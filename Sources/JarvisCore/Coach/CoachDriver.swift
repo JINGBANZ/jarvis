@@ -200,7 +200,8 @@ public final class CoachDriver: @unchecked Sendable {
     public func updatePlan(_ plan: SessionPlan) {
         stateLock.lock()
         self.plan = SessionPlan(revision: plan.revision, screen: plan.screen,
-                                explanationsEnabled: self.plan.explanationsEnabled)
+                                explanationsEnabled: self.plan.explanationsEnabled,
+                                codeEnabled: self.plan.codeEnabled)
         stateLock.unlock()
     }
 

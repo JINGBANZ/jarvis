@@ -37,6 +37,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var didStartApp = false
     private var sessionExplanationsEnabled = false
     private let explanationPreferences = ExplanationPreferences()
+    private let codePreferences = CodePreferences()
+    private var sessionCodeEnabled = false
     private let hotkeyPreferences = CoachingShortcut.allCases.map { HotkeyPreferences(shortcut: $0) }
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
@@ -174,6 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // On by default, but the box is a session surface: this only arms the switch. It reaches the
         // screen on Start (below) and leaves it on Stop, so a stopped Jarvis shows nothing.
         overlayBox.setEnabled(appearance.boxEnabled)
+        overlayBox.setCodeEnabled(codePreferences.isEnabled)
 
         // No updater in a development bundle (no feed URL), so the menu omits the item entirely.
         updates = UpdateController()
@@ -185,9 +188,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // The global hint hotkey is constructed before Settings so HotkeySection's closures (built
         // below) can already read/apply through it. `onRequest` is wired later, alongside the
         // rest of session lifecycle plumbing.
-        if !appearance.boxEnabled { explanationPreferences.isEnabled = false }
+        if !appearance.boxEnabled {
+            explanationPreferences.isEnabled = false
+            codePreferences.isEnabled = false
+        }
         hotkeys = HotkeyController(preferences: hotkeyPreferences.filter {
-            $0.shortcut != .explainMore || explanationPreferences.isEnabled
+            ($0.shortcut != .explainMore || explanationPreferences.isEnabled)
+                && ($0.shortcut != .showCode || codePreferences.isEnabled)
         })
 
         // Unified Settings window: Brain owns behavior; Connections owns shared authentication.
@@ -209,6 +216,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             onKeySaved: { [weak self] credential, key in
                 self?.applySavedAPIKeyToRunningSession(credential: credential, key: key)
             })
+        let hotkeySection = HotkeySection(
+                preferences: hotkeyPreferences,
+                explanationPreferences: explanationPreferences,
+                codePreferences: codePreferences,
+                onCodeChanged: { [weak self] in self?.refreshOptionalShortcut(.showCode) },
+                boxEnabled: { [weak self] in self?.appearance.boxEnabled == true },
+                onExplanationsChanged: { [weak self] in self?.refreshOptionalShortcut(.explainMore) },
+                hasActiveHotkey: { [weak self] shortcut in
+                    guard let self else { return false }
+                    // Deferred bindings have no live registration to warn about until Start.
+                    return (self.requestManualHint != nil && !self.sessionAllows(shortcut))
+                        || self.hotkeys?.registered[shortcut] != nil
+                },
+                applyCombination: { [weak self] shortcut, combination in
+                    // `hotkeys` is constructed above, before Settings can ever be shown, so `self`
+                    // being torn down is the only way this falls through — report failure rather
+                    // than falsely claiming a rebind that never happened.
+                    guard let self else { return .failed(status: -1) }
+                    let outcome = self.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
+                    if self.requestManualHint != nil, !self.sessionAllows(shortcut) {
+                        self.hotkeys?.unregister(shortcut) // Validate ownership, then release until Start.
+                    }
+                    return outcome
+                })
         let sections: [SettingsSection] = [
             brainSection,
             connectionsSection,
@@ -216,39 +247,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 onBoxEnabledChanged: { [weak self] enabled in
                     guard let self, !enabled else { return }
                     self.explanationPreferences.isEnabled = false
+                    self.codePreferences.isEnabled = false
+                    self.overlayBox.setCodeEnabled(false)
                     self.hotkeys?.unregister(.explainMore)
+                    self.hotkeys?.unregister(.showCode)
                 }),
             DisplaySection(preferences: screenPreferences) { [weak self] in
                 self?.reapplySessionPlan()
             },
             PrepMaterialSection(preferences: prepMaterialPreferences),
-            HotkeySection(
-                preferences: hotkeyPreferences,
-                explanationPreferences: explanationPreferences,
-                boxEnabled: { [weak self] in self?.appearance.boxEnabled == true },
-                onExplanationsChanged: { [weak self] in
-                    guard let self else { return }
-                    if self.explanationPreferences.isEnabled,
-                       self.requestManualHint == nil || self.sessionExplanationsEnabled,
-                       let preference = self.hotkeyPreferences.first(where: { $0.shortcut == .explainMore }) {
-                        self.hotkeys?.apply(preference.combination, for: .explainMore)
-                    } else {
-                        self.hotkeys?.unregister(.explainMore)
-                    }
-                },
-                hasActiveHotkey: { [weak self] shortcut in (shortcut == .explainMore && self?.requestManualHint != nil && self?.sessionExplanationsEnabled != true) || self?.hotkeys?.registered[shortcut] != nil },
-                applyCombination: { [weak self] shortcut, combination in
-                    // `hotkeys` is constructed above, before Settings can ever be shown, so `self`
-                    // being torn down is the only way this falls through — report failure rather
-                    // than falsely claiming a rebind that never happened.
-                    guard let self else { return .failed(status: -1) }
-                    if shortcut == .explainMore, self.requestManualHint != nil, !self.sessionExplanationsEnabled {
-                        let outcome = self.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
-                        self.hotkeys?.unregister(shortcut) // Validate ownership, then release until Start.
-                        return outcome
-                    }
-                    return self.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
-                }),
+            hotkeySection,
             ActivitySection(viewer: activityViewer),
         ]
         settingsWindow = SettingsWindow(sections: sections)
@@ -266,11 +274,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // While a session is running, screenshot + ask the brain for a hint in one trip; otherwise
         // beep — there's no live driver/conversation to hint from when stopped.
         hotkeys?.onRequest = { [weak self] shortcut in
-            if shortcut == .explainMore, self?.sessionExplanationsEnabled != true { return }
             guard let self, let fire = self.requestManualHint else {
                 NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
                 return
             }
+            guard self.sessionAllows(shortcut) else { return }
             fire(shortcut)
         }
 
@@ -336,6 +344,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let interviewFormat = brain.preferences.interviewFormat
         let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
         let explanationsEnabled = explanationPreferences.isEnabled && appearance.boxEnabled
+        let codeEnabled = codePreferences.isEnabled && appearance.boxEnabled
+            && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         // The brain's key stays OpenAI-only (above); transcription reads whichever credential the
         // selected provider owns — Apple Speech has none, so this is "" there and unused.
@@ -487,6 +497,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 interviewFormatAddendum: interviewFormatAddendum,
                 interviewFormat: interviewFormat,
                 explanationsEnabled: explanationsEnabled,
+                codeEnabled: codeEnabled,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
                 detectedCLIs: detectedCLIs,
@@ -548,6 +559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         interviewFormatAddendum: String,
         interviewFormat: InterviewFormat?,
         explanationsEnabled: Bool,
+        codeEnabled: Bool,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
@@ -602,6 +614,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let sessionDirectory = artifacts.currentSessionDir!
         // Fixed for the whole session — set before every construction/reapply path that bakes a
         // system prompt, including a later `applyBrainPreferencesToRunningSession` hot switch.
+        sessionCodeEnabled = codeEnabled
+        brain.codeEnabled = codeEnabled
+        overlayBox.setCodeEnabled(codeEnabled)
+        if codeEnabled, let preference = hotkeyPreferences.first(where: { $0.shortcut == .showCode }) {
+            hotkeys?.apply(preference.combination, for: .showCode)
+        } else {
+            hotkeys?.unregister(.showCode)
+        }
         sessionExplanationsEnabled = explanationsEnabled
         brain.explanationsEnabled = explanationsEnabled
         if explanationsEnabled, let preference = hotkeyPreferences.first(where: { $0.shortcut == .explainMore }) {
@@ -845,7 +865,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         // Arm the hint hotkey for this session: capture the screen and force a one-trip hint, routed
         // through the same turn box as audio triggers (so Stop cancels it and rapid presses coalesce).
-        self.requestManualHint = { shortcut in turns.run { await driver.handleTrigger(shortcut.triggerReason) } }
+        self.requestManualHint = { shortcut in
+            turns.run { await driver.handleTrigger(shortcut.triggerReason) }
+        }
         transcriber.connect()
         themTranscriber.connect()
         if let reason = capture.start() {
@@ -891,6 +913,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         sessionIsLive = false
         overlayBox.setSessionLive(false)     // the history box goes away with the session
         requestManualHint = nil              // hotkey beeps again once there's no live session
+        overlayBox.setCodeEnabled(false)
         // Capture and clear this session handle before a quick Start installs another. The cancelled
         // tasks retain only its observer ports and can finish enqueueing into the old session.
         let (audit, auditDirectory) = artifacts.takeCurrentSession()
@@ -1153,6 +1176,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
 
 
+    private func sessionAllows(_ shortcut: CoachingShortcut) -> Bool {
+        switch shortcut {
+        case .hint: true
+        case .explainMore: sessionExplanationsEnabled
+        case .showCode: sessionCodeEnabled
+        }
+    }
+
+    private func refreshOptionalShortcut(_ shortcut: CoachingShortcut) {
+        let enabled = shortcut == .explainMore ? explanationPreferences.isEnabled : codePreferences.isEnabled
+        if enabled, requestManualHint == nil || sessionAllows(shortcut),
+           let preference = hotkeyPreferences.first(where: { $0.shortcut == shortcut }) {
+            hotkeys?.apply(preference.combination, for: shortcut)
+        } else {
+            hotkeys?.unregister(shortcut)
+        }
+    }
+
     /// Read the persisted control plane once and freeze it as the next revision.
     ///
     /// This is the only place preferences reach a coaching attempt. Everything a turn needs is
@@ -1161,7 +1202,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private func freshSessionPlan() -> SessionPlan {
         planRevision &+= 1
         return SessionPlan(revision: planRevision, screen: screenPreferences.selection,
-                           explanationsEnabled: sessionExplanationsEnabled)
+                           explanationsEnabled: sessionExplanationsEnabled, codeEnabled: sessionCodeEnabled)
     }
 
     /// An explicit Settings edit takes effect at the next attempt. A turn already running keeps the

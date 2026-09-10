@@ -6,6 +6,14 @@ import Foundation
 public final class BroadcastOverlay: OverlayRendering {
     private let sinks: [OverlayRendering]
 
+    @MainActor public func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? {
+        var delivered: CodeSnippet?
+        for sink in sinks {
+            if let code = sink.deliverCodeSnippet(snippet) { delivered = code }
+        }
+        return delivered
+    }
+
     @MainActor public var acceptsDetail: Bool { sinks.contains { $0.acceptsDetail } }
 
     @MainActor public func deliver(_ lines: [String], perLineSeconds: [TimeInterval],

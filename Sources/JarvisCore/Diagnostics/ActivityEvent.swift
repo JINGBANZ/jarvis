@@ -16,6 +16,7 @@ public enum ActivityEvent: Sendable {
         case heard
         case manualHint
         case manualExplanation
+        case manualCode
         case screenViewed
         case screenViewFailed
         case tip
@@ -35,6 +36,7 @@ public enum ActivityEvent: Sendable {
     /// The user explicitly requested help through the manual-hint shortcut.
     case manualHint(prompt: String)
     case manualExplanation(prompt: String)
+    case manualCode(prompt: String)
     /// Jarvis captured and viewed the screen while preparing a coaching response.
     case screenViewed(imageBase64JPEG: String)
     /// The brain chose to view the screen, but capture failed. Activity gets fixed recovery
@@ -75,6 +77,8 @@ public enum ActivityEvent: Sendable {
             return (.manualHint, "⌨️ hint shortcut — \(prompt)", nil)
         case .manualExplanation(let prompt):
             return (.manualExplanation, "⌨️ explain more shortcut — \(prompt)", nil)
+        case .manualCode(let prompt):
+            return (.manualCode, "⌨️ show code shortcut — \(prompt)", nil)
         case .screenViewed(let imageBase64JPEG):
             return (.screenViewed, "👁 looking at your screen", imageBase64JPEG)
         case .screenViewFailed:
