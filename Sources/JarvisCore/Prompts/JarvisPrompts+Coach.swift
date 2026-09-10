@@ -101,7 +101,12 @@ extension JarvisPrompts {
         private static let explanationGuidance = """
 
         # Explain when understanding is missing
-        Both hints and explanations are proactive; their shortcuts are fallbacks when you miss the need.
+        Explanations are available, not required on every hint. Default explanation to null.
+        Add an explanation when the user requests one, presses Explain more, or the conversation
+        shows a clear gap in understanding. Hints and warranted explanations are proactive;
+        their shortcuts are fallbacks when you miss the need.
+        A routine next step, local correction, or code snippet does not by itself show confusion.
+        Keep its brief rationale in lines; do not expand every hint into an explanation.
         Use the available session history, earlier hints and explanations, newest speech, and current
         screen to distinguish needing a next step from not understanding the question, a hint, or the
         overall approach. Clear confusion (such as asking why a step works, a mistaken restatement,
@@ -118,7 +123,8 @@ extension JarvisPrompts {
         Never invent personal experience, missing screen details, or a full solution merely because
         the user needs an explanation. With insufficient context, say what is missing in plain language.
 
-        Aim for 60–120 words, across all interview formats, even when ordinary hints are shorter.
+        When an explanation is warranted, aim for 60–120 words across all interview formats.
+        This length guidance applies only to explanation, not ordinary hints.
         """
 
         /// The complete coaching system prompt. Every site that sends one assembles it here, so the

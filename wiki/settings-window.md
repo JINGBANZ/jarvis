@@ -189,7 +189,9 @@ explanation shortcut. Automatic explanations remain available for an enabled ses
 shortcut cannot register. `ExplanationPreferences` persists the switch; the capability is frozen at
 Start. The row says “Takes effect the next time you start.” Disabling Overlay Box also disables the
 saved explanation setting and its switch remains unavailable until the box is enabled again.
-Ordinary hints remain available.
+Ordinary hints remain available. Enabling explanations makes them available for explicit requests
+or clear gaps in understanding; routine next steps, local corrections, and code snippets default to
+no explanation. The explanation length guidance applies only after that need is established.
 
 A collision with another application or another Jarvis shortcut leaves the old working binding
 active and displays feedback for that card. If no binding could be registered at launch, its warning

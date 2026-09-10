@@ -305,6 +305,9 @@ Disabling Overlay Box turns off the saved explanation setting and releases its s
 The persistent box gates detail delivery live; hidden detail is omitted from Activity and history;
 see [architecture.md → On-demand coaching shortcuts](./architecture.md#on-demand-coaching-shortcuts).
 
+See [Settings → Shortcuts](./settings-window.md#shortcuts) for when explanations are warranted
+and how the explanation length guidance applies.
+
 System Design sessions support [private high-level architecture hints](./architecture.md#private-architecture-hints):
 [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) validates a small Mermaid subset, and
 [`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) renders boxes and arrows alongside
