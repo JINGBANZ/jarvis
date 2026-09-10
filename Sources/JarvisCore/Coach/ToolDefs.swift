@@ -12,7 +12,7 @@ public let captureScreenTool = ToolDef(
 public let speakTool = ToolDef(
     name: "speak",
     description: JarvisPrompts.Coach.ToolDescription.speak,
-    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},"required":["lines"],"additionalProperties":false}"#
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]}},"required":["lines","explanation"],"additionalProperties":false}"#
 )
 
 public let staySilentTool = ToolDef(
@@ -37,5 +37,5 @@ public let searchPrepNotesTool = ToolDef(
 public let systemDesignSpeakTool = ToolDef(
     name: speakTool.name,
     description: JarvisPrompts.Coach.ToolDescription.speak,
-    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"mermaid":{"type":["string","null"]}},"required":["lines","mermaid"],"additionalProperties":false}"#
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"mermaid":{"type":["string","null"]}},"required":["lines","mermaid","explanation"],"additionalProperties":false}"#
 )

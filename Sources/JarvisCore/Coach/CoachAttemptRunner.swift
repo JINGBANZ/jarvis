@@ -127,11 +127,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         var observations: [ChatMessage] {
             screenObservation + (prepNotesObservation.map { [$0] } ?? [])
         }
-        var manualHintPrepared = false
+        var preparedManualReason: TriggerReason?
 
         init(reason: TriggerReason) {
             self.reason = reason
-            bypassesTranscriptionSettlement = reason == .manualHint
+            bypassesTranscriptionSettlement = reason.isManual
         }
     }
 
@@ -217,13 +217,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
         let systemPrompt = JarvisPrompts.Coach.system(
             prepMaterial: attempt.prepMaterial != nil,
-            formatAddendum: interviewFormatAddendum)
+            formatAddendum: interviewFormatAddendum,
+            explanationsEnabled: attempt.plan.explanationsEnabled)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
-
-        if reason == .manualHint && !work.manualHintPrepared {
+        if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
-                jlog("⌨️ hint shortcut — \(prompt)")
-                activity?.record(.manualHint(prompt: prompt))
+                jlog("⌨️ coaching shortcut — \(prompt)")
+                activity?.record(reason == .manualExplanation
+                    ? .manualExplanation(prompt: prompt) : .manualHint(prompt: prompt))
             }
             let screen = self.screen
             let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
@@ -235,12 +236,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("👁 looking at your screen")
                 activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
-                turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     let observation = ChatMessage.user(JarvisPrompts.Coach.recognizedText(text))
                     observations.append(observation)
-                    turnMessages.append(observation)
                 }
                 work.screenObservation = observations
             } else {
@@ -250,11 +249,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
             }
-            work.manualHintPrepared = true
+            // Replace the carried screen slot while retaining independent prep observations.
+            turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
+            work.preparedManualReason = reason
         }
 
         let toolChoice: ToolChoice =
-            reason == .manualHint ? .force(speakTool.name) : .required
+            reason.isManual ? .force(speakTool.name) : .required
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
@@ -405,23 +406,43 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines, let mermaid):
+                case .speak(let callID, let lines, let mermaid, let requestedExplanation):
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    activity?.record(.tip(lines: lines))
                     let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
                     if mermaid != nil && diagram == nil {
                         jlog("Diagram hint omitted: unsupported graph or interview format")
                     }
-                    overlay.render(
-                        lines,
-                        perLineSeconds: lines.map {
-                            OverlayTiming.displaySeconds(for: $0, config: config)
-                        }, diagram: diagram)
-                    turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                    let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?) in
+                        guard !Task.isCancelled else { return (false, nil) }
+                        let detail = self.overlay.deliver(lines, perLineSeconds: lines.map {
+                            OverlayTiming.displaySeconds(for: $0, config: self.config)
+                        }, diagram: diagram, explanation: attempt.plan.explanationsEnabled ? requestedExplanation : nil)
+                        return (true, detail)
+                    }
+                    guard delivery.accepted else { return .cancelled }
+                    let explanation = delivery.explanation
+                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? [])))
+                    // Only the selected call executes; extra provider calls were never delivered.
+                    var deliveredCalls = response.rawToolCalls.filter { $0.id == callID }
+                    if explanation == nil {
+                        // History describes what was delivered, not optional text suppressed by Settings.
+                        // These parsed values contain only JSON strings, arrays, and null, so encoding cannot fail.
+                        let arguments: [String: Any] = [
+                            "lines": lines, "mermaid": mermaid as Any? ?? NSNull(), "explanation": NSNull(),
+                        ]
+                        let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+                        deliveredCalls = deliveredCalls.map { call in
+                            call.id == callID
+                                ? RawToolCall(id: call.id, name: call.name,
+                                              argumentsJSON: String(decoding: data, as: UTF8.self))
+                                : call
+                        }
+                    }
+                    turnMessages.append(.assistantToolCalls(deliveredCalls))
                     turnMessages.append(.init(
                         role: .tool,
                         text: JarvisPrompts.Coach.tipShown,

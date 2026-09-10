@@ -1995,7 +1995,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         })
     }
 
-    @Test func manualHintWakesFailedAttemptEvenWhileSpeechIsUnsettled() async {
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation])
+    func manualHintWakesFailedAttemptEvenWhileSpeechIsUnsettled(_ reason: TriggerReason) async {
         let gate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let (driver, transcript) = makeDriver(
@@ -2006,7 +2007,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         async let outcome = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
         driver.updateTranscriptionWork(true, for: .them)
-        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        #expect(await driver.handleTrigger(reason) == .busy)
         await gate.release()
 
         #expect(await outcome == .spoke)
@@ -2014,7 +2015,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateTranscriptionWork(false, for: .them)
     }
 
-    @Test func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech() async {
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation])
+    func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech(_ reason: TriggerReason) async {
         let gate = AsyncGate()
         let delayGate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
@@ -2026,7 +2028,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
-                await driver.handleTrigger(.manualHint)
+                await driver.handleTrigger(reason)
             }
         }
         defer {

@@ -77,6 +77,7 @@ final class BrainComposition {
     /// `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` builder `CoachAttemptRunner`
     /// calls per turn.
     var interviewFormatAddendum = ""
+    var explanationsEnabled = true
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -146,7 +147,8 @@ final class BrainComposition {
                                        // construction cannot describe it.
                                        systemPrompt: JarvisPrompts.Coach.system(
                                            prepMaterial: false,
-                                           formatAddendum: interviewFormatAddendum),
+                                           formatAddendum: interviewFormatAddendum,
+                                           explanationsEnabled: explanationsEnabled),
                                        tools: coachTools,
                                        toolChoice: .required,
                                        runtime: runtimes.coach,
