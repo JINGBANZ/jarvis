@@ -124,7 +124,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         /// disturbing whatever the screen slot holds, and vice versa. Never raw reasoning, tool ids,
         /// or call/result linkage.
         var screenObservation: [ChatMessage] = []
-        /// Identity/text travel with the carried observation across provider failures.
+        /// Identity travels with the carried observation across provider failures.
         var screenMemoryID: Int?
         var prepNotesObservation: ChatMessage?
         /// Every carried observation, screen first, in the order the model should see them.

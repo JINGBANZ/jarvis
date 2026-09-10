@@ -38,6 +38,8 @@ import Testing
         #expect(text.contains(#""sourceID":"window:1""#))
         #expect(text.contains(#""id":1"#))
         #expect(text.contains("Screen observation ID: 2"))
+        #expect(text.contains(#""sameTextAsObservationID":2"#))
+        #expect(brain.calls.last!.count(where: { ($0.text ?? "").contains("return count") }) == 1)
     }
 
     @Test func explicitNewQuestionRetainsItsCaptureAfterProviderRecovery() async {

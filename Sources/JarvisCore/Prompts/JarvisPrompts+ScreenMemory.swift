@@ -15,6 +15,8 @@ extension JarvisPrompts {
         file. It does not satisfy the fresh-screen gate. Higher observation IDs are later observations.
         A newer matching region takes precedence over older code; scrolling alone does not supersede
         other regions. A sourceID identifies a capture window only, never a document or question.
+        A sameTextAsObservationID reference reuses that observation's exact OCR text only; it does
+        not imply the same document or freshness. Each observation retains its own ID and provenance.
         Keep ambiguous files, panes and versions separate. OCR may misread symbols and indentation.
         You may discover a possible earlier bug from later code or tests, but qualify any diagnosis
         dependent on historical OCR. The short hint lines themselves must state that uncertainty

@@ -11,6 +11,29 @@ struct ScreenObservationMemory {
         let truncated: Bool
     }
 
+    /// Request-only references avoid repeating full text while preserving each observation's
+    /// provenance. Stored observations remain self-contained, so references never outlive a request.
+    private struct ContextObservation: Encodable {
+        let id: Int
+        let sourceID: String?
+        let elapsedSeconds: Int
+        let text: String?
+        let truncated: Bool
+        let sameTextAsObservationID: Int?
+
+        init(_ observation: Observation, current: Observation?) {
+            id = observation.id
+            sourceID = observation.sourceID
+            elapsedSeconds = observation.elapsedSeconds
+            truncated = observation.truncated
+            let sameText = current.map {
+                !$0.truncated && !observation.truncated && $0.text == observation.text
+            } ?? false
+            text = sameText ? nil : observation.text
+            sameTextAsObservationID = sameText ? current?.id : nil
+        }
+    }
+
     private let byteLimit: Int
     private let observationLimit: Int
     private(set) var observations: [Observation] = []
@@ -69,7 +92,8 @@ struct ScreenObservationMemory {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         // These values are only strings, integers and booleans: encoding cannot fail.
-        let data = try! encoder.encode(historical)
+        let current = observations.first { $0.id == currentID }
+        let data = try! encoder.encode(historical.map { ContextObservation($0, current: current) })
         return .user(JarvisPrompts.ScreenMemory.context(
             json: String(decoding: data, as: UTF8.self), hasOmissions: hasOmissions))
     }
