@@ -1,20 +1,21 @@
 import Foundation
 
-/// The sanitized reason a live coaching session ended. This closed set keeps raw provider, transport,
-/// and device errors out of Activity while still making every terminal lifecycle transition explicit.
+/// The reason a live coaching session ended. This closed set keeps *unclassified* text out of the
+/// lifecycle while still making every terminal transition explicit: a provider-caused end carries
+/// the failure that caused it, and Activity renders that failure's fixed sentence.
 public enum SessionEndReason: Sendable, Equatable {
     case stoppedByUser
     case applicationQuit
     case replacedByNewSession
-    /// Name kept for persisted session records even though the trigger is now provider-neutral
-    /// (any missing transcription or brain credential, not only OpenAI's) — renaming it would
-    /// invalidate existing logs for no user-visible gain.
+    /// Name kept even though the trigger is now provider-neutral: any missing transcription or
+    /// brain credential, not only OpenAI's.
     case openAIAPIKeyMissing
     case permissionsMissing
-    case brainRouteExhausted(lastProvider: BrainProvider)
+    case brainRouteExhausted(last: ProviderFailure)
     case transcriptionStopped(reason: TranscriptionFailureReason)
-    case audioCaptureUnavailable
-    case unexpectedError
+    case audioCaptureUnavailable(failure: ProviderFailure)
+    /// Jarvis-authored copy from the error catalog for a stop with no provider behind it.
+    case unexpectedError(detail: String)
 
     var activityMessage: String {
         switch self {
@@ -28,14 +29,16 @@ public enum SessionEndReason: Sendable, Equatable {
             "session ended by error — an API key is missing; check Settings → Connections"
         case .permissionsMissing:
             "session ended by error — a required permission is missing; check System Settings → Privacy & Security"
-        case .brainRouteExhausted(let lastProvider):
-            "session ended by error — all configured provider targets were exhausted; last target: \(lastProvider.displayName)"
+        case .brainRouteExhausted(let last):
+            "session ended by error — all configured provider targets were exhausted; last target: \(last.activitySentence)"
         case .transcriptionStopped(let reason):
             "session ended by error — \(reason.activityDescription)"
-        case .audioCaptureUnavailable:
-            "session ended by error — audio capture became unavailable; check jarvis-debug.log"
-        case .unexpectedError:
-            "session ended by error — check jarvis-debug.log"
+        case .audioCaptureUnavailable(let failure):
+            "session ended by error — \(failure.activitySentence)"
+        case .unexpectedError(let detail):
+            // Catalog copy is Jarvis-authored and already safe; redacting anyway keeps the rule
+            // "nothing reaches a row unredacted" free of exceptions.
+            "session ended by error — \(ProviderMessageRedaction.redact(detail))"
         }
     }
 }

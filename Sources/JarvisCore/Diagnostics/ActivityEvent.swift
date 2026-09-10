@@ -46,8 +46,9 @@ public enum ActivityEvent: Sendable {
     /// sanitized set so raw errors cannot leak into Activity.
     case sessionEnded(reason: SessionEndReason)
     /// One coaching response failed temporarily and a fresh attempt will retry while capture and
-    /// transcription remain live. Provider identity is enough; raw error detail stays in debug.
-    case coachingTurnFailed(provider: BrainProvider)
+    /// transcription remain live. The failure carries its own sentence: the frame is fixed, and
+    /// what the provider said (already redacted) is quoted inside it.
+    case coachingTurnFailed(failure: ProviderFailure)
     /// The secondary system-audio transcription stopped while microphone coaching continued.
     case systemAudioStopped
     /// An explicit Settings reapply failed its preflight while the existing session continued.
@@ -56,10 +57,12 @@ public enum ActivityEvent: Sendable {
     /// identities are enough for a fixed human-facing success notice; model transport details
     /// remain in jlog.
     case brainChangeApplied(previous: BrainProvider, current: BrainProvider)
-    /// A failed target was exhausted and the next user-authorized route target became active.
-    case brainRouteAdvanced(previous: BrainProvider, current: BrainProvider)
+    /// A failed target was exhausted and the next user-authorized route target became active. The
+    /// failure that exhausted the old target is quoted; the frame names the new one.
+    case brainRouteAdvanced(
+        previous: BrainProvider, current: BrainProvider, failure: ProviderFailure)
     /// A route target was proven unavailable before a provider request could be constructed.
-    case brainRouteTargetSkipped(provider: BrainProvider)
+    case brainRouteTargetSkipped(failure: ProviderFailure)
     /// The brain looked up the user's prepared interview notes for `query`. `matchCount` is how
     /// many relevant chunks came back, 0 meaning nothing scored usefully.
     case prepNotesSearched(query: String, matchCount: Int)
@@ -86,10 +89,10 @@ public enum ActivityEvent: Sendable {
             return (.stayedSilent, "🤫 stayed silent — nothing useful to add", nil)
         case .sessionEnded(let reason):
             return (.sessionEnded, "⏹ \(reason.activityMessage)", nil)
-        case .coachingTurnFailed(let provider):
+        case .coachingTurnFailed(let failure):
             return (
                 .coachingTurnFailed,
-                "⚠️ \(provider.displayName) couldn't finish the response — retrying while listening continues",
+                "⚠️ \(failure.activitySentence) — retrying while listening continues",
                 nil
             )
         case .systemAudioStopped:
@@ -111,17 +114,20 @@ public enum ActivityEvent: Sendable {
                 "🧠 brain switch applied — \(previous.displayName) → \(current.displayName)"
             }
             return (.brainChangeApplied, message, nil)
-        case .brainRouteAdvanced(let previous, let current):
+        case .brainRouteAdvanced(let previous, let current, let failure):
+            // This frame supplies its own verb, so it quotes the evidence alone rather than the
+            // failure's whole sentence.
+            let detail = failure.activityDetail
             let message = if previous == current {
-                "⚠️ \(previous.displayName) target couldn't respond — continuing with the next \(current.displayName) model"
+                "⚠️ \(previous.displayName) target couldn't respond\(detail) — continuing with the next \(current.displayName) model"
             } else {
-                "⚠️ \(previous.displayName) couldn't respond — continuing on \(current.displayName)"
+                "⚠️ \(previous.displayName) couldn't respond\(detail) — continuing on \(current.displayName)"
             }
             return (.brainRouteAdvanced, message, nil)
-        case .brainRouteTargetSkipped(let provider):
+        case .brainRouteTargetSkipped(let failure):
             return (
                 .brainRouteTargetSkipped,
-                "⚠️ \(provider.displayName) target is unavailable — skipping it",
+                "⚠️ \(failure.activitySentence) — skipping it",
                 nil
             )
         case .prepNotesSearched(let query, let matchCount):

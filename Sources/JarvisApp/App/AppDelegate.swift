@@ -741,7 +741,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 guard let self, self.aggregateCapture === capture else { return }
                 self.observeReadiness(.capture(.stopped), for: readinessSession)
                 self.errorReporter.reportImmediately(
-                    .captureStopped(reason: reason), context: .runtime)
+                    .captureStopped(failure: Self.captureFailure(reason)), context: .runtime)
             }
         }
         capture.onRecoveryStateChange = { [weak self, weak capture] inProgress in
@@ -810,7 +810,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         if let reason = capture.start() {
             observeReadiness(.capture(.stopped), for: readinessSession)
             errorReporter.reportImmediately(
-                .captureFailed(reason: reason), context: reportContext)
+                .captureFailed(failure: Self.captureFailure(reason)), context: reportContext)
             return false
         }
         // Capture setup is synchronous and can legitimately take longer than the first-frame
@@ -928,6 +928,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
     func brainTargetDidChange(_ target: BrainTarget?) {
         brainSection.setActiveTarget(target)
+    }
+
+    /// Wrap a capture cause in the one failure record Activity and the session lifecycle read. The
+    /// aggregate device is local, so there is no provider identity to carry: the sentence the
+    /// capture layer already wrote is the whole evidence.
+    private static func captureFailure(_ reason: String) -> ProviderFailure {
+        ProviderFailure(
+            source: .capture, stage: .local, category: .unavailable, disposition: .permanent,
+            identity: .init(), message: reason)
     }
 
     /// Deduplicate endpoint failures: either side can fail first, but Activity should show one reason
@@ -1079,8 +1088,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             case .microphoneCaptureFailed(let cause):
                 jlog("Jarvis: microphone capture unhealthy (\(cause.rawValue)) — stopping.")
                 errorReporter.reportImmediately(
-                    .captureStopped(
-                        reason: "Jarvis stopped receiving microphone audio. Check the input device and press Start."),
+                    .captureStopped(failure: Self.captureFailure(
+                        "Jarvis stopped receiving microphone audio. Check the input device and press Start.")),
                     context: .runtime)
             case .degradeToMicrophoneOnly(let cause):
                 guard themTranscriber != nil || systemConnectionState != .failed else { break }

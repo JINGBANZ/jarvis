@@ -394,9 +394,9 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("👁 couldn't view your screen")
             || m.hasPrefix("💬") || m.hasPrefix("🤫 stayed silent")
             || m.hasPrefix("⏹ session ended")
-            || (m.hasPrefix("⚠️") && m.hasSuffix("listening continues")
-                && (m.contains("couldn't respond this turn")
-                    || m.contains("couldn't finish the response — retrying while")))
+            // The retry notice's cause is now the failure's own sentence, so this keys on the fixed
+            // frame instead of the wording in front of it; both older wordings end the same way.
+            || (m.hasPrefix("⚠️") && m.hasSuffix("listening continues"))
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")
             || m.hasPrefix("🧠 brain switch applied")

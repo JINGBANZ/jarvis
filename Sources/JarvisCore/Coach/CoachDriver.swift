@@ -873,8 +873,7 @@ public final class CoachDriver: @unchecked Sendable {
                 case .retry(let failureCount, let advanced):
                     routeChanged = false
                     if !advanced {
-                        activity?.record(
-                            .coachingTurnFailed(provider: attempt.target.provider))
+                        activity?.record(.coachingTurnFailed(failure: failure))
                     }
                     let policy = failure.disposition == .permanent
                         ? "permanent failure"

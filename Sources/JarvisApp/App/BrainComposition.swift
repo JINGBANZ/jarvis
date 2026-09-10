@@ -246,23 +246,23 @@ final class BrainComposition {
                 self.activeBrainTarget = target
                 self.host.brainTargetDidChange(target)
             },
-            onAdvanced: { [weak self] previous, current, _ in
+            onAdvanced: { [weak self] previous, current, failure in
                 guard let self, self.host.liveCoachDriver != nil,
                       self.host.liveSessionDirectory == sessionDirectory else {
                     jlog("Jarvis: ignoring route transition from a stopped or superseded session.")
                     return
                 }
                 self.host.liveSessionEvidence?.record(.brainRouteAdvanced(
-                    previous: previous.provider, current: current.provider))
+                    previous: previous.provider, current: current.provider, failure: failure))
             },
-            onSkipped: { [weak self] target, _ in
+            onSkipped: { [weak self] _, failure in
                 guard let self, self.host.liveCoachDriver != nil,
                       self.host.liveSessionDirectory == sessionDirectory else {
                     jlog("Jarvis: ignoring unavailable-target notice from a stopped session.")
                     return
                 }
                 self.host.liveSessionEvidence?.record(
-                    .brainRouteTargetSkipped(provider: target.provider))
+                    .brainRouteTargetSkipped(failure: failure))
             },
             onExhausted: { [weak self] target, failure in
                 guard let self, self.host.liveCoachDriver != nil,
@@ -271,9 +271,7 @@ final class BrainComposition {
                     return
                 }
                 self.host.reportBrainError(
-                    .brainRouteExhausted(
-                        lastProvider: target.provider,
-                        reason: failure.message),
+                    .brainRouteExhausted(target: target, failure: failure),
                     context: .runtime)
             })
     }
