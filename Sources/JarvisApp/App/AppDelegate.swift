@@ -661,24 +661,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         // Bind terminal callbacks to the transcriber that emitted them. A callback already queued
         // across Stop → Start must not report against or tear down the replacement session.
-        transcriber.onTerminalFailure = { [weak self, weak transcriber] reason in
+        transcriber.onTerminalFailure = { [weak self, weak transcriber] failure in
             guard let transcriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.transcriber === transcriber else { return }
-                self.reportTranscriptionFailure(reason)
+                self.reportTranscriptionFailure(failure)
             }
         }
-        themTranscriber.onTerminalFailure = { [weak self, weak themTranscriber] reason in
+        themTranscriber.onTerminalFailure = { [weak self, weak themTranscriber] failure in
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                // Key on the failure REASON, not the provider: Gemini (unlike Apple Speech) can emit
-                // an account/credential/configuration reason on the system-audio side too, and that
-                // kind of failure threatens the mic side identically — see
-                // `TranscriptionFailureReason.affectsEveryStream`'s doc comment for why degrading on
-                // one of those would hide the real cause behind a misleading system-audio notice.
-                if reason.affectsEveryStream {
-                    self.reportTranscriptionFailure(reason)
+                // Key on the failure, not the provider: a socket transcriber (unlike Apple Speech)
+                // can hit a rejected key, a denied region, or a connection that never came up on the
+                // system-audio side too, and each of those threatens the mic side identically — see
+                // `ProviderFailure.endsEverySession` for why degrading on one of those would hide
+                // the real cause behind a misleading system-audio notice.
+                if failure.endsEverySession {
+                    self.reportTranscriptionFailure(failure)
                     return
                 }
                 // A system-audio transport loss or local analyzer failure degrades gracefully: stop
@@ -692,7 +692,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self.captureReadiness?.systemBecameUnavailable()
                 self.observeEndpointAndCaptureReadiness(
                     stream: .system, state: .failed, for: readinessSession)
-                self.artifacts.sessionAudit?.record(.systemAudioStopped)
+                self.artifacts.sessionAudit?.record(.systemAudioStopped(failure: failure))
                 self.errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }
@@ -941,14 +941,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
     /// Deduplicate endpoint failures: either side can fail first, but Activity should show one reason
     /// and teardown should run once.
-    private func reportTranscriptionFailure(_ reason: TranscriptionFailureReason) {
+    private func reportTranscriptionFailure(_ failure: ProviderFailure) {
         guard !reportedTranscriptionFailure, transcriber != nil || themTranscriber != nil else { return }
         reportedTranscriptionFailure = true
         // This method already runs on the main actor after checking the emitting transcriber's
         // identity. Deliver synchronously so Stop → Start cannot slip between that check and the
         // terminal lifecycle consequence and let a stale failure stop the replacement session.
         errorReporter.reportImmediately(
-            .transcriptionStopped(reason: reason), context: .runtime)
+            .transcriptionStopped(failure: failure), context: .runtime)
     }
 
     private func observeReadiness(
@@ -1100,7 +1100,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 systemConnectionState = .failed
                 observeEndpointAndCaptureReadiness(
                     stream: .system, state: .failed, for: readinessSession)
-                artifacts.sessionAudit?.record(.systemAudioStopped)
+                artifacts.sessionAudit?.record(.systemAudioStopped(failure: Self.captureFailure(
+                    "system audio capture unhealthy (\(cause.rawValue))")))
                 errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }

@@ -8,10 +8,11 @@ import JarvisCore
 ///
 /// SECURITY: Gemini authenticates with a query parameter (`GeminiLiveSession.connectURL(apiKey:)`),
 /// so the API key lives in the connect URL. Nothing in this file may log, interpolate, or stringify
-/// that URL, a `URLRequest` built from it, or a raw transport `Error` — `URLError` and
-/// `URLSessionWebSocketTask` failures can embed the failing URL in their `description`. Every
-/// diagnostic that names the endpoint uses `GeminiLiveSession.redactedEndpoint`, and every transport
-/// failure path constructs its own fixed reason string instead of interpolating the caught error.
+/// that URL or a `URLRequest` built from it; every diagnostic that names the endpoint uses
+/// `GeminiLiveSession.redactedEndpoint`. Transport errors are safe to pass along because they go
+/// through `TransportFailureClassifier`, whose messages come from a fixed table keyed on the error
+/// code and never from the error's own description, and server close reasons reach Activity only
+/// through `ProviderMessageRedaction`.
 ///
 /// `@unchecked Sendable`: most mutable fields are guarded by `lock`. `readyTimer`/`pingTimer`/
 /// `pongTimer`/`drainTimer` are the exception — they are created, read, invalidated, and nilled only
@@ -24,11 +25,16 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     var onSilence: (@Sendable (TimeInterval) -> Void)?
     var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
-    var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
+    var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
     private let reconnectSchedule = RetrySchedule(
         maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
+    /// A socket that has never been ready has nothing to preserve, and every attempt costs the user
+    /// silence with no explanation. Three attempts is enough to ride out a transient refusal; past
+    /// that the cause is the key, the region, or the network, and the session should say so.
+    private let initialConnectSchedule = RetrySchedule(
+        maximumRetries: 2, initialDelay: 1, maximumDelay: 30)
     private let model: GeminiTranscriptionModel
     private let expectedLanguages: [TranscriptionLanguage]
     private let vocabularyKeywords: [String]
@@ -107,7 +113,11 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
     private var rotating = false
     private var stopped = true
     private var connected = false         // true only once the server acknowledges setup
+    private var everConnected = false     // distinguishes the first connect from a reconnect
     private var terminalFailureReported = false
+    /// The most recent classified reason a socket went down, so the row shown when the retry budget
+    /// runs out names the cause rather than "the connection was lost".
+    private var lastConnectionFailure: ProviderFailure?
     private var generation = 0            // rejects late callbacks from a replaced socket
     private var pendingPingGeneration: Int?
 
@@ -186,6 +196,9 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         lock.lock()
         stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
         terminalFailureReported = false
+        // Readiness selects the retry budget and how an exhausted budget is categorized, so a fresh
+        // session must start as never-ready even if this instance ran one before.
+        everConnected = false; lastConnectionFailure = nil
         lock.unlock()
         coachingCoordinator.start()
         emitState(.connecting)
@@ -290,16 +303,17 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         guard let data = try? JSONSerialization.data(withJSONObject: setup),
               let text = String(data: data, encoding: .utf8) else {
             failConnection(task: task, generation: socketGeneration,
-                           diagnostic: "could not encode Gemini setup message")
+                           cause: ProviderFailure(
+                            source: source, stage: .transport, category: .unknown,
+                            disposition: .temporary, identity: .init(),
+                            message: "could not encode Gemini setup message"))
             return
         }
         task.send(.string(text)) { [weak self, weak task] error in
             guard let self, let task else { return }
-            guard error != nil else { return }
-            // Never log the caught error — a `URLError` can embed the connect URL (and its key) in
-            // its description. A fixed, self-authored reason is the only safe diagnostic here.
+            guard let error else { return }
             self.failConnection(task: task, generation: socketGeneration,
-                                diagnostic: "setup send failed")
+                                cause: self.transportFailure(error))
         }
     }
 
@@ -393,20 +407,19 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         }
         task.send(.string(text)) { [weak self, weak task] error in
             guard let self, let task else { return }
-            if error != nil {
-                // Never log the caught error — see the security note atop this file.
+            if let error {
                 self.lock.lock()
                 let isCurrentLease = self.task === task && self.generation == socketGeneration
                 // Only a completion for the CURRENT lease may clear `isSending` — a stale completion
                 // from a socket that has already been replaced would otherwise clear the replacement
                 // socket's in-flight-send flag and let a duplicate send through. `failConnection`
                 // itself carries its own generation guard (see its top), so calling it unconditionally
-                // below is a safe no-op for a stale lease — that guard is what keeps this diagnostic
+                // below is a safe no-op for a stale lease — that guard is what keeps this failure
                 // report from disrupting a healthy replacement, not this early return.
                 if isCurrentLease { self.isSending = false }
                 self.lock.unlock()
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "audio send failed")
+                                    cause: self.transportFailure(error))
                 return
             }
             self.lock.lock()
@@ -455,13 +468,29 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             guard let self, let task else { return }
             guard self.isCurrent(task: task, generation: socketGeneration) else { return }
             switch result {
-            case .failure:
+            case .failure(let err):
                 // A failed pending receive is the EXPECTED artifact of an intentional Stop (cancel).
-                // Never log the caught error — see the security note atop this file.
-                self.lock.lock(); let isStopped = self.stopped; self.lock.unlock()
+                self.lock.lock()
+                let isStopped = self.stopped
+                let everReady = self.everConnected
+                self.lock.unlock()
                 if isStopped { return }
-                self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "receive failed")
+                // A refused upgrade (non-101) surfaces here as a transport error; the HTTP status is
+                // on the task. Gemini accepts the upgrade even for a bad key and rejects in the close
+                // instead, so a refused handshake here is the edge itself refusing.
+                let cause: ProviderFailure
+                if let status = (task.response as? HTTPURLResponse)?.statusCode, status != 101 {
+                    cause = GeminiFailureClassifier.classify(
+                        httpStatus: status, body: nil, source: self.source, stage: .handshake)
+                } else {
+                    cause = TransportFailureClassifier.classify(
+                        error: err, source: self.source, everReady: everReady)
+                }
+                if cause.disposition == .permanent {
+                    self.reportTerminalFailureOnce(cause)
+                    return
+                }
+                self.failConnection(task: task, generation: socketGeneration, cause: cause)
             case .success(let message):
                 self.decodeAndHandle(message, task: task, generation: socketGeneration)
                 self.receiveLoop(task: task, generation: socketGeneration)
@@ -601,7 +630,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         lock.lock()
         guard let currentTask = self.task, currentTask === task, generation == socketGeneration,
               !connected, !stopped, !isReconnecting else { lock.unlock(); return }
-        connected = true; reconnectAttempt = 0
+        connected = true; everConnected = true; reconnectAttempt = 0
         lock.unlock()
         invalidateReadyTimer(task: task, generation: socketGeneration)
         jlog("Jarvis Gemini [\(speaker.rawValue)]: transcription session ready "
@@ -725,8 +754,18 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         openSocket()
     }
 
+    /// This transcriber's identity in every failure it classifies.
+    private var source: ProviderFailure.Source { .transcription(.gemini) }
+
+    /// Classify a transport error against this socket's readiness, which decides whether it reads as
+    /// a connection that never came up or one lost after it was working.
+    private func transportFailure(_ error: any Error) -> ProviderFailure {
+        lock.lock(); let everReady = everConnected; lock.unlock()
+        return TransportFailureClassifier.classify(error: error, source: source, everReady: everReady)
+    }
+
     /// End a green-but-unusable transcription session immediately for permanent provider failures.
-    private func reportTerminalFailureOnce(_ reason: TranscriptionFailureReason) {
+    private func reportTerminalFailureOnce(_ failure: ProviderFailure) {
         lock.lock()
         guard !stopped, !terminalFailureReported else { lock.unlock(); return }
         terminalFailureReported = true
@@ -734,8 +773,9 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         lock.unlock()
         invalidateConnectionTimers()
         emitState(.failed)
-        jlog("Jarvis Gemini [\(speaker.rawValue)]: unrecoverable transcription failure — stopping")
-        onTerminalFailure?(reason)
+        jlog("Jarvis Gemini [\(speaker.rawValue)]: unrecoverable transcription failure "
+             + "(\(failure.errorDescription ?? "")) — stopping")
+        onTerminalFailure?(failure)
     }
 
     // MARK: - Reconnect / keepalive
@@ -749,28 +789,29 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         lock.unlock()
         if isStopped { return } // An intentional Stop closes the socket on purpose.
         // A rejected API key, a retired model id, and an unsupported request all surface ONLY as
-        // close code 1008 — see `GeminiLiveSession.terminalFailure(forCloseCode:reason:)` for the
-        // empirically-established wire behavior and how the `reason` text tells them apart. Route it
-        // straight to the terminal path instead of `failConnection`'s six-attempt, ~61s backoff: every
-        // 1008 is a permanent provider-boundary failure a retry cannot fix, and this is the one case
-        // AGENTS.md permits exhausting a target immediately, without the usual retry discipline.
+        // close code 1008 — see `GeminiFailureClassifier.classify(closeCode:reason:source:)` for the
+        // empirically-established wire behavior and how the `reason` text tells them apart. A
+        // permanent close goes straight to the terminal path instead of `failConnection`'s
+        // six-attempt, ~61s backoff: it is a provider-boundary failure a retry cannot fix, and this
+        // is the one case AGENTS.md permits exhausting a target immediately.
         //
-        // `reason` is server-supplied content — decode it only to classify, never log the text (see
-        // the security note atop this file).
+        // `reason` is server-supplied content. It reaches Activity only through the failure record,
+        // which redacts it; it is still never logged verbatim (see the security note atop this file).
         let reasonText = reason.flatMap { String(data: $0, encoding: .utf8) }
-        if let failure = GeminiLiveSession.terminalFailure(forCloseCode: closeCode.rawValue, reason: reasonText) {
-            reportTerminalFailureOnce(failure)
+        let cause = GeminiFailureClassifier.classify(
+            closeCode: closeCode.rawValue, reason: reasonText, source: source)
+        if cause.disposition == .permanent {
+            reportTerminalFailureOnce(cause)
             return
         }
-        failConnection(task: webSocketTask, generation: socketGeneration,
-                      diagnostic: "socket closed: code \(closeCode.rawValue)")
+        failConnection(task: webSocketTask, generation: socketGeneration, cause: cause)
     }
 
     /// Move the current socket into reconnect exactly once. Every failure source (receive, close,
     /// send, readiness deadline, and pong deadline) funnels through here; `generation` prevents a late
     /// callback from an old socket from disrupting its healthy replacement.
     private func failConnection(task failedTask: URLSessionWebSocketTask, generation failedGeneration: Int,
-                                diagnostic: String?) {
+                                cause: ProviderFailure?) {
         lock.lock()
         guard let currentTask = task else { lock.unlock(); return }
         if stopped || terminalFailureReported || isReconnecting
@@ -781,12 +822,14 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
             // `goAway` already told us this socket was going away — any failure it produces while
             // draining (a close arriving before the grace deadline, a receive failure, ...) is
             // expected transport churn, not a fault. Skip the backoff path entirely and rotate now
-            // instead of spending a retry attempt or reporting a diagnostic for something already
+            // instead of spending a retry attempt or remembering a cause for something already
             // anticipated. `rotate` re-validates the lease itself, so it is safe to call unlocked.
             lock.unlock()
-            rotate(fromTask: failedTask, generation: failedGeneration, reason: diagnostic ?? "socket failure")
+            rotate(fromTask: failedTask, generation: failedGeneration,
+                   reason: cause?.errorDescription ?? "socket failure")
             return
         }
+        if let cause { lastConnectionFailure = cause }
         connected = false; isSending = false
         // Bound: whatever this socket was recognizing is now unknowable — a final for it may never
         // arrive. Clearing here (not just in `openSocket` on the replacement) closes the gap during
@@ -796,18 +839,24 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         let failedSession = session
         task = nil
         session = nil
-        guard let retryDelay = reconnectSchedule.delay(forRetry: reconnectAttempt) else {
+        // A socket that never reached ready spends the short budget: nothing is preserved by waiting,
+        // and the user is sitting in silence while it retries.
+        let schedule = everConnected ? reconnectSchedule : initialConnectSchedule
+        guard let retryDelay = schedule.delay(forRetry: reconnectAttempt) else {
+            let last = lastConnectionFailure
+            let wasEverConnected = everConnected
             isReconnecting = true
             terminalFailureReported = true
             lock.unlock()
-            if let diagnostic { logTransportFailure(diagnostic, generation: failedGeneration) }
+            if let cause { logTransportFailure(cause, generation: failedGeneration) }
             invalidateConnectionTimers()
             failedTask.cancel(with: .goingAway, reason: nil)
             failedSession?.invalidateAndCancel()
             emitState(.failed)
             jlog("Jarvis Gemini [\(speaker.rawValue)]: giving up after "
-                 + "\(reconnectSchedule.maximumRetries) reconnect attempts — stopping")
-            onTerminalFailure?(.connectionLost)
+                 + "\(schedule.maximumRetries) reconnect attempts — stopping")
+            onTerminalFailure?(.exhausted(
+                last: last, source: source, everReady: wasEverConnected))
             return
         }
         isReconnecting = true
@@ -815,7 +864,7 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         reconnectAttempt = attempt + 1
         lock.unlock()
 
-        if let diagnostic { logTransportFailure(diagnostic, generation: failedGeneration) }
+        if let cause { logTransportFailure(cause, generation: failedGeneration) }
         invalidateConnectionTimers()
         failedTask.cancel(with: .goingAway, reason: nil)
         failedSession?.invalidateAndCancel()
@@ -854,8 +903,11 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
                     && !self.connected && !self.isReconnecting && !self.stopped
                 self.lock.unlock()
                 guard isStillPending else { return }
+                self.lock.lock(); let everReady = self.everConnected; self.lock.unlock()
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "session readiness timed out after \(self.readyTimeout)s")
+                                    cause: TransportFailureClassifier.readinessTimeout(
+                                        seconds: self.readyTimeout, source: self.source,
+                                        everReady: everReady))
             }
         }
     }
@@ -898,16 +950,16 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
                 self.lock.unlock()
                 guard isStillPending else { return }
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "pong timed out after \(self.pongTimeout)s")
+                                    cause: TransportFailureClassifier.livenessTimeout(
+                                        seconds: self.pongTimeout, source: self.source))
             }
         }
 
         task.sendPing { [weak self, weak task] error in
             guard let self, let task else { return }
-            if error != nil {
-                // Never log the caught error — see the security note atop this file.
+            if let error {
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "ping failed")
+                                    cause: self.transportFailure(error))
                 return
             }
             self.lock.lock()
@@ -957,8 +1009,9 @@ final class GeminiLiveTranscriber: NSObject, TranscriptionSession, URLSessionWeb
         }
     }
 
-    private func logTransportFailure(_ diagnostic: String, generation socketGeneration: Int) {
-        jlog("Jarvis Gemini [\(speaker.rawValue)] socket #\(socketGeneration) \(diagnostic) "
+    private func logTransportFailure(_ cause: ProviderFailure, generation socketGeneration: Int) {
+        jlog("Jarvis Gemini [\(speaker.rawValue)] socket #\(socketGeneration) "
+             + "\(cause.stage.rawValue) failed: \(cause.errorDescription ?? "") "
              + "(network: \(networkStatus()))")
     }
 

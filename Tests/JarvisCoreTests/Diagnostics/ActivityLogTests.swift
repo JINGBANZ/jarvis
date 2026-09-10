@@ -318,37 +318,33 @@ import Foundation
         let capture = ProviderFailure(
             source: .capture, stage: .local, category: .unavailable, disposition: .permanent,
             identity: .init(), message: "no input device")
+        let region = ProviderFailure(
+            source: .transcription(.openAI), stage: .handshake, category: .access,
+            disposition: .permanent,
+            identity: .init(httpStatus: 403, errorCode: "unsupported_country_region_territory"),
+            message: "Country, region, or territory not supported")
+        let lost = ProviderFailure(
+            source: .transcription(.openAI), stage: .close, category: .disconnected,
+            disposition: .temporary, identity: .init(closeCode: 1006), message: "")
         let events: [ActivityEvent] = [
-            .sessionEnded(reason: .transcriptionStopped(reason: .connectionLost)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .quotaExceeded)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .authenticationFailed)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .accessDenied)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .configurationRejected)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .appleSpeechUnavailable)),
+            .sessionEnded(reason: .transcriptionStopped(failure: region)),
             .sessionEnded(reason: .brainRouteExhausted(last: leaky)),
             .sessionEnded(reason: .audioCaptureUnavailable(failure: capture)),
             .coachingTurnFailed(failure: leaky),
-            .systemAudioStopped,
+            .systemAudioStopped(failure: lost),
             .settingsChangeNotApplied,
         ]
         let messages = events.map { $0.rendered.message }
 
-        #expect(messages.count == 11)
-        #expect(messages[0].contains("session ended by error"))
-        #expect(messages[0].contains("transcription connection was lost"))
-        #expect(messages[1].contains("API quota is exhausted"))
-        #expect(messages[1].contains("billing"))
-        #expect(messages[2].contains("rejected the API key"))
-        #expect(messages[2].contains("Settings → Connections"))
-        #expect(messages[3].contains("denied access"))
-        #expect(messages[4].contains("rejected the configuration"))
-        #expect(messages[5].contains("Apple Speech transcription became unavailable"))
-        #expect(messages[6] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …)")
-        #expect(ActivityLog.cssClass(for: messages[6]) == "err")
-        #expect(messages[7] == "⏹ session ended by error — audio capture became unavailable (no input device)")
-        #expect(messages[8] == "⚠️ Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …) — retrying while listening continues")
-        #expect(messages[9].contains("microphone coaching continues"))
-        #expect(messages[10].contains("current coaching session continues"))
+        #expect(messages.count == 6)
+        #expect(messages[0] == "⏹ session ended by error — OpenAI denied access (HTTP 403, unsupported_country_region_territory: Country, region, or territory not supported); check your region, VPN, or API project")
+        #expect(ActivityLog.cssClass(for: messages[0]) == "err")
+        #expect(messages[1] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …)")
+        #expect(ActivityLog.cssClass(for: messages[1]) == "err")
+        #expect(messages[2] == "⏹ session ended by error — audio capture became unavailable (no input device)")
+        #expect(messages[3] == "⚠️ Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …) — retrying while listening continues")
+        #expect(messages[4] == "⚠️ system audio stopped — the transcription connection to OpenAI was lost (close 1006); microphone coaching continues")
+        #expect(messages[5].contains("current coaching session continues"))
         // Provider text reaches a row only after redaction, so a quoted message can never carry a
         // credential.
         #expect(messages.allSatisfy { !$0.contains("abc123token") })
@@ -377,6 +373,11 @@ import Foundation
         let capture = ProviderFailure(
             source: .capture, stage: .local, category: .unavailable, disposition: .permanent,
             identity: .init(), message: "no input device")
+        let region = ProviderFailure(
+            source: .transcription(.openAI), stage: .handshake, category: .access,
+            disposition: .permanent,
+            identity: .init(httpStatus: 403, errorCode: "unsupported_country_region_territory"),
+            message: "Country, region, or territory not supported")
         let reasons: [SessionEndReason] = [
             .stoppedByUser,
             .applicationQuit,
@@ -384,7 +385,7 @@ import Foundation
             .openAIAPIKeyMissing,
             .permissionsMissing,
             .brainRouteExhausted(last: leaky),
-            .transcriptionStopped(reason: .quotaExceeded),
+            .transcriptionStopped(failure: region),
             .audioCaptureUnavailable(failure: capture),
             .unexpectedError(detail: "Couldn't prepare Apple Speech"),
         ]
@@ -399,7 +400,8 @@ import Foundation
         #expect(messages[3].contains("Settings → Connections"))
         #expect(messages[4].contains("required permission is missing"))
         #expect(messages[5] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …)")
-        #expect(messages[6].contains("API quota is exhausted"))
+        #expect(messages[6] == "⏹ session ended by error — OpenAI denied access (HTTP 403, unsupported_country_region_territory: Country, region, or territory not supported); check your region, VPN, or API project")
+        #expect(ActivityLog.cssClass(for: messages[6]) == "err")
         #expect(messages[7] == "⏹ session ended by error — audio capture became unavailable (no input device)")
         #expect(messages[8] == "⏹ session ended by error — Couldn't prepare Apple Speech")
         #expect(messages.allSatisfy { !$0.contains("abc123token") })

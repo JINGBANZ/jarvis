@@ -28,11 +28,16 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     /// Fired when transcription becomes unusable, either from an unrecoverable provider rejection or
     /// after reconnection is abandoned, so the app can stop instead of lying green.
-    var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
+    var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
     private let reconnectSchedule = RetrySchedule(
         maximumRetries: 6, initialDelay: 1, maximumDelay: 30)
+    /// A socket that has never been ready has nothing to preserve, and every attempt costs the user
+    /// silence with no explanation. Three attempts is enough to ride out a transient refusal; past
+    /// that the cause is the key, the region, or the network, and the session should say so.
+    private let initialConnectSchedule = RetrySchedule(
+        maximumRetries: 2, initialDelay: 1, maximumDelay: 30)
     private var apiKey: String
     private let model: OpenAITranscriptionModel
     private let expectedLanguages: [TranscriptionLanguage]
@@ -83,6 +88,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     private var hasUntrackedBufferedReplayAudio = false
     private var rotating = false         // an EXPECTED server rotation is mid-flight; quiet the noise it makes
     private var terminalFailureReported = false
+    /// The most recent classified reason a socket went down, so the row shown when the retry budget
+    /// runs out names the cause rather than "the connection was lost".
+    private var lastConnectionFailure: ProviderFailure?
     private var generation = 0           // rejects late callbacks from a replaced socket
     private var pendingPingGeneration: Int?
     /// Realtime's `audio_start_ms` is relative to audio written on one socket. These origins map it
@@ -208,6 +216,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         lock.lock()
         stopped = false; reconnectAttempt = 0; isReconnecting = false; rotating = false
         terminalFailureReported = false
+        // Readiness selects the retry budget and how an exhausted budget is categorized, so a fresh
+        // session must start as never-ready even if this instance ran one before.
+        everConnected = false; lastConnectionFailure = nil
         reconnectRecoveryIsInitializing = false
         bufferedAudioDuringRecoveryInitialization = false
         hasUntrackedBufferedReplayAudio = false
@@ -487,7 +498,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             guard let self, let t else { return }
             guard let error else { return }
             self.failConnection(task: t, generation: socketGeneration,
-                                diagnostic: "send failed: \(error)")
+                                cause: self.transportFailure(error))
         }
         return true
     }
@@ -512,7 +523,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                 // producer can select this failed socket; retrying before that transition would let
                 // a racing producer send the same head on the dead task.
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "send failed: \(error)")
+                                    cause: self.transportFailure(error))
                 return
             }
             self.continuityReporter.recordSendSuccess(
@@ -542,14 +553,17 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             withJSONObject: RealtimeSession.commitAudio(eventID: eventID)),
               let text = String(data: data, encoding: .utf8) else {
             failConnection(task: task, generation: socketGeneration,
-                           diagnostic: "could not encode Jarvis-managed turn commit")
+                           cause: ProviderFailure(
+                            source: source, stage: .transport, category: .unknown,
+                            disposition: .temporary, identity: .init(),
+                            message: "could not encode Jarvis-managed turn commit"))
             return
         }
         task.send(.string(text)) { [weak self, weak task] error in
             guard let self, let task else { return }
             if let error {
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "Jarvis-managed commit send failed: \(error)")
+                                    cause: self.transportFailure(error))
                 return
             }
             self.lock.lock()
@@ -585,12 +599,32 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             case .failure(let err):
                 // A failed pending receive is the EXPECTED artifact of an intentional Stop
                 // (cancel → ENOTCONN/POSIX 57). Suppress it then; only a live failure reconnects.
-                self.lock.lock(); let isStopped = self.stopped; let quiet = self.rotating; self.lock.unlock()
+                self.lock.lock()
+                let isStopped = self.stopped
+                let quiet = self.rotating
+                let everReady = self.everConnected
+                self.lock.unlock()
                 if isStopped { return }
-                // During an expected rotation the failing receive is just the old socket going away — the
-                // rotation line already covers it, so don't surface "Socket is not connected" on top.
+                // A refused upgrade (non-101) surfaces here as a transport error; the HTTP status is
+                // on the task. OpenAI rejects a bad key in-band after a successful upgrade, so a
+                // refused handshake is the edge itself refusing: region, VPN exit, wrong URL. A
+                // permanent one ends the session now instead of after the whole retry budget.
+                let cause: ProviderFailure
+                if let status = (task.response as? HTTPURLResponse)?.statusCode, status != 101 {
+                    cause = OpenAIFailureClassifier.classify(
+                        httpStatus: status, body: nil, source: self.source, stage: .handshake)
+                } else {
+                    cause = TransportFailureClassifier.classify(
+                        error: err, source: self.source, everReady: everReady)
+                }
+                if cause.disposition == .permanent {
+                    self.reportTerminalFailure(cause)
+                    return
+                }
+                // During an expected rotation the failing receive is just the old socket going away.
+                // The rotation line already covers it, so don't surface a transport error on top.
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: quiet ? nil : "receive failed: \(err)")
+                                    cause: quiet ? nil : cause)
             case .success(let message):
                 if case .string(let text) = message {
                     self.handle(text, task: task, generation: socketGeneration)
@@ -733,7 +767,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                 break
             }
             let error = Self.transcriptionErrorDescription(from: obj)
-            let terminalFailure = RealtimeSession.terminalTranscriptionFailure(from: obj)
+            let terminalFailure = OpenAIFailureClassifier.classify(event: obj, source: source)
+                .flatMap { $0.disposition == .permanent ? $0 : nil }
             benchmark?.observer.record(.init(
                 kind: .providerFinal,
                 provider: TranscriptionProvider.openAI.rawValue,
@@ -804,11 +839,12 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             // driven by those paths as usual. Any OTHER error is a real fault — log it verbatim.
             if RealtimeSession.isSessionExpired(obj) {
                 noteRotation("reached its time limit")
-                failConnection(task: task, generation: socketGeneration, diagnostic: nil)
+                failConnection(task: task, generation: socketGeneration, cause: nil)
             } else {
                 jlog("Jarvis realtime [\(speaker.rawValue)] error event: \(text)")
-                if let terminalFailure = RealtimeSession.terminalTranscriptionFailure(from: obj) {
-                    reportTerminalFailure(terminalFailure)
+                if let failure = OpenAIFailureClassifier.classify(event: obj, source: source),
+                   failure.disposition == .permanent {
+                    reportTerminalFailure(failure)
                 }
             }
         default:
@@ -889,10 +925,18 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         return description.isEmpty ? "unknown error" : description
     }
 
+    /// This transcriber's identity in every failure it classifies.
+    private var source: ProviderFailure.Source { .transcription(.openAI) }
+
+    /// Classify a transport error against this socket's readiness, which decides whether it reads as
+    /// a connection that never came up or one lost after it was working.
+    private func transportFailure(_ error: any Error) -> ProviderFailure {
+        lock.lock(); let everReady = everConnected; lock.unlock()
+        return TransportFailureClassifier.classify(error: error, source: source, everReady: everReady)
+    }
+
     /// End a green-but-unusable transcription session immediately for permanent provider failures.
-    /// The Activity layer receives only the typed reason; the raw provider detail was logged by the
-    /// item lifecycle immediately before this call.
-    private func reportTerminalFailure(_ reason: TranscriptionFailureReason) {
+    private func reportTerminalFailure(_ failure: ProviderFailure) {
         lock.lock()
         guard !stopped, !terminalFailureReported else { lock.unlock(); return }
         terminalFailureReported = true
@@ -900,8 +944,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         lock.unlock()
         invalidateConnectionTimers()
         emitState(.failed)
-        jlog("Jarvis realtime [\(speaker.rawValue)]: unrecoverable transcription failure — stopping")
-        onTerminalFailure?(reason)
+        jlog("Jarvis realtime [\(speaker.rawValue)]: unrecoverable transcription failure "
+             + "(\(failure.errorDescription ?? "")) — stopping")
+        onTerminalFailure?(failure)
     }
 
     // MARK: - Reconnect / keepalive
@@ -920,7 +965,10 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         failConnection(
             task: currentTask,
             generation: socketGeneration,
-            diagnostic: "benchmark interrupted this transcription transport")
+            cause: ProviderFailure(
+                source: source, stage: .transport, category: .disconnected,
+                disposition: .temporary, identity: .init(),
+                message: "benchmark interrupted this transcription transport"))
         return true
     }
 
@@ -937,8 +985,16 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // as expected even if no session_expired error preceded it (the two can arrive in either order);
         // any other close code is unexpected and stays visible.
         if closeCode == .goingAway { noteRotation("server going away") }
-        let diagnostic = quiet ? nil : "socket closed: code \(closeCode.rawValue)"
-        failConnection(task: webSocketTask, generation: socketGeneration, diagnostic: diagnostic)
+        // OpenAI closes a rejected session with 3000 and "<type>.<code>" after the in-band error
+        // event. Classifying the close as well covers the case where the event was not recognized.
+        let reasonText = reason.flatMap { String(data: $0, encoding: .utf8) }
+        let cause = OpenAIFailureClassifier.classify(
+            closeCode: closeCode.rawValue, reason: reasonText, source: source)
+        if cause.disposition == .permanent {
+            reportTerminalFailure(cause)
+            return
+        }
+        failConnection(task: webSocketTask, generation: socketGeneration, cause: quiet ? nil : cause)
     }
 
     /// Announce an expected server-initiated rotation exactly once, then mark `rotating` so the close /
@@ -954,7 +1010,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
     /// send, readiness deadline, and pong deadline) funnels through here; `generation` prevents a late
     /// callback from an old socket from disrupting its healthy replacement.
     private func failConnection(task failedTask: URLSessionWebSocketTask, generation failedGeneration: Int,
-                                diagnostic: String?) {
+                                cause: ProviderFailure?) {
         let failureAt = clock.now() - sessionStart
         lock.lock()
         guard let currentTask = task else { lock.unlock(); return }
@@ -962,6 +1018,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             || generation != failedGeneration || currentTask !== failedTask {
             lock.unlock(); return
         }
+        if let cause { lastConnectionFailure = cause }
         connected = false
         pendingPingGeneration = nil
         let failedSession = session
@@ -971,20 +1028,26 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         // into the canceled socket during the reconnect delay.
         task = nil
         session = nil
-        guard let retryDelay = reconnectSchedule.delay(forRetry: reconnectAttempt) else {
+        // A socket that never reached ready spends the short budget: nothing is preserved by waiting,
+        // and the user is sitting in silence while it retries.
+        let schedule = everConnected ? reconnectSchedule : initialConnectSchedule
+        guard let retryDelay = schedule.delay(forRetry: reconnectAttempt) else {
+            let last = lastConnectionFailure
+            let wasEverConnected = everConnected
             isReconnecting = true
             terminalFailureReported = true
             lock.unlock()
             audioBuffer.retryInFlight()
             transcriptionLifecycle.finalizeInterrupted(reason: "socket failure")
-            if let diagnostic { logTransportFailure(diagnostic, generation: failedGeneration) }
+            if let cause { logTransportFailure(cause, generation: failedGeneration) }
             invalidateConnectionTimers()
             failedTask.cancel(with: .goingAway, reason: nil)
             failedSession?.invalidateAndCancel()
             emitState(.failed)
             jlog("Jarvis realtime [\(speaker.rawValue)]: giving up after "
-                 + "\(reconnectSchedule.maximumRetries) reconnect attempts — stopping")
-            onTerminalFailure?(.connectionLost)
+                 + "\(schedule.maximumRetries) reconnect attempts — stopping")
+            onTerminalFailure?(.exhausted(
+                last: last, source: source, everReady: wasEverConnected))
             return
         }
         isReconnecting = true
@@ -1037,7 +1100,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             jlog("Jarvis realtime [\(speaker.rawValue)] retained \(replay.replayedChunks) "
                  + "locally-sent audio chunks for end-to-end reconnect replay")
         }
-        if let diagnostic { logTransportFailure(diagnostic, generation: failedGeneration) }
+        if let cause { logTransportFailure(cause, generation: failedGeneration) }
         invalidateConnectionTimers()
         failedTask.cancel(with: .goingAway, reason: nil)
         failedSession?.invalidateAndCancel()
@@ -1094,8 +1157,11 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                     && !self.connected && !self.isReconnecting && !self.stopped
                 self.lock.unlock()
                 guard isStillPending else { return }
+                self.lock.lock(); let everReady = self.everConnected; self.lock.unlock()
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "session readiness timed out after \(self.readyTimeout)s")
+                                    cause: TransportFailureClassifier.readinessTimeout(
+                                        seconds: self.readyTimeout, source: self.source,
+                                        everReady: everReady))
             }
         }
     }
@@ -1138,7 +1204,8 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
                 self.lock.unlock()
                 guard isStillPending else { return }
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "pong timed out after \(self.pongTimeout)s")
+                                    cause: TransportFailureClassifier.livenessTimeout(
+                                        seconds: self.pongTimeout, source: self.source))
             }
         }
 
@@ -1146,7 +1213,7 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
             guard let self, let task else { return }
             if let error {
                 self.failConnection(task: task, generation: socketGeneration,
-                                    diagnostic: "ping failed: \(error)")
+                                    cause: self.transportFailure(error))
                 return
             }
             self.lock.lock()
@@ -1200,8 +1267,9 @@ final class RealtimeTranscriber: NSObject, TranscriptionSession, URLSessionWebSo
         }
     }
 
-    private func logTransportFailure(_ diagnostic: String, generation socketGeneration: Int) {
-        jlog("Jarvis realtime [\(speaker.rawValue)] socket #\(socketGeneration) \(diagnostic) "
+    private func logTransportFailure(_ cause: ProviderFailure, generation socketGeneration: Int) {
+        jlog("Jarvis realtime [\(speaker.rawValue)] socket #\(socketGeneration) "
+             + "\(cause.stage.rawValue) failed: \(cause.errorDescription ?? "") "
              + "(network: \(networkStatus()))")
     }
 

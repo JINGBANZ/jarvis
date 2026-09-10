@@ -49,8 +49,9 @@ public enum ActivityEvent: Sendable {
     /// transcription remain live. The failure carries its own sentence: the frame is fixed, and
     /// what the provider said (already redacted) is quoted inside it.
     case coachingTurnFailed(failure: ProviderFailure)
-    /// The secondary system-audio transcription stopped while microphone coaching continued.
-    case systemAudioStopped
+    /// The secondary system-audio transcription stopped while microphone coaching continued. The
+    /// failure that stopped it is quoted, so a degraded session still says why it degraded.
+    case systemAudioStopped(failure: ProviderFailure)
     /// An explicit Settings reapply failed its preflight while the existing session continued.
     case settingsChangeNotApplied
     /// A live brain replacement completed its first non-truncated terminal turn. Provider
@@ -95,10 +96,10 @@ public enum ActivityEvent: Sendable {
                 "⚠️ \(failure.activitySentence) — retrying while listening continues",
                 nil
             )
-        case .systemAudioStopped:
+        case .systemAudioStopped(let failure):
             return (
                 .systemAudioStopped,
-                "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log",
+                "⚠️ system audio stopped — \(failure.activitySentence); microphone coaching continues",
                 nil
             )
         case .settingsChangeNotApplied:

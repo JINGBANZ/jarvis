@@ -26,7 +26,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     var onSilence: (@Sendable (TimeInterval) -> Void)?
     var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
-    var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)?
+    var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
     private struct BufferedAudio {
@@ -701,7 +701,11 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         coachingCoordinator.stop()
         jlog("Jarvis Apple Speech [\(speaker.rawValue)]: \(diagnostic)")
         emitState(.failed)
-        onTerminalFailure?(.appleSpeechUnavailable)
+        // Apple Speech runs on this Mac, so it shares no account or network surface with the other
+        // stream: `.local` keeps a failure here from ending a session the microphone could continue.
+        onTerminalFailure?(ProviderFailure(
+            source: .transcription(.appleSpeech), stage: .local, category: .unavailable,
+            disposition: .permanent, identity: .init(), message: diagnostic))
     }
 
     private func installRuntime(

@@ -12,7 +12,7 @@ public enum SessionEndReason: Sendable, Equatable {
     case openAIAPIKeyMissing
     case permissionsMissing
     case brainRouteExhausted(last: ProviderFailure)
-    case transcriptionStopped(reason: TranscriptionFailureReason)
+    case transcriptionStopped(failure: ProviderFailure)
     case audioCaptureUnavailable(failure: ProviderFailure)
     /// Jarvis-authored copy from the error catalog for a stop with no provider behind it.
     case unexpectedError(detail: String)
@@ -31,8 +31,8 @@ public enum SessionEndReason: Sendable, Equatable {
             "session ended by error — a required permission is missing; check System Settings → Privacy & Security"
         case .brainRouteExhausted(let last):
             "session ended by error — all configured provider targets were exhausted; last target: \(last.activitySentence)"
-        case .transcriptionStopped(let reason):
-            "session ended by error — \(reason.activityDescription)"
+        case .transcriptionStopped(let failure):
+            "session ended by error — \(failure.activitySentence)"
         case .audioCaptureUnavailable(let failure):
             "session ended by error — \(failure.activitySentence)"
         case .unexpectedError(let detail):

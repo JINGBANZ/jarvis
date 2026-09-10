@@ -120,11 +120,11 @@ public extension UserFacingError {
 
     /// The mic ("me") transcription endpoint gave up — NOT a mic-hardware failure (that's
     /// `captureStopped`). Coaching can't continue, so stop without revealing UI.
-    static func transcriptionStopped(reason: TranscriptionFailureReason) -> UserFacingError {
+    static func transcriptionStopped(failure: ProviderFailure) -> UserFacingError {
         .init(title: "Transcription stopped",
-              message: "Jarvis could not continue because \(reason.activityDescription).",
+              message: "Jarvis could not continue because \(failure.activitySentence).",
               severity: .terminal,
-              sessionEndReason: .transcriptionStopped(reason: reason))
+              sessionEndReason: .transcriptionStopped(failure: failure))
     }
 
     /// The system-audio ("them") endpoint gave up. The mic still works, so this is a graceful

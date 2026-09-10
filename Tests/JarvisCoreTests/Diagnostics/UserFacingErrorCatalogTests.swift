@@ -97,14 +97,21 @@ import Testing
         #expect(e.sessionEndReason == .audioCaptureUnavailable(failure: Self.noInputDevice))
     }
 
+    /// Whatever a transcription boundary reports, the stop is terminal and quiet, and the message is
+    /// the failure's own sentence, so the alert-free stop still says what happened.
     @Test func transcriptionStoppedIsTerminal() {
-        for reason in TranscriptionFailureReason.allCases {
-            let error = UserFacingError.transcriptionStopped(reason: reason)
+        for category in ProviderFailure.Category.allCases {
+            let failure = ProviderFailure(
+                source: .transcription(.openAI), stage: .session, category: category,
+                disposition: .permanent, identity: .init(closeCode: 3000),
+                message: "Incorrect API key provided: sk-abc123456789")
+            let error = UserFacingError.transcriptionStopped(failure: failure)
             #expect(error.severity == .terminal)
             #expect(error.severity.stopsSession)
             #expect(!error.severity.showsAlert)
-            #expect(error.message.contains(reason.activityDescription))
-            #expect(error.sessionEndReason == .transcriptionStopped(reason: reason))
+            #expect(error.message == "Jarvis could not continue because \(failure.activitySentence).")
+            #expect(!error.message.contains("sk-abc123456789"))
+            #expect(error.sessionEndReason == .transcriptionStopped(failure: failure))
         }
     }
 
