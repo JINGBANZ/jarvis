@@ -2,10 +2,8 @@ import Foundation
 
 /// Pure session-local cursor and health policy for an ordered provider route.
 ///
-/// The route only moves forward. Temporary/unknown attempt failures exhaust a target on the third
-/// consecutive failure when a usable fallback remains. The last usable target keeps retrying
-/// temporary failures; a proven permanent failure exhausts it immediately. Success clears only
-/// the active target's count and never returns to an earlier target.
+/// Within one request the route only moves forward. Three temporary failures or one proven
+/// permanent failure exhaust a target. The driver owns the new-request reset after route exhaustion.
 struct BrainRouteSession: Sendable, Equatable {
     static let failuresPerTarget = 3
 
@@ -29,13 +27,11 @@ struct BrainRouteSession: Sendable, Equatable {
     }
 
     mutating func recordFailure(
-        _ disposition: BrainFailure.Disposition,
-        hasAvailableFallback: Bool = true
+        _ disposition: BrainFailure.Disposition
     ) -> FailureTransition {
         consecutiveFailures += 1
         let targetIsExhausted = disposition == .permanent
-            || (consecutiveFailures >= Self.failuresPerTarget
-                && activeIndex + 1 < targetCount && hasAvailableFallback)
+            || consecutiveFailures >= Self.failuresPerTarget
         guard targetIsExhausted else {
             return .stay(failureCount: consecutiveFailures)
         }

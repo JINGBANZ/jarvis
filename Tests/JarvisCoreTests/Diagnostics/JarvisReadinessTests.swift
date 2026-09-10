@@ -287,6 +287,17 @@ import Testing
         #expect(readiness.status == .ready(.full))
     }
 
+    @Test func failedRequestKeepsSessionAndClearsOnNextRequest() {
+        let (readiness, session) = fullReadyReadiness()
+        _ = readiness.observe(.brainRequestFailed(.openAI), for: session)
+        #expect(readiness.status == .requestFailed(.openAI))
+        _ = readiness.observe(.brainRecovery(nil), for: session)
+        #expect(readiness.status == .ready(.full))
+        _ = readiness.observe(.brainRequestFailed(.openAI), for: session)
+        _ = readiness.observe(.transcriptionEndpoint(stream: .microphone, state: .failed), for: session)
+        #expect(readiness.status == .blocked(.endpoint(.microphone)))
+    }
+
     private func fullReadyReadiness() -> (JarvisReadiness, JarvisReadiness.Session) {
         let readiness = JarvisReadiness()
         let start = readiness.begin(configuration: .init())

@@ -29,6 +29,16 @@ import AppKit
 @Suite(.serialized) struct OverlayInvisibilityTests {
 
     @MainActor @Test
+    func requestErrorUsesExistingCaptureExcludedCaption() {
+        let panel = OverlayCaptionPanel()
+        panel.setEnabled(true)
+        defer { panel.setEnabled(false) }
+        panel.showError("Model request failed — try again.")
+        #expect(panel.currentText == "Model request failed — try again.")
+        #expect(panel.currentSharingType == .none)
+    }
+
+    @MainActor @Test
     func overlaySetsCaptureExclusionAtInit() {
         let overlay = OverlayCaptionPanel()
         #expect(overlay.currentSharingType == .none)

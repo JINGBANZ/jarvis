@@ -225,7 +225,7 @@ import Foundation
             == "think")
     }
 
-    @Test func temporaryBrainFailureSaysRetryingWithoutDiagnosticDetail() async throws {
+    @Test func failedRequestInvitesRetryWithoutDiagnosticDetail() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
         evidence.record(.coachingTurnFailed(provider: .codexCLI))
@@ -233,8 +233,8 @@ import Foundation
         let snapshot = log.attach { _ in }
 
         let row = try #require(snapshot.rows.first)
-        #expect(row.contains("Codex CLI is not responding"))
-        #expect(row.contains("retrying"))
+        #expect(row.contains("Codex CLI request failed"))
+        #expect(row.contains("try again"))
         #expect(row.contains("listening continues"))
         #expect(!row.contains("timed out"))
         #expect(ActivityLog.isHumanFacing(

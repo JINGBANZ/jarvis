@@ -114,7 +114,7 @@ producer a generic path to author human-facing copy.
 |---|---|---|
 | Finalized utterance, manual hint, brain action, or fixed lifecycle/degradation notice | Friendly high-level row from the event's Activity presentation | Full typed event and attribution |
 | Provider timing, transport error, retry scheduling, lifecycle detail, or raw error | Nothing; the event has no Activity presentation | Full typed diagnostic detail |
-| Route advance or beginning of a coaching failure streak | Fixed, non-sensitive Activity summary | Same event's provider, attempt, timing, and failure detail |
+| Route advance or exhausted coaching request | Fixed, non-sensitive Activity summary | Same event's provider, attempt, timing, and failure detail |
 | Capture heartbeat or continuity anomaly | No raw counter stream; readiness remains current UI state | Optional content-free evidence copy |
 
 One occurrence produces one event. Producers do not mirror it through an `ActivityEventSink`, a
@@ -153,12 +153,12 @@ shares the evidence stack.
    replays a failed brain request or switches providers inside the attempt.
 3. Failure ends the attempt without committing a partial outcome. The conversation remains pending,
    and a new attempt can include newer finalized speech.
-4. Temporary or unknown failures advance after the threshold only when a usable fallback remains;
-   the last usable target keeps retrying with capped backoff while listening continues. A proven
-   permanent provider-boundary failure may exhaust it immediately. See the
-   [ordered route policy](./architecture.md#ordered-provider-route) for recovery and status behavior.
-5. Only a later fresh attempt advances to the next configured target. The route moves forward, never
-   revisits an exhausted target, never races providers, and never rewrites saved preferences.
+4. Temporary/unknown failures exhaust a target at the finite threshold; proven permanent failures
+   may exhaust it immediately. Exhausting the route ends only the request and shows an error while
+   listening continues. See the [ordered route policy](./architecture.md#ordered-provider-route).
+5. Only a later fresh attempt advances to another target. A later user request can start a new route
+   budget after exhaustion; successful fallback selection stays active. Providers never race and
+   runtime failures never rewrite preferences.
 
 This roadmap does not add evidence-write retries, provider probes, or same-attempt failover.
 Transcription transport reconnect remains its separate adapter-level recovery contract.

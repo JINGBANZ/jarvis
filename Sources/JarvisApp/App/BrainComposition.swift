@@ -24,6 +24,7 @@ protocol BrainCompositionHost: AnyObject {
     /// The Settings pane's active-target badge follows the route the session actually selected.
     func brainTargetDidChange(_ target: BrainTarget?)
     func brainRecoveryDidChange(_ provider: BrainProvider?)
+    func brainRequestDidFail(_ provider: BrainProvider)
 }
 
 /// Builds and reapplies the provider route.
@@ -264,17 +265,13 @@ final class BrainComposition {
                       self.host.liveSessionDirectory == sessionDirectory else { return }
                 self.host.brainRecoveryDidChange(provider)
             },
-            onExhausted: { [weak self] target, failure in
+            onExhausted: { [weak self] target, _ in
                 guard let self, self.host.liveCoachDriver != nil,
                       self.host.liveSessionDirectory == sessionDirectory else {
                     jlog("Jarvis: ignoring route exhaustion from a stopped or superseded session.")
                     return
                 }
-                self.host.reportBrainError(
-                    .brainRouteExhausted(
-                        lastProvider: target.provider,
-                        reason: failure.detail),
-                    context: .runtime)
+                self.host.brainRequestDidFail(target.provider)
             })
     }
 

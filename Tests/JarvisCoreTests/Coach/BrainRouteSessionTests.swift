@@ -2,22 +2,20 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct BrainRouteSessionTests {
-    @Test func lastTargetKeepsRetryingTemporaryFailuresUntilRecovery() {
+    @Test func lastTargetEndsRequestAfterThreeTemporaryFailures() {
         var route = BrainRouteSession(targetCount: 1)
-        for count in 1...8 {
-            #expect(route.recordFailure(.temporary) == .stay(failureCount: count))
-        }
-        route.recordSuccess()
         #expect(route.recordFailure(.temporary) == .stay(failureCount: 1))
-        #expect(route.recordFailure(.permanent) == .exhausted(last: 0))
+        #expect(route.recordFailure(.temporary) == .stay(failureCount: 2))
+        #expect(route.recordFailure(.temporary) == .exhausted(last: 0))
     }
 
-    @Test func unavailableFallbackDoesNotDisplaceRecoverableTarget() {
+    @Test func newRequestStartsWithFreshRouteBudget() {
         var route = BrainRouteSession(targetCount: 2)
-        for count in 1...5 {
-            #expect(route.recordFailure(.temporary, hasAvailableFallback: false) == .stay(failureCount: count))
-        }
+        _ = route.recordFailure(.permanent)
+        _ = route.recordFailure(.permanent)
+        route = BrainRouteSession(targetCount: 2)
         #expect(route.activeIndex == 0)
+        #expect(route.recordFailure(.temporary) == .stay(failureCount: 1))
     }
 
     @Test func thirdTemporaryFailureAdvances() {

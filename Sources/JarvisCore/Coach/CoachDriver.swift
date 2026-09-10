@@ -42,6 +42,8 @@ public final class CoachDriver: @unchecked Sendable {
     /// inside this type's lock needs no coordination with the runner's.
     private let ledger = CoachTranscriptLedger()
     /// The attempt half. One per driver, so history and the compaction lifetime match the session's.
+    private let transcript: RollingTranscript
+    private var failedTranscriptBoundary: Int?
     private let runner: CoachAttemptRunner
 
     private let stateLock = NSLock()
@@ -66,7 +68,7 @@ public final class CoachDriver: @unchecked Sendable {
     private var isHandling = false
     /// Natural triggers coalesce while an attempt or automatic pending-work wait owns the slot.
     private var pendingTrigger: PendingTrigger?
-    /// Monotonic pulse used to race bounded automatic backoff against a newly coalesced trigger
+    /// Monotonic pulse used to race the retry pause against a newly coalesced trigger
     /// without losing a trigger that lands just before the async waiter is installed.
     private var pendingTriggerGeneration: UInt = 0
     private var pendingTriggerWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
@@ -168,6 +170,7 @@ public final class CoachDriver: @unchecked Sendable {
         self.plan = plan
         self.activity = activity
         self._prepMaterial = prepMaterial
+        self.transcript = transcript
         self.configuredRoute = route
         self.routeSession = BrainRouteSession(targetCount: route.targets.count)
         self.coachingAttempts = coachingAttempts
@@ -186,9 +189,8 @@ public final class CoachDriver: @unchecked Sendable {
             interviewFormat: interviewFormat)
     }
 
-    private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { sequence in
-        let seconds = min(0.5 * pow(2, Double(max(0, sequence - 1))), 30)
-        try await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+    private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { _ in
+        try await Task.sleep(for: .milliseconds(500))
     }
 
     /// Install a fresh control-plane revision for the next attempt. This is the declared
@@ -218,6 +220,7 @@ public final class CoachDriver: @unchecked Sendable {
         routeTopologyRevision &+= 1
         configuredRoute = route
         routeSession = BrainRouteSession(targetCount: route.targets.count)
+        failedTranscriptBoundary = nil
         pendingTransitionOrigin = nil
         routeIsExhausted = false
         pendingExhaustionDeliveryGeneration = nil
@@ -262,19 +265,12 @@ public final class CoachDriver: @unchecked Sendable {
         if refreshesActiveTarget {
             routeRevision &+= 1
         }
-        var retiredReplacements: [ConfiguredBrainTarget] = []
-        let targets = zip(configuredRoute.targets, route.targets).enumerated().map {
-            index, pair in
+        let targets = zip(configuredRoute.targets, route.targets).map { pair in
             let (current, replacement) = pair
             let shouldReplace = providers.map {
                 $0.contains(replacement.target.provider)
             } ?? true
             guard shouldReplace else {
-                return current
-            }
-            let isReachable = !routeIsExhausted && index >= routeSession.activeIndex
-            guard isReachable else {
-                retiredReplacements.append(replacement)
                 return current
             }
             return replacement
@@ -290,7 +286,6 @@ public final class CoachDriver: @unchecked Sendable {
             ? configuredRoute.targets[routeSession.activeIndex]
             : nil
         stateLock.unlock()
-        retiredReplacements.forEach { $0.terminate() }
         activeReplacement?.prepare()
         return true
     }
@@ -308,17 +303,7 @@ public final class CoachDriver: @unchecked Sendable {
             stateLock.unlock()
             return false
         }
-        var retiredReplacements: [ConfiguredBrainTarget] = []
-        let targets = zip(configuredRoute.targets, route.targets).enumerated().map {
-            index, pair in
-            let (current, replacement) = pair
-            let isReachable = !routeIsExhausted && index >= routeSession.activeIndex
-            guard isReachable else {
-                retiredReplacements.append(replacement)
-                return current
-            }
-            return replacement
-        }
+        let targets = route.targets
         configuredRoute = ConfiguredBrainRoute(
             targets: targets,
             onSelected: route.onSelected,
@@ -330,7 +315,6 @@ public final class CoachDriver: @unchecked Sendable {
             ? nil
             : configuredRoute.targets[routeSession.activeIndex]
         stateLock.unlock()
-        retiredReplacements.forEach { $0.terminate() }
         activeReplacement?.prepare()
         return true
     }
@@ -398,7 +382,8 @@ public final class CoachDriver: @unchecked Sendable {
     private func claimOrPend(_ trigger: PendingTrigger) -> TriggerClaim {
         let waiters: [CheckedContinuation<Void, Never>]
         stateLock.lock()
-        if routeIsExhausted {
+        if routeIsExhausted && !isHandling &&
+            trigger.reason != .manualHint && transcript.count <= (failedTranscriptBoundary ?? transcript.count) {
             stateLock.unlock()
             return .exhausted
         }
@@ -420,6 +405,18 @@ public final class CoachDriver: @unchecked Sendable {
                 transcriptionSettlement.interruptWaiters()
             }
             return .pending
+        }
+        // A failed request does not poison the next one. Successful fallback selection remains
+        // sticky; after exhausting the whole route, a new request starts at the primary again.
+        if routeIsExhausted {
+            routeSession = BrainRouteSession(targetCount: configuredRoute.targets.count)
+            routeIsExhausted = false
+            pendingTransitionOrigin = nil
+            pendingExhaustionDeliveryGeneration = nil
+            failedTranscriptBoundary = nil
+        } else {
+            routeSession.recordSuccess()
+            failedTranscriptBoundary = nil
         }
         isHandling = true
         stateLock.unlock()
@@ -465,7 +462,7 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     /// Atomically take a coalesced trigger and the pulse generation at the same boundary. A later
-    /// generation can then wake bounded backoff even if it arrives before the waiter is registered.
+    /// generation can then wake the retry pause even if it arrives before the waiter is registered.
     private func takePendingTriggerSnapshot() -> (trigger: PendingTrigger?, generation: UInt) {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -523,8 +520,29 @@ public final class CoachDriver: @unchecked Sendable {
         if let pendingTrigger {
             self.pendingTrigger = nil
             if !isCoveredByCommittedTranscript(pendingTrigger) {
+                routeSession.recordSuccess()
+                failedTranscriptBoundary = nil
                 return pendingTrigger
             }
+        }
+        isHandling = false
+        return nil
+    }
+
+    /// Only input not included in the final failed attempt can start another request immediately.
+    private func finishFailedRequest(unattemptedManualHint: Bool = false) -> TriggerReason? {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        let next = pendingTrigger
+        pendingTrigger = nil
+        if !Task.isCancelled && (unattemptedManualHint || next?.reason == .manualHint ||
+            transcript.count > (failedTranscriptBoundary ?? transcript.count)) {
+            routeSession = BrainRouteSession(targetCount: configuredRoute.targets.count)
+            routeIsExhausted = false
+            pendingTransitionOrigin = nil
+            pendingExhaustionDeliveryGeneration = nil
+            failedTranscriptBoundary = nil
+            return unattemptedManualHint ? .manualHint : (next?.reason ?? .turnEnd)
         }
         isHandling = false
         return nil
@@ -622,7 +640,7 @@ public final class CoachDriver: @unchecked Sendable {
             break
         case .exhausted:
             routeIsExhausted = true
-            pendingTrigger = nil
+            failedTranscriptBoundary = failedTranscriptBoundary ?? transcript.count
             exhaustionDeliveryGeneration &+= 1
             pendingExhaustionDeliveryGeneration = exhaustionDeliveryGeneration
             step.exhaustion = RouteExhaustionDelivery(
@@ -645,10 +663,11 @@ public final class CoachDriver: @unchecked Sendable {
 
     private func recordAttemptFailure(
         _ failure: BrainFailure,
-        on attempt: AttemptBrain
+        on attempt: AttemptBrain,
+        transcriptBoundary: Int
     ) async -> RouteFailureAction {
-        let record = applyAttemptFailure(failure, on: attempt)
-        record.retiredTarget?.terminate()
+        let record = applyAttemptFailure(failure, on: attempt, transcriptBoundary: transcriptBoundary)
+        // Targets remain reusable by the next request; their owners release them at session teardown.
         if let exhaustion = record.exhaustion {
             return await deliverRouteExhaustion(exhaustion)
                 ? record.action
@@ -659,37 +678,33 @@ public final class CoachDriver: @unchecked Sendable {
 
     private func applyAttemptFailure(
         _ failure: BrainFailure,
-        on attempt: AttemptBrain
+        on attempt: AttemptBrain,
+        transcriptBoundary: Int
     ) -> (
         action: RouteFailureAction,
-        exhaustion: RouteExhaustionDelivery?,
-        retiredTarget: ConfiguredBrainTarget?
+        exhaustion: RouteExhaustionDelivery?
     ) {
         stateLock.lock()
         defer { stateLock.unlock() }
         if routeRevision != attempt.routeRevision
             || routeSession.activeIndex != attempt.routeIndex {
-            return (.staleRevision, nil, nil)
+            return (.staleRevision, nil)
         }
 
-        // Never abandon a recoverable target for a tail that preflight already proved unusable.
-        let hasAvailableFallback = configuredRoute.targets.dropFirst(attempt.routeIndex + 1)
-            .contains { $0.brain != nil }
-        switch routeSession.recordFailure(
-            failure.disposition, hasAvailableFallback: hasAvailableFallback) {
+        failedTranscriptBoundary = transcriptBoundary
+        switch routeSession.recordFailure(failure.disposition) {
         case .stay(let count):
-            return (.retry(failureCount: count, advanced: false), nil, nil)
+            return (.retry(failureCount: count, advanced: false), nil)
         case .advanced:
             pendingTransitionOrigin = attempt.target
             return (
                 .retry(
                     failureCount: BrainRouteSession.failuresPerTarget,
                     advanced: true),
-                nil,
-                configuredRoute.targets[attempt.routeIndex])
+                nil)
         case .exhausted:
             routeIsExhausted = true
-            pendingTrigger = nil
+            failedTranscriptBoundary = transcriptBoundary
             exhaustionDeliveryGeneration &+= 1
             pendingExhaustionDeliveryGeneration = exhaustionDeliveryGeneration
             return (
@@ -699,8 +714,7 @@ public final class CoachDriver: @unchecked Sendable {
                     topologyRevision: routeTopologyRevision,
                     target: attempt.target,
                     failure: failure,
-                    callback: configuredRoute.onExhausted),
-                configuredRoute.targets[attempt.routeIndex])
+                    callback: configuredRoute.onExhausted))
         }
     }
 
@@ -709,6 +723,7 @@ public final class CoachDriver: @unchecked Sendable {
         if routeTopologyRevision == attempt.routeTopologyRevision
             && routeSession.activeIndex == attempt.routeIndex {
             routeSession.recordSuccess()
+            failedTranscriptBoundary = nil
         }
         stateLock.unlock()
     }
@@ -748,6 +763,7 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("Jarvis coach: ignoring route exhaustion from a superseded Settings revision")
                 return false
             }
+            activity?.record(.coachingTurnFailed(provider: delivery.target.provider))
             delivery.callback?(delivery.target, delivery.failure)
 
             // A callback may synchronously install an explicit replacement route. That edit
@@ -824,12 +840,14 @@ public final class CoachDriver: @unchecked Sendable {
             jlog("… coalesced deferred turn for already-committed transcript")
             return .busy
         case .exhausted:
-            jlog("… provider route already exhausted")
+            jlog("… request failed; waiting for new input")
             return .brainError
         }
 
         var work = CoachAttemptRunner.PendingCoachingWork(reason: reason)
         var automaticSequence = 0
+        // A queued hint may be consumed before selection discovers an unavailable route tail.
+        var unattemptedManualHint = false
         var latestOutcome: TurnOutcome = .silentByModel
 
         while !Task.isCancelled {
@@ -839,10 +857,17 @@ public final class CoachDriver: @unchecked Sendable {
                 return .cancelled
             }
             guard let attempt = await selectBrainForAttempt() else {
-                releaseHandlingSlot()
+                if let next = finishFailedRequest(unattemptedManualHint: unattemptedManualHint) {
+                    unattemptedManualHint = false
+                    work = CoachAttemptRunner.PendingCoachingWork(reason: next)
+                    automaticSequence = 0
+                    continue
+                }
                 return .brainError
             }
 
+            if automaticSequence == 0 { await reportBrainRecovery(nil, on: attempt) }
+            unattemptedManualHint = false
             let execution = await runner.runAttempt(work, using: attempt)
             switch execution.result {
             case .completed(let outcome):
@@ -883,7 +908,8 @@ public final class CoachDriver: @unchecked Sendable {
 
             case .failed(let outcome, let failure, var failedWork):
                 latestOutcome = outcome
-                let action = await recordAttemptFailure(failure, on: attempt)
+                let action = await recordAttemptFailure(failure, on: attempt,
+                    transcriptBoundary: failedWork.attemptedTranscriptBoundary)
                 if let id = execution.id {
                     let terminal: CoachingAttemptAuditEvent.TerminalAction
                     switch action {
@@ -898,22 +924,19 @@ public final class CoachDriver: @unchecked Sendable {
                         outcome: outcome)
                 }
                 let routeChanged: Bool
-                let sustainedOutage: Bool
                 switch action {
                 case .exhausted:
-                    releaseHandlingSlot()
+                    if let next = finishFailedRequest() {
+                        work = CoachAttemptRunner.PendingCoachingWork(reason: next)
+                        automaticSequence = 0
+                        continue
+                    }
                     return .brainError
                 case .staleRevision:
-                    sustainedOutage = false
                     routeChanged = true
                     jlog("Jarvis coach: preserving pending work from superseded route revision")
                 case .retry(let failureCount, let advanced):
                     routeChanged = false
-                    sustainedOutage = !advanced && failureCount >= BrainRouteSession.failuresPerTarget
-                    if !advanced && failureCount == 1 {
-                        activity?.record(
-                            .coachingTurnFailed(provider: attempt.target.provider))
-                    }
                     if !advanced {
                         await reportBrainRecovery(attempt.target.provider, on: attempt)
                     }
@@ -935,11 +958,7 @@ public final class CoachDriver: @unchecked Sendable {
 
                 // A natural trigger and the automatic wake are the same pending attempt. Without a
                 // natural wake, use a bounded delay so a quiet provider outage cannot spin.
-                if sustainedOutage {
-                    // Speech still coalesces, but cannot bypass backoff during a sustained outage.
-                    // This wait belongs to the existing single-flight task, so Stop cancels it.
-                    try? await automaticAttemptDelay(automaticSequence)
-                } else if wake.trigger == nil && !routeChanged {
+                if wake.trigger == nil && !routeChanged {
                     await waitForAutomaticWakeOrDelay(
                         sequence: automaticSequence,
                         after: wake.generation)
@@ -958,6 +977,7 @@ public final class CoachDriver: @unchecked Sendable {
                     work.reason = Self.coalescing(work.reason, with: reason)
                 }
                 work.bypassesTranscriptionSettlement = explicitManualWake
+                unattemptedManualHint = explicitManualWake
                 work.wake = receivedTrigger ? .trigger : .pendingWork
             }
         }

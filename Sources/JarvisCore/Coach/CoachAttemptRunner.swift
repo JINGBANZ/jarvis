@@ -128,6 +128,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
             screenObservation + (prepNotesObservation.map { [$0] } ?? [])
         }
         var manualHintPrepared = false
+        /// The actual input boundary, so failure cannot discard speech finalized during inference.
+        var attemptedTranscriptBoundary = 0
 
         init(reason: TriggerReason) {
             self.reason = reason
@@ -173,6 +175,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
             sessionElapsedSeconds: now - sessionStart)
         let transcriptStartIndex = ledger.committedCount
         let delta = transcript.renderFrom(index: transcriptStartIndex)
+        work.attemptedTranscriptBoundary = delta.upTo
         let classifications = delta.lines.map { TurnSubstance.classification(of: $0.text) }
         let brainFacingOffsets = classifications.indices.filter {
             classifications[$0].isSubstantive

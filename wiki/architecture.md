@@ -198,8 +198,8 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 |---|---|---|
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. When a client-commit model is selected, separate Silero VAD instances score these post-AEC streams (resampled to 16 kHz) on the delivery queue rather than the IOProc, and emit content-free turn edges. Both sides then downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3** + **Silero VAD** via Core ML. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
-| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; only route exhaustion enters terminal reporting. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
-| **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
+| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; route exhaustion ends only the request and uses nonfatal app status. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
+| **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, request failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
@@ -318,8 +318,9 @@ and failure counts remain diagnostic detail.
 
 Overall readiness is current UI state rather than an Activity event: `JarvisReadiness` drives the
 menu and the live Activity badge from the same effect, while an opened past session shows **Ended**.
-A temporary brain failure shows the provider as not responding until a complete terminal response
-restores readiness. Capture and transcription continue, and their failures keep their own precedence.
+A temporary brain failure shows retrying while its finite budget remains. An exhausted request shows
+an error until another request starts; capture and transcription continue, and their failures keep
+precedence. The error is also rendered in red on the existing enabled overlay surfaces.
 Readiness transitions never append rows to `jarvis-activity.jsonl`; the persisted record continues
 to contain only user-facing coaching, fixed failures, and lifecycle outcomes.
 
@@ -366,8 +367,8 @@ screen-capture failure do not count as provider failures. The most recent comple
 remains provider-neutral input for the next attempt, but older captures, raw reasoning, tool-call
 identifiers, and call/result pairing never cross an attempt or provider boundary.
 
-Failed conversation work remains pending and schedules another coaching attempt under bounded
-backoff. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
+Failed conversation work remains pending within the request's retry budget and schedules another
+coaching attempt after a short fixed delay. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
 manual-hint trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
 failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
 attempt uses the same pending conversation. Every automatic attempt waits while either transcription
@@ -380,25 +381,20 @@ state, not a fourth instruction to the model. An automatic attempt with no newer
 pending work's reason; when another natural trigger arrives, its newer reason describes the fresh
 snapshot.
 
-Temporary and unknown failures increment the active target's consecutive count; reaching the
-code-owned threshold advances to a later usable fallback (see
-[`BrainRouteSession.failuresPerTarget`](../Sources/JarvisCore/Coach/BrainRouteSession.swift)).
-When no later target can be constructed, the active target remains usable for recovery: temporary
-failures never exhaust it or end the session. Its fresh attempts continue with capped exponential
-backoff while listening and finalized transcription remain live. After the threshold, speech and
-manual hints still coalesce into the latest conversation but cannot bypass the retry delay; this
-prevents a busy conversation from hammering an unavailable provider. Stop cancels that delay with
-the existing single-flight task. A successful response clears the outage status and failure count.
-A failure classified as permanent at the provider boundary (for example, proven authentication,
-billing, access, or model configuration failure) exhausts the target immediately. Either transition
-only changes the route cursor after the failed attempt ends: the next target starts in a separate
-fresh attempt with rebuilt conversation context. A terminal success resets the active target's count
-but never moves the cursor backward. A fallback that is already proven impossible to construct at
-activation time—for example, a missing executable, confirmed signed-out CLI, or invalid
-configuration—is skipped as unavailable rather than consuming synthetic attempts merely to reach
-that threshold. Only permanent failures or preflight unavailability can exhaust the last usable
-target; that terminal case stops coaching and records one fixed typed route-exhausted event.
-Raw errors stay in `jarvis-debug.log`.
+Temporary and unknown failures exhaust a target at the code-owned threshold (see
+[`BrainRouteSession.failuresPerTarget`](../Sources/JarvisCore/Coach/BrainRouteSession.swift)). A proven
+permanent provider-boundary failure exhausts it immediately. The next fresh attempt advances to the
+next configured target; unavailable targets are skipped without synthetic provider attempts. Retries
+use a fixed short delay that an incoming natural trigger may wake early, with no exponential backoff.
+A successful response clears the target's failure count and preserves successful fallback selection.
+
+Exhausting the whole route ends only that request. Jarvis records one fixed Activity notice and shows
+a red error on its existing enabled overlays, while capture and transcription remain active. It does
+not keep automatically retrying the failed conversation. A later explicit manual hint or new finalized
+speech starts a fresh request at the primary with a new budget; silence with no new transcript does
+not. Failed transcript stays available as context. Provider clients remain owned until replacement or
+session teardown so a new request can reuse them. Stop still cancels pending/in-flight work. Raw
+errors stay in `jarvis-debug.log`; fixed UI copy does not claim that every failure is a timeout.
 
 ```mermaid
 flowchart TD
@@ -412,11 +408,9 @@ flowchart TD
     D -- No --> B{Consecutive failure<br/>budget reached?}
     B -- No --> W[Schedule a fresh attempt<br/>on the same target]
     D -- Yes --> N{Next configured<br/>target exists?}
-    B -- Yes --> H{Usable fallback<br/>remains?}
-    H -- Yes --> N
-    H -- No --> W
+    B -- Yes --> N
     N -- Yes --> F[Advance once<br/>schedule a new attempt]
-    N -- No --> X[Stop coaching<br/>typed Activity event]
+    N -- No --> X[End request, show error<br/>keep session listening]
     W --> T
     F --> T
     P --> T
@@ -428,7 +422,7 @@ The implementation keeps orchestration, route policy, and OS edges separate:
 |---|---|---|
 | Route value (`JarvisCore/Brain`) | Immutable ordered targets and validation. | Schedule work or create UI. |
 | Route state machine (`JarvisCore/Coach`) | Count attempt outcomes, move forward, and emit pure transition commands. | Call providers, read preferences, or own timers. |
-| Attempt scheduler (`JarvisCore/Coach`) | Own pending work, bounded backoff, trigger coalescing, single-flight, and transcription-settlement admission. | Classify provider payloads or mutate the route directly. |
+| Attempt scheduler (`JarvisCore/Coach`) | Own finite request retries, trigger coalescing, single-flight, and transcription-settlement admission. | Classify provider payloads or mutate the route directly. |
 | Attempt runner (`CoachAttemptRunner`) | Run one snapshotted target's tool loop, normalize completed provider-neutral effects, commit history, and report one outcome. | Retry a failed request, choose another target mid-attempt, or schedule anything. |
 | Client factory (`JarvisCore/Brain`) | Build a `BrainClient` for an explicit target and surface preflight availability. | Select or reorder targets. |
 | Preferences (`JarvisCore/Config`) | Persist primary, ordered fallbacks, per-provider models, and shared effort. | Store the live route cursor or failure counts. |
@@ -817,15 +811,11 @@ The always-on legs are built to survive transient failure rather than die on it:
   buffering is bounded while no turn is consuming it.
   A persistent-runtime failure has no one-shot fallback and is never replayed inside its coaching
   attempt. The attempt ends, sent-state and provider-neutral work remain uncommitted, and the
-  scheduler makes a new attempt after bounded backoff or an earlier coalesced natural trigger. That
+  scheduler makes a new attempt within its retry budget after a short delay or earlier coalesced trigger. That
   new attempt rebuilds its input from the latest committed history, the failed conversation, and
   every newer finalized transcript item; with no new speech, it simply re-attempts the pending work.
-  The [ordered route](#ordered-provider-route) advances after its consecutive failure threshold
-  when a usable fallback remains, and keeps retrying the last usable target through temporary
-  outages. A provider-boundary failure proven permanent exhausts a target after one attempt.
-  Only the next fresh attempt runs another target on the forward-only route.
-  A terminal success resets the active target's count and keeps that target installed. No provider
-  is probed concurrently, and no automatic recovery returns to the primary. Cancellation remains
+  The [ordered route](#ordered-provider-route) defines finite retries, fallback transitions, and
+  nonfatal request failure. No provider is probed concurrently. Cancellation remains
   quiet. A timed-out Codex inference first interrupts and drains only that turn, preserving the
   session-scoped app-server when the matching terminal state confirms the stream is healthy;
   uncertain protocol cleanup still invalidates the server. Memory **compaction** fails soft outside
@@ -871,8 +861,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   saying — that restraint lives in the system prompt (see
   [`JarvisPrompts.Coach.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift)).
   This keeps
-  conversation natural during healthy operation. During a sustained provider outage, new speech
-  coalesces behind the capped retry delay instead of generating more failing requests. The hard control is
+  conversation natural during healthy operation. During provider failures, new speech coalesces
+  within the finite request budget; after that budget ends, another user request can try again. The hard control is
   the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the
   pipeline down entirely. Cost is accepted as tracking usage for now (a future improvement, not a
   v1 guardrail).

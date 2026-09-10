@@ -94,8 +94,7 @@ inside the attempt, automatic pending-work attempts with the newest finalized tr
 code-owned temporary/unknown failure threshold in
 [`BrainRouteSession.failuresPerTarget`](../Sources/JarvisCore/Coach/BrainRouteSession.swift)—or one
 proven permanent failure—before moving forward, and no automatic return to an earlier target.
-Runtime movement never changes preferences. Temporary failures keep the last usable target alive
-while listening continues; see [routing and recovery](./architecture.md#ordered-provider-route)
+Runtime movement never changes preferences. Failed requests leave the session listening and allow a later request to try again; see [routing and recovery](./architecture.md#ordered-provider-route)
 for the full policy. That route is implemented as immutable provider/model values, a pure
 Foundation-only session cursor, a single-flight fresh-attempt scheduler, and the ordered Settings
 Provider editor with one uninterrupted Primary/fallback route, separate Coaching and Transcription
@@ -257,11 +256,11 @@ adds the provider-only success notice to Activity; then exercise a failed replac
 the pending conversation is preserved. Verify the first-open Brain state (the OpenAI API selected as Primary,
 with its model and Add fallback usable) plus the Connections **Add API key** state, then configure multiple fallbacks and force a temporary
 failure-budget transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
-permanent final route exhaustion. With only one usable target, keep its brain unavailable beyond
-three attempts: confirm listening continues, one outage notice appears, the menu and Activity badge
-show the provider as not responding, and a recovered response restores readiness using the latest
-conversation without Start. Stop during backoff must prevent further requests. Confirm no
-provider-specific tool state crosses attempts and verify a
+final route exhaustion. With only one usable target, keep its brain unavailable for three attempts:
+confirm retries stop, listening continues, and one fixed failure notice appears in Activity and red
+on the enabled overlay. Wait through a silence check and confirm no new request is sent. Then send
+a new hint or finalized speech and confirm a fresh retry budget without Start. Stop during a retry
+must prevent further requests. Confirm no provider-specific tool state crosses attempts and verify a
 successful fallback remains active without changing preferences. Configure Codex as Primary and
 confirm `jarvis-debug.log` reports the target thread ready before the first coaching request and that
 the turn completes on its app-server; then Stop and confirm neither the app-server nor its private

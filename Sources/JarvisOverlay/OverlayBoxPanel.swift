@@ -73,15 +73,15 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Reports the box's new content size once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
     /// Stand-in responses shown during the Settings preview.
-    private static let sampleEntries: [(stamp: String, text: String, diagram: DiagramHint?)] = [
-        ("10:30:00", "Ask about the time complexity of that loop.", nil),
-        ("10:30:08", "Mention the edge case when the list is empty.", nil),
+    private static let sampleEntries: [(stamp: String, text: String, diagram: DiagramHint?, isError: Bool)] = [
+        ("10:30:00", "Ask about the time complexity of that loop.", nil, false),
+        ("10:30:08", "Mention the edge case when the list is empty.", nil, false),
     ]
     /// Each spoken tip with the time it arrived, newest last. Held as structured entries (not the
     /// rendered string) so `clear()` and the test hooks don't have to parse the text back out.
     private var diagramsEnabled = Defaults.Overlay.Box.diagramsEnabled
     private var latestEntryStart = 0
-    private var entries: [(stamp: String, text: String, diagram: DiagramHint?)] = []
+    private var entries: [(stamp: String, text: String, diagram: DiagramHint?, isError: Bool)] = []
     /// Test hook (internal): counts how many times the panel has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -266,8 +266,13 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         Task { @MainActor in self.append(text, diagram: diagram) }
     }
 
-    private func append(_ text: String, diagram: DiagramHint?) {
-        entries.append((stamp: timeFormatter.string(from: Date()), text: text, diagram: diagram))
+    /// Fixed error copy stays in the existing nonactivating, capture-excluded history panel.
+    public func showError(_ message: String) {
+        append(message, diagram: nil, isError: true)
+    }
+
+    private func append(_ text: String, diagram: DiagramHint?, isError: Bool = false) {
+        entries.append((stamp: timeFormatter.string(from: Date()), text: text, diagram: diagram, isError: isError))
         // No preview can be running: one only opens while stopped, and Start ends it.
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
         // OverlayCaptionPanel.show, since this box can be visible (full of responses) while Settings flips the
@@ -306,7 +311,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
             latestEntryStart = result.length
             result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
-            result.append(NSAttributedString(string: entry.text, attributes: textAttrs))
+            var entryAttrs = textAttrs
+            if entry.isError { entryAttrs[.foregroundColor] = NSColor.systemRed }
+            result.append(NSAttributedString(string: entry.text, attributes: entryAttrs))
             if diagramsEnabled, let diagram = entry.diagram {
                 result.append(NSAttributedString(string: "\n"))
                 let attachment = NSTextAttachment()

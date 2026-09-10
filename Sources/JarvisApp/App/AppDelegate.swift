@@ -933,6 +933,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         observeReadiness(.brainRecovery(provider), for: readinessSession)
     }
 
+    func brainRequestDidFail(_ provider: BrainProvider) {
+        guard let readinessSession else { return }
+        observeReadiness(.brainRequestFailed(provider), for: readinessSession)
+        let message = "Model request failed — try again."
+        overlayCaption?.showError(message)
+        overlayBox?.showError(message)
+    }
+
     func brainTargetDidChange(_ target: BrainTarget?) {
         brainSection.setActiveTarget(target)
     }

@@ -95,11 +95,11 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 - Build the harness, not model or OS intelligence. Add a target only for an isolated test boundary, a
   compiler-enforced boundary, or code shared by another executable.
 - Preserve one brain target for an entire coaching attempt: no in-attempt provider retry or switch.
-  Temporary or unknown failures advance after three failed attempts when a usable fallback remains;
-  otherwise keep the last usable target retrying with capped backoff while listening continues. Only
-  a proven permanent provider-boundary failure may exhaust it immediately. Advance only in a fresh
-  attempt, move forward through the persisted route, and never rewrite preferences or revisit an
-  exhausted target.
+  Temporary or unknown failures exhaust a target after three failed attempts; proven permanent
+  provider-boundary failures may exhaust it immediately. Retries use a short fixed delay. Exhausting
+  the route ends only the request: show a fixed error and keep listening. A later explicit hint or new
+  finalized speech gets a fresh route budget. Successful fallback selection stays active. Never
+  rewrite saved preferences or switch targets inside an attempt.
 - Keep route and scheduling policy as Foundation-only state machines; the app supplies clients,
   timers, and speech-activity events.
 - Use Swift 6 strict concurrency. Do not use `@unchecked` or `nonisolated(unsafe)` without a written

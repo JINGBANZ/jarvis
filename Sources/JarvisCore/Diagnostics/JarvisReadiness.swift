@@ -74,6 +74,7 @@ public final class JarvisReadiness {
         case blocked(Blocker)
         case recovering(Requirement, attempt: Int?)
         case ready(ReadyMode)
+        case requestFailed(BrainProvider)
         case stopped
     }
 
@@ -103,6 +104,7 @@ public final class JarvisReadiness {
         case capture(CaptureReadinessMonitor.Readiness)
         case captureRecovery(inProgress: Bool)
         case brainRecovery(BrainProvider?)
+        case brainRequestFailed(BrainProvider)
     }
 
     /// Effects are deliberately presentation- and lifecycle-free. The app renders `statusChanged`
@@ -155,6 +157,7 @@ public final class JarvisReadiness {
     private var captureState: CaptureReadinessMonitor.Readiness?
     private var captureRecoveryInProgress = false
     private var recoveringBrain: BrainProvider?
+    private var failedBrain: BrainProvider?
 
     public init() {}
 
@@ -174,6 +177,7 @@ public final class JarvisReadiness {
         captureState = nil
         captureRecoveryInProgress = false
         recoveringBrain = nil
+        failedBrain = nil
         return (session, transition(to: reducedStatus()))
     }
 
@@ -243,6 +247,10 @@ public final class JarvisReadiness {
 
         case .brainRecovery(let provider):
             recoveringBrain = provider
+            failedBrain = nil
+        case .brainRequestFailed(let provider):
+            recoveringBrain = nil
+            failedBrain = provider
         }
     }
 
@@ -292,6 +300,7 @@ public final class JarvisReadiness {
             return .checking(.transcriptionEndpoints)
         }
 
+        if let failedBrain { return .requestFailed(failedBrain) }
         if let recoveringBrain {
             return .recovering(.brainResponse(recoveringBrain), attempt: nil)
         }
