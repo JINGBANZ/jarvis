@@ -93,7 +93,7 @@ moments the model judges worthwhile.
    transcription model to drop filler is not a deterministic boundary and would silently alter the
    audit record.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
-   (`CoachHistory`), the
+   (`CoachHistory` plus bounded historical screen observations), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
    `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
    "stuck."
@@ -412,8 +412,9 @@ non-truncated terminal `speak` or `stay_silent` commits the attempt and clears t
 failure count. A provider error, malformed/incomplete terminal response, or failure after an
 intermediate `capture_screen` fails the attempt once; cancellation, filler suppression, and local
 screen-capture failure do not count as provider failures. The most recent completed screen observation
-remains provider-neutral input for the next attempt, but older captures, raw reasoning, tool-call
-identifiers, and call/result pairing never cross an attempt or provider boundary.
+remains provider-neutral input for the next attempt. Earlier OCR survives only as bounded historical
+[screen observations](#screen-observation-memory); earlier image bytes, raw reasoning, tool-call
+identifiers, and call/result pairing from failed attempts never cross that boundary.
 
 Failed conversation work remains pending and schedules another coaching attempt under bounded
 backoff. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
@@ -489,6 +490,47 @@ The model is the cost governor: it spends vision tokens and screen real estate o
 judges them worthwhile. That is the whole point of making screen capture a model-invoked tool
 rather than a per-turn screenshot.
 
+### Screen observation memory
+
+[`ScreenObservationMemory`](../Sources/JarvisCore/Screen/ScreenObservationMemory.swift) retains exact
+OCR from successful captures of question text, examples, constraints, code, and test output. It is
+owned by the single-flight attempt runner and lives only for that session. Each partial observation
+has an increasing ID, elapsed time, and an optional capture-window origin; a window is not a document
+identity. The model interprets visible filenames and line numbers in the OCR. Matching window origins
+and identical text permit deduplication, but there is no fuzzy merge or reconstructed source file:
+scrolling, edits, and unrelated panes otherwise remain separate observations.
+
+The cache bounds both observation count and total UTF-8 text bytes; limits and Unicode-safe clipping
+live in the type. Oldest observations are evicted when necessary, and the model is told when content
+was omitted or truncated. Each attempt receives the retained text in chronological order, except
+text already carried by its current observation. This favors recall of previously seen requirements
+and implementations without replaying old image bytes or guessing which hidden detail matters.
+The historical context is frozen before the first model request, preserving the CLI continuation
+prefix. Successful captures enter the cache even if inference subsequently fails. The latest capture
+still travels through the existing continuation/retry slot; there is no extra OCR or inference pass.
+Full-display captures still omit OCR and therefore cannot contribute text to this memory.
+
+The prompt treats unseen/off-screen content as unknown, uses earlier requirements before structuring
+an answer, and qualifies diagnoses dependent on old OCR in the short hint itself. New matching visual
+evidence takes precedence over old code and advice. Historical text never satisfies the fresh-screen
+gate. OCR is untrusted evidence, not executable instructions or a guaranteed copy of source code.
+
+The existing terminal `speak` and `stay_silent` schemas accept nullable memory maintenance (see
+[`ToolDefs`](../Sources/JarvisCore/Coach/ToolDefs.swift) and
+[`ScreenMemoryUpdate`](../Sources/JarvisCore/Screen/ScreenMemoryUpdate.swift)). The model may retire
+fully superseded observations by ID, or mark a clearly different question. Uncertain overlap keeps
+both observations; a follow-up, scroll, file switch, or test run alone does not establish a new
+question. Maintenance applies only to the selected, complete, accepted terminal action, including a
+forced shortcut reply. A question boundary retires earlier observations while preserving this
+attempt's captures and its carried retry observation. This is model-governed semantic judgment,
+not guaranteed automatic question detection; a new session unconditionally begins empty.
+
+Raw OCR is stripped before conversation commit so history compaction cannot independently preserve
+or revive evicted/retired screen text. The conversation still retains speech and prior advice as
+historical context. The cache creates no separate disk archive; observations included in model
+requests follow the existing protected wire-audit path. Behavioral and real-capture validation is
+covered by the [screen-memory checks](./build-and-run.md#screen-memory-validation).
+
 ### Models and APIs
 
 - **OpenAI brain — the selected catalog model via the Responses API** (`POST /v1/responses`), not Chat Completions:
@@ -500,9 +542,9 @@ rather than a per-turn screenshot.
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
   keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
-  cache keeps hitting at ~90% discount); `stay_silent` turns leave no trace; screenshots and reasoning
-  items live only inside the turn that produced them — at commit, the pixels become a one-line stub
-  and the capture's OCR text (in the tool result) is what persists, and reasoning items are dropped;
+  cache can reuse stable prefixes); the `stay_silent` action itself leaves no trace, while useful
+  speech and observations survive. At conversation commit, pixels and raw OCR become neutral stubs
+  and reasoning items are dropped. Exact OCR has its own bounded [screen memory](#screen-observation-memory);
   and past a token threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
   interview-format-neutral briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate

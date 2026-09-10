@@ -12,13 +12,13 @@ public let captureScreenTool = ToolDef(
 public let speakTool = ToolDef(
     name: "speak",
     description: JarvisPrompts.Coach.ToolDescription.speak,
-    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","explanation","codeSnippet"],"additionalProperties":false}"#
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false},"screenMemory":{"type":["object","null"],"properties":{"newQuestion":{"type":"boolean"},"obsoleteObservationIDs":{"type":"array","items":{"type":"integer"}}},"required":["newQuestion","obsoleteObservationIDs"],"additionalProperties":false}},"required":["lines","explanation","codeSnippet","screenMemory"],"additionalProperties":false}"#
 )
 
 public let staySilentTool = ToolDef(
     name: "stay_silent",
     description: JarvisPrompts.Coach.ToolDescription.staySilent,
-    parametersJSON: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
+    parametersJSON: #"{"type":"object","properties":{"screenMemory":{"type":["object","null"],"properties":{"newQuestion":{"type":"boolean"},"obsoleteObservationIDs":{"type":"array","items":{"type":"integer"}}},"required":["newQuestion","obsoleteObservationIDs"],"additionalProperties":false}},"required":["screenMemory"],"additionalProperties":false}"#
 )
 
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
@@ -37,5 +37,5 @@ public let searchPrepNotesTool = ToolDef(
 public let systemDesignSpeakTool = ToolDef(
     name: speakTool.name,
     description: JarvisPrompts.Coach.ToolDescription.speak,
-    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"mermaid":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}"#
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"mermaid":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false},"screenMemory":{"type":["object","null"],"properties":{"newQuestion":{"type":"boolean"},"obsoleteObservationIDs":{"type":"array","items":{"type":"integer"}}},"required":["newQuestion","obsoleteObservationIDs"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet","screenMemory"],"additionalProperties":false}"#
 )

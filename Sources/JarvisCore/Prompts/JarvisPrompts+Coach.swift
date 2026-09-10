@@ -27,6 +27,8 @@ extension JarvisPrompts {
           asserting a specific line or token is wrong, verify it in the image — if you can only see it in
           OCR, frame the tip as something to double-check ("verify line 18 uses ==") rather than as a defect.
 
+        \(JarvisPrompts.ScreenMemory.guidance)
+
         # Action policy
         Choose exactly one action on each model response, in this priority order:
 

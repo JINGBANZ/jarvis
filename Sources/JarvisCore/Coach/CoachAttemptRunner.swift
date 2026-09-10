@@ -52,6 +52,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let history = CoachHistory()
+    /// Confined to the single-flight attempt lane, independently of background compaction.
+    private var screenMemory = ScreenObservationMemory()
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
@@ -122,6 +124,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
         /// disturbing whatever the screen slot holds, and vice versa. Never raw reasoning, tool ids,
         /// or call/result linkage.
         var screenObservation: [ChatMessage] = []
+        /// Identity/text travel with the carried observation across provider failures.
+        var screenMemoryID: Int?
+        var screenText: String?
         var prepNotesObservation: ChatMessage?
         /// Every carried observation, screen first, in the order the model should see them.
         var observations: [ChatMessage] {
@@ -220,7 +225,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
             prepMaterial: attempt.prepMaterial != nil,
             formatAddendum: interviewFormatAddendum,
             explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
-        let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
+        // Freeze once: persistent CLI conversations require a byte-identical prefix on continuations.
+        let screenBoundary = screenMemory.latestID
+        var visibleScreenIDs = Set(screenMemory.observations.map(\.id))
         if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
                 jlog("⌨️ coaching shortcut — \(prompt)")
@@ -240,15 +247,23 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("👁 looking at your screen")
                 activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
+                let observationID = recordScreen(shot)
+                work.screenMemoryID = observationID
+                work.screenText = shot.recognizedText
+                if let observationID { visibleScreenIDs.insert(observationID) }
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
-                    let observation = ChatMessage.user(JarvisPrompts.Coach.recognizedText(text))
+                    let observation = ChatMessage.user(
+                        (observationID.map(JarvisPrompts.ScreenMemory.observation) ?? "")
+                            + JarvisPrompts.Coach.recognizedText(text))
                     observations.append(observation)
                 }
                 work.screenObservation = observations
             } else {
                 jlog("👁 screenshot failed")
                 activity?.record(.screenViewFailed)
+                work.screenMemoryID = nil
+                work.screenText = nil
                 work.screenObservation = [
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
@@ -257,6 +272,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
             turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
             work.preparedManualReason = reason
         }
+
+        let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
+            + (screenMemory.contextMessage(excludingText: work.screenText).map { [$0] } ?? [])
 
         let toolChoice: ToolChoice =
             reason.isManual ? .force(speakTool.name) : .required
@@ -386,21 +404,28 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         if let text = shot.recognizedText {
                             jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                         }
+                        let observationID = recordScreen(shot)
+                        work.screenMemoryID = observationID
+                        work.screenText = shot.recognizedText
+                        if let observationID { visibleScreenIDs.insert(observationID) }
+                        let observationLabel = observationID.map(JarvisPrompts.ScreenMemory.observation) ?? ""
                         work.screenObservation = [
-                            .user(JarvisPrompts.Coach.captureResult(
+                            .user(observationLabel + JarvisPrompts.Coach.captureResult(
                                 recognizedText: shot.recognizedText
                             )),
                             .userImage(shot.imageBase64),
                         ]
                         appendToolContinuation(
                             toolCallId: callID,
-                            resultText: JarvisPrompts.Coach.captureResult(
+                            resultText: observationLabel + JarvisPrompts.Coach.captureResult(
                                 recognizedText: shot.recognizedText),
                             extraMessages: [.userImage(shot.imageBase64)],
                             newPhase: .captureScreenContinuation)
                     } else {
                         jlog("👁 screenshot failed")
                         activity?.record(.screenViewFailed)
+                        work.screenMemoryID = nil
+                        work.screenText = nil
                         work.screenObservation = [
                             .user(JarvisPrompts.Coach.earlierCaptureFailed),
                         ]
@@ -454,17 +479,23 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         role: .tool,
                         text: JarvisPrompts.Coach.tipShown,
                         toolCallId: callID))
-                    history.commit(turnMessages)
+                    applyScreenMaintenance(response, callID: callID, after: screenBoundary,
+                                           visibleIDs: visibleScreenIDs, keepingID: work.screenMemoryID,
+                                           turnMessages: &turnMessages)
+                    history.commit(CoachHistory.omittingScreenText(turnMessages))
                     ledger.commit(through: delta.upTo)
                     return .completed(.spoke)
 
-                case .staySilent:
+                case .staySilent(let callID):
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before recording silence")
                         return .cancelled
                     }
                     jlog("… nothing useful to add, staying silent")
                     activity?.record(.stayedSilent)
+                    applyScreenMaintenance(response, callID: callID, after: screenBoundary,
+                                           visibleIDs: visibleScreenIDs, keepingID: work.screenMemoryID,
+                                           turnMessages: &turnMessages)
                     commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
                     ledger.commit(through: delta.upTo)
                     return .completed(.silentByModel)
@@ -522,9 +553,26 @@ final class CoachAttemptRunner: @unchecked Sendable {
         return AttemptExecution(id: attemptID, result: result)
     }
 
+    private func recordScreen(_ shot: ScreenSnapshot) -> Int? {
+        guard let text = shot.recognizedText else { return nil }
+        return screenMemory.record(text: text, sourceID: shot.sourceID,
+                                   elapsedSeconds: clock.now() - sessionStart)
+    }
+
+    private func applyScreenMaintenance(
+        _ response: BrainResponse, callID: String, after boundary: Int,
+        visibleIDs: Set<Int>, keepingID: Int?, turnMessages: inout [ChatMessage]
+    ) {
+        guard let raw = response.rawToolCalls.first(where: { $0.id == callID }),
+              let update = ScreenMemoryUpdate.parse(raw.argumentsJSON) else { return }
+        screenMemory.apply(update, after: boundary, visibleIDs: visibleIDs,
+                           keepingIDs: Set(keepingID.map { [$0] } ?? []))
+        if update.newQuestion { turnMessages.append(.user(JarvisPrompts.ScreenMemory.questionChanged)) }
+    }
+
     private func commitIfWorthKeeping(_ turn: [ChatMessage], deltaText: String) {
         guard !deltaText.isEmpty || turn.count > 1 else { return }
-        history.commit(turn)
+        history.commit(CoachHistory.omittingScreenText(turn))
     }
 
     /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
