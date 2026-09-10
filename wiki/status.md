@@ -94,11 +94,9 @@ inside the attempt, automatic pending-work attempts with the newest finalized tr
 code-owned temporary/unknown failure threshold in
 [`BrainRouteSession.failuresPerTarget`](../Sources/JarvisCore/Coach/BrainRouteSession.swift)—or one
 proven permanent failure—before moving forward, and no automatic return to an earlier target.
-Runtime movement never changes preferences. Temporary failures retain the last usable target and
-retry with capped backoff while listening and transcription continue; the menu and live Activity
-badge show the provider as not responding until a complete response restores readiness. Activity
-records one fixed notice per failure streak. Only permanent failure or preflight unavailability of
-the remaining route ends coaching. See [routing and recovery](./architecture.md#ordered-provider-route). That route is implemented as immutable provider/model values, a pure
+Runtime movement never changes preferences. Temporary failures keep the last usable target alive
+while listening continues; see [routing and recovery](./architecture.md#ordered-provider-route)
+for the full policy. That route is implemented as immutable provider/model values, a pure
 Foundation-only session cursor, a single-flight fresh-attempt scheduler, and the ordered Settings
 Provider editor with one uninterrupted Primary/fallback route, separate Coaching and Transcription
 cards, and a Connections tab for shared authentication. A first-open install already holds a complete
