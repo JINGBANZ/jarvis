@@ -5,7 +5,8 @@ import JarvisCore
 import JarvisBrainProviders
 
 @Suite struct AgenticEvaluatorTests {
-    @Test func evaluateRunsClaudeAndPersistsOwnerOnlyStampedReport() async throws {
+    @Test(arguments: [false, true])
+    func evaluateRunsClaudeAndPersistsOwnerOnlyStampedReport(isRelease: Bool) async throws {
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
         let session = root.appendingPathComponent("session")
@@ -15,6 +16,11 @@ import JarvisBrainProviders
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try await writeSessionInputs(to: session)
+        let cache = root.appendingPathComponent("source")
+        let checkout = isRelease ? cache.appendingPathComponent("v0.2.1/jarvis-0.2.1") : root
+        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
+        try Data("// fixture".utf8).write(to: checkout.appendingPathComponent("Package.swift"))
+        let source: EvaluationSource = isRelease ? .release(version: "0.2.1") : .localCheckout(root)
 
         let executable = bin.appendingPathComponent("claude")
         let script = """
@@ -23,6 +29,11 @@ import JarvisBrainProviders
               printf '{"loggedIn":true}'
               exit 0
             fi
+            [ . -ef "\(checkout.path)" ] || exit 1
+            case "$2" in
+              *"\(source.workspaceProvenance)"*) ;;
+              *) exit 2 ;;
+            esac
             printf '## Summary\\nNo issue.\\n'
             """
         try Data(script.utf8).write(to: executable)
@@ -35,9 +46,12 @@ import JarvisBrainProviders
             authStatusTimeout: 1,
             temporaryDirectory: root.appendingPathComponent("unrelated-system-temp"))
         let evaluator = AgenticEvaluator(
-            repositoryDirectory: root,
+            source: source,
             preferredProvider: .claudeCode,
             detector: detector,
+            sourceStore: ReleaseSourceStore(root: cache) { _, _ in
+                Issue.record("Cached evaluator fetched source")
+            },
             timeout: 5)
 
         let report = try await evaluator.evaluate(sessionDirectory: session)
@@ -99,6 +113,11 @@ import JarvisBrainProviders
             "audit",
         ])
         #expect(codexRun.workingDirectory == repository)
+        let releaseRun = AgenticEvaluator.invocation(
+            for: codex, prompt: "audit", repositoryDirectory: repository,
+            sessionDirectory: session, timeout: 10, isReleaseSource: true)
+        #expect(releaseRun.arguments == Array(codexRun.arguments.dropLast())
+                + ["--skip-git-repo-check", "audit"])
     }
 
     private func writeSessionInputs(to session: URL) async throws {

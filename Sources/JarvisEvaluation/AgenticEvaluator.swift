@@ -27,21 +27,37 @@ public struct AgenticEvaluator: Sendable {
         }
     }
 
-    private let repositoryDirectory: URL
+    private let source: EvaluationSource
+    private let sourceStore: ReleaseSourceStore
     private let preferredProvider: BrainProvider?
     private let detector: AgentCLIDetector
     private let timeout: TimeInterval
 
-    public init(repositoryDirectory: URL, preferredProvider: BrainProvider? = nil,
+    public init(source: EvaluationSource, preferredProvider: BrainProvider? = nil,
                 detector: AgentCLIDetector = AgentCLIDetector(),
+                sourceStore: ReleaseSourceStore = ReleaseSourceStore(),
                 timeout: TimeInterval = 15 * 60) {
-        self.repositoryDirectory = repositoryDirectory
+        self.source = source
+        self.sourceStore = sourceStore
         self.preferredProvider = preferredProvider?.usesLocalCLI == true ? preferredProvider : nil
         self.detector = detector
         self.timeout = timeout
     }
 
-    public func evaluate(sessionDirectory: URL) async throws -> String {
+    public func evaluate(sessionDirectory: URL,
+                         onFetchingSource: @MainActor @Sendable (Bool) -> Void = { _ in }) async throws -> String {
+        let repositoryDirectory: URL
+        let isRelease: Bool
+        switch source {
+        case .localCheckout(let directory):
+            repositoryDirectory = directory
+            isRelease = false
+        case .release(let version):
+            await onFetchingSource(true)
+            repositoryDirectory = try await sourceStore.directory(for: version)
+            await onFetchingSource(false)
+            isRelease = true
+        }
         let prompt = try await prepare(sessionDirectory: sessionDirectory)
         try Task.checkCancellation()
         let providers = preferredProvider.map { [$0] } ?? [.claudeCode, .codexCLI]
@@ -54,7 +70,7 @@ public struct AgenticEvaluator: Sendable {
 
         let invocation = Self.invocation(
             for: cli, prompt: prompt, repositoryDirectory: repositoryDirectory,
-            sessionDirectory: sessionDirectory, timeout: timeout)
+            sessionDirectory: sessionDirectory, timeout: timeout, isReleaseSource: isRelease)
         let output: AgentCLIOutput
         do {
             output = try await AgentCLIProcessRunner.run(invocation)
@@ -81,7 +97,8 @@ public struct AgenticEvaluator: Sendable {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(with: Result {
-                    try AgenticEvaluation.prepare(sessionDir: sessionDirectory)
+                    try AgenticEvaluation.prepare(sessionDir: sessionDirectory,
+                                                  workspaceProvenance: source.workspaceProvenance)
                 })
             }
         }
@@ -101,7 +118,7 @@ public struct AgenticEvaluator: Sendable {
 
     static func invocation(for cli: DetectedAgentCLI, prompt: String,
                            repositoryDirectory: URL, sessionDirectory: URL,
-                           timeout: TimeInterval) -> AgentCLIRun {
+                           timeout: TimeInterval, isReleaseSource: Bool = false) -> AgentCLIRun {
         let arguments: [String]
         switch cli.provider {
         case .claudeCode:
@@ -121,8 +138,7 @@ public struct AgenticEvaluator: Sendable {
                 "exec", "--ephemeral", "--sandbox", "read-only",
                 "--ignore-user-config", "--ignore-rules",
                 "-c", "mcp_servers={}",
-                prompt,
-            ]
+            ] + (isReleaseSource ? ["--skip-git-repo-check"] : []) + [prompt]
         case .openAI:
             preconditionFailure("Agentic evaluation requires a local agent CLI")
         }

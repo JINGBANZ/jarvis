@@ -120,7 +120,11 @@ cannot stop a new session after Stop → Start; repeated route notifications can
 incident's bounded budget. Activity persists stable event kinds and flushes at Stop. The sole evaluator is agentic: it
 receives the complete session directory and reads the full, unfiltered `jarvis-activity.jsonl`
 whenever it needs the user-visible sequence, alongside first-class coaching-attempt provenance, raw
-brain traffic, screenshots, and live source code. A neutral evidence index reports artifact health,
+brain traffic, screenshots, and source code. Development evaluates against the live checkout
+containing the app bundle; releases fetch and cache source at the session's recorded version.
+`EvaluationSource`, `SessionBuild`, and `ReleaseSourceStore` in `Sources/JarvisEvaluation/` own the
+source identity and cache; [build-and-run.md](./build-and-run.md) defines provenance, failures,
+and the Activity button states. A neutral evidence index reports artifact health,
 categorical distributions, and correlation-field coverage; a separate normalized table reports
 provider-call latency, token, cache, and cost telemetry. Both preserve unavailable and partial values
 without declaring findings. The prompt gives the read-only agent file and source-search tools, asks it
@@ -178,6 +182,11 @@ coaching coordinator and app delegate are decomposed into owners with stated bou
 coaching kernel's dependency rules are enforced by `scripts/check-coaching-kernel.sh` in the Gate.
 
 ## Next action
+
+Run the [evaluation source smoke](./build-and-run.md#live-smoke-checklist) in a development bundle
+and an installed release: source/version selection, fetching and cached use, actionable failures,
+and cancellation on Quit. Offline tests cover the source store and evaluator; native presentation
+and a real release download still need this smoke.
 
 Run the signed-app Explain more smoke: with an interview session active, press both configured
 shortcuts from another app and verify distinct hint/explanation requests; rebind them independently

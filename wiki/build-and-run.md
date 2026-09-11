@@ -239,11 +239,20 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   history is common-prefix elided with an explicit pointer back to untouched traffic. The agent uses
   read-only file and source-search tools to follow the evidence, then writes a generic Summary /
   Findings / Evidence gaps / Recommendations report to owner-only `eval-report.md`. A saved session
-  shows **Open report** instead, avoiding another agent run. The local app locates its checkout from the
-  workspace `.jarvis/`, a `--repo-dir` launch argument, or the directory containing a locally built
-  app bundle; without live source it refuses to run a weaker audit, because a single model call over
-  the wire traffic alone produced confident recommendations about mechanisms that already existed in
-  the code. `./scripts/eval-session.sh
+  shows **Open report** instead, avoiding another agent run. Development builds use the live checkout
+  containing `Jarvis Dev.app`, including when opened directly. Release builds use the version in the
+  selected session's owner-only `session-build.json`, fetching that public tagged source on demand
+  through `ReleaseSourceStore`. The button shows **Fetching source…**, then **Evaluating…**. The cache
+  returns the inner `jarvis-<version>` directory, publishes only completely unpacked archives, and
+  keeps the three most recently used versions after a fetch. Cache hits need no network. Source is
+  required because without the prompt files a coding agent cannot distinguish a bad hint caused by
+  the model from one caused by the harness. The evaluator prompt identifies release source as the
+  session's exact code without git history, and warns that a development checkout may have drifted,
+  including uncommitted edits. Codex accepts the release workspace without requiring `.git`.
+  Development sessions carry no version stamp; release sessions without a stamp cannot be evaluated.
+  Missing source tags and download failures name the version and give next steps in the dialog;
+  cancellation reaches both the download and subprocess, and failures preserve any saved report.
+  See [sandbox.md](./sandbox.md) for cache storage and permissions. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same `JarvisEvaluation` evaluator.
 
 ## System-audio transcription benchmark
@@ -291,6 +300,11 @@ the human-facing coaching record. The current validation priority lives in
 - Choose **Stop Jarvis** and confirm Activity ends with `session ended by user`, with no later
   transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
-  **Evaluating…**, the report opens when the agent finishes, and the button then shows **Open report**.
+  **Fetching source…** for a release, then **Evaluating…**, the report opens when the agent finishes,
+  and the button then shows **Open report**. Verify a release session still uses its recorded version
+  after an app update, a cached version works offline, and an unstamped session explains why matching
+  source is unavailable. On an uncached release, verify offline/tag-not-found dialogs identify the
+  version and next step; Quit during fetching must cancel the download without publishing a partial
+  cache. For development, verify both `build-app.sh --run` and plain `open` use the bundle's checkout.
   Confirm the report uses the four generic sections, cites concrete session or source anchors for
   findings, and keeps unavailable evidence in **Evidence gaps** instead of inventing a conclusion.

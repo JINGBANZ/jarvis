@@ -65,7 +65,7 @@ public enum AgenticEvaluation {
     /// session directory, and returns the prompt (which embeds the directory's absolute path so the
     /// agent knows where its inputs live). Throws `EvaluationError.noTraffic` when there is nothing
     /// to audit.
-    public static func prepare(sessionDir: URL) throws -> String {
+    public static func prepare(sessionDir: URL, workspaceProvenance: String) throws -> String {
         try CodexRuntimeHome.removeLegacyHomes(from: sessionDir)
         let trafficURL = sessionDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
         let jsonl = (try? String(contentsOf: trafficURL, encoding: .utf8)) ?? ""
@@ -93,7 +93,7 @@ public enum AgenticEvaluation {
         try replaceOwnerOnlyFile(
             Data(transcript.utf8), filename: transcriptFilename, in: sessionDir)
 
-        return prompt(sessionDirPath: sessionDir.path)
+        return prompt(sessionDirPath: sessionDir.path, workspaceProvenance: workspaceProvenance)
     }
 
     /// Persist one successful agent result without ever exposing report bytes through a permissive
@@ -140,7 +140,7 @@ public enum AgenticEvaluation {
     }
 
     /// Assemble the session-specific values consumed by the centralized audit prompt.
-    static func prompt(sessionDirPath: String) -> String {
+    static func prompt(sessionDirPath: String, workspaceProvenance: String) -> String {
         JarvisPrompts.Evaluation.sessionAudit(
             sessionDirectoryPath: sessionDirPath,
             transcriptFilename: transcriptFilename,
@@ -148,7 +148,8 @@ public enum AgenticEvaluation {
             attemptsFilename: FileSessionAudit.coachingAttemptsFilename,
             healthFilename: FileSessionAudit.healthFilename,
             activityFilename: ActivityLog.filename,
-            reportFilename: reportFilename
+            reportFilename: reportFilename,
+            workspaceProvenance: workspaceProvenance
         )
     }
 }

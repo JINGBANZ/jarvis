@@ -135,8 +135,10 @@ Narrow and explicit. Data leaves the machine only via:
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, coaching-attempt provenance, brain traffic,
   saved screenshots, and source checkout because correlation across those inputs is the audit's
-  purpose. Evaluation is unavailable without a live checkout; the app never substitutes a weaker
-  API-only audit.
+  purpose. Development uses the live checkout containing the bundle; release evaluation fetches
+  public source from `github.com/JINGBANZ/jarvis` (redirecting to GitHub's archive host) at the
+  session's recorded version. This request sends the release version, never session contents.
+  The two source paths and provenance contract are in [build-and-run.md](./build-and-run.md).
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: audio is either
@@ -155,7 +157,7 @@ the **per-session log directory** — owner-only and bounded; see below.
 > *debuggability-over-retention* choice. A future `store:false` change must also preserve stateless
 > tool-loop reasoning continuity; it is not part of the public-launch hardening.
 
-**The per-session log directory is the one bounded form of disk persistence, hardened to stay
+**The per-session log directory is the bounded session-data persistence, hardened to stay
 owner-only.** It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
 the screenshots the model looked at, alongside `jarvis-debug.log`) — the model's spoken tips and the
 transcribed "heard:" lines so a session can be reviewed afterward — plus the **coaching-attempt
@@ -175,6 +177,14 @@ owner-only permissions inside a **`0700`** dir, **fresh each session**, and **ne
 (world-readable, shared across user accounts). Growth is bounded: each Start prunes to the **10 most recent** session
 dirs, and the viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and
 readable by this user account and by nothing else. See [build-and-run.md](./build-and-run.md).
+
+Release sessions also contain immutable `session-build.json`, written at Start with `0600`
+permissions independently of the audit worker and its health marker. Development sessions have no
+build stamp. The sibling `~/Library/Application Support/Jarvis/source/` cache is `0700` and contains
+only public repository source, never session-derived data. Downloads unpack under a private staging
+directory and move atomically into a version directory only after extraction succeeds. Cache hits
+refresh recency; successful fetches prune to three versions. See `ReleaseSourceStore` in
+`Sources/JarvisEvaluation/`.
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 

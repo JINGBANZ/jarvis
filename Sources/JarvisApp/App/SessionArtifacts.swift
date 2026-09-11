@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisEvaluation
 
 /// Owns everything a coaching session leaves on disk.
 ///
@@ -58,7 +59,16 @@ final class SessionArtifacts {
         // Application Support/Jarvis left by another tool) keeps its mode, which would leak session-dir
         // names. Tighten it best-effort, mirroring FileSecretStore.setApiKey.
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
-        // File creation and every later write run on the shared bounded evidence worker. Start only
+        let stampError: Error?
+        do {
+            try SessionBuild.write(in: dir,
+                isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
+                version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
+            stampError = nil
+        } catch {
+            stampError = error
+        }
+        // Evidence file creation and later writes run on the shared bounded evidence worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
         // The human-facing projection is composed here, not reached for inside the kernel: the
         // handle owns the one admission point, and ActivityLog renders what the worker hands it.
@@ -70,6 +80,9 @@ final class SessionArtifacts {
         // Diagnostics join that same handle: <dir>/jarvis-debug.log, 0600, fresh, written by the
         // worker rather than by whichever thread called jlog.
         JarvisLog.attach(to: audit)
+        if let stampError {
+            jlog("Jarvis: session build stamp failed — \(stampError)")
+        }
         currentSessionDir = dir
         // Point the viewer's history browser at the new current session and show it live; clear-history
         // spares whichever session is current.
@@ -140,29 +153,15 @@ final class SessionArtifacts {
         return secretFile.directoryURL.appendingPathComponent("sessions")
     }
 
-    /// The agentic evaluator must inspect the live source checkout, not a baked description. Prefer
-    /// an explicit launch argument, then the workspace-local `.jarvis/` parent used by build-app.sh,
-    /// then the directory containing a locally built app bundle. A redistributed bundle without a
-    /// checkout simply reports evaluation unavailable instead of running a weaker evaluator.
-    func evaluationRepositoryDirectory() -> URL? {
-        let args = CommandLine.arguments
-        var candidates: [URL] = []
-        if let i = args.firstIndex(of: "--repo-dir"), i + 1 < args.count {
-            candidates.append(URL(fileURLWithPath: args[i + 1]))
-        }
-        let logs = logDirectory().standardizedFileURL
-        if logs.lastPathComponent == ".jarvis" {
-            candidates.append(logs.deletingLastPathComponent())
-        }
-        candidates.append(Bundle.main.bundleURL.deletingLastPathComponent())
+    func evaluationSource(for session: URL) -> EvaluationSource? {
+        EvaluationSource.resolve(
+            isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
+            bundleURL: Bundle.main.bundleURL,
+            recordedVersion: SessionBuild.read(in: session)?.version)
+    }
 
-        return candidates.first { candidate in
-            let root = candidate.standardizedFileURL
-            return FileManager.default.fileExists(
-                atPath: root.appendingPathComponent("Package.swift").path)
-                && FileManager.default.fileExists(
-                    atPath: root.appendingPathComponent("Sources/JarvisCore").path)
-        }?.standardizedFileURL
+    var evaluationSourceStore: ReleaseSourceStore {
+        ReleaseSourceStore(root: secretFile.directoryURL.appendingPathComponent("source"))
     }
 
     /// Hand the live session back at teardown and forget it, so a replacement Start opens a fresh
