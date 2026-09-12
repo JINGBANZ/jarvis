@@ -854,9 +854,9 @@ The always-on legs are built to survive transient failure rather than die on it:
   skips the reconnect path entirely and ends the session with its cause, because no retry fixes a
   rejected key, a denied region, or a wrong URL. A status that describes a moment rather than a
   contract, such as a proxy's upgrade timeout, keeps its retries like any other temporary failure.
-  A socket that has never reached ready retries **three** times rather than
-  seven: it has nothing buffered to preserve, and every further attempt is silence the user cannot
-  explain. When that budget runs out, the reported failure keeps the last observed identity and
+  A socket that has never reached ready gets **three attempts** rather than seven (the two budgets
+  `SocketLifecyclePolicy` is built with): it has nothing buffered to preserve, and every further
+  attempt is silence the user cannot explain. When that budget runs out, the reported failure keeps the last observed identity and
   message and reads as unreachable rather than lost, which is what ends the session instead of
   degrading. A socket lost after it was ready keeps the longer budget, because there is a working
   session's audio to replay into a replacement. Each replacement
