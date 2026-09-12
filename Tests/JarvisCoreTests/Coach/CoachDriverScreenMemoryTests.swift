@@ -109,7 +109,7 @@ import Testing
         #expect(brain.calls[1].prefix(brain.calls[0].count).map(\.text) == brain.calls[0].map(\.text))
     }
 
-    @Test func obsoleteObservationIsRemovedWithoutRemovingOtherQuestionSections() async {
+    @Test func obsoleteObservationIsRemovedWithoutRemovingOtherQuestionSections() async throws {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "a", lines: ["Continue."])]),
             .init(toolCalls: [.staySilent(callId: "b")]),
@@ -130,6 +130,10 @@ import Testing
         #expect(!text.contains("count = 1"))
         #expect(text.contains("count = 0"))
         #expect(text.contains("Count all matching pairs."))
+        let replay = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.id == "fix" })
+        let arguments = try #require(JSONSerialization.jsonObject(with: Data(replay.argumentsJSON.utf8)) as? [String: Any])
+        #expect(arguments["screenMemory"] is NSNull,
+                "Replay must satisfy the required nullable field without repeating applied maintenance")
     }
 
     @Test func incompleteReplyCannotResetMemory() async {

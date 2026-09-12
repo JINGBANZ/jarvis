@@ -489,6 +489,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         "lines": lines,
                         "explanation": explanation as Any? ?? NSNull(),
                         "codeSnippet": codeArguments as Any? ?? NSNull(),
+                        // Maintenance executes from the original response; replay stays schema-valid
+                        // without presenting already-applied observation IDs as another action.
+                        "screenMemory": NSNull(),
                     ]
                     // Only the System Design speak schema declares `mermaid`, and both set
                     // additionalProperties:false: replaying the key elsewhere would show the model
