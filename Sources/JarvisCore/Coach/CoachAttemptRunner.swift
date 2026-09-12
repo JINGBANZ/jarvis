@@ -439,11 +439,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         ["language": $0.language, "placement": $0.placement, "code": $0.code,
                          "highlightedLines": $0.highlightedLines]
                     }
-                    let arguments: [String: Any] = [
-                        "lines": lines, "mermaid": diagram == nil ? NSNull() : mermaid as Any,
+                    var arguments: [String: Any] = [
+                        "lines": lines,
                         "explanation": explanation as Any? ?? NSNull(),
                         "codeSnippet": codeArguments as Any? ?? NSNull(),
                     ]
+                    // Only the System Design speak schema declares `mermaid`, and both set
+                    // additionalProperties:false: replaying the key elsewhere would show the model
+                    // a field its own tool definition forbids.
+                    if interviewFormat == .systemDesign {
+                        arguments["mermaid"] = diagram == nil ? NSNull() : mermaid as Any
+                    }
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
                     let deliveredCalls = response.rawToolCalls.filter { $0.id == callID }.map { call in
                         RawToolCall(id: call.id, name: call.name,
