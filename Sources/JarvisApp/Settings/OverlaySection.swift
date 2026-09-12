@@ -8,6 +8,7 @@ final class OverlaySection: NSObject, SettingsSection {
     let title = "Overlay"
     let fillsTab = true
 
+    private let onBoxEnabledChanged: (Bool) -> Void
     private let appearance: OverlayAppearance
     private let caption: OverlayCaptionApplying
     private let box: OverlayBoxApplying
@@ -17,7 +18,9 @@ final class OverlaySection: NSObject, SettingsSection {
     private var captionView: OverlaySurfaceSettingsView?
     private var boxView: OverlaySurfaceSettingsView?
 
-    init(appearance: OverlayAppearance, caption: OverlayCaptionApplying, box: OverlayBoxApplying) {
+    init(appearance: OverlayAppearance, caption: OverlayCaptionApplying, box: OverlayBoxApplying,
+         onBoxEnabledChanged: @escaping (Bool) -> Void = { _ in }) {
+        self.onBoxEnabledChanged = onBoxEnabledChanged
         self.appearance = appearance
         self.caption = caption
         self.box = box
@@ -51,6 +54,13 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityAction: #selector(captionOpacityChanged),
             opacityAccessibilityLabel: "Overlay caption background opacity")
 
+        let diagramToggle = NSSwitch()
+        diagramToggle.state = appearance.boxDiagramsEnabled ? .on : .off
+        diagramToggle.target = self
+        diagramToggle.action = #selector(diagramsEnabledChanged)
+        diagramToggle.setAccessibilityLabel("Show diagrams")
+        diagramToggle.sizeToFit()
+
         boxView = makeSurface(
             title: "Overlay Box",
             description: "A persistent history of recent Jarvis messages.",
@@ -66,7 +76,8 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityValue: appearance.boxOpacity,
             opacityRange: Defaults.Overlay.Box.opacityRange,
             opacityAction: #selector(boxOpacityChanged),
-            opacityAccessibilityLabel: "Overlay box opacity")
+            opacityAccessibilityLabel: "Overlay box opacity",
+            diagramToggle: diagramToggle)
 
         if let captionView { document.addSubview(captionView) }
         if let boxView { document.addSubview(boxView) }
@@ -96,7 +107,8 @@ final class OverlaySection: NSObject, SettingsSection {
         opacityValue: Double,
         opacityRange: ClosedRange<Double>,
         opacityAction: Selector,
-        opacityAccessibilityLabel: String
+        opacityAccessibilityLabel: String,
+        diagramToggle: NSSwitch? = nil
     ) -> OverlaySurfaceSettingsView {
         OverlaySurfaceSettingsView(
             title: title,
@@ -114,7 +126,8 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityValue: opacityValue,
             opacityRange: opacityRange,
             opacityAction: opacityAction,
-            opacityAccessibilityLabel: opacityAccessibilityLabel)
+            opacityAccessibilityLabel: opacityAccessibilityLabel,
+            diagramToggle: diagramToggle)
     }
 
     private func relayout() {
@@ -169,9 +182,15 @@ final class OverlaySection: NSObject, SettingsSection {
         relayout()
     }
 
+    @objc private func diagramsEnabledChanged(_ sender: NSSwitch) {
+        appearance.boxDiagramsEnabled = sender.state == .on
+        box.setDiagramsEnabled(appearance.boxDiagramsEnabled)
+    }
+
     @objc private func boxEnabledChanged(_ sender: NSSwitch) {
         let enabled = sender.state == .on
         appearance.boxEnabled = enabled
+        onBoxEnabledChanged(enabled)
         box.setEnabled(enabled)
         box.showAppearancePreview(enabled)
         boxView?.updateEnabledState(enabled)

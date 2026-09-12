@@ -242,6 +242,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
                             clock: Clock, config: Config = .default,
+                            codeEnabled: Bool = false,
                             coachingAttempts: (any CoachingAttemptAuditing)? = nil,
                             automaticAttemptDelay: @escaping CoachDriver.AutomaticAttemptDelay = { _ in },
                             onRouteFailure: (@MainActor @Sendable (ProviderFailure) -> Void)? = nil,
@@ -261,6 +262,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             config: config, transcript: transcript,
             route: route, screen: screen, overlay: overlay, clock: clock,
             coachingAttempts: coachingAttempts,
+            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, codeEnabled: codeEnabled),
             automaticAttemptDelay: automaticAttemptDelay,
             activity: activity,
             prepMaterial: prepMaterial
@@ -2014,38 +2016,41 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         })
     }
 
-    @Test func manualHintWakesFailedAttemptEvenWhileSpeechIsUnsettled() async {
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .manualCode])
+    func manualHintWakesFailedAttemptEvenWhileSpeechIsUnsettled(_ reason: TriggerReason) async {
         let gate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let (driver, transcript) = makeDriver(
             brain: brain,
-            clock: ManualClock())
+            clock: ManualClock(), codeEnabled: true)
         transcript.append(.init(speaker: .me, text: "first attempt", at: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
         driver.updateTranscriptionWork(true, for: .them)
-        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        #expect(await driver.handleTrigger(reason) == .busy)
         await gate.release()
 
         #expect(await outcome == .spoke)
         #expect(brain.calls.count == 2)
+        #expect(brain.calls.last?.first?.text?.contains("# Code accompanies") == true)
         driver.updateTranscriptionWork(false, for: .them)
     }
 
-    @Test func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech() async {
+    @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .manualCode])
+    func automaticRetryOfFailedManualHintWaitsForUnsettledSpeech(_ reason: TriggerReason) async {
         let gate = AsyncGate()
         let delayGate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let (driver, _) = makeDriver(
             brain: brain,
-            clock: ManualClock(),
+            clock: ManualClock(), codeEnabled: true,
             automaticAttemptDelay: { _ in await delayGate.enter() })
         driver.updateTranscriptionWork(true, for: .them)
 
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
-                await driver.handleTrigger(.manualHint)
+                await driver.handleTrigger(reason)
             }
         }
         defer {
@@ -2066,6 +2071,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateTranscriptionWork(false, for: .them)
         #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
+        #expect(brain.calls.last?.first?.text?.contains("# Code accompanies") == true)
     }
 
     @Test func automaticManualHintAttemptDoesNotRecapture() async {

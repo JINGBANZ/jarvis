@@ -42,12 +42,10 @@ final class BrainComposition {
     /// Shared with the Settings sections so a detection performed there is the one this uses.
     let detector = AgentCLIDetector()
     private let secrets: any SecretStore
-    private let coachTools: [ToolDef]
     private unowned let host: BrainCompositionHost
 
-    init(secrets: any SecretStore, coachTools: [ToolDef], host: BrainCompositionHost) {
+    init(secrets: any SecretStore, host: BrainCompositionHost) {
         self.secrets = secrets
-        self.coachTools = coachTools
         self.host = host
     }
 
@@ -77,6 +75,15 @@ final class BrainComposition {
     /// `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` builder `CoachAttemptRunner`
     /// calls per turn.
     var interviewFormatAddendum = ""
+    var explanationsEnabled = true
+    var codeEnabled = false
+
+    /// The current session's tool set, fixed once at Start on exactly the same terms as
+    /// `interviewFormatAddendum` and set from the same place, before the first `makeConfiguredRoute`
+    /// call. A local-agent target bakes these schemas into its process instructions and rejects any
+    /// later turn that no longer composes to them, so this must be the same value the session's
+    /// `CoachDriver` was given — resolve both from `sessionCoachTools` (#273).
+    var coachTools: [ToolDef] = JarvisCore.coachTools
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -141,12 +148,18 @@ final class BrainComposition {
                                        workDirectory: sessionDir,
                                        timeout: BrainWorkloadTimeout.liveCoaching,
                                        traffic: host.liveSessionEvidence, trafficTag: "coach",
-                                       // No prep material: it is indexed off the Start path and
-                                       // installed on the driver later, so a prompt fixed at
-                                       // construction cannot describe it.
+                                       // Prep material is described whenever the session's tool set
+                                       // carries search_prep_notes, which is decided at Start from
+                                       // the configured sources — the index itself lands later, off
+                                       // the Start path. Reading it from the same tool set the coach
+                                       // loop sends is what keeps these instructions valid for the
+                                       // whole session (#273).
                                        systemPrompt: JarvisPrompts.Coach.system(
-                                           prepMaterial: false,
-                                           formatAddendum: interviewFormatAddendum),
+                                           prepMaterial: coachTools.contains {
+                                               $0.name == searchPrepNotesTool.name
+                                           },
+                                           formatAddendum: interviewFormatAddendum,
+                                           explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
                                        tools: coachTools,
                                        toolChoice: .required,
                                        runtime: runtimes.coach,

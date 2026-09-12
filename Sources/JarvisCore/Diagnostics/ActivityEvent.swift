@@ -17,6 +17,8 @@ public enum ActivityEvent: Sendable {
     public enum Kind: String, Codable, CaseIterable, Sendable {
         case heard
         case manualHint
+        case manualExplanation
+        case manualCode
         case screenViewed
         case screenViewFailed
         case tip
@@ -35,13 +37,15 @@ public enum ActivityEvent: Sendable {
     case heard(speaker: Speaker, text: String)
     /// The user explicitly requested help through the manual-hint shortcut.
     case manualHint(prompt: String)
+    case manualExplanation(prompt: String)
+    case manualCode(prompt: String)
     /// Jarvis captured and viewed the screen while preparing a coaching response.
     case screenViewed(imageBase64JPEG: String)
     /// The brain chose to view the screen, but capture failed. Activity gets fixed recovery
     /// guidance while raw failure detail stays in debug.
     case screenViewFailed
     /// Jarvis displayed these coaching lines to the user.
-    case tip(lines: [String])
+    case tip(lines: [String], explanation: String? = nil, codeSnippet: CodeSnippet? = nil)
     /// The brain explicitly chose `stay_silent` for this turn.
     case stayedSilent
     /// The single terminal lifecycle event for a live coaching session. The reason is a closed set,
@@ -71,6 +75,11 @@ public enum ActivityEvent: Sendable {
     /// many relevant chunks came back, 0 meaning nothing scored usefully.
     case prepNotesSearched(query: String, matchCount: Int)
 
+    var response: ActivityResponse? {
+        guard case .tip(let lines, let explanation, let code) = self else { return nil }
+        return ActivityResponse(lines: lines, explanation: explanation, codeSnippet: code)
+    }
+
     /// Keep persisted identity, human copy, and the optional screenshot payload in one exhaustive
     /// mapping so adding or editing an event cannot make its `k` disagree with what Activity shows.
     var rendered: (kind: Kind, message: String, imageBase64: String?) {
@@ -79,6 +88,10 @@ public enum ActivityEvent: Sendable {
             return (.heard, "🗣 heard (\(speaker.rawValue)): \"\(text)\"", nil)
         case .manualHint(let prompt):
             return (.manualHint, "⌨️ hint shortcut — \(prompt)", nil)
+        case .manualExplanation(let prompt):
+            return (.manualExplanation, "⌨️ explain more shortcut — \(prompt)", nil)
+        case .manualCode(let prompt):
+            return (.manualCode, "⌨️ show code shortcut — \(prompt)", nil)
         case .screenViewed(let imageBase64JPEG):
             return (.screenViewed, "👁 looking at your screen", imageBase64JPEG)
         case .screenViewFailed:
@@ -87,8 +100,8 @@ public enum ActivityEvent: Sendable {
                 "👁 couldn't view your screen — screen capture failed; check Screen Recording permission",
                 nil
             )
-        case .tip(let lines):
-            return (.tip, "💬 \(lines.joined(separator: " "))", nil)
+        case .tip(let lines, let explanation, let code):
+            return (.tip, ActivityResponse(lines: lines, explanation: explanation, codeSnippet: code).message, nil)
         case .stayedSilent:
             return (.stayedSilent, "🤫 stayed silent — nothing useful to add", nil)
         case .sessionEnded(let reason):

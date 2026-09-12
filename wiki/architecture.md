@@ -78,7 +78,7 @@ moments the model judges worthwhile.
    progress is consumed from the module stream.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
    a delayed transcript-batch callback arriving after another attempt committed that same line is
-   consumed instead of buying a duplicate request. The explicit manual-hint hotkey bypasses this wait.
+   consumed instead of buying a duplicate request. Any explicit coaching shortcut bypasses this wait.
    The CoachDriver then calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
@@ -88,15 +88,16 @@ moments the model judges worthwhile.
    keeps the complete finalized transcription. Context-dependent short replies such as "Yes", "No",
    "Okay", "对", and "可以" fail open for either speaker, as do unknown short fragments. Interviewer
    questions remain first-class and may draw a proactive tip. Consumed noise never rides into a
-   later request; silence checks and the hint hotkey always go through. The gate is a small explicit
+   later request; silence checks and both coaching shortcuts always go through. The gate is a small explicit
    class on purpose: a classifier model would add latency and cost for it, and asking the
    transcription model to drop filler is not a deterministic boundary and would silently alter the
    audit record.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
    (`CoachHistory`), the
-   new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
-   `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
-   "stuck."
+   new transcript delta, the timing context (seconds silent, session elapsed), and the session's
+   fixed tool set — `[capture_screen, speak, stay_silent]`, plus `search_prep_notes` when prep
+   sources are configured, with `speak` carrying the System Design schema in that format. The timing
+   is what lets the model tell "thinking" from "stuck."
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
    visible context missing from the conversation — including unresolved references such as “this”
    or “here” — and no fresh capture is already available for that request. It may also capture when
@@ -146,26 +147,109 @@ drop*, not *show-freshest-only* — and adding direct-reply priority/preemption 
 rejected as solving a problem the interview workflow doesn't have. (The must-reply-on-direct-address
 path still works for testing/practice; it is simply not latency-critical there.)
 
-### On-demand hint (⌥⌘J)
+### Private architecture hints
 
-Proactive coaching is the default, but the user can also **pull** a hint on demand. Pressing the
-global hotkey **⌥⌘J** while a session is running fires a `manualHint` trigger that does in **one**
-brain round-trip what the proactive screen path needs two for: the harness captures the screenshot
-*itself* and injects it — plus a synthetic "give me a hint now" user message — into the *first*
-request, and forces the `speak` tool, so a screen-aware hint always comes straight back. (The
-proactive path, by contrast, must first let the model decide to call `capture_screen`, then reason
-over the returned image on a second trip — the latency this hotkey exists to skip.) It reuses the
-live session's brain, conversation, and transcript, so the hint has full context, and it routes
-through the same single-in-flight turn box as audio triggers (a press coalesces, never stacks). It is
-inert — a beep — when no session is running, since there is no live conversation to hint from. The
-trigger and its pre-filled message are recorded to the [activity viewer](./build-and-run.md), so you
-can see exactly what the shortcut sent to the brain.
+An explicitly selected System Design session can attach a visual sketch to `speak` during the
+high-level-architecture stage. The format addendum tells the model when a graph is helpful; the
+harness does not classify interview stages. `CoachAttemptRunner` offers the nullable diagram field
+only for that Start-time format and ignores unexpected diagram output in other formats. Keeping it
+on `speak` also makes the manual-hint shortcut work in one response.
 
-The hotkey is registered with **Carbon `RegisterEventHotKey`**, the one global-shortcut API Apple
-never modernized, which needs no Accessibility/TCC permission. We deliberately did **not** take the
-`KeyboardShortcuts` package: every modern release uses SwiftUI macros (`@Entry`/`#Preview`) whose
-plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
-[build-and-run.md](./build-and-run.md)). The binding is fixed for now; a rebinding UI is a later nicety.
+[`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) accepts a bounded Mermaid subset:
+rectangular labeled boxes and directed connections. The parser owns the precise grammar and limits;
+the model-facing usage guidance lives in the system-design skill. Native
+[`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) draws that inert graph into a
+memory-only text attachment. This limited renderer needs no JavaScript, browser, remote assets, or
+extra presentation surface. Graphs retain their layout and scale uniformly to the available width and a fraction of the
+window height, reserving room for the text hint. They resize during a window drag. The Overlay Box
+settings include a persisted **Show diagrams** switch, enabled by default, that hides or restores
+attachments immediately without discarding text or graph history. Diagrams clear with the session.
+The existing nonactivating panel, capture exclusion, visibility toggle, and Start/Stop rules apply.
+Nothing is drawn on the interviewer's shared canvas.
+
+Invalid or unsupported graph syntax degrades to the same text hint, with diagnostic detail only in
+`jlog`. Activity records the text tip; graph source follows the existing brain-history and wire-audit
+path, and rendered images are never archived. A graph is a suggested sketch accompanying one hint,
+not a continuously synchronized model of the discussion.
+
+### On-demand coaching shortcuts
+
+Hints and explanations are proactive. The shared coach prompt distinguishes needing a next step
+from not understanding the question, earlier guidance, or the overall approach using the available
+session history, newest speech, and current screen. Clear confusion warrants an explanation; silence
+or unchanged code alone does not. Repeated confusion calls for simpler framing or a smaller example,
+while productive progress calls for silence. This policy applies across interview formats without a
+separate classifier, timer, or model request.
+
+Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
+**⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
+clarification of the relevant gap, which may span several earlier hints; **Show code** (default
+**⌥⌘K**) requests the next small coding component. All snapshot a fresh screen,
+include the available conversation, and force `speak` in one brain round trip. If capture fails, the
+request identifies the missing screen and uses available context without inventing visible details.
+They share the ordinary single-flight coach loop and provider route. Natural wakes preserve pending
+manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass unsettled
+transcription, while an automatic retry waits for settlement. Stop cancels any request; while stopped,
+an explicit shortcut only beeps. Activity records which shortcut was pressed.
+
+The `speak` action keeps short `lines` for captions and an optional plain-text `explanation` for fuller
+clarification in the persistent box. The prompt targets roughly 60–120 words in short paragraphs,
+with a simple rationale, a concrete example when useful, and one starting action. The box scrolls to
+the beginning of that entry and preserves its paragraphs. Hints use semibold text; fuller detail uses
+regular text at the same configured size under an **Explanation** label, separated by whitespace.
+Captions retain only the standalone summary.
+[Enable explanations](./settings-window.md#shortcuts) controls both automatic detail and the manual
+fallback. `SessionPlan.explanationsEnabled` is fixed at Start and preserved across screen-plan
+revisions. Only enabled sessions receive explanation guidance in the system prompt; saved edits take
+effect on the next Start, keeping CLI instructions stable. The nullable tool field remains until
+[#273](https://github.com/JINGBANZ/jarvis/issues/273) establishes session-composed tools.
+At delivery, the runner checks whether the persistent box can show detail. Hidden explanations are
+omitted from both Activity and committed tool-call history. This live visibility check also covers a
+box hidden while the request was running. Disabling the box turns off the saved explanation setting
+and releases its shortcut; enabling the box does not implicitly enable explanations.
+
+Explanation text follows the existing coaching history and Activity paths. It opens no extra window,
+never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
+only the brief caption if that surface is enabled; it does not force a hidden surface on.
+
+**Show code with hints** enables matching snippets in Coding or general sessions, defaulting off.
+`SessionPlan.codeEnabled` is frozen at Start and preserved across screen revisions. The app resolves
+the session format at Start, so non-coding sessions cannot reserve an empty code area. Only enabled
+sessions receive the shortened code guidance in their fixed system prompt. The Show code shortcut
+requests the next snippet; it never edits the preference or enables code during a disabled session.
+Saved settings take effect on the next Start. Tool-field removal is deferred with explanations to #273.
+The fixed `speak.codeSnippet` schema carries language, placement, code, and corrected-line indices;
+[`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) bounds and validates it without
+truncating code. Highlight arrays are bounded before normalization, and trimming leading blank lines
+rebases correction indices. Invalid attachments retain the useful text hint. The prompt requests one logical
+component matching visible names, language, and structure. Local mistakes include a highlighted
+correction and relevant next lines; an invalid overall approach receives a corrective hint instead.
+Without visible code, known problem context supports a first component without inventing unseen names.
+
+[`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) pins the snippet in a separate
+bottom scroll area inside the existing capture-excluded panel. Its opaque dark background preserves
+syntax contrast regardless of history opacity. Long code lines wrap within the dock without changing
+source text or correction highlights. The dock measures wrapped content to use available space;
+code uses a compact monospace size and shrinks only as needed to fit, down to a readable minimum
+(see `CodeSnippetView`). Very small panels retain vertical scrolling rather than clipping code or
+shrinking it indefinitely. Each new hint
+replaces its snippet, or clears the previous code when none is appropriate, so guidance and code agree.
+Dismiss and session clear remove the snippet. While enabled, an empty code area remains reserved;
+a session started with code off has no dock. The dock collapses
+with the header and restores its snippet on expansion. Settings preview
+includes code only when enabled and restores the real snippet on close. The caption carries
+only the short hint; Activity includes the accepted placement and code. Explanation preferences do
+not govern code. Box visibility and code acceptance are checked together on the main actor at delivery;
+a hidden snippet is also removed from committed tool history and Activity. Disabling the master box
+releases the shortcut, disables the saved code setting, and clears/disables the current code dock.
+Re-enabling the box alone does not restore the dock; code must be enabled before a new Start.
+
+Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
+[`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
+`HotkeyController` dispatches only matching Jarvis events. Each binding persists independently through
+`HotkeyPreferences`. Registering a replacement happens before releasing the old binding, so a
+collision—including another Jarvis shortcut—keeps the prior working binding. See
+[Settings → Shortcuts](./settings-window.md#shortcuts).
 
 ## 3. Components
 
@@ -182,9 +266,9 @@ plugins ship only with full Xcode, and Jarvis builds **CLT-only** (see
 | **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
-| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). It follows the session: shown on Start (cleared, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). | AppKit NSPanel; `OverlayBoxPanel`. |
-| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, not the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
-| **HotkeyController** | Register the global **⌥⌘J** hint hotkey and route a press to a one-trip `manualHint` turn while a session runs (beep otherwise). See [§2 On-demand hint](#on-demand-hint-j). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
+| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). System-design visual hints are image attachments beside their text in this same box; the caption remains text-only. See [Private architecture hints](#private-architecture-hints). | AppKit NSPanel; `OverlayBoxPanel`. |
+| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
+| **HotkeyController** | Register the independent hint, explanation, and code shortcuts and route each press to its manual coaching request while a session runs (beep otherwise). See [§2 On-demand coaching shortcuts](#on-demand-coaching-shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 | **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -368,14 +452,14 @@ identifiers, and call/result pairing never cross an attempt or provider boundary
 
 Failed conversation work remains pending and schedules another coaching attempt under bounded
 backoff. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
-manual-hint trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
+manual coaching trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
 failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
 attempt uses the same pending conversation. Every automatic attempt waits while either transcription
 stream owns unfinished work so it does not cross an earlier utterance that is about to finalize. An
-explicit manual hint interrupts that postponement even after the wait begins and upgrades the same
+explicit coaching shortcut interrupts that postponement even after the wait begins and upgrades the same
 pending-work attempt to a forced hint; ordinary natural triggers remain parked until transcription
 settles. `TriggerReason` remains the model-facing
-reason that made coaching useful (`turnEnd`, `silence`, or `manualHint`); pending work is scheduler
+reason that made coaching useful (`turnEnd`, `silence`, `manualHint`, `manualExplanation`, or `manualCode`); pending work is scheduler
 state, not a fourth instruction to the model. An automatic attempt with no newer trigger reuses the
 pending work's reason; when another natural trigger arrives, its newer reason describes the fresh
 snapshot.
@@ -397,7 +481,7 @@ stay in `jarvis-debug.log`.
 
 ```mermaid
 flowchart TD
-    T[Turn end, silence, manual hint,<br/>or pending-work wake] --> S{Either transcription<br/>stream unsettled?}
+    T[Turn end, silence, manual shortcut,<br/>or pending-work wake] --> S{Either transcription<br/>stream unsettled?}
     S -- Yes, automatic attempt --> P[Keep work pending<br/>and postpone]
     S -- No --> A[Snapshot active target +<br/>latest finalized conversation]
     A --> R[Run one coaching attempt<br/>on one target]
@@ -468,56 +552,52 @@ rather than a per-turn screenshot.
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
-- **Interview format supplies optional specialist coaching (`InterviewFormat` in
-  `Sources/JarvisCore/Config/`).** A Start-time picker (**None**, plus one entry per format that actually has
-  content — Behavioral and System Design today) adds a format-specific addendum to the coach system
-  prompt. System Design supplies stage vocabulary so tips stay with the part of the design under
-  discussion. Behavioral treats a complete interviewer question as a useful proactive coaching
-  moment, shapes answers with STAR, and follows the newest answer stage to surface only material
-  gaps. When prep search is available it grounds the answer in the candidate's stories and uses
-  company values, leadership principles, role expectations, or behavioral requirements as answer
-  criteria. Without a matching personal story, it may supply a clearly labeled illustrative
-  mini-story; partial candidate facts may be organized but never embellished with invented personal
-  details, outcomes, or metrics. Coding stays empty because no specialist policy has been requested,
-  not because the mechanism cannot hold its content too. Each format's
-  content is a real Markdown file (`Sources/JarvisCore/Resources/Skills/<rawValue>.md`), not a Swift
-  string literal, so it reads and edits like prose; a missing file resolves to an empty addendum
-  rather than an error, since an unwritten skill is a normal state. `InterviewFormat`'s private
-  `skillMarkdownURL(named:)` locates it directly rather than trusting the generated `Bundle.module`
-  accessor, for the same reasons `SileroVoiceActivityDetector.bundledModelURL()` does — see
-  `Sources/JarvisCore/Config/InterviewFormat.swift`; `scripts/build-app.sh` and
-  `scripts/package-app.sh` copy `Jarvis_JarvisCore.bundle` into the assembled app's
-  `Contents/Resources` alongside `Jarvis_JarvisApp.bundle` (the Silero VAD model) accordingly. Adding
-  or editing a skill still needs a developer and a rebuild — a self-service system where a user drops
-  in their own skill file was considered and set aside as speculative infrastructure for a need
-  nothing has
-  yet. The picker filters the fixed `InterviewFormat.allCases` down to entries whose addendum is
-  non-empty (see `BrainSection.availableFormats`), so an entry is never indistinguishable from None:
-  writing Coding's or Behavioral's Markdown file is a resource-only change that surfaces its existing
-  case, but a genuinely new format still needs a new `InterviewFormat` case and display name before
-  any Markdown file can surface it. No selection resolves to no addendum at all (see
-  `CoachAttemptRunner`'s system-prompt assembly), not a guess assembled from whatever formats happen to have
-  content: concatenating every non-empty addendum was tried and rejected — with only one format
-  written it silently asserted "this is a system-design interview" into every session by default,
-  including coding and behavioral ones nobody opted into, and it does not scale, since two written
-  formats would concatenate two contradictory interview-format claims into one prompt. An automatic
-  classifier that guesses the format from conversation is separately rejected too: guessing once and
-  locking in misclassifies a session that shifts formats (a behavioral opener sliding into a
-  system-design round), and re-guessing every turn is a brittle state machine for a signal the model
-  can read from context anyway once it has the vocabulary. Fixed for the whole session like the
-  transcription language/model choice, for a concrete reason beyond convention: `CLIBrainClient`
-  bakes the system prompt into the local-agent process at construction and asserts it never changes,
-  so the resolved addendum must be computed once (`BrainComposition.interviewFormatAddendum`, set
-  before every route construction or reapply, including a live provider hot-switch) and reused
-  identically by both the per-turn OpenAI-style prompt (`CoachAttemptRunner`) and the CLI-provider
-  construction (`BrainComposition`). Both sites assemble the prompt through one builder,
-  `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` in `JarvisCore`, so the two cannot
-  drift. The builder takes the addendum as an already-resolved string rather than an
-  `InterviewFormat?` because `promptAddendum` reads its bundled file on every access and the
-  per-turn site would otherwise read it on every coaching turn. The CLI site passes
-  `prepMaterial: false`: prep material is indexed off the Start path and installed later, so its
-  `search_prep_notes` guidance cannot be baked into a process whose instructions are fixed at
-  construction.
+- **Interview format is an optional Start-time addendum (`InterviewFormat` in
+  `Sources/JarvisCore/Config/`).** The picker defaults to **None**, which supplies the byte-for-byte
+  base coach prompt. Coding, Behavioral, System Design, and General Technical are explicit choices.
+  This keeps behavior unchanged for a user who never opens Settings. General Technical is one
+  purpose-built routing skill, not a concatenation of specialist prompts: it selects relevant
+  format-specific guidance from the newest conversation and available screen evidence. Screen
+  capture remains on demand under the base action policy; no fresh capture is assumed on every turn.
+  There is no runtime classifier or persisted question classification.
+
+  The base prompt owns when to speak or stay silent, the hint length, and conditional comprehension
+  before strategy. Coding adds representation/invariant guidance, local implementation and defect
+  diagnosis, and boundary-test content for a post-completion hint already warranted by the base
+  policy. Finishing code alone does not trigger a hint. Behavioral shapes candidate-owned answers
+  with STAR and prepared criteria, labels constructed examples, and avoids refinement of a concrete,
+  complete, aligned answer. General Technical follows the same behavioral completion standard.
+  System Design supplies stage vocabulary from requirements through trade-offs.
+
+  Each explicit format is a Markdown file under `Sources/JarvisCore/Resources/Skills/`; missing content
+  resolves to an empty addendum, and Settings filters it out. `InterviewFormat.promptAddendum` loads
+  the selected resource through `skillMarkdownURL(named:)`, including installed-app, SwiftPM, and test
+  layouts. Packaging copies `Jarvis_JarvisCore.bundle` into `Contents/Resources`. New formats require an
+  enum case and display name as well as a resource; user-supplied skill files are not supported.
+  Nil resolves directly to an empty string, preserving the default rather than composing skills.
+
+  The selected text is frozen at Start (`BrainComposition.interviewFormatAddendum`) and reused during
+  provider reapply. Both OpenAI and CLI construction use
+  `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)`; passing resolved text keeps resource I/O
+  outside coaching turns. CLI instructions remain fixed for the session, while General Technical can
+  use new task evidence within those instructions. CLI construction reads `prepMaterial` from the
+  session's fixed tool set, so the baked instructions describe exactly what the loop offers.
+  [Private architecture hints](#private-architecture-hints) require explicit **System Design** in
+  both the tool schema and runtime; General Technical's system-design guidance does not enable
+  diagrams.
+- **A session's tool set is fixed at Start, for the same reason its system prompt is
+  (`sessionCoachTools` in `Sources/JarvisCore/Coach/ToolDefs.swift`).** `CLIBrainClient` renders each
+  tool's `parametersJSON` verbatim into the instructions its process is warmed with, and rejects any
+  later turn whose tools no longer compose to that string, so a set that grew or changed shape
+  mid-session would fail every remaining attempt on that target until the route exhausted. Both the
+  coach loop and the CLI-provider construction therefore resolve their tools through one function,
+  from inputs known at Start: the interview format selects the plain or System Design speak schema,
+  and configured prep-material *sources* decide whether `search_prep_notes` is offered at all. That
+  last input is deliberately "sources are configured", not "an index exists": building the index
+  reads files and shells out to `textutil`, so it runs off the Start path and the search port arrives
+  after the first attempts. A search that lands before it, or after indexing found nothing usable,
+  returns no matches — the honest answer, and one that costs nothing, where changing the offered set
+  mid-session would cost the whole session.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
@@ -927,14 +1007,15 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 ## 6. Non-Goals (v1)
 
-- A tiered sensitivity dial, or code-level coaching modes with separate trigger gates, tool sets, or
+- A tiered sensitivity dial, or code-level coaching modes with separate trigger gates or
   runtime state. One harness spans behavioral, system-design, and coding questions; an optional
-  Start-time interview-format selection specializes the model's coaching policy inside that shared
-  loop — see [§ Models and APIs](#models-and-apis) — rather than creating another mode of operation.
+  Start-time interview-format selection specializes the model's coaching policy and, for System
+  Design, enables private architecture sketches inside that shared loop — see
+  [§ Models and APIs](#models-and-apis) — while retaining the same scheduling.
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
-  **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-hint-j) — but it
+  **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-coaching-shortcuts) — but it
   complements the proactive default; it is not a trigger-to-listen wake key.)
 - Productization: hosted auth, billing, onboarding, or arbitrary provider chains.
 - Windows / cross-platform.

@@ -55,9 +55,19 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
-    /// Fixed for the whole session — chosen once at Start, never reclassified — so it needs none of
-    /// `prepMaterial`'s live-swap machinery; a plain stored `let` is enough.
+    /// Fixed prompt text for the session. In automatic mode that text tells the model to choose from
+    /// current evidence per response; no mutable runtime classification is required.
     private let interviewFormatAddendum: String
+    private let interviewFormat: InterviewFormat?
+    /// The session's tool set, resolved at Start by `sessionCoachTools` and sent verbatim on every
+    /// request. Deriving it per attempt is what let it drift from the schemas a local-agent target
+    /// was warmed with (#273), so this is a plain `let` even though `prepMaterial` lands later.
+    private let sessionTools: [ToolDef]
+    /// Whether this session offers `search_prep_notes` at all, read from `sessionTools` so the tool
+    /// list and the system prompt that describes it cannot disagree.
+    private var offersPrepNotes: Bool {
+        sessionTools.contains { $0.name == searchPrepNotesTool.name }
+    }
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
@@ -80,8 +90,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)?,
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
-        interviewFormatAddendum: String = ""
+        sessionTools: [ToolDef],
+        interviewFormatAddendum: String = "",
+        interviewFormat: InterviewFormat? = nil
     ) {
+        self.sessionTools = sessionTools
         self.config = config
         self.transcript = transcript
         self.screen = screen
@@ -92,6 +105,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         self.activity = activity
         self.ledger = ledger
         self.interviewFormatAddendum = interviewFormatAddendum
+        self.interviewFormat = interviewFormat
     }
 
     private func takeNextAttemptID() -> Int {
@@ -124,11 +138,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         var observations: [ChatMessage] {
             screenObservation + (prepNotesObservation.map { [$0] } ?? [])
         }
-        var manualHintPrepared = false
+        var preparedManualReason: TriggerReason?
 
         init(reason: TriggerReason) {
             self.reason = reason
-            bypassesTranscriptionSettlement = reason == .manualHint
+            bypassesTranscriptionSettlement = reason.isManual
         }
     }
 
@@ -223,15 +237,20 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // Describing search_prep_notes when it isn't actually offered invites the model to call a
         // tool it doesn't have — and that call is a hard attempt failure (below), so `prepMaterial`
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
+        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let systemPrompt = JarvisPrompts.Coach.system(
-            prepMaterial: attempt.prepMaterial != nil,
-            formatAddendum: interviewFormatAddendum)
+            prepMaterial: offersPrepNotes,
+            formatAddendum: interviewFormatAddendum,
+            explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
-
-        if reason == .manualHint && !work.manualHintPrepared {
+        if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
-                jlog("⌨️ hint shortcut — \(prompt)")
-                activity?.record(.manualHint(prompt: prompt))
+                jlog("⌨️ coaching shortcut — \(prompt)")
+                switch reason {
+                case .manualCode: activity?.record(.manualCode(prompt: prompt))
+                case .manualExplanation: activity?.record(.manualExplanation(prompt: prompt))
+                default: activity?.record(.manualHint(prompt: prompt))
+                }
             }
             let screen = self.screen
             let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
@@ -243,12 +262,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("👁 looking at your screen")
                 activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
-                turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     let observation = ChatMessage.user(JarvisPrompts.Coach.recognizedText(text))
                     observations.append(observation)
-                    turnMessages.append(observation)
                 }
                 work.screenObservation = observations
             } else {
@@ -258,11 +275,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
             }
-            work.manualHintPrepared = true
+            // Replace the carried screen slot while retaining independent prep observations.
+            turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
+            work.preparedManualReason = reason
         }
 
         let toolChoice: ToolChoice =
-            reason == .manualHint ? .force(speakTool.name) : .required
+            reason.isManual ? .force(speakTool.name) : .required
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
@@ -294,9 +313,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 result: .failed(outcome: .brainError, failure: failure, work: work))
         }
 
-        // search_prep_notes joins the fixed set only when a source actually indexed usable text —
-        // a session without prep material offers a tool set identical to before this feature existed.
-        let tools: [ToolDef] = attempt.prepMaterial != nil ? coachTools + [searchPrepNotesTool] : coachTools
+        // Sent verbatim, never rebuilt per attempt: these are the schemas a local-agent target was
+        // warmed with, and it rejects the turn if what it is sent no longer composes to them.
+        let tools = sessionTools
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
@@ -414,19 +433,52 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines):
+                case .speak(let callID, let lines, let mermaid, let requestedExplanation, let requestedCode):
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    activity?.record(.tip(lines: lines))
-                    overlay.render(
-                        lines,
-                        perLineSeconds: lines.map {
-                            OverlayTiming.displaySeconds(for: $0, config: config)
-                        })
-                    turnMessages.append(.assistantToolCalls(response.rawToolCalls))
+                    let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
+                    if mermaid != nil && diagram == nil {
+                        jlog("Diagram hint omitted: unsupported graph or interview format")
+                    }
+                    let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?, code: CodeSnippet?) in
+                        guard !Task.isCancelled else { return (false, nil, nil) }
+                        let code = self.overlay.deliverCodeSnippet(codeAllowed ? requestedCode : nil)
+                        let detail = self.overlay.deliver(lines, perLineSeconds: lines.map {
+                            OverlayTiming.displaySeconds(for: $0, config: self.config)
+                        }, diagram: diagram, explanation: attempt.plan.explanationsEnabled ? requestedExplanation : nil)
+                        return (true, detail, code)
+                    }
+                    guard delivery.accepted else { return .cancelled }
+                    let explanation = delivery.explanation
+                    let code = delivery.code
+                    activity?.record(.tip(lines: lines, explanation: explanation, codeSnippet: code))
+                    // Only the selected call executes; extra provider calls were never delivered.
+                    // History describes delivered optional content, including independently enabled code.
+                    // Parsed values contain only JSON primitives, so encoding cannot fail.
+                    let codeArguments: [String: Any]? = code.map {
+                        ["language": $0.language, "placement": $0.placement, "code": $0.code,
+                         "highlightedLines": $0.highlightedLines]
+                    }
+                    var arguments: [String: Any] = [
+                        "lines": lines,
+                        "explanation": explanation as Any? ?? NSNull(),
+                        "codeSnippet": codeArguments as Any? ?? NSNull(),
+                    ]
+                    // Only the System Design speak schema declares `mermaid`, and both set
+                    // additionalProperties:false: replaying the key elsewhere would show the model
+                    // a field its own tool definition forbids.
+                    if interviewFormat == .systemDesign {
+                        arguments["mermaid"] = diagram == nil ? NSNull() : mermaid as Any
+                    }
+                    let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+                    let deliveredCalls = response.rawToolCalls.filter { $0.id == callID }.map { call in
+                        RawToolCall(id: call.id, name: call.name,
+                                    argumentsJSON: String(decoding: data, as: UTF8.self))
+                    }
+                    turnMessages.append(.assistantToolCalls(deliveredCalls))
                     turnMessages.append(.init(
                         role: .tool,
                         text: JarvisPrompts.Coach.tipShown,
@@ -451,12 +503,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         jlog("… attempt cancelled (stopped) before searching prep notes")
                         return .cancelled
                     }
-                    // The tool is offered only when prepMaterial != nil (below), so a call here with
-                    // it absent means a non-schema-enforced provider (a CLI protocol reconstructing
-                    // calls from free-form prompt text) emitted one anyway — reject it rather than
-                    // silently returning an empty result with a real-looking Activity entry implying
-                    // prep material was actually checked.
-                    guard let prepMaterial = attempt.prepMaterial else {
+                    // The tool is in the session's set only when prep sources were configured at
+                    // Start, so a call here without it means a non-schema-enforced provider (a CLI
+                    // protocol reconstructing calls from free-form prompt text) emitted one anyway —
+                    // reject it rather than silently returning an empty result with a real-looking
+                    // Activity entry implying prep material was actually checked.
+                    guard offersPrepNotes else {
                         jlog("⚠️ search_prep_notes called without prep material configured — "
                              + "scheduling fresh attempt")
                         return .failed(
@@ -466,7 +518,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                                 from: attempt.target),
                             work: work)
                     }
-                    let results = prepMaterial.search(query: query)
+                    // A nil port here is the offered tool being used before indexing finished, or
+                    // after it found nothing usable. Both are honestly "no matches", not a failure.
+                    let results = attempt.prepMaterial?.search(query: query) ?? []
                     jlog("📎 searched prep notes for \"\(query)\" — \(results.count) match(es)")
                     activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
                     // Mirrors capture_screen: if the very next request in this attempt fails, a
