@@ -10,7 +10,7 @@ import JarvisCore
 final class OverlayBoxHeaderView: NSView {
     let collapseButton = OverlayBoxHeaderButton(symbol: "chevron.down", label: "Collapse")
     let clearButton = OverlayBoxHeaderButton(symbol: "eraser", label: "Clear history")
-    private let titleLabel = MovableLabel(labelWithString: "Jarvis")
+    let formatButton = NSButton(title: "Jarvis · None ▾", target: nil, action: nil)
     private var chrome: OverlayBoxChrome
     /// Hidden while collapsed: with no log under it, the rule would underline nothing.
     private var showsSeparator = true
@@ -18,11 +18,13 @@ final class OverlayBoxHeaderView: NSView {
     init(chrome: OverlayBoxChrome) {
         self.chrome = chrome
         super.init(frame: .zero)
-        titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.alignment = .center
-        titleLabel.textColor = NSColor(white: 1, alpha: 0.72)
+        formatButton.isBordered = false
+        formatButton.setAccessibilityLabel("Interview mode")
+        formatButton.lineBreakMode = .byTruncatingTail
+        formatButton.alignment = .center
+        formatButton.contentTintColor = NSColor(white: 1, alpha: 0.72)
         clearButton.isHidden = true          // nothing logged yet, so nothing to erase
-        addSubview(titleLabel)
+        addSubview(formatButton)
         addSubview(collapseButton)
         addSubview(clearButton)
         applyChrome()
@@ -42,7 +44,7 @@ final class OverlayBoxHeaderView: NSView {
     }
 
     private func applyChrome() {
-        titleLabel.font = .systemFont(ofSize: chrome.titlePointSize, weight: .medium)
+        formatButton.font = .systemFont(ofSize: chrome.titlePointSize, weight: .medium)
         let radius = (chrome.button * 0.22).rounded()
         collapseButton.apply(iconPointSize: chrome.iconPointSize, cornerRadius: radius)
         clearButton.apply(iconPointSize: chrome.iconPointSize, cornerRadius: radius)
@@ -59,7 +61,7 @@ final class OverlayBoxHeaderView: NSView {
     }
 
     func setInterviewFormat(_ format: InterviewFormat?) {
-        titleLabel.stringValue = format.map { "Jarvis · \($0.displayName)" } ?? "Jarvis"
+        formatButton.title = "Jarvis · \(format?.displayName ?? "None") ▾"
         layoutControls()
     }
 
@@ -83,10 +85,10 @@ final class OverlayBoxHeaderView: NSView {
                                    width: chrome.button, height: chrome.button)
         // Centred across the full width rather than in the gap between the buttons, so the name stays
         // put whether or not the clear button is on screen.
-        let titleHeight = titleLabel.intrinsicContentSize.height.rounded(.up)
+        let titleHeight = formatButton.intrinsicContentSize.height.rounded(.up)
         // Reserve both buttons' space so a long format truncates without covering either control.
         let titleInset = chrome.inset * 2 + chrome.button
-        titleLabel.frame = NSRect(x: titleInset, y: ((bounds.height - titleHeight) / 2).rounded(),
+        formatButton.frame = NSRect(x: titleInset, y: ((bounds.height - titleHeight) / 2).rounded(),
                                   width: max(0, bounds.width - titleInset * 2), height: titleHeight)
     }
 
@@ -96,10 +98,4 @@ final class OverlayBoxHeaderView: NSView {
         NSColor(white: 1, alpha: 0.10).setFill()
         NSRect(x: 0, y: 0, width: bounds.width, height: 1).fill()
     }
-}
-
-/// A label that lets a drag on it move the borderless window, the way `MovableTextView` does for the
-/// log. `NSControl` refuses the drag by default.
-private final class MovableLabel: NSTextField {
-    override var mouseDownCanMoveWindow: Bool { true }
 }

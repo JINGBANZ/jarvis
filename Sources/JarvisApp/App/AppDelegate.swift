@@ -176,6 +176,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // On by default, but the box is a session surface: this only arms the switch. It reaches the
         // screen on Start (below) and leaves it on Stop, so a stopped Jarvis shows nothing.
         overlayBox.setEnabled(appearance.boxEnabled)
+        overlayBox.setInterviewFormat(brain.preferences.interviewFormat)
+        overlayBox.onInterviewFormatSelected = { [weak self] format in
+            self?.selectInterviewFormat(format)
+        }
 
         // No updater in a development bundle (no feed URL), so the menu omits the item entirely.
         updates = UpdateController()
@@ -193,10 +197,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         // After normalization, not beside the other panel settings above: the panel must latch the
         // preference the rest of launch agrees on, not the one a disabled box is about to clear.
-        overlayBox.setCodeEnabled(codePreferences.isEnabled)
+        overlayBox.setCodeEnabled(codePreferences.isEnabled(
+            for: brain.preferences.interviewFormat, boxEnabled: appearance.boxEnabled))
         hotkeys = HotkeyController(preferences: hotkeyPreferences.filter {
             ($0.shortcut != .explainMore || explanationPreferences.isEnabled)
-                && ($0.shortcut != .showCode || codePreferences.isEnabled)
+                && ($0.shortcut != .showCode || codePreferences.isEnabled(
+                    for: brain.preferences.interviewFormat, boxEnabled: appearance.boxEnabled))
         })
 
         // Unified Settings window: Brain owns behavior; Connections owns shared authentication.
@@ -211,7 +217,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     detectedCLIs: clis,
                     update: change == .topology ? .topologyEdit : .effortEdit)
             },
-            transcriptionPreferences: transcriptionPreferences)
+            transcriptionPreferences: transcriptionPreferences,
+            onInterviewFormatSelected: { [weak self] format in self?.selectInterviewFormat(format) })
         let connectionsSection = ConnectionsSection(
             detector: brain.detector,
             keyStore: secretFile,
@@ -228,7 +235,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 hasActiveHotkey: { [weak self] shortcut in
                     guard let self else { return false }
                     // Deferred bindings have no live registration to warn about until Start.
-                    return (self.requestManualHint != nil && !self.sessionAllows(shortcut))
+                    return !self.allowsShortcutRegistration(shortcut)
                         || self.hotkeys?.registered[shortcut] != nil
                 },
                 applyCombination: { [weak self] shortcut, combination in
@@ -237,7 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     // than falsely claiming a rebind that never happened.
                     guard let self else { return .failed(status: -1) }
                     let outcome = self.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
-                    if self.requestManualHint != nil, !self.sessionAllows(shortcut) {
+                    if !self.allowsShortcutRegistration(shortcut) {
                         self.hotkeys?.unregister(shortcut) // Validate ownership, then release until Start.
                     }
                     return outcome
@@ -341,8 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let interviewFormat = brain.preferences.interviewFormat
         let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
         let explanationsEnabled = explanationPreferences.isEnabled && appearance.boxEnabled
-        let codeEnabled = codePreferences.isEnabled && appearance.boxEnabled
-            && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
+        let codeEnabled = codePreferences.isEnabled(for: interviewFormat, boxEnabled: appearance.boxEnabled)
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         // The brain's key stays OpenAI-only (above); transcription reads whichever credential the
         // selected provider owns — Apple Speech has none, so this is "" there and unused.
@@ -358,13 +364,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             requiredPermissions: PermissionGate.required.subtracting([.systemAudio]),
             requiredCredentials: requiredCredentials,
             requiresTranscriptionPreparation: preparesAppleSpeech)
-        let readinessStart = readiness.begin(configuration: readinessConfiguration)
-        let readinessSession = readinessStart.session
-        self.readinessSession = readinessSession
-        applyReadinessEffects(readinessStart.effects)
+        let readinessSession: JarvisReadiness.Session
+        if wasRunning, let activeSession = self.readinessSession {
+            // Keep health callbacks attached to the live session throughout replacement preflight.
+            // Only a successful installation may replace its readiness identity.
+            readinessSession = activeSession
+        } else {
+            let readinessStart = readiness.begin(configuration: readinessConfiguration)
+            readinessSession = readinessStart.session
+            self.readinessSession = readinessSession
+            applyReadinessEffects(readinessStart.effects)
+        }
 
         let grantedPermissions = Permissions.grantedReadinessPermissions()
-        observeReadiness(.permissions(granted: grantedPermissions), for: readinessSession)
+        if !wasRunning { observeReadiness(.permissions(granted: grantedPermissions), for: readinessSession) }
         let missingPermissions = readinessConfiguration.requiredPermissions
             .subtracting(grantedPermissions)
         guard missingPermissions.isEmpty else {
@@ -382,7 +395,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let availableCredentials = Set(Credential.allCases.filter {
             secrets.apiKey(for: $0)?.isEmpty == false
         })
-        observeReadiness(.credentials(available: availableCredentials), for: readinessSession)
+        if !wasRunning { observeReadiness(.credentials(available: availableCredentials), for: readinessSession) }
         let missingCredentials = requiredCredentials.subtracting(availableCredentials)
         guard missingCredentials.isEmpty else {
             jlog("Jarvis: can't start — missing credential(s): "
@@ -461,8 +474,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 guard !Task.isCancelled,
                       self.pendingStartRevision == revision,
                       self.readinessSession == readinessSession else { return }
-                self.observeReadiness(
-                    .transcriptionPreparation(.ready), for: readinessSession)
+                if !wasRunning {
+                    self.observeReadiness(.transcriptionPreparation(.ready), for: readinessSession)
+                }
             }
             let detected = await detector.detectAllAsync(cliProviders)
             guard !Task.isCancelled,
@@ -479,9 +493,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             } ?? true
             guard credentialIsCurrent, transcriptionCredentialIsCurrent,
                   self.transcriptionPreferences.configuration == transcriptionConfiguration,
-                  self.brain.preferences.route == brainRoute else {
+                  self.brain.preferences.route == brainRoute,
+                  self.brain.preferences.interviewFormat == interviewFormat else {
                 self.pendingStartTask = nil
-                self.cancelReadinessAttempt(readinessSession)
+                if !wasRunning { self.cancelReadinessAttempt(readinessSession) }
                 return
             }
             self.pendingStartTask = nil
@@ -500,6 +515,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 detectedCLIs: detectedCLIs,
                 wasRunning: wasRunning,
                 reportContext: reportContext,
+                readinessConfiguration: readinessConfiguration,
                 readinessSession: readinessSession)
         }
         return true
@@ -517,8 +533,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         guard pendingStartRevision == revision,
               self.readinessSession == readinessSession else { return }
         pendingStartTask = nil
-        observeReadiness(
-            .transcriptionPreparation(.blocked(blocker)), for: readinessSession)
+        if !wasRunning {
+            observeReadiness(.transcriptionPreparation(.blocked(blocker)), for: readinessSession)
+        }
         jlog("Jarvis: can't start — \(diagnostic)")
         if wasRunning {
             artifacts.sessionAudit?.record(.settingsChangeNotApplied)
@@ -537,9 +554,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         guard pendingStartRevision == revision,
               self.readinessSession == readinessSession else { return }
         pendingStartTask = nil
-        observeReadiness(
-            .permissions(granted: Permissions.grantedReadinessPermissions()),
-            for: readinessSession)
+        if !wasRunning {
+            observeReadiness(.permissions(granted: Permissions.grantedReadinessPermissions()),
+                             for: readinessSession)
+        }
         jlog("Jarvis: can't start — system audio is no longer proved for this session.")
         if wasRunning {
             artifacts.sessionAudit?.record(.settingsChangeNotApplied)
@@ -562,6 +580,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
         wasRunning: Bool,
         reportContext: UserFacingError.PresentationContext,
+        readinessConfiguration: JarvisReadiness.Configuration,
         readinessSession: JarvisReadiness.Session
     ) -> Bool {
         guard self.readinessSession == readinessSession else { return false }
@@ -572,14 +591,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                                                context: reportContext,
                                                recordSettingsFailure: wasRunning)
         guard preflight.isReady else {
-            observeReadiness(
-                .brainPreparation(.blocked(.providerUnavailable)),
-                for: readinessSession)
+            if !wasRunning {
+                observeReadiness(.brainPreparation(.blocked(.providerUnavailable)), for: readinessSession)
+            }
             return false
         }
         if let primaryCLI = preflight.cli {
             detectedCLIs[brainProvider] = primaryCLI
         }
+        let installedReadinessSession: JarvisReadiness.Session
+        if wasRunning {
+            let readinessStart = readiness.begin(configuration: readinessConfiguration)
+            installedReadinessSession = readinessStart.session
+            self.readinessSession = installedReadinessSession
+            applyReadinessEffects(readinessStart.effects)
+            // Preflight has proved these requirements; publish them only when replacement commits.
+            observeReadiness([
+                .permissions(granted: readinessConfiguration.requiredPermissions),
+                .credentials(available: readinessConfiguration.requiredCredentials),
+                .transcriptionPreparation(.ready),
+            ], for: installedReadinessSession)
+        } else {
+            installedReadinessSession = readinessSession
+        }
+        let readinessSession = installedReadinessSession
         stop(reason: .replacedByNewSession, preserving: readinessSession)
         reportedTranscriptionFailure = false
         // A fresh transcript for the fresh pipeline. Reusing the old one would re-send a dead run's
@@ -588,6 +623,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         transcript = RollingTranscript()
         artifacts.beginNewSession()  // rotate to a fresh session dir + activity/debug log
         overlayBox.clear() // …and a fresh response history for the new conversation
+        overlayCaption.clear()
         overlayBox.setInterviewFormat(interviewFormat)
         switch transcriptionConfiguration.provider {
         case .openAI:
@@ -918,8 +954,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
         overlayBox.setSessionLive(false)     // the history box goes away with the session
+        overlayBox.setInterviewFormat(brain.preferences.interviewFormat)
         requestManualHint = nil              // hotkey beeps again once there's no live session
         overlayBox.setCodeEnabled(false)
+        refreshOptionalShortcut(.showCode)
         // Capture and clear this session handle before a quick Start installs another. The cancelled
         // tasks retain only its observer ports and can finish enqueueing into the old session.
         let (audit, auditDirectory) = artifacts.takeCurrentSession()
@@ -1179,6 +1217,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
 
 
+    /// Both explicit mode pickers use the same replacement path. Start keeps the running
+    /// session intact until preflight succeeds, then clears all overlay content as it installs.
+    private func selectInterviewFormat(_ format: InterviewFormat?) {
+        guard brain.preferences.interviewFormat != format else { return }
+        brain.preferences.interviewFormat = format
+        brainSection.refreshInterviewFormatSelection()
+        // Invalidate an older preparation even if this selection fails an immediate Start guard.
+        pendingStartRevision &+= 1
+        pendingStartTask?.cancel()
+        pendingStartTask = nil
+        if !sessionIsLive {
+            overlayBox.setInterviewFormat(format)
+            overlayBox.setCodeEnabled(codePreferences.isEnabled(for: format, boxEnabled: appearance.boxEnabled))
+            refreshOptionalShortcut(.showCode)
+        }
+        _ = start()
+    }
+
+    private func allowsShortcutRegistration(_ shortcut: CoachingShortcut) -> Bool {
+        if requestManualHint != nil { return sessionAllows(shortcut) }
+        return shortcut != .showCode || brain.preferences.interviewFormat == .coding
+    }
+
     private func sessionAllows(_ shortcut: CoachingShortcut) -> Bool {
         switch shortcut {
         case .hint: true
@@ -1189,7 +1250,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
     private func refreshOptionalShortcut(_ shortcut: CoachingShortcut) {
         let enabled = shortcut == .explainMore ? explanationPreferences.isEnabled : codePreferences.isEnabled
-        if enabled, requestManualHint == nil || sessionAllows(shortcut),
+        if enabled, allowsShortcutRegistration(shortcut),
            let preference = hotkeyPreferences.first(where: { $0.shortcut == shortcut }) {
             hotkeys?.apply(preference.combination, for: shortcut)
         } else {

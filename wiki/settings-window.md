@@ -64,7 +64,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, interview format, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; interview format and transcription changes take effect on the next Start. |
+| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, interview format, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; changing interview format starts a fresh session, while transcription changes apply on the next Start. |
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in four stacked cards — **OpenAI API**, **Gemini API**, **Claude Code**, **Codex CLI**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key checks it with one models-list request and shows the vendor's verdict under the row. Saving never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also has **Show diagrams**, enabled by default. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
@@ -102,10 +102,17 @@ place is why the panel, not the two call sites, owns it: switching the box on fr
 stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides
 the rule while the Overlay tab is open and re-derives it on close.
 
-The session’s selected interview format appears beside the name in the box’s existing header
-(for example, **Jarvis · Coding**). It uses the same Start-time selection as the coaching prompt,
-remains visible when collapsed, and survives clearing responses. With no selection or after Stop,
-the title reads **Jarvis**. The format shares the header’s sizing and adds no extra row.
+The session’s selected interview format appears in the header’s clickable title
+(for example, **Jarvis · Coding ▾**). The mode list is drawn inside the capture-excluded panel;
+native popup menus would create an unprotected window. It scrolls in short overlays, opens a
+collapsed box, and dismisses on selection, another title click, an outside click inside the box,
+or Stop. With no selection the title offers **None**.
+
+Choosing a different mode from either the header or Brain Settings saves it and starts a fresh
+session, even when stopped. Successful startup clears the conversation and all overlay content
+(hints, explanations, diagrams, and code). Failed preflight preserves the running session and its
+header; the saved selection remains available for the next Start. Re-selecting the saved mode
+or dismissing the list does not restart. Both pickers share the same available modes and selection.
 
 Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
 backdrop, not a hidden one. Nothing here takes a surface off screen: that is the On/Off toggle, and
@@ -174,7 +181,7 @@ preview is running. The plain setters
 ## Shortcuts
 
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
-They work during a session; code is available in Coding and general sessions only. Hints and
+They work during a session; code is available only in Coding mode, including its shortcut and the stopped appearance preview. Hints and
 explanations are fallbacks for proactive coaching; the code hotkey requests a snippet only when the session started with code enabled; [architecture.md](./architecture.md#on-demand-coaching-shortcuts)
 defines their context, output, and scheduling behavior. Each card uses `HotkeyBindingView` and the
 existing recorder, requiring Command or Option. A successful rebind takes effect immediately and
@@ -298,7 +305,7 @@ three shared levels pass through.
 
 **Interview format.** The Coaching-card picker defaults to **None** (base prompt only), with
 **Coding**, **Behavioral**, **System Design**, and **General Technical** as explicit selections.
-The selected addendum applies on the next Start. General Technical uses available conversation and
+Choosing a different format immediately starts a fresh session and clears the overlay once startup succeeds. General Technical uses available conversation and
 screen context; capture remains on demand. Per-format policy and the explicit System Design
 requirement for diagrams are defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis).
 

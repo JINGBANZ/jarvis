@@ -29,11 +29,13 @@ final class BrainSection: NSObject, SettingsSection {
     private let onPreferencesChanged:
         (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
     private let transcription: TranscriptionControls
+    private let onInterviewFormatSelected: (InterviewFormat?) -> Void
+    private var formatPopup: NSPopUpButton?
     /// Only formats with real content are offered — showing an entry that does nothing is worse
     /// than not showing it, and it means a later `<format>.md` addition needs zero Swift changes to
     /// appear here. Computed once (`promptAddendum` reads a file per access) since this section is
     /// built once per app launch, not per keystroke.
-    private let availableFormats = InterviewFormat.allCases.filter { !$0.promptAddendum.isEmpty }
+    private let availableFormats = InterviewFormat.availableCases
 
     private var pageView: SettingsPageView?
     private var scrollView: SettingsScrollView?
@@ -55,8 +57,10 @@ final class BrainSection: NSObject, SettingsSection {
         detector: AgentCLIDetector,
         onPreferencesChanged:
             @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
-        transcriptionPreferences: TranscriptionPreferences
+        transcriptionPreferences: TranscriptionPreferences,
+        onInterviewFormatSelected: @escaping (InterviewFormat?) -> Void
     ) {
+        self.onInterviewFormatSelected = onInterviewFormatSelected
         self.preferences = preferences
         self.detector = detector
         self.onPreferencesChanged = onPreferencesChanged
@@ -146,6 +150,7 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     func didBecomeActive() {
+        refreshInterviewFormatSelection()
         refreshDetection()
     }
 
@@ -177,6 +182,7 @@ final class BrainSection: NSObject, SettingsSection {
         formatPopup.target = self
         formatPopup.action = #selector(interviewFormatChanged)
         formatPopup.setAccessibilityLabel("Interview format")
+        self.formatPopup = formatPopup
         if let format = preferences.interviewFormat,
            let index = availableFormats.firstIndex(of: format) {
             formatPopup.selectItem(at: index + 1)
@@ -185,7 +191,7 @@ final class BrainSection: NSObject, SettingsSection {
         }
         let formatRow = SettingsRowView(
             title: "Interview format",
-            detail: "Applies on the next Start",
+            detail: "Starts a fresh session and clears the overlay",
             controlView: formatPopup)
         content.addSubview(formatRow)
 
@@ -263,15 +269,15 @@ final class BrainSection: NSObject, SettingsSection {
         preferencesDidChange(.effort)
     }
 
-    /// Fixed for the whole session like the transcription language/model choice — applies on the
-    /// next Start only, so this never triggers the CLI-preflight reapply `preferencesDidChange` owns.
+    func refreshInterviewFormatSelection() {
+        let index = preferences.interviewFormat.flatMap { availableFormats.firstIndex(of: $0) }
+        formatPopup?.selectItem(at: index.map { $0 + 1 } ?? 0)
+    }
+
     @objc private func interviewFormatChanged(_ sender: NSPopUpButton) {
         let row = sender.indexOfSelectedItem
         guard row == 0 || availableFormats.indices.contains(row - 1) else { return }
-        let format = row == 0 ? nil : availableFormats[row - 1]
-        preferences.interviewFormat = format
-        jlog("Jarvis: \(format?.displayName ?? "None") interview format selected for the "
-            + "next Start.")
+        onInterviewFormatSelected(row == 0 ? nil : availableFormats[row - 1])
     }
 
     private func preferencesDidChange(_ change: PreferenceChange) {

@@ -7,6 +7,9 @@ public enum InterviewFormat: String, CaseIterable, Codable, Sendable {
     case behavioral = "behavioral"
     case generalTechnical = "general-technical"
 
+    /// Both mode pickers offer only formats with authored guidance.
+    public static var availableCases: [Self] { allCases.filter { !$0.promptAddendum.isEmpty } }
+
     public var displayName: String {
         switch self {
         case .coding: "Coding"

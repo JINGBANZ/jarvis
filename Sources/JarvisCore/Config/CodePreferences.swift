@@ -8,6 +8,11 @@ public final class CodePreferences {
         self.defaults = defaults
     }
 
+    /// Resolve at Start (or for a stopped preview), without erasing the saved preference.
+    public func isEnabled(for format: InterviewFormat?, boxEnabled: Bool) -> Bool {
+        isEnabled && boxEnabled && format == .coding
+    }
+
     public var isEnabled: Bool {
         get {
             defaults.object(forKey: Defaults.Code.enabledKey) as? Bool

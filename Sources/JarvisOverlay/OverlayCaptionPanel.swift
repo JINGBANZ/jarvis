@@ -226,6 +226,17 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
         panel.backgroundColor = NSColor.black.withAlphaComponent(CGFloat(opacity))
     }
 
+    /// Drop the previous session's active and queued tips without changing appearance preferences.
+    /// A Settings sample can stay visible, but closing it must never resume the old conversation.
+    public func clear() {
+        tickWorkItem?.cancel(); tickWorkItem = nil
+        queue.removeAll()
+        active = nil
+        guard !isPreviewing else { return }
+        label.stringValue = ""
+        hide()
+    }
+
     /// Switch the caption on or off, live. Turning it off drops any in-flight and queued tips and hides
     /// the panel at once (unless a Settings preview currently owns it — the preview restores to this
     /// state on close). Turning it on simply lets the next tip through.

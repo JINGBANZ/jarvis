@@ -316,6 +316,17 @@ the human-facing coaching record. The current validation priority lives in
   Activity.
 - Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
   controls and preview follow the toggle, and confirm the choice survives relaunch.
+- During a Zoom or Meet entire-display share with a second participant/device viewing the feed,
+  open the interview-format dropdown beside Jarvis. Verify the caption, box, and **open dropdown**
+  are absent from the recipient's live view and any meeting recording; repeat with window sharing.
+  Check both the expanded box and opening the picker from a collapsed box. The local preview and
+  offline `sharingType` assertions do not establish recipient-side invisibility. Record the macOS
+  and meeting-app versions, sharing mode, and observed result when performing this check.
+- Switch interview format through both the header and Brain Settings. Confirm a successful switch
+  starts a fresh conversation and clears the box, caption, and queued tips; a failed preflight must
+  preserve the running session and its health monitoring. Reselecting the saved format or dismissing
+  the picker must not restart. Confirm code output and its shortcut work only in Coding with the box
+  and code preference enabled, and drag the box using the header space outside the clickable format.
 - Validate realtime recovery with `./scripts/transcription-benchmark.sh reconnect`; do not disable the
   Mac's network connection. Confirm its summary reports both scoped-interruption phrases exactly once.
 - Confirm the development build's menu has **no** update item. In a signed release build, confirm
