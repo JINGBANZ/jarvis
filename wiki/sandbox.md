@@ -170,9 +170,9 @@ directory also holds its derived `eval-transcript.txt`, `eval-report.md`, and br
 `eval-report.html`. The evaluator receives this complete owner-only session directory;
 `jarvis-activity.jsonl` is not copied or prefiltered into another prompt artifact. Every
 launch writes this record as the default session-review affordance. The files go to a per-session
-directory in the **gitignored, workspace-local `.jarvis/`** (passed to the `open`-launched app via
-`--log-dir` by `build-app.sh --run`) — or, when the bundle is opened directly with no `--log-dir`, a
-per-user **`~/Library/Application Support/Jarvis/sessions/`** alongside the API key — at **`0600`**
+directory under the build-specific base defined by
+[`SessionStore.baseDirectory`](../Sources/JarvisCore/Diagnostics/SessionStore.swift), following the
+[history isolation contract](./build-and-run.md#the-live-activity-viewer), at **`0600`**
 owner-only permissions inside a **`0700`** dir, **fresh each session**, and **never `/tmp`**
 (world-readable, shared across user accounts). Growth is bounded: each Start prunes to the **10 most recent** session
 dirs, and the viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and

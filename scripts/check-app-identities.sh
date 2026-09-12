@@ -42,7 +42,7 @@ do
   /usr/bin/grep -Fqx "$required" "$dev_script" \
     || fail "$dev_script must assemble Jarvis Dev.app with its independent bundle identity."
 done
-/usr/bin/grep -Fqx '    open ./"$APP" --args --log-dir "$LOGDIR"' "$dev_script" \
+/usr/bin/grep -Fqx '    open ./"$APP"' "$dev_script" \
   || fail "$dev_script must launch the assembled development bundle."
 
 /usr/bin/grep -Fqx 'APP="Jarvis.app"' scripts/package-app.sh \

@@ -2,8 +2,8 @@ import Foundation
 
 /// Reads, lists, prunes, and deletes past session directories so the activity viewer can browse history.
 /// Foundation-only and stateless beyond its two URLs. All operations are bounded to immediate
-/// subdirectories of `base` whose name matches the session-id shape, so a stray `--log-dir` or a
-/// malformed persisted filename can't make it touch anything outside the log tree. See
+/// subdirectories of `base` whose name matches the session-id shape, so a malformed persisted
+/// filename can't make it touch anything outside the log tree. See
 /// wiki/build-and-run.md.
 public struct SessionStore: Sendable {
     public struct Session: Sendable, Equatable {
@@ -28,6 +28,16 @@ public struct SessionStore: Sendable {
     public init(base: URL, current: URL?) {
         self.base = base
         self.current = current
+    }
+
+    /// Choose session storage without I/O: each development bundle owns its containing worktree's
+    /// history, regardless of launch method; releases keep the established per-user history.
+    public static func baseDirectory(isDevelopmentBuild: Bool, bundleURL: URL,
+                                     appDataDirectory: URL) -> URL {
+        if isDevelopmentBuild {
+            return bundleURL.deletingLastPathComponent().appendingPathComponent(".jarvis", isDirectory: true)
+        }
+        return appDataDirectory.appendingPathComponent("sessions", isDirectory: true)
     }
 
     /// Terminal evaluation uses the same chronology as Activity, including contentless sessions.

@@ -122,6 +122,8 @@ receives the complete session directory and reads the full, unfiltered `jarvis-a
 whenever it needs the user-visible sequence, alongside first-class coaching-attempt provenance, raw
 brain traffic, screenshots, and source code. Development evaluates against the live checkout
 containing the app bundle; releases derive the recorded version from the session directory name.
+`SessionStore.baseDirectory` keeps development history in that same worktree regardless of launch
+method, separate from release history; see the [session-folder rule](./build-and-run.md#the-live-activity-viewer).
 `SessionDirectoryID` in `Sources/JarvisCore/Diagnostics/` owns build identity and timestamp ordering;
 `EvaluationSource` and `ReleaseSourceStore` in `Sources/JarvisEvaluation/` select matching source or
 available release source with an explicit mismatch disclosure. Start has no separate version-file

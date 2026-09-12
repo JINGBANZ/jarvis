@@ -3,6 +3,44 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct SessionStoreTests {
+    @Test func developmentHistoryIsIsolatedPerWorktreeAndFromRelease() throws {
+        let root = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let appData = root.appendingPathComponent("Application Support/Jarvis")
+        let firstWorktree = root.appendingPathComponent("main checkout")
+        let secondWorktree = root.appendingPathComponent("feature worktree")
+        let first = SessionStore.baseDirectory(isDevelopmentBuild: true,
+            bundleURL: firstWorktree.appendingPathComponent("Jarvis Dev.app"), appDataDirectory: appData)
+        let second = SessionStore.baseDirectory(isDevelopmentBuild: true,
+            bundleURL: secondWorktree.appendingPathComponent("Jarvis Dev.app"), appDataDirectory: appData)
+        let release = SessionStore.baseDirectory(isDevelopmentBuild: false,
+            bundleURL: root.appendingPathComponent("Applications/Jarvis.app"), appDataDirectory: appData)
+        #expect(first == firstWorktree.appendingPathComponent(".jarvis", isDirectory: true))
+        #expect(second == secondWorktree.appendingPathComponent(".jarvis", isDirectory: true))
+        #expect(release == appData.appendingPathComponent("sessions", isDirectory: true))
+        // Path selection itself neither creates directories nor probes for a checkout.
+        for base in [first, second, release] { #expect(!FileManager.default.fileExists(atPath: base.path)) }
+        let ids = ["dev-2026-09-12_10-00-00_aaaa", "dev-2026-09-12_11-00-00_bbbb",
+                   "v0.2.2-2026-09-12_12-00-00_cccc"]
+        for (base, id) in zip([first, second, release], ids) {
+            try makeSession(base, id, lines: [#"{"t":"10:00:00","m":"heard question","k":"heard"}"#])
+            #expect(SessionStore(base: base, current: nil).listSessions().map(\.id) == [id])
+        }
+        SessionStore(base: first, current: nil).clearHistory()
+        #expect(SessionStore(base: first, current: nil).listSessions().isEmpty)
+        #expect(SessionStore(base: second, current: nil).listSessions().map(\.id) == [ids[1]])
+        #expect(SessionStore(base: release, current: nil).listSessions().map(\.id) == [ids[2]])
+    }
+
+    @Test func releaseHistoryDoesNotDependOnBundleLocation() {
+        let appData = URL(fileURLWithPath: "/user/Application Support/Jarvis", isDirectory: true)
+        for bundle in ["/Applications/Jarvis.app", "/Volumes/Jarvis/Jarvis.app"] {
+            #expect(SessionStore.baseDirectory(isDevelopmentBuild: false,
+                bundleURL: URL(fileURLWithPath: bundle), appDataDirectory: appData)
+                == appData.appendingPathComponent("sessions", isDirectory: true))
+        }
+    }
+
     @Test func prefixedAndOldSessionsShareChronologyAndRetention() throws {
         let base = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: base) }

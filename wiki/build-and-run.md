@@ -51,10 +51,9 @@ other. With the development identity, bundle id, and checkout path fixed, its gr
 rebuilds and relaunches. On the first build macOS prompts once to let `codesign` use the new key —
 click **"Always Allow"** — and the first launch requests the development app's own capture grants.
 
-The identity split is not a second data sandbox. Both variants intentionally keep the established
-owner-only API-key and direct-open session storage under `Application Support/Jarvis`; launching the
-development app through `build-app.sh --run` continues to put its sessions in that checkout's
-`.jarvis/`. If a checkout still contains a generated `Jarvis.app` from before the split, move only
+The identity split is not a second data sandbox. Both variants intentionally share the established
+owner-only API-key storage; session histories are separated by the
+[session-folder rule](#the-live-activity-viewer). If a checkout still contains a generated `Jarvis.app` from before the split, move only
 that checkout-local bundle to the Trash so it cannot be launched accidentally; leave
 `/Applications/Jarvis.app` in place.
 
@@ -219,11 +218,14 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
 - **The viewer and its file logging are always on** (they used to be `--dev`-gated; that flag is gone).
   On every Start, `ActivityLog` writes the coaching exchange to `jarvis-activity.jsonl` while `jlog`
   writes agent-facing diagnostics to the unified log (Console.app) and `jarvis-debug.log`. Both files
-  live in the gitignored, workspace-local `.jarvis/<session>/` (`0600` files in a `0700` dir).
-  `build-app.sh --run` passes that path via `--log-dir`, since the `open`-launched app can't find the
-  repo itself; opening the bundle directly with no `--log-dir` falls back to
-  `~/Library/Application Support/Jarvis/sessions/`. The full privacy posture is in
-  [sandbox.md](./sandbox.md).
+  use the base selected by
+  [`SessionStore.baseDirectory`](../Sources/JarvisCore/Diagnostics/SessionStore.swift): development
+  history belongs to the checkout containing the running bundle, while releases use per-user app
+  storage. The bundle location gives each worktree its own history and evaluation source, independent
+  of the working directory or whether launch comes from the build script, Finder, Dock, or `open`.
+  Existing histories stay where they are; there is no automatic migration or cross-variant browsing.
+  Folder selection only constructs a URL; Start creates and protects its usual session directory.
+  The full privacy posture is in [sandbox.md](./sandbox.md).
 - Activity JSONL stays append-only for durable writes, but each new row carries numeric occurrence,
   insertion, and record times. Live and reopened views apply the shared Core chronology rule rather
   than treating file append order as speech order. Historical files without complete chronology
@@ -325,7 +327,9 @@ the human-facing coaching record. The current validation priority lives in
   saved report discloses the unknown version or mismatch. With no obtainable source, verify the
   dialog provides a next step. Quit during fetching must cancel the download without publishing a
   partial cache; subsequent access must reclaim abandoned staging. For development, verify both
-  `build-app.sh --run` and plain `open` use the bundle's checkout. Confirm prefixed and older sessions
+  `build-app.sh --run` and plain `open` use the bundle's checkout for both history and source. Repeat
+  with a second worktree and confirm neither its history nor release history appears in the first.
+  Confirm prefixed and older sessions
   remain in time order in Activity, retention, and the terminal evaluator's default selection.
   Confirm the report uses the four generic sections, cites concrete session or source anchors for
   findings, and keeps unavailable evidence in **Evidence gaps** instead of inventing a conclusion.

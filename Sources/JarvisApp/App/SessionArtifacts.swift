@@ -121,18 +121,13 @@ final class SessionArtifacts {
             version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
     }
 
-    /// Where session logs go. `build-app.sh --run` passes a `--log-dir` pointing at the repo's
-    /// gitignored, workspace-local `.jarvis/` (the app is launched by `open` from an arbitrary cwd, so
-    /// it can't find the repo itself). When the bundle is opened directly with no `--log-dir`, fall back
-    /// to a per-user app-data dir alongside the API key — `~/Library/Application Support/Jarvis/sessions/`
-    /// — which is always writable and owner-only. Each Start nests a per-session subdir under this base
-    /// (see `beginNewSession`).
+    /// Bundle location, not launch arguments or cwd, keeps each development worktree's history
+    /// beside its source. The same base feeds Start, Activity, and retention.
     func logDirectory() -> URL {
-        let args = CommandLine.arguments
-        if let i = args.firstIndex(of: "--log-dir"), i + 1 < args.count {
-            return URL(fileURLWithPath: args[i + 1])
-        }
-        return secretFile.directoryURL.appendingPathComponent("sessions")
+        SessionStore.baseDirectory(
+            isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
+            bundleURL: Bundle.main.bundleURL,
+            appDataDirectory: secretFile.directoryURL)
     }
 
     func evaluationSource(for session: URL) -> EvaluationSource {
