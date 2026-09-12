@@ -2,9 +2,8 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ToolDefsTests {
-    @Test(arguments: [speakTool, systemDesignSpeakTool])
-    func speakSchemaLeavesHighlightLimitToLocalValidation(_ tool: ToolDef) {
-        #expect(!tool.parametersJSON.contains("\"maxItems\""))
+    @Test func speakSchemaLeavesHighlightLimitToLocalValidation() {
+        #expect(!speakTool.parametersJSON.contains("\"maxItems\""))
         #expect(CodeSnippet(language: "swift", placement: "Inside solve", code: "return result",
                             highlightedLines: Array(repeating: 1, count: 13)) == nil)
     }
@@ -20,6 +19,10 @@ import Testing
     /// so the client no longer splits a free-form string.
     @Test func speakToolReturnsStrictLinesArray() {
         #expect(speakTool.parametersJSON.contains("\"lines\""))
+        // One schema on every brain: `mermaid` is declared always, nullable so strict Structured
+        // Outputs treats it as optional while it stays in `required`.
+        #expect(speakTool.parametersJSON.contains(#""mermaid":{"type":["string","null"]"#))
+        #expect(speakTool.parametersJSON.contains(#""required":["lines","mermaid""#))
         #expect(speakTool.parametersJSON.contains("\"array\""))
         #expect(speakTool.parametersJSON.contains("\"required\""))
         // strict mode requires additionalProperties:false on every object in the schema.
@@ -109,8 +112,12 @@ import Testing
         #expect(JarvisPrompts.Coach.system.contains("Never claim you opened an app"))
     }
 
+    /// The tip style governs `speak` and travels with it; `speak` is always offered, so this text
+    /// still reaches the model in every session.
     @Test func coachPromptHasOneConsistentFullSolutionRule() {
-        #expect(JarvisPrompts.Coach.system.contains("Give a full solution only when \"me\" explicitly asks"))
+        #expect(JarvisPrompts.Coach.ToolGuidance.speak
+            .contains("Give a full solution only when \"me\" explicitly asks"))
+        #expect(!JarvisPrompts.Coach.ToolGuidance.speak.contains("never the whole answer"))
         #expect(!JarvisPrompts.Coach.system.contains("never the whole answer"))
     }
 
@@ -119,7 +126,8 @@ import Testing
     /// vocabulary already in front of the user; a genuinely necessary new term is glossed, not
     /// dropped, because accuracy outranks brevity.
     @Test func coachPromptGroundsTipVocabularyInWhatTheUserAlreadySees() {
-        let prompt = JarvisPrompts.Coach.system.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let prompt = JarvisPrompts.Coach.ToolGuidance.speak
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         #expect(prompt.contains("Name things with the words already in front of \"me\""))
         // Either speaker: the interviewer's spoken terms are also in front of the user, and
         // interviewer questions are first-class coaching input.

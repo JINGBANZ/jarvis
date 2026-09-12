@@ -509,7 +509,7 @@ import JarvisCore
     /// combinations that used to throw `instructions changed after runtime initialization` on every
     /// attempt, because composition baked the plain `coachTools` while the coach loop sent a
     /// format-resolved or prep-material set (#273). Both sides now resolve through
-    /// `sessionCoachTools`, so warming with a session's set and sending it back must dispatch.
+    /// `CoachCapabilities`, so warming with a session's set and sending it back must dispatch.
     @Test(arguments: [
         (InterviewFormat?.none, false), (.systemDesign, false), (.coding, true), (.behavioral, true),
     ])
@@ -519,16 +519,17 @@ import JarvisCore
         let workDir = try makeWorkDir()
         let backend = FakeLocalAgentRuntime(
             replies: [#"{"tool":"speak","arguments":{"lines":["tip"],"mermaid":null}}"#])
-        let tools = sessionCoachTools(interviewFormat: format, prepMaterial: prepMaterial)
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: prepMaterial)
         let prompt = JarvisPrompts.Coach.system(
-            prepMaterial: prepMaterial, formatAddendum: format?.promptAddendum ?? "")
+            capabilities: capabilities, formatAddendum: format?.promptAddendum ?? "")
         let client = makeClient(provider: .claudeCode, workDir: workDir,
                                 runtime: CLIBrainRuntime(backend: backend),
-                                systemPrompt: prompt, tools: tools)
+                                systemPrompt: prompt, tools: capabilities.tools)
 
         let response = try await client.respond(
             messages: [.system(prompt), .user("help")],
-            tools: tools,
+            tools: capabilities.tools,
             toolChoice: .required)
 
         #expect(response.toolCalls.isEmpty == false)
@@ -541,11 +542,13 @@ import JarvisCore
         let workDir = try makeWorkDir()
         let backend = FakeLocalAgentRuntime(
             replies: [#"{"tool":"speak","arguments":{"lines":["tip"]}}"#])
-        let baked = JarvisPrompts.Coach.system(prepMaterial: false, formatAddendum: "")
+        let baked = JarvisPrompts.Coach.system(capabilities: .default, formatAddendum: "")
         let client = makeClient(provider: .claudeCode, workDir: workDir,
                                 runtime: CLIBrainRuntime(backend: backend),
                                 systemPrompt: baked, tools: coachTools)
-        let sent = coachTools.map { $0.name == speakTool.name ? systemDesignSpeakTool : $0 }
+        let widened = ToolDef(name: speakTool.name, description: speakTool.description,
+                              parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},"required":["lines"],"additionalProperties":false}"#)
+        let sent = coachTools.map { $0.name == speakTool.name ? widened : $0 }
 
         do {
             _ = try await client.respond(

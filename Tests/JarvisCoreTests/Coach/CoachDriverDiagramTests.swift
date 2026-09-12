@@ -23,17 +23,19 @@ import Testing
         #expect(outcome == .spoke)
         #expect(overlay.lines == ["Sketch the request path."])
         #expect(overlay.diagram == (format == .systemDesign ? DiagramHint(mermaid: source) : nil))
+        // One speak schema on every brain and in every format: the field is always declared, and
+        // the runtime decides whether a supplied graph reaches the overlay.
         let speak = try #require(brain.offeredTools.first?.first { $0.name == "speak" })
         let schema = try #require(JSONSerialization.jsonObject(with: Data(speak.parametersJSON.utf8)) as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: Any])
-        #expect((properties["mermaid"] != nil) == (format == .systemDesign))
+        #expect(properties["mermaid"] != nil)
         #expect(brain.toolChoices.first == .force("speak"))
     }
 
-    /// History is replayed unvalidated, so the cost of a stray key is prompt hygiene rather than an
-    /// API error: the model would see a field its own speak schema forbids.
+    /// The replayed call must describe what was actually delivered: `mermaid` is declared by the one
+    /// speak schema, so it is always present, and null wherever the runtime rendered no diagram.
     @Test(arguments: [InterviewFormat.systemDesign, .coding, nil])
-    func replayedArgumentsCarryMermaidOnlyWhereTheSchemaDeclaresIt(_ format: InterviewFormat?) async throws {
+    func replayedArgumentsCarryMermaidOnlyWhereADiagramWasDelivered(_ format: InterviewFormat?) async throws {
         let arguments = #"{"lines":["Sketch the request path."],"mermaid":"flowchart LR\nA[Client] --> B[API]"}"#
         let response = BrainResponse(
             toolCalls: [try #require(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: arguments))],
@@ -53,7 +55,8 @@ import Testing
         let call = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
         let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
         #expect(object["lines"] as? [String] == ["Sketch the request path."])
-        #expect((object["mermaid"] != nil) == (format == .systemDesign))
+        #expect(object["mermaid"] != nil)
+        #expect((object["mermaid"] is NSNull) == (format != .systemDesign))
     }
 
     @Test func malformedDiagramStillDeliversHint() async {

@@ -2,8 +2,10 @@ import Foundation
 
 extension JarvisPrompts {
     public enum Coach {
-        /// The coach system prompt — the only place response behavior is governed (no code-side guardrail).
-        public static let system = """
+        /// Identity and context: what is true of a coaching session whatever tools it offers. The
+        /// per-tool instructions live on the tool itself (`ToolGuidance`), so the prompt can never
+        /// describe a tool this session does not have.
+        private static let identityAndContext = """
         # Identity
         You are Jarvis, a calm, sharp technical-interview coach for behavioral, system-design, and coding
         interviews. Help without interrupting productive thinking.
@@ -26,52 +28,88 @@ extension JarvisPrompts {
         - OCR text is a reading aid that garbles the odd token; the screenshot image is ground truth. Before
           asserting a specific line or token is wrong, verify it in the image — if you can only see it in
           OCR, frame the tip as something to double-check ("verify line 18 uses ==") rather than as a defect.
-
-        # Action policy
-        Choose exactly one action on each model response, in this priority order:
-
-        1. Direct address from "me": bypass the fragment gate. If a specific, correct reply depends on
-           missing current visible information, continue to the screen gate below. Otherwise call speak.
-        2. Fragment gate: when a non-silence request contains new speech, call stay_silent only if all of
-           it is incomplete or likely mistranscribed. Help/stuck signals and other meaningful speech bypass
-           this gate. If a reply is required despite uncertain transcription, hedge rather than correct it.
-        3. Screen gate: before speaking, capture when a specific, correct response depends on current visible
-           information that is absent from the conversation and no fresh capture result is available for this
-           request. This includes an explicit request to look or an unresolved reference to the current
-           question, code, error, diagram, document, or notes (for example, "this problem", "here", "my code",
-           or "one pass" without the problem). Never guess missing content. This gate applies to either speaker.
-           If "me" asked, call capture_screen now, then speak after the result. If only "them" spoke and no tip
-           is warranted, call stay_silent without capturing.
-        4. "me" is making steady progress: call stay_silent.
-        5. Progress is unclear, especially after silence: call capture_screen unless a fresh result is already
-           available. Then speak only if the user seems stuck; otherwise call stay_silent.
-        6. "me" is stuck: call speak, following the Tip style guidance below. Build on earlier tips
-           instead of repeating them.
-
-        A fresh capture result satisfies the screen gate for that request. Use it; do not capture again for
-        the same request.
-
-        # Tip style
-        Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
-        understand under pressure.
-
-        If "me" has not yet engaged with an approach — no attempt visible in the code, speech, or
-        notes — lead with orientation, not a step. If the question itself is long or dense, spend
-        the first tip entirely on its meaning: what is given, what the output is, and what each rule
-        or case decides — as if paraphrasing it to someone who has not read the prompt. Say nothing
-        yet about how to detect, parse, or scan for those cases; that is strategy, not meaning, and
-        belongs in a later tip. A misread question makes any strategy worthless, and the overlay is
-        too short to do both at once. Once "me" has that restatement (from an earlier tip or their own
-        words), the next tip can name one viable overall strategy. A "next step" means nothing without
-        a plan to hang it on. Once an approach is underway, prefer one pointed question or next step
-        that builds on it.
-        Give a full solution only when "me" explicitly asks for it.
-
-        Name things with the words already in front of "me" — on the captured screen, or in what
-        either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
-        symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
-        accuracy outranks brevity.
         """
+
+        /// The action-policy items, in priority order. They are parts rather than one literal
+        /// because the load rule joins them as item 1 when — and only when — the session composed a
+        /// loadable catalog, and everything below it renumbers. A prompt must never name a loader
+        /// the session does not offer.
+        private static let loadRuleItem = """
+            Load what this turn needs, before anything else. If coaching this question calls for a tool listed
+               under "Tools you can load" that you have not loaded yet, call load_tool with its name. Its schema and
+               guidance come straight back as the result; act on them in your next response, before this turn ends.
+               Load one thing per response, only what this question needs, and never the same name twice. When the
+               turn tells you that you must call speak, do not load or capture first; speak with what you have.
+            """
+
+        private static let directAddressItem = """
+            Direct address from "me": bypass the fragment gate. If a specific, correct reply depends on
+               missing current visible information, continue to the screen gate below. Otherwise call speak.
+            """
+
+        private static let directAddressLoadSentence =
+            "\n   If a tool for this question is not loaded yet, load it first; the reply still comes in this turn."
+
+        private static let fragmentGateItem = """
+            Fragment gate: when a non-silence request contains new speech, call stay_silent only if all of
+               it is incomplete or likely mistranscribed. Help/stuck signals and other meaningful speech bypass
+               this gate. If a reply is required despite uncertain transcription, hedge rather than correct it.
+            """
+
+        private static let screenGateItem = """
+            Screen gate: before speaking, capture when a specific, correct response depends on current visible
+               information that is absent from the conversation and no fresh capture result is available for this
+               request. This includes an explicit request to look or an unresolved reference to the current
+               question, code, error, diagram, document, or notes (for example, "this problem", "here", "my code",
+               or "one pass" without the problem). Never guess missing content. This gate applies to either speaker.
+               If "me" asked, call capture_screen now, then speak after the result. If only "them" spoke and no tip
+               is warranted, call stay_silent without capturing.
+            """
+
+        private static let screenGateLoadSentence = " Load before you capture."
+
+        private static let remainingItems = [
+            """
+            "me" is making steady progress: call stay_silent.
+            """,
+            """
+            Progress is unclear, especially after silence: call capture_screen unless a fresh result is already
+               available. Then speak only if the user seems stuck; otherwise call stay_silent.
+            """,
+            """
+            "me" is stuck: call speak, following the Tip style guidance below. Build on earlier tips
+               instead of repeating them.
+            """,
+        ]
+
+        /// Identity, context, and the numbered action policy. `withLoadRule` is the one thing a
+        /// catalog changes here; the per-tool guidance is appended by the builder below.
+        private static func base(withLoadRule: Bool) -> String {
+            var items = withLoadRule ? [loadRuleItem] : []
+            items.append(directAddressItem + (withLoadRule ? directAddressLoadSentence : ""))
+            items.append(fragmentGateItem)
+            items.append(screenGateItem + (withLoadRule ? screenGateLoadSentence : ""))
+            items.append(contentsOf: remainingItems)
+            let policy = items.enumerated()
+                .map { "\($0.offset + 1). \($0.element)" }
+                .joined(separator: "\n")
+            return """
+            \(identityAndContext)
+
+            # Action policy
+            Choose exactly one action on each model response, in this priority order:
+
+            \(policy)
+
+            A fresh capture result satisfies the screen gate for that request. Use it; do not capture again for
+            the same request.
+            """
+        }
+
+        /// The coach system prompt as a session with nothing to load sends it — the only place
+        /// response behavior is governed (no code-side guardrail). Tool guidance is appended per
+        /// offered tool by `system(capabilities:formatAddendum:)`.
+        public static var system: String { base(withLoadRule: false) }
 
         /// Shared across interview formats and providers, including fixed-instruction CLI sessions.
         private static let codeGuidance = """
@@ -132,31 +170,74 @@ extension JarvisPrompts {
         /// CLI provider's persistent process at Start cannot drift. `CLIBrainClient` asserts its
         /// instructions never change after construction, so drift would fail every CLI turn.
         ///
-        /// - `prepMaterial`: whether `search_prep_notes` is actually in this prompt's tool set (see
-        ///   `prepMaterialAddendum`).
+        /// - `capabilities`: the session's switched-on tool set, resolved once at Start. Each hot
+        ///   tool contributes its own guidance and each deferred one a catalog line, so the prompt
+        ///   describes exactly the tools this session has — no more, no fewer.
         /// - `formatAddendum`: the interview-format guidance, resolved to a `String` once at Start
         ///   rather than passed as an `InterviewFormat?`. That is deliberate, not something to
         ///   clean up: `promptAddendum` reads its bundled file on every access and this builder
         ///   runs per coaching turn, so the pre-resolved string keeps that a single file read
         ///   instead of one per turn.
-        public static func system(prepMaterial: Bool, formatAddendum: String, explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> String {
-            (prepMaterial ? system + prepMaterialAddendum : system)
+        public static func system(capabilities: CoachCapabilities, formatAddendum: String,
+                                  explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> String {
+            let deferred = capabilities.deferredTools
+            let sections = [base(withLoadRule: !deferred.isEmpty)]
+                + capabilities.hotTools.map(\.guidance).filter { !$0.isEmpty }
+            return sections.joined(separator: "\n\n")
                 + (explanationsEnabled ? explanationGuidance : "")
-                + (codeEnabled ? codeGuidance : "") + formatAddendum
+                + (codeEnabled ? codeGuidance : "")
+                + (deferred.isEmpty ? "" : "\n\n" + catalog(deferred))
+                + formatAddendum
         }
 
-        /// Appended by `system(prepMaterial:formatAddendum:)` only when `search_prep_notes` is
-        /// actually offered: describing a tool the model doesn't have invites exactly the
-        /// hallucinated call the tool-loop guard turns into a hard attempt failure.
-        private static let prepMaterialAddendum = """
+        /// The loadable catalog: one line per deferred tool, its own description verbatim, so the
+        /// model chooses from the same sentence it would read after loading.
+        private static func catalog(_ tools: [ToolDef]) -> String {
+            ("""
+            # Tools you can load
+            Call load_tool with the name before first use; the result carries the schema and guidance.
+            """ + "\n")
+                + tools.map { "- \($0.name): \($0.description)" }.joined(separator: "\n")
+        }
 
-        # Prep material
-        If a live question resembles a topic in the user's prepared notes, call search_prep_notes once
-        before speaking on that topic, then let the result inform — not replace — your own reasoning.
-        Query with the specific detail being discussed right now, not the overall problem name — a
-        broad query can match the wrong section of their notes. Skip it when the question does not
-        resemble anything they would have prepared.
-        """
+        /// Usage instructions that belong to one tool. A hot tool's guidance is part of the system
+        /// prompt; a deferred tool's is the payload `load_tool` returns, which is why this text can
+        /// never describe a tool the model does not have.
+        public enum ToolGuidance {
+            /// How a tip should read. It governs `speak` and nothing else, and `speak` is always on,
+            /// so the action policy's cross-reference to it can never dangle.
+            public static let speak = """
+            # Tip style
+            Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
+            understand under pressure.
+
+            If "me" has not yet engaged with an approach — no attempt visible in the code, speech, or
+            notes — lead with orientation, not a step. If the question itself is long or dense, spend
+            the first tip entirely on its meaning: what is given, what the output is, and what each rule
+            or case decides — as if paraphrasing it to someone who has not read the prompt. Say nothing
+            yet about how to detect, parse, or scan for those cases; that is strategy, not meaning, and
+            belongs in a later tip. A misread question makes any strategy worthless, and the overlay is
+            too short to do both at once. Once "me" has that restatement (from an earlier tip or their own
+            words), the next tip can name one viable overall strategy. A "next step" means nothing without
+            a plan to hang it on. Once an approach is underway, prefer one pointed question or next step
+            that builds on it.
+            Give a full solution only when "me" explicitly asks for it.
+
+            Name things with the words already in front of "me" — on the captured screen, or in what
+            either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
+            symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
+            accuracy outranks brevity.
+            """
+
+            public static let searchPrepNotes = """
+            # Prep material
+            If a live question resembles a topic in the user's prepared notes, call search_prep_notes once
+            before speaking on that topic, then let the result inform — not replace — your own reasoning.
+            Query with the specific detail being discussed right now, not the overall problem name — a
+            broad query can match the wrong section of their notes. Skip it when the question does not
+            resemble anything they would have prepared.
+            """
+        }
 
         enum ToolDescription {
             static let captureScreen = "Capture a fresh screenshot and OCR of visible interview "

@@ -161,7 +161,7 @@ public final class CoachDriver: @unchecked Sendable {
         plan: SessionPlan = .default,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
         activity: (any ActivityEventRecording)? = nil,
-        coachTools: [ToolDef]? = nil,
+        capabilities: CoachCapabilities = .default,
         prepMaterial: (any PrepMaterialSearching)? = nil,
         interviewFormatAddendum: String = "",
         interviewFormat: InterviewFormat? = nil
@@ -183,11 +183,8 @@ public final class CoachDriver: @unchecked Sendable {
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
-            // The app passes the same set it baked into a local-agent target's instructions. The
-            // fallback keeps a session composed without one consistent with what it was given.
-            sessionTools: coachTools
-                ?? sessionCoachTools(
-                    interviewFormat: interviewFormat, prepMaterial: prepMaterial != nil),
+            // The app passes the same value it baked into a local-agent target's instructions.
+            capabilities: capabilities,
             interviewFormatAddendum: interviewFormatAddendum,
             interviewFormat: interviewFormat)
     }

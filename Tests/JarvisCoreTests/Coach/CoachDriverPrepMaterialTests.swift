@@ -24,9 +24,12 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 }
 
 @Suite(.serialized) struct CoachDriverPrepMaterialTests {
+    /// `capabilities` defaults to the app's own shape: a port exists only where sources were
+    /// configured at Start, so an installed port implies the tool was composed in.
     private func makeDriver(
         brain: BrainClient,
         prepMaterial: (any PrepMaterialSearching)? = nil,
+        capabilities: CoachCapabilities? = nil,
         screen: ScreenCapturing = FakeScreen(),
         clock: Clock = ManualClock(now: 100)
     ) -> (CoachDriver, RollingTranscript) {
@@ -39,6 +42,8 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
             config: .default, transcript: transcript, route: route,
             screen: screen, overlay: FakeOverlay(), clock: clock,
             automaticAttemptDelay: { _ in },
+            capabilities: capabilities ?? .compose(
+                disabledTools: [], prepSourcesConfigured: prepMaterial != nil),
             prepMaterial: prepMaterial)
         return (driver, transcript)
     }

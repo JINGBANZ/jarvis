@@ -59,14 +59,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
     /// current evidence per response; no mutable runtime classification is required.
     private let interviewFormatAddendum: String
     private let interviewFormat: InterviewFormat?
-    /// The session's tool set, resolved at Start by `sessionCoachTools` and sent verbatim on every
-    /// request. Deriving it per attempt is what let it drift from the schemas a local-agent target
-    /// was warmed with (#273), so this is a plain `let` even though `prepMaterial` lands later.
-    private let sessionTools: [ToolDef]
-    /// Whether this session offers `search_prep_notes` at all, read from `sessionTools` so the tool
+    /// The session's switched-on tool set, resolved at Start. Deriving it per attempt is what let
+    /// it drift from the schemas a local-agent target was warmed with (#273), so this is a plain
+    /// `let` even though `prepMaterial` lands later.
+    private let capabilities: CoachCapabilities
+    /// Whether this session offers `search_prep_notes` at all, read from `capabilities` so the tool
     /// list and the system prompt that describes it cannot disagree.
     private var offersPrepNotes: Bool {
-        sessionTools.contains { $0.name == searchPrepNotesTool.name }
+        capabilities.tool(named: searchPrepNotesTool.name) != nil
     }
 
     private let runnerLock = NSLock()
@@ -90,11 +90,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)?,
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
-        sessionTools: [ToolDef],
+        capabilities: CoachCapabilities,
         interviewFormatAddendum: String = "",
         interviewFormat: InterviewFormat? = nil
     ) {
-        self.sessionTools = sessionTools
+        self.capabilities = capabilities
         self.config = config
         self.transcript = transcript
         self.screen = screen
@@ -223,12 +223,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
             ledger.commit(through: delta.upTo)
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
-        // Describing search_prep_notes when it isn't actually offered invites the model to call a
-        // tool it doesn't have — and that call is a hard attempt failure (below), so `prepMaterial`
-        // must track the real tool set (`tools`, below) exactly, not just hint at it.
         let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
+        // One value describes the tools and offers them, so the prompt cannot name a tool the
+        // request does not carry — the state that invited a hallucinated call.
         let systemPrompt = JarvisPrompts.Coach.system(
-            prepMaterial: offersPrepNotes,
+            capabilities: capabilities,
             formatAddendum: interviewFormatAddendum,
             explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
@@ -301,7 +300,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
         // Sent verbatim, never rebuilt per attempt: these are the schemas a local-agent target was
         // warmed with, and it rejects the turn if what it is sent no longer composes to them.
-        let tools = sessionTools
+        let tools = capabilities.tools
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
@@ -447,17 +446,15 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         ["language": $0.language, "placement": $0.placement, "code": $0.code,
                          "highlightedLines": $0.highlightedLines]
                     }
-                    var arguments: [String: Any] = [
+                    // `mermaid` is always present because one speak schema declares it on every
+                    // brain; null records that no diagram was delivered, which is what the model
+                    // should read back when the runtime dropped or never rendered one.
+                    let arguments: [String: Any] = [
                         "lines": lines,
+                        "mermaid": diagram == nil ? NSNull() : mermaid as Any,
                         "explanation": explanation as Any? ?? NSNull(),
                         "codeSnippet": codeArguments as Any? ?? NSNull(),
                     ]
-                    // Only the System Design speak schema declares `mermaid`, and both set
-                    // additionalProperties:false: replaying the key elsewhere would show the model
-                    // a field its own tool definition forbids.
-                    if interviewFormat == .systemDesign {
-                        arguments["mermaid"] = diagram == nil ? NSNull() : mermaid as Any
-                    }
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
                     let deliveredCalls = response.rawToolCalls.filter { $0.id == callID }.map { call in
                         RawToolCall(id: call.id, name: call.name,

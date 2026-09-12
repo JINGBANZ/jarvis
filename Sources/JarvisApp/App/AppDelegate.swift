@@ -633,13 +633,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             hotkeys?.unregister(.explainMore)
         }
         brain.interviewFormatAddendum = interviewFormatAddendum
-        // One tool set for the session, handed to both the targets that bake it into their
+        // One capability set for the session, handed to both the targets that bake it into their
         // instructions and the driver that sends it. Prep material counts as configured sources, not
         // a finished index: the index lands later and must not change what the session offers (#273).
         let prepMaterialSources = prepMaterialPreferences.sources
-        let sessionTools = sessionCoachTools(
-            interviewFormat: interviewFormat, prepMaterial: !prepMaterialSources.isEmpty)
-        brain.coachTools = sessionTools
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty)
+        brain.capabilities = capabilities
+        jlog("Jarvis coach capabilities: hot="
+            + capabilities.hotTools.map(\.name).joined(separator: ",")
+            + " deferred="
+            + (capabilities.catalogNames.joined(separator: ",").isEmpty
+                ? "(none)" : capabilities.catalogNames.joined(separator: ",")))
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
             detectedCLIs: detectedCLIs,
@@ -663,7 +668,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             coachingAttempts: artifacts.sessionAudit,
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit,
-            coachTools: sessionTools,
+            capabilities: capabilities,
             interviewFormatAddendum: interviewFormatAddendum,
             interviewFormat: interviewFormat)
 

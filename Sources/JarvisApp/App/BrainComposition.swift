@@ -72,7 +72,7 @@ final class BrainComposition {
     /// reapply — `applyBrainPreferencesToRunningSession` never re-reads `preferences.interviewFormat`
     /// live, so a Settings edit mid-session cannot retroactively change a value that was meant to be
     /// fixed for the whole session. Baked into the CLI system prompt through the same
-    /// `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` builder `CoachAttemptRunner`
+    /// `JarvisPrompts.Coach.system(capabilities:formatAddendum:)` builder `CoachAttemptRunner`
     /// calls per turn.
     var interviewFormatAddendum = ""
     var explanationsEnabled = true
@@ -82,8 +82,8 @@ final class BrainComposition {
     /// `interviewFormatAddendum` and set from the same place, before the first `makeConfiguredRoute`
     /// call. A local-agent target bakes these schemas into its process instructions and rejects any
     /// later turn that no longer composes to them, so this must be the same value the session's
-    /// `CoachDriver` was given — resolve both from `sessionCoachTools` (#273).
-    var coachTools: [ToolDef] = JarvisCore.coachTools
+    /// `CoachDriver` was given (#273).
+    var capabilities: CoachCapabilities = .default
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -148,19 +148,14 @@ final class BrainComposition {
                                        workDirectory: sessionDir,
                                        timeout: BrainWorkloadTimeout.liveCoaching,
                                        traffic: host.liveSessionEvidence, trafficTag: "coach",
-                                       // Prep material is described whenever the session's tool set
-                                       // carries search_prep_notes, which is decided at Start from
-                                       // the configured sources — the index itself lands later, off
-                                       // the Start path. Reading it from the same tool set the coach
-                                       // loop sends is what keeps these instructions valid for the
-                                       // whole session (#273).
+                                       // Prompt and tool list come from the one value resolved at
+                                       // Start, which is what keeps these baked instructions valid
+                                       // for the whole session (#273).
                                        systemPrompt: JarvisPrompts.Coach.system(
-                                           prepMaterial: coachTools.contains {
-                                               $0.name == searchPrepNotesTool.name
-                                           },
+                                           capabilities: capabilities,
                                            formatAddendum: interviewFormatAddendum,
                                            explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
-                                       tools: coachTools,
+                                       tools: capabilities.tools,
                                        toolChoice: .required,
                                        runtime: runtimes.coach,
                                        prewarm: prewarm)

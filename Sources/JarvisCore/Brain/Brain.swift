@@ -50,15 +50,29 @@ public struct ChatMessage: Sendable {
 }
 
 /// A tool definition exposed to the model.
-public struct ToolDef: Sendable {
+///
+/// A tool carries everything the model needs to use it: the one-line `description` it is chosen
+/// from, the `parametersJSON` it is called with, and the `guidance` governing when and how. Keeping
+/// guidance on the tool is what lets `CoachCapabilities` build a prompt that never describes a tool
+/// the session does not offer, and lets a deferred tool hand its guidance over on load instead.
+public struct ToolDef: Sendable, Equatable {
     public let name: String
     public let description: String
     /// JSON Schema for parameters, as a JSON string.
     public let parametersJSON: String
-    public init(name: String, description: String, parametersJSON: String) {
+    /// Usage instructions, rendered into the system prompt for a hot tool and returned by
+    /// `load_tool` for a deferred one. Empty when the description says everything.
+    public let guidance: String
+    /// When true the prompt lists only this tool's name and description, in the loadable catalog;
+    /// the model must call `load_tool` before it may be called.
+    public let deferLoading: Bool
+    public init(name: String, description: String, parametersJSON: String,
+                guidance: String = "", deferLoading: Bool = false) {
         self.name = name
         self.description = description
         self.parametersJSON = parametersJSON
+        self.guidance = guidance
+        self.deferLoading = deferLoading
     }
 }
 
