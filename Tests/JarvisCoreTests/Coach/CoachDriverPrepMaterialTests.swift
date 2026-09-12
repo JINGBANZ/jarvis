@@ -61,7 +61,9 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         #expect(!brain.offeredTools[0].map(\.name).contains("search_prep_notes"))
     }
 
-    @Test func toolOfferedWhenPrepMaterialConfigured() async {
+    /// Configured means catalogued, not declared: the first request carries the loader and names
+    /// the tool in the prompt, and the tool itself becomes callable only once the model loads it.
+    @Test func toolCatalogedButNotDeclaredWhenPrepMaterialConfigured() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "s1")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "stay_silent", argumentsJSON: "{}")]),
@@ -72,7 +74,11 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        #expect(brain.offeredTools[0].map(\.name).contains("search_prep_notes"))
+        #expect(!brain.offeredTools[0].map(\.name).contains("search_prep_notes"))
+        #expect(brain.offeredTools[0].map(\.name).contains("load_tool"))
+        #expect(brain.calls[0].contains {
+            $0.role == .system && ($0.text ?? "").contains("- search_prep_notes:")
+        })
     }
 
     @Test func searchThenSpeakPipelinePassesTheQueryAndResultThrough() async {
@@ -105,26 +111,6 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         ])
     }
 
-    @Test func searchPrepNotesWithoutConfiguredMaterialFailsRatherThanSilentlyEmpty() async {
-        // Simulates a non-schema-enforced CLI provider emitting the call even though it was never
-        // offered (prepMaterial nil means the tool isn't in the request's tool set at all).
-        let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
-                  rawToolCalls: [RawToolCall(
-                    id: "p1", name: "search_prep_notes",
-                    argumentsJSON: #"{"query":"rate limiter"}"#)]),
-        ])
-        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: nil)
-        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
-
-        let outcome = await driver.handleTrigger(.turnEnd)
-
-        // A temporary failure correctly triggers automatic retry (same as any other malformed
-        // response) — the scripted brain just keeps replaying the same call, so what matters here
-        // is that it's treated as a failure at all, never as a silent empty-result success.
-        #expect(outcome == .brainError)
-    }
-
     @Test func systemPromptOmitsPrepMaterialGuidanceWhenNotConfigured() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "s1")],
@@ -135,14 +121,18 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        // Describing a tool the model doesn't have invites exactly the hallucinated call that's a
-        // hard attempt failure — the guidance must not appear when the tool isn't offered.
+        // A prompt that names a tool this session does not have invites exactly the call that has
+        // to be refused — neither the catalog line nor the loader may appear.
         #expect(!brain.calls[0].contains {
-            $0.role == .system && ($0.text ?? "").contains("search_prep_notes")
+            $0.role == .system
+                && (($0.text ?? "").contains("search_prep_notes")
+                    || ($0.text ?? "").contains("load_tool"))
         })
     }
 
-    @Test func systemPromptIncludesPrepMaterialGuidanceWhenConfigured() async {
+    /// Configured means the catalog names the tool. Its guidance is not in the prompt at all: that
+    /// arrives as the `load_tool` result, so the model reads it only once it can call the tool.
+    @Test func systemPromptCatalogsPrepNotesSearchWhenConfigured() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "s1")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "stay_silent", argumentsJSON: "{}")]),
@@ -153,9 +143,10 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        #expect(brain.calls[0].contains {
-            $0.role == .system && ($0.text ?? "").contains("search_prep_notes")
-        })
+        let prompt = brain.calls[0].first { $0.role == .system }?.text ?? ""
+        #expect(prompt.contains("# Tools you can load"))
+        #expect(prompt.contains("- search_prep_notes:"))
+        #expect(!prompt.contains("# Prep material"))
     }
 
     @Test func retryAfterCaptureAndSearchPreservesBothObservations() async {

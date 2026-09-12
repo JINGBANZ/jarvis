@@ -254,7 +254,29 @@ extension JarvisPrompts {
             static let searchPrepNotes = "Search the user's own prepared interview notes for content "
                 + "relevant to the current question. Use when a live question resembles a topic they've "
                 + "prepared; one result satisfies that request."
+            static let loadTool = "Load a tool listed under 'Tools you can load'. Returns its "
+                + "arguments schema and usage guidance. Call it once per tool, before that tool's "
+                + "first use."
         }
+
+        static func loadToolResult(_ tool: ToolDef) -> String {
+            "Loaded \(tool.name).\nArguments JSON Schema: \(tool.parametersJSON)\n\n\(tool.guidance)"
+        }
+
+        static func loadToolAlreadyLoaded(_ name: String) -> String {
+            "\(name) is already loaded; its schema and guidance are earlier in this conversation. "
+                + "Do not load it again."
+        }
+
+        /// Answers both an unknown load name and a call to a tool this session does not offer. The
+        /// model is told plainly rather than failing the attempt: on a text protocol it can emit
+        /// any name at all, and a refusal it can read is what stops it repeating the call.
+        static func toolUnavailable(_ name: String) -> String {
+            "No tool named \(name) is available."
+        }
+
+        static let prepNotesUnavailable =
+            "the user's prepared notes are not ready in this conversation; coach without them"
 
         // Keep this a neutral marker. An earlier instruction to recapture, repeated in user-role
         // history, biased the coach toward capturing on every quiet turn.

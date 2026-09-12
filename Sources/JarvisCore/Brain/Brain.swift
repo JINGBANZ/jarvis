@@ -81,16 +81,20 @@ public enum ToolInvocation: Sendable, Equatable {
     case captureScreen(callId: String)
     /// The overlay lines to show, already split by the model (the `speak` tool's `lines` array) and
     /// rendered one at a time — so the client never splits a free-form string on punctuation.
-    /// Optional Mermaid is rendered only in an explicitly selected System Design session.
+    /// `mermaid` is declared by the one speak schema on every brain; whether a supplied graph
+    /// reaches the overlay is the runtime's decision.
     case speak(callId: String, lines: [String], mermaid: String? = nil, explanation: String? = nil, codeSnippet: CodeSnippet? = nil)
     /// The model's explicit "nothing useful to add" decision. Silence is a tool call (not the absence
     /// of one) so that `tool_choice: required` can forbid plain-text output entirely — free text from
     /// a stay-quiet turn used to be stored in the server-side conversation, where the model imitated
     /// its own leaked deliberation and degenerated (and every stored byte was re-billed every turn).
     case staySilent(callId: String)
-    /// A lookup against the user's configured prep material. Present only when at least one source
-    /// produced usable text at Session Start — see `PrepMaterialSearching`.
+    /// A lookup against the user's configured prep material. In the session's set only when at
+    /// least one source was configured at Start — see `PrepMaterialSearching`.
     case searchPrepNotes(callId: String, query: String)
+    /// The model asking for a deferred tool's schema and guidance, which come back as the result.
+    /// Offered only while the session has something left to load.
+    case loadTool(callId: String, name: String)
 }
 
 /// One brain response: parsed tool calls (possibly empty = stay silent), plus the raw calls

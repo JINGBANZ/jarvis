@@ -29,6 +29,15 @@ public enum ActivityEvent: Sendable {
         case brainRouteAdvanced
         case brainRouteTargetSkipped
         case prepNotesSearched
+        case capabilityLoaded
+        case prepNotesUnavailable
+    }
+
+    /// What kind of thing a load brought in. Persisted inside the event, so it is part of the
+    /// on-disk vocabulary.
+    public enum CapabilityKind: String, Codable, Sendable {
+        case tool
+        case skill
     }
 
     /// A finalized utterance from the user (`me`) or interviewer (`them`).
@@ -67,6 +76,12 @@ public enum ActivityEvent: Sendable {
     /// The brain looked up the user's prepared interview notes for `query`. `matchCount` is how
     /// many relevant chunks came back, 0 meaning nothing scored usefully.
     case prepNotesSearched(query: String, matchCount: Int)
+    /// The brain pulled in a capability it was offered but had not loaded yet.
+    case capabilityLoaded(kind: CapabilityKind, name: String)
+    /// The brain looked for prepared notes in a session that offers them, but the index had not
+    /// finished building. A distinct row rather than a zero-match search, which would claim the
+    /// notes were read and found wanting.
+    case prepNotesUnavailable
 
     var response: ActivityResponse? {
         guard case .tip(let lines, let explanation, let code) = self else { return nil }
@@ -143,6 +158,10 @@ public enum ActivityEvent: Sendable {
                     + "\(matchCount == 1 ? "" : "es")"
                 : "📎 checked prep notes for \"\(query)\" — nothing relevant found"
             return (.prepNotesSearched, message, nil)
+        case .capabilityLoaded(let kind, let name):
+            return (.capabilityLoaded, "📎 loaded the \(name) \(kind.rawValue)", nil)
+        case .prepNotesUnavailable:
+            return (.prepNotesUnavailable, "📎 prep notes aren't ready yet", nil)
         }
     }
 }

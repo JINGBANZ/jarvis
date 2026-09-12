@@ -52,7 +52,7 @@ import Testing
         _ = await driver.handleTrigger(.turnEnd)
 
         #expect(brain.offeredTools.count == 2)
-        #expect(brain.offeredTools[0].map(\.name).contains(searchPrepNotesTool.name))
+        #expect(brain.offeredTools[0].map(\.name).contains(CoachCapabilities.loadToolName))
         #expect(brain.offeredTools[0].map(\.name) == brain.offeredTools[1].map(\.name))
         #expect(brain.offeredTools[0].map(\.parametersJSON)
             == brain.offeredTools[1].map(\.parametersJSON))

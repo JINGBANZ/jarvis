@@ -105,6 +105,52 @@ import Testing
         #expect(prefix!.count < h.snapshot().count)                // the tail stays verbatim
     }
 
+    /// A summary that replaced an assistant tool call while its result stayed behind would leave an
+    /// orphaned output, which providers reject. The boundary moves rather than splitting the pair.
+    @Test func theCompactionPrefixNeverSplitsACallFromItsResult() {
+        let h = CoachHistory()
+        h.commit([
+            .user(String(repeating: "x", count: 4000)),
+            .assistantToolCalls([RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            .init(role: .tool, text: "screenshot captured", toolCallId: "c1"),
+            .user("recent"),
+        ])
+        let prefix = try! #require(h.compactionPrefix())
+
+        let messages = h.snapshot()
+        let calledBefore = Set(messages.prefix(prefix.count).flatMap { $0.toolCalls ?? [] }.map(\.id))
+        let answeredAfter = Set(messages.dropFirst(prefix.count).compactMap(\.toolCallId))
+        #expect(calledBefore.isDisjoint(with: answeredAfter))
+    }
+
+    /// A loaded tool's schema and guidance are the only copy the model has. Summarizing them away
+    /// would leave it holding a tool it can no longer call correctly, so the pair survives verbatim
+    /// under the summary, and the summarizer never sees it twice.
+    @Test func loadPairsSurviveASummaryAndStayOutOfIt() throws {
+        let h = CoachHistory()
+        let load = RawToolCall(id: "l1", name: "load_tool",
+                               argumentsJSON: #"{"name":"search_prep_notes"}"#)
+        h.commit([
+            .user(String(repeating: "x", count: 4000)),
+            .assistantToolCalls([load]),
+            .init(role: .tool, text: "Loaded search_prep_notes. Arguments JSON Schema: {}", toolCallId: "l1"),
+            .user("recent"),
+        ])
+        let prefix = try #require(h.compactionPrefix())
+        let before = h.estimatedTokens
+
+        #expect(!prefix.messages.contains { $0.toolCallId == "l1" })
+        #expect(!prefix.messages.contains { $0.toolCalls?.contains(load) == true })
+        #expect(h.compact(prefixCount: prefix.count, summary: "the gist",
+                          revision: prefix.revision))
+
+        let kept = h.snapshot()
+        #expect(kept[0].text?.contains("the gist") == true)
+        #expect(kept[1].toolCalls?.map(\.name) == ["load_tool"])
+        #expect(kept[2].text?.contains("Loaded search_prep_notes") == true)
+        #expect(h.estimatedTokens < before)
+    }
+
     @Test func compactReplacesPrefixWithSummary() {
         let h = CoachHistory()
         h.commit([.user("old one"), .user("old two"), .user("recent")])

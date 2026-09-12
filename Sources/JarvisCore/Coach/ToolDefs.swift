@@ -36,5 +36,6 @@ public let searchPrepNotesTool = ToolDef(
     name: "search_prep_notes",
     description: JarvisPrompts.Coach.ToolDescription.searchPrepNotes,
     parametersJSON: #"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}"#,
-    guidance: JarvisPrompts.Coach.ToolGuidance.searchPrepNotes
+    guidance: JarvisPrompts.Coach.ToolGuidance.searchPrepNotes,
+    deferLoading: true
 )

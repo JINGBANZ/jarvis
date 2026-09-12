@@ -1,15 +1,34 @@
+import Foundation
 import Testing
 @testable import JarvisCore
 
 /// The one value the app's brain composition and the coach loop both read, so the schemas a
 /// local-agent process is warmed with are the schemas the loop later sends (#273).
 @Suite struct CoachCapabilitiesTests {
+    /// The loader sits between the always-on actions and the catalog, and exists only while there
+    /// is something left to load.
     @Test func theThreeCoachingActionsComeFirstAndAlwaysInTheSameOrder() {
-        #expect(CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
-            .tools.map(\.name) == ["capture_screen", "speak", "stay_silent", "search_prep_notes"])
+        let offered = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
+        #expect(offered.tools.map(\.name)
+            == ["capture_screen", "speak", "stay_silent", "load_tool", "search_prep_notes"])
+        #expect(offered.catalogNames == ["search_prep_notes"])
         #expect(CoachCapabilities.default.tools.map(\.name)
             == ["capture_screen", "speak", "stay_silent"])
         #expect(CoachCapabilities.default.deferredTools.isEmpty)
+    }
+
+    /// A schema-enforcing provider cannot emit a name that is not in the catalog at all.
+    @Test func theLoaderOffersExactlyTheCatalogNames() throws {
+        let loader = try #require(CoachCapabilities
+            .compose(disabledTools: [], prepSourcesConfigured: true)
+            .tool(named: CoachCapabilities.loadToolName))
+        let schema = try #require(JSONSerialization.jsonObject(
+            with: Data(loader.parametersJSON.utf8)) as? [String: Any])
+        let properties = try #require(schema["properties"] as? [String: Any])
+        let name = try #require(properties["name"] as? [String: Any])
+
+        #expect(name["enum"] as? [String] == ["search_prep_notes"])
+        #expect(!loader.deferLoading)
     }
 
     /// Jarvis cannot start without screen capture, and a turn cannot end without speak or stay

@@ -225,6 +225,31 @@ import Foundation
             == "think")
     }
 
+    /// One row per load, and a distinct row for notes that are not ready — never a zero-match
+    /// search, which would claim the notes were read and found wanting.
+    @Test func capabilityLoadsAndUnreadyPrepNotesEachGetTheirOwnRow() async throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.capabilityLoaded(kind: .tool, name: "search_prep_notes"))
+        evidence.record(.prepNotesUnavailable)
+        _ = await evidence.close()
+        let snapshot = log.attach { _ in }
+
+        #expect(snapshot.rows.count == 2)
+        #expect(snapshot.rows[0].contains("loaded the search_prep_notes tool"))
+        #expect(snapshot.rows[1].contains("prep notes aren't ready yet"))
+        #expect(ActivityLog.cssClass(for: "📎 loaded the search_prep_notes tool") == "think")
+        #expect(ActivityLog.cssClass(for: "📎 prep notes aren't ready yet") == "think")
+    }
+
+    /// `Kind` is on-disk identity: a tool reading a complete log matches these strings.
+    @Test func theNewCapabilityKindsKeepTheirPersistedNames() {
+        #expect(ActivityEvent.Kind.capabilityLoaded.rawValue == "capabilityLoaded")
+        #expect(ActivityEvent.Kind.prepNotesUnavailable.rawValue == "prepNotesUnavailable")
+        #expect(ActivityEvent.CapabilityKind.tool.rawValue == "tool")
+        #expect(ActivityEvent.CapabilityKind.skill.rawValue == "skill")
+    }
+
     @Test func temporaryBrainFailureSaysRetryingWithoutDiagnosticDetail() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)

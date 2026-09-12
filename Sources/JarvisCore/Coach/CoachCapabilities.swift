@@ -22,19 +22,44 @@ public struct CoachCapabilities: Sendable, Equatable {
     public var deferredTools: [ToolDef] { tools.filter(\.deferLoading) }
     public var catalogNames: [String] { deferredTools.map(\.name) }
 
-    /// Names the user cannot switch off: Jarvis cannot start without screen capture, and a turn
-    /// cannot end without speak or stay silent.
-    public static let fixedToolNames: Set<String> =
-        [captureScreenTool.name, speakTool.name, staySilentTool.name]
+    public static let loadToolName = "load_tool"
 
-    /// Order: capture_screen, speak, stay_silent, then the configured extras. `search_prep_notes`
-    /// is present only when `prepSourcesConfigured` and the user has not switched it off. Names in
-    /// `disabledTools` that match nothing, or that name a fixed tool, are ignored.
+    /// Names the user cannot switch off: Jarvis cannot start without screen capture, a turn cannot
+    /// end without speak or stay silent, and the loader is included so a hand-edited plist cannot
+    /// remove it while deferred tools remain in the catalog. The loader needs no switch of its own:
+    /// it disappears when nothing is left to load.
+    public static let fixedToolNames: Set<String> =
+        [captureScreenTool.name, speakTool.name, staySilentTool.name, loadToolName]
+
+    /// Order: capture_screen, speak, stay_silent, load_tool, then the deferred tools.
+    /// `search_prep_notes` is present only when `prepSourcesConfigured` and the user has not
+    /// switched it off. Names in `disabledTools` that match nothing, or that name a fixed tool, are
+    /// ignored.
     public static func compose(disabledTools: Set<String>,
                                prepSourcesConfigured: Bool) -> CoachCapabilities {
-        let offered = coachTools + (prepSourcesConfigured ? [searchPrepNotesTool] : [])
         let disabled = disabledTools.subtracting(fixedToolNames)
-        return CoachCapabilities(tools: offered.filter { !disabled.contains($0.name) })
+        let extras = (prepSourcesConfigured ? [searchPrepNotesTool] : [])
+            .filter { !disabled.contains($0.name) }
+        let deferred = extras.filter(\.deferLoading)
+        return CoachCapabilities(
+            tools: coachTools
+                + (deferred.isEmpty ? [] : [loadTool(catalogNames: deferred.map(\.name))])
+                + extras)
+    }
+
+    /// Built per Start rather than as a global: the `name` schema is an enum of the deferred names
+    /// actually present, so on a schema-enforcing provider a misspelled name cannot be emitted at
+    /// all. The list is fixed at Start, which keeps a CLI target's baked instructions constant.
+    private static func loadTool(catalogNames: [String]) -> ToolDef {
+        let names = catalogNames
+            .map { "\"\($0.replacingOccurrences(of: "\"", with: "\\\""))\"" }
+            .joined(separator: ",")
+        return ToolDef(
+            name: loadToolName,
+            description: JarvisPrompts.Coach.ToolDescription.loadTool,
+            parametersJSON: #"{"type":"object","properties":{"name":{"type":"string","enum":["#
+                + names
+                + #"]}},"required":["name"],"additionalProperties":false}"#)
     }
 
     /// The three coaching actions and nothing else: what a session composed without configuration

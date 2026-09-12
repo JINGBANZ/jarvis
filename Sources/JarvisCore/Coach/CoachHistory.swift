@@ -4,7 +4,7 @@ import Foundation
 /// and rebuilds every request as `[system] + snapshot() + <this turn>`. Owning the memory (instead of
 /// a server-side conversation object) is what lets the harness keep it small: screenshots are stubbed
 /// at commit, `stay_silent` turns leave no trace, and once the estimate passes the compaction threshold
-/// the oldest span is replaced with a short summary (see `CoachDriver.compactIfNeeded`).
+/// the oldest span is replaced with a short summary (see `CoachAttemptRunner.compactIfNeeded`).
 ///
 /// Growth is strictly append-only between compactions — the message prefix stays byte-identical
 /// across requests, which is exactly what OpenAI's prompt cache needs to keep hitting.
@@ -132,8 +132,11 @@ public final class CoachHistory: @unchecked Sendable {
 
     /// The oldest span to summarize: the longest message prefix holding roughly `fraction` of the
     /// estimated tokens — clamped to at least one message (a single oversized message must still be
-    /// compactable) and never the whole history (the newest turn stays verbatim). Returns nil only
-    /// when there's a single message or none, i.e. nothing meaningful to split.
+    /// compactable) and never the whole history (the newest turn stays verbatim). Returns nil when
+    /// there's a single message or none, or when no boundary leaves every tool call answered.
+    ///
+    /// The returned messages are what the summarizer reads: the pairs `compact` will keep verbatim
+    /// are left out, so their text is never duplicated into the summary that sits above them.
     public func compactionPrefix(fraction: Double = 0.6)
         -> (messages: [ChatMessage], count: Int, revision: UInt)? {
         lock.lock(); defer { lock.unlock() }
@@ -145,11 +148,61 @@ public final class CoachHistory: @unchecked Sendable {
             if used + cost > budget { break }
             used += cost; count += 1
         }
-        count = min(max(count, 1), messages.count - 1)
-        return (Array(messages.prefix(count)), count, rewriteRevision)
+        count = Self.pairSnapped(min(max(count, 1), messages.count - 1), in: messages)
+        guard count >= 1 else { return nil }
+        let prefix = Array(messages.prefix(count))
+        let retained = Set(Self.retainedIndices(in: prefix))
+        return (prefix.indices.filter { !retained.contains($0) }.map { prefix[$0] },
+                count, rewriteRevision)
     }
 
-    /// Replace the oldest `prefixCount` messages with a single summary message. Tolerates the tail
+    /// A prefix boundary must never fall between an assistant message carrying tool calls and the
+    /// `.tool` message answering it: the summary would replace the call and orphan its output,
+    /// which providers reject. Snap forward to include the answer, and when that would consume the
+    /// whole history, snap back to leave the pair out of the summary entirely.
+    private static func pairSnapped(_ count: Int, in messages: [ChatMessage]) -> Int {
+        var forward = count
+        while forward < messages.count - 1, splitsPair(messages, at: forward) { forward += 1 }
+        if !splitsPair(messages, at: forward) { return forward }
+        var back = count
+        while back > 0, splitsPair(messages, at: back) { back -= 1 }
+        return back
+    }
+
+    private static func splitsPair(_ messages: [ChatMessage], at count: Int) -> Bool {
+        let calledBefore = Set(messages.prefix(count).flatMap { $0.toolCalls ?? [] }.map(\.id))
+        guard !calledBefore.isEmpty else { return false }
+        let answeredAfter = Set(messages.dropFirst(count).compactMap(\.toolCallId))
+        return !calledBefore.isDisjoint(with: answeredAfter)
+    }
+
+    /// Tool calls whose results the model must keep word for word after a summary: a loaded tool's
+    /// schema and guidance are the only copy it has, and summarizing them away mid-session would
+    /// leave it holding a tool it can no longer call correctly.
+    public static let retainedToolNames: Set<String> = [CoachCapabilities.loadToolName]
+
+    /// The call/result pairs inside `messages` that survive compaction verbatim, in order.
+    public static func retainedPairs(in messages: [ChatMessage]) -> [ChatMessage] {
+        retainedIndices(in: messages).map { messages[$0] }
+    }
+
+    private static func retainedIndices(in messages: [ChatMessage]) -> [Int] {
+        var answeredIDs: Set<String> = []
+        var kept: [Int] = []
+        for (index, message) in messages.enumerated() {
+            if let calls = message.toolCalls,
+               calls.contains(where: { retainedToolNames.contains($0.name) }) {
+                answeredIDs.formUnion(calls.map(\.id))
+                kept.append(index)
+            } else if let id = message.toolCallId, answeredIDs.contains(id) {
+                kept.append(index)
+            }
+        }
+        return kept
+    }
+
+    /// Replace the oldest `prefixCount` messages with a single summary message, followed by the
+    /// pairs `retainedPairs` says must survive verbatim. Tolerates the tail
     /// having grown while the summary was being written — only the exact prefix handed out by
     /// `compactionPrefix` is replaced. One deliberate prompt-cache miss; cache-hot again afterwards.
     ///
@@ -164,7 +217,8 @@ public final class CoachHistory: @unchecked Sendable {
         guard prefixCount > 0, prefixCount <= messages.count else { return false }
         guard revision == rewriteRevision else { return false }
         let head = ChatMessage.user(JarvisPrompts.Coach.condensedHistory(summary))
-        messages.replaceSubrange(0..<prefixCount, with: [head])
+        let retained = Self.retainedPairs(in: Array(messages.prefix(prefixCount)))
+        messages.replaceSubrange(0..<prefixCount, with: [head] + retained)
         return true
     }
 }
