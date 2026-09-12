@@ -209,9 +209,10 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.unlock()
     }
 
-    /// Installs the prep-material search port once its index finishes building. A trigger that fires
-    /// before this lands simply doesn't have `search_prep_notes` available for that attempt — no
-    /// gate waits for it, matching "coaching always continues."
+    /// Installs the prep-material search port once its index finishes building. The session already
+    /// offers `search_prep_notes` if its sources were configured at Start, so a search that fires
+    /// before this lands returns no matches for that attempt — no gate waits for it, matching
+    /// "coaching always continues," and the offered set never changes mid-session (#273).
     public func installPrepMaterial(_ port: (any PrepMaterialSearching)?) {
         stateLock.lock()
         _prepMaterial = port
