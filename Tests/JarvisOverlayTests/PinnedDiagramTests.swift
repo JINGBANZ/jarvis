@@ -94,6 +94,24 @@ import Testing
         #expect(panel.currentCodeHeight > 0, "hiding diagrams restores the enabled code area")
     }
 
+    @MainActor @Test func crampedDiagramYieldsSpaceToHistoryAndReturnsAfterResize() throws {
+        let (panel, content) = try makePanel()
+        defer { panel.setSessionLive(false) }
+        panel.setCodeEnabled(true)
+        let snippet = try #require(CodeSnippet(language: "python", placement: "Start", code: "seen = {}"))
+        #expect(panel.deliverCodeSnippet(snippet) == snippet)
+        let graph = try #require(DiagramHint(mermaid: "flowchart LR\nA[Client] --> B[API]"))
+        _ = panel.deliver(["First design."], perLineSeconds: [2], diagram: graph, explanation: nil)
+        let diagramView = try #require(content.subviews.compactMap { $0 as? DiagramHintView }.first)
+        let history = try #require(content.subviews.compactMap { $0 as? NSScrollView }.first)
+        panel.setContentSize(NSSize(width: 520, height: 190))
+        #expect(diagramView.frame.height == 0, "chrome without a drawable graph must not take history space")
+        #expect(history.frame.minY == panel.currentCodeHeight)
+        panel.setContentSize(NSSize(width: 520, height: 440))
+        #expect(diagramView.frame.height > 40)
+        #expect(image(in: diagramView)?.image != nil, "the retained diagram returns when there is room")
+    }
+
     @MainActor @Test func stoppedDeliveryCannotRepopulateNextInterview() throws {
         let (panel, content) = try makePanel()
         panel.setSessionLive(false)

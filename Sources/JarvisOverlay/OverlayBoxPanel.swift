@@ -325,8 +325,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         codeView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
         codeView.needsLayout = true
         codeView.layoutSubtreeIfNeeded()
-        let diagramHeight = diagramView.isHidden ? 0
+        let proposedDiagramHeight = diagramView.isHidden ? 0
             : min(box.bounds.height * 0.45, max(0, available - 44 - height))
+        // Give history the space back when the diagram's 40-point chrome leaves no drawing area.
+        let diagramHeight = proposedDiagramHeight > 40 ? proposedDiagramHeight : 0
         diagramView.frame = NSRect(x: 0, y: height, width: box.bounds.width, height: diagramHeight)
         diagramView.needsLayout = true
         diagramView.layoutSubtreeIfNeeded()
