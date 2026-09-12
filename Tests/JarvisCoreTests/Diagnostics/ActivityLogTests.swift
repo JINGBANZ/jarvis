@@ -225,18 +225,27 @@ import Foundation
             == "think")
     }
 
-    @Test func temporaryBrainFailureSaysRetryingWithoutDiagnosticDetail() async throws {
+    /// The retry frame is fixed; the cause in front of it is the failure's own sentence, so a
+    /// screenshot of Activity diagnoses a turn that failed for a reason nobody has classified yet.
+    @Test func temporaryBrainFailureQuotesTheProviderInsideTheRetryFrame() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
-        evidence.record(.coachingTurnFailed(provider: .codexCLI))
+        evidence.record(.coachingTurnFailed(failure: ProviderFailure(
+            source: .brain(.codexCLI), stage: .process, category: .timeout,
+            disposition: .temporary, identity: .init(transportDomain: "AgentRuntimeProcess"),
+            message: "local agent runtime timed out after 60s")))
         _ = await evidence.close()
         let snapshot = log.attach { _ in }
 
-        let row = try #require(snapshot.rows.first)
-        #expect(row.contains("Codex CLI couldn't finish the response"))
-        #expect(row.contains("retrying"))
-        #expect(row.contains("listening continues"))
-        #expect(!row.contains("timed out"))
+        #expect(snapshot.rows.count == 1)
+        let persisted = try Self.persistedRows(in: dir)
+        #expect(persisted.count == 1)
+        #expect(persisted[0].message == "⚠️ Codex CLI didn't respond in time "
+            + "(local agent runtime timed out after 60s) — retrying while listening continues")
+        #expect(persisted[0].kind == ActivityEvent.Kind.coachingTurnFailed.rawValue)
+        #expect(ActivityLog.isHumanFacing(message: persisted[0].message, imageFile: nil))
+        // Rows written before event kinds existed carry the two older wordings; the legacy filter
+        // keys on the frame, so they stay visible alongside the sentence above.
         #expect(ActivityLog.isHumanFacing(
             message: "⚠️ Codex CLI couldn't finish the response — retrying while listening continues",
             imageFile: nil
@@ -245,12 +254,38 @@ import Foundation
             message: "⚠️ Codex CLI couldn't respond this turn — listening continues",
             imageFile: nil
         ))
-        let jsonl = try String(
-            contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
-        let persisted = try #require(try JSONSerialization.jsonObject(
-            with: Data(jsonl.split(separator: "\n")[0].utf8)) as? [String: Any])
-        #expect(persisted["k"] as? String
-            == ActivityEvent.Kind.coachingTurnFailed.rawValue)
+    }
+
+    /// A frame that says what Jarvis is doing about the failure puts the advice after it, so the
+    /// row does not read as two instructions on either side of the dash. New rows carry a kind, so
+    /// the legacy suffix filter (which the advice now follows) never has to judge one.
+    @Test func adviceFollowsTheFrameRatherThanSplittingIt() async throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let (_, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.coachingTurnFailed(failure: ProviderFailure(
+            source: .brain(.openAI), stage: .connect, category: .unreachable,
+            disposition: .temporary,
+            identity: .init(transportDomain: NSURLErrorDomain, transportCode: -1009),
+            message: "the internet connection appears to be offline")))
+        evidence.record(.brainRouteTargetSkipped(failure: ProviderFailure(
+            source: .brain(.claudeCode), stage: .process, category: .authentication,
+            disposition: .permanent, identity: .init(), message: "")))
+        _ = await evidence.close()
+
+        let persisted = try Self.persistedRows(in: dir)
+        #expect(persisted.count == 2)
+        #expect(persisted[0].message
+            == "\u{26A0}\u{FE0F} OpenAI API couldn't be reached for coaching "
+            + "(network -1009: the internet connection appears to be offline) "
+            + "\u{2014} retrying while listening continues; check your network or VPN")
+        #expect(persisted[1].message
+            == "\u{26A0}\u{FE0F} Claude Code isn't signed in \u{2014} skipping it; "
+            + "sign in to the CLI and press Start again")
+        for row in persisted {
+            #expect(ActivityLog.isHumanFacing(
+                message: row.message, imageFile: nil,
+                kind: ActivityEvent.Kind(rawValue: row.kind ?? "")))
+        }
     }
 
     @Test func brainChangeAppliedNamesProvidersWithoutDiagnosticDetail() async throws {
@@ -272,71 +307,81 @@ import Foundation
         ))
     }
 
-    @Test func providerRouteLifecycleUsesFixedProviderOnlyCopy() async throws {
+    @Test func providerRouteLifecycleQuotesTheFailureInsideFixedFrames() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
-        evidence.record(.brainRouteAdvanced(previous: .openAI, current: .claudeCode))
-        evidence.record(.brainRouteAdvanced(previous: .claudeCode, current: .claudeCode))
-        evidence.record(.brainRouteTargetSkipped(provider: .codexCLI))
+        let rateLimited = ProviderFailure(
+            source: .brain(.openAI), stage: .request, category: .rejected, disposition: .temporary,
+            identity: .init(httpStatus: 429, errorCode: "rate_limit_exceeded"),
+            message: "Rate limit reached")
+        let missingCLI = ProviderFailure(
+            source: .brain(.claudeCode), stage: .process, category: .unavailable,
+            disposition: .permanent, identity: .init(), message: "Claude Code CLI was not found")
+        evidence.record(.brainRouteAdvanced(
+            previous: .openAI, current: .claudeCode, failure: rateLimited))
+        evidence.record(.brainRouteAdvanced(
+            previous: .openAI, current: .openAI, failure: rateLimited))
+        evidence.record(.brainRouteTargetSkipped(failure: missingCLI))
         _ = await evidence.close()
         let snapshot = log.attach { _ in }
 
         #expect(snapshot.rows.count == 3)
-        #expect(snapshot.rows[0].contains(
-            "OpenAI API couldn't respond — continuing on Claude Code"))
-        #expect(snapshot.rows[1].contains(
-            "Claude Code target couldn't respond — continuing with the next Claude Code model"))
-        #expect(snapshot.rows[2].contains(
-            "Codex CLI target is unavailable — skipping it"))
-        #expect(!snapshot.rows.joined().contains("timeout"))
-        #expect(!snapshot.rows.joined().contains("OAuth"))
-        #expect(!snapshot.rows.joined().contains("token"))
-
-        let jsonl = try String(
-            contentsOf: dir.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
-        let kinds = try jsonl.split(separator: "\n").map { line in
-            let value = try #require(
-                try JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
-            return value["k"] as? String
-        }
-        #expect(kinds == [
+        let persisted = try Self.persistedRows(in: dir)
+        #expect(persisted.map(\.message) == [
+            "⚠️ OpenAI API couldn't respond (HTTP 429, rate_limit_exceeded: Rate limit reached) — continuing on Claude Code",
+            "⚠️ OpenAI API target couldn't respond (HTTP 429, rate_limit_exceeded: Rate limit reached) — continuing with the next OpenAI API model",
+            "⚠️ Claude Code is unavailable (Claude Code CLI was not found) — skipping it",
+        ])
+        #expect(persisted.map(\.kind) == [
             ActivityEvent.Kind.brainRouteAdvanced.rawValue,
             ActivityEvent.Kind.brainRouteAdvanced.rawValue,
             ActivityEvent.Kind.brainRouteTargetSkipped.rawValue,
         ])
     }
 
-    @Test func runtimeFailureNoticesStayFixedAndDiagnosticFree() {
+    /// Failure notices keep their fixed frames, which row styling and the legacy human-facing filter
+    /// key on, and quote the provider's identity and redacted message after the frame, so a
+    /// screenshot of Activity is enough to diagnose a failure nobody has classified yet.
+    @Test func runtimeFailureNoticesKeepTheirFramesAndQuoteTheProvider() {
+        let leaky = ProviderFailure(
+            source: .brain(.codexCLI), stage: .process, category: .unknown,
+            disposition: .temporary, identity: .init(exitStatus: 1),
+            message: "OAuth token expired; Authorization: Bearer abc123token")
+        let capture = ProviderFailure(
+            source: .capture, stage: .local, category: .unavailable, disposition: .permanent,
+            identity: .init(), message: "no input device")
+        let region = ProviderFailure(
+            source: .transcription(.openAI), stage: .handshake, category: .access,
+            disposition: .permanent,
+            identity: .init(httpStatus: 403, errorCode: "unsupported_country_region_territory"),
+            message: "Country, region, or territory not supported")
+        let lost = ProviderFailure(
+            source: .transcription(.openAI), stage: .close, category: .disconnected,
+            disposition: .temporary, identity: .init(closeCode: 1006), message: "")
         let events: [ActivityEvent] = [
-            .sessionEnded(reason: .transcriptionStopped(reason: .connectionLost)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .quotaExceeded)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .authenticationFailed)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .accessDenied)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .configurationRejected)),
-            .sessionEnded(reason: .transcriptionStopped(reason: .appleSpeechUnavailable)),
-            .sessionEnded(reason: .audioCaptureUnavailable),
-            .systemAudioStopped,
+            .sessionEnded(reason: .transcriptionStopped(failure: region)),
+            .sessionEnded(reason: .brainRouteExhausted(last: leaky)),
+            .sessionEnded(reason: .audioCaptureUnavailable(failure: capture)),
+            .coachingTurnFailed(failure: leaky),
+            .systemAudioStopped(failure: lost),
             .settingsChangeNotApplied,
         ]
         let messages = events.map { $0.rendered.message }
 
-        #expect(messages.count == 9)
-        #expect(messages[0].contains("session ended by error"))
-        #expect(messages[0].contains("transcription connection was lost"))
-        #expect(messages[1].contains("API quota is exhausted"))
-        #expect(messages[1].contains("billing"))
-        #expect(messages[2].contains("rejected the API key"))
-        #expect(messages[2].contains("Settings → Connections"))
-        #expect(messages[3].contains("denied access"))
-        #expect(messages[4].contains("rejected the configuration"))
-        #expect(messages[5].contains("Apple Speech transcription became unavailable"))
-        #expect(messages[6].contains("audio capture became unavailable"))
-        #expect(messages[7].contains("microphone coaching continues"))
-        #expect(messages[8].contains("current coaching session continues"))
+        #expect(messages.count == 6)
+        #expect(messages[0] == "⏹ session ended by error — OpenAI denied access (HTTP 403, unsupported_country_region_territory: Country, region, or territory not supported); check your region, VPN, or API project")
+        #expect(ActivityLog.cssClass(for: messages[0]) == "err")
+        #expect(messages[1] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …)")
+        #expect(ActivityLog.cssClass(for: messages[1]) == "err")
+        #expect(messages[2] == "⏹ session ended by error — audio capture became unavailable (no input device)")
+        #expect(messages[3] == "⚠️ Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …) — retrying while listening continues")
+        #expect(messages[4] == "⚠️ system audio stopped — the transcription connection to OpenAI was lost (close 1006); microphone coaching continues")
+        #expect(messages[5].contains("current coaching session continues"))
+        // Provider text reaches a row only after redaction, so a quoted message can never carry a
+        // credential.
+        #expect(messages.allSatisfy { !$0.contains("abc123token") })
         for message in messages {
-            #expect(!message.contains("OAuth"))
-            #expect(!message.contains("AirPods"))
-            #expect(!message.contains("item_"))
+            #expect(ActivityLog.isHumanFacing(message: message, imageFile: nil))
         }
         #expect(ActivityLog.isHumanFacing(
             message: "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log",
@@ -353,16 +398,28 @@ import Foundation
     }
 
     @Test func sessionEndReasonsAreExplicitSanitizedAndStable() {
+        let leaky = ProviderFailure(
+            source: .brain(.codexCLI), stage: .process, category: .unknown,
+            disposition: .temporary, identity: .init(exitStatus: 1),
+            message: "OAuth token expired; Authorization: Bearer abc123token")
+        let capture = ProviderFailure(
+            source: .capture, stage: .local, category: .unavailable, disposition: .permanent,
+            identity: .init(), message: "no input device")
+        let region = ProviderFailure(
+            source: .transcription(.openAI), stage: .handshake, category: .access,
+            disposition: .permanent,
+            identity: .init(httpStatus: 403, errorCode: "unsupported_country_region_territory"),
+            message: "Country, region, or territory not supported")
         let reasons: [SessionEndReason] = [
             .stoppedByUser,
             .applicationQuit,
             .replacedByNewSession,
             .openAIAPIKeyMissing,
             .permissionsMissing,
-            .brainRouteExhausted(lastProvider: .claudeCode),
-            .transcriptionStopped(reason: .quotaExceeded),
-            .audioCaptureUnavailable,
-            .unexpectedError,
+            .brainRouteExhausted(last: leaky),
+            .transcriptionStopped(failure: region),
+            .audioCaptureUnavailable(failure: capture),
+            .unexpectedError(detail: "Couldn't prepare Apple Speech"),
         ]
         let rendered = reasons.map { ActivityEvent.sessionEnded(reason: $0).rendered }
         let messages = rendered.map { $0.message }
@@ -374,13 +431,12 @@ import Foundation
         #expect(messages[3].contains("API key is missing"))
         #expect(messages[3].contains("Settings → Connections"))
         #expect(messages[4].contains("required permission is missing"))
-        #expect(messages[5].contains("last target: Claude Code"))
-        #expect(messages[6].contains("API quota is exhausted"))
-        #expect(messages[7].contains("audio capture became unavailable"))
-        #expect(messages[8].contains("check jarvis-debug.log"))
-        #expect(!messages.joined().contains("OAuth"))
-        #expect(!messages.joined().contains("AirPods"))
-        #expect(!messages.joined().contains("item_"))
+        #expect(messages[5] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …)")
+        #expect(messages[6] == "⏹ session ended by error — OpenAI denied access (HTTP 403, unsupported_country_region_territory: Country, region, or territory not supported); check your region, VPN, or API project")
+        #expect(ActivityLog.cssClass(for: messages[6]) == "err")
+        #expect(messages[7] == "⏹ session ended by error — audio capture became unavailable (no input device)")
+        #expect(messages[8] == "⏹ session ended by error — Couldn't prepare Apple Speech")
+        #expect(messages.allSatisfy { !$0.contains("abc123token") })
         #expect(rendered.map { $0.kind } == Array(
             repeating: ActivityEvent.Kind.sessionEnded,
             count: reasons.count
@@ -389,6 +445,21 @@ import Foundation
             message: "⏹ session ended by user",
             imageFile: nil
         ))
+    }
+
+    /// The message and event kind of each persisted `jarvis-activity.jsonl` row, in file order.
+    /// Reading the file is how a row's exact copy is asserted: `Snapshot.rows` are `appendRow(...)`
+    /// scripts, not messages. Malformed lines are dropped, so tests assert the count they expect.
+    static func persistedRows(in directory: URL) throws -> [(message: String, kind: String?)] {
+        let jsonl = try String(
+            contentsOf: directory.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
+        return jsonl.split(separator: "\n").compactMap { line in
+            guard let object = try? JSONSerialization.jsonObject(with: Data(line.utf8)),
+                  let value = object as? [String: Any],
+                  let message = value["m"] as? String
+            else { return nil }
+            return (message, value["k"] as? String)
+        }
     }
 
     /// Shared temp-dir helper (also used by SessionStoreTests). Owner-only dir, like the real app.

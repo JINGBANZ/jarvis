@@ -279,7 +279,8 @@ import JarvisCore
                 toolChoice: .required)
             Issue.record("expected runtime failure")
         } catch {
-            #expect(BrainFailure(error).disposition == .temporary)
+            #expect(LocalAgentFailureClassifier.classify(
+                error: error, provider: .claudeCode).disposition == .temporary)
             #expect(error.localizedDescription.contains("app-server unavailable"))
         }
         _ = await traffic.closeForTesting()
@@ -503,6 +504,61 @@ import JarvisCore
         #expect(CLIBrainClient.claudeEffort("high") == "high")
         #expect(CLIBrainClient.codexEffort("none") == "low")
         #expect(CLIBrainClient.codexEffort("xhigh") == "xhigh")
+    }
+
+    /// Every session shape a target can be warmed with must survive its own turns. These are the
+    /// combinations that used to throw `instructions changed after runtime initialization` on every
+    /// attempt, because composition baked the plain `coachTools` while the coach loop sent a
+    /// format-resolved or prep-material set (#273). Both sides now resolve through
+    /// `sessionCoachTools`, so warming with a session's set and sending it back must dispatch.
+    @Test(arguments: [
+        (InterviewFormat?.none, false), (.systemDesign, false), (.coding, true), (.behavioral, true),
+    ])
+    func aSessionsOwnToolSetDispatchesOnItsOwnTarget(
+        format: InterviewFormat?, prepMaterial: Bool
+    ) async throws {
+        let workDir = try makeWorkDir()
+        let backend = FakeLocalAgentRuntime(
+            replies: [#"{"tool":"speak","arguments":{"lines":["tip"],"mermaid":null}}"#])
+        let tools = sessionCoachTools(interviewFormat: format, prepMaterial: prepMaterial)
+        let prompt = JarvisPrompts.Coach.system(
+            prepMaterial: prepMaterial, formatAddendum: format?.promptAddendum ?? "")
+        let client = makeClient(provider: .claudeCode, workDir: workDir,
+                                runtime: CLIBrainRuntime(backend: backend),
+                                systemPrompt: prompt, tools: tools)
+
+        let response = try await client.respond(
+            messages: [.system(prompt), .user("help")],
+            tools: tools,
+            toolChoice: .required)
+
+        #expect(response.toolCalls.isEmpty == false)
+        client.terminate()
+    }
+
+    /// The other half of the contract: drift is still rejected loudly. Tool names alone are not
+    /// enough, because `toolProtocol` renders each schema verbatim into the baked instructions.
+    @Test func aChangedSchemaUnderTheSameToolNameIsStillRejected() async throws {
+        let workDir = try makeWorkDir()
+        let backend = FakeLocalAgentRuntime(
+            replies: [#"{"tool":"speak","arguments":{"lines":["tip"]}}"#])
+        let baked = JarvisPrompts.Coach.system(prepMaterial: false, formatAddendum: "")
+        let client = makeClient(provider: .claudeCode, workDir: workDir,
+                                runtime: CLIBrainRuntime(backend: backend),
+                                systemPrompt: baked, tools: coachTools)
+        let sent = coachTools.map { $0.name == speakTool.name ? systemDesignSpeakTool : $0 }
+
+        do {
+            _ = try await client.respond(
+                messages: [.system(baked), .user("help")],
+                tools: sent,
+                toolChoice: .required)
+            Issue.record("a changed speak schema reached the runtime unrejected")
+        } catch {
+            #expect(String(describing: error)
+                .contains("instructions changed after runtime initialization"))
+        }
+        client.terminate()
     }
 
     private func makeClient(

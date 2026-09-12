@@ -31,7 +31,7 @@ import JarvisCore
             at: legacyRuntimeHome.appendingPathComponent("auth.json"),
             withDestinationURL: URL(fileURLWithPath: "/private/credential"))
 
-        let prompt = try AgenticEvaluation.prepare(sessionDir: dir)
+        let prompt = try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
 
         #expect(!FileManager.default.fileExists(atPath: legacyRuntimeHome.path))
         // The compact transcript is written beside the traffic, owner-only, with the rendered content.
@@ -74,13 +74,13 @@ import JarvisCore
         _ = await traffic.closeForTesting()
         try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
 
-        _ = try AgenticEvaluation.prepare(sessionDir: dir)
+        _ = try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
         let transcriptURL = dir.appendingPathComponent(AgenticEvaluation.transcriptFilename)
         try Data("stale partial transcript".utf8).write(to: transcriptURL)
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o644], ofItemAtPath: transcriptURL.path)
 
-        _ = try AgenticEvaluation.prepare(sessionDir: dir)
+        _ = try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
 
         let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
         #expect(transcript.contains("=== call #1 · coach"))
@@ -92,7 +92,7 @@ import JarvisCore
 
     /// The evaluator receives neutral measurements and tools, not a growing list of known defects.
     @Test func promptProvidesGenericEvidenceWorkflowWithoutIncidentChecklist() {
-        let prompt = AgenticEvaluation.prompt(sessionDirPath: "/tmp/session")
+        let prompt = AgenticEvaluation.prompt(sessionDirPath: "/tmp/session", workspaceProvenance: "Development test checkout.")
         #expect(prompt.contains("neutral evidence index"))
         #expect(prompt.contains("categorical distributions"))
         #expect(prompt.contains("correlation-field coverage"))
@@ -158,7 +158,7 @@ import JarvisCore
     @Test func prepareThrowsWhenSessionHasNoTraffic() throws {
         let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(throws: AgenticEvaluation.EvaluationError.noTraffic) {
-            try AgenticEvaluation.prepare(sessionDir: dir)
+            try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
         }
         // No transcript file is left behind on the empty-traffic path.
         #expect(!FileManager.default.fileExists(
@@ -171,7 +171,7 @@ import JarvisCore
             to: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename))
         try Data().write(to: dir.appendingPathComponent(ActivityLog.filename))
 
-        _ = try AgenticEvaluation.prepare(sessionDir: dir)
+        _ = try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
 
         let transcript = try String(
             contentsOf: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename),
@@ -195,7 +195,7 @@ import JarvisCore
             at: dir.appendingPathComponent(ActivityLog.filename))
 
         #expect(throws: AgenticEvaluation.EvaluationError.missingActivityLog) {
-            try AgenticEvaluation.prepare(sessionDir: dir)
+            try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
         }
         #expect(!FileManager.default.fileExists(
             atPath: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
@@ -217,7 +217,7 @@ import JarvisCore
             at: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename),
             withIntermediateDirectories: false)
         #expect(throws: (any Error).self) {
-            try AgenticEvaluation.prepare(sessionDir: dir)
+            try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
         }
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
             .filter {
