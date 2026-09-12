@@ -7,18 +7,18 @@ public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkOb
         public let events: [TranscriptionBenchmarkEvent]
         public let captureObservations: [TranscriptionBenchmark.CaptureObservation]
         public let states: [TranscriptionConnectionState]
-        public let terminalFailure: TranscriptionFailureReason?
+        public let terminalFailure: ProviderFailure?
     }
 
     public enum Failure: Error, CustomStringConvertible {
         case timedOut(String)
-        case terminal(TranscriptionFailureReason)
+        case terminal(ProviderFailure)
         case aborted
 
         public var description: String {
             switch self {
             case .timedOut(let boundary): "Timed out waiting for \(boundary)"
-            case .terminal(let reason): "Transcription failed: \(reason.activityDescription)"
+            case .terminal(let failure): "Transcription failed: \(failure.activitySentence)"
             case .aborted: "Transcription benchmark aborted"
             }
         }
@@ -29,7 +29,7 @@ public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkOb
     private var events: [TranscriptionBenchmarkEvent] = []
     private var captureObservations: [TranscriptionBenchmark.CaptureObservation] = []
     private var states: [TranscriptionConnectionState] = []
-    private var terminalFailure: TranscriptionFailureReason?
+    private var terminalFailure: ProviderFailure?
 
     public init(abortMarker: URL? = nil) {
         self.abortMarker = abortMarker
@@ -50,7 +50,7 @@ public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkOb
         lock.unlock()
     }
 
-    public func record(_ failure: TranscriptionFailureReason) {
+    public func record(_ failure: ProviderFailure) {
         lock.lock(); terminalFailure = failure; lock.unlock()
     }
 

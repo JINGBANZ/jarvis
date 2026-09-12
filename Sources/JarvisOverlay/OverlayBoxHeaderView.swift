@@ -1,4 +1,5 @@
 import AppKit
+import JarvisCore
 
 /// The Overlay Box's header strip: collapse on the left, "Jarvis" in the middle, clear on the right.
 ///
@@ -17,6 +18,7 @@ final class OverlayBoxHeaderView: NSView {
     init(chrome: OverlayBoxChrome) {
         self.chrome = chrome
         super.init(frame: .zero)
+        titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.alignment = .center
         titleLabel.textColor = NSColor(white: 1, alpha: 0.72)
         clearButton.isHidden = true          // nothing logged yet, so nothing to erase
@@ -56,6 +58,11 @@ final class OverlayBoxHeaderView: NSView {
         needsDisplay = true
     }
 
+    func setInterviewFormat(_ format: InterviewFormat?) {
+        titleLabel.stringValue = format.map { "Jarvis · \($0.displayName)" } ?? "Jarvis"
+        layoutControls()
+    }
+
     /// The clear button exists only when there is something to erase, so an empty box carries no dead
     /// control. It keeps its space rather than collapsing out, so the title does not shift sideways
     /// when the first tip lands.
@@ -77,8 +84,10 @@ final class OverlayBoxHeaderView: NSView {
         // Centred across the full width rather than in the gap between the buttons, so the name stays
         // put whether or not the clear button is on screen.
         let titleHeight = titleLabel.intrinsicContentSize.height.rounded(.up)
-        titleLabel.frame = NSRect(x: 0, y: ((bounds.height - titleHeight) / 2).rounded(),
-                                  width: bounds.width, height: titleHeight)
+        // Reserve both buttons' space so a long format truncates without covering either control.
+        let titleInset = chrome.inset * 2 + chrome.button
+        titleLabel.frame = NSRect(x: titleInset, y: ((bounds.height - titleHeight) / 2).rounded(),
+                                  width: max(0, bounds.width - titleInset * 2), height: titleHeight)
     }
 
     override func draw(_ dirtyRect: NSRect) {

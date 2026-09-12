@@ -11,6 +11,7 @@ final class CodeSnippetView: NSView {
     private let scroll = NSScrollView()
     private let emptyLabel = NSTextField(wrappingLabelWithString: "Code for your next coding hint will appear here.")
     private let document = CodeSnippetDocumentView(frame: .zero)
+    private var preferredFontSize: CGFloat = 18
     private(set) var snippet: CodeSnippet?
     var codeText: NSAttributedString { document.codeText }
 
@@ -32,7 +33,7 @@ final class CodeSnippetView: NSView {
         dismissButton.action = #selector(dismiss)
         dismissButton.setAccessibilityLabel("Dismiss code snippet")
         scroll.hasVerticalScroller = true
-        scroll.hasHorizontalScroller = true
+        scroll.hasHorizontalScroller = false
         scroll.scrollerStyle = .overlay
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
@@ -50,10 +51,19 @@ final class CodeSnippetView: NSView {
         dismissButton.frame = NSRect(x: bounds.width - 78, y: bounds.height - 27, width: 66, height: 22)
         scroll.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, bounds.height - 28))
         emptyLabel.frame = NSRect(x: 14, y: 12, width: max(0, bounds.width - 28), height: max(0, bounds.height - 44))
-        document.fit(viewportWidth: scroll.contentSize.width)
+        guard let snippet else { return }
+        // Keep the largest readable size that fits; a tiny panel can still scroll vertically.
+        var size = preferredFontSize
+        while true {
+            document.show(snippet, fontSize: size)
+            document.fit(viewportWidth: scroll.contentSize.width)
+            if document.frame.height <= scroll.contentSize.height || size <= 12 { break }
+            size = max(12, size - 1)
+        }
     }
 
     func show(_ snippet: CodeSnippet?, fontSize: CGFloat, enabled: Bool = true) {
+        preferredFontSize = min(18, max(12, fontSize))
         let changed = self.snippet != snippet
         self.snippet = snippet
         isHidden = !enabled
@@ -64,10 +74,18 @@ final class CodeSnippetView: NSView {
         needsLayout = true
         guard let snippet else { return }
         title.stringValue = snippet.language.isEmpty ? "CODE" : "CODE · \(snippet.language)"
-        document.show(snippet, fontSize: fontSize)
+        document.show(snippet, fontSize: preferredFontSize)
         document.fit(viewportWidth: max(1, bounds.width))
         if changed { scroll.contentView.scroll(to: .zero) }
         needsLayout = true
+    }
+
+    /// Measure wrapped content at the preferred size before allocating the dock's bounded height.
+    func preferredHeight(viewportWidth: CGFloat) -> CGFloat {
+        guard let snippet else { return 96 }
+        document.show(snippet, fontSize: preferredFontSize)
+        document.fit(viewportWidth: viewportWidth)
+        return 28 + document.frame.height
     }
 
     @objc private func dismiss() { onDismiss?() }

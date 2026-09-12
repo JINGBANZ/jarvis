@@ -103,6 +103,7 @@ final class ConnectionsSection: NSObject, SettingsSection {
     func windowWillClose() {
         detectionTask?.cancel()
         detectionTask = nil
+        for controls in apiKeyControls.values { controls.windowWillClose() }
     }
 
     private func makeCLICard(for provider: BrainProvider) -> SettingsCardView {

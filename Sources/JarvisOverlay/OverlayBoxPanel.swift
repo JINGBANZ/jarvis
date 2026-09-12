@@ -78,16 +78,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Reports the box's new content size once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
     /// Stand-in responses shown during the Settings preview.
-    private static let sampleEntries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?, isError: Bool)] = [
-        ("10:30:00", "Ask about the time complexity of that loop.", nil, nil, false),
+    private static let sampleEntries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?)] = [
+        ("10:30:00", "Ask about the time complexity of that loop.", nil, nil),
         ("10:30:08", "Check the empty list before reading its first item.",
-         "An empty list has no first item. Handle that case before indexing into it, then continue with the normal path.", nil, false),
+         "An empty list has no first item. Handle that case before indexing into it, then continue with the normal path.", nil),
     ]
     /// Each spoken tip with the time it arrived, newest last. Held as structured entries (not the
     /// rendered string) so `clear()` and the test hooks don't have to parse the text back out.
     private var diagramsEnabled = Defaults.Overlay.Box.diagramsEnabled
     private var latestEntryStart = 0
-    private var entries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?, isError: Bool)] = []
+    private var entries: [(stamp: String, text: String, explanation: String?, diagram: DiagramHint?)] = []
     /// Test hook (internal): counts how many times the panel has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -287,11 +287,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         }
     }
 
-    /// Fixed error copy stays in the existing nonactivating, capture-excluded history panel.
-    public func showError(_ message: String) {
-        append(message, explanation: nil, diagram: nil, isError: true)
-    }
-
     public func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? {
         codeSnippet = acceptsDetail && codeEnabled ? snippet : nil
         refreshCode()
@@ -314,10 +309,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private func layoutCode() {
         let available = max(0, box.bounds.height - chrome.height)
         let preferred = min(box.bounds.height * 0.45,
-            76 + CGFloat(codeView.snippet?.code.components(separatedBy: "\n").count ?? 0) * (fontSize + 4))
+            codeView.preferredHeight(viewportWidth: box.bounds.width))
         // Preserve the header and one history line even at the minimum expanded size.
         let height = codeView.isHidden ? 0 : min(max(0, available - 44), max(96, preferred))
         codeView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
+        codeView.needsLayout = true
+        codeView.layoutSubtreeIfNeeded()
         scroll.frame = NSRect(x: 0, y: height, width: box.bounds.width, height: max(0, available - height))
     }
 
@@ -331,8 +328,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         return detail
     }
 
-    private func append(_ text: String, explanation: String?, diagram: DiagramHint?, isError: Bool = false) {
-        entries.append((stamp: timeFormatter.string(from: Date()), text: text, explanation: explanation, diagram: diagram, isError: isError))
+    private func append(_ text: String, explanation: String?, diagram: DiagramHint?) {
+        entries.append((stamp: timeFormatter.string(from: Date()), text: text, explanation: explanation, diagram: diagram))
         // No preview can be running: one only opens while stopped, and Start ends it.
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
         // OverlayCaptionPanel.show, since this box can be visible (full of responses) while Settings flips the
@@ -377,9 +374,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
             latestEntryStart = result.length
             result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
-            var entryAttrs = hintAttrs
-            if entry.isError { entryAttrs[.foregroundColor] = NSColor.systemRed }
-            result.append(NSAttributedString(string: entry.text, attributes: entryAttrs))
+            result.append(NSAttributedString(string: entry.text, attributes: hintAttrs))
             if let explanation = entry.explanation {
                 result.append(NSAttributedString(string: "\n\nExplanation\n", attributes: explanationLabelAttrs))
                 result.append(NSAttributedString(string: explanation, attributes: textAttrs))
@@ -431,11 +426,17 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
     }
 
+    /// The app supplies the same Start-time selection used by the coaching prompt.
+    public func setInterviewFormat(_ format: InterviewFormat?) {
+        header.setInterviewFormat(format)
+    }
+
     /// Follow the session: Start puts the box on screen (if it is switched on), Stop takes it away.
     /// Start also rolls a collapsed box back open, because collapse belongs to the conversation the
     /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
         isSessionLive = live
+        if !live { header.setInterviewFormat(nil) }
         if !live { codeSnippet = nil }
         // Start takes the sample down and Stop can put it back, both without Settings saying anything:
         // whether the preview stands in is derived, not commanded.

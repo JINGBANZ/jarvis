@@ -2,10 +2,12 @@ import Foundation
 
 /// The closed set of human-visible occurrences in the coaching exchange.
 ///
-/// Keeping this set typed and closed is what stops transport, retry, timing, lifecycle, and raw
-/// error detail from reaching the Activity window through a generic logging call. Sharing one
-/// evidence stack (wiki/lean-coaching-core.md, "One Event, Two Projections") does not relax that:
-/// a producer chooses from these cases or it has no human-facing copy at all.
+/// Keeping this set typed and closed is what stops transport, retry, timing, and lifecycle detail
+/// from reaching the Activity window through a generic logging call. Sharing one evidence stack
+/// (wiki/lean-coaching-core.md, "One Event, Two Projections") does not relax that: a producer
+/// chooses from these cases or it has no human-facing copy at all. A failure case carries a
+/// `ProviderFailure`, whose message is redacted provider text, so what the provider said is quoted
+/// inside copy this file owns rather than authored by the producer.
 ///
 /// It lives apart from `ActivityLog` so the coaching kernel can name the human-safe vocabulary
 /// without holding the concrete persistence type behind it.
@@ -22,7 +24,7 @@ public enum ActivityEvent: Sendable {
         case tip
         case stayedSilent
         case sessionEnded
-        case coachingTurnFailed
+        case coachingCycleFailed = "coachingTurnFailed"
         case systemAudioStopped
         case settingsChangeNotApplied
         case brainChangeApplied
@@ -43,29 +45,39 @@ public enum ActivityEvent: Sendable {
     /// guidance while raw failure detail stays in debug.
     case screenViewFailed
     /// Jarvis displayed these coaching lines to the user.
-    case tip(lines: [String])
+    case tip(lines: [String], explanation: String? = nil, codeSnippet: CodeSnippet? = nil)
     /// The brain explicitly chose `stay_silent` for this turn.
     case stayedSilent
-    /// The single terminal lifecycle event for a live coaching session. The reason is a closed,
-    /// sanitized set so raw errors cannot leak into Activity.
+    /// The single terminal lifecycle event for a live coaching session. The reason is a closed set,
+    /// so a producer cannot author copy; a provider-caused end carries the classified failure and
+    /// Activity renders its sentence.
     case sessionEnded(reason: SessionEndReason)
-    /// A coaching request exhausted its route. Recorded once while capture and transcription remain live. Provider identity is enough; raw error detail stays in debug.
-    case coachingTurnFailed(provider: BrainProvider)
-    /// The secondary system-audio transcription stopped while microphone coaching continued.
-    case systemAudioStopped
+    /// One coaching cycle exhausted its finite route budget while capture and transcription remain live. The failure carries its own sentence: the frame is fixed, and
+    /// what the provider said (already redacted) is quoted inside it.
+    case coachingCycleFailed(failure: ProviderFailure)
+    /// The secondary system-audio transcription stopped while microphone coaching continued. The
+    /// failure that stopped it is quoted, so a degraded session still says why it degraded.
+    case systemAudioStopped(failure: ProviderFailure)
     /// An explicit Settings reapply failed its preflight while the existing session continued.
     case settingsChangeNotApplied
     /// A live brain replacement completed its first non-truncated terminal turn. Provider
     /// identities are enough for a fixed human-facing success notice; model transport details
     /// remain in jlog.
     case brainChangeApplied(previous: BrainProvider, current: BrainProvider)
-    /// A failed target was exhausted and the next user-authorized route target became active.
-    case brainRouteAdvanced(previous: BrainProvider, current: BrainProvider)
+    /// A failed target was exhausted and the next user-authorized route target became active. The
+    /// failure that exhausted the old target is quoted; the frame names the new one.
+    case brainRouteAdvanced(
+        previous: BrainProvider, current: BrainProvider, failure: ProviderFailure)
     /// A route target was proven unavailable before a provider request could be constructed.
-    case brainRouteTargetSkipped(provider: BrainProvider)
+    case brainRouteTargetSkipped(failure: ProviderFailure)
     /// The brain looked up the user's prepared interview notes for `query`. `matchCount` is how
     /// many relevant chunks came back, 0 meaning nothing scored usefully.
     case prepNotesSearched(query: String, matchCount: Int)
+
+    var response: ActivityResponse? {
+        guard case .tip(let lines, let explanation, let code) = self else { return nil }
+        return ActivityResponse(lines: lines, explanation: explanation, codeSnippet: code)
+    }
 
     /// Keep persisted identity, human copy, and the optional screenshot payload in one exhaustive
     /// mapping so adding or editing an event cannot make its `k` disagree with what Activity shows.
@@ -87,22 +99,24 @@ public enum ActivityEvent: Sendable {
                 "👁 couldn't view your screen — screen capture failed; check Screen Recording permission",
                 nil
             )
-        case .tip(let lines):
-            return (.tip, "💬 \(lines.joined(separator: " "))", nil)
+        case .tip(let lines, let explanation, let code):
+            return (.tip, ActivityResponse(lines: lines, explanation: explanation, codeSnippet: code).message, nil)
         case .stayedSilent:
             return (.stayedSilent, "🤫 stayed silent — nothing useful to add", nil)
         case .sessionEnded(let reason):
             return (.sessionEnded, "⏹ \(reason.activityMessage)", nil)
-        case .coachingTurnFailed(let provider):
+        case .coachingCycleFailed(let failure):
             return (
-                .coachingTurnFailed,
-                "⚠️ \(provider.displayName) request failed — listening continues; try again",
+                .coachingCycleFailed,
+                "⚠️ \(failure.activitySentenceWithoutAdvice) — coaching cycle failed; listening continues"
+                    + failure.activityAdvice,
                 nil
             )
-        case .systemAudioStopped:
+        case .systemAudioStopped(let failure):
             return (
                 .systemAudioStopped,
-                "⚠️ system audio stopped — microphone coaching continues; check jarvis-debug.log",
+                "⚠️ system audio stopped — \(failure.activitySentenceWithoutAdvice)"
+                    + "; microphone coaching continues\(failure.activityAdvice)",
                 nil
             )
         case .settingsChangeNotApplied:
@@ -118,17 +132,20 @@ public enum ActivityEvent: Sendable {
                 "🧠 brain switch applied — \(previous.displayName) → \(current.displayName)"
             }
             return (.brainChangeApplied, message, nil)
-        case .brainRouteAdvanced(let previous, let current):
+        case .brainRouteAdvanced(let previous, let current, let failure):
+            // This frame supplies its own verb, so it quotes the evidence alone rather than the
+            // failure's whole sentence.
+            let detail = failure.activityDetail
             let message = if previous == current {
-                "⚠️ \(previous.displayName) target couldn't respond — continuing with the next \(current.displayName) model"
+                "⚠️ \(previous.displayName) target couldn't respond\(detail) — continuing with the next \(current.displayName) model"
             } else {
-                "⚠️ \(previous.displayName) couldn't respond — continuing on \(current.displayName)"
+                "⚠️ \(previous.displayName) couldn't respond\(detail) — continuing on \(current.displayName)"
             }
             return (.brainRouteAdvanced, message, nil)
-        case .brainRouteTargetSkipped(let provider):
+        case .brainRouteTargetSkipped(let failure):
             return (
                 .brainRouteTargetSkipped,
-                "⚠️ \(provider.displayName) target is unavailable — skipping it",
+                "⚠️ \(failure.activitySentenceWithoutAdvice) — skipping it\(failure.activityAdvice)",
                 nil
             )
         case .prepNotesSearched(let query, let matchCount):

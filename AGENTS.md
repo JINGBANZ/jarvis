@@ -96,10 +96,10 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
   compiler-enforced boundary, or code shared by another executable.
 - Preserve one brain target for an entire coaching attempt: no in-attempt provider retry or switch.
   Temporary or unknown failures exhaust a target after three failed attempts; proven permanent
-  provider-boundary failures may exhaust it immediately. Retries use a short fixed delay. Exhausting
-  the route ends only the request: show a fixed error and keep listening. A later explicit coaching shortcut or new
-  finalized speech gets a fresh route budget. Successful fallback selection stays active. Never
-  rewrite saved preferences or switch targets inside an attempt.
+  provider-boundary failures exhaust it immediately and exclude it for the session. A failed cycle
+  ends its route budget while listening continues under the cooldown and terminal limits in
+  `wiki/architecture.md#ordered-provider-route`. Successful fallback selection stays active.
+  Never rewrite saved preferences or switch targets inside an attempt.
 - Keep route and scheduling policy as Foundation-only state machines; the app supplies clients,
   timers, and speech-activity events.
 - Use Swift 6 strict concurrency. Do not use `@unchecked` or `nonisolated(unsafe)` without a written
@@ -115,9 +115,10 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
   the two nonactivating capture-excluded overlay panels, open apps or URLs, request attention, notify,
   or play sound. Explicit user-opened Settings/Activity and unavoidable macOS privacy UI are the only
   other presentation paths. Every presentation API call needs an inline `ghost-mode-allowed` reason.
-- `ActivityLog` contains finalized speech, manual hints, brain actions, and fixed session-end or
-  degradation notices. Retry, transport, timing, lifecycle, and raw-error detail goes only through
-  `jlog` to `jarvis-debug.log`; never mirror debug logs into Activity.
+- `ActivityLog` contains finalized speech, manual hints, brain actions, and typed session-end or
+  degradation notices. A failure notice carries the provider's structured identity and its redacted
+  message (`ProviderFailure`), never raw text. Retry, transport, timing, and lifecycle detail goes
+  only through `jlog` to `jarvis-debug.log`; never mirror debug logs into Activity.
 - Persist screen- or audio-derived data only in owner-only files inside the workspace-local `.jarvis/`
   session directory, never `/tmp`. Never archive raw microphone audio or the live transcript.
 - Store the API key only in the owner-only `0600` secrets file; `OPENAI_API_KEY` is a headless fallback.

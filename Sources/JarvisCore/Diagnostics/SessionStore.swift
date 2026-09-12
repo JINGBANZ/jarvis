@@ -2,8 +2,8 @@ import Foundation
 
 /// Reads, lists, prunes, and deletes past session directories so the activity viewer can browse history.
 /// Foundation-only and stateless beyond its two URLs. All operations are bounded to immediate
-/// subdirectories of `base` whose name matches the session-id shape, so a stray `--log-dir` or a
-/// malformed persisted filename can't make it touch anything outside the log tree. See
+/// subdirectories of `base` whose name matches the session-id shape, so a malformed persisted
+/// filename can't make it touch anything outside the log tree. See
 /// wiki/build-and-run.md.
 public struct SessionStore: Sendable {
     public struct Session: Sendable, Equatable {
@@ -30,10 +30,30 @@ public struct SessionStore: Sendable {
         self.current = current
     }
 
-    /// `yyyy-MM-dd_HH-mm-ss_xxxx` (timestamp + 4-char suffix; see AppDelegate.newSessionID). The
-    /// regex is built locally (not a stored static) to stay Sendable-clean under Swift 6.
+    /// Choose session storage without I/O: each development bundle owns its containing worktree's
+    /// history, regardless of launch method; releases keep the established per-user history.
+    public static func baseDirectory(isDevelopmentBuild: Bool, bundleURL: URL,
+                                     appDataDirectory: URL) -> URL {
+        if isDevelopmentBuild {
+            return bundleURL.deletingLastPathComponent().appendingPathComponent(".jarvis", isDirectory: true)
+        }
+        return appDataDirectory.appendingPathComponent("sessions", isDirectory: true)
+    }
+
+    /// Terminal evaluation uses the same chronology as Activity, including contentless sessions.
+    public func newestSessionDirectory() -> URL? {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
+        return names.filter { Self.isSessionID($0) }
+            .filter { name in
+                (try? base.appendingPathComponent(name).resourceValues(forKeys: [.isDirectoryKey])
+                    .isDirectory) == true
+            }
+            .sorted { Self.isNewer($0, than: $1) }.first.map { base.appendingPathComponent($0) }
+    }
+
+    /// The shared parser also accepts older sessions without a build prefix.
     private static func isSessionID(_ s: String) -> Bool {
-        s.wholeMatch(of: /^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9A-Za-z]{4}$/) != nil
+        SessionDirectoryID(s) != nil
     }
     /// A bare `shot-N.jpg` filename — anything with slashes or `..` is rejected (path-traversal guard).
     private static func isShotName(_ s: String) -> Bool {
@@ -43,6 +63,7 @@ public struct SessionStore: Sendable {
     private struct Line: Decodable {
         let t: String
         let m: String
+        let response: ActivityResponse?
         let s: String?
         /// A raw value lets this build distinguish current typed events from unknown kinds; only
         /// current kinds bypass the human-copy classifier.
@@ -81,7 +102,7 @@ public struct SessionStore: Sendable {
                     evidenceIsComplete: Self.evidenceIsComplete(in: url))
             }
             .filter { $0.isCurrent || Self.hasCoachingContent($0.url) }
-            .sorted { $0.id > $1.id }   // id is a lexically-sortable timestamp ⇒ newest first
+            .sorted { Self.isNewer($0.id, than: $1.id) }
     }
 
     /// Read the session's monotonic health record. `complete` means every accepted record reached
@@ -177,7 +198,7 @@ public struct SessionStore: Sendable {
                 message: line.m,
                 imageFile: shotName,
                 occurredAt: line.o,
-                insertionOrder: insertionOrder)
+                insertionOrder: insertionOrder, response: line.response)
             out.append(LoadedEntry(entry: entry, imageData: bytes, occurredAt: line.o))
         }
         let total = out.count
@@ -196,7 +217,7 @@ public struct SessionStore: Sendable {
                     ActivityLog.Entry(
                         time: entry.time,
                         message: entry.message,
-                        imageFile: entry.imageFile),
+                        imageFile: entry.imageFile, response: entry.response),
                     loaded.imageData)
             }
             return EntrySnapshot(entries: entries, total: total)
@@ -243,7 +264,7 @@ public struct SessionStore: Sendable {
         let protectedPaths = Set(protectedDirectories.map { $0.standardizedFileURL.path })
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? [])
             .filter { Self.isSessionID($0) }
-            .sorted(by: >)   // id is a lexically-sortable timestamp ⇒ newest first
+            .sorted { Self.isNewer($0, than: $1) }
         for name in names.dropFirst(keep) {
             let url = base.appendingPathComponent(name)
             if url.standardizedFileURL.path == curPath { continue }                 // spare current
@@ -256,8 +277,12 @@ public struct SessionStore: Sendable {
 
     /// "2026-06-16_10-00-00_aaaa" → "2026-06-16 10:00:00".
     private static func label(from id: String) -> String {
-        let parts = id.split(separator: "_")
-        guard parts.count >= 2 else { return id }
-        return "\(parts[0]) \(parts[1].replacingOccurrences(of: "-", with: ":"))"
+        SessionDirectoryID(id)?.label ?? id
+    }
+
+    private static func isNewer(_ lhs: String, than rhs: String) -> Bool {
+        let left = SessionDirectoryID(lhs)?.chronologyKey ?? lhs
+        let right = SessionDirectoryID(rhs)?.chronologyKey ?? rhs
+        return left == right ? lhs > rhs : left > right
     }
 }

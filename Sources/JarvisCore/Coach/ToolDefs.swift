@@ -23,9 +23,8 @@ public let staySilentTool = ToolDef(
 
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
 
-/// Offered only when the session has a `PrepMaterialSearching` port (i.e. at least one configured
-/// source produced usable text at Session Start) — see the tool-set construction in
-/// `CoachAttemptRunner.runAttempt`.
+/// Offered only when the session has prep-material sources configured at Start, which is decided
+/// once by `sessionCoachTools` below. The search port itself lands later, after indexing.
 public let searchPrepNotesTool = ToolDef(
     name: "search_prep_notes",
     description: JarvisPrompts.Coach.ToolDescription.searchPrepNotes,
@@ -39,3 +38,21 @@ public let systemDesignSpeakTool = ToolDef(
     description: JarvisPrompts.Coach.ToolDescription.speak,
     parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"mermaid":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}"#
 )
+
+/// The tool set one session offers, resolved once at Start and then fixed for the session's life.
+///
+/// Fixed rather than per-attempt because a local-agent target bakes each tool's `parametersJSON`
+/// into the instructions its process is warmed with, and re-checks the composed string on every turn
+/// (`CLIBrainClient.prepareTurn`). A set that grew or changed shape mid-session was rejected there,
+/// failing every remaining attempt on that target until the route exhausted — see #273. So both the
+/// app's brain composition and the coach loop resolve their tools here, from inputs known at Start.
+///
+/// `prepMaterial` is therefore "prep sources are configured", not "the index has finished building":
+/// indexing runs off the Start path deliberately, so the port arrives after the first attempts. A
+/// search that lands before it returns no matches rather than changing what the session offers.
+public func sessionCoachTools(interviewFormat: InterviewFormat?, prepMaterial: Bool) -> [ToolDef] {
+    let base = coachTools.map {
+        interviewFormat == .systemDesign && $0.name == speakTool.name ? systemDesignSpeakTool : $0
+    }
+    return prepMaterial ? base + [searchPrepNotesTool] : base
+}

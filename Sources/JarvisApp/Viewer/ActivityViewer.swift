@@ -16,8 +16,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var store: SessionStore   // rebuilt when a new session opens (see `sessionDidChange`)
 
     /// Builds the sole agentic evaluation pipeline at click time so it uses the current provider
-    /// selection and source checkout. Nil means this app instance cannot locate its checkout.
-    var makeEvaluator: (@MainActor () -> AgenticEvaluator?)?
+    /// selection and the selected session's source. Missing version identity permits fallback.
+    var makeEvaluator: (@MainActor (URL) -> AgenticEvaluator?)?
 
     /// Whether a coaching session is currently running (wired by AppDelegate). Evaluation and report
     /// opening are explicit user actions, but their presentation stays outside the ghost lifecycle.
@@ -35,6 +35,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var exportButton: NSButton?
     /// Survives a Settings close/reopen because the viewer itself lives for the whole app run.
     private var isEvaluating = false
+    private var isFetchingSource = false
     /// Retained so Quit can cancel the direct CLI child instead of leaving an orphaned paid run.
     private var evaluationTask: Task<Void, Never>?
     private var sessions: [SessionStore.Session] = []
@@ -127,7 +128,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             copyID.widthAnchor.constraint(equalToConstant: 72),
             copyID.trailingAnchor.constraint(lessThanOrEqualTo: evaluate.leadingAnchor, constant: -8),
             evaluate.centerYAnchor.constraint(equalTo: header.centerYAnchor),
-            evaluate.widthAnchor.constraint(equalToConstant: 96),
+            evaluate.widthAnchor.constraint(greaterThanOrEqualToConstant: 96),
             evaluate.trailingAnchor.constraint(equalTo: clear.leadingAnchor, constant: -8),
             clear.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             clear.widthAnchor.constraint(equalToConstant: 110),
@@ -250,8 +251,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         clearHistoryButton?.isEnabled = !coachingRunning && !isEvaluating
         guard let button = evaluateButton else { return }
         if isEvaluating {
-            button.title = "Evaluating…"
-            button.toolTip = "The agentic evaluator is inspecting this session"
+            button.title = isFetchingSource ? "Fetching source…" : "Evaluating…"
+            button.toolTip = isFetchingSource
+                ? "Preparing the Jarvis source for this session's release"
+                : "The agentic evaluator is inspecting this session"
             button.isEnabled = false
             return
         }
@@ -309,7 +312,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             retainingMostRecentInsertions: ActivityLog.retainedEntryLimit)
         let rows = snapshot.entries.map { entry, data in
             ActivityLog.rowScript(time: entry.time, message: entry.message,
-                                  imageBase64: data?.base64EncodedString())
+                                  imageBase64: data?.base64EncodedString(), response: entry.response)
         }
         beginLoad(shell: ActivityLog.htmlShell(), rows: rows,
                   shown: rows.count, total: snapshot.total)
@@ -370,6 +373,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// One click runs the sole agentic evaluator over the source checkout plus the selected session,
     /// saves `eval-report.md`, and opens it. An existing report is reopened without re-billing.
     @objc private func evaluateTapped() {
+        guard !isEvaluating else { return }
         guard isCoachingRunning?() != true else {
             jlog("Jarvis: suppressed Activity evaluation presentation while coaching is running.")
             return
@@ -389,11 +393,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
                  "This session has no recorded brain traffic. Traffic starts with the first coaching turn.")
             return
         }
-        guard let evaluator = makeEvaluator?() else {
-            info("Evaluation unavailable",
-                 "Jarvis couldn't locate the source checkout required by the agentic evaluator.")
-            return
-        }
+        guard let evaluator = makeEvaluator?(session.url) else { return }
 
         isEvaluating = true
         refreshEvaluateButtonState()
@@ -401,10 +401,14 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             defer {
                 self?.evaluationTask = nil
                 self?.isEvaluating = false
+                self?.isFetchingSource = false
                 self?.refreshEvaluateButtonState()
             }
             do {
-                let report = try await evaluator.evaluate(sessionDirectory: session.url)
+                let report = try await evaluator.evaluate(sessionDirectory: session.url) { [weak self] fetching in
+                    self?.isFetchingSource = fetching
+                    self?.refreshEvaluateButtonState()
+                }
                 self?.openReport(report, for: session)
             } catch is CancellationError {
                 jlog("Jarvis: Activity evaluation was cancelled.")
@@ -421,6 +425,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         evaluationTask?.cancel()
         evaluationTask = nil
         isEvaluating = false
+        isFetchingSource = false
         refreshEvaluateButtonState()
     }
 
@@ -501,10 +506,10 @@ private extension JarvisReadiness.Status {
             ("Starting", "starting")
         case .blocked:
             ("Blocked", "blocked")
-        case .requestFailed(let provider):
-            ("\(provider.displayName) request failed — try again", "blocked")
+        case .cycleFailed(let provider):
+            ("\(provider.displayName) cycle failed — listening continues", "blocked")
         case .recovering(.brainResponse(let provider), _):
-            ("\(provider.displayName) is not responding", "recovering")
+            ("\(provider.displayName) coaching attempt failed — retrying", "recovering")
         case .recovering:
             ("Recovering", "recovering")
         case .ready(.full):

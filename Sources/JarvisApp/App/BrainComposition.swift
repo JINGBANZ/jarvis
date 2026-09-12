@@ -24,7 +24,7 @@ protocol BrainCompositionHost: AnyObject {
     /// The Settings pane's active-target badge follows the route the session actually selected.
     func brainTargetDidChange(_ target: BrainTarget?)
     func brainRecoveryDidChange(_ provider: BrainProvider?)
-    func brainRequestDidFail(_ provider: BrainProvider)
+    func brainCycleDidFail(_ provider: BrainProvider)
 }
 
 /// Builds and reapplies the provider route.
@@ -44,12 +44,10 @@ final class BrainComposition {
     /// Shared with the Settings sections so a detection performed there is the one this uses.
     let detector = AgentCLIDetector()
     private let secrets: any SecretStore
-    private let coachTools: [ToolDef]
     private unowned let host: BrainCompositionHost
 
-    init(secrets: any SecretStore, coachTools: [ToolDef], host: BrainCompositionHost) {
+    init(secrets: any SecretStore, host: BrainCompositionHost) {
         self.secrets = secrets
-        self.coachTools = coachTools
         self.host = host
     }
 
@@ -81,6 +79,13 @@ final class BrainComposition {
     var interviewFormatAddendum = ""
     var explanationsEnabled = true
     var codeEnabled = false
+
+    /// The current session's tool set, fixed once at Start on exactly the same terms as
+    /// `interviewFormatAddendum` and set from the same place, before the first `makeConfiguredRoute`
+    /// call. A local-agent target bakes these schemas into its process instructions and rejects any
+    /// later turn that no longer composes to them, so this must be the same value the session's
+    /// `CoachDriver` was given — resolve both from `sessionCoachTools` (#273).
+    var coachTools: [ToolDef] = JarvisCore.coachTools
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -145,11 +150,16 @@ final class BrainComposition {
                                        workDirectory: sessionDir,
                                        timeout: BrainWorkloadTimeout.liveCoaching,
                                        traffic: host.liveSessionEvidence, trafficTag: "coach",
-                                       // No prep material: it is indexed off the Start path and
-                                       // installed on the driver later, so a prompt fixed at
-                                       // construction cannot describe it.
+                                       // Prep material is described whenever the session's tool set
+                                       // carries search_prep_notes, which is decided at Start from
+                                       // the configured sources — the index itself lands later, off
+                                       // the Start path. Reading it from the same tool set the coach
+                                       // loop sends is what keeps these instructions valid for the
+                                       // whole session (#273).
                                        systemPrompt: JarvisPrompts.Coach.system(
-                                           prepMaterial: false,
+                                           prepMaterial: coachTools.contains {
+                                               $0.name == searchPrepNotesTool.name
+                                           },
                                            formatAddendum: interviewFormatAddendum,
                                            explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
                                        tools: coachTools,
@@ -188,13 +198,19 @@ final class BrainComposition {
     func fallbackUnavailability(
         for target: BrainTarget,
         detectedCLI: DetectedAgentCLI?
-    ) -> String? {
+    ) -> ProviderFailure? {
         guard target.provider.usesLocalCLI else { return nil }
+        let source = ProviderFailure.Source.brain(target.provider)
         guard let detectedCLI else {
-            return "\(target.provider.displayName) CLI was not found"
+            return ProviderFailure(
+                source: source, stage: .process, category: .unavailable, disposition: .permanent,
+                identity: .init(), message: "\(target.provider.displayName) CLI was not found")
         }
         if detectedCLI.authenticationStatus == .signedOut {
-            return "\(target.provider.displayName) is signed out"
+            return ProviderFailure(
+                source: source, stage: .process, category: .authentication,
+                disposition: .permanent, identity: .init(),
+                message: "\(target.provider.displayName) is signed out")
         }
         return nil
     }
@@ -214,8 +230,8 @@ final class BrainComposition {
             codexSupportedFeatures: detectedCLIs[.codexCLI]?.supportedFeatures ?? []) : nil
         let targets = route.targets.enumerated().map { index, target -> ConfiguredBrainTarget in
             let cli = detectedCLIs[target.provider]
-            if let detail = fallbackUnavailability(for: target, detectedCLI: cli) {
-                return ConfiguredBrainTarget(unavailable: target, detail: detail)
+            if let failure = fallbackUnavailability(for: target, detectedCLI: cli) {
+                return ConfiguredBrainTarget(unavailable: target, failure: failure)
             }
             let runtime = makeBrainRuntime(
                 apiKey: key,
@@ -245,23 +261,23 @@ final class BrainComposition {
                 self.activeBrainTarget = target
                 self.host.brainTargetDidChange(target)
             },
-            onAdvanced: { [weak self] previous, current in
+            onAdvanced: { [weak self] previous, current, failure in
                 guard let self, self.host.liveCoachDriver != nil,
                       self.host.liveSessionDirectory == sessionDirectory else {
                     jlog("Jarvis: ignoring route transition from a stopped or superseded session.")
                     return
                 }
                 self.host.liveSessionEvidence?.record(.brainRouteAdvanced(
-                    previous: previous.provider, current: current.provider))
+                    previous: previous.provider, current: current.provider, failure: failure))
             },
-            onSkipped: { [weak self] target in
+            onSkipped: { [weak self] _, failure in
                 guard let self, self.host.liveCoachDriver != nil,
                       self.host.liveSessionDirectory == sessionDirectory else {
                     jlog("Jarvis: ignoring unavailable-target notice from a stopped session.")
                     return
                 }
                 self.host.liveSessionEvidence?.record(
-                    .brainRouteTargetSkipped(provider: target.provider))
+                    .brainRouteTargetSkipped(failure: failure))
             },
             onRecoveryChanged: { [weak self] provider in
                 guard let self, self.host.liveCoachDriver != nil,
@@ -274,7 +290,13 @@ final class BrainComposition {
                     jlog("Jarvis: ignoring route exhaustion from a stopped or superseded session.")
                     return
                 }
-                self.host.brainRequestDidFail(target.provider)
+                self.host.brainCycleDidFail(target.provider)
+            },
+            onTerminated: { [weak self] target, failure in
+                guard let self, self.host.liveCoachDriver != nil,
+                      self.host.liveSessionDirectory == sessionDirectory else { return }
+                self.host.reportBrainError(
+                    .brainRouteExhausted(target: target, failure: failure), context: .runtime)
             })
     }
 

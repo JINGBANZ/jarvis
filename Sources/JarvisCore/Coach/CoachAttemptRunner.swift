@@ -59,6 +59,15 @@ final class CoachAttemptRunner: @unchecked Sendable {
     /// current evidence per response; no mutable runtime classification is required.
     private let interviewFormatAddendum: String
     private let interviewFormat: InterviewFormat?
+    /// The session's tool set, resolved at Start by `sessionCoachTools` and sent verbatim on every
+    /// request. Deriving it per attempt is what let it drift from the schemas a local-agent target
+    /// was warmed with (#273), so this is a plain `let` even though `prepMaterial` lands later.
+    private let sessionTools: [ToolDef]
+    /// Whether this session offers `search_prep_notes` at all, read from `sessionTools` so the tool
+    /// list and the system prompt that describes it cannot disagree.
+    private var offersPrepNotes: Bool {
+        sessionTools.contains { $0.name == searchPrepNotesTool.name }
+    }
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
@@ -81,9 +90,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)?,
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
+        sessionTools: [ToolDef],
         interviewFormatAddendum: String = "",
         interviewFormat: InterviewFormat? = nil
     ) {
+        self.sessionTools = sessionTools
         self.config = config
         self.transcript = transcript
         self.screen = screen
@@ -141,7 +152,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         case completed(TurnOutcome)
         case failed(
             outcome: TurnOutcome,
-            failure: BrainFailure,
+            failure: ProviderFailure,
             work: PendingCoachingWork
         )
         case skipped(TurnOutcome)
@@ -151,6 +162,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
     struct AttemptExecution {
         let id: Int?
         let result: AttemptResult
+    }
+
+    /// The kernel's own verdict that a provider answered but the answer cannot be used. The provider
+    /// reported nothing, so there is no identity to carry: the stage and the message say what was
+    /// wrong. Always temporary: the next attempt asks the same target again.
+    private static func unusableResponse(
+        _ message: String, from target: BrainTarget
+    ) -> ProviderFailure {
+        ProviderFailure(
+            source: .brain(target.provider), stage: .response, category: .response,
+            disposition: .temporary, identity: .init(), message: message)
     }
 
     /// Run one attempt on one immutable target snapshot.
@@ -220,7 +242,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
         let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let systemPrompt = JarvisPrompts.Coach.system(
-            prepMaterial: attempt.prepMaterial != nil,
+            prepMaterial: offersPrepNotes,
             formatAddendum: interviewFormatAddendum,
             explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
@@ -283,20 +305,20 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("… attempt cancelled (interrupted)")
                 return AttemptExecution(id: attemptID, result: .cancelled)
             }
-            let failure = BrainFailure(error)
+            // Classified at the provider boundary when the adapter knew what it was; this passes
+            // one through unchanged and gives anything else the safe temporary default.
+            let failure = ProviderFailure(
+                unclassified: error, source: .brain(attempt.target.provider), stage: .request)
             jlog("Jarvis coach: brain conversation failed on \(reason) via "
-                 + "\(attempt.target.provider.displayName): \(failure.detail)")
+                 + "\(attempt.target.provider.displayName): \(failure.errorDescription ?? "")")
             return AttemptExecution(
                 id: attemptID,
                 result: .failed(outcome: .brainError, failure: failure, work: work))
         }
 
-        // Search joins only when usable prep text exists; the format-specific speak schema
-        // still ends the same attempt, including the manual shortcut's forced speak.
-        let baseTools = coachTools.map {
-            interviewFormat == .systemDesign && $0.name == speakTool.name ? systemDesignSpeakTool : $0
-        }
-        let tools = attempt.prepMaterial != nil ? baseTools + [searchPrepNotesTool] : baseTools
+        // Sent verbatim, never rebuilt per attempt: these are the schemas a local-agent target was
+        // warmed with, and it rejects the turn if what it is sent no longer composes to them.
+        let tools = sessionTools
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
@@ -321,9 +343,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         jlog("… attempt cancelled (interrupted)")
                         return .cancelled
                     }
-                    let failure = BrainFailure(error)
+                    let failure = ProviderFailure(
+                        unclassified: error, source: .brain(attempt.target.provider),
+                        stage: .request)
                     jlog("Jarvis coach: brain request failed on \(reason) via "
-                         + "\(attempt.target.provider.displayName): \(failure.detail)")
+                         + "\(attempt.target.provider.displayName): \(failure.errorDescription ?? "")")
                     return .failed(outcome: .brainError, failure: failure, work: work)
                 }
 
@@ -338,9 +362,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("⚠️ response incomplete (\(incompleteReason)) — scheduling fresh attempt")
                     return .failed(
                         outcome: .truncated,
-                        failure: BrainFailure(
-                            disposition: .temporary,
-                            detail: "incomplete response: \(incompleteReason)"),
+                        failure: Self.unusableResponse(
+                            "incomplete response: \(incompleteReason)", from: attempt.target),
                         work: work)
                 }
 
@@ -348,9 +371,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("⚠️ required coaching action missing — scheduling fresh attempt")
                     return .failed(
                         outcome: .brainError,
-                        failure: BrainFailure(
-                            disposition: .temporary,
-                            detail: "provider returned no required coaching tool call"),
+                        failure: Self.unusableResponse(
+                            "provider returned no required coaching tool call",
+                            from: attempt.target),
                         work: work)
                 }
 
@@ -434,8 +457,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     guard delivery.accepted else { return .cancelled }
                     let explanation = delivery.explanation
                     let code = delivery.code
-                    let codeText = code.map { "\($0.placement)\n\($0.code)" }
-                    activity?.record(.tip(lines: lines + (explanation.map { [$0] } ?? []) + (codeText.map { [$0] } ?? [])))
+                    activity?.record(.tip(lines: lines, explanation: explanation, codeSnippet: code))
                     // Only the selected call executes; extra provider calls were never delivered.
                     // History describes delivered optional content, including independently enabled code.
                     // Parsed values contain only JSON primitives, so encoding cannot fail.
@@ -443,11 +465,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         ["language": $0.language, "placement": $0.placement, "code": $0.code,
                          "highlightedLines": $0.highlightedLines]
                     }
-                    let arguments: [String: Any] = [
-                        "lines": lines, "mermaid": diagram == nil ? NSNull() : mermaid as Any,
+                    var arguments: [String: Any] = [
+                        "lines": lines,
                         "explanation": explanation as Any? ?? NSNull(),
                         "codeSnippet": codeArguments as Any? ?? NSNull(),
                     ]
+                    // Only the System Design speak schema declares `mermaid`, and both set
+                    // additionalProperties:false: replaying the key elsewhere would show the model
+                    // a field its own tool definition forbids.
+                    if interviewFormat == .systemDesign {
+                        arguments["mermaid"] = diagram == nil ? NSNull() : mermaid as Any
+                    }
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
                     let deliveredCalls = response.rawToolCalls.filter { $0.id == callID }.map { call in
                         RawToolCall(id: call.id, name: call.name,
@@ -478,22 +506,24 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         jlog("… attempt cancelled (stopped) before searching prep notes")
                         return .cancelled
                     }
-                    // The tool is offered only when prepMaterial != nil (below), so a call here with
-                    // it absent means a non-schema-enforced provider (a CLI protocol reconstructing
-                    // calls from free-form prompt text) emitted one anyway — reject it rather than
-                    // silently returning an empty result with a real-looking Activity entry implying
-                    // prep material was actually checked.
-                    guard let prepMaterial = attempt.prepMaterial else {
+                    // The tool is in the session's set only when prep sources were configured at
+                    // Start, so a call here without it means a non-schema-enforced provider (a CLI
+                    // protocol reconstructing calls from free-form prompt text) emitted one anyway —
+                    // reject it rather than silently returning an empty result with a real-looking
+                    // Activity entry implying prep material was actually checked.
+                    guard offersPrepNotes else {
                         jlog("⚠️ search_prep_notes called without prep material configured — "
                              + "scheduling fresh attempt")
                         return .failed(
                             outcome: .brainError,
-                            failure: BrainFailure(
-                                disposition: .temporary,
-                                detail: "search_prep_notes called without prep material configured"),
+                            failure: Self.unusableResponse(
+                                "search_prep_notes called without prep material configured",
+                                from: attempt.target),
                             work: work)
                     }
-                    let results = prepMaterial.search(query: query)
+                    // A nil port here is the offered tool being used before indexing finished, or
+                    // after it found nothing usable. Both are honestly "no matches", not a failure.
+                    let results = attempt.prepMaterial?.search(query: query) ?? []
                     jlog("📎 searched prep notes for \"\(query)\" — \(results.count) match(es)")
                     activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
                     // Mirrors capture_screen: if the very next request in this attempt fails, a
@@ -513,9 +543,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
             jlog("⚠️ tool loop exhausted — scheduling fresh attempt")
             return .failed(
                 outcome: .exhausted,
-                failure: BrainFailure(
-                    disposition: .temporary,
-                    detail: "coaching tool loop exhausted"),
+                failure: Self.unusableResponse(
+                    "coaching tool loop exhausted", from: attempt.target),
                 work: work)
         }()
 

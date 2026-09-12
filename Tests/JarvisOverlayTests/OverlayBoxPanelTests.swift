@@ -15,19 +15,6 @@ import JarvisCore
 @Suite(.serialized) struct OverlayBoxPanelTests {
 
     @MainActor @Test
-    func requestErrorUsesExistingCaptureExcludedPanel() {
-        let panel = OverlayBoxPanel()
-        panel.setEnabled(true)
-        panel.setSessionLive(true)
-        defer { panel.setSessionLive(false) }
-        panel.showError("Model request failed — try again.")
-        #expect(panel.currentText.contains("Model request failed — try again."))
-        #expect(panel.entryCount == 1)
-        #expect(panel.isPanelVisible)
-        #expect(panel.currentSharingType == .none)
-    }
-
-    @MainActor @Test
     func excludedFromScreenCaptureAtInit() {
         let panel = OverlayBoxPanel()
         #expect(panel.currentSharingType == .none)

@@ -5,44 +5,35 @@ import FoundationNetworking
 #endif
 
 /// Per-task diagnostics preserve the shared session's connection pooling and cancellation behavior.
-/// Only allowlisted metadata is logged: never URLs, headers, bodies, or NSError.userInfo text.
-final class OpenAINetworkDiagnostics: NSObject, URLSessionTaskDelegate, Sendable {
-    private let id = UUID().uuidString
-    private let started = ContinuousClock.now
-    private let timeout: TimeInterval
+/// Only allowlisted metadata enters the audit: never URLs, headers, bodies, or NSError.userInfo text.
+/// `@unchecked Sendable` is safe because the sole mutable field is protected by `lock`.
+final class OpenAINetworkDiagnostics: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    private let lock = NSLock()
+    private var collectedPhases: [String: Int] = [:]
 
-    init(timeout: TimeInterval) {
-        self.timeout = timeout
-    }
-
-    func completed(status: Int? = nil, error: Error? = nil) {
-        let elapsed = started.duration(to: .now).components
-        let milliseconds = elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000
-        let result = error.map(Self.errorSummary) ?? "http_status=\(status.map(String.init) ?? "unavailable")"
-        jlog("Jarvis OpenAI transport id=\(id) elapsed_ms=\(milliseconds) timeout_s=\(timeout) \(result)")
+    var phases: [String: Int]? {
+        lock.withLock { collectedPhases.isEmpty ? nil : collectedPhases }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask,
                     didFinishCollecting metrics: URLSessionTaskMetrics) {
-        jlog("Jarvis OpenAI transport id=\(id) transactions=\(metrics.transactionMetrics.count) redirects=\(metrics.redirectCount)")
-        for (index, transaction) in metrics.transactionMetrics.enumerated() {
-            let phases = [
-                "dns_ms=\(Self.milliseconds(transaction.domainLookupStartDate, transaction.domainLookupEndDate))",
-                "connect_ms=\(Self.milliseconds(transaction.connectStartDate, transaction.connectEndDate))",
-                "tls_ms=\(Self.milliseconds(transaction.secureConnectionStartDate, transaction.secureConnectionEndDate))",
-                "upload_ms=\(Self.milliseconds(transaction.requestStartDate, transaction.requestEndDate))",
-                "wait_response_ms=\(Self.milliseconds(transaction.requestEndDate, transaction.responseStartDate))",
-                "download_ms=\(Self.milliseconds(transaction.responseStartDate, transaction.responseEndDate))",
-            ].joined(separator: " ")
-            jlog("Jarvis OpenAI transport id=\(id) transaction=\(index) reused=\(transaction.isReusedConnection) proxy=\(transaction.isProxyConnection) \(phases)")
+        var phases = ["transactions": metrics.transactionMetrics.count, "redirects": metrics.redirectCount]
+        for transaction in metrics.transactionMetrics {
+            let durations = [
+                ("dns_ms", transaction.domainLookupStartDate, transaction.domainLookupEndDate),
+                ("connect_ms", transaction.connectStartDate, transaction.connectEndDate),
+                ("tls_ms", transaction.secureConnectionStartDate, transaction.secureConnectionEndDate),
+                ("upload_ms", transaction.requestStartDate, transaction.requestEndDate),
+                ("wait_response_ms", transaction.requestEndDate, transaction.responseStartDate),
+                ("download_ms", transaction.responseStartDate, transaction.responseEndDate),
+            ]
+            for (name, start, end) in durations {
+                if let start, let end { phases[name, default: 0] += Int(end.timeIntervalSince(start) * 1_000) }
+            }
+            phases["reused_connections", default: 0] += transaction.isReusedConnection ? 1 : 0
+            phases["proxy_connections", default: 0] += transaction.isProxyConnection ? 1 : 0
         }
-    }
-
-    /// Missing endpoints are explicitly unavailable, not zero: a failed connection may never finish
-    /// DNS/TLS, and a reused connection can legitimately have no DNS/TLS measurements at all.
-    private static func milliseconds(_ start: Date?, _ end: Date?) -> String {
-        guard let start, let end else { return "unavailable" }
-        return String(Int(end.timeIntervalSince(start) * 1_000))
+        lock.withLock { collectedPhases = phases }
     }
 
     static func errorSummary(_ error: Error) -> String {

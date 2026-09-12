@@ -114,13 +114,15 @@ producer a generic path to author human-facing copy.
 |---|---|---|
 | Finalized utterance, manual hint, brain action, or fixed lifecycle/degradation notice | Friendly high-level row from the event's Activity presentation | Full typed event and attribution |
 | Provider timing, transport error, retry scheduling, lifecycle detail, or raw error | Nothing; the event has no Activity presentation | Full typed diagnostic detail |
-| Route advance or exhausted coaching request | Fixed, non-sensitive Activity summary | Same event's provider, attempt, timing, and failure detail |
+| Route advance or exhausted coaching cycle | Fixed, non-sensitive Activity summary | Same event's provider, attempt, timing, and failure detail |
 | Capture heartbeat or continuity anomaly | No raw counter stream; readiness remains current UI state | Optional content-free evidence copy |
 
 One occurrence produces one event. Producers do not mirror it through an `ActivityEventSink`, a
 `DiagnosticSink`, a session-audit queue, and a continuity-telemetry queue. The closed set of Activity
-presentations preserves the existing rule that transport, retry, timing, lifecycle, and raw-error
-details never leak into the human view or model transcript.
+presentations preserves the existing rule that transport, retry, timing, and lifecycle details never
+leak into the human view or model transcript. A failure presentation is the one place provider text
+appears, and only as `ProviderFailure`'s redacted message quoted inside a Core-owned frame, so a
+producer still cannot author copy.
 
 After consolidation, “session audit” means the evaluator-relevant event categories and persisted
 projection. It is not a second worker or lifecycle. “Continuity telemetry” likewise becomes typed
@@ -154,9 +156,9 @@ shares the evidence stack.
 3. Failure ends the attempt without committing a partial outcome. The conversation remains pending,
    and a new attempt can include newer finalized speech.
 4. Temporary/unknown failures exhaust a target at the finite threshold; proven permanent failures
-   may exhaust it immediately. Exhausting the route ends only the request and shows an error while
-   listening continues. See the [ordered route policy](./architecture.md#ordered-provider-route).
-5. Only a later fresh attempt advances to another target. A later user request can start a new route
+   may exhaust it immediately. Cycle exhaustion follows the session recovery policy while
+   listening continues within its limits. See the [ordered route policy](./architecture.md#ordered-provider-route).
+5. Only a later fresh attempt advances to another target. A later coaching cycle can start a new route
    budget after exhaustion; successful fallback selection stays active. Providers never race and
    runtime failures never rewrite preferences.
 
@@ -310,8 +312,8 @@ the worker renders into. Activity keeps its own persistence until the next slice
 - Rendering now happens on the evidence worker rather than on the producer's thread. A producer
   states an occurrence and returns.
 - The closed presentation set is unchanged. Sharing one stack grants no producer a path to author
-  free-form human-facing copy, and transport, retry, timing, lifecycle, and raw-error detail still
-  cannot reach the human view or the model transcript.
+  free-form human-facing copy, and transport, retry, timing, and lifecycle detail still cannot reach
+  the human view or the model transcript.
 
 ### Failure and accepted degradation
 
@@ -456,9 +458,9 @@ incomplete instead of presenting an apparently complete story.
 - A session whose evidence is complete shows nothing.
 - Switching from an incomplete session to a complete one clears the badge, so a stale notice cannot
   follow the reader into another session's history.
-- The wording carries no transport, retry, timing, lifecycle, or raw-error detail. The rule that
-  debug detail never reaches the Activity window is not relaxed to build this; the detail stays in
-  the owner-only session folder where an agent reads it.
+- The wording carries no transport, retry, timing, or lifecycle detail. The rule that debug detail
+  never reaches the Activity window is not relaxed to build this; the detail stays in the owner-only
+  session folder where an agent reads it.
 
 ### Failure and accepted degradation
 
@@ -708,21 +710,25 @@ contracts before implementation.
   with `JarvisEvaluation`; the coaching-kernel guard separately keeps `URLSession` out of Core's
   kernel paths.
 - `Sources/JarvisBrainProviders/OpenAI/` holds the OpenAI Responses adapter, moved unchanged
-  apart from `import JarvisCore`: `OpenAIBrainClient`, plus `BrainFailure+OpenAI` — the OpenAI
-  HTTP permanence proof, which moves although the issue body does not list it: the statuses and
-  error codes proving an unrecoverable OpenAI target are that adapter's reviewed boundary
-  knowledge, not provider-neutral domain, and nothing outside the adapter calls it.
+  apart from `import JarvisCore`: `OpenAIBrainClient`.
 - Core keeps the provider-neutral brain domain: `BrainClient`/`BrainConversation`, `BrainTarget`,
-  `BrainRoute`, `BrainProvider`, `BrainFailure` with its unknown-error → temporary entry point,
-  `BrainModelCatalog`, `ReasoningEffort`, `BrainWorkloadTimeout`, tool-invocation parsing, and
-  the attempt/observer contracts. (The local-agent CLI subtree followed in
-  [#206](https://github.com/JINGBANZ/jarvis/issues/206).)
+  `BrainRoute`, `BrainProvider`, `BrainModelCatalog`, `ReasoningEffort`, `BrainWorkloadTimeout`,
+  tool-invocation parsing, and the attempt/observer contracts. (The local-agent CLI subtree
+  followed in [#206](https://github.com/JINGBANZ/jarvis/issues/206).)
+- Core also keeps what a failure at any provider boundary means: `ProviderFailure` and one
+  classifier per vendor under `Sources/JarvisCore/Providers/` (see
+  [architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)).
+  A vendor's statuses and error codes are shared boundary knowledge, not one adapter's: the same
+  OpenAI table answers for a brain request, a transcription socket, and a Settings credential
+  check, and a per-adapter copy would drift between them. It stays Foundation-only, so the target
+  boundary is unaffected: adapters hand in status codes, JSON, close reasons, and `NSError` domain
+  and code, never `URLSession` types.
 - `JarvisApp` composes providers at Start and hands the kernel injected `BrainClient` ports; the
   kernel's route and scheduling policy never name a concrete adapter.
 - One Core symbol becomes public for the boundary; everything else the adapter reads already was:
-  - `BrainFailure.init(_:)` — every provider adapter's classification entry point for errors it
-    has not proven anything about (unknown → temporary). The local-agent slice needs the same
-    entry point when it moves.
+  - `ProviderFailure.init(unclassified:source:stage:)` — every provider adapter's entry point for
+    errors it has not proven anything about (unknown → temporary). The local-agent slice needs the
+    same entry point when it moves.
 - The coaching parity harness keeps composing the kernel with the real OpenAI adapter over
   scripted transports — the same composition `JarvisApp` performs at Start — so
   `Tests/JarvisCoreTests` links `JarvisBrainProviders` for exactly that harness; Core's own units
@@ -740,9 +746,9 @@ contracts before implementation.
 
 ### Failure and accepted degradation
 
-- Nothing new, and no accepted data loss. The typed `BrainFailure` dispositions and the
-  unknown-defaults-to-temporary policy carry over unchanged; raw provider detail still stays out
-  of Activity.
+- Nothing new, and no accepted data loss. The typed `ProviderFailure` dispositions and the
+  unknown-defaults-to-temporary policy carry over unchanged; provider text still reaches Activity
+  only redacted, inside a Core-owned frame.
 
 ### Non-goals
 
@@ -763,7 +769,7 @@ contracts before implementation.
   `Sources/JarvisCore`.
 - The OpenAI adapter tests and the OpenAI classification tests move to
   `JarvisBrainProvidersTests` with assertions unchanged — imports and local test support only.
-  The provider-neutral `BrainFailure` tests stay in `JarvisCoreTests`.
+  The provider-neutral `ProviderFailure` and vendor-classifier tests stay in `JarvisCoreTests`.
 - The coaching parity harness passes with its scenario, fakes, and snapshot comparison untouched.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`. Live smoke verification of one OpenAI
   coaching turn stays in the standard app smoke, performed by a human.
@@ -790,11 +796,12 @@ all. It is a pure move: no behavior, invocation, parsing, timing, or classificat
   runner rather than keeping a second copy of that plumbing. The dependency graph stays acyclic and
   inward-only (`JarvisEvaluation` → `JarvisBrainProviders` → `JarvisCore`), and the boundary that
   matters — evaluation never reads live coaching state — is untouched.
-- One symbol becomes public for the boundary: `AgentCLIProcessRunner.errorDomain`. It is the
-  adapter's identity on every error that leaves it, and Core's provider-neutral `BrainFailure`
-  classification is tested against the real domain rather than a duplicated literal.
-- `JarvisCoreTests` links `JarvisBrainProviders` for two narrow reasons now: the coaching parity
-  harness, and the `BrainFailure` classification tests naming that real domain.
+- One symbol is public for the boundary: `AgentCLIProcessRunner.errorDomain`. It is the adapter's
+  identity on every error that leaves it, and an alias of the matching constant on Core's
+  `LocalAgentFailureClassifier`, which owns the domain names it classifies, so the adapter and the
+  table cannot name the domain differently.
+- `JarvisCoreTests` links `JarvisBrainProviders` for two narrow reasons: the coaching parity
+  harness, and the local-agent classification tests naming that real domain.
 
 ### Expected behavior
 

@@ -289,11 +289,11 @@ import Testing
 
     @Test func failedRequestKeepsSessionAndClearsOnNextRequest() {
         let (readiness, session) = fullReadyReadiness()
-        _ = readiness.observe(.brainRequestFailed(.openAI), for: session)
-        #expect(readiness.status == .requestFailed(.openAI))
+        _ = readiness.observe(.brainCycleFailed(.openAI), for: session)
+        #expect(readiness.status == .cycleFailed(.openAI))
         _ = readiness.observe(.brainRecovery(nil), for: session)
         #expect(readiness.status == .ready(.full))
-        _ = readiness.observe(.brainRequestFailed(.openAI), for: session)
+        _ = readiness.observe(.brainCycleFailed(.openAI), for: session)
         _ = readiness.observe(.transcriptionEndpoint(stream: .microphone, state: .failed), for: session)
         #expect(readiness.status == .blocked(.endpoint(.microphone)))
     }

@@ -62,7 +62,10 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 messages: messages, tools: tools, toolChoice: toolChoice)
         } catch {
             if Task.isCancelled || error is CancellationError { throw error }
-            throw BrainFailure(error)
+            // A brain request is one round trip with nothing "ready" behind it, which is exactly
+            // what this initializer's transport path assumes: a refused connection reads as
+            // unreachable, and the failing URL never becomes the message.
+            throw ProviderFailure(unclassified: error, source: .brain(.openAI), stage: .request)
         }
     }
 
@@ -80,7 +83,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         // This transport makes exactly one request. `CoachDriver` never replays it; a failure leaves
         // the conversation pending so a fresh attempt can include newer finalized transcript.
         let started = Date()
-        let diagnostics = OpenAINetworkDiagnostics(timeout: timeout)
+        let diagnostics = OpenAINetworkDiagnostics()
         let data: Data
         let http: HTTPURLResponse?
         do {
@@ -90,36 +93,22 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 let result = try await URLSession.shared.data(for: request, delegate: diagnostics)
                 (data, http) = (result.0, result.1 as? HTTPURLResponse)
             }
-            diagnostics.completed(status: http?.statusCode)
         } catch {
-            diagnostics.completed(error: error)
             // Record the failed round trip too — a transport error (timeout, dropped connection) is
             // exactly the kind of issue the session evaluation should see.
             traffic?.record(tag: trafficTag, request: body, response: nil, status: nil,
                             latencyMs: Self.elapsedMs(since: started),
-                            error: error.localizedDescription)
+                            error: OpenAINetworkDiagnostics.errorSummary(error), phases: diagnostics.phases)
             throw error
         }
         let status = http?.statusCode ?? 0
         traffic?.record(tag: trafficTag, request: body, response: data, status: status,
-                        latencyMs: Self.elapsedMs(since: started))
+                        latencyMs: Self.elapsedMs(since: started), phases: diagnostics.phases)
         guard (200..<300).contains(status) else {
-            let identity = Self.errorIdentity(from: data)
-            throw BrainFailure.openAIHTTP(
-                status: status,
-                errorCode: identity.code,
-                errorType: identity.type,
-                detail: String(data: data, encoding: .utf8) ?? "http \(status)")
+            throw OpenAIFailureClassifier.classify(
+                httpStatus: status, body: data, source: .brain(.openAI), stage: .request)
         }
         return try decode(data)
-    }
-
-    private static func errorIdentity(from data: Data) -> (code: String?, type: String?) {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let error = root["error"] as? [String: Any] else {
-            return (nil, nil)
-        }
-        return (error["code"] as? String, error["type"] as? String)
     }
 
     private static func elapsedMs(since started: Date) -> Int {

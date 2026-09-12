@@ -2,8 +2,8 @@ import Foundation
 
 /// Pure session-local cursor and health policy for an ordered provider route.
 ///
-/// Within one request the route only moves forward. Three temporary failures or one proven
-/// permanent failure exhaust a target. The driver owns the new-request reset after route exhaustion.
+/// Within one cycle the route only moves forward. Three temporary failures or one proven
+/// permanent failure exhaust a target. The driver owns the new-cycle reset after route exhaustion.
 struct BrainRouteSession: Sendable, Equatable {
     static let failuresPerTarget = 3
 
@@ -27,7 +27,7 @@ struct BrainRouteSession: Sendable, Equatable {
     }
 
     mutating func recordFailure(
-        _ disposition: BrainFailure.Disposition
+        _ disposition: ProviderFailure.Disposition
     ) -> FailureTransition {
         consecutiveFailures += 1
         let targetIsExhausted = disposition == .permanent

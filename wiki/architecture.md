@@ -94,9 +94,10 @@ moments the model judges worthwhile.
    audit record.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
    (`CoachHistory`), the
-   new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
-   `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
-   "stuck."
+   new transcript delta, the timing context (seconds silent, session elapsed), and the session's
+   fixed tool set — `[capture_screen, speak, stay_silent]`, plus `search_prep_notes` when prep
+   sources are configured, with `speak` carrying the System Design schema in that format. The timing
+   is what lets the model tell "thinking" from "stuck."
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
    visible context missing from the conversation — including unresolved references such as “this”
    or “here” — and no fresh capture is already available for that request. It may also capture when
@@ -227,7 +228,11 @@ Without visible code, known problem context supports a first component without i
 
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) pins the snippet in a separate
 bottom scroll area inside the existing capture-excluded panel. Its opaque dark background preserves
-syntax contrast regardless of history opacity; monospace text uses the configured size. Each new hint
+syntax contrast regardless of history opacity. Long code lines wrap within the dock without changing
+source text or correction highlights. The dock measures wrapped content to use available space;
+code uses a compact monospace size and shrinks only as needed to fit, down to a readable minimum
+(see `CodeSnippetView`). Very small panels retain vertical scrolling rather than clipping code or
+shrinking it indefinitely. Each new hint
 replaces its snippet, or clears the previous code when none is appropriate, so guidance and code agree.
 Dismiss and session clear remove the snippet. While enabled, an empty code area remains reserved;
 a session started with code off has no dock. The dock collapses
@@ -252,8 +257,8 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 |---|---|---|
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. When a client-commit model is selected, separate Silero VAD instances score these post-AEC streams (resampled to 16 kHz) on the delivery queue rather than the IOProc, and emit content-free turn edges. Both sides then downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3** + **Silero VAD** via Core ML. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
-| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `BrainFailure` feeds attempt outcomes into the finite provider route; route exhaustion ends only the request and uses nonfatal app status. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
-| **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, request failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
+| **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `ProviderFailure` feeds attempt outcomes into the finite provider route; cycle exhaustion uses the session recovery policy. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
+| **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
@@ -356,25 +361,25 @@ failure site decides presentation. Startup failures caused by an explicit Start 
 runtime context suppresses alerts unconditionally, including after teardown, so a queued main-actor
 report cannot reveal Jarvis during screen sharing. Permanent brain, microphone-transcription, and
 audio-capture failures stop without presenting UI; the system-audio failure degrades to
-microphone-only. Every brain provider crosses one typed `BrainFailure` boundary, but provider
+microphone-only. Every brain provider crosses one typed `ProviderFailure` boundary, but provider
 classification never replays a failed request inside its coaching attempt. A failed attempt leaves
 capture, transcription, pending triggers, unsent transcript, and committed history intact; the
 provider-route state machine decides whether to try the active target again, advance to the next
-user-authorized target, or stop after the finite route is exhausted. Audio-route rebuilds separately
+user-authorized target, or finish the finite cycle under the session recovery policy. Audio-route rebuilds separately
 retry under a bounded schedule before capture is declared unavailable, and stale callbacks are
 identity-guarded across Stop → Start. Each Activity row persists a stable event kind. The agentic
 session evaluator reads the complete Activity file, using those kinds and the full user-visible
 sequence rather than a preselected excerpt; dynamic provider and transport detail remains only in
 `JarvisLog`. Route changes and final exhaustion use fixed, provider-level Activity events.
-Failure streaks use one fixed provider-only Activity notice because unavailable coaching is
-user-visible; repeated attempts do not add duplicate notices. Raw request errors, attempt scheduling,
-and failure counts remain diagnostic detail.
+Cycle failures use typed Activity notices with the redacted provider cause; repeated attempts within
+a cycle do not add duplicate notices. Raw request errors, scheduling, and failure counts remain
+diagnostic detail.
 
 Overall readiness is current UI state rather than an Activity event: `JarvisReadiness` drives the
 menu and the live Activity badge from the same effect, while an opened past session shows **Ended**.
-A temporary brain failure shows retrying while its finite budget remains. An exhausted request shows
-an error until another request starts; capture and transcription continue, and their failures keep
-precedence. The error is also rendered in red on the existing enabled overlay surfaces.
+A temporary brain failure shows retrying while its finite budget remains. An exhausted cycle shows
+a failed status until coaching succeeds; capture and transcription continue, and their failures keep
+precedence. See the [ordered route policy](#ordered-provider-route) for quiet recovery and terminal limits.
 Readiness transitions never append rows to `jarvis-activity.jsonl`; the persisted record continues
 to contain only user-facing coaching, fixed failures, and lifecycle outcomes.
 
@@ -386,12 +391,11 @@ presentation matrix is unit-tested, and `scripts/check-ghost-mode.sh` rejects un
 API calls from the normal test gate. Realtime health remains visible through the menu and current
 Activity badge; `ErrorReporter` owns failure lifecycle and permitted startup surfacing.
 
-OpenAI request diagnostics in `OpenAINetworkDiagnostics` use per-task URLSession metrics while
-preserving the shared connection pool. Correlated debug-only entries record elapsed/configured
-timeout, HTTP status or allowlisted error domains and numeric codes, transaction counts, connection
-reuse/proxy flags, and DNS/connect/TLS/upload/response timings. Missing timing endpoints are
-unavailable rather than zero. These entries exclude URLs, headers, payloads, and arbitrary error text;
-transport failure alone does not establish a provider outage.
+OpenAI transport diagnostics use per-task URLSession metrics while preserving the shared connection
+pool. DNS/connect/TLS/upload/response durations and connection reuse/proxy counts enter the existing
+`BrainTrafficAuditEvent.phases` on the same provider-call record the evaluator reads. Missing endpoints
+are omitted, not reported as zero. No parallel correlation stream is emitted; diagnostic fields
+exclude URLs, headers, payloads, and arbitrary error text.
 
 ### Ordered provider route
 
@@ -421,7 +425,7 @@ screen-capture failure do not count as provider failures. The most recent comple
 remains provider-neutral input for the next attempt, but older captures, raw reasoning, tool-call
 identifiers, and call/result pairing never cross an attempt or provider boundary.
 
-Failed conversation work remains pending within the request's retry budget and schedules another
+Failed conversation work remains pending within the cycle's retry budget and schedules another
 coaching attempt after a short fixed delay. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
 manual coaching trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
 failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
@@ -442,13 +446,25 @@ next configured target; unavailable targets are skipped without synthetic provid
 use a fixed short delay that an incoming natural trigger may wake early, with no exponential backoff.
 A successful response clears the target's failure count and preserves successful fallback selection.
 
-Exhausting the whole route ends only that request. Jarvis records one fixed Activity notice and shows
-a red error on its existing enabled overlays, while capture and transcription remain active. It does
-not keep automatically retrying the failed conversation. A later explicit coaching shortcut or new finalized
-speech starts a fresh request at the primary with a new budget; silence with no new transcript does
-not. Failed transcript stays available as context. Provider clients remain owned until replacement or
-session teardown so a new request can reuse them. Stop still cancels pending/in-flight work. Raw
-errors stay in `jarvis-debug.log`; fixed UI copy does not claim that every failure is a timeout.
+A **coaching cycle** is one finite traversal of the remaining route, possibly containing multiple
+attempts and HTTP requests. Exhausting a cycle keeps capture and transcription active. The icon,
+menu and Activity status remain failed until a successful coaching attempt; only the first failed
+cycle in a streak shows a red caption. Failures never add rows to the Box. Activity records the failed
+cycle with the provider's redacted cause.
+
+A later explicit coaching shortcut or new finalized speech starts a fresh cycle at the primary;
+silence without new transcript does not. Consecutive failed cycles delay that admission by 0, 5, 15,
+45, then at most 120 seconds. New input coalesces during the cooldown, and the admitted attempt
+snapshots the latest conversation. Any successful terminal coaching action resets the cooldown.
+Proven permanent target failures remain excluded for the session, including across fresh cycles and
+Settings edits; when all configured targets are permanently unavailable, the existing terminal
+`brainRouteExhausted` path ends the session and Activity names the cause. If at least one cycle has
+failed and ten minutes pass since the last success (or session start), the same path ends the session
+with that explanation, even without new speech. These terminal paths add no live presentation.
+
+Provider clients remain owned until replacement or session teardown. Stop cancels pending/in-flight
+work and the recovery deadline. This policy is implemented by `BrainRouteSession`,
+`BrainCycleRecovery`, and `CoachDriver`; provider preferences remain unchanged.
 
 ```mermaid
 flowchart TD
@@ -464,7 +480,7 @@ flowchart TD
     D -- Yes --> N{Next configured<br/>target exists?}
     B -- Yes --> N
     N -- Yes --> F[Advance once<br/>schedule a new attempt]
-    N -- No --> X[End request, show error<br/>keep session listening]
+    N -- No --> X[End cycle; apply session<br/>recovery policy]
     W --> T
     F --> T
     P --> T
@@ -476,7 +492,7 @@ The implementation keeps orchestration, route policy, and OS edges separate:
 |---|---|---|
 | Route value (`JarvisCore/Brain`) | Immutable ordered targets and validation. | Schedule work or create UI. |
 | Route state machine (`JarvisCore/Coach`) | Count attempt outcomes, move forward, and emit pure transition commands. | Call providers, read preferences, or own timers. |
-| Attempt scheduler (`JarvisCore/Coach`) | Own finite request retries, trigger coalescing, single-flight, and transcription-settlement admission. | Classify provider payloads or mutate the route directly. |
+| Attempt scheduler (`JarvisCore/Coach`) | Own finite cycle retries, trigger coalescing, single-flight, and transcription-settlement admission. | Classify provider payloads or mutate the route directly. |
 | Attempt runner (`CoachAttemptRunner`) | Run one snapshotted target's tool loop, normalize completed provider-neutral effects, commit history, and report one outcome. | Retry a failed request, choose another target mid-attempt, or schedule anything. |
 | Client factory (`JarvisCore/Brain`) | Build a `BrainClient` for an explicit target and surface preflight availability. | Select or reorder targets. |
 | Preferences (`JarvisCore/Config`) | Persist primary, ordered fallbacks, per-provider models, and shared effort. | Store the live route cursor or failure counts. |
@@ -551,10 +567,24 @@ rather than a per-turn screenshot.
   provider reapply. Both OpenAI and CLI construction use
   `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)`; passing resolved text keeps resource I/O
   outside coaching turns. CLI instructions remain fixed for the session, while General Technical can
-  use new task evidence within those instructions. CLI construction passes `prepMaterial: false`
-  because prep material is installed later. [Private architecture hints](#private-architecture-hints)
-  require explicit **System Design** in both the tool schema and runtime; General Technical's
-  system-design guidance does not enable diagrams.
+  use new task evidence within those instructions. CLI construction reads `prepMaterial` from the
+  session's fixed tool set, so the baked instructions describe exactly what the loop offers.
+  [Private architecture hints](#private-architecture-hints) require explicit **System Design** in
+  both the tool schema and runtime; General Technical's system-design guidance does not enable
+  diagrams.
+- **A session's tool set is fixed at Start, for the same reason its system prompt is
+  (`sessionCoachTools` in `Sources/JarvisCore/Coach/ToolDefs.swift`).** `CLIBrainClient` renders each
+  tool's `parametersJSON` verbatim into the instructions its process is warmed with, and rejects any
+  later turn whose tools no longer compose to that string, so a set that grew or changed shape
+  mid-session would fail every remaining attempt on that target until the route exhausted. Both the
+  coach loop and the CLI-provider construction therefore resolve their tools through one function,
+  from inputs known at Start: the interview format selects the plain or System Design speak schema,
+  and configured prep-material *sources* decide whether `search_prep_notes` is offered at all. That
+  last input is deliberately "sources are configured", not "an index exists": building the index
+  reads files and shells out to `textutil`, so it runs off the Start path and the search port arrives
+  after the first attempts. A search that lands before it, or after indexing found nothing usable,
+  returns no matches — the honest answer, and one that costs nothing, where changing the offered set
+  mid-session would cost the whole session.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
@@ -594,11 +624,13 @@ rather than a per-turn screenshot.
 - **Gemini transcription is the third opt-in provider, over the Gemini Live WebSocket
   (`GeminiLiveSession`, `GeminiLiveTranscriber`).** The socket authenticates with the API key as a
   URL query parameter rather than a header — the only one of the three providers that does — so
-  `GeminiLiveTranscriber` never logs, interpolates, or stringifies the connect URL, a `URLRequest`
-  built from it, or a raw transport `Error` (a `URLError` can embed the failing URL, key included, in
-  its `description`); every diagnostic instead names the fixed, credential-free
-  `GeminiLiveSession.redactedEndpoint`, and every transport-failure path constructs its own fixed
-  reason string rather than interpolating the caught error. Turn detection is **entirely
+  `GeminiLiveTranscriber` never logs, interpolates, or stringifies the connect URL or a `URLRequest`
+  built from it (a `URLError` can embed the failing URL, key included, in its `description`); every
+  diagnostic instead names the fixed, credential-free `GeminiLiveSession.redactedEndpoint`. A caught
+  transport error is safe to carry because it reaches a message only through
+  `TransportFailureClassifier`'s fixed table, keyed on the error code and never on the error's own
+  description, and a server close reason reaches Activity only through `ProviderMessageRedaction`
+  (see [One failure record](#one-failure-record-one-table-per-vendor)). Turn detection is **entirely
   server-owned**: Gemini finalizes each utterance itself and returns it as `inputTranscription`, so
   unlike the OpenAI models there is no client-side commit, no Silero endpoint scoring, and no
   ledger reconciling provisional against final items — one server final is one accepted line, mirrored
@@ -615,11 +647,11 @@ rather than a per-turn screenshot.
   needs neither `RealtimeTranscriber`'s per-item ledger nor its client-commit path (turn detection is
   entirely server-owned), so restructuring the OpenAI adapter — whose live socket cannot be
   unit-tested — to serve a provider that needs neither would risk the primary transcription path for
-  speculative reuse. The two adapters' socket lifecycle (ready-timeout, ping/pong, timer invalidation,
-  generation guards) still duplicates roughly 130 lines as a result, tracked in each file's
-  `DIVERGENCE HAZARD` comment (`RealtimeTranscriber.swift`, `GeminiLiveTranscriber.swift`) so a fix to
-  one is not missed in the other; extracting a shared lifecycle helper stays a deliberately deferred,
-  separate change until a third streaming provider makes the reuse concrete instead of speculative.
+  speculative reuse. What the two genuinely share is the socket lifecycle (ready-timeout, ping/pong,
+  timer invalidation, generation guards), and that part is one driver, because a lifecycle rule
+  maintained twice by hand is a rule the two adapters can disagree about without either looking
+  wrong: see [Resilience](#resilience). The per-item ledger, the commit path, and turn detection are
+  what the adapters keep to themselves, which is what separates them.
 - **The wire sample rate is a per-provider requirement, not a quality knob
   (`TranscriptionProvider.audioFormat`, `TranscriptionAudioFormat`).** OpenAI Realtime and Apple
   Speech take 24 kHz PCM16 mono; Gemini Live requires 16 kHz PCM16 mono
@@ -787,14 +819,31 @@ The always-on legs are built to survive transient failure rather than die on it:
   provider-specific configuration for both speaker endpoints: provider plus OpenAI model and
   expected-language list, or provider plus Apple locale. Changing Settings affects the next Start, reconnects keep
   the same snapshot, and neither adapter silently sends audio to the other provider after failure. A
-  microphone-side terminal failure ends the unusable session; a system-audio-side failure degrades
-  to microphone-only with fixed Activity copy.
+  microphone-side terminal failure ends the unusable session. A system-audio-side failure degrades to
+  microphone-only and says why, unless the failure is one both sockets share (a permanent rejection,
+  or a connection that never reached ready), in which case it ends the session instead
+  (`ProviderFailure.endsEverySession`). Both sockets use one key and one network, so degrading on
+  whichever side reports first would hide the real cause behind a system-audio notice seconds before
+  the microphone side failed identically. A socket lost after it was ready is a blip local to that
+  one stream and still degrades. Apple Speech and the capture device are `.local`: they share no
+  account or network surface, so they never escalate.
 - **An OpenAI Realtime transcription socket *will* drop** (network blips, server resets, the ~60-min
   session cap) and a Realtime session **cannot be resumed** — a dropped connection means a new
   session. A socket is not declared ready at the WebSocket handshake: the transcriber waits for the
   server's session-configuration acknowledgement under a startup deadline. Once ready, ping/pong
   probes expose an idle half-open connection before the user's next utterance; send, receive, close,
-  startup-timeout, and liveness failures all enter one idempotent reconnect path. Each replacement
+  startup-timeout, and liveness failures all classify at the edge and enter one idempotent reconnect
+  path. A refused WebSocket upgrade whose status proves the request cannot succeed as sent
+  (`HandshakeRefusal`, shared by both vendor tables), or a close the vendor table proves permanent,
+  skips the reconnect path entirely and ends the session with its cause, because no retry fixes a
+  rejected key, a denied region, or a wrong URL. A status that describes a moment rather than a
+  contract, such as a proxy's upgrade timeout, keeps its retries like any other temporary failure.
+  A socket that has never reached ready gets **three attempts** rather than seven (the two budgets
+  `SocketLifecyclePolicy` is built with): it has nothing buffered to preserve, and every further
+  attempt is silence the user cannot explain. When that budget runs out, the reported failure keeps the last observed identity and
+  message and reads as unreachable rather than lost, which is what ends the session instead of
+  degrading. A socket lost after it was ready keeps the longer budget, because there is a working
+  session's audio to replay into a replacement. Each replacement
   socket has a generation so stale callbacks cannot damage the new one, and diagnostics label the
   `me`/`them` side, socket generation, server session, and current macOS network-path summary. While
   reconnecting, speech-eligible audio remains in one **transactional FIFO plus recovery tail**
@@ -810,8 +859,8 @@ The always-on legs are built to survive transient failure rather than die on it:
   loss edges; deliberate cap eviction is logged as diagnostic metadata. Within a healthy socket,
   streamed transcript deltas survive a failed or missing terminal event. An utterance-local failure
   remains visible in diagnostics but cannot become pseudo-speech or trigger the brain; a permanent
-  quota, authentication, access, or configuration rejection ends the session and records its fixed
-  cause in Activity.
+  quota, authentication, access, or configuration rejection ends the session and records its cause in
+  Activity, quoted from the provider.
   Sequence, sample, timestamp, and socket-generation checkpoints cover the capture, delivery,
   WebSocket attempt/completion, and server-event boundaries. Periodic content-free summaries and
   typed anomalies show which boundary stopped advancing. Bounded local activity intervals match
@@ -824,6 +873,29 @@ The always-on legs are built to survive transient failure rather than die on it:
   their retained PCM is transcribed by the replacement session instead of first emitting a partial
   or gap that the replay would duplicate. Stale speech state therefore cannot suppress silence
   coaching after reconnect. Reconnect uses capped exponential backoff.
+- **Both socket providers run that lifecycle from one driver
+  (`SocketLifecyclePolicy`, `WebSocketConnection`).** The decisions are Foundation-only and
+  unit-tested in Core: when to open, what counts as ready, which failures terminate now, and how much
+  retry budget is left. The App-side driver owns the `URLSession`, the task, the generation counter,
+  the three timers, and the receive and close paths, and asks the policy for each of those decisions.
+  Each transcriber is that driver's adapter and supplies only what its vendor does differently: the
+  request, the configuration frame, the frame reader, the two failure classifiers, and the stream
+  bookkeeping a socket handoff needs.
+
+  The split costs two locks, and the rule between them is load-bearing. The driver's lock guards
+  socket state and is a leaf: the driver never calls an adapter while holding it. Each adapter guards
+  its own audio and replay state, mirrors the driver's readiness under that lock, and has its
+  producers read only the mirror. Every driver state change is immediately followed by an adapter
+  callback that flips the mirror, so a producer sees either the whole pre-change picture or the whole
+  post-change one, never a half-applied handoff. Having producers ask the driver directly would
+  reopen the race the replay barrier exists to close: a producer that saw "not ready" before the
+  handoff had begun would publish a barrier into the lifecycle ahead of the snapshot it belongs to.
+
+  A rotation the server announced (OpenAI's `session_expired` or a 1001 close, Gemini's `goAway`)
+  spends no retry budget and waits out no backoff delay, because it is expected churn rather than a
+  fault. That freedom belongs only to a socket that reached ready. A warning on a socket that never
+  worked describes a connection that is failing, and reading it as a rotation would reopen forever
+  against a server that refuses every handshake, so those take the ordinary budgeted path.
 - **A Gemini Live socket is capped at roughly 10 minutes, but Google gives advance warning:** a
   `goAway` frame (with a `timeLeft` countdown) arrives before the close, instead of the close simply
   happening as OpenAI's does. `GeminiLiveTranscriber` uses that warning to drain rather than just
@@ -869,7 +941,7 @@ The always-on legs are built to survive transient failure rather than die on it:
   new attempt rebuilds its input from the latest committed history, the failed conversation, and
   every newer finalized transcript item; with no new speech, it simply re-attempts the pending work.
   The [ordered route](#ordered-provider-route) defines finite retries, fallback transitions, and
-  nonfatal request failure. No provider is probed concurrently. Cancellation remains
+  bounded cycle failure. No provider is probed concurrently. Cancellation remains
   quiet. A timed-out Codex inference first interrupts and drains only that turn, preserving the
   session-scoped app-server when the matching terminal state confirms the stream is healthy;
   uncertain protocol cleanup still invalidates the server. Memory **compaction** fails soft outside
@@ -904,19 +976,19 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   generations, provider audio-clock values, and a local activity bit in the owner-only session
   log — never PCM or recovered words. The only screen-/audio-derived data written to **local** disk
   is the owner-only, bounded per-session record: Activity (spoken tips, deliberate-silence outcomes,
-  fixed failed-action and stop/degrade notices, transcribed lines, and the screenshots the model
-  saw), the coaching-attempt provenance needed to attribute those finalized lines, and redacted wire
+  failed-action and stop/degrade notices carrying the provider's redacted message, transcribed
+  lines, and the screenshots the model saw), the coaching-attempt provenance needed to attribute those finalized lines, and redacted wire
   traffic. Raw mic audio and a separate live-transcript archive are never persisted. Requests
   are sent `store:true`, so what the model saw does remain inspectable (and retained) server-side at
   OpenAI for debugging (see [sandbox.md](./sandbox.md)).
-- **Behavioral restraint (model-governed):** there is **no cooldown or rate cap** in code. Every
+- **Behavioral restraint (model-governed):** there is **no cooldown or rate cap during healthy operation**. Every
   substantive utterance — from either speaker; only clear non-semantic hesitation sounds are removed
   as pure cost — reaches the brain, and the brain decides whether it has anything worth
   saying — that restraint lives in the system prompt (see
   [`JarvisPrompts.Coach.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+Coach.swift)).
   This keeps
   conversation natural during healthy operation. During provider failures, new speech coalesces
-  within the finite request budget; after that budget ends, another user request can try again. The hard control is
+  within the finite cycle budget; subsequent cycles follow the [recovery cooldown](#ordered-provider-route). The hard control is
   the menu-bar **Start/Stop** — coaching never runs until explicitly started, and stopping tears the
   pipeline down entirely. Cost is accepted as tracking usage for now (a future improvement, not a
   v1 guardrail).
