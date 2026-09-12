@@ -6,8 +6,8 @@ import Foundation
 /// Two kinds of consumer read two different parts and nothing else. Policy (route advance, socket
 /// retry, session end) reads `disposition` and `endsEverySession`. People read `category` for the
 /// fixed sentence and advice, and `identity` plus `message` for what the provider actually said.
-/// `message` is always redacted provider text: both initializers redact unconditionally, so no
-/// adapter can carry raw text past this type.
+/// Every provider-supplied string this type holds is redacted: the initializer redacts `message`
+/// and the identity's own strings unconditionally, so no adapter can carry raw text past it.
 ///
 /// Unknown failures deliberately classify as `.temporary`: losing one coaching turn, or spending a
 /// bounded retry budget on a socket, is safer than exhausting a target because a new provider
@@ -139,6 +139,17 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
             default: return "code"
             }
         }
+
+        /// Every string an identity can render, put through the one redaction the record applies to
+        /// its message. Uniform rather than exempting the fields that happen to be vendor-controlled
+        /// today: an exception is a rule someone has to remember, and this one guards a credential.
+        func redacted() -> Self {
+            var copy = self
+            copy.errorType = errorType.map(ProviderMessageRedaction.redact)
+            copy.errorCode = errorCode.map(ProviderMessageRedaction.redact)
+            copy.transportDomain = transportDomain.map(ProviderMessageRedaction.redact)
+            return copy
+        }
     }
 
     public let source: Source
@@ -157,7 +168,11 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
         self.stage = stage
         self.category = category
         self.disposition = disposition
-        self.identity = identity
+        // An identity's strings render into a row through `summary` exactly as the message does, so
+        // they take the same path. A vendor's error code is normally a fixed enum value with nothing
+        // to redact, but a WebSocket close reason is free text the server chose, and redacting only
+        // the message would have let that text reach a row beside its own redacted copy.
+        self.identity = identity.redacted()
         self.message = ProviderMessageRedaction.redact(message)
     }
 

@@ -51,9 +51,15 @@ public enum OpenAIFailureClassifier {
             // `<type>.<code>` is the documented shape, but a reason arriving as a bare code still
             // names a rejection. Reading it as a transport close instead would spend the whole
             // retry budget on a key the server has already refused.
+            //
+            // A close reason is free text the server chose, so only the halves that actually look
+            // like codes become identity. A sentence is not an identifier, and rendering one in the
+            // identity would repeat the message back beside itself in the row; the message already
+            // carries whatever the server said.
             let separator = trimmed.firstIndex(of: ".")
-            let type = separator.map { String(trimmed[..<$0]) }
-            let code = separator.map { String(trimmed[trimmed.index(after: $0)...]) } ?? trimmed
+            let type = separator.flatMap { Self.errorCodeIfIdentifier(String(trimmed[..<$0])) }
+            let code = Self.errorCodeIfIdentifier(
+                separator.map { String(trimmed[trimmed.index(after: $0)...]) } ?? trimmed)
             let (category, disposition) = categorize(status: nil, code: code, type: type, param: nil, stage: .close)
             return ProviderFailure(
                 source: source, stage: .close,
@@ -117,6 +123,16 @@ public enum OpenAIFailureClassifier {
         case 500..<600: return (.unavailable, .temporary)
         default: return (.unknown, .temporary)
         }
+    }
+
+    /// The text back if it is shaped like a vendor error code, otherwise nil. OpenAI's codes are
+    /// short ASCII identifiers (`invalid_api_key`, `insufficient_quota`); anything with a space or a
+    /// colon in it is the server explaining itself, which belongs in the message alone.
+    private static func errorCodeIfIdentifier(_ text: String) -> String? {
+        guard !text.isEmpty, text.count <= 64,
+              text.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") })
+        else { return nil }
+        return text
     }
 
     private static func errorObject(from body: Data?) -> [String: Any]? {

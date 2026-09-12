@@ -400,8 +400,11 @@ for URL loading, `errno`, `exit`, or a plain `code`), because a bare number labe
 person to check their Wi-Fi over a CLI that had exited badly. Quoting the provider is deliberate and is what changed: a user
 reports a failure with a screenshot of Activity and nothing else, so a row that named only the
 category left every unclassified cause undiagnosable. Redaction, not omission, is what keeps a
-credential out of a row: the record redacts in its initializer, so no adapter can carry raw text
-past it.
+credential out of a row: the record redacts every provider-supplied string it holds, the message and
+the identity's own error type and code alike, in its initializer, so no adapter can carry raw text
+past it. The identity is also kept to what is grep-able at the source: a WebSocket close reason is
+free text the server chose, so only a half that is shaped like an error code becomes one, and a
+sentence stays in the message where it is quoted once rather than printed back beside itself.
 
 An unclassified failure stays `.temporary`: losing one coaching turn, or spending a bounded retry
 budget, is safer than exhausting a target because a new provider error was not yet in the table. A

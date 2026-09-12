@@ -15,13 +15,44 @@ import Testing
     }
 
     /// An unrecognized dotless reason is still the server refusing, so the row quotes what it said
-    /// rather than claiming the connection was merely lost. It stays temporary either way.
+    /// rather than claiming the connection was merely lost. It stays temporary either way, and prose
+    /// stays out of the identity: a sentence is not a code, and putting one there would print the
+    /// message back beside itself.
     @Test func anUnrecognizedDotlessCloseReasonIsQuotedAsARejection() {
         let failure = OpenAIFailureClassifier.classify(
             closeCode: 3000, reason: "session ended by policy", source: .transcription(.openAI))
         #expect(failure.category == .rejected)
         #expect(failure.disposition == .temporary)
         #expect(failure.message == "session ended by policy")
+        #expect(failure.identity.errorCode == nil)
+        #expect(failure.identity == .init(closeCode: 3000))
+        #expect(failure.activityDetail == " (close 3000: session ended by policy)")
+    }
+
+    /// A close reason is free text the server chose, so it is the one identity input that can carry
+    /// a credential. Both the guard above and the record's own redaction have to hold: a key must
+    /// not reach the row through `errorCode` the way it cannot through `message`.
+    @Test func aCredentialInACloseReasonNeverReachesTheRow() {
+        let prose = OpenAIFailureClassifier.classify(
+            closeCode: 3000, reason: "rejected: key sk-live-9f3ab27c is invalid",
+            source: .transcription(.openAI))
+        #expect(!prose.identity.summary.contains("sk-live-9f3ab27c"))
+        #expect(!prose.activitySentence.contains("sk-live-9f3ab27c"))
+        #expect(prose.activitySentence.contains("sk-…"))
+
+        // A bare token with no spaces passes the identifier guard, so the record's redaction is what
+        // stops it. Both layers are load-bearing; neither alone closes this.
+        let bare = ProviderFailure(
+            source: .transcription(.openAI), stage: .close, category: .rejected,
+            disposition: .temporary,
+            identity: .init(closeCode: 3000, errorType: "sk-live-9f3ab27c", errorCode: "AIzaSyRealKey123"),
+            message: "")
+        // `summary` renders the code and falls back to the type, so assert on the stored fields as
+        // well: both are redacted, whichever one a row happens to show.
+        #expect(bare.identity.errorType == "sk-…")
+        #expect(bare.identity.errorCode == "AIza…")
+        #expect(!bare.identity.summary.contains("AIzaSyRealKey123"))
+        #expect(bare.activitySentence == "OpenAI refused the transcription request (close 3000, AIza…)")
     }
 
     /// An empty reason has nothing to read, so 3000 falls through to the transport path.
