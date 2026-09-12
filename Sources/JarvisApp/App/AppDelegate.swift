@@ -154,8 +154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         activityViewer.makeEvaluator = { [weak self] session in
             guard let self else { return nil }
             return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session),
-                                    preferredProvider: self.brain.preferences.provider,
-                                    sourceStore: self.artifacts.evaluationSourceStore)
+                                    preferredProvider: self.brain.preferences.provider)
         }
 
         overlayCaption = OverlayCaptionPanel()

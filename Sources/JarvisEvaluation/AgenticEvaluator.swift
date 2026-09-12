@@ -49,6 +49,10 @@ public struct AgenticEvaluator: Sendable {
         let repositoryDirectory: URL
         let isRelease: Bool
         let provenance: String
+        // Release source is fetched for this run alone. The defer must outlive the CLI invocation
+        // below, so it belongs to the whole function rather than to the case that creates it.
+        var fetched: ReleaseSourceStore.Checkout?
+        defer { fetched?.discard() }
         switch source {
         case .localCheckout(let directory):
             repositoryDirectory = directory
@@ -56,9 +60,11 @@ public struct AgenticEvaluator: Sendable {
             provenance = source.workspaceProvenance
         case .release(let version, let fallbackVersion):
             await onFetchingSource(true)
-            let resolved = try await sourceStore.resolve(version: version, fallbackVersion: fallbackVersion)
-            repositoryDirectory = resolved.directory
-            provenance = source.releaseProvenance(using: resolved.version)
+            let checkout = try await sourceStore.fetch(version: version,
+                                                       fallbackVersion: fallbackVersion)
+            fetched = checkout
+            repositoryDirectory = checkout.directory
+            provenance = source.releaseProvenance(using: checkout.version)
             await onFetchingSource(false)
             isRelease = true
         }

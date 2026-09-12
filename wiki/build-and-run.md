@@ -252,13 +252,14 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   remain in its checkout; resolving it does not probe for or discover a relocated checkout. Release
   builds read the selected session's version from its directory name and ask
   [`ReleaseSourceStore`](../Sources/JarvisEvaluation/ReleaseSourceStore.swift) for that public tagged
-  source. Missing version identity or unavailable matching source permits evaluation against the
-  newest release already cached; with no cache, the store tries the running release. It never searches
-  through historical tags, and cancellation never triggers fallback. If no source can be obtained,
-  evaluation reports a source-availability failure. The button shows **Fetching source…**, then
-  **Evaluating…**. Cache hits need no network. The store publishes only completely unpacked archives
-  with an atomic rename and reuses an existing complete winner; cache limits and the retention policy
-  live in `ReleaseSourceStore`. Source is
+  source, downloaded fresh for that one evaluation and discarded when the run ends. Nothing is cached
+  between runs: the agent CLI needs the network anyway, so a cache could never rescue an offline
+  evaluation. The store falls back to the running release only when the session records no version or
+  its tag no longer exists. A download failure is reported against the recorded version instead of
+  being retried against another one, which would fail the same way while naming a version the user
+  never selected. It never searches through historical tags, and cancellation never triggers fallback.
+  If no source can be obtained, evaluation reports a source-availability failure. The button shows
+  **Fetching source…**, then **Evaluating…**. Source is
   required because without the prompt files a coding agent cannot distinguish a bad hint caused by
   the model from one caused by the harness. The evaluator prompt identifies release source as the
   session's exact code only when the versions match, and warns that a development checkout may have
@@ -267,12 +268,12 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   The saved report also carries this provenance directly, independently of the agent's output.
   Codex accepts the release workspace without requiring `.git`. Unrecoverable source failures give
   next steps in the dialog; raw errors stay in debug logs. Cancellation reaches both the download and
-  subprocess, and failures preserve any saved report. Quit remains immediate: subsequent cache access
-  cleans abandoned staging whose owning process has exited, while preserving active owners' staging.
-  Activity admits one evaluation at a time; the terminal evaluator uses a local checkout. Concurrent
-  release-app instances sharing active cached checkouts are outside this workflow; the cache has no
-  cross-process checkout leases.
-  See [sandbox.md](./sandbox.md) for cache storage and permissions. `./scripts/eval-session.sh
+  subprocess, and failures preserve any saved report. Quit remains immediate: a run abandoned
+  mid-download leaves only a per-user temporary directory the OS reclaims, so there is no staging,
+  publication, or retention bookkeeping. Activity admits one evaluation at a time; the terminal
+  evaluator uses a local checkout. Each evaluation owns its own source tree, so concurrent runs
+  cannot disturb one another.
+  See [sandbox.md](./sandbox.md) for source storage and permissions. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same `JarvisEvaluation` evaluator.
 
 ## System-audio transcription benchmark
@@ -322,11 +323,12 @@ the human-facing coaching record. The current validation priority lives in
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
   **Fetching source…** for a release, then **Evaluating…**, the report opens when the agent finishes,
   and the button then shows **Open report**. Verify a release session still uses its recorded version
-  after an app update and a cached version works offline. Evaluate an older timestamp-only session
-  and a session with an unavailable release tag; confirm available release source is used and the
-  saved report discloses the unknown version or mismatch. With no obtainable source, verify the
-  dialog provides a next step. Quit during fetching must cancel the download without publishing a
-  partial cache; subsequent access must reclaim abandoned staging. For development, verify both
+  after an app update, and that a second evaluation of the same session fetches its source again.
+  Evaluate an older timestamp-only session and a session with an unavailable release tag; confirm the
+  running release is used and the saved report discloses the unknown version or mismatch. Evaluate
+  while offline and confirm the dialog names the session's own recorded version. With no obtainable
+  source, verify the dialog provides a next step. Quit during fetching must cancel the download and
+  leave no source tree behind. For development, verify both
   `build-app.sh --run` and plain `open` use the bundle's checkout for both history and source. Repeat
   with a second worktree and confirm neither its history nor release history appears in the first.
   Confirm prefixed and older sessions

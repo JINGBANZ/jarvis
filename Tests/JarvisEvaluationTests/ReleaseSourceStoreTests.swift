@@ -4,160 +4,140 @@ import JarvisBrainProviders
 @testable import JarvisEvaluation
 
 @Suite struct ReleaseSourceStoreTests {
-    @Test func missingVersionUsesNewestCachedReleaseWithoutFetching() async throws {
-        let root = tmp()
-        defer { try? FileManager.default.removeItem(at: root) }
-        _ = try cached("0.2.9", in: root, lastUsed: Date())
-        let newest = try cached("0.2.10", in: root, lastUsed: .distantPast)
-        let store = ReleaseSourceStore(root: root) { _, _ in Issue.record("Fallback cache hit fetched") }
-        let resolved = try await store.resolve(version: nil, fallbackVersion: "0.2.11")
-        #expect(resolved.version == "0.2.10")
-        #expect(resolved.directory == newest)
-    }
-
-    @Test(arguments: [URLError.Code.fileDoesNotExist, .notConnectedToInternet])
-    func unavailableRecordedSourceUsesCache(_ code: URLError.Code) async throws {
-        let root = tmp()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let cachedSource = try cached("0.2.2", in: root, lastUsed: .distantPast)
-        let store = ReleaseSourceStore(root: root) { url, _ in
-            #expect(url.lastPathComponent == "v0.2.1.tar.gz")
-            throw URLError(code)
+    @Test func recordedVersionFetchesItsOwnSourceAndDiscardsItAfterUse() async throws {
+        let fixture = tmp()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let root = fixture.appendingPathComponent("runs")
+        let archive = try await releaseArchive("0.2.1", in: fixture)
+        let store = ReleaseSourceStore(root: root) { url, destination in
+            #expect(url.absoluteString
+                    == "https://github.com/JINGBANZ/jarvis/archive/refs/tags/v0.2.1.tar.gz")
+            try FileManager.default.copyItem(at: archive, to: destination)
         }
-        let resolved = try await store.resolve(version: "0.2.1", fallbackVersion: "0.2.3")
-        #expect(resolved.version == "0.2.2")
-        #expect(resolved.directory == cachedSource)
+        let checkout = try await store.fetch(version: "0.2.1", fallbackVersion: "0.2.2")
+        #expect(checkout.version == "0.2.1")
+        #expect(checkout.directory.lastPathComponent == "jarvis-0.2.1")
+        #expect(try String(contentsOf: checkout.directory.appendingPathComponent("Package.swift"),
+                           encoding: .utf8) == "// fixture 0.2.1")
+        checkout.discard()
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
     }
 
-    @Test(arguments: [false, true])
-    func emptyCacheFallsBackToRunningRelease(recordedVersionMissing: Bool) async throws {
+    @Test func networkFailureNamesTheRecordedVersionAndNeverTriesAnother() async throws {
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
-        let archive = try await archive("0.2.2", in: root)
-        let store = ReleaseSourceStore(root: root.appendingPathComponent("cache")) { url, destination in
+        let requested = Requests()
+        let store = ReleaseSourceStore(root: root) { url, _ in
+            await requested.record(url.lastPathComponent)
+            throw URLError(.notConnectedToInternet)
+        }
+        await #expect(throws: ReleaseSourceStore.Failure.fetchFailed("0.2.1")) {
+            _ = try await store.fetch(version: "0.2.1", fallbackVersion: "0.2.2")
+        }
+        // The running release lives behind the same unreachable network, so retrying it could only
+        // fail again while renaming the failure after a version the user never selected.
+        #expect(await requested.all == ["v0.2.1.tar.gz"])
+    }
+
+    @Test func missingTagFallsBackToTheRunningRelease() async throws {
+        let fixture = tmp()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let archive = try await releaseArchive("0.2.2", in: fixture)
+        let requested = Requests()
+        let store = ReleaseSourceStore(root: fixture.appendingPathComponent("runs")) { url, destination in
+            await requested.record(url.lastPathComponent)
             if url.lastPathComponent == "v0.2.1.tar.gz" { throw URLError(.fileDoesNotExist) }
+            try FileManager.default.copyItem(at: archive, to: destination)
+        }
+        let checkout = try await store.fetch(version: "0.2.1", fallbackVersion: "0.2.2")
+        #expect(checkout.version == "0.2.2")
+        #expect(await requested.all == ["v0.2.1.tar.gz", "v0.2.2.tar.gz"])
+        checkout.discard()
+    }
+
+    @Test func missingTagWithoutAFallbackReportsTheRecordedVersion() async throws {
+        let root = tmp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ReleaseSourceStore(root: root) { _, _ in throw URLError(.fileDoesNotExist) }
+        await #expect(throws: ReleaseSourceStore.Failure.tagNotFound("0.2.1")) {
+            _ = try await store.fetch(version: "0.2.1", fallbackVersion: nil)
+        }
+    }
+
+    @Test func unrecordedVersionUsesTheRunningRelease() async throws {
+        let fixture = tmp()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let archive = try await releaseArchive("0.2.2", in: fixture)
+        let store = ReleaseSourceStore(root: fixture.appendingPathComponent("runs")) { url, destination in
             #expect(url.lastPathComponent == "v0.2.2.tar.gz")
             try FileManager.default.copyItem(at: archive, to: destination)
         }
-        let resolved = try await store.resolve(version: recordedVersionMissing ? nil : "0.2.1",
-                                               fallbackVersion: "0.2.2")
-        #expect(resolved.version == "0.2.2")
+        let checkout = try await store.fetch(version: nil, fallbackVersion: "0.2.2")
+        #expect(checkout.version == "0.2.2")
+        checkout.discard()
     }
 
-    @Test func nextCacheHitCleansAbandonedStagingButPreservesLiveOwner() async throws {
+    @Test func noVersionAndNoRunningReleaseReportsNoSource() async throws {
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
-        try process.run()
-        process.waitUntilExit()
-        let abandoned = root.appendingPathComponent(".fetch-\(process.processIdentifier)-\(UUID().uuidString)")
-        let active = root.appendingPathComponent(
-            ".fetch-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)")
-        let unrelated = root.appendingPathComponent(".fetch-not-ours")
-        for directory in [abandoned, active, unrelated] {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            try Data("partial".utf8).write(to: directory.appendingPathComponent("archive"))
-        }
-        _ = try cached("0.2.1", in: root, lastUsed: .distantPast)
-        let store = ReleaseSourceStore(root: root) { _, _ in Issue.record("Cache hit fetched") }
-        _ = try await store.directory(for: "0.2.1")
-        #expect(!FileManager.default.fileExists(atPath: abandoned.path))
-        #expect(FileManager.default.fileExists(atPath: active.path))
-        #expect(FileManager.default.fileExists(atPath: unrelated.path))
-    }
-
-    @Test func concurrentPublicationReusesOneCompleteWinner() async throws {
-        let root = tmp()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let archive = try await archive("0.2.1", in: root)
-        let cache = root.appendingPathComponent("cache")
-        let barrier = FetchBarrier()
-        let store = ReleaseSourceStore(root: cache) { _, destination in
-            await barrier.arrive()
-            try FileManager.default.copyItem(at: archive, to: destination)
-        }
-        async let first = store.directory(for: "0.2.1")
-        async let second = store.directory(for: "0.2.1")
-        let results = try await [first, second]
-        #expect(results[0] == results[1])
-        #expect(try String(contentsOf: results[0].appendingPathComponent("Package.swift"), encoding: .utf8)
-                == "// swift-tools-version:6.0")
-        #expect(try FileManager.default.contentsOfDirectory(atPath: cache.path) == ["v0.2.1"])
-    }
-
-    private actor FetchBarrier {
-        private var first: CheckedContinuation<Void, Never>?
-        func arrive() async {
-            if let first { first.resume(); return }
-            await withCheckedContinuation { first = $0 }
+        let store = ReleaseSourceStore(root: root) { _, _ in Issue.record("Fetched without a version") }
+        await #expect(throws: ReleaseSourceStore.Failure.noAvailableSource) {
+            _ = try await store.fetch(version: nil, fallbackVersion: nil)
         }
     }
 
-    @Test func cacheHitSkipsFetcherAndRefreshesRecency() async throws {
-        let root = tmp()
-        defer { try? FileManager.default.removeItem(at: root) }
-        let checkout = try cached("0.2.1", in: root, lastUsed: .distantPast)
-        let store = ReleaseSourceStore(root: root) { _, _ in Issue.record("Cache hit fetched source") }
-        #expect(try await store.directory(for: "0.2.1") == checkout)
-        let attributes = try FileManager.default.attributesOfItem(atPath: root.path)
-        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o700)
-        let used = try checkout.deletingLastPathComponent().resourceValues(forKeys: [.contentModificationDateKey])
-        #expect(try #require(used.contentModificationDate) > Date().addingTimeInterval(-30))
-    }
-
-    @Test func fetchPublishesInnerCheckoutAndPrunesLeastRecentlyUsed() async throws {
+    @Test func failedUnpackLeavesNoTreeBehindAndRetryStillWorks() async throws {
         let fixture = tmp()
         defer { try? FileManager.default.removeItem(at: fixture) }
-        let root = fixture.appendingPathComponent("cache")
-        _ = try cached("0.2.1", in: root, lastUsed: Date(timeIntervalSince1970: 1))
-        _ = try cached("0.2.2", in: root, lastUsed: Date(timeIntervalSince1970: 2))
-        _ = try cached("0.2.3", in: root, lastUsed: Date(timeIntervalSince1970: 3))
-        let archive = try await archive("0.2.4", in: fixture)
-        let store = ReleaseSourceStore(root: root) { url, destination in
-            #expect(url.absoluteString == "https://github.com/JINGBANZ/jarvis/archive/refs/tags/v0.2.4.tar.gz")
-            try FileManager.default.copyItem(at: archive, to: destination)
-        }
-        _ = try await store.directory(for: "0.2.1")
-        let checkout = try await store.directory(for: "0.2.4")
-        #expect(checkout == root.appendingPathComponent("v0.2.4/jarvis-0.2.4"))
-        #expect(FileManager.default.fileExists(atPath: checkout.appendingPathComponent("Package.swift").path))
-        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).sorted()
-                == ["v0.2.1", "v0.2.3", "v0.2.4"])
-    }
-
-    @Test func failedUnpackNeverBecomesCacheHit() async throws {
-        let fixture = tmp()
-        defer { try? FileManager.default.removeItem(at: fixture) }
-        let root = fixture.appendingPathComponent("cache")
-        let archive = try await archive("0.2.1", in: fixture)
+        let root = fixture.appendingPathComponent("runs")
+        let archive = try await releaseArchive("0.2.1", in: fixture)
         let bytes = try Data(contentsOf: archive)
         let broken = ReleaseSourceStore(root: root) { _, destination in
             try bytes.prefix(bytes.count / 2).write(to: destination)
         }
-        await #expect(throws: ReleaseSourceStore.Failure.cacheFailed("0.2.1")) {
-            _ = try await broken.directory(for: "0.2.1")
+        await #expect(throws: ReleaseSourceStore.Failure.unpackFailed("0.2.1")) {
+            _ = try await broken.checkout(version: "0.2.1")
         }
         #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
         let repaired = ReleaseSourceStore(root: root) { _, destination in
             try FileManager.default.copyItem(at: archive, to: destination)
         }
-        let checkout = try await repaired.directory(for: "0.2.1")
-        #expect(FileManager.default.fileExists(atPath: checkout.appendingPathComponent("Package.swift").path))
+        let checkout = try await repaired.checkout(version: "0.2.1")
+        #expect(FileManager.default.fileExists(
+            atPath: checkout.directory.appendingPathComponent("Package.swift").path))
+        checkout.discard()
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
+    }
+
+    @Test func sourceTreeIsOwnerOnly() async throws {
+        let fixture = tmp()
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let root = fixture.appendingPathComponent("runs")
+        let archive = try await releaseArchive("0.2.1", in: fixture)
+        let store = ReleaseSourceStore(root: root) { _, destination in
+            try FileManager.default.copyItem(at: archive, to: destination)
+        }
+        let checkout = try await store.checkout(version: "0.2.1")
+        let container = try #require(try FileManager.default
+            .contentsOfDirectory(atPath: root.path).first)
+        let attributes = try FileManager.default.attributesOfItem(
+            atPath: root.appendingPathComponent(container).path)
+        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o700)
+        checkout.discard()
     }
 
     @Test func invalidVersionDoesNotReachFetcherOrFilesystem() async throws {
         let fixture = tmp()
         defer { try? FileManager.default.removeItem(at: fixture) }
-        let root = fixture.appendingPathComponent("cache")
+        let root = fixture.appendingPathComponent("runs")
         let store = ReleaseSourceStore(root: root) { _, _ in Issue.record("Invalid version fetched") }
         await #expect(throws: ReleaseSourceStore.Failure.invalidVersion) {
-            _ = try await store.directory(for: "../0.2.1;id")
+            _ = try await store.checkout(version: "../0.2.1;id")
         }
         #expect(!FileManager.default.fileExists(atPath: root.path))
     }
 
-    @Test func cancellationReachesFetcherAndLeavesNoCache() async throws {
+    @Test func cancellationReachesFetcherAndLeavesNoTree() async throws {
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
         let (started, signal) = AsyncStream<Void>.makeStream()
@@ -166,11 +146,28 @@ import JarvisBrainProviders
             signal.yield(())
             try await Task.sleep(for: .seconds(60))
         }
-        let task = Task { try await store.directory(for: "0.2.1") }
+        let task = Task { try await store.checkout(version: "0.2.1") }
         for await _ in started { break }
         task.cancel()
         await #expect(throws: CancellationError.self) { _ = try await task.value }
         #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
+    }
+
+    @Test func cancellationNeverFallsBackToAnotherVersion() async throws {
+        let root = tmp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (started, signal) = AsyncStream<Void>.makeStream()
+        let requested = Requests()
+        let store = ReleaseSourceStore(root: root) { url, _ in
+            await requested.record(url.lastPathComponent)
+            signal.yield(())
+            try await Task.sleep(for: .seconds(60))
+        }
+        let task = Task { try await store.fetch(version: "0.2.1", fallbackVersion: "0.2.2") }
+        for await _ in started { break }
+        task.cancel()
+        await #expect(throws: CancellationError.self) { _ = try await task.value }
+        #expect(await requested.all == ["v0.2.1.tar.gz"])
     }
 
     @Test(arguments: [URLError.Code.notConnectedToInternet, .fileDoesNotExist])
@@ -181,7 +178,7 @@ import JarvisBrainProviders
         try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
         let report = session.appendingPathComponent(AgenticEvaluation.reportFilename)
         try Data("Previous report".utf8).write(to: report)
-        let store = ReleaseSourceStore(root: root.appendingPathComponent("source")) { _, _ in
+        let store = ReleaseSourceStore(root: root.appendingPathComponent("runs")) { _, _ in
             throw URLError(code)
         }
         let evaluator = AgenticEvaluator(source: .release(version: "0.2.1"), sourceStore: store)
@@ -193,25 +190,9 @@ import JarvisBrainProviders
         #expect(try String(contentsOf: report, encoding: .utf8) == "Previous report")
     }
 
-    private func cached(_ version: String, in root: URL, lastUsed: Date) throws -> URL {
-        let checkout = root.appendingPathComponent("v\(version)/jarvis-\(version)", isDirectory: true)
-        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
-        try Data("// fixture".utf8).write(to: checkout.appendingPathComponent("Package.swift"))
-        try FileManager.default.setAttributes([.modificationDate: lastUsed],
-            ofItemAtPath: checkout.deletingLastPathComponent().path)
-        return checkout
-    }
-
-    private func archive(_ version: String, in fixture: URL) async throws -> URL {
-        let source = fixture.appendingPathComponent("jarvis-\(version)")
-        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
-        try Data("// swift-tools-version:6.0".utf8).write(to: source.appendingPathComponent("Package.swift"))
-        let archive = fixture.appendingPathComponent("fixture.tar.gz")
-        let output = try await AgentCLIProcessRunner.run(AgentCLIRun(
-            executable: URL(fileURLWithPath: "/usr/bin/tar"),
-            arguments: ["-czf", archive.path, "-C", fixture.path, source.lastPathComponent],
-            stdin: nil, workingDirectory: fixture, timeout: 5))
-        #expect(output.exitCode == 0)
-        return archive
+    private actor Requests {
+        private var names: [String] = []
+        func record(_ name: String) { names.append(name) }
+        var all: [String] { names }
     }
 }

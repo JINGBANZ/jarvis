@@ -125,9 +125,10 @@ containing the app bundle; releases derive the recorded version from the session
 `SessionStore.baseDirectory` keeps development history in that same worktree regardless of launch
 method, separate from release history; see the [session-folder rule](./build-and-run.md#the-live-activity-viewer).
 `SessionDirectoryID` in `Sources/JarvisCore/Diagnostics/` owns build identity and timestamp ordering;
-`EvaluationSource` and `ReleaseSourceStore` in `Sources/JarvisEvaluation/` select matching source or
-available release source with an explicit mismatch disclosure. Start has no separate version-file
-write, and unknown version identity does not prevent evaluation.
+`EvaluationSource` and `ReleaseSourceStore` in `Sources/JarvisEvaluation/` select matching source,
+falling back to the running release only when the session records no version or its tag is gone, with
+an explicit mismatch disclosure. Release source is downloaded per evaluation and discarded with it.
+Start has no separate version-file write, and unknown version identity does not prevent evaluation.
 [build-and-run.md](./build-and-run.md) defines provenance, failures,
 and the Activity button states. A neutral evidence index reports artifact health,
 categorical distributions, and correlation-field coverage; a separate normalized table reports
@@ -189,7 +190,7 @@ coaching kernel's dependency rules are enforced by `scripts/check-coaching-kerne
 ## Next action
 
 Run the [evaluation source smoke](./build-and-run.md#live-smoke-checklist) in a development bundle
-and an installed release: source/version selection, fetching and cached use, actionable failures,
+and an installed release: source/version selection, per-run fetch and discard, actionable failures,
 and cancellation on Quit. Offline tests cover the source store and evaluator; native presentation
 and a real release download still need this smoke.
 

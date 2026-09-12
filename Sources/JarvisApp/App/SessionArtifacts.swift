@@ -130,16 +130,15 @@ final class SessionArtifacts {
             appDataDirectory: secretFile.directoryURL)
     }
 
+    /// The session's directory name is structured data: it carries the version identity that
+    /// `EvaluationSource` turns into a source choice, so the name is read here rather than any
+    /// file inside the session.
     func evaluationSource(for session: URL) -> EvaluationSource {
         EvaluationSource.resolve(
             isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
             bundleURL: Bundle.main.bundleURL,
             sessionID: session.lastPathComponent,
             currentVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
-    }
-
-    var evaluationSourceStore: ReleaseSourceStore {
-        ReleaseSourceStore(root: secretFile.directoryURL.appendingPathComponent("source"))
     }
 
     /// Hand the live session back at teardown and forget it, so a replacement Start opens a fresh

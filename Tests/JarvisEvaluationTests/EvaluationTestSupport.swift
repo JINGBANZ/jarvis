@@ -1,5 +1,22 @@
 import Foundation
+import JarvisBrainProviders
 import JarvisCore
+import Testing
+
+/// A tarball shaped like GitHub's release archive: a single `jarvis-<version>/` root whose
+/// `Package.swift` names its version, so a test can tell which source tree a run actually used.
+func releaseArchive(_ version: String, in fixture: URL) async throws -> URL {
+    let source = fixture.appendingPathComponent("jarvis-\(version)")
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    try Data("// fixture \(version)".utf8).write(to: source.appendingPathComponent("Package.swift"))
+    let archive = fixture.appendingPathComponent("fixture-\(version).tar.gz")
+    let output = try await AgentCLIProcessRunner.run(AgentCLIRun(
+        executable: URL(fileURLWithPath: "/usr/bin/tar"),
+        arguments: ["-czf", archive.path, "-C", fixture.path, source.lastPathComponent],
+        stdin: nil, workingDirectory: fixture, timeout: 5))
+    #expect(output.exitCode == 0)
+    return archive
+}
 
 /// An owner-only scratch directory for one test.
 func tmp() -> URL {

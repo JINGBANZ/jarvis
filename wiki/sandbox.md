@@ -180,13 +180,13 @@ readable by this user account and by nothing else. See [build-and-run.md](./buil
 
 Build identity lives in the session directory name, with its validation defined by
 [`SessionDirectoryID`](../Sources/JarvisCore/Diagnostics/SessionDirectoryID.swift).
-The owner-only source cache beside the session storage contains public repository source, never
-session-derived data. This separation allows a reusable source workspace without copying private
-evidence into it. [`ReleaseSourceStore`](../Sources/JarvisEvaluation/ReleaseSourceStore.swift) owns
-the exact path, permissions, staging cleanup, publication, and retention policy;
-[build-and-run.md](./build-and-run.md#the-live-activity-viewer) defines source selection and mismatch
-disclosure. Version text is validated before it reaches a path or download URL, and extraction
-does not publish a usable cache entry until complete.
+Evaluation downloads public repository source into an owner-only per-user temporary directory for
+one run and removes it when that run ends. Nothing persists between evaluations, and session-derived
+data is never copied into that tree, so private evidence and public source stay separate.
+[`ReleaseSourceStore`](../Sources/JarvisEvaluation/ReleaseSourceStore.swift) owns the exact path and
+permissions; [build-and-run.md](./build-and-run.md#the-live-activity-viewer) defines source selection
+and mismatch disclosure. Version text is validated before it reaches a path or download URL, and a
+failed, cancelled, or incomplete extraction takes its directory with it.
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 

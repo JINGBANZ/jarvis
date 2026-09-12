@@ -17,11 +17,17 @@ import JarvisBrainProviders
         try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try await writeSessionInputs(to: session)
-        let cache = root.appendingPathComponent("source")
+        let sourceRoot = root.appendingPathComponent("runs")
         let actualVersion = scenario == "matching" ? "0.2.1" : "0.2.2"
-        let checkout = isRelease ? cache.appendingPathComponent("v\(actualVersion)/jarvis-\(actualVersion)") : root
-        try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
-        try Data("// fixture".utf8).write(to: checkout.appendingPathComponent("Package.swift"))
+        // Release source lands in a per-run directory with an unpredictable name, so the fake CLI
+        // identifies its workspace by the version its Package.swift names rather than by path.
+        let marker = isRelease ? actualVersion : "dev"
+        let archive = isRelease
+            ? try await releaseArchive(actualVersion, in: root.appendingPathComponent("fixtures"))
+            : nil
+        if !isRelease {
+            try Data("// fixture dev".utf8).write(to: root.appendingPathComponent("Package.swift"))
+        }
         let source: EvaluationSource = isRelease
             ? .release(version: scenario == "unknown" ? nil : "0.2.1", fallbackVersion: "0.2.2")
             : .localCheckout(root)
@@ -34,7 +40,7 @@ import JarvisBrainProviders
               printf '{"loggedIn":true}'
               exit 0
             fi
-            [ . -ef "\(checkout.path)" ] || exit 1
+            grep -q "fixture \(marker)" Package.swift || exit 1
             case "$2" in
               *"\(provenance)"*) ;;
               *) exit 2 ;;
@@ -54,14 +60,22 @@ import JarvisBrainProviders
             source: source,
             preferredProvider: .claudeCode,
             detector: detector,
-            sourceStore: ReleaseSourceStore(root: cache) { url, _ in
-                #expect(scenario == "fallback")
-                #expect(url.lastPathComponent == "v0.2.1.tar.gz")
-                throw URLError(.fileDoesNotExist)
+            sourceStore: ReleaseSourceStore(root: sourceRoot) { url, destination in
+                guard let archive else { Issue.record("Development source was fetched"); return }
+                if scenario == "fallback" && url.lastPathComponent == "v0.2.1.tar.gz" {
+                    throw URLError(.fileDoesNotExist)
+                }
+                #expect(url.lastPathComponent == "v\(actualVersion).tar.gz")
+                try FileManager.default.copyItem(at: archive, to: destination)
             },
             timeout: 5)
 
         let report = try await evaluator.evaluate(sessionDirectory: session)
+
+        if isRelease {
+            // The run's source tree is discarded once evaluation returns, not left for the next one.
+            #expect(try FileManager.default.contentsOfDirectory(atPath: sourceRoot.path).isEmpty)
+        }
 
         #expect(report.contains("Produced by the agentic evaluator (`claude`"))
         #expect(report.contains("## Summary"))
