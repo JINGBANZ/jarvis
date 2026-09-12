@@ -51,10 +51,9 @@ other. With the development identity, bundle id, and checkout path fixed, its gr
 rebuilds and relaunches. On the first build macOS prompts once to let `codesign` use the new key —
 click **"Always Allow"** — and the first launch requests the development app's own capture grants.
 
-The identity split is not a second data sandbox. Both variants intentionally keep the established
-owner-only API-key and direct-open session storage under `Application Support/Jarvis`; launching the
-development app through `build-app.sh --run` continues to put its sessions in that checkout's
-`.jarvis/`. If a checkout still contains a generated `Jarvis.app` from before the split, move only
+The identity split is not a second data sandbox. Both variants intentionally share the established
+owner-only API-key storage; session histories are separated by the
+[session-folder rule](#the-live-activity-viewer). If a checkout still contains a generated `Jarvis.app` from before the split, move only
 that checkout-local bundle to the Trash so it cannot be launched accidentally; leave
 `/Applications/Jarvis.app` in place.
 
@@ -210,14 +209,23 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   `coaching-attempts.jsonl` for evaluator-only trigger/delta/outcome provenance and
   `brain-traffic.jsonl` for redacted wire evidence. Past runs can be browsed and the history cleared
   from the viewer. Old sessions are pruned to the most recent few at each Start.
+- [`SessionDirectoryID`](../Sources/JarvisCore/Diagnostics/SessionDirectoryID.swift) puts the release
+  version or development identity in the session directory name, beside its timestamp and random
+  suffix. Start only constructs that name in memory and creates its usual session directory; there
+  is no separate version-file write or version-dependent failure gate. Timestamp-only historical
+  sessions remain readable with unknown version identity. Activity, retention, and the terminal
+  evaluator order by the timestamp portion, so a version prefix cannot reorder history.
 - **The viewer and its file logging are always on** (they used to be `--dev`-gated; that flag is gone).
   On every Start, `ActivityLog` writes the coaching exchange to `jarvis-activity.jsonl` while `jlog`
   writes agent-facing diagnostics to the unified log (Console.app) and `jarvis-debug.log`. Both files
-  live in the gitignored, workspace-local `.jarvis/<session>/` (`0600` files in a `0700` dir).
-  `build-app.sh --run` passes that path via `--log-dir`, since the `open`-launched app can't find the
-  repo itself; opening the bundle directly with no `--log-dir` falls back to
-  `~/Library/Application Support/Jarvis/sessions/`. The full privacy posture is in
-  [sandbox.md](./sandbox.md).
+  use the base selected by
+  [`SessionStore.baseDirectory`](../Sources/JarvisCore/Diagnostics/SessionStore.swift): development
+  history belongs to the checkout containing the running bundle, while releases use per-user app
+  storage. The bundle location gives each worktree its own history and evaluation source, independent
+  of the working directory or whether launch comes from the build script, Finder, Dock, or `open`.
+  Existing histories stay where they are; there is no automatic migration or cross-variant browsing.
+  Folder selection only constructs a URL; Start creates and protects its usual session directory.
+  The full privacy posture is in [sandbox.md](./sandbox.md).
 - Activity JSONL stays append-only for durable writes, but each new row carries numeric occurrence,
   insertion, and record times. Live and reopened views apply the shared Core chronology rule rather
   than treating file append order as speech order. Historical files without complete chronology
@@ -239,11 +247,33 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   history is common-prefix elided with an explicit pointer back to untouched traffic. The agent uses
   read-only file and source-search tools to follow the evidence, then writes a generic Summary /
   Findings / Evidence gaps / Recommendations report to owner-only `eval-report.md`. A saved session
-  shows **Open report** instead, avoiding another agent run. The local app locates its checkout from the
-  workspace `.jarvis/`, a `--repo-dir` launch argument, or the directory containing a locally built
-  app bundle; without live source it refuses to run a weaker audit, because a single model call over
-  the wire traffic alone produced confident recommendations about mechanisms that already existed in
-  the code. `./scripts/eval-session.sh
+  shows **Open report** instead, avoiding another agent run. Development builds use the live checkout
+  containing `Jarvis Dev.app`, including when opened directly. The development bundle is expected to
+  remain in its checkout; resolving it does not probe for or discover a relocated checkout. Release
+  builds read the selected session's version from its directory name and ask
+  [`ReleaseSourceStore`](../Sources/JarvisEvaluation/ReleaseSourceStore.swift) for that public tagged
+  source, downloaded fresh for that one evaluation and discarded when the run ends. Nothing is cached
+  between runs: the agent CLI needs the network anyway, so a cache could never rescue an offline
+  evaluation. The store falls back to the running release only when the session records no version or
+  its tag no longer exists. A download failure is reported against the recorded version instead of
+  being retried against another one, which would fail the same way while naming a version the user
+  never selected. It never searches through historical tags, and cancellation never triggers fallback.
+  If no source can be obtained, evaluation reports a source-availability failure. The button shows
+  **Fetching source…**, then **Evaluating…**. Source is
+  required because without the prompt files a coding agent cannot distinguish a bad hint caused by
+  the model from one caused by the harness. The evaluator prompt identifies release source as the
+  session's exact code only when the versions match, and warns that a development checkout may have
+  drifted, including uncommitted edits. Fallback prompts identify both the recorded version (or its
+  absence) and the actual source used, and require source-based findings to acknowledge the mismatch.
+  The saved report also carries this provenance directly, independently of the agent's output.
+  Codex accepts the release workspace without requiring `.git`. Unrecoverable source failures give
+  next steps in the dialog; raw errors stay in debug logs. Cancellation reaches both the download and
+  subprocess, and failures preserve any saved report. Quit remains immediate: a run abandoned
+  mid-download leaves only a per-user temporary directory the OS reclaims, so there is no staging,
+  publication, or retention bookkeeping. Activity admits one evaluation at a time; the terminal
+  evaluator uses a local checkout. Each evaluation owns its own source tree, so concurrent runs
+  cannot disturb one another.
+  See [sandbox.md](./sandbox.md) for source storage and permissions. `./scripts/eval-session.sh
   [session-dir]` is the terminal launcher for the same `JarvisEvaluation` evaluator.
 
 ## System-audio transcription benchmark
@@ -291,6 +321,18 @@ the human-facing coaching record. The current validation priority lives in
 - Choose **Stop Jarvis** and confirm Activity ends with `session ended by user`, with no later
   transcription or coaching events.
 - In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
-  **Evaluating…**, the report opens when the agent finishes, and the button then shows **Open report**.
+  **Fetching source…** for a release, then **Evaluating…**, the report opens when the agent finishes,
+  and the button then shows **Open report**. Verify a release session still uses its recorded version
+  after an app update, and that a second evaluation of the same session fetches its source again.
+  Evaluate an older timestamp-only session and a session with an unavailable release tag; confirm the
+  running release is used and the saved report discloses the unknown version or mismatch. Evaluate
+  while offline and confirm the dialog names the session's own recorded version. Cancelling from
+  Activity during fetching must stop the download and leave no source tree behind. Quit also stops
+  it, but terminates immediately, so the run's temporary directory is left for the OS to reclaim.
+  For development, verify both
+  `build-app.sh --run` and plain `open` use the bundle's checkout for both history and source. Repeat
+  with a second worktree and confirm neither its history nor release history appears in the first.
+  Confirm prefixed and older sessions
+  remain in time order in Activity, retention, and the terminal evaluator's default selection.
   Confirm the report uses the four generic sections, cites concrete session or source anchors for
   findings, and keeps unavailable evidence in **Evidence gaps** instead of inventing a conclusion.

@@ -120,7 +120,17 @@ cannot stop a new session after Stop → Start; repeated route notifications can
 incident's bounded budget. Activity persists stable event kinds and flushes at Stop. The sole evaluator is agentic: it
 receives the complete session directory and reads the full, unfiltered `jarvis-activity.jsonl`
 whenever it needs the user-visible sequence, alongside first-class coaching-attempt provenance, raw
-brain traffic, screenshots, and live source code. A neutral evidence index reports artifact health,
+brain traffic, screenshots, and source code. Development evaluates against the live checkout
+containing the app bundle; releases derive the recorded version from the session directory name.
+`SessionStore.baseDirectory` keeps development history in that same worktree regardless of launch
+method, separate from release history; see the [session-folder rule](./build-and-run.md#the-live-activity-viewer).
+`SessionDirectoryID` in `Sources/JarvisCore/Diagnostics/` owns build identity and timestamp ordering;
+`EvaluationSource` and `ReleaseSourceStore` in `Sources/JarvisEvaluation/` select matching source,
+falling back to the running release only when the session records no version or its tag is gone, with
+an explicit mismatch disclosure. Release source is downloaded per evaluation and discarded with it.
+Start has no separate version-file write, and unknown version identity does not prevent evaluation.
+[build-and-run.md](./build-and-run.md) defines provenance, failures,
+and the Activity button states. A neutral evidence index reports artifact health,
 categorical distributions, and correlation-field coverage; a separate normalized table reports
 provider-call latency, token, cache, and cost telemetry. Both preserve unavailable and partial values
 without declaring findings. The prompt gives the read-only agent file and source-search tools, asks it
@@ -178,6 +188,11 @@ coaching coordinator and app delegate are decomposed into owners with stated bou
 coaching kernel's dependency rules are enforced by `scripts/check-coaching-kernel.sh` in the Gate.
 
 ## Next action
+
+Run the [evaluation source smoke](./build-and-run.md#live-smoke-checklist) in a development bundle
+and an installed release: source/version selection, per-run fetch and discard, actionable failures,
+and cancellation on Quit. Offline tests cover the source store and evaluator; native presentation
+and a real release download still need this smoke.
 
 Run the signed-app Explain more smoke: with an interview session active, press both configured
 shortcuts from another app and verify distinct hint/explanation requests; rebind them independently
