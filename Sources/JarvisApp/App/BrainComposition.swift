@@ -196,13 +196,19 @@ final class BrainComposition {
     func fallbackUnavailability(
         for target: BrainTarget,
         detectedCLI: DetectedAgentCLI?
-    ) -> String? {
+    ) -> ProviderFailure? {
         guard target.provider.usesLocalCLI else { return nil }
+        let source = ProviderFailure.Source.brain(target.provider)
         guard let detectedCLI else {
-            return "\(target.provider.displayName) CLI was not found"
+            return ProviderFailure(
+                source: source, stage: .process, category: .unavailable, disposition: .permanent,
+                identity: .init(), message: "\(target.provider.displayName) CLI was not found")
         }
         if detectedCLI.authenticationStatus == .signedOut {
-            return "\(target.provider.displayName) is signed out"
+            return ProviderFailure(
+                source: source, stage: .process, category: .authentication,
+                disposition: .permanent, identity: .init(),
+                message: "\(target.provider.displayName) is signed out")
         }
         return nil
     }
@@ -222,8 +228,8 @@ final class BrainComposition {
             codexSupportedFeatures: detectedCLIs[.codexCLI]?.supportedFeatures ?? []) : nil
         let targets = route.targets.enumerated().map { index, target -> ConfiguredBrainTarget in
             let cli = detectedCLIs[target.provider]
-            if let detail = fallbackUnavailability(for: target, detectedCLI: cli) {
-                return ConfiguredBrainTarget(unavailable: target, detail: detail)
+            if let failure = fallbackUnavailability(for: target, detectedCLI: cli) {
+                return ConfiguredBrainTarget(unavailable: target, failure: failure)
             }
             let runtime = makeBrainRuntime(
                 apiKey: key,
@@ -253,23 +259,23 @@ final class BrainComposition {
                 self.activeBrainTarget = target
                 self.host.brainTargetDidChange(target)
             },
-            onAdvanced: { [weak self] previous, current in
+            onAdvanced: { [weak self] previous, current, failure in
                 guard let self, self.host.liveCoachDriver != nil,
                       self.host.liveSessionDirectory == sessionDirectory else {
                     jlog("Jarvis: ignoring route transition from a stopped or superseded session.")
                     return
                 }
                 self.host.liveSessionEvidence?.record(.brainRouteAdvanced(
-                    previous: previous.provider, current: current.provider))
+                    previous: previous.provider, current: current.provider, failure: failure))
             },
-            onSkipped: { [weak self] target in
+            onSkipped: { [weak self] _, failure in
                 guard let self, self.host.liveCoachDriver != nil,
                       self.host.liveSessionDirectory == sessionDirectory else {
                     jlog("Jarvis: ignoring unavailable-target notice from a stopped session.")
                     return
                 }
                 self.host.liveSessionEvidence?.record(
-                    .brainRouteTargetSkipped(provider: target.provider))
+                    .brainRouteTargetSkipped(failure: failure))
             },
             onExhausted: { [weak self] target, failure in
                 guard let self, self.host.liveCoachDriver != nil,
@@ -278,9 +284,7 @@ final class BrainComposition {
                     return
                 }
                 self.host.reportBrainError(
-                    .brainRouteExhausted(
-                        lastProvider: target.provider,
-                        reason: failure.detail),
+                    .brainRouteExhausted(target: target, failure: failure),
                     context: .runtime)
             })
     }

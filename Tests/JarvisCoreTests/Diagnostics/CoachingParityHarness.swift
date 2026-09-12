@@ -138,11 +138,14 @@ enum CoachingParityHarness {
                     ConfiguredBrainTarget(target: primaryTarget, brain: primary),
                     ConfiguredBrainTarget(
                         unavailable: unavailableTarget,
-                        detail: "preflight-proven unavailable"),
+                        failure: ProviderFailure(
+                            source: .brain(unavailableTarget.provider), stage: .process,
+                            category: .unavailable, disposition: .permanent, identity: .init(),
+                            message: "preflight-proven unavailable")),
                     ConfiguredBrainTarget(target: finalTarget, brain: final),
                 ],
-                onAdvanced: { transitions.append(.advanced(from: $0, to: $1)) },
-                onSkipped: { transitions.append(.skipped($0)) },
+                onAdvanced: { previous, current, _ in transitions.append(.advanced(from: previous, to: current)) },
+                onSkipped: { target, _ in transitions.append(.skipped(target)) },
                 onExhausted: { target, _ in transitions.append(.exhausted(target)) }),
             screen: FakeScreen(),
             overlay: overlay,

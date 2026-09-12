@@ -33,6 +33,16 @@ public final class CaptureReadinessMonitor {
     public enum FailureCause: String, Sendable, Equatable {
         case firstFrameTimeout
         case sustainedStall
+
+        /// What a person reads inside the capture failure's Activity row. The raw values are
+        /// grep-able identifiers for the debug log, not prose, and quoting one inside the row's own
+        /// parentheses nested a second pair inside them.
+        public var summary: String {
+            switch self {
+            case .firstFrameTimeout: return "it never started arriving"
+            case .sustainedStall: return "it stopped arriving"
+            }
+        }
     }
 
     /// A lifecycle consequence the caller must apply. Both are silent, ghost-safe outcomes.

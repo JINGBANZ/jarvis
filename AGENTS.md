@@ -113,9 +113,10 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
   the two nonactivating capture-excluded overlay panels, open apps or URLs, request attention, notify,
   or play sound. Explicit user-opened Settings/Activity and unavoidable macOS privacy UI are the only
   other presentation paths. Every presentation API call needs an inline `ghost-mode-allowed` reason.
-- `ActivityLog` contains finalized speech, manual hints, brain actions, and fixed session-end or
-  degradation notices. Retry, transport, timing, lifecycle, and raw-error detail goes only through
-  `jlog` to `jarvis-debug.log`; never mirror debug logs into Activity.
+- `ActivityLog` contains finalized speech, manual hints, brain actions, and typed session-end or
+  degradation notices. A failure notice carries the provider's structured identity and its redacted
+  message (`ProviderFailure`), never raw text. Retry, transport, timing, and lifecycle detail goes
+  only through `jlog` to `jarvis-debug.log`; never mirror debug logs into Activity.
 - Persist screen- or audio-derived data only in owner-only files inside the workspace-local `.jarvis/`
   session directory, never `/tmp`. Never archive raw microphone audio or the live transcript.
 - Store the API key only in the owner-only `0600` secrets file; `OPENAI_API_KEY` is a headless fallback.

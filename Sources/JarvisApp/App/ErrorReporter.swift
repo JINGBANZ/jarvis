@@ -33,7 +33,7 @@ final class ErrorReporter {
                          context: UserFacingError.PresentationContext) {
         jlog("Jarvis: \(error.severity) — \(error.title): \(error.message)")  // diagnostics still go to JarvisLog
         if error.severity.stopsSession {
-            onFatal?(error.sessionEndReason ?? .unexpectedError)
+            onFatal?(error.sessionEndReason ?? .unexpectedError(detail: error.message))
         }
         guard error.severity.showsAlert(in: context) else { return }
         NSApp.activate(ignoringOtherApps: true) // ghost-mode-allowed: explicit startup failure
