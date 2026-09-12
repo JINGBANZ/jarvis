@@ -642,11 +642,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             disabledTools: brain.preferences.disabledTools,
             prepSourcesConfigured: !prepMaterialSources.isEmpty)
         brain.capabilities = capabilities
+        // The one place a switched-off tool is visible: Activity never mentions what was not
+        // offered, and a name in preferences that matched nothing is honored as nothing.
+        let honoredDisabled = CoachCapabilities
+            .compose(disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty)
+            .tools.map(\.name)
+            .filter { capabilities.tool(named: $0) == nil }
         jlog("Jarvis coach capabilities: hot="
             + capabilities.hotTools.map(\.name).joined(separator: ",")
-            + " deferred="
-            + (capabilities.catalogNames.joined(separator: ",").isEmpty
-                ? "(none)" : capabilities.catalogNames.joined(separator: ",")))
+            + " deferred=" + (capabilities.catalogNames.isEmpty
+                ? "(none)" : capabilities.catalogNames.joined(separator: ","))
+            + " switched-off=" + (honoredDisabled.isEmpty
+                ? "(none)" : honoredDisabled.joined(separator: ",")))
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
             detectedCLIs: detectedCLIs,

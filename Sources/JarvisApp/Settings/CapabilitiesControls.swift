@@ -58,7 +58,6 @@ final class CapabilitiesControls: NSObject {
         prepSwitch.action = #selector(prepNotesSearchChanged)
         prepSwitch.setAccessibilityLabel("Prep notes search")
         prepSwitch.identifier = NSUserInterfaceItemIdentifier("capability-search-prep-notes")
-        prepSwitch.sizeToFit()
         // Read once, when the card is built: adding a source in Prep material enables the switch
         // the next time Settings opens, which is the same granularity as the Start it applies at.
         let prepRow = SettingsRowView(
@@ -67,6 +66,9 @@ final class CapabilitiesControls: NSObject {
                 ? "Loads on demand when a prepared topic comes up"
                 : "Add a prep material source to enable",
             controlView: prepSwitch,
+            // The row stretches its control to `controlWidth`; a switch keeps its own size and sits
+            // at the trailing edge, as the Shortcuts toggles do.
+            controlSize: NSSize(width: 44, height: 26),
             showsSeparator: false)
         content.addSubview(prepRow)
         rows.append(prepRow)
