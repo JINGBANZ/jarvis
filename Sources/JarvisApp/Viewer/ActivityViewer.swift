@@ -16,7 +16,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var store: SessionStore   // rebuilt when a new session opens (see `sessionDidChange`)
 
     /// Builds the sole agentic evaluation pipeline at click time so it uses the current provider
-    /// selection and the selected session's source. Nil means a release session has no build stamp.
+    /// selection and the selected session's source. Missing version identity permits fallback.
     var makeEvaluator: (@MainActor (URL) -> AgenticEvaluator?)?
 
     /// Whether a coaching session is currently running (wired by AppDelegate). Evaluation and report
@@ -373,6 +373,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// One click runs the sole agentic evaluator over the source checkout plus the selected session,
     /// saves `eval-report.md`, and opens it. An existing report is reopened without re-billing.
     @objc private func evaluateTapped() {
+        guard !isEvaluating else { return }
         guard isCoachingRunning?() != true else {
             jlog("Jarvis: suppressed Activity evaluation presentation while coaching is running.")
             return
@@ -392,11 +393,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
                  "This session has no recorded brain traffic. Traffic starts with the first coaching turn.")
             return
         }
-        guard let evaluator = makeEvaluator?(session.url) else {
-            info("Evaluation unavailable",
-                 "This session has no recorded Jarvis version, so I can't fetch its matching source. Older sessions were saved without a version. Record a new session with the latest release, then try Evaluate again.")
-            return
-        }
+        guard let evaluator = makeEvaluator?(session.url) else { return }
 
         isEvaluating = true
         refreshEvaluateButtonState()

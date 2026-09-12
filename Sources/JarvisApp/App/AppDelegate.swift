@@ -152,8 +152,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // source at click time and read the current provider preference then, so Settings changes
         // and a moved local app bundle are both reflected without rebuilding Activity.
         activityViewer.makeEvaluator = { [weak self] session in
-            guard let self, let source = self.artifacts.evaluationSource(for: session) else { return nil }
-            return AgenticEvaluator(source: source,
+            guard let self else { return nil }
+            return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session),
                                     preferredProvider: self.brain.preferences.provider,
                                     sourceStore: self.artifacts.evaluationSourceStore)
         }

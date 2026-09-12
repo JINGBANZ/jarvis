@@ -59,15 +59,6 @@ final class SessionArtifacts {
         // Application Support/Jarvis left by another tool) keeps its mode, which would leak session-dir
         // names. Tighten it best-effort, mirroring FileSecretStore.setApiKey.
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
-        let stampError: Error?
-        do {
-            try SessionBuild.write(in: dir,
-                isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
-                version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
-            stampError = nil
-        } catch {
-            stampError = error
-        }
         // Evidence file creation and later writes run on the shared bounded evidence worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
         // The human-facing projection is composed here, not reached for inside the kernel: the
@@ -80,9 +71,6 @@ final class SessionArtifacts {
         // Diagnostics join that same handle: <dir>/jarvis-debug.log, 0600, fresh, written by the
         // worker rather than by whichever thread called jlog.
         JarvisLog.attach(to: audit)
-        if let stampError {
-            jlog("Jarvis: session build stamp failed — \(stampError)")
-        }
         currentSessionDir = dir
         // Point the viewer's history browser at the new current session and show it live; clear-history
         // spares whichever session is current.
@@ -126,17 +114,11 @@ final class SessionArtifacts {
         Set(closingAuditPaths.map { URL(fileURLWithPath: $0, isDirectory: true) })
     }
 
-    /// A unique id for a session (one per Start), used as its log subdirectory name. Sortable
-    /// timestamp + a short random suffix so two Starts in the same second don't collide.
+    /// Build identity is part of the directory name already created at Start, not a second file.
     func newSessionID() -> String {
-        let f = DateFormatter()
-        // Fixed-format timestamp: pin locale + calendar so the name is always Gregorian yyyy-MM-dd
-        // and lexically sortable, regardless of the user's locale or system calendar (Apple QA1480).
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        let suffix = String(UUID().uuidString.prefix(4))
-        return "\(f.string(from: Date()))_\(suffix)"
+        SessionDirectoryID.make(
+            isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
+            version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
     }
 
     /// Where session logs go. `build-app.sh --run` passes a `--log-dir` pointing at the repo's
@@ -153,11 +135,12 @@ final class SessionArtifacts {
         return secretFile.directoryURL.appendingPathComponent("sessions")
     }
 
-    func evaluationSource(for session: URL) -> EvaluationSource? {
+    func evaluationSource(for session: URL) -> EvaluationSource {
         EvaluationSource.resolve(
             isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
             bundleURL: Bundle.main.bundleURL,
-            recordedVersion: SessionBuild.read(in: session)?.version)
+            sessionID: session.lastPathComponent,
+            currentVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
     }
 
     var evaluationSourceStore: ReleaseSourceStore {

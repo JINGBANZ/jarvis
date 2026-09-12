@@ -98,14 +98,16 @@ public enum AgenticEvaluation {
 
     /// Persist one successful agent result without ever exposing report bytes through a permissive
     /// intermediate file. A failed run never reaches this point, so an older report remains intact.
-    static func saveReport(_ markdown: String, agentName: String, in sessionDir: URL) throws -> String {
+    static func saveReport(_ markdown: String, agentName: String, in sessionDir: URL,
+                           workspaceProvenance: String? = nil) throws -> String {
         let body = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { throw EvaluationError.emptyReport }
         let stamp = """
             > _Produced by the agentic evaluator (`\(agentName)` over the repo + session); the auditor \
             was instructed to separate observed evidence, source-confirmed facts, and hypotheses._
             """
-        let report = "\(stamp)\n\n\(body)\n"
+        let sourceStamp = workspaceProvenance.map { "\n\n> \($0)" } ?? ""
+        let report = "\(stamp)\(sourceStamp)\n\n\(body)\n"
         try replaceOwnerOnlyFile(
             Data(report.utf8), filename: reportFilename, in: sessionDir)
         return report

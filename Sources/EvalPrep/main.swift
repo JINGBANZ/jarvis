@@ -23,6 +23,13 @@ do {
         print(try AgenticEvaluation.prepare(sessionDir: sessionDir,
             workspaceProvenance: EvaluationSource.localCheckout(
                 URL(fileURLWithPath: FileManager.default.currentDirectoryPath)).workspaceProvenance))
+    case (3, "--latest"):
+        let base = URL(fileURLWithPath: args[2], isDirectory: true)
+        guard let latest = SessionStore(base: base, current: nil).newestSessionDirectory() else {
+            FileHandle.standardError.write(Data("eval-prep: no session directory found\n".utf8))
+            exit(1)
+        }
+        print(latest.path)
     case (3, "--html"):
         let sessionDir = URL(fileURLWithPath: args[2], isDirectory: true)
         guard let markdown = AgenticEvaluation.savedReport(in: sessionDir) else {
@@ -60,7 +67,7 @@ do {
         FileHandle.standardError.write(
             Data("""
                 usage: EvalPrep <session-dir> | EvalPrep --html <session-dir> | \
-                EvalPrep --evaluate <repo> <session-dir> [claude|codex]
+                EvalPrep --evaluate <repo> <session-dir> [claude|codex] | EvalPrep --latest <sessions-dir>
                 """.utf8))
         exit(2)
     }

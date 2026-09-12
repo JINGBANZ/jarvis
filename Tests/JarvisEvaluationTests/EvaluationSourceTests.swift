@@ -1,20 +1,23 @@
 import Foundation
 import Testing
+import JarvisCore
 @testable import JarvisEvaluation
 
 @Suite struct EvaluationSourceTests {
     @Test func buildChoosesPathAndSessionChoosesVersion() {
         let bundle = URL(fileURLWithPath: "/checkout/Jarvis Dev.app")
         #expect(EvaluationSource.resolve(isDevelopmentBuild: true, bundleURL: bundle,
-                                         recordedVersion: nil) == .localCheckout(
+                                         sessionID: "dev-2026-09-12_10-00-00_abcd", currentVersion: "0.2.2") == .localCheckout(
                                             URL(fileURLWithPath: "/checkout", isDirectory: true)))
         #expect(EvaluationSource.resolve(isDevelopmentBuild: true, bundleURL: bundle,
-                                         recordedVersion: "0.2.1") == .localCheckout(
+                                         sessionID: "2026-09-12_10-00-00_abcd", currentVersion: "0.2.2") == .localCheckout(
                                             URL(fileURLWithPath: "/checkout", isDirectory: true)))
         #expect(EvaluationSource.resolve(isDevelopmentBuild: false, bundleURL: bundle,
-                                         recordedVersion: "0.2.1") == .release(version: "0.2.1"))
+                                         sessionID: "v0.2.1-2026-09-12_10-00-00_abcd", currentVersion: "0.2.2")
+                == .release(version: "0.2.1", fallbackVersion: "0.2.2"))
         #expect(EvaluationSource.resolve(isDevelopmentBuild: false, bundleURL: bundle,
-                                         recordedVersion: nil) == nil)
+                                         sessionID: "2026-09-12_10-00-00_abcd", currentVersion: "0.2.2")
+                == .release(version: nil, fallbackVersion: "0.2.2"))
     }
 
     @Test(arguments: ["../0.2.1", "0.2.1/../../tmp", "0.2.1;echo hi", "$(id)",
@@ -23,30 +26,17 @@ import Testing
         #expect(!EvaluationSource.isValidVersion(version))
     }
 
-    @Test func sessionStampIsReleaseOnlyAndOwnerOnly() throws {
-        let directory = tmp()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        try SessionBuild.write(in: directory, isDevelopmentBuild: true, version: "0.2.2")
-        #expect(!FileManager.default.fileExists(
-            atPath: directory.appendingPathComponent(SessionBuild.filename).path))
-        try SessionBuild.write(in: directory, isDevelopmentBuild: false, version: "0.2.1")
-        let stamp = try #require(SessionBuild.read(in: directory))
-        #expect(stamp.version == "0.2.1")
-        #expect(stamp.format == 1)
-        let attributes = try FileManager.default.attributesOfItem(
-            atPath: directory.appendingPathComponent(SessionBuild.filename).path)
-        #expect((attributes[.posixPermissions] as? NSNumber)?.intValue == 0o600)
-    }
-
-    @Test func missingMalformedAndUnsupportedStampsDoNotInventVersion() throws {
-        let directory = tmp()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        #expect(SessionBuild.read(in: directory) == nil)
-        let stamp = directory.appendingPathComponent(SessionBuild.filename)
-        for contents in ["not json", #"{"version":"0.2.1","format":2}"#] {
-            try Data(contents.utf8).write(to: stamp)
-            #expect(SessionBuild.read(in: directory) == nil)
-        }
+    @Test func fallbackProvenanceNeverClaimsExactSource() {
+        let recorded = EvaluationSource.release(version: "0.2.1", fallbackVersion: "0.2.2")
+            .releaseProvenance(using: "0.2.2")
+        #expect(recorded.contains("recorded with Jarvis 0.2.1"))
+        #expect(recorded.contains("uses released source for Jarvis 0.2.2"))
+        #expect(recorded.contains("may not match"))
+        #expect(!recorded.contains("the exact code"))
+        let unknown = EvaluationSource.release(version: nil, fallbackVersion: "0.2.2")
+            .releaseProvenance(using: "0.2.2")
+        #expect(unknown.contains("version is unknown"))
+        #expect(unknown.contains("Jarvis 0.2.2"))
     }
 
     @Test func promptsExplainBothSourceProvenances() {

@@ -4,6 +4,96 @@ import JarvisBrainProviders
 @testable import JarvisEvaluation
 
 @Suite struct ReleaseSourceStoreTests {
+    @Test func missingVersionUsesNewestCachedReleaseWithoutFetching() async throws {
+        let root = tmp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try cached("0.2.9", in: root, lastUsed: Date())
+        let newest = try cached("0.2.10", in: root, lastUsed: .distantPast)
+        let store = ReleaseSourceStore(root: root) { _, _ in Issue.record("Fallback cache hit fetched") }
+        let resolved = try await store.resolve(version: nil, fallbackVersion: "0.2.11")
+        #expect(resolved.version == "0.2.10")
+        #expect(resolved.directory == newest)
+    }
+
+    @Test(arguments: [URLError.Code.fileDoesNotExist, .notConnectedToInternet])
+    func unavailableRecordedSourceUsesCache(_ code: URLError.Code) async throws {
+        let root = tmp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cachedSource = try cached("0.2.2", in: root, lastUsed: .distantPast)
+        let store = ReleaseSourceStore(root: root) { url, _ in
+            #expect(url.lastPathComponent == "v0.2.1.tar.gz")
+            throw URLError(code)
+        }
+        let resolved = try await store.resolve(version: "0.2.1", fallbackVersion: "0.2.3")
+        #expect(resolved.version == "0.2.2")
+        #expect(resolved.directory == cachedSource)
+    }
+
+    @Test(arguments: [false, true])
+    func emptyCacheFallsBackToRunningRelease(recordedVersionMissing: Bool) async throws {
+        let root = tmp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = try await archive("0.2.2", in: root)
+        let store = ReleaseSourceStore(root: root.appendingPathComponent("cache")) { url, destination in
+            if url.lastPathComponent == "v0.2.1.tar.gz" { throw URLError(.fileDoesNotExist) }
+            #expect(url.lastPathComponent == "v0.2.2.tar.gz")
+            try FileManager.default.copyItem(at: archive, to: destination)
+        }
+        let resolved = try await store.resolve(version: recordedVersionMissing ? nil : "0.2.1",
+                                               fallbackVersion: "0.2.2")
+        #expect(resolved.version == "0.2.2")
+    }
+
+    @Test func nextCacheHitCleansAbandonedStagingButPreservesLiveOwner() async throws {
+        let root = tmp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        try process.run()
+        process.waitUntilExit()
+        let abandoned = root.appendingPathComponent(".fetch-\(process.processIdentifier)-\(UUID().uuidString)")
+        let active = root.appendingPathComponent(
+            ".fetch-\(ProcessInfo.processInfo.processIdentifier)-\(UUID().uuidString)")
+        let unrelated = root.appendingPathComponent(".fetch-not-ours")
+        for directory in [abandoned, active, unrelated] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try Data("partial".utf8).write(to: directory.appendingPathComponent("archive"))
+        }
+        _ = try cached("0.2.1", in: root, lastUsed: .distantPast)
+        let store = ReleaseSourceStore(root: root) { _, _ in Issue.record("Cache hit fetched") }
+        _ = try await store.directory(for: "0.2.1")
+        #expect(!FileManager.default.fileExists(atPath: abandoned.path))
+        #expect(FileManager.default.fileExists(atPath: active.path))
+        #expect(FileManager.default.fileExists(atPath: unrelated.path))
+    }
+
+    @Test func concurrentPublicationReusesOneCompleteWinner() async throws {
+        let root = tmp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let archive = try await archive("0.2.1", in: root)
+        let cache = root.appendingPathComponent("cache")
+        let barrier = FetchBarrier()
+        let store = ReleaseSourceStore(root: cache) { _, destination in
+            await barrier.arrive()
+            try FileManager.default.copyItem(at: archive, to: destination)
+        }
+        async let first = store.directory(for: "0.2.1")
+        async let second = store.directory(for: "0.2.1")
+        let results = try await [first, second]
+        #expect(results[0] == results[1])
+        #expect(try String(contentsOf: results[0].appendingPathComponent("Package.swift"), encoding: .utf8)
+                == "// swift-tools-version:6.0")
+        #expect(try FileManager.default.contentsOfDirectory(atPath: cache.path) == ["v0.2.1"])
+    }
+
+    private actor FetchBarrier {
+        private var first: CheckedContinuation<Void, Never>?
+        func arrive() async {
+            if let first { first.resume(); return }
+            await withCheckedContinuation { first = $0 }
+        }
+    }
+
     @Test func cacheHitSkipsFetcherAndRefreshesRecency() async throws {
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }

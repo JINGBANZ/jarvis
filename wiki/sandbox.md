@@ -178,13 +178,15 @@ owner-only permissions inside a **`0700`** dir, **fresh each session**, and **ne
 dirs, and the viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and
 readable by this user account and by nothing else. See [build-and-run.md](./build-and-run.md).
 
-Release sessions also contain immutable `session-build.json`, written at Start with `0600`
-permissions independently of the audit worker and its health marker. Development sessions have no
-build stamp. The sibling `~/Library/Application Support/Jarvis/source/` cache is `0700` and contains
-only public repository source, never session-derived data. Downloads unpack under a private staging
-directory and move atomically into a version directory only after extraction succeeds. Cache hits
-refresh recency; successful fetches prune to three versions. See `ReleaseSourceStore` in
-`Sources/JarvisEvaluation/`.
+Build identity lives in the session directory name, with its validation defined by
+[`SessionDirectoryID`](../Sources/JarvisCore/Diagnostics/SessionDirectoryID.swift).
+The owner-only source cache beside the session storage contains public repository source, never
+session-derived data. This separation allows a reusable source workspace without copying private
+evidence into it. [`ReleaseSourceStore`](../Sources/JarvisEvaluation/ReleaseSourceStore.swift) owns
+the exact path, permissions, staging cleanup, publication, and retention policy;
+[build-and-run.md](./build-and-run.md#the-live-activity-viewer) defines source selection and mismatch
+disclosure. Version text is validated before it reaches a path or download URL, and extraction
+does not publish a usable cache entry until complete.
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 

@@ -3,6 +3,25 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct SessionStoreTests {
+    @Test func prefixedAndOldSessionsShareChronologyAndRetention() throws {
+        let base = ActivityLogTests.tmp()
+        defer { try? FileManager.default.removeItem(at: base) }
+        let ids = ["v9.0.0-2026-09-12_09-00-00_aaaa", "v0.2.2-2026-09-12_10-00-00_bbbb",
+                   "2026-09-12_11-00-00_cccc", "dev-2026-09-12_12-00-00_dddd"]
+        for id in ids {
+            try makeSession(base, id, lines: [#"{"t":"10:00:00","m":"heard question","k":"heard"}"#])
+        }
+        let current = base.appendingPathComponent(ids[3])
+        let store = SessionStore(base: base, current: current)
+        #expect(store.listSessions().map(\.id) == Array(ids.reversed()))
+        #expect(store.listSessions().first?.label == "2026-09-12 12:00:00")
+        #expect(store.newestSessionDirectory()?.lastPathComponent == ids[3])
+        store.pruneToMostRecent(2)
+        #expect(store.listSessions().map(\.id) == [ids[3], ids[2]])
+        store.clearHistory()
+        #expect(store.listSessions().map(\.id) == [ids[3]])
+    }
+
     /// Write a session dir with a `jarvis-activity.jsonl` (and optional shot) under `base`.
     private func makeSession(_ base: URL, _ id: String, lines: [String], shot: (String, Data)? = nil) throws {
         let d = base.appendingPathComponent(id)

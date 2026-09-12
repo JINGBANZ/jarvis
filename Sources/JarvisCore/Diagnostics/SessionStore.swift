@@ -30,10 +30,20 @@ public struct SessionStore: Sendable {
         self.current = current
     }
 
-    /// `yyyy-MM-dd_HH-mm-ss_xxxx` (timestamp + 4-char suffix; see AppDelegate.newSessionID). The
-    /// regex is built locally (not a stored static) to stay Sendable-clean under Swift 6.
+    /// Terminal evaluation uses the same chronology as Activity, including contentless sessions.
+    public func newestSessionDirectory() -> URL? {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
+        return names.filter { Self.isSessionID($0) }
+            .filter { name in
+                (try? base.appendingPathComponent(name).resourceValues(forKeys: [.isDirectoryKey])
+                    .isDirectory) == true
+            }
+            .sorted { Self.isNewer($0, than: $1) }.first.map { base.appendingPathComponent($0) }
+    }
+
+    /// The shared parser also accepts older sessions without a build prefix.
     private static func isSessionID(_ s: String) -> Bool {
-        s.wholeMatch(of: /^[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9A-Za-z]{4}$/) != nil
+        SessionDirectoryID(s) != nil
     }
     /// A bare `shot-N.jpg` filename — anything with slashes or `..` is rejected (path-traversal guard).
     private static func isShotName(_ s: String) -> Bool {
@@ -82,7 +92,7 @@ public struct SessionStore: Sendable {
                     evidenceIsComplete: Self.evidenceIsComplete(in: url))
             }
             .filter { $0.isCurrent || Self.hasCoachingContent($0.url) }
-            .sorted { $0.id > $1.id }   // id is a lexically-sortable timestamp ⇒ newest first
+            .sorted { Self.isNewer($0.id, than: $1.id) }
     }
 
     /// Read the session's monotonic health record. `complete` means every accepted record reached
@@ -244,7 +254,7 @@ public struct SessionStore: Sendable {
         let protectedPaths = Set(protectedDirectories.map { $0.standardizedFileURL.path })
         let names = ((try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? [])
             .filter { Self.isSessionID($0) }
-            .sorted(by: >)   // id is a lexically-sortable timestamp ⇒ newest first
+            .sorted { Self.isNewer($0, than: $1) }
         for name in names.dropFirst(keep) {
             let url = base.appendingPathComponent(name)
             if url.standardizedFileURL.path == curPath { continue }                 // spare current
@@ -257,8 +267,12 @@ public struct SessionStore: Sendable {
 
     /// "2026-06-16_10-00-00_aaaa" → "2026-06-16 10:00:00".
     private static func label(from id: String) -> String {
-        let parts = id.split(separator: "_")
-        guard parts.count >= 2 else { return id }
-        return "\(parts[0]) \(parts[1].replacingOccurrences(of: "-", with: ":"))"
+        SessionDirectoryID(id)?.label ?? id
+    }
+
+    private static func isNewer(_ lhs: String, than rhs: String) -> Bool {
+        let left = SessionDirectoryID(lhs)?.chronologyKey ?? lhs
+        let right = SessionDirectoryID(rhs)?.chronologyKey ?? rhs
+        return left == right ? lhs > rhs : left > right
     }
 }

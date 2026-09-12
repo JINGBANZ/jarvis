@@ -5,8 +5,9 @@ import JarvisCore
 import JarvisBrainProviders
 
 @Suite struct AgenticEvaluatorTests {
-    @Test(arguments: [false, true])
-    func evaluateRunsClaudeAndPersistsOwnerOnlyStampedReport(isRelease: Bool) async throws {
+    @Test(arguments: ["development", "matching", "fallback", "unknown"])
+    func evaluateRunsClaudeAndPersistsOwnerOnlyStampedReport(scenario: String) async throws {
+        let isRelease = scenario != "development"
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
         let session = root.appendingPathComponent("session")
@@ -17,10 +18,14 @@ import JarvisBrainProviders
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         try await writeSessionInputs(to: session)
         let cache = root.appendingPathComponent("source")
-        let checkout = isRelease ? cache.appendingPathComponent("v0.2.1/jarvis-0.2.1") : root
+        let actualVersion = scenario == "matching" ? "0.2.1" : "0.2.2"
+        let checkout = isRelease ? cache.appendingPathComponent("v\(actualVersion)/jarvis-\(actualVersion)") : root
         try FileManager.default.createDirectory(at: checkout, withIntermediateDirectories: true)
         try Data("// fixture".utf8).write(to: checkout.appendingPathComponent("Package.swift"))
-        let source: EvaluationSource = isRelease ? .release(version: "0.2.1") : .localCheckout(root)
+        let source: EvaluationSource = isRelease
+            ? .release(version: scenario == "unknown" ? nil : "0.2.1", fallbackVersion: "0.2.2")
+            : .localCheckout(root)
+        let provenance = isRelease ? source.releaseProvenance(using: actualVersion) : source.workspaceProvenance
 
         let executable = bin.appendingPathComponent("claude")
         let script = """
@@ -31,7 +36,7 @@ import JarvisBrainProviders
             fi
             [ . -ef "\(checkout.path)" ] || exit 1
             case "$2" in
-              *"\(source.workspaceProvenance)"*) ;;
+              *"\(provenance)"*) ;;
               *) exit 2 ;;
             esac
             printf '## Summary\\nNo issue.\\n'
@@ -49,8 +54,10 @@ import JarvisBrainProviders
             source: source,
             preferredProvider: .claudeCode,
             detector: detector,
-            sourceStore: ReleaseSourceStore(root: cache) { _, _ in
-                Issue.record("Cached evaluator fetched source")
+            sourceStore: ReleaseSourceStore(root: cache) { url, _ in
+                #expect(scenario == "fallback")
+                #expect(url.lastPathComponent == "v0.2.1.tar.gz")
+                throw URLError(.fileDoesNotExist)
             },
             timeout: 5)
 
@@ -58,6 +65,7 @@ import JarvisBrainProviders
 
         #expect(report.contains("Produced by the agentic evaluator (`claude`"))
         #expect(report.contains("## Summary"))
+        #expect(report.contains(provenance))
         #expect(AgenticEvaluation.savedReport(in: session) == report)
         let reportURL = session.appendingPathComponent(AgenticEvaluation.reportFilename)
         let permissions = try FileManager.default.attributesOfItem(

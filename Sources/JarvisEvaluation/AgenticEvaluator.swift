@@ -48,17 +48,21 @@ public struct AgenticEvaluator: Sendable {
                          onFetchingSource: @MainActor @Sendable (Bool) -> Void = { _ in }) async throws -> String {
         let repositoryDirectory: URL
         let isRelease: Bool
+        let provenance: String
         switch source {
         case .localCheckout(let directory):
             repositoryDirectory = directory
             isRelease = false
-        case .release(let version):
+            provenance = source.workspaceProvenance
+        case .release(let version, let fallbackVersion):
             await onFetchingSource(true)
-            repositoryDirectory = try await sourceStore.directory(for: version)
+            let resolved = try await sourceStore.resolve(version: version, fallbackVersion: fallbackVersion)
+            repositoryDirectory = resolved.directory
+            provenance = source.releaseProvenance(using: resolved.version)
             await onFetchingSource(false)
             isRelease = true
         }
-        let prompt = try await prepare(sessionDirectory: sessionDirectory)
+        let prompt = try await prepare(sessionDirectory: sessionDirectory, workspaceProvenance: provenance)
         try Task.checkCancellation()
         let providers = preferredProvider.map { [$0] } ?? [.claudeCode, .codexCLI]
         let detected = await detector.detectFirstAsync(providers).map { [$0] } ?? []
@@ -89,16 +93,17 @@ public struct AgenticEvaluator: Sendable {
         }
         try Task.checkCancellation()
         return try AgenticEvaluation.saveReport(
-            output.stdout, agentName: cli.executableURL.lastPathComponent, in: sessionDirectory)
+            output.stdout, agentName: cli.executableURL.lastPathComponent, in: sessionDirectory,
+            workspaceProvenance: provenance)
     }
 
     /// Traffic rendering can read a long session, so keep it off the main actor used by Activity.
-    private func prepare(sessionDirectory: URL) async throws -> String {
+    private func prepare(sessionDirectory: URL, workspaceProvenance: String) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(with: Result {
                     try AgenticEvaluation.prepare(sessionDir: sessionDirectory,
-                                                  workspaceProvenance: source.workspaceProvenance)
+                                                  workspaceProvenance: workspaceProvenance)
                 })
             }
         }
@@ -134,6 +139,7 @@ public struct AgenticEvaluator: Sendable {
                 "--add-dir", sessionDirectory.path,
             ]
         case .codexCLI:
+            // Release source is an extracted archive without .git, so Codex must allow that workspace.
             arguments = [
                 "exec", "--ephemeral", "--sandbox", "read-only",
                 "--ignore-user-config", "--ignore-rules",

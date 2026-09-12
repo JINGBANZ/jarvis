@@ -121,9 +121,12 @@ incident's bounded budget. Activity persists stable event kinds and flushes at S
 receives the complete session directory and reads the full, unfiltered `jarvis-activity.jsonl`
 whenever it needs the user-visible sequence, alongside first-class coaching-attempt provenance, raw
 brain traffic, screenshots, and source code. Development evaluates against the live checkout
-containing the app bundle; releases fetch and cache source at the session's recorded version.
-`EvaluationSource`, `SessionBuild`, and `ReleaseSourceStore` in `Sources/JarvisEvaluation/` own the
-source identity and cache; [build-and-run.md](./build-and-run.md) defines provenance, failures,
+containing the app bundle; releases derive the recorded version from the session directory name.
+`SessionDirectoryID` in `Sources/JarvisCore/Diagnostics/` owns build identity and timestamp ordering;
+`EvaluationSource` and `ReleaseSourceStore` in `Sources/JarvisEvaluation/` select matching source or
+available release source with an explicit mismatch disclosure. Start has no separate version-file
+write, and unknown version identity does not prevent evaluation.
+[build-and-run.md](./build-and-run.md) defines provenance, failures,
 and the Activity button states. A neutral evidence index reports artifact health,
 categorical distributions, and correlation-field coverage; a separate normalized table reports
 provider-call latency, token, cache, and cost telemetry. Both preserve unavailable and partial values
