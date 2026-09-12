@@ -12,7 +12,8 @@ public let captureScreenTool = ToolDef(
 /// One schema on every brain and in every session. `mermaid` is nullable rather than absent because
 /// that is what makes a field optional under strict Structured Outputs, and because a second speak
 /// variant is what let the tool array a local-agent process was warmed with drift from the one the
-/// coach loop later sent (#273). Whether a supplied graph is rendered is a runtime decision.
+/// coach loop later sent (#273). When a graph belongs on a tip is prompt text's decision, not the
+/// runtime's: any graph the renderer can parse reaches the overlay.
 public let speakTool = ToolDef(
     name: "speak",
     description: JarvisPrompts.Coach.ToolDescription.speak,

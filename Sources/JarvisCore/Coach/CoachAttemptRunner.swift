@@ -108,9 +108,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
     }
 
     /// Safety backstop against a pathological model that loops on capture_screen forever. The
-    /// longest sensible chain once skills also load on demand is load a skill, load a tool, search,
-    /// capture, speak — five responses, and the two spare keep a reasonable attempt from dying on
-    /// the cap.
+    /// longest sensible chain is load a skill, load a tool, search, capture, speak — five
+    /// responses, and the two spare keep a reasonable attempt from dying on the cap.
     private let maxToolIterations = 7
 
     struct PendingCoachingWork {

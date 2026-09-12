@@ -81,8 +81,8 @@ public enum ToolInvocation: Sendable, Equatable {
     case captureScreen(callId: String)
     /// The overlay lines to show, already split by the model (the `speak` tool's `lines` array) and
     /// rendered one at a time — so the client never splits a free-form string on punctuation.
-    /// `mermaid` is declared by the one speak schema on every brain; whether a supplied graph
-    /// reaches the overlay is the runtime's decision.
+    /// `mermaid` is declared by the one speak schema on every brain; a supplied graph reaches the
+    /// overlay whenever the renderer can parse it.
     case speak(callId: String, lines: [String], mermaid: String? = nil, explanation: String? = nil, codeSnippet: CodeSnippet? = nil)
     /// The model's explicit "nothing useful to add" decision. Silence is a tool call (not the absence
     /// of one) so that `tool_choice: required` can forbid plain-text output entirely — free text from
