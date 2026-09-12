@@ -194,8 +194,8 @@ never-ready paths: with an obviously invalid OpenAI key, Start ends the session 
 seconds naming the rejection and its close code; with a valid key and Wi-Fi off, Start ends it within
 about fifteen seconds naming the network cause, with no system-audio degradation row before it; with
 a valid key and network, coaching still works and `jarvis-debug.log` carries `socket #1` lines with
-stage names. Both socket providers now run one shared lifecycle driver, so the same walk is needed
-for Gemini, plus a session left past its ten-minute cap to see the `goAway` rotation replace the
+stage names. Both socket providers run one shared lifecycle driver, so the same walk is needed for
+Gemini, plus a session left past its ten-minute cap to see the `goAway` rotation replace the
 socket with no user-visible notice, and the benchmark's reconnect arm
 (`./scripts/transcription-benchmark.sh`), which should report ready at generation 1, then
 `reconnectPrepared`, then ready at generation 2.
