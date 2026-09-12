@@ -397,11 +397,12 @@ saved key.
 
 Saving a key checks it. One models-list request goes out with the key in a header, and the card shows
 what the vendor said under the row: **accepted**, **refused** with the provider's status, error code,
-and redacted message, or **couldn't check the key** carrying the same evidence. Which of the last two
-a failure lands in comes from the vendor table's disposition, not the status: only a permanent
-failure is a verdict on the key, so a rate limit, a momentarily exhausted quota, and a 5xx are all
-inconclusive rather than refusals, because each describes the provider's own state and would
-otherwise send a user to rotate a key that is fine. The verdict comes from the same
+and redacted message, or **couldn't check the key** carrying the same evidence. The check answers one
+question, whether the provider refused the key, so only an authentication failure is a refusal. An
+exhausted quota, a blocked region, a rate limit, and a 5xx are all real problems, but none of them is
+the key being wrong and rotating it fixes none of them, so each lands in the third case with its
+cause quoted. They are not worth telling apart here: a session that actually hits one of them names
+it in Activity. The verdict comes from the same
 `CredentialCheck` table a live session uses (see
 [architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)),
 so Settings and a session that dies on the same key cannot disagree. The check never gates the save:

@@ -77,18 +77,34 @@ import Testing
                 == "I couldn't check the key with Gemini (HTTP 429, RESOURCE_EXHAUSTED: Quota exceeded for requests).")
     }
 
-    /// A permanent refusal still reads as one, so the fix above cannot swallow a real rejection.
-    @Test func permanentRefusalsStayRejections() throws {
+    /// A permanent failure that is not about the key is still not a refusal of it. An exhausted
+    /// quota and a blocked region are real problems the row names, but rotating the key fixes
+    /// neither, and "refused the key" is the one sentence that sends a user to do exactly that.
+    @Test func permanentFailuresThatAreNotAboutTheKeyStayInconclusive() throws {
+        let noCredit = try JSONSerialization.data(withJSONObject: [
+            "error": ["code": "insufficient_quota", "type": "insufficient_quota",
+                      "message": "You exceeded your current quota, please check your plan and billing details."],
+        ])
+        guard case .inconclusive(let quota) =
+            CredentialCheck.verdict(for: .openAIAPIKey, httpStatus: 429, body: noCredit) else {
+            Issue.record("expected inconclusive"); return
+        }
+        // Permanent for a live session, where the route must exhaust this target and move on. That
+        // is a different question from whether the saved key is valid, which it is.
+        #expect(quota.disposition == .permanent)
+        #expect(quota.category == .quota)
+        #expect(CredentialCheck.statusText(.inconclusive(quota), for: .openAIAPIKey)
+                == "I couldn't check the key with OpenAI (HTTP 429, insufficient_quota: You exceeded your current quota, please check your plan and billing details.).")
+
         let forbidden = try JSONSerialization.data(withJSONObject: [
             "error": ["code": "unsupported_country_region_territory",
                       "message": "Country, region, or territory not supported"],
         ])
-        guard case .rejected(let failure) =
+        guard case .inconclusive(let region) =
             CredentialCheck.verdict(for: .openAIAPIKey, httpStatus: 403, body: forbidden) else {
-            Issue.record("expected rejection"); return
+            Issue.record("expected inconclusive"); return
         }
-        #expect(failure.disposition == .permanent)
-        #expect(failure.category == .access)
+        #expect(region.category == .access)
     }
 
     @Test func transportErrorsAreInconclusive() {

@@ -9,21 +9,23 @@ import Foundation
 public enum CredentialCheck {
     public enum Verdict: Sendable, Equatable {
         case accepted
-        /// The provider answered about the key itself, and the answer was no.
+        /// The provider said the key itself is not valid.
         case rejected(ProviderFailure)
-        /// Nothing was learned about the key: the request never arrived, or the provider answered
-        /// about its own state instead (busy, rate limited, down).
+        /// The provider did not answer about the key: it was busy, down, out of quota, blocked by
+        /// region, or never reached. The failure is quoted so the row still says which.
         case inconclusive(ProviderFailure)
     }
 
     public static func verdict(for credential: Credential, httpStatus: Int, body: Data?) -> Verdict {
         if (200..<300).contains(httpStatus) { return .accepted }
         let failure = classify(credential: credential, httpStatus: httpStatus, body: body)
-        // Only a permanent failure is a verdict on the key. A rate limit, a momentarily exhausted
-        // quota, and a 5xx all describe the provider's state rather than the key's, and calling any
-        // of them a refusal would send a user to rotate a key that is fine. The vendor table already
-        // decides which is which, so this reads its disposition instead of ranging over statuses.
-        return failure.disposition == .permanent ? .rejected(failure) : .inconclusive(failure)
+        // This check answers one question: did the provider refuse the key. Only an authentication
+        // failure answers it. An exhausted quota, a blocked region, a rate limit, and a 5xx are all
+        // real problems, but none of them is the key being wrong, and calling any of them a refusal
+        // sends a user to rotate a key that would work. They are not worth telling apart here: the
+        // failure is quoted either way, and the live session names the cause in Activity when it
+        // actually bites.
+        return failure.category == .authentication ? .rejected(failure) : .inconclusive(failure)
     }
 
     public static func verdict(for credential: Credential, transportError: any Error) -> Verdict {
