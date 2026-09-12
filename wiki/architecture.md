@@ -94,9 +94,10 @@ moments the model judges worthwhile.
    audit record.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
    (`CoachHistory`), the
-   new transcript delta, the timing context (seconds silent, session elapsed), and the tool set
-   `[capture_screen, speak, stay_silent]`. The timing is what lets the model tell "thinking" from
-   "stuck."
+   new transcript delta, the timing context (seconds silent, session elapsed), and the session's
+   fixed tool set — `[capture_screen, speak, stay_silent]`, plus `search_prep_notes` when prep
+   sources are configured, with `speak` carrying the System Design schema in that format. The timing
+   is what lets the model tell "thinking" from "stuck."
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
    visible context missing from the conversation — including unresolved references such as “this”
    or “here” — and no fresh capture is already available for that request. It may also capture when
@@ -543,10 +544,24 @@ rather than a per-turn screenshot.
   provider reapply. Both OpenAI and CLI construction use
   `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)`; passing resolved text keeps resource I/O
   outside coaching turns. CLI instructions remain fixed for the session, while General Technical can
-  use new task evidence within those instructions. CLI construction passes `prepMaterial: false`
-  because prep material is installed later. [Private architecture hints](#private-architecture-hints)
-  require explicit **System Design** in both the tool schema and runtime; General Technical's
-  system-design guidance does not enable diagrams.
+  use new task evidence within those instructions. CLI construction reads `prepMaterial` from the
+  session's fixed tool set, so the baked instructions describe exactly what the loop offers.
+  [Private architecture hints](#private-architecture-hints) require explicit **System Design** in
+  both the tool schema and runtime; General Technical's system-design guidance does not enable
+  diagrams.
+- **A session's tool set is fixed at Start, for the same reason its system prompt is
+  (`sessionCoachTools` in `Sources/JarvisCore/Coach/ToolDefs.swift`).** `CLIBrainClient` renders each
+  tool's `parametersJSON` verbatim into the instructions its process is warmed with, and rejects any
+  later turn whose tools no longer compose to that string, so a set that grew or changed shape
+  mid-session would fail every remaining attempt on that target until the route exhausted. Both the
+  coach loop and the CLI-provider construction therefore resolve their tools through one function,
+  from inputs known at Start: the interview format selects the plain or System Design speak schema,
+  and configured prep-material *sources* decide whether `search_prep_notes` is offered at all. That
+  last input is deliberately "sources are configured", not "an index exists": building the index
+  reads files and shells out to `textutil`, so it runs off the Start path and the search port arrives
+  after the first attempts. A search that lands before it, or after indexing found nothing usable,
+  returns no matches — the honest answer, and one that costs nothing, where changing the offered set
+  mid-session would cost the whole session.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their

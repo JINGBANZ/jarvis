@@ -9,7 +9,8 @@ import Testing
         let runner = CoachAttemptRunner(config: .default, transcript: RollingTranscript(),
             screen: ReviewScreen(succeeds: captureSucceeds), overlay: FakeOverlay(),
             clock: ManualClock(now: 100), sessionStart: 0, coachingAttempts: nil,
-            activity: nil, ledger: CoachTranscriptLedger())
+            activity: nil, ledger: CoachTranscriptLedger(),
+            sessionTools: sessionCoachTools(interviewFormat: nil, prepMaterial: false))
         var work = CoachAttemptRunner.PendingCoachingWork(reason: .manualExplanation)
         work.preparedManualReason = .manualHint
         work.screenObservation = [.userImage("stale-image"), .user("stale-ocr")]

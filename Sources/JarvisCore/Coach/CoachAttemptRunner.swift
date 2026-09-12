@@ -59,6 +59,15 @@ final class CoachAttemptRunner: @unchecked Sendable {
     /// current evidence per response; no mutable runtime classification is required.
     private let interviewFormatAddendum: String
     private let interviewFormat: InterviewFormat?
+    /// The session's tool set, resolved at Start by `sessionCoachTools` and sent verbatim on every
+    /// request. Deriving it per attempt is what let it drift from the schemas a local-agent target
+    /// was warmed with (#273), so this is a plain `let` even though `prepMaterial` lands later.
+    private let sessionTools: [ToolDef]
+    /// Whether this session offers `search_prep_notes` at all, read from `sessionTools` so the tool
+    /// list and the system prompt that describes it cannot disagree.
+    private var offersPrepNotes: Bool {
+        sessionTools.contains { $0.name == searchPrepNotesTool.name }
+    }
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
@@ -81,9 +90,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)?,
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
+        sessionTools: [ToolDef],
         interviewFormatAddendum: String = "",
         interviewFormat: InterviewFormat? = nil
     ) {
+        self.sessionTools = sessionTools
         self.config = config
         self.transcript = transcript
         self.screen = screen
@@ -217,7 +228,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // must track the real tool set (`tools`, below) exactly, not just hint at it.
         let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let systemPrompt = JarvisPrompts.Coach.system(
-            prepMaterial: attempt.prepMaterial != nil,
+            prepMaterial: offersPrepNotes,
             formatAddendum: interviewFormatAddendum,
             explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
@@ -288,12 +299,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 result: .failed(outcome: .brainError, failure: failure, work: work))
         }
 
-        // Search joins only when usable prep text exists; the format-specific speak schema
-        // still ends the same attempt, including the manual shortcut's forced speak.
-        let baseTools = coachTools.map {
-            interviewFormat == .systemDesign && $0.name == speakTool.name ? systemDesignSpeakTool : $0
-        }
-        let tools = attempt.prepMaterial != nil ? baseTools + [searchPrepNotesTool] : baseTools
+        // Sent verbatim, never rebuilt per attempt: these are the schemas a local-agent target was
+        // warmed with, and it rejects the turn if what it is sent no longer composes to them.
+        let tools = sessionTools
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
@@ -480,12 +488,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         jlog("… attempt cancelled (stopped) before searching prep notes")
                         return .cancelled
                     }
-                    // The tool is offered only when prepMaterial != nil (below), so a call here with
-                    // it absent means a non-schema-enforced provider (a CLI protocol reconstructing
-                    // calls from free-form prompt text) emitted one anyway — reject it rather than
-                    // silently returning an empty result with a real-looking Activity entry implying
-                    // prep material was actually checked.
-                    guard let prepMaterial = attempt.prepMaterial else {
+                    // The tool is in the session's set only when prep sources were configured at
+                    // Start, so a call here without it means a non-schema-enforced provider (a CLI
+                    // protocol reconstructing calls from free-form prompt text) emitted one anyway —
+                    // reject it rather than silently returning an empty result with a real-looking
+                    // Activity entry implying prep material was actually checked.
+                    guard offersPrepNotes else {
                         jlog("⚠️ search_prep_notes called without prep material configured — "
                              + "scheduling fresh attempt")
                         return .failed(
@@ -495,7 +503,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                                 detail: "search_prep_notes called without prep material configured"),
                             work: work)
                     }
-                    let results = prepMaterial.search(query: query)
+                    // A nil port here is the offered tool being used before indexing finished, or
+                    // after it found nothing usable. Both are honestly "no matches", not a failure.
+                    let results = attempt.prepMaterial?.search(query: query) ?? []
                     jlog("📎 searched prep notes for \"\(query)\" — \(results.count) match(es)")
                     activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
                     // Mirrors capture_screen: if the very next request in this attempt fails, a
