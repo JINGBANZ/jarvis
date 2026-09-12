@@ -176,7 +176,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // On by default, but the box is a session surface: this only arms the switch. It reaches the
         // screen on Start (below) and leaves it on Stop, so a stopped Jarvis shows nothing.
         overlayBox.setEnabled(appearance.boxEnabled)
-        overlayBox.setCodeEnabled(codePreferences.isEnabled)
 
         // No updater in a development bundle (no feed URL), so the menu omits the item entirely.
         updates = UpdateController()
@@ -192,6 +191,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             explanationPreferences.isEnabled = false
             codePreferences.isEnabled = false
         }
+        // After normalization, not beside the other panel settings above: the panel must latch the
+        // preference the rest of launch agrees on, not the one a disabled box is about to clear.
+        overlayBox.setCodeEnabled(codePreferences.isEnabled)
         hotkeys = HotkeyController(preferences: hotkeyPreferences.filter {
             ($0.shortcut != .explainMore || explanationPreferences.isEnabled)
                 && ($0.shortcut != .showCode || codePreferences.isEnabled)
