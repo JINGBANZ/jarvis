@@ -22,9 +22,11 @@ public struct Config: Sendable {
     /// How long a capture's OCR text keeps describing "the screen" before `CoachHistory` retires it to
     /// a stub. The newest dump is otherwise the one block that never collapses — superseding only ever
     /// fires when a *newer* capture lands — so with no further look it sits in history verbatim for the
-    /// rest of the session and reads as current. Two minutes is short enough that a question change or
-    /// a rewritten editor buffer does not inherit the previous screen, and long enough that a coach
-    /// working through one problem keeps the screen it just read instead of looking again every turn.
+    /// rest of the session and reads as current. Five minutes keeps a coach working through one
+    /// problem on the screen it already read — an editor changes constantly, and expiring mid-problem
+    /// buys a re-look that the screen gate would otherwise not have asked for. It is a backstop
+    /// against a dump outliving its screen indefinitely, not the mechanism that grounds a new
+    /// question: the screen gate captures at a question's start, well before this fires.
     public var screenTextStalenessSeconds: TimeInterval
     /// Fixed time added to every overlay line before its reading time. Unlike a movie viewer (eyes on
     /// the screen, audio reinforcing the text), our user is mid-conversation and only *glances* at the
@@ -75,7 +77,7 @@ public struct Config: Sendable {
         silenceMaxIntervalSeconds: TimeInterval = 960,
         silenceIdleCutoffSeconds: TimeInterval = 1_800,
         historyCompactionTokenThreshold: Int = 10_000,
-        screenTextStalenessSeconds: TimeInterval = 120,
+        screenTextStalenessSeconds: TimeInterval = 300,
         overlayNoticeBufferSeconds: TimeInterval = 2.0,
         overlaySecondsPerWord: TimeInterval = 0.35,
         overlayMaxDisplaySeconds: TimeInterval = 8,
