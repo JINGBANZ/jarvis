@@ -23,6 +23,14 @@ import JarvisCore
 /// and every producer reads the mirror rather than asking the connection. That is what keeps a
 /// producer's decision atomic with the replay bookkeeping it drives; see `WebSocketConnection`'s
 /// header for the lock order and why the mirror exists.
+///
+/// `@unchecked Sendable`: every mutable field is guarded by `lock`. The four implicitly unwrapped
+/// or optional collaborators (`connection`, `coachingCoordinator`, `transcriptionLifecycle`,
+/// `jarvisManagedTurnCoordinator`) are assigned once in `init`, before this instance is shared, and
+/// never reassigned; they are not `let` only because building them captures `self`. No timer or
+/// other main-queue-confined state lives here, because the socket's timers belong to
+/// `WebSocketConnection`. `continuityReporter`, `coachingCoordinator`, and `audioBuffer` guard their
+/// own state, and this type calls them under the A-then-D order that header documents.
 final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapter,
     @unchecked Sendable {
     private enum OutboundAction {
