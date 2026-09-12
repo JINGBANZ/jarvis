@@ -75,6 +75,8 @@ final class BrainComposition {
     /// `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` builder `CoachAttemptRunner`
     /// calls per turn.
     var interviewFormatAddendum = ""
+    var explanationsEnabled = true
+    var codeEnabled = false
 
     /// The current session's tool set, fixed once at Start on exactly the same terms as
     /// `interviewFormatAddendum` and set from the same place, before the first `makeConfiguredRoute`
@@ -156,7 +158,8 @@ final class BrainComposition {
                                            prepMaterial: coachTools.contains {
                                                $0.name == searchPrepNotesTool.name
                                            },
-                                           formatAddendum: interviewFormatAddendum),
+                                           formatAddendum: interviewFormatAddendum,
+                                           explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
                                        tools: coachTools,
                                        toolChoice: .required,
                                        runtime: runtimes.coach,

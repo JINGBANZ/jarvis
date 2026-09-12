@@ -1,0 +1,255 @@
+import AppKit
+import JarvisCore
+
+/// Settings panel for the global manual-hint hotkey: one "click to record" control, plus an inline
+/// callout when a user-chosen combination can't be registered (e.g. another app already owns it) —
+/// see #229. A rejected rebind always leaves the previous, still-working combination live, so that
+/// stays displayed and the failure is only flashed as immediate feedback on the attempt itself
+/// (`recorded(_:)`); it does not persist across a tab revisit, since the previous shortcut is still
+/// fine. The one case that *is* persistent — the shipped default itself colliding with another app at
+/// launch, so nothing is registered at all — keeps showing the callout on every revisit instead of
+/// going quiet on a stale success.
+@MainActor
+final class HotkeyBindingView: NSObject {
+
+    private let preferences: HotkeyPreferences
+    private let codePreferences: CodePreferences?
+    private let onCodeChanged: () -> Void
+    private let boxEnabled: () -> Bool
+    private var explanationRow: SettingsRowView?
+    private let explanationPreferences: ExplanationPreferences?
+    private let onExplanationsChanged: () -> Void
+    private var explanationSwitch: NSSwitch?
+    private var shortcutRow: SettingsRowView?
+    private var cardHeightConstraint: NSLayoutConstraint?
+
+    private var isEnabled: Bool { explanationPreferences?.isEnabled ?? codePreferences?.isEnabled ?? true }
+    private var cardHeight: CGFloat {
+        SettingsStyle.cardHeaderHeight
+            + (explanationPreferences == nil && codePreferences == nil ? 0 : SettingsStyle.rowHeight)
+            + (isEnabled ? SettingsStyle.rowHeight : 0)
+    }
+    /// Whether the controller currently has *any* combination registered. This is the only thing
+    /// that must persist across Settings visits: a rejected rebind always leaves the previous,
+    /// still-working combination live (see `HotkeyController.apply`), so the sole way this is false
+    /// is the shipped default itself colliding with another app at launch — nothing was ever
+    /// registered this run. Both branches of `renderOutcome` read this: it decides whether a
+    /// revisit shows the persistent-failure callout, and it picks that callout's wording.
+    private let hasActiveHotkey: () -> Bool
+    /// Attempts to register a candidate combination and reports whether it took. Persisting the
+    /// choice is this section's job, only after a `.registered` outcome — see `recorded(_:)`.
+    private let applyCombination: (HotkeyCombination) -> HotkeyRegistrationOutcome
+
+    private var recorder: HotkeyRecorderButton?
+    private var callout: NSBox?
+    private var calloutLabel: NSTextField?
+    private var calloutHeightConstraint: NSLayoutConstraint?
+
+    private static let calloutHeight: CGFloat = 60
+    var onHeightChanged: (() -> Void)?
+    var preferredHeight: CGFloat {
+        cardHeight + SettingsStyle.sectionSpacing
+            + (calloutHeightConstraint?.constant ?? 0)
+    }
+
+    init(
+        preferences: HotkeyPreferences,
+        explanationPreferences: ExplanationPreferences? = nil,
+        codePreferences: CodePreferences? = nil,
+        onCodeChanged: @escaping () -> Void = {},
+        boxEnabled: @escaping () -> Bool = { true },
+        onExplanationsChanged: @escaping () -> Void = {},
+        hasActiveHotkey: @escaping () -> Bool,
+        applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
+    ) {
+        self.codePreferences = codePreferences
+        self.onCodeChanged = onCodeChanged
+        self.boxEnabled = boxEnabled
+        self.preferences = preferences
+        self.explanationPreferences = explanationPreferences
+        self.onExplanationsChanged = onExplanationsChanged
+        self.hasActiveHotkey = hasActiveHotkey
+        self.applyCombination = applyCombination
+    }
+
+    func makeView() -> NSView {
+        let body = NSView(frame: NSRect(x: 0, y: 0, width: 712, height: 180))
+
+        let recorder = HotkeyRecorderButton(combination: preferences.combination)
+        recorder.setAccessibilityLabel("\(preferences.shortcut.title) shortcut")
+        recorder.onRecorded = { [weak self] combination in
+            self?.recorded(combination)
+        }
+        self.recorder = recorder
+
+        let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
+        card.translatesAutoresizingMaskIntoConstraints = false
+        card.setHeader(title: preferences.shortcut.title, detail: preferences.shortcut == .showCode
+            ? "Coding · snippets follow your hints" : "Works only while a session is running")
+        let row = SettingsRowView(
+            title: "Shortcut",
+            detail: "Requires ⌘ or ⌥",
+            controlView: recorder,
+            controlSize: NSSize(width: 170, height: 32),
+            preferredHeight: SettingsStyle.rowHeight,
+            showsSeparator: false)
+        shortcutRow = row
+        card.contentView?.addSubview(row)
+        var toggleRow: SettingsRowView?
+        if explanationPreferences != nil || codePreferences != nil {
+            let toggle = NSSwitch()
+            toggle.target = self
+            toggle.action = #selector(explanationsChanged)
+            toggle.setAccessibilityLabel(codePreferences == nil ? "Enable explanations" : "Show code with hints")
+            explanationSwitch = toggle
+            let settingsRow = SettingsRowView(
+                title: codePreferences == nil ? "Enable explanations" : "Show code with hints",
+                detail: "Takes effect the next time you start",
+                controlView: toggle,
+                controlSize: NSSize(width: 44, height: 26))
+            card.contentView?.addSubview(settingsRow)
+            toggleRow = settingsRow
+            explanationRow = settingsRow
+        }
+        card.onLayout = { [weak card, weak row, weak toggleRow] in
+            guard let card, let row else { return }
+            let bounds = card.bodyFrame
+            if let toggleRow {
+                toggleRow.frame = NSRect(x: 0, y: max(0, bounds.height - SettingsStyle.rowHeight),
+                    width: bounds.width, height: SettingsStyle.rowHeight)
+                row.frame = NSRect(x: 0, y: 0, width: bounds.width, height: SettingsStyle.rowHeight)
+            } else {
+                row.frame = bounds
+            }
+        }
+
+        let callout = makeCallout()
+        callout.translatesAutoresizingMaskIntoConstraints = false
+        self.callout = callout
+
+        body.addSubview(card)
+        body.addSubview(callout)
+        NSLayoutConstraint.activate([
+            card.topAnchor.constraint(equalTo: body.topAnchor),
+            card.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            callout.topAnchor.constraint(equalTo: card.bottomAnchor, constant: SettingsStyle.sectionSpacing),
+            callout.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            callout.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+        ])
+        let height = card.heightAnchor.constraint(equalToConstant: cardHeight)
+        height.isActive = true
+        cardHeightConstraint = height
+        let calloutHeight = callout.heightAnchor.constraint(equalToConstant: 0)
+        calloutHeight.isActive = true
+        calloutHeightConstraint = calloutHeight
+
+        renderOutcome()
+
+        body.translatesAutoresizingMaskIntoConstraints = false
+        body.bottomAnchor.constraint(equalTo: callout.bottomAnchor).isActive = true
+        return body
+    }
+
+    func didBecomeActive() {
+        recorder?.setCombination(preferences.combination)
+        renderOutcome()
+    }
+
+    @objc private func explanationsChanged() {
+        guard let explanationSwitch else { return }
+        if let codePreferences {
+            codePreferences.isEnabled = explanationSwitch.state == .on
+            onCodeChanged()
+        } else if let explanationPreferences {
+            explanationPreferences.isEnabled = explanationSwitch.state == .on
+            onExplanationsChanged()
+        }
+        recorder?.setCombination(preferences.combination)
+        renderOutcome()
+    }
+
+    private func recorded(_ combination: HotkeyCombination) {
+        guard isEnabled else { return }
+        let outcome = applyCombination(combination)
+        switch outcome {
+        case .registered:
+            preferences.combination = combination
+            recorder?.setCombination(combination)
+        case .failed:
+            // The controller left the previous, still-working combination registered — reflect that,
+            // not the rejected candidate, and never persist a combination that isn't actually live.
+            recorder?.setCombination(preferences.combination)
+        }
+        renderOutcome(outcome)
+    }
+
+    /// `outcome` is the immediate result of one `recorded(_:)` attempt — pass it right after a
+    /// rebind to flash honest feedback about *that* attempt. Passing nothing (`makeView()` opening
+    /// the tab, `didBecomeActive()` revisiting it) must not replay that transient result: a rejected
+    /// rebind whose previous combination is still active is not an ongoing problem, so on a revisit
+    /// the callout shows only for the one state that *is* persistent — nothing registered at all.
+    private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
+        defer { onHeightChanged?() }
+        explanationSwitch?.isEnabled = boxEnabled()
+        explanationRow?.setDetail(boxEnabled() ? "Takes effect the next time you start" : "Requires Overlay Box · enable it in Overlay settings")
+        explanationSwitch?.state = isEnabled ? .on : .off
+        shortcutRow?.isHidden = !isEnabled
+        recorder?.isEnabled = isEnabled
+        cardHeightConstraint?.constant = cardHeight
+        let showsFailure: Bool
+        switch outcome {
+        case .registered: showsFailure = false
+        case .failed: showsFailure = true
+        case nil: showsFailure = !hasActiveHotkey()
+        }
+        guard isEnabled && showsFailure else {
+            calloutHeightConstraint?.constant = 0
+            callout?.isHidden = true
+            return
+        }
+        calloutLabel?.stringValue = hasActiveHotkey()
+            ? "That shortcut is already in use. Your previous shortcut is unchanged."
+            : "That shortcut is already in use, and this shortcut is not "
+                + "currently active."
+        calloutHeightConstraint?.constant = Self.calloutHeight
+        callout?.isHidden = false
+    }
+
+    private func makeCallout() -> NSBox {
+        let callout = NSBox()
+        callout.boxType = .custom
+        callout.borderWidth = 1
+        callout.cornerRadius = 10
+        callout.borderColor = NSColor.systemOrange.withAlphaComponent(0.25)
+        callout.fillColor = NSColor.systemOrange.withAlphaComponent(0.08)
+        callout.contentViewMargins = .zero
+        callout.isHidden = true
+
+        guard let content = callout.contentView else { return callout }
+        let icon = NSImageView()
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.image = NSImage(
+            systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)
+        icon.contentTintColor = .systemOrange
+        content.addSubview(icon)
+
+        let label = NSTextField(wrappingLabelWithString: "")
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        label.textColor = .secondaryLabelColor
+        content.addSubview(label)
+        calloutLabel = label
+
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            icon.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
+            icon.widthAnchor.constraint(equalToConstant: 22),
+            icon.heightAnchor.constraint(equalToConstant: 22),
+            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
+            label.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+            label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
+        ])
+        return callout
+    }
+}

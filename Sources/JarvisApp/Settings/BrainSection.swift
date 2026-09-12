@@ -170,8 +170,7 @@ final class BrainSection: NSObject, SettingsSection {
             showsSeparator: false)
         content.addSubview(effortRow)
 
-        // "None" (index 0) persists as `nil` and resolves to no addendum at all — not a guess
-        // assembled from whichever formats happen to have content.
+        // None (index 0) persists as nil; explicit formats remain optional overrides.
         let formatPopup = NSPopUpButton()
         formatPopup.addItem(withTitle: "None")
         formatPopup.addItems(withTitles: availableFormats.map(\.displayName))

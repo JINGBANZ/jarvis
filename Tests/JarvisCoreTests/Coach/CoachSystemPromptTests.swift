@@ -5,13 +5,13 @@ import Testing
 /// once at Start for a CLI provider whose instructions are fixed after construction.
 @Suite struct CoachSystemPromptTests {
     @Test func bareBuilderIsTheBasePrompt() {
-        #expect(JarvisPrompts.Coach.system(prepMaterial: false, formatAddendum: "")
+        #expect(JarvisPrompts.Coach.system(prepMaterial: false, formatAddendum: "", explanationsEnabled: false)
             == JarvisPrompts.Coach.system)
     }
 
     @Test func prepMaterialGuidanceIsDescribedOnlyWhenOffered() {
         let offered = JarvisPrompts.Coach.system(prepMaterial: true, formatAddendum: "")
-        let withheld = JarvisPrompts.Coach.system(prepMaterial: false, formatAddendum: "")
+        let withheld = JarvisPrompts.Coach.system(prepMaterial: false, formatAddendum: "", explanationsEnabled: false)
         #expect(offered.hasPrefix(JarvisPrompts.Coach.system))
         #expect(offered.contains("search_prep_notes"))
         #expect(!withheld.contains("search_prep_notes"))

@@ -3,7 +3,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct CoachDriverDiagramTests {
-    @Test(arguments: [InterviewFormat.systemDesign, .coding, .behavioral, nil])
+    @Test(arguments: [InterviewFormat.systemDesign, .coding, .behavioral, .generalTechnical, nil])
     func graphOnlyReachesOverlayInSystemDesign(_ format: InterviewFormat?) async throws {
         let source = "flowchart LR\nA[Client] --> B[API]"
         let arguments = #"{"lines":["Sketch the request path."],"mermaid":"flowchart LR\nA[Client] --> B[API]"}"#
@@ -28,6 +28,32 @@ import Testing
         let properties = try #require(schema["properties"] as? [String: Any])
         #expect((properties["mermaid"] != nil) == (format == .systemDesign))
         #expect(brain.toolChoices.first == .force("speak"))
+    }
+
+    /// History is replayed unvalidated, so the cost of a stray key is prompt hygiene rather than an
+    /// API error: the model would see a field its own speak schema forbids.
+    @Test(arguments: [InterviewFormat.systemDesign, .coding, nil])
+    func replayedArgumentsCarryMermaidOnlyWhereTheSchemaDeclaresIt(_ format: InterviewFormat?) async throws {
+        let arguments = #"{"lines":["Sketch the request path."],"mermaid":"flowchart LR\nA[Client] --> B[API]"}"#
+        let response = BrainResponse(
+            toolCalls: [try #require(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: arguments))],
+            rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: arguments)])
+        let brain = ScriptedBrain(script: [response, response])
+        let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
+        let driver = CoachDriver(
+            config: .default, transcript: RollingTranscript(),
+            route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
+            screen: FakeScreen(), overlay: BroadcastOverlay([DiagramRecordingOverlay()]),
+            clock: ManualClock(now: 100),
+            interviewFormatAddendum: format?.promptAddendum ?? "", interviewFormat: format)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+
+        let call = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
+        let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
+        #expect(object["lines"] as? [String] == ["Sketch the request path."])
+        #expect((object["mermaid"] != nil) == (format == .systemDesign))
     }
 
     @Test func malformedDiagramStillDeliversHint() async {

@@ -29,8 +29,7 @@ public enum Defaults {
         /// Keeps a coaching turn fast (sub-2s target) while still allowing tool calls.
         public static let effort: ReasoningEffort = .low
 
-        /// No default value: absent means "not selected," which resolves to no addendum at all —
-        /// not a guess assembled from whatever formats have content.
+        /// No stored default: absence selects None (base prompt only).
         public static let interviewFormatKey = "brain.interviewFormat"
 
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
@@ -102,8 +101,29 @@ public enum Defaults {
 
     // MARK: - Hotkey
 
-    /// The one global shortcut: force an immediate hint mid-session.
+    /// Availability of code snippets beside the hint, and their manual shortcut.
+    public enum Code {
+        public static let enabledKey = "coaching.codeEnabled"
+        public static let enabled = false
+    }
+
+    /// Availability of fuller explanations and their manual fallback.
+    public enum Explanations {
+        public static let enabledKey = "coaching.explanationsEnabled"
+        public static let enabled = true
+    }
+
+    /// Independent shortcuts for an immediate hint or explanation mid-session.
     public enum Hotkey {
+        public static let codeKeyCodeKey = "hotkey.code.keyCode"
+        public static let codeModifiersKey = "hotkey.code.modifiers"
+        /// kVK_ANSI_K. Code is requested only by this explicit shortcut.
+        public static let codeCombination = HotkeyCombination(keyCode: 40, modifiers: [.command, .option])
+        public static let explanationKeyCodeKey = "hotkey.explanation.keyCode"
+        public static let explanationModifiersKey = "hotkey.explanation.modifiers"
+        /// kVK_ANSI_E, with the same modifiers as the hint shortcut.
+        public static let explanationCombination = HotkeyCombination(
+            keyCode: 14, modifiers: [.command, .option])
         public static let keyCodeKey = "hotkey.keyCode"
         public static let modifiersKey = "hotkey.modifiers"
 

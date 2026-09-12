@@ -76,7 +76,11 @@ public enum ActivityHistoryExporter {
     ) -> String {
         var lines = ["# Jarvis session — \(session.label)", "", "Session ID: \(session.id)", ""]
         for (entry, data) in entries {
-            lines.append("**\(entry.time)** — \(entry.message)")
+            if let response = entry.response {
+                lines.append("**\(entry.time)**\n\n\(response.markdown)")
+            } else {
+                lines.append("**\(entry.time)** — \(entry.message)")
+            }
             if includeScreenshots, let imageFile = entry.imageFile, data != nil {
                 lines.append("")
                 lines.append("![screenshot](images/\(imageFile))")
@@ -93,7 +97,7 @@ public enum ActivityHistoryExporter {
     ) -> String {
         var lines = ["Jarvis session — \(session.label)", "Session ID: \(session.id)", ""]
         for (entry, data) in entries {
-            lines.append("\(entry.time)  \(entry.message)")
+            lines.append("\(entry.time)  \(entry.response?.plainText ?? entry.message)")
             if includeScreenshots, let imageFile = entry.imageFile, data != nil {
                 lines.append("[screenshot: images/\(imageFile)]")
             }
@@ -114,11 +118,11 @@ public enum ActivityHistoryExporter {
         var rows = ""
         for (entry, data) in entries {
             rows += "<div class=\"row\"><span class=\"t\">\(escape(entry.time))</span>"
-            rows += "<span class=\"m\">\(escape(entry.message))"
+            rows += "<div class=\"m\">\(entry.response?.html ?? escape(entry.message))"
             if includeScreenshots, let data {
                 rows += "<img src=\"data:image/jpeg;base64,\(data.base64EncodedString())\">"
             }
-            rows += "</span></div>\n"
+            rows += "</div></div>\n"
         }
         return """
         <!doctype html><html lang="en"><head><meta charset="utf-8">
@@ -127,6 +131,11 @@ public enum ActivityHistoryExporter {
           body { font: 13px/1.5 -apple-system, sans-serif; margin: 24px; }
           .row { display: grid; grid-template-columns: 70px 1fr; gap: 12px; padding: 6px 0; }
           .t { color: #888; }
+          .m { min-width: 0; white-space: pre-wrap; }
+          section + section { border-top: 1px solid #ddd; margin-top: 12px; padding-top: 8px; }
+          h3 { margin: 0 0 4px; font-size: 12px; }
+          p { margin: 0; }
+          pre { overflow-x: auto; white-space: pre; padding: 10px; background: #f4f4f4; }
           img { display: block; max-width: 480px; margin-top: 8px; border-radius: 6px; }
         </style></head><body>
         <h1>Jarvis session — \(escape(session.label))</h1>
