@@ -4,6 +4,12 @@ import Testing
 
 @Suite("Transcription benchmark event recorder")
 struct TranscriptionBenchmarkEventRecorderTests {
+    /// A socket that dropped after it was ready, the shape the benchmark's fault arm produces.
+    private static let connectionLost = ProviderFailure(
+        source: .transcription(.openAI), stage: .transport, category: .disconnected,
+        disposition: .temporary, identity: .init(transportDomain: NSURLErrorDomain, transportCode: -1005),
+        message: "the network connection was lost")
+
     @Test("a standard final stream settles only after the latest final stays quiet")
     func finalStreamSettlementIncludesLateFragments() async throws {
         let recorder = TranscriptionBenchmarkEventRecorder()
@@ -31,13 +37,13 @@ struct TranscriptionBenchmarkEventRecorderTests {
             minimumCount: 1,
             quietPeriod: 0.01,
             timeout: 1)
-        recorder.record(.connectionLost)
+        recorder.record(Self.connectionLost)
 
         let failure = recorder.snapshot().terminalFailure.map {
             TranscriptionBenchmarkEventRecorder.Failure.terminal($0).description
         }
-        #expect(failure ==
-            "Transcription failed: \(TranscriptionFailureReason.connectionLost.activityDescription)")
+        #expect(failure == "Transcription failed: the transcription connection to OpenAI was lost "
+            + "(network -1005: the network connection was lost)")
     }
 
     @Test("reconnect settlement includes finals after both expected phrases")
@@ -71,7 +77,7 @@ struct TranscriptionBenchmarkEventRecorderTests {
         recorder.record(diagnostic)
         recorder.record(.reconnecting(attempt: 1))
         recorder.recordCapture(sequence: 7, samples: 2_400)
-        recorder.record(.connectionLost)
+        recorder.record(Self.connectionLost)
 
         let snapshot = recorder.snapshot()
         #expect(snapshot.events == [diagnostic])
@@ -79,7 +85,7 @@ struct TranscriptionBenchmarkEventRecorderTests {
         #expect(snapshot.captureObservations == [
             .init(sequenceNumber: 7, sampleCount: 2_400),
         ])
-        #expect(snapshot.terminalFailure == .connectionLost)
+        #expect(snapshot.terminalFailure == Self.connectionLost)
     }
 
     @Test("an abort marker interrupts a standard benchmark wait")

@@ -57,7 +57,7 @@ public final class CoachDriver: @unchecked Sendable {
     private var routeSession: BrainRouteSession
     /// Set after a target exhausts, then consumed when the next constructible target is selected.
     /// This avoids announcing an unavailable intermediate target as active.
-    private var pendingTransitionOrigin: BrainTarget?
+    private var pendingTransitionOrigin: (target: BrainTarget, failure: ProviderFailure)?
     private var routeIsExhausted = false
     /// A committed terminal transition owns one delivery token independent of client revisions.
     /// Same-topology client changes preserve it; an explicit replacement route clears it.
@@ -104,10 +104,10 @@ public final class CoachDriver: @unchecked Sendable {
         let generation: UInt
         let topologyRevision: UInt
         let target: BrainTarget
-        let failure: BrainFailure
+        let failure: ProviderFailure
         /// Captured when exhaustion commits. A later same-topology client refresh must neither
         /// redirect the already-committed event to a second callback nor suppress this one.
-        let callback: (@MainActor @Sendable (BrainTarget, BrainFailure) -> Void)?
+        let callback: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
     }
 
     // Committing a route notice and delivering it are deliberately separate phases: the commit
@@ -123,7 +123,8 @@ public final class CoachDriver: @unchecked Sendable {
     struct RouteSkipDelivery {
         let topologyRevision: UInt
         let target: BrainTarget
-        let callback: (@MainActor @Sendable (BrainTarget) -> Void)?
+        let failure: ProviderFailure
+        let callback: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
     }
 
     /// The paired target transition committed when the next constructible target is selected.
@@ -131,7 +132,9 @@ public final class CoachDriver: @unchecked Sendable {
         let topologyRevision: UInt
         let previous: BrainTarget
         let current: BrainTarget
-        let callback: (@MainActor @Sendable (BrainTarget, BrainTarget) -> Void)?
+        /// The failure that retired `previous`, so the transition notice can name the cause.
+        let failure: ProviderFailure
+        let callback: (@MainActor @Sendable (BrainTarget, BrainTarget, ProviderFailure) -> Void)?
     }
 
     struct BrainSelectionStep {
@@ -161,6 +164,7 @@ public final class CoachDriver: @unchecked Sendable {
         plan: SessionPlan = .default,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
         activity: (any ActivityEventRecording)? = nil,
+        coachTools: [ToolDef]? = nil,
         prepMaterial: (any PrepMaterialSearching)? = nil,
         interviewFormatAddendum: String = "",
         interviewFormat: InterviewFormat? = nil
@@ -182,6 +186,11 @@ public final class CoachDriver: @unchecked Sendable {
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
+            // The app passes the same set it baked into a local-agent target's instructions. The
+            // fallback keeps a session composed without one consistent with what it was given.
+            sessionTools: coachTools
+                ?? sessionCoachTools(
+                    interviewFormat: interviewFormat, prepMaterial: prepMaterial != nil),
             interviewFormatAddendum: interviewFormatAddendum,
             interviewFormat: interviewFormat)
     }
@@ -203,9 +212,10 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.unlock()
     }
 
-    /// Installs the prep-material search port once its index finishes building. A trigger that fires
-    /// before this lands simply doesn't have `search_prep_notes` available for that attempt — no
-    /// gate waits for it, matching "coaching always continues."
+    /// Installs the prep-material search port once its index finishes building. The session already
+    /// offers `search_prep_notes` if its sources were configured at Start, so a search that fires
+    /// before this lands returns no matches for that attempt — no gate waits for it, matching
+    /// "coaching always continues," and the offered set never changes mid-session (#273).
     public func installPrepMaterial(_ port: (any PrepMaterialSearching)?) {
         stateLock.lock()
         _prepMaterial = port
@@ -571,8 +581,9 @@ public final class CoachDriver: @unchecked Sendable {
             if let origin = pendingTransitionOrigin {
                 step.advanced = RouteAdvanceDelivery(
                     topologyRevision: routeTopologyRevision,
-                    previous: origin,
+                    previous: origin.target,
                     current: configured.target,
+                    failure: origin.failure,
                     callback: configuredRoute.onAdvanced)
                 pendingTransitionOrigin = nil
             }
@@ -590,18 +601,20 @@ public final class CoachDriver: @unchecked Sendable {
             return step
         }
 
-        let failure = BrainFailure(
-            disposition: .permanent,
-            detail: configured.unavailabilityDetail
-                ?? "\(configured.target.provider.displayName) is unavailable")
+        let failure = configured.unavailability
+            ?? ProviderFailure(
+                source: .brain(configured.target.provider), stage: .process,
+                category: .unavailable, disposition: .permanent, identity: .init(),
+                message: "\(configured.target.provider.displayName) is unavailable")
         step.diagnostic = "Jarvis coach: skipping unavailable route target "
-            + "\(configured.target.provider.displayName): \(failure.detail)"
+            + "\(configured.target.provider.displayName): \(failure.errorDescription ?? "")"
         step.skipped = RouteSkipDelivery(
             topologyRevision: routeTopologyRevision,
             target: configured.target,
+            failure: failure,
             callback: configuredRoute.onSkipped)
         if pendingTransitionOrigin == nil {
-            pendingTransitionOrigin = configured.target
+            pendingTransitionOrigin = (configured.target, failure)
         }
         switch routeSession.skipUnavailable() {
         case .advanced:
@@ -630,7 +643,7 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     private func recordAttemptFailure(
-        _ failure: BrainFailure,
+        _ failure: ProviderFailure,
         on attempt: AttemptBrain
     ) async -> RouteFailureAction {
         let record = applyAttemptFailure(failure, on: attempt)
@@ -644,7 +657,7 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     private func applyAttemptFailure(
-        _ failure: BrainFailure,
+        _ failure: ProviderFailure,
         on attempt: AttemptBrain
     ) -> (
         action: RouteFailureAction,
@@ -662,7 +675,7 @@ public final class CoachDriver: @unchecked Sendable {
         case .stay(let count):
             return (.retry(failureCount: count, advanced: false), nil, nil)
         case .advanced:
-            pendingTransitionOrigin = attempt.target
+            pendingTransitionOrigin = (attempt.target, failure)
             return (
                 .retry(
                     failureCount: BrainRouteSession.failuresPerTarget,
@@ -755,7 +768,7 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("Jarvis coach: ignoring target skip from a superseded Settings revision")
                 return
             }
-            callback(delivery.target)
+            callback(delivery.target, delivery.failure)
         }
     }
 
@@ -766,7 +779,7 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("Jarvis coach: ignoring route transition from a superseded Settings revision")
                 return
             }
-            callback(delivery.previous, delivery.current)
+            callback(delivery.previous, delivery.current, delivery.failure)
         }
     }
 
@@ -871,8 +884,7 @@ public final class CoachDriver: @unchecked Sendable {
                 case .retry(let failureCount, let advanced):
                     routeChanged = false
                     if !advanced {
-                        activity?.record(
-                            .coachingTurnFailed(provider: attempt.target.provider))
+                        activity?.record(.coachingTurnFailed(failure: failure))
                     }
                     let policy = failure.disposition == .permanent
                         ? "permanent failure"

@@ -177,7 +177,8 @@ import JarvisCore
         } catch {
             #expect(error.localizedDescription.contains("timed out"))
             #expect(error.localizedDescription.contains("startup-stalled"))
-            #expect(BrainFailure(error).disposition == .temporary)
+            #expect(LocalAgentFailureClassifier.classify(
+                error: error, provider: .claudeCode).disposition == .temporary)
         }
     }
 

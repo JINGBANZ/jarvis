@@ -6,6 +6,7 @@ import JarvisCore
 final class CodeSnippetDocumentView: NSView {
     private let placement = NSTextField(wrappingLabelWithString: "")
     private let textView = NSTextView()
+    private var rendered: (snippet: CodeSnippet, fontSize: CGFloat)?
     override var isFlipped: Bool { true }
     var codeText: NSAttributedString { textView.attributedString() }
 
@@ -29,7 +30,13 @@ final class CodeSnippetDocumentView: NSView {
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Skip re-lexing text that is already on screen. A single resize frame reaches here three
+    /// times over: the panel refreshes the dock, measures its preferred height, then lays out,
+    /// shrinking the font until the code fits. Only that last loop changes what is rendered, and
+    /// `fit` reflows the existing text storage, so a skipped render still answers the new width.
     func show(_ snippet: CodeSnippet, fontSize: CGFloat) {
+        guard rendered?.snippet != snippet || rendered?.fontSize != fontSize else { return }
+        rendered = (snippet, fontSize)
         placement.stringValue = snippet.placement
         textView.textStorage?.setAttributedString(CodeSnippetFormatting.render(snippet, fontSize: fontSize))
     }

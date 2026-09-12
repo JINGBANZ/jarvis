@@ -65,7 +65,7 @@ public enum AgenticEvaluation {
     /// session directory, and returns the prompt (which embeds the directory's absolute path so the
     /// agent knows where its inputs live). Throws `EvaluationError.noTraffic` when there is nothing
     /// to audit.
-    public static func prepare(sessionDir: URL) throws -> String {
+    public static func prepare(sessionDir: URL, workspaceProvenance: String) throws -> String {
         try CodexRuntimeHome.removeLegacyHomes(from: sessionDir)
         let trafficURL = sessionDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
         let jsonl = (try? String(contentsOf: trafficURL, encoding: .utf8)) ?? ""
@@ -93,19 +93,21 @@ public enum AgenticEvaluation {
         try replaceOwnerOnlyFile(
             Data(transcript.utf8), filename: transcriptFilename, in: sessionDir)
 
-        return prompt(sessionDirPath: sessionDir.path)
+        return prompt(sessionDirPath: sessionDir.path, workspaceProvenance: workspaceProvenance)
     }
 
     /// Persist one successful agent result without ever exposing report bytes through a permissive
     /// intermediate file. A failed run never reaches this point, so an older report remains intact.
-    static func saveReport(_ markdown: String, agentName: String, in sessionDir: URL) throws -> String {
+    static func saveReport(_ markdown: String, agentName: String, in sessionDir: URL,
+                           workspaceProvenance: String? = nil) throws -> String {
         let body = markdown.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { throw EvaluationError.emptyReport }
         let stamp = """
             > _Produced by the agentic evaluator (`\(agentName)` over the repo + session); the auditor \
             was instructed to separate observed evidence, source-confirmed facts, and hypotheses._
             """
-        let report = "\(stamp)\n\n\(body)\n"
+        let sourceStamp = workspaceProvenance.map { "\n\n> \($0)" } ?? ""
+        let report = "\(stamp)\(sourceStamp)\n\n\(body)\n"
         try replaceOwnerOnlyFile(
             Data(report.utf8), filename: reportFilename, in: sessionDir)
         return report
@@ -140,7 +142,7 @@ public enum AgenticEvaluation {
     }
 
     /// Assemble the session-specific values consumed by the centralized audit prompt.
-    static func prompt(sessionDirPath: String) -> String {
+    static func prompt(sessionDirPath: String, workspaceProvenance: String) -> String {
         JarvisPrompts.Evaluation.sessionAudit(
             sessionDirectoryPath: sessionDirPath,
             transcriptFilename: transcriptFilename,
@@ -148,7 +150,8 @@ public enum AgenticEvaluation {
             attemptsFilename: FileSessionAudit.coachingAttemptsFilename,
             healthFilename: FileSessionAudit.healthFilename,
             activityFilename: ActivityLog.filename,
-            reportFilename: reportFilename
+            reportFilename: reportFilename,
+            workspaceProvenance: workspaceProvenance
         )
     }
 }

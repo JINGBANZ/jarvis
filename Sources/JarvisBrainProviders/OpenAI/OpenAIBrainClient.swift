@@ -65,7 +65,10 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 messages: messages, tools: tools, toolChoice: toolChoice)
         } catch {
             if Task.isCancelled || error is CancellationError { throw error }
-            throw BrainFailure(error)
+            // A brain request is one round trip with nothing "ready" behind it, which is exactly
+            // what this initializer's transport path assumes: a refused connection reads as
+            // unreachable, and the failing URL never becomes the message.
+            throw ProviderFailure(unclassified: error, source: .brain(.openAI), stage: .request)
         }
     }
 
@@ -99,22 +102,10 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         traffic?.record(tag: trafficTag, request: body, response: data, status: status,
                         latencyMs: Self.elapsedMs(since: started))
         guard (200..<300).contains(status) else {
-            let identity = Self.errorIdentity(from: data)
-            throw BrainFailure.openAIHTTP(
-                status: status,
-                errorCode: identity.code,
-                errorType: identity.type,
-                detail: String(data: data, encoding: .utf8) ?? "http \(status)")
+            throw OpenAIFailureClassifier.classify(
+                httpStatus: status, body: data, source: .brain(.openAI), stage: .request)
         }
         return try decode(data)
-    }
-
-    private static func errorIdentity(from data: Data) -> (code: String?, type: String?) {
-        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let error = root["error"] as? [String: Any] else {
-            return (nil, nil)
-        }
-        return (error["code"] as? String, error["type"] as? String)
     }
 
     private static func elapsedMs(since started: Date) -> Int {

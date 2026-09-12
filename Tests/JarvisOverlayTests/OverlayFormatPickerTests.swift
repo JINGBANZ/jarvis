@@ -12,8 +12,12 @@ import Testing
             #expect(!box.isFormatPickerVisible)
             selections.append(format)
         }
+        let windowsBeforeOpening = Set(NSApp.windows.map(ObjectIdentifier.init))
         box.clickFormatButton()
         #expect(box.isFormatPickerVisible)
+        #expect(box.currentSharingType == .none)
+        #expect(Set(NSApp.windows.map(ObjectIdentifier.init)) == windowsBeforeOpening,
+                "Opening the picker must not create a separate, potentially capturable window")
         box.chooseInterviewFormat(.behavioral)
         #expect(selections == [.behavioral])
         #expect(box.currentSharingType == .none)
