@@ -81,17 +81,37 @@ import Testing
         #expect(region.category == .access && region.disposition == .permanent)
     }
 
-    /// A refused WebSocket upgrade has no body to read. Any 4xx other than a rate limit means the
-    /// URL, headers, or key are wrong for this account, which no retry fixes.
-    @Test func refusedHandshakesArePermanentExceptRateLimits() {
+    /// A refused WebSocket upgrade has no body to read, so the status is the whole evidence. It is
+    /// permanent only where the status itself says the request cannot succeed as sent; a status that
+    /// describes a moment keeps the bounded first-connect budget rather than ending the session on
+    /// the first attempt.
+    @Test func refusedHandshakesArePermanentOnlyWhereTheStatusProvesIt() {
         let forbidden = OpenAIFailureClassifier.classify(httpStatus: 403, body: nil, source: transcription, stage: .handshake)
         #expect(forbidden.category == .access && forbidden.disposition == .permanent && forbidden.stage == .handshake)
         let notFound = OpenAIFailureClassifier.classify(httpStatus: 404, body: nil, source: transcription, stage: .handshake)
         #expect(notFound.category == .rejected && notFound.disposition == .permanent)
+        let malformed = OpenAIFailureClassifier.classify(httpStatus: 400, body: nil, source: transcription, stage: .handshake)
+        #expect(malformed.disposition == .permanent)
         let limited = OpenAIFailureClassifier.classify(httpStatus: 429, body: nil, source: transcription, stage: .handshake)
         #expect(limited.disposition == .temporary)
         let down = OpenAIFailureClassifier.classify(httpStatus: 503, body: nil, source: transcription, stage: .handshake)
         #expect(down.category == .unavailable && down.disposition == .temporary)
+    }
+
+    /// An edge or proxy answering a WebSocket upgrade with a timeout is a moment, not a contract.
+    /// Marking it permanent ended the whole session on the first attempt, spending none of the
+    /// three-attempt budget that exists precisely for a connection that has not come up yet.
+    @Test func transientHandshakeStatusesKeepTheirRetries() {
+        for status in [408, 409, 423, 425] {
+            let failure = OpenAIFailureClassifier.classify(
+                httpStatus: status, body: nil, source: transcription, stage: .handshake)
+            #expect(failure.disposition == .temporary, "HTTP \(status) at a handshake must stay retryable")
+            #expect(!failure.endsEverySession)
+        }
+        // The same status on a plain request was always temporary and stays so.
+        let request = OpenAIFailureClassifier.classify(
+            httpStatus: 408, body: nil, source: .brain(.openAI), stage: .request)
+        #expect(request.disposition == .temporary)
     }
 
     @Test func inBandEventsClassifyBreakingAccountErrors() {

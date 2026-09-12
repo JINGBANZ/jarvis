@@ -82,7 +82,8 @@ public enum GeminiFailureClassifier {
             return (.configuration, .permanent)
         }
         switch httpStatus {
-        case 400..<500: return (.rejected, stage == .handshake ? .permanent : .temporary)
+        case 400..<500:
+            return (.rejected, HandshakeRefusal.isPermanent(status: httpStatus, stage: stage) ? .permanent : .temporary)
         case 500..<600: return (.unavailable, .temporary)
         default: return (.unknown, .temporary)
         }

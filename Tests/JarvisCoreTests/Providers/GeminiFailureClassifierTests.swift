@@ -52,6 +52,11 @@ import Testing
         #expect(unknown400.category == .rejected && unknown400.disposition == .temporary)
         let handshake400 = GeminiFailureClassifier.classify(httpStatus: 400, body: nil, source: source, stage: .handshake)
         #expect(handshake400.disposition == .permanent)
+        // Both vendors read one shared list, so a status cannot be permanent here and retryable
+        // there. A handshake timeout keeps the three-attempt budget rather than ending the session.
+        let handshake408 = GeminiFailureClassifier.classify(httpStatus: 408, body: nil, source: source, stage: .handshake)
+        #expect(handshake408.disposition == .temporary)
+        #expect(!handshake408.endsEverySession)
     }
 
     /// 1008 is Google's generic policy-violation close: a rejected key, a retired model id, and an

@@ -3,9 +3,9 @@ import Foundation
 /// The one reviewed table of what an OpenAI failure means, shared by the brain HTTP adapter, the
 /// Realtime transcriber (handshake status, in-band events, close reasons), and the credential
 /// check. Statuses alone are permanent only when they prove authentication, billing, or access
-/// cannot recover. A WebSocket upgrade refused with any other 4xx is a wrong URL, header, or key
-/// for this account and is equally permanent, while request-local and unknown 4xx on a plain
-/// request deliberately stay temporary.
+/// cannot recover. A WebSocket upgrade refused with one of the statuses in `HandshakeRefusal` is
+/// equally permanent because the request cannot succeed as sent, while the rest of the 4xx range,
+/// at a handshake or on a plain request, deliberately stays temporary.
 public enum OpenAIFailureClassifier {
     public static func classify(
         httpStatus: Int, body: Data?, source: ProviderFailure.Source, stage: ProviderFailure.Stage
@@ -112,7 +112,8 @@ public enum OpenAIFailureClassifier {
         case 402: return (.quota, .permanent)
         case 403: return (.access, .permanent)
         case 429: return (.rejected, .temporary)
-        case 400..<500: return (.rejected, stage == .handshake ? .permanent : .temporary)
+        case 400..<500:
+            return (.rejected, HandshakeRefusal.isPermanent(status: status, stage: stage) ? .permanent : .temporary)
         case 500..<600: return (.unavailable, .temporary)
         default: return (.unknown, .temporary)
         }

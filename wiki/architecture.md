@@ -846,9 +846,12 @@ The always-on legs are built to survive transient failure rather than die on it:
   server's session-configuration acknowledgement under a startup deadline. Once ready, ping/pong
   probes expose an idle half-open connection before the user's next utterance; send, receive, close,
   startup-timeout, and liveness failures all classify at the edge and enter one idempotent reconnect
-  path. A refused WebSocket upgrade or a close the vendor table proves permanent skips the reconnect
-  path entirely and ends the session with its cause, because no retry fixes a rejected key, a denied
-  region, or a wrong URL. A socket that has never reached ready retries **three** times rather than
+  path. A refused WebSocket upgrade whose status proves the request cannot succeed as sent
+  (`HandshakeRefusal`, shared by both vendor tables), or a close the vendor table proves permanent,
+  skips the reconnect path entirely and ends the session with its cause, because no retry fixes a
+  rejected key, a denied region, or a wrong URL. A status that describes a moment rather than a
+  contract, such as a proxy's upgrade timeout, keeps its retries like any other temporary failure.
+  A socket that has never reached ready retries **three** times rather than
   seven: it has nothing buffered to preserve, and every further attempt is silence the user cannot
   explain. When that budget runs out, the reported failure keeps the last observed identity and
   message and reads as unreachable rather than lost, which is what ends the session instead of
