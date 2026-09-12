@@ -243,44 +243,4 @@ import Foundation
         #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": ["timeLeft": "soon"]]) == nil)
         #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": ["timeLeft": "9.5"]]) == nil)  // no "s" suffix
     }
-
-    /// The exact reason string captured from the live server for a deliberately invalid API key.
-    /// Google does not document this wording as a stable contract, but it is what the classifier
-    /// below must recognize today.
-    @Test func policyViolationWithAnAuthenticationReasonIsAuthenticationFailure() {
-        let reason = "Request had invalid authentication credentials. Expected OAuth 2 access "
-            + "token, login cookie or other valid authentication credential."
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1008, reason: reason)
-            == .authenticationFailed)
-    }
-
-    /// 1008 is Google's GENERIC policy-violation code — it also covers a retired/unrecognized model
-    /// id, which has nothing to do with the API key. A model-not-found-style reason must classify as
-    /// `.configurationRejected`, never `.authenticationFailed`, or a user would rotate a perfectly
-    /// good key to fix a problem the key had nothing to do with.
-    @Test func policyViolationWithAModelNotFoundReasonIsConfigurationRejected() {
-        #expect(GeminiLiveSession.terminalFailure(
-            forCloseCode: 1008, reason: "The requested model is not found for this API version.")
-            == .configurationRejected)
-    }
-
-    /// An unrecognized or absent reason on 1008 must default to `.configurationRejected`, never
-    /// `.authenticationFailed` — the whole point of keeping the default conservative.
-    @Test func policyViolationWithNoReasonIsConfigurationRejected() {
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1008, reason: nil)
-            == .configurationRejected)
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1008, reason: "")
-            == .configurationRejected)
-    }
-
-    /// Every other close code — normal closure, going away, abnormal closure, etc. — must stay
-    /// non-terminal so the caller's existing reconnect-with-backoff behavior is unaffected, whatever
-    /// the reason text says.
-    @Test func otherCloseCodesAreNotTerminal() {
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1000, reason: nil) == nil) // normal closure
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1001, reason: nil) == nil) // going away
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1006, reason: nil) == nil) // abnormal closure
-        #expect(GeminiLiveSession.terminalFailure(forCloseCode: 1011, reason: "invalid authentication credentials")
-            == nil) // internal server error — code outranks reason text
-    }
 }

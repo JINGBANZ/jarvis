@@ -119,7 +119,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// gate closing, and never twice.
     private func startApp() {
         didStartApp = true
-        brain = BrainComposition(secrets: secrets, coachTools: coachTools, host: self)
+        brain = BrainComposition(secrets: secrets, host: self)
         networkDiagnostics.start()
 
         // The activity viewer lives for the whole app run, but a *session* is one coaching run: each
@@ -149,11 +149,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             self?.activityViewer?.historyDidChange()
         }
         // The button launches the same sole agentic evaluator as scripts/eval-session.sh. Resolve the
-        // checkout at click time and read the current provider preference then, so Settings changes
+        // source at click time and read the current provider preference then, so Settings changes
         // and a moved local app bundle are both reflected without rebuilding Activity.
-        activityViewer.makeEvaluator = { [weak self] in
-            guard let self, let repository = self.artifacts.evaluationRepositoryDirectory() else { return nil }
-            return AgenticEvaluator(repositoryDirectory: repository,
+        activityViewer.makeEvaluator = { [weak self] session in
+            guard let self else { return nil }
+            return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session),
                                     preferredProvider: self.brain.preferences.provider)
         }
 
@@ -178,7 +178,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // On by default, but the box is a session surface: this only arms the switch. It reaches the
         // screen on Start (below) and leaves it on Stop, so a stopped Jarvis shows nothing.
         overlayBox.setEnabled(appearance.boxEnabled)
-        overlayBox.setCodeEnabled(codePreferences.isEnabled)
 
         // No updater in a development bundle (no feed URL), so the menu omits the item entirely.
         updates = UpdateController()
@@ -194,6 +193,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             explanationPreferences.isEnabled = false
             codePreferences.isEnabled = false
         }
+        // After normalization, not beside the other panel settings above: the panel must latch the
+        // preference the rest of launch agrees on, not the one a disabled box is about to clear.
+        overlayBox.setCodeEnabled(codePreferences.isEnabled)
         hotkeys = HotkeyController(preferences: hotkeyPreferences.filter {
             ($0.shortcut != .explainMore || explanationPreferences.isEnabled)
                 && ($0.shortcut != .showCode || codePreferences.isEnabled)
@@ -317,18 +319,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// probing or replacing CLI clients, changing route policy, or restarting transcription.
     ///
     /// Guarded by credential: a saved OpenAI key must never reach a Gemini-backed session (or vice
-    /// versa), so each branch only casts the transcriber to the adapter type that credential feeds.
+    /// versa). Each session applies only the credential it authenticates with and ignores the rest,
+    /// so this passes the credential along rather than deciding on their behalf.
     private func applySavedAPIKeyToRunningSession(credential: Credential, key: String) {
         guard let transcriber else { return }
-        switch credential {
-        case .openAIAPIKey:
-            (transcriber as? RealtimeTranscriber)?.updateAPIKey(key)
-            (themTranscriber as? RealtimeTranscriber)?.updateAPIKey(key)
-            brain.applySavedAPIKey(key)
-        case .geminiAPIKey:
-            (transcriber as? GeminiLiveTranscriber)?.updateAPIKey(key)
-            (themTranscriber as? GeminiLiveTranscriber)?.updateAPIKey(key)
-        }
+        transcriber.updateAPIKey(key, for: credential)
+        themTranscriber?.updateAPIKey(key, for: credential)
+        if credential == .openAIAPIKey { brain.applySavedAPIKey(key) }
     }
 
     /// Validate a Start immediately, then prove system audio and prepare any local-CLI targets and
@@ -635,6 +632,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             hotkeys?.unregister(.explainMore)
         }
         brain.interviewFormatAddendum = interviewFormatAddendum
+        // One tool set for the session, handed to both the targets that bake it into their
+        // instructions and the driver that sends it. Prep material counts as configured sources, not
+        // a finished index: the index lands later and must not change what the session offers (#273).
+        let prepMaterialSources = prepMaterialPreferences.sources
+        let sessionTools = sessionCoachTools(
+            interviewFormat: interviewFormat, prepMaterial: !prepMaterialSources.isEmpty)
+        brain.coachTools = sessionTools
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
             detectedCLIs: detectedCLIs,
@@ -658,15 +662,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             coachingAttempts: artifacts.sessionAudit,
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit,
+            coachTools: sessionTools,
             interviewFormatAddendum: interviewFormatAddendum,
             interviewFormat: interviewFormat)
 
         // Building the index reads files and can shell out to `textutil`, so it runs off the Start
-        // path entirely rather than delaying it — a trigger that fires before this lands just
-        // doesn't have search_prep_notes available for that one attempt. Tracked and cancelled in
-        // `stop()` for the same reason compaction is: an untracked task would keep reading files and
-        // spawning textutil subprocesses after the session it belongs to has already torn down.
-        let prepMaterialSources = prepMaterialPreferences.sources
+        // path entirely rather than delaying it — a search that fires before this lands returns no
+        // matches for that one attempt. The tool itself was offered from Start, with the rest of the
+        // session's fixed set. Tracked and cancelled in `stop()` for the same reason compaction is:
+        // an untracked task would keep reading files and spawning textutil subprocesses after the
+        // session it belongs to has already torn down.
         prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
             let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
             guard !Task.isCancelled else { return }
@@ -727,24 +732,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         // Bind terminal callbacks to the transcriber that emitted them. A callback already queued
         // across Stop → Start must not report against or tear down the replacement session.
-        transcriber.onTerminalFailure = { [weak self, weak transcriber] reason in
+        transcriber.onTerminalFailure = { [weak self, weak transcriber] failure in
             guard let transcriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.transcriber === transcriber else { return }
-                self.reportTranscriptionFailure(reason)
+                self.reportTranscriptionFailure(failure)
             }
         }
-        themTranscriber.onTerminalFailure = { [weak self, weak themTranscriber] reason in
+        themTranscriber.onTerminalFailure = { [weak self, weak themTranscriber] failure in
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                // Key on the failure REASON, not the provider: Gemini (unlike Apple Speech) can emit
-                // an account/credential/configuration reason on the system-audio side too, and that
-                // kind of failure threatens the mic side identically — see
-                // `TranscriptionFailureReason.affectsEveryStream`'s doc comment for why degrading on
-                // one of those would hide the real cause behind a misleading system-audio notice.
-                if reason.affectsEveryStream {
-                    self.reportTranscriptionFailure(reason)
+                // Key on the failure, not the provider: a socket transcriber (unlike Apple Speech)
+                // can hit a rejected key, a denied region, or a connection that never came up on the
+                // system-audio side too, and each of those threatens the mic side identically — see
+                // `ProviderFailure.endsEverySession` for why degrading on one of those would hide
+                // the real cause behind a misleading system-audio notice.
+                if failure.endsEverySession {
+                    self.reportTranscriptionFailure(failure)
                     return
                 }
                 // A system-audio transport loss or local analyzer failure degrades gracefully: stop
@@ -758,7 +763,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self.captureReadiness?.systemBecameUnavailable()
                 self.observeEndpointAndCaptureReadiness(
                     stream: .system, state: .failed, for: readinessSession)
-                self.artifacts.sessionAudit?.record(.systemAudioStopped)
+                self.artifacts.sessionAudit?.record(.systemAudioStopped(failure: failure))
                 self.errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }
@@ -807,7 +812,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 guard let self, self.aggregateCapture === capture else { return }
                 self.observeReadiness(.capture(.stopped), for: readinessSession)
                 self.errorReporter.reportImmediately(
-                    .captureStopped(reason: reason), context: .runtime)
+                    .captureStopped(failure: Self.captureFailure(reason)), context: .runtime)
             }
         }
         capture.onRecoveryStateChange = { [weak self, weak capture] inProgress in
@@ -878,7 +883,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         if let reason = capture.start() {
             observeReadiness(.capture(.stopped), for: readinessSession)
             errorReporter.reportImmediately(
-                .captureFailed(reason: reason), context: reportContext)
+                .captureFailed(failure: Self.captureFailure(reason)), context: reportContext)
             return false
         }
         // Capture setup is synchronous and can legitimately take longer than the first-frame
@@ -999,16 +1004,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         brainSection.setActiveTarget(target)
     }
 
+    /// Wrap a capture cause in the one failure record Activity and the session lifecycle read. The
+    /// aggregate device is local, so there is no provider identity to carry: the sentence the
+    /// capture layer already wrote is the whole evidence.
+    private static func captureFailure(_ reason: String) -> ProviderFailure {
+        ProviderFailure(
+            source: .capture, stage: .local, category: .unavailable, disposition: .permanent,
+            identity: .init(), message: reason)
+    }
+
     /// Deduplicate endpoint failures: either side can fail first, but Activity should show one reason
     /// and teardown should run once.
-    private func reportTranscriptionFailure(_ reason: TranscriptionFailureReason) {
+    private func reportTranscriptionFailure(_ failure: ProviderFailure) {
         guard !reportedTranscriptionFailure, transcriber != nil || themTranscriber != nil else { return }
         reportedTranscriptionFailure = true
         // This method already runs on the main actor after checking the emitting transcriber's
         // identity. Deliver synchronously so Stop → Start cannot slip between that check and the
         // terminal lifecycle consequence and let a stale failure stop the replacement session.
         errorReporter.reportImmediately(
-            .transcriptionStopped(reason: reason), context: .runtime)
+            .transcriptionStopped(failure: failure), context: .runtime)
     }
 
     private func observeReadiness(
@@ -1148,8 +1162,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             case .microphoneCaptureFailed(let cause):
                 jlog("Jarvis: microphone capture unhealthy (\(cause.rawValue)) — stopping.")
                 errorReporter.reportImmediately(
-                    .captureStopped(
-                        reason: "Jarvis stopped receiving microphone audio. Check the input device and press Start."),
+                    .captureStopped(failure: Self.captureFailure(
+                        "Jarvis stopped receiving microphone audio. Check the input device and press Start.")),
                     context: .runtime)
             case .degradeToMicrophoneOnly(let cause):
                 guard themTranscriber != nil || systemConnectionState != .failed else { break }
@@ -1160,7 +1174,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 systemConnectionState = .failed
                 observeEndpointAndCaptureReadiness(
                     stream: .system, state: .failed, for: readinessSession)
-                artifacts.sessionAudit?.record(.systemAudioStopped)
+                artifacts.sessionAudit?.record(
+                    .systemAudioStopped(failure: Self.captureFailure(cause.summary)))
                 errorReporter.reportImmediately(.systemAudioStopped, context: .runtime)
             }
         }

@@ -27,7 +27,7 @@ struct BrainRouteSession: Sendable, Equatable {
         consecutiveFailures = 0
     }
 
-    mutating func recordFailure(_ disposition: BrainFailure.Disposition) -> FailureTransition {
+    mutating func recordFailure(_ disposition: ProviderFailure.Disposition) -> FailureTransition {
         consecutiveFailures += 1
         let targetIsExhausted = disposition == .permanent
             || consecutiveFailures >= Self.failuresPerTarget

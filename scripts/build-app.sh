@@ -120,15 +120,9 @@ launch() {
 case "$LAUNCH" in
   run)
     launch
-    # Per-session logs go to a gitignored, workspace-local .jarvis/ (passed via --log-dir so the app,
-    # launched from anywhere by `open`, writes back into the repo). chmod 700 the base so session-dir
-    # names (timestamps) aren't readable by other local users — the app then makes each <session>/
-    # 0700 with 0600 files inside (CWE-732).
-    LOGDIR="$PWD/.jarvis"
-    mkdir -p "$LOGDIR"
-    chmod 700 "$LOGDIR"
-    echo "▶ launching $APP_NAME — open Settings → Activity to watch the log; per-session logs in $LOGDIR/<session>"
-    open ./"$APP" --args --log-dir "$LOGDIR"
+    # The app derives its session folder from its bundle location, just as a Finder/Dock launch does.
+    echo "▶ launching $APP_NAME — open Settings → Activity to watch the log; sessions stay beside the bundle"
+    open ./"$APP"
     ;;
   "")
     echo "   run: open ./$APP        (or: ./scripts/build-app.sh --run)"

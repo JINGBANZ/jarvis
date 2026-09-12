@@ -11,7 +11,7 @@ public protocol TranscriptionSession: AnyObject, Sendable {
     /// produce an earlier transcript line; `false` only when its current chronology is settled.
     var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)? { get set }
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)? { get set }
-    var onTerminalFailure: (@Sendable (TranscriptionFailureReason) -> Void)? { get set }
+    var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)? { get set }
     /// Content-free capture progress/stall edges derived from this endpoint's continuity witness.
     /// They let Core combine positive sample-count progress with provider readiness without exposing
     /// amplitude or PCM. See `CaptureReadinessMonitor`.
@@ -32,6 +32,11 @@ public protocol TranscriptionSession: AnyObject, Sendable {
         _ event: LocalSpeechEvent,
         throughSequenceNumber: UInt64
     )
+    /// A credential saved in Settings while this session is running. A session ignores a credential
+    /// it does not authenticate with, so a caller never has to know which provider is running.
+    /// Adopting one must not disturb a healthy connection: the replacement is picked up if this side
+    /// later reconnects.
+    func updateAPIKey(_ apiKey: String, for credential: Credential)
 }
 
 public extension TranscriptionSession {
@@ -40,4 +45,7 @@ public extension TranscriptionSession {
         _ event: LocalSpeechEvent,
         throughSequenceNumber: UInt64
     ) {}
+
+    /// On-device providers hold no credential to replace.
+    func updateAPIKey(_ apiKey: String, for credential: Credential) {}
 }
