@@ -9,7 +9,10 @@
 ## Current phase
 
 **General technical-interview coaching, audio reliability, and local CLI brain providers are
-implemented.** Interview format defaults to **None**, preserving the base prompt. Coding,
+implemented.** The coach's capabilities are composed once at Start and the model loads a deferred one
+when it needs it, prep-notes search being the first
+([architecture.md → Capabilities](./architecture.md#capabilities)). Interview format defaults to
+**None**, preserving the base prompt. Coding,
 Behavioral, System Design, and General Technical are opt-in addenda; their policy and diagram
 boundaries are defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
@@ -189,6 +192,12 @@ coaching kernel's dependency rules are enforced by `scripts/check-coaching-kerne
 
 ## Next action
 
+Run the [on-demand tool smoke](./build-and-run.md#live-smoke-checklist) on OpenAI, Claude Code, and
+Codex: with prep notes configured, a matching question should load prep search and use it in the same
+attempt, and a session with the capability switched off should carry neither the tool nor its catalog
+line. Offline tests cover composition, loading, refusal, and compaction retention; only the live
+round trip and the CLI baked instructions still need this smoke.
+
 Run the [evaluation source smoke](./build-and-run.md#live-smoke-checklist) in a development bundle
 and an installed release: source/version selection, per-run fetch and discard, actionable failures,
 and cancellation on Quit. Offline tests cover the source store and evaluator; native presentation
@@ -296,6 +305,13 @@ playback, remains in
 
 ## Built
 
+**Coaching tools load on demand.** A session's capabilities are one value composed at Start
+(`CoachCapabilities`), and each tool carries its own usage guidance. Prep-notes search is deferred:
+the prompt lists it in a one-line catalog, and the model calls `load_tool` to receive its schema and
+guidance as a tool result, after which it is callable for the rest of the session. Settings → Brain →
+Capabilities switches it off for the next Start; screen capture, speak, and stay silent are always
+on. See [architecture.md → Capabilities](./architecture.md#capabilities).
+
 **Show code with hints** optionally supplies the next contextual coding component with each hint.
 Its capability is fixed at Start; the configurable fallback hotkey requests code for the current
 guidance only in enabled sessions. Settings changes take effect on the next Start.
@@ -339,7 +355,8 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 - `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, optional absence-means-disabled instrumentation, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and automated transcription-transport reconnect regression (`TranscriptionBenchmark`, `TranscriptionBenchmarkEvent`, `TranscriptionBenchmarkInstrumentation`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operating, isolation, and scoring contract in [transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/Brain/` — the provider-neutral brain domain, and nothing that runs one: the `BrainClient`/attempt-scoped `BrainConversation` contracts, provider-neutral failure classification (`BrainFailure`), immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), `ReasoningEffort`, and `BrainWorkloadTimeout`. The kernel dependency guard rejects `Process`, `FileManager`, `FileHandle`, and `URLSession` here.
 - `Sources/JarvisBrainProviders/` — every concrete brain adapter ([lean-coaching-core.md → Phase 4 contracts](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction)): the OpenAI Responses transport with its HTTP permanence classification (`OpenAIBrainClient`, `BrainFailure+OpenAI`), and the local-agent CLI subtree — detection, `CLIBrainClient` with its reply parsing, the bounded shared process edge, runtime lifetime, and the Claude Code, Codex exec, and Codex app-server runtimes (`AgentCLIDetector`, `AgentCLIProcessRunner`, `CLIBrainRuntime`, `LocalAgentRuntimeSet`, `ClaudeCodeRuntime`, `CodexAppServerRuntime`, `CodexExecRuntime`), plus their model-facing prompt text. Depends inward on `JarvisCore`; composed by `JarvisApp` at Start, and reused by `JarvisEvaluation` to run the agentic evaluator's CLI.
-- `Sources/JarvisCore/Coach/` — the event loop, split into two owners ([lean-coaching-core.md → Phase 5](./lean-coaching-core.md#phase-5-implementation-contract--coachdriver-split)): `CoachDriver` schedules (trigger coalescing, transcription-settlement admission, forward-only route state and its delivery tokens) and `CoachAttemptRunner` executes one snapshotted target (tool loop, history commit, off-path compaction), sharing only the `CoachTranscriptLedger` boundary. Plus the pure forward-only `BrainRouteSession`, `TranscriptionSettlementGate`, `CoachHistory` (client-managed session memory), and `ToolDefs` (coach tool schemas).
+- `Sources/JarvisCore/Coach/` — the event loop, split into two owners ([lean-coaching-core.md → Phase 5](./lean-coaching-core.md#phase-5-implementation-contract--coachdriver-split)): `CoachDriver` schedules (trigger coalescing, transcription-settlement admission, forward-only route state and its delivery tokens) and `CoachAttemptRunner` executes one snapshotted target (tool loop, history commit, off-path compaction), sharing only the `CoachTranscriptLedger` boundary. Plus the pure forward-only `BrainRouteSession`, `TranscriptionSettlementGate`, `CoachHistory` (client-managed session memory), `CoachCapabilities` (the session's switched-on tool
+  set, composed once at Start), and `ToolDefs` (coach tool schemas).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-facing screen port and the pure, Foundation-only capture logic: the `ScreenCapturing` contract, the `ScreenSnapshot` model, front-window selection over window-server candidates, and reading-order OCR layout (`ScreenCapturing`, `ScreenSnapshot`, `FrontWindowSelector`, `WindowCandidate`, `TextFragment`, `RecognizedTextLayout`). No process or file I/O; the kernel dependency guard rejects `Process`/`FileManager` here.
 - `Sources/JarvisScreenCapture/` — the OS-bound screen-capture adapter behind that port ([lean-coaching-core.md → Phase 4 contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)): `ScreenCaptureRunner` owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory — it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for — and `ScreenCaptureCLI` shoots the display frozen into the attempt's `SessionPlan` revision, or the main display. Depends inward on `JarvisCore`; composed by `WindowScopedScreenCapture` in `JarvisApp`; tested headlessly in `JarvisScreenCaptureTests`.
