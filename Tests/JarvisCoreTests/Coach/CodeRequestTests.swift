@@ -159,6 +159,20 @@ import Testing
         }
     }
 
+    /// A CLI brain is not bound by the strict schema's `required` list, so an uncorrected snippet
+    /// arrives without the array at all. Dropping it there would lose code the model did produce.
+    @Test func snippetWithoutHighlightsSurvivesParsing() throws {
+        for payload in [#"{"language":"Python","placement":"In loop","code":"x = 1"}"#,
+                        #"{"language":"Python","placement":"In loop","code":"x = 1","highlightedLines":null}"#] {
+            let call = ToolInvocation.parse(callId: "s", name: "speak",
+                argumentsJSON: "{\"lines\":[\"Continue here\"],\"codeSnippet\":\(payload)}")
+            guard case .speak(_, let lines, _, _, let snippet) = call else { Issue.record("Lost the hint"); continue }
+            #expect(lines == ["Continue here"])
+            #expect(snippet?.code == "x = 1")
+            #expect(snippet?.highlightedLines == [])
+        }
+    }
+
     @Test func codeHotkeyPersistsIndependently() {
         let suite = "CodeRequestTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
