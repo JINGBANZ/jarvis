@@ -289,6 +289,49 @@ changes host networking, or runs in the normal build/test gate.
 See [transcription-benchmark.md](./transcription-benchmark.md) for commands, architecture, scoring,
 acceptance, privacy, result interpretation, and when each mode should be run.
 
+## Screen memory validation
+
+`CoachDriverScreenMemoryTests` exercises scrolling, current-image-only replay, silent captures,
+capture failure, question reset across provider recovery, incomplete-response rejection, session
+isolation and compaction. `ScreenObservationMemoryTests` covers byte/count bounds, Unicode clipping,
+origin ambiguity, deduplication, and strict maintenance decoding.
+
+An opt-in synthetic model check uses the production Claude adapter, coach prompt and tool schemas.
+It sends fixture OCR only, without a live screenshot or microphone, and prints replies for semantic
+review. Set `JARVIS_SCREEN_MEMORY_EVAL=1` and `JARVIS_EVAL_CLAUDE` to an absolute path to an installed,
+signed-in Claude executable, then run `./scripts/run-tests.sh --filter ScreenMemoryModelEvaluation`.
+This consumes subscription inference and is disabled in the normal Gate. It checks a split question,
+hidden implementation, an earlier possible bug, a visible fix, and a different question; a small
+synthetic run is directional evidence rather than an OCR or model-accuracy guarantee.
+
+OCR fidelity is a separate acceptance check: fixture strings bypass both JPEG capture and Vision.
+Use representative browser problem/editor splits, source views with sidebars, and editor windows at
+normal working zoom. Record display resolution/scaling and browser zoom, compare captured OCR against
+visible identifiers, operators, punctuation, indentation and numeric constraints, and repeat captures
+with only focus changes and with real edits. Measure exact-text repetition separately from new useful
+content. Keep any captured evidence only in an owner-only workspace-local `.jarvis/` session directory.
+
+Historical observations have no image for token verification. Qualified model output is a behavioral
+check, not a deterministic guarantee. Exact-text deduplication bounds storage but does not establish
+low redundancy for noisy or edited captures; one observation can consume the entire text budget.
+The current-observation reference encoding also changes when the current capture changes. Evaluate
+these limits alongside OCR fidelity before treating retained text as reliable interview evidence.
+
+For the signed-app smoke, use Active window capture and an ordinary editor/browser:
+
+- Capture the top of a question with a distinctive constraint; scroll through two later sections and
+  request a hint. Confirm the answer accounts for the earlier constraint.
+- Capture an initialization and helper, scroll below them, then request a hint. Confirm Jarvis does
+  not call the hidden implementation absent. Show a test failure that implicates an earlier line;
+  confirm any diagnosis based on historical text is qualified in the short hint itself.
+- Revisit and fix that line. Confirm later tips prefer the new version. Switch tabs or files without
+  changing the problem and confirm Jarvis neither invents a merged file nor assumes a new question.
+- Clearly move to an unrelated question; confirm old question OCR leaves subsequent model requests.
+  Stop and Start again and confirm no prior-session screen memory is supplied.
+- Repeat a failed capture and a provider-recovery attempt. Confirm available older text remains
+  historical context and no growing image history is replayed. Entire-display scope has no OCR;
+  it cannot provide this text retention.
+
 ## Live smoke checklist
 
 Some behavior can only be verified with a real key, a mic, and granted permissions. Run

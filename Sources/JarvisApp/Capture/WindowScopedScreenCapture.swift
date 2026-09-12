@@ -36,7 +36,8 @@ struct WindowScopedScreenCapture: ScreenCapturing {
             case let .captured(jpeg):
                 return ScreenSnapshot(
                     imageBase64: jpeg.base64EncodedString(),
-                    recognizedText: recognizer.recognizedText(inJPEG: jpeg))
+                    recognizedText: recognizer.recognizedText(inJPEG: jpeg),
+                    sourceID: "window:\(windowID)")
             case .cleanupFailed, .cancelled:
                 return nil
             case .failed:

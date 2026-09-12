@@ -10,9 +10,12 @@ public struct ScreenSnapshot: Sendable, Equatable {
     /// captures skip OCR — a whole display's text would feed the clutter back as tokens — and
     /// recognition can fail). Derived from the screen, so it goes only where the image goes.
     public let recognizedText: String?
+    /// Capture origin only; a window can show many documents. Never use this as file identity.
+    public let sourceID: String?
 
-    public init(imageBase64: String, recognizedText: String? = nil) {
+    public init(imageBase64: String, recognizedText: String? = nil, sourceID: String? = nil) {
         self.imageBase64 = imageBase64
         self.recognizedText = recognizedText
+        self.sourceID = sourceID
     }
 }

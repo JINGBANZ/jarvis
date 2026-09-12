@@ -6,8 +6,9 @@ import Foundation
 /// at commit, `stay_silent` turns leave no trace, and once the estimate passes the compaction threshold
 /// the oldest span is replaced with a short summary (see `CoachDriver.compactIfNeeded`).
 ///
-/// Growth is strictly append-only between compactions — the message prefix stays byte-identical
-/// across requests, which is exactly what OpenAI's prompt cache needs to keep hitting.
+/// The runner commits `omittingScreenText` output: exact OCR belongs to `ScreenObservationMemory`,
+/// outside lossy conversation compaction. Conversation growth is append-only between compactions.
+/// Direct callers that supply raw OCR still receive the defensive masking documented on `commit`.
 ///
 /// `@unchecked Sendable`: all mutable state is guarded by `lock`.
 public final class CoachHistory: @unchecked Sendable {
@@ -29,7 +30,8 @@ public final class CoachHistory: @unchecked Sendable {
 
     /// Commit a finished turn's messages (the user delta, and any capture/speak calls with their
     /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Two kinds of
-    /// message are rewritten at commit:
+    /// message are rewritten at commit. The runner strips OCR before this boundary, so the raw-OCR
+    /// collapse below applies only when a caller supplies unmasked screen text:
     /// - **Screenshots** are replaced with a text stub (observation masking). The capture's OCR text
     ///   — what the model actually reads — rides in the tool-result message and stays verbatim; the
     ///   pixels are ~1–2k tokens re-billed on every later request, and the model can always capture
@@ -82,6 +84,18 @@ public final class CoachHistory: @unchecked Sendable {
                 + JarvisPrompts.Coach.supersededRecognizedTextStub,
             toolCallId: m.toolCallId
         )
+    }
+
+    /// The runner owns raw OCR separately, including captures from failed attempts. Strip it before
+    /// conversation commit so summaries cannot revive an evicted or retired observation.
+    static func omittingScreenText(_ messages: [ChatMessage]) -> [ChatMessage] {
+        messages.map { message in
+            guard let text = message.text,
+                  let header = text.range(of: JarvisPrompts.Coach.recognizedTextHeader) else { return message }
+            return ChatMessage(role: message.role,
+                               text: String(text[..<header.lowerBound]) + JarvisPrompts.ScreenMemory.historyStub,
+                               toolCallId: message.toolCallId)
+        }
     }
 
     /// The commit-time conversion of a verbatim passthrough message: keep its `function_call` items

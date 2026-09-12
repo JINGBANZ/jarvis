@@ -14,7 +14,9 @@ Behavioral, System Design, and General Technical are opt-in addenda; their polic
 boundaries are defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
 before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
-answered without a reflexive capture. The independent Transcription setting keeps **OpenAI as the
+answered without a reflexive capture. Bounded [screen observation memory](./architecture.md#screen-observation-memory)
+retains earlier question/code OCR across scrolling, separately from conversation summaries.
+The independent Transcription setting keeps **OpenAI as the
 default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Transcribe** and
 **GPT Live Transcribe**, adds opt-in, on-device **Apple Speech** on macOS 26 or later, and adds
 opt-in **Gemini** over the Gemini Live WebSocket — server-owned turn detection (no client commit, no
@@ -189,6 +191,13 @@ coaching kernel's dependency rules are enforced by `scripts/check-coaching-kerne
 
 ## Next action
 
+Run the [screen-memory live smoke](./build-and-run.md#screen-memory-validation): observe a long
+question and code across scrolling, revisit an edited region, then switch questions and restart the
+session. Offline tests cover retention, bounded loss, terminal maintenance, retries, and compaction;
+actual OCR fidelity, near-duplicate redundancy, and qualified coaching behavior across real editor
+panes remain acceptance blockers. The checklist separates capture measurements from fixture-based
+model checks.
+
 Run the provider-failure live smoke, which is the only way to see the refused-handshake and
 never-ready paths: with an obviously invalid OpenAI key, Start ends the session within about three
 seconds naming the rejection and its close code; with a valid key and Wi-Fi off, Start ends it within
@@ -306,6 +315,12 @@ playback, remains in
 [build-and-run.md](./build-and-run.md).
 
 ## Built
+
+Bounded historical question/code observations are owned by
+[`ScreenObservationMemory`](../Sources/JarvisCore/Screen/ScreenObservationMemory.swift) and supplied by
+`CoachAttemptRunner` alongside current evidence. The model can retire superseded observations and
+recognize clear question boundaries through existing terminal actions. See
+[screen observation memory](./architecture.md#screen-observation-memory) for limits and uncertainty.
 
 **Show code with hints** optionally supplies the next contextual coding component with each hint.
 Its capability is fixed at Start; the configurable fallback hotkey requests code for the current
