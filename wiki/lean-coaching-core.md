@@ -796,10 +796,10 @@ all. It is a pure move: no behavior, invocation, parsing, timing, or classificat
   inward-only (`JarvisEvaluation` → `JarvisBrainProviders` → `JarvisCore`), and the boundary that
   matters — evaluation never reads live coaching state — is untouched.
 - One symbol is public for the boundary: `AgentCLIProcessRunner.errorDomain`. It is the adapter's
-  identity on every error that leaves it, and it is now an alias of the matching constant on
-  Core's `LocalAgentFailureClassifier`, which owns the domain names it classifies, so the adapter
-  and the table cannot name the domain differently.
-- `JarvisCoreTests` links `JarvisBrainProviders` for two narrow reasons now: the coaching parity
+  identity on every error that leaves it, and an alias of the matching constant on Core's
+  `LocalAgentFailureClassifier`, which owns the domain names it classifies, so the adapter and the
+  table cannot name the domain differently.
+- `JarvisCoreTests` links `JarvisBrainProviders` for two narrow reasons: the coaching parity
   harness, and the local-agent classification tests naming that real domain.
 
 ### Expected behavior

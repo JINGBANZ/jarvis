@@ -396,10 +396,10 @@ human-facing filter key on them. A frame that also says what Jarvis is doing abo
 (retrying, skipping the target, continuing on the microphone) takes the sentence without its advice
 clause and appends the advice after its own tail, so the row never reads as two instructions on
 either side of the frame. The identity renders each code with the numbering it belongs to (`network`
-for URL loading, `errno`, `exit`, or a plain `code`), because a bare number labelled "network" sent a
-person to check their Wi-Fi over a CLI that had exited badly. Quoting the provider is deliberate and is what changed: a user
-reports a failure with a screenshot of Activity and nothing else, so a row that named only the
-category left every unclassified cause undiagnosable. Redaction, not omission, is what keeps a
+for URL loading, `errno`, `exit`, or a plain `code`), because a bare number labelled "network" sends a
+person to check their Wi-Fi over a CLI that exited badly. Quoting the provider is deliberate: a user
+reports a failure with a screenshot of Activity and nothing else, so a row naming only the category
+leaves every unclassified cause undiagnosable. Redaction, not omission, is what keeps a
 credential out of a row: the record redacts every provider-supplied string it holds, the message and
 the identity's own error type and code alike, in its initializer, so no adapter can carry raw text
 past it. The identity is also kept to what is grep-able at the source: a WebSocket close reason is
@@ -664,10 +664,10 @@ rather than a per-turn screenshot.
   entirely server-owned), so restructuring the OpenAI adapter — whose live socket cannot be
   unit-tested — to serve a provider that needs neither would risk the primary transcription path for
   speculative reuse. What the two genuinely share is the socket lifecycle (ready-timeout, ping/pong,
-  timer invalidation, generation guards), and once both were live the two hand-maintained copies had
-  already drifted apart in four places, so that part is now one driver rather than two copies: see
-  [Resilience](#resilience). The per-item ledger, the commit path, and turn detection stay separate,
-  which is what the original split was actually about.
+  timer invalidation, generation guards), and that part is one driver, because a lifecycle rule
+  maintained twice by hand is a rule the two adapters can disagree about without either looking
+  wrong: see [Resilience](#resilience). The per-item ledger, the commit path, and turn detection are
+  what the adapters keep to themselves, which is what separates them.
 - **The wire sample rate is a per-provider requirement, not a quality knob
   (`TranscriptionProvider.audioFormat`, `TranscriptionAudioFormat`).** OpenAI Realtime and Apple
   Speech take 24 kHz PCM16 mono; Gemini Live requires 16 kHz PCM16 mono
