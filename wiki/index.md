@@ -18,14 +18,15 @@
 - **[overlay-timing.md](./overlay-timing.md)** — how long each coaching line stays on screen: a hybrid of the captioning reading-speed standard and our glance-not-watch situation (length-proportional time + a fixed notice buffer + an inter-line blank gap).
 - **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
 - **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
-- **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting Brain, Connections, Overlay, Screen, and Activity sections; Brain configures the ordered coaching route, shared reasoning effort, and independent transcription provider/model/expected-language list or Apple locale; Connections owns the shared OpenAI credential editor and external Claude Code / Codex CLI account readiness; Overlay configures both coaching surfaces; Screen picks the active window or an entire display for `capture_screen`.
+- **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow` hosting Brain, Connections, Overlay, Screen, and Activity sections; Brain configures the ordered coaching route, shared reasoning effort, which coaching capabilities (tools and skills) the session offers, and independent transcription provider/model/expected-language list or Apple locale; Connections owns the shared OpenAI credential editor and external Claude Code / Codex CLI account readiness; Overlay configures both coaching surfaces; Screen picks the active window or an entire display for `capture_screen`.
 - **[lean-coaching-core.md](./lean-coaching-core.md)** — the approved issue #147 target architecture and phased roadmap: one critical coaching lane, one shared `SessionEvidence` stack with Activity and agent projections, capture heartbeat, preserved fresh-attempt routing, and the per-slice implementation contracts every phase was reviewed against.
 - **[session-audit.md](./session-audit.md)** — the one session-evidence stack: typed producer ports, one bounded worker and per-session handle, the Activity and session-folder projections, Start/Stop/Quit ownership, the uniform loss contract, completeness evidence, and the evaluator boundary.
 
 ## Meta
 
 - **[AGENTS.md](./AGENTS.md)** — conventions for maintaining this wiki. Read before editing any wiki file.
-- **[agents/](./agents/)** — configuration the engineering skills read, not design documentation:
+- **[agents/](./agents/)** — configuration the engineering skills that build Jarvis read (not the
+  coaching skills the app loads at runtime), not design documentation:
   [issue-tracker.md](./agents/issue-tracker.md), [triage-labels.md](./agents/triage-labels.md), and
   [domain.md](./agents/domain.md). Edit them directly to retarget a skill.
 

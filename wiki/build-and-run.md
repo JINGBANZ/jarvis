@@ -311,7 +311,15 @@ the human-facing coaching record. The current validation priority lives in
   the load, and confirm no "instructions changed after runtime initialization" line in
   `jarvis-debug.log`. Switch Prep notes search off in Settings → Brain → Capabilities, Start again,
   and confirm the tool and its catalog line are absent from that file's `tools` and `instructions`.
-- Run a System Design session on a CLI brain and confirm a diagram renders in the Overlay Box.
+- Ask a behavioral question through the normal audio path. Confirm Activity shows "loaded the
+  behavioral skill" and then the tip, both in one attempt, and note the time from question to first
+  tip. In the same session, describe a system to design: expect "loaded the system-design skill" and
+  a tip whose diagram renders in the Overlay Box. Press **⌥⌘J** in a fresh session before any load
+  and confirm the overlay shows an ordinary tip with no reasoning text. Switch System design off in
+  Settings → Brain → Capabilities, Start again, and confirm `brain-traffic.jsonl` never names it in
+  the system text and that it is never loaded. Repeat the two loads on Claude Code and Codex with at
+  least two coaching turns after each, and confirm no "instructions changed after runtime
+  initialization" line in `jarvis-debug.log`.
 - Create an overlapping exchange where a longer interviewer question finalizes after a short user
   reply. Confirm Activity places the question first and the first automatic brain request uses the
   same order. Repeat while a prior brain call is in flight to exercise the queued-attempt boundary.
