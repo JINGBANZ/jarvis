@@ -18,6 +18,11 @@ public final class CoachHistory: @unchecked Sendable {
     /// the tail is safe for that, but an in-place OCR collapse is not, because the summary would
     /// reintroduce the very screen text the collapse just retired.
     private var rewriteRevision: UInt = 0
+    /// Session-elapsed seconds at which the one still-verbatim OCR block was committed, or nil when
+    /// history holds none. Stored rather than read back out of the message text: the [mm:ss] stamp in
+    /// a capture result is written for the model, and parsing our own prompt copy would make the
+    /// wording of a catalog string load-bearing.
+    private var liveScreenTextElapsed: TimeInterval?
 
     public init() {}
 
@@ -51,7 +56,7 @@ public final class CoachHistory: @unchecked Sendable {
     ///   reasoning items outright. The id-less call + output pair is the long-proven history shape.
     /// Both rewrites cost one prompt-cache divergence at the tail of the just-finished turn — far
     /// cheaper than re-billing the content on every request for the rest of the session.
-    public func commit(_ turn: [ChatMessage]) {
+    public func commit(_ turn: [ChatMessage], at sessionElapsed: TimeInterval) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
         var turn = turn
@@ -61,6 +66,10 @@ public final class CoachHistory: @unchecked Sendable {
             rewriteRevision &+= 1
             // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
             for i in turn.indices where i < newest { turn[i] = Self.collapsingSupersededOCR(turn[i]) }
+            // The shot itself was taken a few seconds before this commit, well inside the staleness
+            // window, so the commit time stands in for the capture time rather than being threaded
+            // separately from each of the two capture sites.
+            liveScreenTextElapsed = sessionElapsed
         }
         messages.append(contentsOf: turn.compactMap { m in
             if let raw = m.rawItemsJSON { return Self.convertRawItems(raw) }
@@ -70,16 +79,41 @@ public final class CoachHistory: @unchecked Sendable {
         })
     }
 
+    /// Retire the one still-verbatim OCR block once it is older than `olderThan`, so a screen read
+    /// minutes ago stops presenting itself as the screen now. Superseding alone cannot do this: it
+    /// fires only when a NEWER capture lands, so the last dump of a session — or of a stretch where
+    /// the coach never looked again — persists verbatim to the end. Reported by a session audit where
+    /// the coach answered a freshly asked question against the previous question's screen.
+    ///
+    /// Called explicitly by the attempt runner just before it snapshots, rather than folded into
+    /// `snapshot()`: expiry is an in-place rewrite of committed messages, and hiding one inside a
+    /// read would make a getter bump `rewriteRevision` and diverge the prompt-cache prefix. Returns
+    /// whether anything was retired, and is a no-op once it has been.
+    @discardableResult
+    public func expireStaleScreenText(olderThan: TimeInterval, at sessionElapsed: TimeInterval) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard let landed = liveScreenTextElapsed, sessionElapsed - landed > olderThan else { return false }
+        messages = messages.map { Self.collapsingOCR(in: $0, to: JarvisPrompts.Coach.staleRecognizedTextStub) }
+        rewriteRevision &+= 1
+        liveScreenTextElapsed = nil
+        return true
+    }
+
     /// Rewrite one committed message so its OCR block becomes the catalog's superseded marker.
     /// Text before the block — e.g. a successful capture result — survives.
     private static func collapsingSupersededOCR(_ m: ChatMessage) -> ChatMessage {
+        collapsingOCR(in: m, to: JarvisPrompts.Coach.supersededRecognizedTextStub)
+    }
+
+    /// Replace a message's OCR block with `stub`, keeping everything before the header — the capture
+    /// result's "[mm:ss] screenshot captured" line — so the retired look still says when it happened.
+    private static func collapsingOCR(in m: ChatMessage, to stub: String) -> ChatMessage {
         guard let text = m.text,
               let header = text.range(of: JarvisPrompts.Coach.recognizedTextHeader)
         else { return m }
         return ChatMessage(
             role: m.role,
-            text: String(text[..<header.lowerBound])
-                + JarvisPrompts.Coach.supersededRecognizedTextStub,
+            text: String(text[..<header.lowerBound]) + stub,
             toolCallId: m.toolCallId
         )
     }

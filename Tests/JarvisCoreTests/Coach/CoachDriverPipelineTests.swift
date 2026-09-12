@@ -323,8 +323,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls?.first?.name == "capture_screen" })
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "c1" })
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
-        // No OCR text on this snapshot → the tool result stays the plain marker.
-        #expect(brain.calls[1].first { $0.role == .tool }?.text == "screenshot captured")
+        // No OCR text on this snapshot → the tool result stays the plain marker, dated like a
+        // transcript line so the model can tell a fresh look from one taken minutes ago.
+        #expect(brain.calls[1].first { $0.role == .tool }?.text == "[00:00] screenshot captured")
         #expect(brain.requestContexts.compactMap { $0 }.map(\.phase) == [
             .initial, .captureScreenContinuation,
         ])

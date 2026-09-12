@@ -19,6 +19,13 @@ public struct Config: Sendable {
     /// rare (a few times an hour), small enough that per-request input stays cheap. The estimator is
     /// conservative for non-ASCII scripts so this boundary is useful in multilingual sessions.
     public var historyCompactionTokenThreshold: Int
+    /// How long a capture's OCR text keeps describing "the screen" before `CoachHistory` retires it to
+    /// a stub. The newest dump is otherwise the one block that never collapses — superseding only ever
+    /// fires when a *newer* capture lands — so with no further look it sits in history verbatim for the
+    /// rest of the session and reads as current. Two minutes is short enough that a question change or
+    /// a rewritten editor buffer does not inherit the previous screen, and long enough that a coach
+    /// working through one problem keeps the screen it just read instead of looking again every turn.
+    public var screenTextStalenessSeconds: TimeInterval
     /// Fixed time added to every overlay line before its reading time. Unlike a movie viewer (eyes on
     /// the screen, audio reinforcing the text), our user is mid-conversation and only *glances* at the
     /// overlay — so the dominant cost is noticing the tip and redirecting their gaze, which is constant
@@ -68,6 +75,7 @@ public struct Config: Sendable {
         silenceMaxIntervalSeconds: TimeInterval = 960,
         silenceIdleCutoffSeconds: TimeInterval = 1_800,
         historyCompactionTokenThreshold: Int = 10_000,
+        screenTextStalenessSeconds: TimeInterval = 120,
         overlayNoticeBufferSeconds: TimeInterval = 2.0,
         overlaySecondsPerWord: TimeInterval = 0.35,
         overlayMaxDisplaySeconds: TimeInterval = 8,
@@ -84,6 +92,7 @@ public struct Config: Sendable {
         self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
         self.silenceIdleCutoffSeconds = silenceIdleCutoffSeconds
         self.historyCompactionTokenThreshold = historyCompactionTokenThreshold
+        self.screenTextStalenessSeconds = screenTextStalenessSeconds
         self.overlayNoticeBufferSeconds = overlayNoticeBufferSeconds
         self.overlaySecondsPerWord = overlaySecondsPerWord
         self.overlayMaxDisplaySeconds = overlayMaxDisplaySeconds

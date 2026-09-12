@@ -47,10 +47,31 @@ import Testing
     }
 
     @Test func coachPromptTreatsFreshCaptureAsSatisfyingScreenGate() {
-        #expect(JarvisPrompts.Coach.system.contains("A fresh screenshot or OCR in the current input"))
+        #expect(JarvisPrompts.Coach.system.contains("Only a result from the current request counts as current screen context"))
         #expect(JarvisPrompts.Coach.system.contains("A fresh capture result satisfies the screen gate"))
         #expect(JarvisPrompts.Coach.system.contains("do not capture again"))
         #expect(JarvisPrompts.Coach.system.contains("the same request"))
+    }
+
+    /// A capture result is stamped like a transcript line, so the prompt has to tell the model a
+    /// stamped result describes that moment rather than now — otherwise the stamp is decoration and
+    /// an old OCR block still reads as the screen.
+    @Test func coachPromptDatesCaptureResults() {
+        #expect(JarvisPrompts.Coach.system.contains("[mm:ss] session stamp as transcript lines"))
+        #expect(JarvisPrompts.Coach.system.contains("describes the screen at that moment, not now"))
+    }
+
+    /// A question read aloud lands in the transcript, so the gate's "absent from the conversation"
+    /// test used to be satisfied without ever looking: a live session coached two coding questions
+    /// off the interviewer's speech alone, one of them for 18 minutes with no capture at all. The
+    /// screen is the source of truth for a problem statement, and one look settles it — a standing
+    /// recapture cue is what drove capture-on-every-quiet-turn before.
+    @Test func coachPromptCapturesAtTheStartOfANewQuestion() {
+        #expect(JarvisPrompts.Coach.system.contains("start of a new coding or technical question"))
+        #expect(JarvisPrompts.Coach.system.contains("capture once before your first tip on it"))
+        #expect(JarvisPrompts.Coach.system.contains("is the source of truth there"))
+        #expect(JarvisPrompts.Coach.system.contains("One capture settles the question"))
+        #expect(JarvisPrompts.Coach.system.contains("A behavioral question has no such shared screen"))
     }
 
     @Test func coachPromptRequiresOneActionPerModelResponse() {

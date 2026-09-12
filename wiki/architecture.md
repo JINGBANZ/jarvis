@@ -102,8 +102,23 @@ moments the model judges worthwhile.
    or “here” — and no fresh capture is already available for that request. It may also capture when
    a silence trigger leaves progress unclear. The harness returns a silent screenshot plus OCR; that
    fresh result satisfies the screen gate, so the next model response must speak or stay silent
-   rather than capture the same request again. Fully stated questions do not require a reflexive
-   capture.
+   rather than capture the same request again.
+
+   The start of a new coding or technical question is its own trigger, **even when the interviewer
+   states it in full aloud**: one capture before the first tip on it. A missing-context test alone
+   never fires there, because a spoken statement lands in the transcript and so is not missing — yet
+   the shared editor is the source of truth. Speech arrives through transcription that garbles
+   symbols, numbers, and names (“find the max *edge*” for *max h*), and the written statement carries
+   the constraints, examples, and starting signature a spoken one skips. The trigger is one capture
+   per question rather than a standing cue: recapture language living in user-role history biases the
+   coach toward capturing on every quiet turn. A behavioral question has no shared screen and does not
+   trigger it. Beyond that, a fully stated question still needs no reflexive capture.
+
+   Every capture result opens with the same `[mm:ss]` session stamp as a transcript line, and only a
+   result from the current request counts as current screen context. `CoachHistory` retires an OCR
+   block older than `Config.screenTextStalenessSeconds` to a stub: superseding fires only when a
+   *newer* capture lands, so without this the last dump of a session goes on describing “the screen”
+   to the end of it.
 5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
    into an array (Structured Outputs / `strict:true`), so the client never splits prose on
    punctuation — or `stay_silent`. A tool call is **required** on every model response: silence is an

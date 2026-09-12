@@ -13,8 +13,11 @@ implemented.** The coach covers behavioral, system-design, and coding questions,
 Behavioral and System Design specialist skills under `Sources/JarvisCore/Resources/Skills/`; their
 policy is defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
-before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
-answered without a reflexive capture. The independent Transcription setting keeps **OpenAI as the
+before `speak`, as does the start of a new coding or technical question even when the interviewer
+states it aloud in full; a fresh screenshot/OCR satisfies that request, and capture results are dated
+so screen text that has aged past `Config.screenTextStalenessSeconds` stops reading as the current
+screen. Beyond a question's start, a fully stated question is still answered without a reflexive
+capture. The independent Transcription setting keeps **OpenAI as the
 default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Transcribe** and
 **GPT Live Transcribe**, adds opt-in, on-device **Apple Speech** on macOS 26 or later, and adds
 opt-in **Gemini** over the Gemini Live WebSocket — server-owned turn detection (no client commit, no
@@ -241,7 +244,10 @@ OpenAI and starting again leaves the primary path unregressed.
 
 Then run the live prompt smoke on a fresh session: show an interview question without speaking its
 details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
-exactly one `capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral
+exactly one `capture_screen` followed by a screen-specific reply. Then, with a coding question posted
+on screen, read it aloud in full without referring to the screen and confirm the first action is
+still one `capture_screen` before the first tip, and that later turns on that same question do not
+keep re-capturing. Then ask a fully stated behavioral
 question and confirm it can answer without an unnecessary capture. Finish the in-app Claude Code
 provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
 While that session runs, switch providers and confirm the next completed turn preserves context and

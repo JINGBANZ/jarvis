@@ -218,6 +218,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         let systemPrompt = JarvisPrompts.Coach.system(
             prepMaterial: attempt.prepMaterial != nil,
             formatAddendum: interviewFormatAddendum)
+        // Retire a screen read that has aged out before this request is built, so the snapshot below
+        // never carries OCR that presents a minutes-old screen as the current one.
+        history.expireStaleScreenText(
+            olderThan: config.screenTextStalenessSeconds,
+            at: context.sessionElapsedSeconds)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
 
         if reason == .manualHint && !work.manualHintPrepared {
@@ -238,7 +243,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 turnMessages.append(.userImage(shot.imageBase64))
                 if let text = shot.recognizedText {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
-                    let observation = ChatMessage.user(JarvisPrompts.Coach.recognizedText(text))
+                    let observation = ChatMessage.user(JarvisPrompts.Coach.captureResult(
+                        timestamp: self.captureStamp(), recognizedText: text))
                     observations.append(observation)
                     turnMessages.append(observation)
                 }
@@ -381,16 +387,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         if let text = shot.recognizedText {
                             jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                         }
+                        let stamp = self.captureStamp()
                         work.screenObservation = [
                             .user(JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.recognizedText
+                                timestamp: stamp, recognizedText: shot.recognizedText
                             )),
                             .userImage(shot.imageBase64),
                         ]
                         appendToolContinuation(
                             toolCallId: callID,
                             resultText: JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.recognizedText),
+                                timestamp: stamp, recognizedText: shot.recognizedText),
                             extraMessages: [.userImage(shot.imageBase64)],
                             newPhase: .captureScreenContinuation)
                     } else {
@@ -426,7 +433,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         role: .tool,
                         text: JarvisPrompts.Coach.tipShown,
                         toolCallId: callID))
-                    history.commit(turnMessages)
+                    history.commit(turnMessages, at: context.sessionElapsedSeconds)
                     ledger.commit(through: delta.upTo)
                     return .completed(.spoke)
 
@@ -437,7 +444,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     }
                     jlog("… nothing useful to add, staying silent")
                     activity?.record(.stayedSilent)
-                    commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
+                    commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText,
+                                        at: context.sessionElapsedSeconds)
                     ledger.commit(through: delta.upTo)
                     return .completed(.silentByModel)
 
@@ -494,9 +502,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
         return AttemptExecution(id: attemptID, result: result)
     }
 
-    private func commitIfWorthKeeping(_ turn: [ChatMessage], deltaText: String) {
+    private func commitIfWorthKeeping(_ turn: [ChatMessage], deltaText: String,
+                                      at sessionElapsed: TimeInterval) {
         guard !deltaText.isEmpty || turn.count > 1 else { return }
-        history.commit(turn)
+        history.commit(turn, at: sessionElapsed)
+    }
+
+    /// The [mm:ss] session stamp for a capture, read at the moment of the shot rather than from the
+    /// attempt's trigger context: the tool loop shoots seconds after the attempt opened, and a stamp
+    /// that claims otherwise is the very drift this is here to expose.
+    private func captureStamp() -> String {
+        RollingTranscript.stamp(clock.now() - sessionStart)
     }
 
     /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.

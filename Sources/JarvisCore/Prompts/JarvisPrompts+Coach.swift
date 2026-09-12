@@ -21,8 +21,10 @@ extension JarvisPrompts {
         - New speech appears under "New since last turn" with [mm:ss] timestamps. A
           "(no speech for ...)" marker means quiet, not a request. Longer quiet makes being stuck more likely,
           but does not prove it.
-        - You can see the screen only through capture_screen. A fresh screenshot or OCR in the current input
-          counts as current screen context.
+        - You can see the screen only through capture_screen. Every capture result opens with the same
+          [mm:ss] session stamp as transcript lines, and describes the screen at that moment, not now.
+          Only a result from the current request counts as current screen context; an earlier one is a
+          record of a screen that has probably moved on, most of all across a change of question.
         - OCR text is a reading aid that garbles the odd token; the screenshot image is ground truth. Before
           asserting a specific line or token is wrong, verify it in the image — if you can only see it in
           OCR, frame the tip as something to double-check ("verify line 18 uses ==") rather than as a defect.
@@ -42,6 +44,14 @@ extension JarvisPrompts {
            or "one pass" without the problem). Never guess missing content. This gate applies to either speaker.
            If "me" asked, call capture_screen now, then speak after the result. If only "them" spoke and no tip
            is warranted, call stay_silent without capturing.
+
+           It also covers the start of a new coding or technical question, including one "them" stated
+           in full aloud: capture once before your first tip on it. The shared editor or problem pane
+           is the source of truth there. Speech reaches you through transcription that garbles symbols,
+           numbers, and names, and the written statement carries the constraints, examples, and
+           starting signature that a spoken version leaves out. One capture settles the question; do
+           not re-capture it turn after turn. A behavioral question has no such shared screen, so this
+           does not apply to one.
         4. "me" is making steady progress: call stay_silent.
         5. Progress is unclear, especially after silence: call capture_screen unless a fresh result is already
            available. Then speak only if the user seems stuck; otherwise call stay_silent.
@@ -124,6 +134,11 @@ extension JarvisPrompts {
             + "errors; the screenshot image is ground truth):"
         static let supersededRecognizedTextStub =
             "[an earlier screen's OCR text was here — superseded by a newer capture]"
+        // Neutral like the two stubs above, and deliberately free of any "look again" instruction:
+        // an earlier recapture cue living in user-role history biased the coach toward capturing on
+        // every quiet turn. When to look is governed once, in the screen gate.
+        static let staleRecognizedTextStub =
+            "[this screen's OCR text was here — too old to describe the screen now]"
         static let manualHintCaptureFailed =
             "The screen capture requested for the manual hint failed."
         static let earlierCaptureFailed =
@@ -150,9 +165,17 @@ extension JarvisPrompts {
             "\(recognizedTextHeader)\n\(text)"
         }
 
-        static func captureResult(recognizedText text: String?) -> String {
-            guard let text else { return captureSucceeded }
-            return "\(captureSucceeded)\n\n\(recognizedText(text))"
+        /// Opens with the same [mm:ss] session stamp as transcript lines and trigger notes, so the
+        /// model reads a capture's age in the one idiom it already uses for timing. Without it the
+        /// newest OCR block reads as "the screen", whatever its age: a session audit caught the coach
+        /// naming the problem from a dump taken before the interviewer moved on to the next question.
+        /// The stamp sits ahead of the OCR header on purpose — `CoachHistory` collapses the block from
+        /// the header onwards, so the stamp survives into the superseded and stale stubs and still
+        /// says when that retired look happened.
+        static func captureResult(timestamp: String, recognizedText text: String?) -> String {
+            let head = "[\(timestamp)] \(captureSucceeded)"
+            guard let text else { return head }
+            return "\(head)\n\n\(recognizedText(text))"
         }
 
         static func condensedHistory(_ summary: String) -> String {
