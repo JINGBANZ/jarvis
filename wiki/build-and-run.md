@@ -326,9 +326,10 @@ the human-facing coaching record. The current validation priority lives in
   after an app update, and that a second evaluation of the same session fetches its source again.
   Evaluate an older timestamp-only session and a session with an unavailable release tag; confirm the
   running release is used and the saved report discloses the unknown version or mismatch. Evaluate
-  while offline and confirm the dialog names the session's own recorded version. With no obtainable
-  source, verify the dialog provides a next step. Quit during fetching must cancel the download and
-  leave no source tree behind. For development, verify both
+  while offline and confirm the dialog names the session's own recorded version. Cancelling from
+  Activity during fetching must stop the download and leave no source tree behind. Quit also stops
+  it, but terminates immediately, so the run's temporary directory is left for the OS to reclaim.
+  For development, verify both
   `build-app.sh --run` and plain `open` use the bundle's checkout for both history and source. Repeat
   with a second worktree and confirm neither its history nor release history appears in the first.
   Confirm prefixed and older sessions
