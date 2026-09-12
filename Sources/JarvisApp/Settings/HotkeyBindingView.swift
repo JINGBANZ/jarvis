@@ -198,8 +198,10 @@ final class HotkeyBindingView: NSObject {
         case nil: showsFailure = (codePreferences?.isEnabled ?? true) && !hasActiveHotkey()
         }
         if preferences.shortcut == .showCode {
-            shortcutRow?.setDetail(codePreferences?.isEnabled == true
-                ? "Requires ⌘ or ⌥" : "Enable Show code with hints in Overlay settings")
+            shortcutRow?.setDetail(!boxEnabled()
+                ? "Requires Overlay Box · enable it in Overlay settings"
+                : codePreferences?.isEnabled == true
+                    ? "Requires ⌘ or ⌥" : "Enable Show code with hints in Overlay settings")
         }
         guard isEnabled && showsFailure else {
             calloutHeightConstraint?.constant = 0

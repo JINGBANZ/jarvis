@@ -4,8 +4,10 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct DiagramHintRenderingTests {
-    @MainActor @Test func diagramIsAnAttachmentInsideThePrivatePanel() async throws {
+    @MainActor @Test func asyncDiagramDeliveryPinsInsideThePrivatePanel() async throws {
+        let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel()
+        let window = try #require(NSApplication.shared.windows.first { !windows.contains($0.windowNumber) })
         panel.setEnabled(true)
         panel.setSessionLive(true)
         let graph = try #require(DiagramHint(mermaid: "flowchart LR\nA[Client] --> B[API]"))
@@ -14,16 +16,19 @@ import Testing
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(panel.currentText.contains("Sketch the request path."))
-        #expect(panel.currentText.contains("\u{FFFC}"))
+        #expect(!panel.currentText.contains("\u{FFFC}"))
+        let content = try #require(window.contentView)
+        let drawing = try #require(findImage(content))
+        #expect(drawing.image != nil)
         #expect(panel.currentSharingType == .none)
 
         // The Settings sample only stands in while stopped: during a session the box is already on
         // screen carrying the real log, which is a better preview than sample text.
         panel.setSessionLive(false)
         panel.showAppearancePreview(true)
-        #expect(!panel.currentText.contains("\u{FFFC}"), "the sample carries no diagram")
+        #expect(drawing.image == nil, "Stop removes the session reference before preview")
         panel.showAppearancePreview(false)
-        #expect(panel.currentText.contains("\u{FFFC}"), "and the logged diagram comes back with it")
+        #expect(drawing.image == nil, "closing preview cannot restore an ended session graph")
 
         panel.clear()
         #expect(panel.currentText.isEmpty)
@@ -45,8 +50,13 @@ import Testing
     }
 
     @MainActor @Test func togglingDiagramsPreservesTextAndRestoresHiddenGraphs() async throws {
+        let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel()
+        let window = try #require(NSApplication.shared.windows.first { !windows.contains($0.windowNumber) })
         let graph = try #require(DiagramHint(mermaid: "flowchart LR\nA[Client] --> B[API]"))
+        panel.setEnabled(true)
+        panel.setSessionLive(true)
+        defer { panel.setSessionLive(false) }
         panel.setDiagramsEnabled(false)
         panel.render(["Keep the text hint."], perLineSeconds: [2], diagram: graph)
         for _ in 0..<100 where panel.entryCount == 0 {
@@ -54,40 +64,43 @@ import Testing
         }
         #expect(panel.currentText.contains("Keep the text hint."))
         #expect(!panel.currentText.contains("\u{FFFC}"))
+        let content = try #require(window.contentView)
+        let drawing = try #require(findImage(content))
+        #expect(drawing.isHiddenOrHasHiddenAncestor)
         panel.setDiagramsEnabled(true)
-        #expect(panel.currentText.contains("\u{FFFC}"))
+        #expect(drawing.image != nil)
+        #expect(!drawing.isHiddenOrHasHiddenAncestor)
         panel.setDiagramsEnabled(false)
-        #expect(!panel.currentText.contains("\u{FFFC}"))
+        #expect(drawing.isHiddenOrHasHiddenAncestor)
         #expect(panel.entryCount == 1)
         #expect(panel.currentText.contains("Keep the text hint."))
     }
 
-    @MainActor @Test func resizingPanelImmediatelyResizesItsAttachment() async throws {
+    @MainActor @Test func resizingPanelImmediatelyResizesItsPinnedDiagram() async throws {
         let previousWindows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
         let window = try #require(NSApplication.shared.windows.first { !previousWindows.contains($0.windowNumber) })
+        panel.setEnabled(true)
+        panel.setSessionLive(true)
+        defer { panel.setSessionLive(false) }
         let graph = try #require(DiagramHint(mermaid: "flowchart TD\nA[Client] --> B[API]\nB --> C[Database]"))
         panel.render(["Sketch this path."], perLineSeconds: [2], diagram: graph)
         for _ in 0..<100 where panel.entryCount == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
-        func findText(_ view: NSView) -> NSTextView? {
-            (view as? NSTextView) ?? view.subviews.lazy.compactMap { findText($0) }.first
-        }
         let content = try #require(window.contentView)
-        let text = try #require(findText(content))
-        func attachmentSize() throws -> NSSize {
-            let storage = try #require(text.textStorage)
-            let range = (text.string as NSString).range(of: "\u{FFFC}")
-            let attachment = try #require(storage.attribute(.attachment, at: range.location, effectiveRange: nil) as? NSTextAttachment)
-            return try #require(attachment.image).size
-        }
-        let before = try attachmentSize()
+        let drawing = try #require(findImage(content))
+        func imageSize() throws -> NSSize { try #require(drawing.image).size }
+        let before = try imageSize()
         panel.setContentSize(NSSize(width: 260, height: 220))
-        let after = try attachmentSize()
-        #expect(after.height <= 132, "graph fits within 60% of the smaller window height")
+        let after = try imageSize()
+        #expect(after.height <= drawing.bounds.height, "graph fits within its pinned area")
         #expect(after.width < before.width && after.height < before.height)
         #expect(abs(after.width / after.height - before.width / before.height) < 0.01)
+    }
+
+    @MainActor private func findImage(_ view: NSView) -> NSImageView? {
+        (view as? NSImageView) ?? view.subviews.lazy.compactMap { findImage($0) }.first
     }
 
     @MainActor @Test func bypassConnectionTravelsOutsideIntermediateBox() throws {

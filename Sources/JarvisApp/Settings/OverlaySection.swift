@@ -101,9 +101,7 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityRange: Defaults.Overlay.Code.opacityRange,
             opacityAction: #selector(codeOpacityChanged),
             opacityAccessibilityLabel: "Code background opacity")
-        codeView?.toggle.setAccessibilityLabel("Show code with hints")
-        boxView?.supplementaryView = codeView
-        boxView?.updateEnabledState(appearance.boxEnabled)
+        if let codeView { boxView?.addSubview(codeView) }
 
         if let captionView { document.addSubview(captionView) }
         if let boxView { document.addSubview(boxView) }
@@ -157,12 +155,14 @@ final class OverlaySection: NSObject, SettingsSection {
     }
 
     private func relayout() {
-        guard let scrollView, let documentView, let captionView, let boxView else { return }
+        guard let scrollView, let documentView, let captionView, let boxView, let codeView else { return }
 
         let viewport = scrollView.contentView.bounds.size
         let width = max(320, viewport.width)
+        let codeHeight = appearance.boxEnabled ? codeView.preferredHeight : 0
+        let boxHeight = boxView.preferredHeight + codeHeight
         let contentHeight =
-            captionView.preferredHeight + SettingsStyle.sectionSpacing + boxView.preferredHeight
+            captionView.preferredHeight + SettingsStyle.sectionSpacing + boxHeight
         let documentHeight = max(viewport.height, contentHeight)
 
         documentView.frame = NSRect(x: 0, y: 0, width: width, height: documentHeight)
@@ -175,9 +175,12 @@ final class OverlaySection: NSObject, SettingsSection {
         top = captionView.frame.minY - SettingsStyle.sectionSpacing
         boxView.frame = NSRect(
             x: 0,
-            y: top - boxView.preferredHeight,
+            y: top - boxHeight,
             width: width,
-            height: boxView.preferredHeight)
+            height: boxHeight)
+        // Code remains subordinate to Box; the section owns the composition and visibility.
+        codeView.isHidden = !appearance.boxEnabled
+        codeView.frame = NSRect(x: 0, y: 0, width: width, height: codeHeight)
         revealTop()
     }
 

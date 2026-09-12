@@ -114,10 +114,10 @@ sliders identically. A corrupted non-finite stored value restores the setting's 
 than the range floor, which at 0% would read as breakage.
 
 The box's **Show diagrams** switch controls [private architecture hints](./architecture.md#private-architecture-hints).
-It defaults on, persists across launches, and immediately hides or restores graph attachments while
-keeping their text hints and history. Graphs scale proportionally to fit the available window width
-and the renderer's height budget, leaving room for text; resizing updates the image during the drag
-without writing preferences until the drag ends.
+It defaults on, persists across launches, and immediately hides or restores the session's pinned
+design while keeping the text history. Before the first valid diagram arrives, no diagram area is
+reserved. Graphs scale proportionally within that area, leaving room for text; resizing updates the
+image during the drag without writing preferences until the drag ends.
 
 Enabling **Show code with hints** reveals separate code **Text size** and **Background opacity**
 sliders inside the Overlay Box card. They persist through `OverlayAppearance` independently of the

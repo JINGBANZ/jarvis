@@ -339,9 +339,10 @@ and how the explanation length guidance applies.
 
 System Design sessions support [private high-level architecture hints](./architecture.md#private-architecture-hints):
 [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) validates a small Mermaid subset, and
-[`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) renders boxes and arrows alongside
-the hint inside the capture-excluded overlay box. Graphs scale proportionally with the window;
-Settings → Overlay → Overlay Box offers **Show diagrams**, enabled by default. Diagrams are limited to System Design.
+[`DiagramHintView`](../Sources/JarvisOverlay/DiagramHintView.swift) pins the latest rendered design
+below the scrolling hint history inside the capture-excluded overlay box. The reference appears on
+first valid delivery and survives ordinary hints and history clearing until Stop; visibility, revision,
+and resizing behavior follow the linked architecture contract.
 
 Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverlay` + `JarvisScreenCapture` harness is green
 (`./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the smoke run.

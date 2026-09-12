@@ -132,11 +132,11 @@ import Testing
         #expect(box.deliverCodeSnippet(snippet) == snippet)
         let font = try #require(dock.codeText.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
         #expect(font.pointSize == 14)
-        #expect(abs((dock.layer?.backgroundColor?.alpha ?? 0) - 0.2) < 0.001)
+        #expect(abs(box.currentCodeBackgroundOpacity - 0.2) < 0.001)
         #expect(content.layer?.backgroundColor == nil)
         #expect(abs(box.currentBoxOpacity - 0.9) < 0.001)
         box.setCodeBackgroundOpacity(0)
-        #expect(dock.layer?.backgroundColor?.alpha == 0)
+        #expect(box.currentCodeBackgroundOpacity == 0)
         #expect(dock.codeText.string == snippet.code)
     }
 

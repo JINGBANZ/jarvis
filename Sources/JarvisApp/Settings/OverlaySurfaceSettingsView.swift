@@ -56,17 +56,9 @@ final class OverlaySurfaceSettingsView: NSView {
     private let opacityRow: SettingsRowView
     private let diagramRow: SettingsRowView?
 
-    var supplementaryView: OverlaySurfaceSettingsView? {
-        didSet {
-            oldValue?.removeFromSuperview()
-            if let supplementaryView { card.contentView?.addSubview(supplementaryView) }
-        }
-    }
-
     var preferredHeight: CGFloat {
         guard toggle.state == .on else { return Self.headerHeight }
         return Self.headerHeight + SettingsStyle.rowHeight * (diagramRow == nil ? 2 : 3)
-            + (supplementaryView?.preferredHeight ?? 0)
     }
 
     init(
@@ -134,7 +126,7 @@ final class OverlaySurfaceSettingsView: NSView {
         toggle.state = enabled ? .on : .off
         toggle.target = target
         toggle.action = enableAction
-        toggle.setAccessibilityLabel("Show \(title.lowercased())")
+        toggle.setAccessibilityLabel(title.hasPrefix("Show ") ? title : "Show \(title.lowercased())")
         stateLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stateLabel.alignment = .right
         stateLabel.textColor = .secondaryLabelColor
@@ -165,7 +157,6 @@ final class OverlaySurfaceSettingsView: NSView {
         sizeRow.isHidden = !enabled
         opacityRow.isHidden = !enabled
         diagramRow?.isHidden = !enabled
-        supplementaryView?.isHidden = !enabled
         needsLayout = true
     }
 
@@ -206,19 +197,19 @@ final class OverlaySurfaceSettingsView: NSView {
             height: 18)
 
         if toggle.state == .on {
-            let supplementaryHeight = supplementaryView?.preferredHeight ?? 0
-            supplementaryView?.frame = NSRect(x: 0, y: 0, width: content.bounds.width, height: supplementaryHeight)
-            let diagramHeight = diagramRow == nil ? 0 : SettingsStyle.rowHeight
-            let extraHeight = diagramHeight + supplementaryHeight
-            diagramRow?.frame = NSRect(x: 0, y: supplementaryHeight, width: content.bounds.width, height: diagramHeight)
-            opacityRow.frame = NSRect(
-                x: 0,
-                y: extraHeight,
-                width: content.bounds.width,
-                height: SettingsStyle.rowHeight)
             sizeRow.frame = NSRect(
                 x: 0,
-                y: SettingsStyle.rowHeight + extraHeight,
+                y: headerY - SettingsStyle.rowHeight,
+                width: content.bounds.width,
+                height: SettingsStyle.rowHeight)
+            opacityRow.frame = NSRect(
+                x: 0,
+                y: headerY - SettingsStyle.rowHeight * 2,
+                width: content.bounds.width,
+                height: SettingsStyle.rowHeight)
+            diagramRow?.frame = NSRect(
+                x: 0,
+                y: headerY - SettingsStyle.rowHeight * 3,
                 width: content.bounds.width,
                 height: SettingsStyle.rowHeight)
         }
