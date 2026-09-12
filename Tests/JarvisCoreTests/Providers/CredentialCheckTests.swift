@@ -39,23 +39,65 @@ import Testing
     }
 
     /// A 5xx is not a verdict on the key.
-    @Test func serverTroubleIsUnreachableNotRejected() {
-        guard case .unreachable(let failure) =
+    @Test func serverTroubleIsInconclusiveNotRejected() {
+        guard case .inconclusive(let failure) =
             CredentialCheck.verdict(for: .openAIAPIKey, httpStatus: 503, body: nil) else {
-            Issue.record("expected unreachable"); return
+            Issue.record("expected inconclusive"); return
         }
         #expect(failure.category == .unavailable)
-        #expect(CredentialCheck.statusText(.unreachable(failure), for: .openAIAPIKey)
-                == "I couldn't reach OpenAI (HTTP 503).")
+        #expect(CredentialCheck.statusText(.inconclusive(failure), for: .openAIAPIKey)
+                == "I couldn't check the key with OpenAI (HTTP 503).")
     }
 
-    @Test func transportErrorsAreUnreachable() {
-        guard case .unreachable(let failure) = CredentialCheck.verdict(
-            for: .openAIAPIKey, transportError: URLError(.notConnectedToInternet)) else {
-            Issue.record("expected unreachable"); return
+    /// A rate limit reaches the provider and comes back over a connection that plainly worked, but it
+    /// says nothing about the key. Calling it a refusal would send a user to rotate a valid key and
+    /// hit the same limit on the replacement, so the disposition decides, not the status range.
+    @Test func rateLimitsAndExhaustedQuotasAreInconclusive() throws {
+        let openAI = try JSONSerialization.data(withJSONObject: [
+            "error": ["code": "rate_limit_exceeded", "type": "requests",
+                      "message": "Rate limit reached for requests"],
+        ])
+        guard case .inconclusive(let failure) =
+            CredentialCheck.verdict(for: .openAIAPIKey, httpStatus: 429, body: openAI) else {
+            Issue.record("expected inconclusive"); return
         }
-        #expect(CredentialCheck.statusText(.unreachable(failure), for: .openAIAPIKey)
-                == "I couldn't reach OpenAI (network -1009: the internet connection appears to be offline).")
+        #expect(failure.disposition == .temporary)
+        #expect(CredentialCheck.statusText(.inconclusive(failure), for: .openAIAPIKey)
+                == "I couldn't check the key with OpenAI (HTTP 429, rate_limit_exceeded: Rate limit reached for requests).")
+
+        let google = try JSONSerialization.data(withJSONObject: [
+            "error": ["status": "RESOURCE_EXHAUSTED", "message": "Quota exceeded for requests"],
+        ])
+        guard case .inconclusive(let gemini) =
+            CredentialCheck.verdict(for: .geminiAPIKey, httpStatus: 429, body: google) else {
+            Issue.record("expected inconclusive"); return
+        }
+        #expect(gemini.category == .quota)
+        #expect(CredentialCheck.statusText(.inconclusive(gemini), for: .geminiAPIKey)
+                == "I couldn't check the key with Gemini (HTTP 429, RESOURCE_EXHAUSTED: Quota exceeded for requests).")
+    }
+
+    /// A permanent refusal still reads as one, so the fix above cannot swallow a real rejection.
+    @Test func permanentRefusalsStayRejections() throws {
+        let forbidden = try JSONSerialization.data(withJSONObject: [
+            "error": ["code": "unsupported_country_region_territory",
+                      "message": "Country, region, or territory not supported"],
+        ])
+        guard case .rejected(let failure) =
+            CredentialCheck.verdict(for: .openAIAPIKey, httpStatus: 403, body: forbidden) else {
+            Issue.record("expected rejection"); return
+        }
+        #expect(failure.disposition == .permanent)
+        #expect(failure.category == .access)
+    }
+
+    @Test func transportErrorsAreInconclusive() {
+        guard case .inconclusive(let failure) = CredentialCheck.verdict(
+            for: .openAIAPIKey, transportError: URLError(.notConnectedToInternet)) else {
+            Issue.record("expected inconclusive"); return
+        }
+        #expect(CredentialCheck.statusText(.inconclusive(failure), for: .openAIAPIKey)
+                == "I couldn't check the key with OpenAI (network -1009: the internet connection appears to be offline).")
         #expect(CredentialCheck.statusText(.accepted, for: .geminiAPIKey) == "Gemini accepted the key.")
     }
 

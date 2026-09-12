@@ -53,7 +53,11 @@ public enum TransportFailureClassifier {
             case .networkConnectionLost: return "the network connection was lost"
             case .dnsLookupFailed: return "the DNS lookup failed"
             case .notConnectedToInternet: return "the internet connection appears to be offline"
-            case .badServerResponse: return "the server refused the WebSocket upgrade"
+            // Deliberately not "refused the WebSocket upgrade": this table is shared by the brain
+            // HTTP adapter and the credential check, which have no socket. A refused upgrade that
+            // carries a status is classified from that status by the vendor table before reaching
+            // here anyway, so the specific wording bought nothing and misnamed two other callers.
+            case .badServerResponse: return "the server sent an unusable response"
             case .cannotParseResponse: return "the server response could not be parsed"
             case .secureConnectionFailed, .serverCertificateHasBadDate, .serverCertificateUntrusted,
                  .serverCertificateHasUnknownRoot, .serverCertificateNotYetValid,

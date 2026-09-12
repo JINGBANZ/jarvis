@@ -61,6 +61,18 @@ import Testing
         #expect(pong.message == "no pong within 10s")
     }
 
+    /// This table is shared by the brain HTTP adapter and the credential check, neither of which has
+    /// a socket, so no description here may name one. The row is the diagnostic surface, and a wrong
+    /// noun on it costs exactly the evidence it exists to give.
+    @Test func descriptionsNameNothingCallerSpecific() {
+        #expect(TransportFailureClassifier.description(domain: NSURLErrorDomain, code: -1011)
+                == "the server sent an unusable response")
+        let request = TransportFailureClassifier.classify(
+            error: URLError(.badServerResponse), source: .brain(.openAI), everReady: false)
+        #expect(!request.message.contains("WebSocket"))
+        #expect(!request.message.contains("socket"))
+    }
+
     @Test func transportDomainsAreRecognized() {
         #expect(TransportFailureClassifier.isTransportDomain(NSURLErrorDomain))
         #expect(TransportFailureClassifier.isTransportDomain(NSPOSIXErrorDomain))

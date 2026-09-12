@@ -11,20 +11,23 @@ public enum CredentialCheck {
         case accepted
         /// The provider answered about the key itself, and the answer was no.
         case rejected(ProviderFailure)
-        /// Nothing was learned about the key: the request never arrived, or the provider was down.
-        case unreachable(ProviderFailure)
+        /// Nothing was learned about the key: the request never arrived, or the provider answered
+        /// about its own state instead (busy, rate limited, down).
+        case inconclusive(ProviderFailure)
     }
 
     public static func verdict(for credential: Credential, httpStatus: Int, body: Data?) -> Verdict {
         if (200..<300).contains(httpStatus) { return .accepted }
         let failure = classify(credential: credential, httpStatus: httpStatus, body: body)
-        // A 5xx says the provider is having trouble, not that the key is bad. Calling it a rejection
-        // would send a user to rotate a key that is fine.
-        return (500..<600).contains(httpStatus) ? .unreachable(failure) : .rejected(failure)
+        // Only a permanent failure is a verdict on the key. A rate limit, a momentarily exhausted
+        // quota, and a 5xx all describe the provider's state rather than the key's, and calling any
+        // of them a refusal would send a user to rotate a key that is fine. The vendor table already
+        // decides which is which, so this reads its disposition instead of ranging over statuses.
+        return failure.disposition == .permanent ? .rejected(failure) : .inconclusive(failure)
     }
 
     public static func verdict(for credential: Credential, transportError: any Error) -> Verdict {
-        .unreachable(TransportFailureClassifier.classify(
+        .inconclusive(TransportFailureClassifier.classify(
             error: transportError, source: source(for: credential), everReady: false))
     }
 
@@ -37,8 +40,10 @@ public enum CredentialCheck {
             return "\(name) accepted the key."
         case .rejected(let failure):
             return "\(name) refused the key\(failure.activityDetail)."
-        case .unreachable(let failure):
-            return "I couldn't reach \(name)\(failure.activityDetail)."
+        case .inconclusive(let failure):
+            // Not "couldn't reach": a rate limit arrives over a connection that plainly worked. What
+            // is true in every case here is that the key itself went unanswered.
+            return "I couldn't check the key with \(name)\(failure.activityDetail)."
         }
     }
 
@@ -56,7 +61,7 @@ public enum CredentialCheck {
     }
 
     /// The surface each key is mainly for: OpenAI's key can reach the brain, Gemini's is
-    /// transcription-only. It selects the vendor table and the noun in an unreachable sentence.
+    /// transcription-only. It selects the vendor table and the name in an inconclusive sentence.
     private static func source(for credential: Credential) -> ProviderFailure.Source {
         switch credential {
         case .openAIAPIKey: .brain(.openAI)

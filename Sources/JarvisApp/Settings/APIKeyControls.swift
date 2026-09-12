@@ -40,7 +40,7 @@ final class APIKeyControls: NSObject {
             case .checking: .secondaryLabelColor
             case .answered(.accepted, _): .systemGreen
             case .answered(.rejected, _): .systemRed
-            case .answered(.unreachable, _): .systemOrange
+            case .answered(.inconclusive, _): .systemOrange
             }
         }
     }
@@ -149,6 +149,10 @@ final class APIKeyControls: NSObject {
     func windowWillClose() {
         verdictTask?.cancel()
         verdictTask = nil
+        // This object outlives the window and is reused on the next open, so a checking state left
+        // behind would greet that open with a check no task is running. An answered verdict stays:
+        // it is still what the provider said about the saved key.
+        if case .checking = verdict { verdict = nil }
     }
 
     private func layout() {

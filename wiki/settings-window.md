@@ -316,15 +316,20 @@ saved key.
 
 Saving a key checks it. One models-list request goes out with the key in a header, and the card shows
 what the vendor said under the row: **accepted**, **refused** with the provider's status, error code,
-and redacted message, or **couldn't reach** when the request never got an answer. A 5xx is
-deliberately the third case and not a refusal, because the provider being down says nothing about the
-key and would otherwise send a user to rotate one that is fine. The verdict comes from the same
+and redacted message, or **couldn't check the key** carrying the same evidence. Which of the last two
+a failure lands in comes from the vendor table's disposition, not the status: only a permanent
+failure is a verdict on the key, so a rate limit, a momentarily exhausted quota, and a 5xx are all
+inconclusive rather than refusals, because each describes the provider's own state and would
+otherwise send a user to rotate a key that is fine. The verdict comes from the same
 `CredentialCheck` table a live session uses (see
 [architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)),
 so Settings and a session that dies on the same key cannot disagree. The check never gates the save:
-the key is written first, and a slow or failed check only leaves the card without an answer. The
-verdict belongs to the key that was checked, so editing the key clears it, and closing the window
-cancels an in-flight check. The request is a models list rather than a real completion because it
+the key is written first, and a check that fails or times out lands in the inconclusive case with its
+cause rather than blocking anything. While the request is in flight the card reads **Checking the key
+with …**; closing the window cancels the check and clears that state, so the next open shows no
+answer rather than a check that is no longer running. An answered verdict belongs to the key that was
+checked, so it survives a reopen and is cleared by editing the key. The request is a models list
+rather than a real completion because it
 costs nothing and still proves the key, the network path, and the region; it does not prove billing,
 which OpenAI only reports on a real request, which is why the wording is "accepted" rather than a
 claim that the account is healthy.
