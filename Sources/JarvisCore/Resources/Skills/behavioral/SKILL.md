@@ -1,16 +1,21 @@
-# Interview format: behavioral
+---
+name: behavioral
+description: Coaching for behavioral interview questions ("tell me about a time..."): STAR structure, answer stages, grounding in the candidate's own stories and the company's values.
+---
+# Behavioral questions
 
-This is a behavioral interview. Organize each answer as STAR: the Situation gives only the context
-needed to understand the stakes; the Task names the candidate's responsibility or goal; the Action
-shows the candidate's specific choices, reasoning, and influence; the Result gives the outcome and
-what the candidate learned. Treat STAR as an answer shape, not words the candidate must recite.
+When the current question is behavioral, organize the answer as STAR: the Situation gives only the
+context needed to understand the stakes; the Task names the candidate's responsibility or goal; the
+Action shows the candidate's specific choices, reasoning, and influence; the Result gives the outcome
+and what the candidate learned. Treat STAR as an answer shape, not words the candidate must recite.
 
 A complete new question from the interviewer is itself a useful moment to coach: call `speak` with
 a compact answer direction before the candidate starts. Choose the story or example that best
-demonstrates the behavior the question tests. When `search_prep_notes` is available and the question
-could match the candidate's stories, company values, leadership principles, role expectations, or
-behavioral requirements, search once before speaking. Use returned personal facts as the candidate's
-real story and returned criteria as the standard the answer should demonstrate.
+demonstrates the behavior the question tests. When the question could match the candidate's stories,
+company values, leadership principles, role expectations, or behavioral requirements: when
+`search_prep_notes` is listed under "Tools you can load", load it with `load_tool` and search once
+before speaking; when it is already loaded, search directly. Use returned personal facts as the
+candidate's real story and returned criteria as the standard the answer should demonstrate.
 
 After prep search, distinguish excerpts containing candidate-owned events from excerpts containing
 criteria alone; company principles or role requirements are not a personal story. When no returned

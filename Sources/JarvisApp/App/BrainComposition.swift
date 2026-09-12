@@ -69,22 +69,16 @@ final class BrainComposition {
     private var activeBrainTarget: BrainTarget?
     private var pendingBrainChangeFrom: BrainTarget?
 
-    /// The current session's resolved interview-format guidance, fixed once at Start (set directly
-    /// by the App before the first `makeConfiguredRoute` call) and reused by every later hot
-    /// reapply — `applyBrainPreferencesToRunningSession` never re-reads `preferences.interviewFormat`
-    /// live, so a Settings edit mid-session cannot retroactively change a value that was meant to be
-    /// fixed for the whole session. Baked into the CLI system prompt through the same
-    /// `JarvisPrompts.Coach.system(capabilities:formatAddendum:)` builder `CoachAttemptRunner`
-    /// calls per turn.
-    var interviewFormatAddendum = ""
     var explanationsEnabled = true
     var codeEnabled = false
 
-    /// The current session's tool set, fixed once at Start on exactly the same terms as
-    /// `interviewFormatAddendum` and set from the same place, before the first `makeConfiguredRoute`
-    /// call. A local-agent target bakes these schemas into its process instructions and rejects any
-    /// later turn that no longer composes to them, so this must be the same value the session's
-    /// `CoachDriver` was given (#273).
+    /// The current session's capability set, fixed once at Start (set directly by the App before
+    /// the first `makeConfiguredRoute` call) and reused by every later hot reapply, so a Settings
+    /// edit mid-session cannot retroactively change a value meant to be fixed for the whole
+    /// session. A local-agent target bakes these schemas and this prompt into its process
+    /// instructions and rejects any later turn that no longer composes to them, so this must be
+    /// the same value the session's `CoachDriver` was given (#273). Baked in through the same
+    /// `JarvisPrompts.Coach.system(capabilities:)` builder `CoachAttemptRunner` calls per turn.
     var capabilities: CoachCapabilities = .default
 
     /// The two clients that move together with one provider/model route target.
@@ -155,7 +149,6 @@ final class BrainComposition {
                                        // for the whole session (#273).
                                        systemPrompt: JarvisPrompts.Coach.system(
                                            capabilities: capabilities,
-                                           formatAddendum: interviewFormatAddendum,
                                            explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
                                        tools: capabilities.tools,
                                        toolChoice: .required,

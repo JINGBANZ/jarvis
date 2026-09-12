@@ -29,9 +29,6 @@ public enum Defaults {
         /// Keeps a coaching turn fast (sub-2s target) while still allowing tool calls.
         public static let effort: ReasoningEffort = .low
 
-        /// No stored default: absence selects None (base prompt only).
-        public static let interviewFormatKey = "brain.interviewFormat"
-
         public static let disabledToolsKey = "brain.disabledTools"
         /// Every composable tool is on until the user switches one off.
         public static let disabledTools: [String] = []

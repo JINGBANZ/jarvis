@@ -55,10 +55,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
-    /// Fixed prompt text for the session. In automatic mode that text tells the model to choose from
-    /// current evidence per response; no mutable runtime classification is required.
-    private let interviewFormatAddendum: String
-    private let interviewFormat: InterviewFormat?
     /// The session's switched-on tool set, resolved at Start. Deriving it per attempt is what let
     /// it drift from the schemas a local-agent target was warmed with (#273), so this is a plain
     /// `let` even though `prepMaterial` lands later.
@@ -89,9 +85,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)?,
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
-        capabilities: CoachCapabilities,
-        interviewFormatAddendum: String = "",
-        interviewFormat: InterviewFormat? = nil
+        capabilities: CoachCapabilities
     ) {
         self.capabilities = capabilities
         self.config = config
@@ -103,8 +97,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
         self.coachingAttempts = coachingAttempts
         self.activity = activity
         self.ledger = ledger
-        self.interviewFormatAddendum = interviewFormatAddendum
-        self.interviewFormat = interviewFormat
     }
 
     private func takeNextAttemptID() -> Int {
@@ -239,12 +231,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
             ledger.commit(through: delta.upTo)
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
-        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
+        let codeAllowed = attempt.plan.codeEnabled
         // One value describes the tools and offers them, so the prompt cannot name a tool the
         // request does not carry — the state that invited a hallucinated call.
         let systemPrompt = JarvisPrompts.Coach.system(
             capabilities: capabilities,
-            formatAddendum: interviewFormatAddendum,
             explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
         if reason.isManual && work.preparedManualReason != reason {
@@ -469,9 +460,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
+                    let diagram = mermaid.flatMap(DiagramHint.init)
                     if mermaid != nil && diagram == nil {
-                        jlog("Diagram hint omitted: unsupported graph or interview format")
+                        jlog("Diagram hint omitted: unsupported graph")
                     }
                     let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?, code: CodeSnippet?) in
                         guard !Task.isCancelled else { return (false, nil, nil) }

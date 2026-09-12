@@ -96,17 +96,6 @@ public final class BrainPreferences {
         set { defaults.set(newValue.rawValue, forKey: Defaults.Brain.effortKey) }
     }
 
-    /// An explicit format override. `nil` keeps the base prompt unchanged.
-    public var interviewFormat: InterviewFormat? {
-        get {
-            guard let raw = defaults.string(forKey: Defaults.Brain.interviewFormatKey) else {
-                return nil
-            }
-            return InterviewFormat(rawValue: raw)
-        }
-        set { defaults.set(newValue?.rawValue, forKey: Defaults.Brain.interviewFormatKey) }
-    }
-
     /// Tool names the user switched off in Settings → Brain → Capabilities, applied at the next
     /// Start. Storing what is OFF rather than what is ON means a tool added in a later version is
     /// on for everyone who never opened the card. The tools a session cannot run without are

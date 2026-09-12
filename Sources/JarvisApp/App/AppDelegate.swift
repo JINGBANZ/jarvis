@@ -342,12 +342,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionConfiguration = transcriptionPreferences.configuration
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
-        // Resolve once because CLI providers bake the prompt into their session. None adds nothing.
-        let interviewFormat = brain.preferences.interviewFormat
-        let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
         let explanationsEnabled = explanationPreferences.isEnabled && appearance.boxEnabled
         let codeEnabled = codePreferences.isEnabled && appearance.boxEnabled
-            && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         // The brain's key stays OpenAI-only (above); transcription reads whichever credential the
         // selected provider owns — Apple Speech has none, so this is "" there and unused.
@@ -496,8 +492,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 apiKey: key,
                 transcriptionKey: transcriptionKey,
                 brainRoute: brainRoute,
-                interviewFormatAddendum: interviewFormatAddendum,
-                interviewFormat: interviewFormat,
                 explanationsEnabled: explanationsEnabled,
                 codeEnabled: codeEnabled,
                 transcriptionConfiguration: transcriptionConfiguration,
@@ -558,8 +552,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         apiKey key: String,
         transcriptionKey: String,
         brainRoute: BrainRoute,
-        interviewFormatAddendum: String,
-        interviewFormat: InterviewFormat?,
         explanationsEnabled: Bool,
         codeEnabled: Bool,
         transcriptionConfiguration: TranscriptionConfiguration,
@@ -593,7 +585,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         transcript = RollingTranscript()
         artifacts.beginNewSession()  // rotate to a fresh session dir + activity/debug log
         overlayBox.clear() // …and a fresh response history for the new conversation
-        overlayBox.setInterviewFormat(interviewFormat)
         switch transcriptionConfiguration.provider {
         case .openAI:
             jlog(
@@ -632,7 +623,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         } else {
             hotkeys?.unregister(.explainMore)
         }
-        brain.interviewFormatAddendum = interviewFormatAddendum
         // One capability set for the session, handed to both the targets that bake it into their
         // instructions and the driver that sends it. Prep material counts as configured sources, not
         // a finished index: the index lands later and must not change what the session offers (#273).
@@ -681,9 +671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             coachingAttempts: artifacts.sessionAudit,
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit,
-            capabilities: capabilities,
-            interviewFormatAddendum: interviewFormatAddendum,
-            interviewFormat: interviewFormat)
+            capabilities: capabilities)
 
         // Building the index reads files and can shell out to `textutil`, so it runs off the Start
         // path entirely rather than delaying it — a search that fires before this lands finds no

@@ -175,9 +175,7 @@ public final class CoachDriver: @unchecked Sendable {
         recoveryDelay: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
         activity: (any ActivityEventRecording)? = nil,
         capabilities: CoachCapabilities = .default,
-        prepMaterial: (any PrepMaterialSearching)? = nil,
-        interviewFormatAddendum: String = "",
-        interviewFormat: InterviewFormat? = nil
+        prepMaterial: (any PrepMaterialSearching)? = nil
     ) {
         self.recoveryDelay = recoveryDelay
         self.clock = clock
@@ -201,9 +199,7 @@ public final class CoachDriver: @unchecked Sendable {
             activity: activity,
             ledger: ledger,
             // The app passes the same value it baked into a local-agent target's instructions.
-            capabilities: capabilities,
-            interviewFormatAddendum: interviewFormatAddendum,
-            interviewFormat: interviewFormat)
+            capabilities: capabilities)
     }
 
     private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { _ in

@@ -108,10 +108,10 @@ extension JarvisPrompts {
 
         /// The coach system prompt as a session with nothing to load sends it — the only place
         /// response behavior is governed (no code-side guardrail). Tool guidance is appended per
-        /// offered tool by `system(capabilities:formatAddendum:)`.
+        /// offered tool by `system(capabilities:)`.
         public static var system: String { base(withLoadRule: false) }
 
-        /// Shared across interview formats and providers, including fixed-instruction CLI sessions.
+        /// Shared across every session and provider, including fixed-instruction CLI sessions.
         private static let codeGuidance = """
 
         # Code accompanies the current hint when enabled
@@ -173,12 +173,7 @@ extension JarvisPrompts {
         /// - `capabilities`: the session's switched-on tool set, resolved once at Start. Each hot
         ///   tool contributes its own guidance and each deferred one a catalog line, so the prompt
         ///   describes exactly the tools this session has — no more, no fewer.
-        /// - `formatAddendum`: the interview-format guidance, resolved to a `String` once at Start
-        ///   rather than passed as an `InterviewFormat?`. That is deliberate, not something to
-        ///   clean up: `promptAddendum` reads its bundled file on every access and this builder
-        ///   runs per coaching turn, so the pre-resolved string keeps that a single file read
-        ///   instead of one per turn.
-        public static func system(capabilities: CoachCapabilities, formatAddendum: String,
+        public static func system(capabilities: CoachCapabilities,
                                   explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> String {
             let deferred = capabilities.deferredTools
             let sections = [base(withLoadRule: !deferred.isEmpty)]
@@ -187,7 +182,6 @@ extension JarvisPrompts {
                 + (explanationsEnabled ? explanationGuidance : "")
                 + (codeEnabled ? codeGuidance : "")
                 + (deferred.isEmpty ? "" : "\n\n" + catalog(deferred))
-                + formatAddendum
         }
 
         /// The loadable catalog: one line per deferred tool, its own description verbatim, so the
@@ -227,6 +221,9 @@ extension JarvisPrompts {
             either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
             symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
             accuracy outranks brevity.
+
+            Set mermaid to null. Attach a graph only when a loaded skill has told you to, and only
+            for the case it describes.
             """
 
             public static let searchPrepNotes = """

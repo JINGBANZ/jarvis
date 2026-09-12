@@ -21,8 +21,6 @@ import Foundation
         #expect(p.fallbackTargets.isEmpty)
         #expect(p.route.targets == [p.primaryTarget])
         #expect(p.primaryTarget.provider == Defaults.Brain.provider)
-        // Absence is the persisted representation of None, not an explicit override.
-        #expect(p.interviewFormat == nil)
     }
 
     /// Storing what is OFF is what makes a tool added in a later version on by default.
@@ -46,23 +44,6 @@ import Foundation
         p.disabledTools = CoachCapabilities.fixedToolNames.union(["search_prep_notes"])
 
         #expect(p.disabledTools == ["search_prep_notes"])
-    }
-
-    @Test(arguments: InterviewFormat.allCases)
-    func interviewFormatOverrideRoundTripsAndClearsBackToNone(_ format: InterviewFormat) {
-        let d = freshDefaults()
-        let p = BrainPreferences(defaults: d)
-        p.interviewFormat = format
-        #expect(BrainPreferences(defaults: d).interviewFormat == format)
-        p.interviewFormat = nil
-        #expect(BrainPreferences(defaults: d).interviewFormat == nil)
-        #expect(d.string(forKey: "brain.interviewFormat") == nil)
-    }
-
-    @Test func unknownStoredInterviewFormatFallsBackToNone() {
-        let d = freshDefaults()
-        d.set("architecture-review", forKey: "brain.interviewFormat")
-        #expect(BrainPreferences(defaults: d).interviewFormat == nil)
     }
 
     @Test func roundTripsThroughDefaults() {

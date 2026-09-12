@@ -16,7 +16,7 @@ public let captureScreenTool = ToolDef(
 public let speakTool = ToolDef(
     name: "speak",
     description: JarvisPrompts.Coach.ToolDescription.speak,
-    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"mermaid":{"type":["string","null"],"description":"A small Mermaid graph for a private architecture sketch. Null unless the coaching guidance for this session asks for a diagram."},"explanation":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}"#,
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"mermaid":{"type":["string","null"],"description":"A small Mermaid graph for a private architecture sketch. Null unless a loaded skill asks for a diagram."},"explanation":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}"#,
     guidance: JarvisPrompts.Coach.ToolGuidance.speak
 )
 
