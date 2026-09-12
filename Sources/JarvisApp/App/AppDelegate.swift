@@ -211,7 +211,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     detectedCLIs: clis,
                     update: change == .topology ? .topologyEdit : .effortEdit)
             },
-            transcriptionPreferences: transcriptionPreferences)
+            transcriptionPreferences: transcriptionPreferences,
+            prepMaterialPreferences: prepMaterialPreferences)
         let connectionsSection = ConnectionsSection(
             detector: brain.detector,
             keyStore: secretFile,
@@ -638,7 +639,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // a finished index: the index lands later and must not change what the session offers (#273).
         let prepMaterialSources = prepMaterialPreferences.sources
         let capabilities = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty)
+            disabledTools: brain.preferences.disabledTools,
+            prepSourcesConfigured: !prepMaterialSources.isEmpty)
         brain.capabilities = capabilities
         jlog("Jarvis coach capabilities: hot="
             + capabilities.hotTools.map(\.name).joined(separator: ",")
