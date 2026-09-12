@@ -112,6 +112,17 @@ public final class BrainPreferences {
         }
     }
 
+    /// Skill names the user switched off, on the same terms as `disabledTools`: stored as what is
+    /// OFF, applied at the next Start. No skill is required for a session to run, so nothing is
+    /// dropped on write; a name matching no bundled skill is simply honored as nothing.
+    public var disabledSkills: Set<String> {
+        get {
+            Set(defaults.stringArray(forKey: Defaults.Brain.disabledSkillsKey)
+                ?? Defaults.Brain.disabledSkills)
+        }
+        set { defaults.set(newValue.sorted(), forKey: Defaults.Brain.disabledSkillsKey) }
+    }
+
     private func persistedTarget(from value: Any) -> BrainTarget? {
         guard let dictionary = value as? [String: Any],
               let providerRaw = dictionary["provider"] as? String,

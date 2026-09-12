@@ -562,6 +562,40 @@ import JarvisCore
         client.terminate()
     }
 
+    /// A skill is not a tool: it is named in the baked system text and its body arrives in the turn
+    /// as a `load_skill` result, so loading one leaves the per-turn array — and the freeze on the
+    /// instructions the process was warmed with — untouched.
+    @Test func aSkillCatalogIsBakedAndLoadingOneLeavesTheToolArrayAlone() async throws {
+        let workDir = try makeWorkDir()
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false,
+            skills: [Skill(name: "behavioral", description: "Coaching for behavioral questions.",
+                           body: "Organize the answer as STAR.")])
+        let backend = FakeLocalAgentRuntime(replies: [
+            #"{"tool":"load_skill","arguments":{"name":"behavioral"}}"#,
+            #"{"tool":"speak","arguments":{"lines":["tip"]}}"#,
+        ])
+        let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
+        let client = makeClient(provider: .claudeCode, workDir: workDir,
+                                runtime: CLIBrainRuntime(backend: backend),
+                                systemPrompt: prompt, tools: capabilities.tools)
+
+        for _ in 0..<2 {
+            let response = try await client.respond(
+                messages: [.system(prompt), .user("help")],
+                tools: capabilities.callable(loaded: []),
+                toolChoice: .required)
+            #expect(response.toolCalls.isEmpty == false)
+        }
+
+        #expect(client.expectedInstructions.contains("# Skills you can load"))
+        #expect(client.expectedInstructions.contains("- behavioral: Coaching for behavioral questions."))
+        #expect(client.expectedInstructions.contains("- load_skill — "))
+        // The body is not in the instructions; it only ever reaches the model as a tool result.
+        #expect(!client.expectedInstructions.contains("Organize the answer as STAR."))
+        client.terminate()
+    }
+
     /// Only the hot tools get a schema in the protocol block. A deferred tool is named in the
     /// catalog inside the system text, and its schema arrives as a `load_tool` result in the turn.
     @Test func theToolProtocolRendersHotSchemasThenPointsAtTheCatalog() {

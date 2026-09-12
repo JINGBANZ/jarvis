@@ -101,4 +101,17 @@ import Testing
         #expect(design.body.contains("mermaid"))
         #expect(skills.first { $0.name == "coding" }?.body.contains("invariant") == true)
     }
+
+    /// A build that ships no readable skill is a generic coach, not a broken one: no loader, no
+    /// catalog block, and a prompt that never names either.
+    @Test func noSkillsMeansNoLoaderAndNoCatalog() {
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false, skills: [])
+        let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
+
+        #expect(capabilities.skills.isEmpty)
+        #expect(capabilities.tool(named: CoachCapabilities.loadSkillName) == nil)
+        #expect(!prompt.contains("load_skill"))
+        #expect(!prompt.contains("# Skills you can load"))
+    }
 }

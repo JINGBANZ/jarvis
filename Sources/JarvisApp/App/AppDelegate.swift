@@ -627,25 +627,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // instructions and the driver that sends it. Prep material counts as configured sources, not
         // a finished index: the index lands later and must not change what the session offers (#273).
         let prepMaterialSources = prepMaterialPreferences.sources
+        let bundledSkills = SkillCatalog.bundled()
         let capabilities = CoachCapabilities.compose(
             disabledTools: brain.preferences.disabledTools,
-            prepSourcesConfigured: !prepMaterialSources.isEmpty)
+            disabledSkills: brain.preferences.disabledSkills,
+            prepSourcesConfigured: !prepMaterialSources.isEmpty,
+            skills: bundledSkills)
         brain.capabilities = capabilities
-        // The one place a switched-off tool is visible: Activity never mentions what was not
+        // The one place a switched-off capability is visible: Activity never mentions what was not
         // offered. Read from the persisted names, so a name that matched nothing is reported as
-        // nothing and the loader — which is synthesized, not switchable — is never named here.
+        // nothing and a loader — which is synthesized, not switchable — is never named here.
+        let everything = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty,
+            skills: bundledSkills)
         let honoredDisabled = brain.preferences.disabledTools
             .subtracting(CoachCapabilities.fixedToolNames)
-            .filter { name in
-                CoachCapabilities
-                    .compose(disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty)
-                    .tool(named: name) != nil
-            }
+            .filter { everything.tool(named: $0) != nil }
+            .sorted()
+            + brain.preferences.disabledSkills
+            .filter { everything.skill(named: $0) != nil }
             .sorted()
         jlog("Jarvis coach capabilities: hot="
             + capabilities.hotTools.map(\.name).joined(separator: ",")
             + " deferred=" + (capabilities.catalogNames.isEmpty
                 ? "(none)" : capabilities.catalogNames.joined(separator: ","))
+            + " skills=" + (capabilities.skills.isEmpty
+                ? "(none)" : capabilities.skills.map(\.name).joined(separator: ","))
             + " switched-off=" + (honoredDisabled.isEmpty
                 ? "(none)" : honoredDisabled.joined(separator: ",")))
         let configuredRoute = brain.makeConfiguredRoute(

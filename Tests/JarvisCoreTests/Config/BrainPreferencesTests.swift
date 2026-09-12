@@ -35,6 +35,18 @@ import Foundation
         #expect(d.stringArray(forKey: Defaults.Brain.disabledToolsKey) == ["search_prep_notes"])
     }
 
+    /// Skills switch off the same way, and nothing is required, so nothing is dropped on write.
+    @Test func disabledSkillsRoundTripAndDefaultToNothingSwitchedOff() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        #expect(p.disabledSkills.isEmpty)
+
+        p.disabledSkills = ["system-design"]
+
+        #expect(BrainPreferences(defaults: d).disabledSkills == ["system-design"])
+        #expect(d.stringArray(forKey: Defaults.Brain.disabledSkillsKey) == ["system-design"])
+    }
+
     /// A session cannot run without these, so the preference cannot record them as off — not even
     /// through a hand-edited plist, which the next write normalizes away.
     @Test func theToolsASessionNeedsAreDroppedOnWrite() {

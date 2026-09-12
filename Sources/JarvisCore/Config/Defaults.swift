@@ -33,6 +33,10 @@ public enum Defaults {
         /// Every composable tool is on until the user switches one off.
         public static let disabledTools: [String] = []
 
+        public static let disabledSkillsKey = "brain.disabledSkills"
+        /// Every bundled skill is on until the user switches one off.
+        public static let disabledSkills: [String] = []
+
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
         /// their selection; CLI providers store under a suffixed key each.
         public static func modelKey(for provider: BrainProvider) -> String {

@@ -62,10 +62,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
-    /// Deferred tools the session has loaded. A load belongs to the attempt that made it and lands
-    /// here only when that attempt commits a turn, so "already loaded" is true exactly when the
-    /// load's schema and guidance are in the committed history the next request replays.
-    private var loadedTools: Set<String> = []
+    /// What the session has loaded: a deferred tool by name, a skill under a `skill:` key so the
+    /// two namespaces cannot collide. A load belongs to the attempt that made it and lands here
+    /// only when that attempt commits a turn, so "already loaded" is true exactly when the loaded
+    /// content is in the committed history the next request replays.
+    private var loadedCapabilities: Set<String> = []
     /// Guards the single off-path compaction run (see `startCompactionIfIdle`).
     private var isCompacting = false
     /// A compaction asked for while one was already running, run once the current pass ends.
@@ -312,7 +313,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // cancellation path discards them, so the next attempt simply loads again — one round trip,
         // and no "already loaded" answer pointing at a conversation that never happened.
         var loadedThisAttempt: Set<String> = []
-        let alreadyLoaded = runnerLock.withLock { loadedTools }
+        let alreadyLoaded = runnerLock.withLock { loadedCapabilities }
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
@@ -579,6 +580,31 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         toolCallId: callID,
                         resultText: resultText,
                         newPhase: .loadToolContinuation)
+
+                case .loadSkill(let callID, let name):
+                    let resultText: String
+                    if let skill = capabilities.skill(named: name) {
+                        // Namespaced, so a skill and a tool of the same name stay separate loads.
+                        if loaded.contains(Self.skillKey(name)) {
+                            jlog("📎 the \(name) skill was already loaded — saying so instead of "
+                                 + "repeating it")
+                            resultText = JarvisPrompts.Coach.loadSkillAlreadyLoaded(name)
+                        } else {
+                            loadedThisAttempt.insert(Self.skillKey(skill.name))
+                            jlog("📎 loaded the \(skill.name) skill")
+                            // The catalog's name, never the model's argument: Activity states what
+                            // Jarvis did, not what it was asked for.
+                            activity?.record(.capabilityLoaded(kind: .skill, name: skill.name))
+                            resultText = JarvisPrompts.Coach.loadSkillResult(skill)
+                        }
+                    } else {
+                        jlog("⚠️ no skill named \(name) to load — telling the model so")
+                        resultText = JarvisPrompts.Coach.skillUnavailable(name)
+                    }
+                    appendToolContinuation(
+                        toolCallId: callID,
+                        resultText: resultText,
+                        newPhase: .loadSkillContinuation)
                 }
             }
 
@@ -607,8 +633,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
     /// a turn that loaded something — which is what makes "already loaded" point at real history.
     private func commitLoads(_ names: Set<String>) {
         guard !names.isEmpty else { return }
-        runnerLock.withLock { loadedTools.formUnion(names) }
+        runnerLock.withLock { loadedCapabilities.formUnion(names) }
     }
+
+    /// Skills and tools share one loaded set; this keeps their names apart inside it.
+    private static func skillKey(_ name: String) -> String { "skill:\(name)" }
 
     /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
     /// Cancellation asks the capture adapter to terminate its helper, then waits for `capture()` to

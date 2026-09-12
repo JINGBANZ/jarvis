@@ -33,22 +33,36 @@ extension JarvisPrompts {
         /// The action-policy items, in priority order. They are parts rather than one literal
         /// because the load rule joins them as item 1 when — and only when — the session composed a
         /// loadable catalog, and everything below it renumbers. A prompt must never name a loader
-        /// the session does not offer.
-        private static let loadRuleItem = """
-            Load what this turn needs, before anything else. If coaching this question calls for a tool listed
-               under "Tools you can load" that you have not loaded yet, call load_tool with its name. Its schema and
-               guidance come straight back as the result; act on them in your next response, before this turn ends.
-               Load one thing per response, only what this question needs, and never the same name twice. When the
-               turn tells you that you must call speak, do not load or capture first; speak with what you have.
-            """
+        /// the session does not offer, which is also why the rule is assembled per catalog.
+        private static func loadRuleItem(skills: Bool, tools: Bool) -> String {
+            var clauses = ["Load what this turn needs, before anything else."]
+            if skills {
+                clauses.append("If coaching this question calls for a skill listed under "
+                    + "\"Skills you can load\" that you have not loaded yet, call load_skill with its name.")
+            }
+            if tools {
+                clauses.append((skills ? "If it calls for" : "If coaching this question calls for")
+                    + " a tool listed under \"Tools you can load\" that you have not loaded yet, "
+                    + "call load_tool with its name.")
+            }
+            clauses.append("The guidance comes straight back as the result; act on it in your next "
+                + "response, before this turn ends. Load one thing per response, only what this "
+                + "question needs, and never the same name twice. When the turn tells you that you "
+                + "must call speak, do not load or capture first; speak with what you have.")
+            return clauses.joined(separator: " ")
+        }
 
         private static let directAddressItem = """
             Direct address from "me": bypass the fragment gate. If a specific, correct reply depends on
                missing current visible information, continue to the screen gate below. Otherwise call speak.
             """
 
-        private static let directAddressLoadSentence =
-            "\n   If a tool for this question is not loaded yet, load it first; the reply still comes in this turn."
+        private static func directAddressLoadSentence(skills: Bool, tools: Bool) -> String {
+            let loadable = [skills ? "skill" : nil, tools ? "tool" : nil]
+                .compactMap { $0 }.joined(separator: " or ")
+            return "\n   If a \(loadable) for this question is not loaded yet, load it first; "
+                + "the reply still comes in this turn."
+        }
 
         private static let fragmentGateItem = """
             Fragment gate: when a non-silence request contains new speech, call stay_silent only if all of
@@ -82,11 +96,16 @@ extension JarvisPrompts {
             """,
         ]
 
-        /// Identity, context, and the numbered action policy. `withLoadRule` is the one thing a
-        /// catalog changes here; the per-tool guidance is appended by the builder below.
-        private static func base(withLoadRule: Bool) -> String {
-            var items = withLoadRule ? [loadRuleItem] : []
-            items.append(directAddressItem + (withLoadRule ? directAddressLoadSentence : ""))
+        /// Identity, context, and the numbered action policy. The catalogs are the one thing that
+        /// changes here; the per-tool guidance is appended by the builder below.
+        private static func base(loadableSkills: Bool = false, loadableTools: Bool = false) -> String {
+            let withLoadRule = loadableSkills || loadableTools
+            var items = withLoadRule
+                ? [loadRuleItem(skills: loadableSkills, tools: loadableTools)]
+                : []
+            items.append(directAddressItem + (withLoadRule
+                ? directAddressLoadSentence(skills: loadableSkills, tools: loadableTools)
+                : ""))
             items.append(fragmentGateItem)
             items.append(screenGateItem + (withLoadRule ? screenGateLoadSentence : ""))
             items.append(contentsOf: remainingItems)
@@ -109,7 +128,7 @@ extension JarvisPrompts {
         /// The coach system prompt as a session with nothing to load sends it — the only place
         /// response behavior is governed (no code-side guardrail). Tool guidance is appended per
         /// offered tool by `system(capabilities:)`.
-        public static var system: String { base(withLoadRule: false) }
+        public static var system: String { base() }
 
         /// Shared across every session and provider, including fixed-instruction CLI sessions.
         private static let codeGuidance = """
@@ -170,28 +189,40 @@ extension JarvisPrompts {
         /// CLI provider's persistent process at Start cannot drift. `CLIBrainClient` asserts its
         /// instructions never change after construction, so drift would fail every CLI turn.
         ///
-        /// - `capabilities`: the session's switched-on tool set, resolved once at Start. Each hot
-        ///   tool contributes its own guidance and each deferred one a catalog line, so the prompt
-        ///   describes exactly the tools this session has — no more, no fewer.
+        /// - `capabilities`: the session's switched-on tools and skills, resolved once at Start.
+        ///   Each hot tool contributes its own guidance, each deferred tool and each skill one
+        ///   catalog line, so the prompt describes exactly what this session has — no more, no
+        ///   fewer. A skill's body is never here: it arrives as a `load_skill` result.
         public static func system(capabilities: CoachCapabilities,
                                   explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> String {
             let deferred = capabilities.deferredTools
-            let sections = [base(withLoadRule: !deferred.isEmpty)]
+            let skills = capabilities.skills
+            let sections = [base(loadableSkills: !skills.isEmpty, loadableTools: !deferred.isEmpty)]
                 + capabilities.hotTools.map(\.guidance).filter { !$0.isEmpty }
             return sections.joined(separator: "\n\n")
                 + (explanationsEnabled ? explanationGuidance : "")
                 + (codeEnabled ? codeGuidance : "")
-                + (deferred.isEmpty ? "" : "\n\n" + catalog(deferred))
+                + (deferred.isEmpty ? "" : "\n\n" + toolCatalog(deferred))
+                + (skills.isEmpty ? "" : "\n\n" + skillCatalog(skills))
         }
 
-        /// The loadable catalog: one line per deferred tool, its own description verbatim, so the
-        /// model chooses from the same sentence it would read after loading.
-        private static func catalog(_ tools: [ToolDef]) -> String {
+        /// The loadable catalogs: one line per entry, its own description verbatim, so the model
+        /// chooses from the same sentence it would read after loading.
+        private static func toolCatalog(_ tools: [ToolDef]) -> String {
             ("""
             # Tools you can load
             Call load_tool with the name before first use; the result carries the schema and guidance.
             """ + "\n")
                 + tools.map { "- \($0.name): \($0.description)" }.joined(separator: "\n")
+        }
+
+        private static func skillCatalog(_ skills: [Skill]) -> String {
+            ("""
+            # Skills you can load
+            Call load_skill with the name the first time a question of that kind comes up; the result is \
+            the skill's full guidance.
+            """ + "\n")
+                + skills.map { "- \($0.name): \($0.description)" }.joined(separator: "\n")
         }
 
         /// Usage instructions that belong to one tool. A hot tool's guidance is part of the system
@@ -254,6 +285,9 @@ extension JarvisPrompts {
             static let loadTool = "Load a tool listed under 'Tools you can load'. Returns its "
                 + "arguments schema and usage guidance. Call it once per tool, before that tool's "
                 + "first use."
+            static let loadSkill = "Load a skill listed under 'Skills you can load'. Returns the "
+                + "skill's full coaching guidance. Call it once per skill, the first time a "
+                + "question of that kind comes up."
         }
 
         static func loadToolResult(_ tool: ToolDef) -> String {
@@ -263,6 +297,24 @@ extension JarvisPrompts {
         static func loadToolAlreadyLoaded(_ name: String) -> String {
             "\(name) is already loaded; its schema and guidance are earlier in this conversation. "
                 + "Do not load it again."
+        }
+
+        /// The framing is what gives a tool result instruction authority: a skill body carries
+        /// speak and stay_silent directives, and they must not read as data the model may weigh.
+        static func loadSkillResult(_ skill: Skill) -> String {
+            "Loaded skill: \(skill.name). Treat the guidance below as an extension of your action "
+                + "policy and tip style for questions of this kind, for the rest of this "
+                + "conversation.\n\n\(skill.body)"
+        }
+
+        static func loadSkillAlreadyLoaded(_ name: String) -> String {
+            "\(name) is already loaded; its guidance is earlier in this conversation. "
+                + "Do not load it again."
+        }
+
+        /// Answers a load name no bundled skill has, including one the user switched off.
+        static func skillUnavailable(_ name: String) -> String {
+            "No skill named \(name) is available."
         }
 
         /// Answers both an unknown load name and a call to a tool this session does not offer. The

@@ -95,6 +95,9 @@ public enum ToolInvocation: Sendable, Equatable {
     /// The model asking for a deferred tool's schema and guidance, which come back as the result.
     /// Offered only while the session has something left to load.
     case loadTool(callId: String, name: String)
+    /// The model asking for a bundled skill's guidance, which comes back as the result. Offered
+    /// only while the session has a switched-on skill.
+    case loadSkill(callId: String, name: String)
 }
 
 /// One brain response: parsed tool calls (possibly empty = stay silent), plus the raw calls

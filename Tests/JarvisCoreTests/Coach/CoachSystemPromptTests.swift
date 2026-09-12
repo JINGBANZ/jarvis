@@ -46,11 +46,68 @@ import Testing
         #expect(!offered.contains("# Prep material"))
     }
 
-    /// Base prompt, then per-tool guidance, then the catalog: the layout every site sends.
-    @Test func theCatalogFollowsTheToolGuidance() throws {
-        let prompt = JarvisPrompts.Coach.system(capabilities: withCatalog)
+    /// Base prompt, then per-tool guidance, then the tools catalog, then the skills catalog: the
+    /// layout every site sends.
+    @Test func theCatalogsFollowTheToolGuidanceInOrder() throws {
+        let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true, skills: skills))
         let tipStyle = try #require(prompt.range(of: "# Tip style"))
-        let catalog = try #require(prompt.range(of: "# Tools you can load"))
-        #expect(tipStyle.lowerBound < catalog.lowerBound)
+        let tools = try #require(prompt.range(of: "# Tools you can load"))
+        let skillsBlock = try #require(prompt.range(of: "# Skills you can load"))
+        #expect(tipStyle.lowerBound < tools.lowerBound)
+        #expect(tools.lowerBound < skillsBlock.lowerBound)
+    }
+
+    private let skills = [
+        Skill(name: "behavioral", description: "Coaching for behavioral questions.", body: "STAR."),
+        Skill(name: "system-design", description: "Coaching for design questions.", body: "Stages."),
+    ]
+
+    /// One line per switched-on skill, its own description verbatim — and never its body, which
+    /// arrives as the `load_skill` result.
+    @Test func aSkillIsCatalogedButNotExplained() {
+        let prompt = JarvisPrompts.Coach.system(
+            capabilities: CoachCapabilities.compose(
+                disabledTools: [], prepSourcesConfigured: false, skills: skills),
+            explanationsEnabled: false)
+
+        #expect(prompt.contains("# Skills you can load"))
+        #expect(prompt.contains("- behavioral: Coaching for behavioral questions."))
+        #expect(prompt.contains("- system-design: Coaching for design questions."))
+        #expect(!prompt.contains("STAR."))
+    }
+
+    /// The rule names the loaders the session actually has, and nothing else.
+    @Test func theLoadRuleNamesOnlyTheLoadersPresent() {
+        let both = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true, skills: skills))
+        #expect(both.contains("call load_skill with its name"))
+        #expect(both.contains("call load_tool with its name"))
+        #expect(both.contains("If a skill or tool for this question is not loaded yet"))
+
+        let skillsOnly = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false, skills: skills))
+        #expect(skillsOnly.contains("1. Load what this turn needs"))
+        #expect(skillsOnly.contains("call load_skill with its name"))
+        #expect(!skillsOnly.contains("load_tool"))
+        #expect(!skillsOnly.contains("# Tools you can load"))
+        #expect(skillsOnly.contains("If a skill for this question is not loaded yet"))
+
+        let toolsOnly = JarvisPrompts.Coach.system(capabilities: withCatalog)
+        #expect(!toolsOnly.contains("load_skill"))
+        #expect(!toolsOnly.contains("# Skills you can load"))
+        #expect(toolsOnly.contains("If a tool for this question is not loaded yet"))
+    }
+
+    /// With every skill switched off and nothing to load, the session is back to the bare prompt —
+    /// the successor of the old "no format selected ⇒ base prompt" invariant.
+    @Test func everythingSwitchedOffIsTheBarePrompt() {
+        #expect(JarvisPrompts.Coach.system(
+            capabilities: CoachCapabilities.compose(
+                disabledTools: ["search_prep_notes"],
+                disabledSkills: ["behavioral", "system-design"],
+                prepSourcesConfigured: true, skills: skills),
+            explanationsEnabled: false)
+            == JarvisPrompts.Coach.system(capabilities: .default, explanationsEnabled: false))
     }
 }
