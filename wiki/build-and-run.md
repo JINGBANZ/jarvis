@@ -304,6 +304,14 @@ the human-facing coaching record. The current validation priority lives in
   speak into the microphone and play speech through system audio; confirm both appear as finalized
   `heard:` entries in Activity. If frames never arrive, confirm Jarvis stops (mic) or degrades to
   microphone-only (system) instead of reporting ready.
+- With a prep-material source configured, ask a question that matches the notes. Confirm Activity
+  shows "loaded the search_prep_notes tool" followed by the search and the tip, all in one attempt,
+  and that in `brain-traffic.jsonl` the first request did not declare `search_prep_notes` while the
+  request after the load did. Repeat on Claude Code and Codex with at least two coaching turns after
+  the load, and confirm no "instructions changed after runtime initialization" line in
+  `jarvis-debug.log`. Switch Prep notes search off in Settings → Brain → Capabilities, Start again,
+  and confirm the tool and its catalog line are absent from that file's `tools` and `instructions`.
+- Run a System Design session on a CLI brain and confirm a diagram renders in the Overlay Box.
 - Create an overlapping exchange where a longer interviewer question finalizes after a short user
   reply. Confirm Activity places the question first and the first automatic brain request uses the
   same order. Repeat while a prior brain call is in flight to exercise the queued-attempt boundary.

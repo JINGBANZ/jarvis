@@ -377,6 +377,54 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"strict\":true"))
     }
 
+    /// A deferred tool is undeclared until the model loads it, so the only array the provider ever
+    /// sees is what the session may call right now — loader included, with its catalog enum.
+    @Test func encodesTheLoaderAndDeclaresADeferredToolOnlyOnceLoaded() async throws {
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true)
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+
+        _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
+        let before = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(before.contains("\"load_tool\""))
+        #expect(before.contains("\"enum\":[\"search_prep_notes\"]"))
+        #expect(before.contains("\"strict\":true"))
+        #expect(!before.contains("\"name\":\"search_prep_notes\""))
+
+        _ = try await client.respond(
+            messages: [.user("hi")],
+            tools: capabilities.callable(loaded: ["search_prep_notes"]))
+        let after = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(after.contains("\"name\":\"search_prep_notes\""))
+    }
+
+    /// The load and the use happen in one attempt, which is one `BrainConversation`. Each request
+    /// inside it must declare the array it was handed, or a tool loaded in one iteration would not
+    /// be callable in the next.
+    @Test func aConversationDeclaresEachRequestsOwnTools() async throws {
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true)
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        let conversation = try await client.makeConversation()
+
+        _ = try await conversation.respond(
+            messages: [.user("hi")], tools: capabilities.callable(loaded: []),
+            toolChoice: .required)
+        #expect(!(String(data: box.get() ?? Data(), encoding: .utf8) ?? "")
+            .contains("\"name\":\"search_prep_notes\""))
+
+        _ = try await conversation.respond(
+            messages: [.user("hi")], tools: capabilities.callable(loaded: ["search_prep_notes"]),
+            toolChoice: .required)
+        #expect((String(data: box.get() ?? Data(), encoding: .utf8) ?? "")
+            .contains("\"name\":\"search_prep_notes\""))
+        await conversation.finish()
+    }
+
     /// Default tool choice is "auto".
     @Test func defaultToolChoiceIsAuto() async throws {
         let box = CapturedBody()

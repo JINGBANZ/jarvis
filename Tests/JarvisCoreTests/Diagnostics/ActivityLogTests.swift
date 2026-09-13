@@ -225,6 +225,36 @@ import Foundation
             == "think")
     }
 
+    /// One row per load, and a distinct row for notes that were not there to search — never a
+    /// zero-match search, which would claim the notes were read and found wanting.
+    @Test func capabilityLoadsAndMissingPrepNotesEachGetTheirOwnRow() async throws {
+        let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let (log, evidence) = ActivityLog.recordingSession(in: dir)
+        evidence.record(.capabilityLoaded(kind: .tool, name: "search_prep_notes"))
+        evidence.record(.prepNotesUnavailable)
+        _ = await evidence.close()
+        let snapshot = log.attach { _ in }
+
+        #expect(snapshot.rows.count == 2)
+        #expect(snapshot.rows[0].contains("loaded the search_prep_notes tool"))
+        // A degradation notice, not a progress report: the row says coaching went ahead without
+        // the notes, and never which of "still building" or "nothing usable" caused it.
+        #expect(snapshot.rows[1].contains("couldn't check your prep notes"))
+        #expect(snapshot.rows[1].contains("coaching without them"))
+        #expect(!snapshot.rows[1].contains("yet"))
+        #expect(ActivityLog.cssClass(for: "📎 loaded the search_prep_notes tool") == "think")
+        #expect(ActivityLog.cssClass(
+            for: "📎 couldn't check your prep notes — coaching without them") == "think")
+    }
+
+    /// `Kind` is on-disk identity: a tool reading a complete log matches these strings.
+    @Test func theNewCapabilityKindsKeepTheirPersistedNames() {
+        #expect(ActivityEvent.Kind.capabilityLoaded.rawValue == "capabilityLoaded")
+        #expect(ActivityEvent.Kind.prepNotesUnavailable.rawValue == "prepNotesUnavailable")
+        #expect(ActivityEvent.CapabilityKind.tool.rawValue == "tool")
+        #expect(ActivityEvent.CapabilityKind.skill.rawValue == "skill")
+    }
+
     /// The retry frame is fixed; the cause in front of it is the failure's own sentence, so a
     /// screenshot of Activity diagnoses a turn that failed for a reason nobody has classified yet.
     @Test func temporaryProviderFailureQuotesTheProviderInsideTheRetryFrame() async throws {

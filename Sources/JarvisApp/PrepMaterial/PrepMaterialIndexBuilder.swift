@@ -19,7 +19,7 @@ enum PrepMaterialIndexBuilder {
     /// Builds an index from every configured source, skipping whatever fails to extract — a corrupt
     /// PDF or an unreadable file never blocks the rest. Returns nil when nothing produced usable
     /// text, so the caller installs no port rather than one with zero chunks. That does not change
-    /// what the session offers: `sessionCoachTools` decided that at Start from the configured
+    /// what the session offers: `CoachCapabilities` decided that at Start from the configured
     /// sources, and a search against a missing port returns no matches.
     ///
     /// Each file's extraction runs on its own detached task — the same "OS-bound synchronous edge,

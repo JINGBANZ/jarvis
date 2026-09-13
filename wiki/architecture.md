@@ -95,8 +95,9 @@ moments the model judges worthwhile.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
    (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the session's
-   fixed tool set — `[capture_screen, speak, stay_silent]`, plus `search_prep_notes` when prep
-   sources are configured, with `speak` carrying the System Design schema in that format. The timing
+   switched-on tool set. `capture_screen`, `speak`, and `stay_silent` are always there; `load_tool`
+   and a one-line catalog entry for `search_prep_notes` join them when prep sources are configured
+   and the user has not switched that capability off (see [Capabilities](#capabilities)). The timing
    is what lets the model tell "thinking" from "stuck."
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
    visible context missing from the conversation — including unresolved references such as “this”
@@ -112,8 +113,10 @@ moments the model judges worthwhile.
    has to emit *something*, and at low reasoning effort that came out as leaked deliberation text
    ("final empty. no. final.") that polluted the conversation and was imitated on later turns;
    requiring a tool call prevents the emission rather than filtering it afterwards.
-6. Activity records every brain action, through the session's one evidence handle: successful or failed `capture_screen`, `speak`, and
-   `stay_silent`. Heard rows and model-facing transcript deltas share `ConversationChronology`:
+6. Activity records every brain action, through the session's one evidence handle: successful or
+   failed `capture_screen`, `speak`, `stay_silent`, each prep-notes search, each capability load, and
+   the fixed notice that a tip went out without the user's prepared notes. Heard rows and
+   model-facing transcript deltas share `ConversationChronology`:
    occurrence time is authoritative, and insertion order breaks timestamp ties. A late-finalizing
    earlier utterance is therefore inserted before a faster later reply. When Activity reaches its
    memory backstop, Core sends the discarded insertion identities so the live DOM trims in lockstep
@@ -147,13 +150,61 @@ drop*, not *show-freshest-only* — and adding direct-reply priority/preemption 
 rejected as solving a problem the interview workflow doesn't have. (The must-reply-on-direct-address
 path still works for testing/practice; it is simply not latency-critical there.)
 
+### Capabilities
+
+What a session can do is one value, `CoachCapabilities`, composed at Start from the user's switches
+and from whether prep-material sources are configured, then read by everything: the prompt the coach
+loop builds per turn, and the prompt and tool list `BrainComposition` bakes into a CLI provider's
+persistent process. One value is the whole point. `CLIBrainClient` renders each tool's
+`parametersJSON` verbatim into the instructions its process is warmed with, so a set derived twice
+could disagree and fail every remaining attempt on that target until the route exhausted.
+
+A tool carries its own usage guidance (`ToolDef.guidance`) and a deferred flag. A **hot** tool is
+declared with its schema and its guidance from the first request: the tip style is `speak`'s
+guidance, because `speak` is the tip. A **deferred** tool appears only as one catalog line, its name
+and its one-sentence description, and the model calls `load_tool` to receive its schema and
+guidance as a tool result, after which it is declared and callable for the rest of the session. So
+the prompt describes exactly the tools the request carries, and the guidance for a tool the model
+cannot call is not in the prompt at all. Jarvis defers on every brain in the same way rather than
+using a provider's own tool-search feature: the route can move between brains mid-session over one
+shared history, and a plain tool result replays on any of them.
+
+A load belongs to the attempt that made it and becomes session state only when that attempt commits
+a turn. An attempt that fails simply loads again, at the cost of one round trip, and in exchange
+"already loaded" is true exactly when the schema and guidance are in history the model can still read. Compaction
+keeps those pairs verbatim under the summary for the same reason ([`CoachHistory`](../Sources/JarvisCore/Coach/CoachHistory.swift)).
+
+`search_prep_notes` is the first deferred tool. It is in the catalog when prep-material *sources* are
+configured and the user has not switched it off. "Configured" is deliberately not "an index exists":
+building the index reads files and shells out to `textutil`, so it runs off the Start path and the
+search port arrives after the first
+attempts. A search that finds no index says so and coaching continues without the notes. That is the
+honest answer, and it costs nothing, where changing the offered set mid-session would cost the whole
+session. The same answer covers indexing that finished with nothing usable, because the builder
+installs no port in either case; which one it was stays in `jlog`, and Activity carries only the
+fixed notice that a tip went out without the user's own material. Switching the capability off also
+skips the index build, so the file reading and `textutil` work stop with it.
+
+A call to a tool the session does not offer is answered with a plain "no tool named X is available"
+rather than failing the attempt. Only a CLI target can reach that branch, since it reconstructs calls
+from prompt text and can name anything; on the API path an undeclared tool is not callable at all.
+The per-attempt response cap is 7: two more than the longest sensible chain once skills also load on
+demand, which is load a skill, load a tool, search, capture, speak.
+
+`capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
+capture, and a turn cannot end without one of the other two. `load_tool` has none either, because it
+is composed only while something remains to load. See
+[settings-window.md](./settings-window.md) for the user-facing card.
+
 ### Private architecture hints
 
 An explicitly selected System Design session can attach a visual sketch to `speak` during the
 high-level-architecture stage. The format addendum tells the model when a graph is helpful; the
-harness does not classify interview stages. `CoachAttemptRunner` offers the nullable diagram field
-only for that Start-time format and ignores unexpected diagram output in other formats. Keeping it
-on `speak` also makes the manual-hint shortcut work in one response.
+harness does not classify interview stages. The nullable diagram field is part of the one `speak`
+schema on every brain and in every session, one schema being what keeps the tool list a CLI process
+is warmed with equal to the one the loop sends. `CoachAttemptRunner` renders a supplied graph only
+in a System Design session, and ignores diagram output elsewhere. Keeping it on `speak` also makes the
+manual-hint shortcut work in one response.
 
 [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) accepts a bounded Mermaid subset:
 rectangular labeled boxes and directed connections. The parser owns the precise grammar and limits;
@@ -574,26 +625,11 @@ rather than a per-turn screenshot.
 
   The selected text is frozen at Start (`BrainComposition.interviewFormatAddendum`) and reused during
   provider reapply. Both OpenAI and CLI construction use
-  `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)`; passing resolved text keeps resource I/O
+  `JarvisPrompts.Coach.system(capabilities:formatAddendum:)`; passing resolved text keeps resource I/O
   outside coaching turns. CLI instructions remain fixed for the session, while General Technical can
-  use new task evidence within those instructions. CLI construction reads `prepMaterial` from the
-  session's fixed tool set, so the baked instructions describe exactly what the loop offers.
-  [Private architecture hints](#private-architecture-hints) require explicit **System Design** in
-  both the tool schema and runtime; General Technical's system-design guidance does not enable
-  diagrams.
-- **A session's tool set is fixed at Start, for the same reason its system prompt is
-  (`sessionCoachTools` in `Sources/JarvisCore/Coach/ToolDefs.swift`).** `CLIBrainClient` renders each
-  tool's `parametersJSON` verbatim into the instructions its process is warmed with, and rejects any
-  later turn whose tools no longer compose to that string, so a set that grew or changed shape
-  mid-session would fail every remaining attempt on that target until the route exhausted. Both the
-  coach loop and the CLI-provider construction therefore resolve their tools through one function,
-  from inputs known at Start: the interview format selects the plain or System Design speak schema,
-  and configured prep-material *sources* decide whether `search_prep_notes` is offered at all. That
-  last input is deliberately "sources are configured", not "an index exists": building the index
-  reads files and shells out to `textutil`, so it runs off the Start path and the search port arrives
-  after the first attempts. A search that lands before it, or after indexing found nothing usable,
-  returns no matches — the honest answer, and one that costs nothing, where changing the offered set
-  mid-session would cost the whole session.
+  use new task evidence within those instructions.
+  [Private architecture hints](#private-architecture-hints) require explicit **System Design** at
+  runtime; General Technical's system-design guidance does not enable diagrams.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their

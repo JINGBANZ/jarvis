@@ -117,6 +117,8 @@ enum EvaluationTranscript {
         }
         prevInstructions[streamKey] = instructions
 
+        // Printed in full whenever the array changes, which now includes each on-demand load —
+        // one extra block per loaded tool per session, and the change is the point.
         let tools = canonical(request["tools"] ?? [])
         if tools == prevTools[streamKey] {
             let count = (request["tools"] as? [Any])?.count ?? 0

@@ -32,6 +32,10 @@ public enum Defaults {
         /// No stored default: absence selects None (base prompt only).
         public static let interviewFormatKey = "brain.interviewFormat"
 
+        public static let disabledToolsKey = "brain.disabledTools"
+        /// Every composable tool is on until the user switches one off.
+        public static let disabledTools: [String] = []
+
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
         /// their selection; CLI providers store under a suffixed key each.
         public static func modelKey(for provider: BrainProvider) -> String {

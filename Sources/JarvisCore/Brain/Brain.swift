@@ -50,15 +50,29 @@ public struct ChatMessage: Sendable {
 }
 
 /// A tool definition exposed to the model.
-public struct ToolDef: Sendable {
+///
+/// A tool carries everything the model needs to use it: the one-line `description` it is chosen
+/// from, the `parametersJSON` it is called with, and the `guidance` governing when and how. Keeping
+/// guidance on the tool is what lets `CoachCapabilities` build a prompt that never describes a tool
+/// the session does not offer, and lets a deferred tool hand its guidance over on load instead.
+public struct ToolDef: Sendable, Equatable {
     public let name: String
     public let description: String
     /// JSON Schema for parameters, as a JSON string.
     public let parametersJSON: String
-    public init(name: String, description: String, parametersJSON: String) {
+    /// Usage instructions, rendered into the system prompt for a hot tool and returned by
+    /// `load_tool` for a deferred one. Empty when the description says everything.
+    public let guidance: String
+    /// When true the prompt lists only this tool's name and description, in the loadable catalog;
+    /// the model must call `load_tool` before it may be called.
+    public let deferLoading: Bool
+    public init(name: String, description: String, parametersJSON: String,
+                guidance: String = "", deferLoading: Bool = false) {
         self.name = name
         self.description = description
         self.parametersJSON = parametersJSON
+        self.guidance = guidance
+        self.deferLoading = deferLoading
     }
 }
 
@@ -67,16 +81,20 @@ public enum ToolInvocation: Sendable, Equatable {
     case captureScreen(callId: String)
     /// The overlay lines to show, already split by the model (the `speak` tool's `lines` array) and
     /// rendered one at a time — so the client never splits a free-form string on punctuation.
-    /// Optional Mermaid is rendered only in an explicitly selected System Design session.
+    /// `mermaid` is declared by the one speak schema on every brain; whether a supplied graph
+    /// reaches the overlay is the runtime's decision.
     case speak(callId: String, lines: [String], mermaid: String? = nil, explanation: String? = nil, codeSnippet: CodeSnippet? = nil)
     /// The model's explicit "nothing useful to add" decision. Silence is a tool call (not the absence
     /// of one) so that `tool_choice: required` can forbid plain-text output entirely — free text from
     /// a stay-quiet turn used to be stored in the server-side conversation, where the model imitated
     /// its own leaked deliberation and degenerated (and every stored byte was re-billed every turn).
     case staySilent(callId: String)
-    /// A lookup against the user's configured prep material. Present only when at least one source
-    /// produced usable text at Session Start — see `PrepMaterialSearching`.
+    /// A lookup against the user's configured prep material. In the session's set only when at
+    /// least one source was configured at Start — see `PrepMaterialSearching`.
     case searchPrepNotes(callId: String, query: String)
+    /// The model asking for a deferred tool's schema and guidance, which come back as the result.
+    /// Offered only while the session has something left to load.
+    case loadTool(callId: String, name: String)
 }
 
 /// One brain response: parsed tool calls (possibly empty = stay silent), plus the raw calls

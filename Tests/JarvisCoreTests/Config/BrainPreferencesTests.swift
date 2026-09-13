@@ -25,6 +25,29 @@ import Foundation
         #expect(p.interviewFormat == nil)
     }
 
+    /// Storing what is OFF is what makes a tool added in a later version on by default.
+    @Test func disabledToolsRoundTripAndDefaultToNothingSwitchedOff() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        #expect(p.disabledTools.isEmpty)
+
+        p.disabledTools = ["search_prep_notes"]
+
+        #expect(BrainPreferences(defaults: d).disabledTools == ["search_prep_notes"])
+        #expect(d.stringArray(forKey: Defaults.Brain.disabledToolsKey) == ["search_prep_notes"])
+    }
+
+    /// A session cannot run without these, so the preference cannot record them as off — not even
+    /// through a hand-edited plist, which the next write normalizes away.
+    @Test func theToolsASessionNeedsAreDroppedOnWrite() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+
+        p.disabledTools = CoachCapabilities.fixedToolNames.union(["search_prep_notes"])
+
+        #expect(p.disabledTools == ["search_prep_notes"])
+    }
+
     @Test(arguments: InterviewFormat.allCases)
     func interviewFormatOverrideRoundTripsAndClearsBackToNone(_ format: InterviewFormat) {
         let d = freshDefaults()

@@ -2330,22 +2330,31 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(overlay.rendered.isEmpty)
     }
 
-    /// Each exhausted tool loop becomes a fresh attempt without rendering unfinished work.
+    /// Each exhausted tool loop becomes a fresh attempt without rendering unfinished work, until the
+    /// only target spends its failure budget.
     @Test func repeatedToolLoopExhaustionEndsRequest() async {
+        // `CoachAttemptRunner.maxToolIterations` responses per attempt, three attempts before a
+        // target is exhausted. The trailing stay_silent is never reached: that it goes unused is
+        // what proves every attempt died on the loop bound rather than finishing.
+        let boundedResponses = 7 * 3
         let brain = ScriptedBrain(script: Array(repeating:
             .init(toolCalls: [.captureScreen(callId: "c")],
                   rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")]),
-            count: 12) + [.init(toolCalls: [.staySilent(callId: "complete")])])
+            count: boundedResponses) + [.init(toolCalls: [.staySilent(callId: "complete")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: ManualClock())
         transcript.append(.init(speaker: .me, text: "look at this code", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
-        #expect(brain.calls.count == 12)
+        #expect(brain.calls.count == boundedResponses)
         #expect(overlay.rendered.isEmpty)
     }
 
     @Test func freshAttemptCarriesOnlyTheLatestScreenObservation() async {
-        let captures = (0..<8).map { index in
+        // Exactly one attempt's worth of captures (`CoachAttemptRunner.maxToolIterations`), so the
+        // speak below is the FIRST request of a fresh attempt — which is the case under test: that
+        // request carries the single latest screen observation, never an accumulation of them.
+        let responsesPerAttempt = 7
+        let captures = (0..<responsesPerAttempt).map { index in
             BrainResponse(
                 toolCalls: [.captureScreen(callId: "capture-\(index)")],
                 rawToolCalls: [
@@ -2368,9 +2377,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "inspect this code", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
-        #expect(brain.calls.count == 9)
-        #expect(brain.calls[8].count(where: { $0.imageBase64JPEG != nil }) == 1)
-        #expect(brain.calls[8].count(where: {
+        #expect(brain.calls.count == responsesPerAttempt + 1)
+        let freshAttempt = brain.calls[responsesPerAttempt]
+        #expect(freshAttempt.count(where: { $0.imageBase64JPEG != nil }) == 1)
+        #expect(freshAttempt.count(where: {
             ($0.text ?? "").contains("latest visible code")
         }) == 1)
         #expect(overlay.rendered == [["bounded context"]])

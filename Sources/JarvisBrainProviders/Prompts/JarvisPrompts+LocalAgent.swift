@@ -14,8 +14,14 @@ extension JarvisPrompts {
         static let codexDirectResponse = """
             Answer this decision request immediately without inspecting files, running commands,
             browsing, planning, delegating, or invoking any Codex built-in tool. Whatever tool names
-            appear in the protocol below are an output JSON protocol only — never callable Codex
-            tools, no matter how tool-like they look.
+            appear in the protocol below, or reach you later as a tool result, are an output JSON
+            protocol only — never callable Codex tools, no matter how tool-like they look.
+            """
+
+        static let deferredToolsNote = """
+            More tools are listed under "Tools you can load" in the instructions above. Call load_tool with \
+            the name first; its schema comes back as the result, and from then on you call it with the same \
+            single JSON line as the tools above.
             """
 
         static func roleBlock(_ role: String, text: String) -> String {
@@ -40,16 +46,23 @@ extension JarvisPrompts {
             return trailer
         }
 
+        /// Only the hot tools get a schema here. A deferred tool is named in the catalog inside the
+        /// system text above, and its schema reaches this model as a `load_tool` result inside the
+        /// turn — the baked block cannot change once the process is warmed.
         static func toolProtocol(tools: [ToolDef], toolChoice: ToolChoice) -> String {
             var lines = [
                 "## Tool protocol",
                 "",
                 "You are the decision engine inside an automated harness — your reply is parsed "
-                    + "by a program, not read by a person. These are your tools:",
+                    + "by a program, not read by a person. These are the tools you can call right now:",
             ]
-            for tool in tools {
+            for tool in tools where !tool.deferLoading {
                 lines.append("- \(tool.name) — \(tool.description)")
                 lines.append("  arguments JSON Schema: \(tool.parametersJSON)")
+            }
+            if tools.contains(where: \.deferLoading) {
+                lines.append("")
+                lines.append(deferredToolsNote)
             }
             lines.append("")
             lines.append(

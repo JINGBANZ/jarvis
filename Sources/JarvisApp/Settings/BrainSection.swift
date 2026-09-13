@@ -28,6 +28,7 @@ final class BrainSection: NSObject, SettingsSection {
     private let detector: AgentCLIDetector
     private let onPreferencesChanged:
         (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
+    private let capabilities: CapabilitiesControls
     private let transcription: TranscriptionControls
     /// Only formats with real content are offered — showing an entry that does nothing is worse
     /// than not showing it, and it means a later `<format>.md` addition needs zero Swift changes to
@@ -55,11 +56,14 @@ final class BrainSection: NSObject, SettingsSection {
         detector: AgentCLIDetector,
         onPreferencesChanged:
             @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
-        transcriptionPreferences: TranscriptionPreferences
+        transcriptionPreferences: TranscriptionPreferences,
+        prepMaterialPreferences: PrepMaterialPreferences
     ) {
         self.preferences = preferences
         self.detector = detector
         self.onPreferencesChanged = onPreferencesChanged
+        self.capabilities = CapabilitiesControls(
+            preferences: preferences, prepMaterialPreferences: prepMaterialPreferences)
         self.transcription = TranscriptionControls(preferences: transcriptionPreferences)
     }
 
@@ -97,6 +101,11 @@ final class BrainSection: NSObject, SettingsSection {
         reasoningCard.heightAnchor.constraint(
             equalToConstant: Self.coachingCardHeight).isActive = true
         stack.addArrangedSubview(reasoningCard)
+
+        let capabilitiesCard = capabilities.makeView()
+        capabilitiesCard.heightAnchor.constraint(
+            equalToConstant: capabilities.preferredHeight).isActive = true
+        stack.addArrangedSubview(capabilitiesCard)
 
         let transcriptionCard = transcription.makeView { [weak self] height in
             self?.transcriptionHeightConstraint?.constant = height
@@ -228,6 +237,7 @@ final class BrainSection: NSObject, SettingsSection {
         let visibleHeights = [
             providerEditor?.preferredHeight,
             Self.coachingCardHeight,
+            capabilities.preferredHeight,
             transcription.preferredHeight,
         ].compactMap { $0 }
         let contentHeight = visibleHeights.reduce(0, +)

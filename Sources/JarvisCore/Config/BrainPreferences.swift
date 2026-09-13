@@ -107,6 +107,22 @@ public final class BrainPreferences {
         set { defaults.set(newValue?.rawValue, forKey: Defaults.Brain.interviewFormatKey) }
     }
 
+    /// Tool names the user switched off in Settings → Brain → Capabilities, applied at the next
+    /// Start. Storing what is OFF rather than what is ON means a tool added in a later version is
+    /// on for everyone who never opened the card. The tools a session cannot run without are
+    /// dropped on write, so a hand-edited plist cannot compose a session that can never speak.
+    public var disabledTools: Set<String> {
+        get {
+            Set(defaults.stringArray(forKey: Defaults.Brain.disabledToolsKey)
+                ?? Defaults.Brain.disabledTools)
+        }
+        set {
+            defaults.set(
+                newValue.subtracting(CoachCapabilities.fixedToolNames).sorted(),
+                forKey: Defaults.Brain.disabledToolsKey)
+        }
+    }
+
     private func persistedTarget(from value: Any) -> BrainTarget? {
         guard let dictionary = value as? [String: Any],
               let providerRaw = dictionary["provider"] as? String,

@@ -9,10 +9,15 @@ public let captureScreenTool = ToolDef(
     parametersJSON: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
 )
 
+/// One schema on every brain and in every session. `mermaid` is nullable rather than absent because
+/// that is what makes a field optional under strict Structured Outputs, and because a second speak
+/// variant is what let the tool array a local-agent process was warmed with drift from the one the
+/// coach loop later sent (#273). Whether a supplied graph is rendered is a runtime decision.
 public let speakTool = ToolDef(
     name: "speak",
     description: JarvisPrompts.Coach.ToolDescription.speak,
-    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","explanation","codeSnippet"],"additionalProperties":false}"#
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"mermaid":{"type":["string","null"],"description":"A small Mermaid graph for a private architecture sketch. Null unless the coaching guidance for this session asks for a diagram."},"explanation":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}"#,
+    guidance: JarvisPrompts.Coach.ToolGuidance.speak
 )
 
 public let staySilentTool = ToolDef(
@@ -21,38 +26,16 @@ public let staySilentTool = ToolDef(
     parametersJSON: #"{"type":"object","properties":{},"required":[],"additionalProperties":false}"#
 )
 
+/// The three coaching actions every session offers. `CoachCapabilities.compose` builds the session's
+/// full set from these plus whatever the user's configuration adds.
 public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
 
-/// Offered only when the session has prep-material sources configured at Start, which is decided
-/// once by `sessionCoachTools` below. The search port itself lands later, after indexing.
+/// In the catalog only when the session has prep-material sources configured at Start. The search
+/// port itself lands later, after indexing.
 public let searchPrepNotesTool = ToolDef(
     name: "search_prep_notes",
     description: JarvisPrompts.Coach.ToolDescription.searchPrepNotes,
-    parametersJSON: #"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}"#
+    parametersJSON: #"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}"#,
+    guidance: JarvisPrompts.Coach.ToolGuidance.searchPrepNotes,
+    deferLoading: true
 )
-
-/// System-design sessions can attach a visual hint without changing the terminal speak action
-/// (including force(speak) for the manual shortcut). Null means an ordinary text hint.
-public let systemDesignSpeakTool = ToolDef(
-    name: speakTool.name,
-    description: JarvisPrompts.Coach.ToolDescription.speak,
-    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"explanation":{"type":["string","null"]},"mermaid":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}"#
-)
-
-/// The tool set one session offers, resolved once at Start and then fixed for the session's life.
-///
-/// Fixed rather than per-attempt because a local-agent target bakes each tool's `parametersJSON`
-/// into the instructions its process is warmed with, and re-checks the composed string on every turn
-/// (`CLIBrainClient.prepareTurn`). A set that grew or changed shape mid-session was rejected there,
-/// failing every remaining attempt on that target until the route exhausted — see #273. So both the
-/// app's brain composition and the coach loop resolve their tools here, from inputs known at Start.
-///
-/// `prepMaterial` is therefore "prep sources are configured", not "the index has finished building":
-/// indexing runs off the Start path deliberately, so the port arrives after the first attempts. A
-/// search that lands before it returns no matches rather than changing what the session offers.
-public func sessionCoachTools(interviewFormat: InterviewFormat?, prepMaterial: Bool) -> [ToolDef] {
-    let base = coachTools.map {
-        interviewFormat == .systemDesign && $0.name == speakTool.name ? systemDesignSpeakTool : $0
-    }
-    return prepMaterial ? base + [searchPrepNotesTool] : base
-}

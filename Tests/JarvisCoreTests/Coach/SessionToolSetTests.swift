@@ -11,9 +11,8 @@ import Testing
 @Suite(.serialized) struct SessionToolSetTests {
     private func makeDriver(
         brain: BrainClient,
-        coachTools: [ToolDef]? = nil,
-        prepMaterial: (any PrepMaterialSearching)? = nil,
-        interviewFormat: InterviewFormat? = nil
+        capabilities: CoachCapabilities = .default,
+        prepMaterial: (any PrepMaterialSearching)? = nil
     ) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let target = BrainTarget(
@@ -24,9 +23,8 @@ import Testing
             config: .default, transcript: transcript, route: route,
             screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(now: 100),
             automaticAttemptDelay: { _ in },
-            coachTools: coachTools,
-            prepMaterial: prepMaterial,
-            interviewFormat: interviewFormat)
+            capabilities: capabilities,
+            prepMaterial: prepMaterial)
         return (driver, transcript)
     }
 
@@ -42,7 +40,7 @@ import Testing
         let brain = ScriptedBrain(script: [staySilent, staySilent])
         let (driver, transcript) = makeDriver(
             brain: brain,
-            coachTools: sessionCoachTools(interviewFormat: nil, prepMaterial: true),
+            capabilities: .compose(disabledTools: [], prepSourcesConfigured: true),
             prepMaterial: nil)
         transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100))
 
@@ -54,26 +52,10 @@ import Testing
         _ = await driver.handleTrigger(.turnEnd)
 
         #expect(brain.offeredTools.count == 2)
-        #expect(brain.offeredTools[0].map(\.name).contains(searchPrepNotesTool.name))
+        #expect(brain.offeredTools[0].map(\.name).contains(CoachCapabilities.loadToolName))
         #expect(brain.offeredTools[0].map(\.name) == brain.offeredTools[1].map(\.name))
         #expect(brain.offeredTools[0].map(\.parametersJSON)
             == brain.offeredTools[1].map(\.parametersJSON))
-    }
-
-    /// The resolver both the app's brain composition and the coach loop read, so the schemas a
-    /// local-agent process is warmed with are the schemas the loop later sends.
-    @Test func systemDesignResolvesToTheDiagramSpeakSchema() {
-        let tools = sessionCoachTools(interviewFormat: .systemDesign, prepMaterial: false)
-
-        #expect(tools.first { $0.name == speakTool.name }?.parametersJSON.contains("mermaid") == true)
-        #expect(!tools.map(\.name).contains(searchPrepNotesTool.name))
-    }
-
-    @Test func codingWithPrepNotesResolvesToThePlainSpeakSchemaPlusSearch() {
-        let tools = sessionCoachTools(interviewFormat: .coding, prepMaterial: true)
-
-        #expect(tools.first { $0.name == speakTool.name }?.parametersJSON.contains("mermaid") == false)
-        #expect(tools.map(\.name).contains(searchPrepNotesTool.name))
     }
 
     /// The inverse of the case above: a session composed without prep material keeps the tool absent

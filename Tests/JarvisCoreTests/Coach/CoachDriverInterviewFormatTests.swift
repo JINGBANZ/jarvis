@@ -90,7 +90,7 @@ import Testing
         _ = await driver.handleTrigger(.turnEnd)
 
         #expect(brain.calls[0].contains {
-            $0.role == .system && $0.text == JarvisPrompts.Coach.system(prepMaterial: false, formatAddendum: "")
+            $0.role == .system && $0.text == JarvisPrompts.Coach.system(capabilities: .default, formatAddendum: "")
         })
     }
 }

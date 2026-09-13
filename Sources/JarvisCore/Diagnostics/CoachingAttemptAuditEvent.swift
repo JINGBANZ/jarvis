@@ -11,6 +11,7 @@ public enum CoachingAttemptAuditEvent: Sendable {
         case initial
         case captureScreenContinuation = "capture_screen_continuation"
         case searchPrepNotesContinuation = "search_prep_notes_continuation"
+        case loadToolContinuation = "load_tool_continuation"
     }
 
     public enum TerminalAction: String, Sendable {

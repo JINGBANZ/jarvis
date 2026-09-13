@@ -64,7 +64,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, interview format, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; interview format and transcription changes take effect on the next Start. |
+| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, interview format, the coach's switchable capabilities, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; interview format, capability, and transcription changes take effect on the next Start. |
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in four stacked cards — **OpenAI API**, **Gemini API**, **Claude Code**, **Codex CLI**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key checks it with one models-list request and shows the vendor's verdict under the row. Saving never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also has **Show diagrams**, enabled by default, and **Show code with hints** with its own appearance controls. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
@@ -238,8 +238,8 @@ older readers and the session evaluator; structured fields drive the sectioned v
 The Brain tab owns the whole "who answers a coaching attempt" decision, persisted through
 `BrainPreferences` (UserDefaults).
 
-The page header sits above one vertically scrolling stack of three rounded groups: **Provider
-route**, **Coaching**, then **Transcription**. The Provider group is one uninterrupted route: Primary and every
+The page header sits above one vertically scrolling stack of four rounded groups: **Provider
+route**, **Coaching**, **Capabilities**, then **Transcription**. The Provider group is one uninterrupted route: Primary and every
 Fallback row share the same label / provider / model alignment, with ordering actions only on
 fallbacks. There are no row dividers or permanent explanatory paragraphs. Fallback rows expand the
 outer document instead of hiding inside a second scroll area. While coaching runs, a compact **In
@@ -310,6 +310,19 @@ three shared levels pass through.
 The selected addendum applies on the next Start. General Technical uses available conversation and
 screen context; capture remains on demand. Per-format policy and the explicit System Design
 requirement for diagrams are defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis).
+
+**Capabilities.** This card lists what the coach can do and lets the user switch parts of it off.
+Screen capture, speak, and stay silent are shown as rows with no control and the detail "Always on":
+Jarvis cannot start without screen capture, and a turn cannot end without one of the other two. Prep
+notes search has a switch, disabled until a prep-material source exists, because a switch that can
+only mean "off either way" reads as a broken control. The card writes
+`BrainPreferences.disabledTools`, the names that are OFF, so a capability added in a later version
+is on for everyone who never opened this card, and nothing else: a session resolves its
+capabilities once at Start and both the coach loop and a warmed CLI process are built from that one
+value, so applying a change mid-session could only make them disagree. The header says "Applies on
+the next Start". The switch's enabled state is read when the card is built, so adding a source in
+Prep material enables it the next time Settings opens. See
+[architecture.md → Capabilities](./architecture.md#capabilities).
 
 **Transcription.** This group owns the separate speech-to-text role without conflating it with the
 brain route. Its picker contains **OpenAI** (the default), **Gemini**, and **Apple Speech (macOS
@@ -490,7 +503,8 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SettingsCardView.swift` | Rounded group boundary, optional header, and resize callback |
 | `Sources/JarvisApp/Settings/SettingsRowView.swift` | Shared label/help/trailing-control row |
 | `Sources/JarvisApp/Settings/SettingsScrollView.swift` | Viewport-change adapter for variable-height card documents |
-| `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Interview format + Transcription |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Interview format + Capabilities + Transcription |
+| `Sources/JarvisApp/Settings/CapabilitiesControls.swift` | The Capabilities card: always-on rows plus the prep-notes-search switch |
 | `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini) + external CLI account readiness |
 | `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The one models-list request behind a saved key's verdict |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |

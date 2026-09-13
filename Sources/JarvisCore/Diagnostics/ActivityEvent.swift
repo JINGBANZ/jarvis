@@ -31,6 +31,15 @@ public enum ActivityEvent: Sendable {
         case brainRouteAdvanced
         case brainRouteTargetSkipped
         case prepNotesSearched
+        case capabilityLoaded
+        case prepNotesUnavailable
+    }
+
+    /// What kind of thing a load brought in. Persisted inside the event, so it is part of the
+    /// on-disk vocabulary.
+    public enum CapabilityKind: String, Codable, Sendable {
+        case tool
+        case skill
     }
 
     /// A finalized utterance from the user (`me`) or interviewer (`them`).
@@ -73,6 +82,14 @@ public enum ActivityEvent: Sendable {
     /// The brain looked up the user's prepared interview notes for `query`. `matchCount` is how
     /// many relevant chunks came back, 0 meaning nothing scored usefully.
     case prepNotesSearched(query: String, matchCount: Int)
+    /// The brain pulled in a capability it was offered but had not loaded yet.
+    case capabilityLoaded(kind: CapabilityKind, name: String)
+    /// The brain looked for prepared notes in a session that offers them and they were not there to
+    /// search. A fixed degradation notice: the tip that follows is not informed by the user's own
+    /// material, which is worth seeing. It is not a zero-match search, which would claim the notes
+    /// were read and found wanting, and it states no timing — whether the index is still building
+    /// or finished with nothing usable belongs in `jlog`.
+    case prepNotesUnavailable
 
     var response: ActivityResponse? {
         guard case .tip(let lines, let explanation, let code) = self else { return nil }
@@ -154,6 +171,10 @@ public enum ActivityEvent: Sendable {
                     + "\(matchCount == 1 ? "" : "es")"
                 : "📎 checked prep notes for \"\(query)\" — nothing relevant found"
             return (.prepNotesSearched, message, nil)
+        case .capabilityLoaded(let kind, let name):
+            return (.capabilityLoaded, "📎 loaded the \(name) \(kind.rawValue)", nil)
+        case .prepNotesUnavailable:
+            return (.prepNotesUnavailable, "📎 couldn't check your prep notes — coaching without them", nil)
         }
     }
 }

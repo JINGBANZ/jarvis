@@ -9,7 +9,10 @@
 ## Current phase
 
 **General technical-interview coaching, audio reliability, and local CLI brain providers are
-implemented.** Interview format defaults to **None**, preserving the base prompt. Coding,
+implemented.** The coach's capabilities are composed once at Start and the model loads a deferred one
+when it needs it, prep-notes search being the first
+([architecture.md → Capabilities](./architecture.md#capabilities)). Interview format defaults to
+**None**, preserving the base prompt. Coding,
 Behavioral, System Design, and General Technical are opt-in addenda; their policy and diagram
 boundaries are defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
@@ -200,6 +203,13 @@ socket with no user-visible notice, and the benchmark's reconnect arm
 (`./scripts/transcription-benchmark.sh`), which should report ready at generation 1, then
 `reconnectPrepared`, then ready at generation 2.
 
+Run the capability smoke in the signed app: with a prep source configured, a matching question
+should show one "loaded the search_prep_notes tool" row and a tip built on the notes, and switching
+Prep notes search off in Settings should leave a Start carrying neither the tool nor its catalog
+line. The model's own choice to load is covered on all three brains by the opt-in
+`CoachToolLoadingLiveTests` (`JARVIS_LIVE_CAPABILITY_PROVIDER`); what is left is the app path around
+it, and a System Design session on a CLI brain rendering a diagram.
+
 Run the [evaluation source smoke](./build-and-run.md#live-smoke-checklist) in a development bundle
 and an installed release: source/version selection, per-run fetch and discard, actionable failures,
 and cancellation on Quit. Offline tests cover the source store and evaluator; native presentation
@@ -311,6 +321,13 @@ playback, remains in
 
 ## Built
 
+**Coaching tools load on demand.** A session's capabilities are one value composed at Start
+(`CoachCapabilities`), and each tool carries its own usage guidance. Prep-notes search is deferred:
+the prompt lists it in a one-line catalog, and the model calls `load_tool` to receive its schema and
+guidance as a tool result, after which it is callable for the rest of the session. Settings → Brain →
+Capabilities switches it off for the next Start; screen capture, speak, and stay silent are always
+on. See [architecture.md → Capabilities](./architecture.md#capabilities).
+
 **Show code with hints**, configured under Overlay Box with independent live code text-size and
 background-opacity controls (`OverlaySection`, `OverlayAppearance`), optionally supplies the next contextual coding component with each hint.
 Its capability is fixed at Start; the configurable fallback hotkey requests code for the current
@@ -357,7 +374,8 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 - `Sources/JarvisCore/Brain/` — the provider-neutral brain domain, and nothing that runs one: the `BrainClient`/attempt-scoped `BrainConversation` contracts, immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), `ReasoningEffort`, and `BrainWorkloadTimeout`. The kernel dependency guard rejects `Process`, `FileManager`, `FileHandle`, and `URLSession` here.
 - `Sources/JarvisCore/Providers/` — what a failure at any provider boundary means, classified once and shared by the brain, transcription, and Settings surfaces ([architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)): the failure record with its Activity sentence table and exhaustion relabelling, the one redaction path provider text takes before a person can see it, and the Save-time credential verdict, and one classifier per vendor plus the transport table (`ProviderFailure`, `ProviderFailure+Activity`, `ProviderFailure+Exhaustion`, `ProviderMessageRedaction`, `CredentialCheck`, `TransportFailureClassifier`, `OpenAI/OpenAIFailureClassifier`, `Gemini/GeminiFailureClassifier`, `LocalAgent/LocalAgentFailureClassifier`, which owns the CLI adapters' error-domain names). Foundation-only under the kernel dependency guard: adapters hand in status codes, JSON, close reasons, and `NSError` domain and code, never `URLSession` types.
 - `Sources/JarvisBrainProviders/` — every concrete brain adapter ([lean-coaching-core.md → Phase 4 contracts](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction)): the OpenAI Responses transport (`OpenAIBrainClient`), and the local-agent CLI subtree — detection, `CLIBrainClient` with its reply parsing, the bounded shared process edge, runtime lifetime, and the Claude Code, Codex exec, and Codex app-server runtimes (`AgentCLIDetector`, `AgentCLIProcessRunner`, `CLIBrainRuntime`, `LocalAgentRuntimeSet`, `ClaudeCodeRuntime`, `CodexAppServerRuntime`, `CodexExecRuntime`), plus their model-facing prompt text. Depends inward on `JarvisCore`; composed by `JarvisApp` at Start, and reused by `JarvisEvaluation` to run the agentic evaluator's CLI.
-- `Sources/JarvisCore/Coach/` — the event loop, split into two owners ([lean-coaching-core.md → Phase 5](./lean-coaching-core.md#phase-5-implementation-contract--coachdriver-split)): `CoachDriver` schedules (trigger coalescing, transcription-settlement admission, forward-only route state and its delivery tokens) and `CoachAttemptRunner` executes one snapshotted target (tool loop, history commit, off-path compaction), sharing only the `CoachTranscriptLedger` boundary. Plus the pure forward-only `BrainRouteSession`, `TranscriptionSettlementGate`, `CoachHistory` (client-managed session memory), and `ToolDefs` (coach tool schemas).
+- `Sources/JarvisCore/Coach/` — the event loop, split into two owners ([lean-coaching-core.md → Phase 5](./lean-coaching-core.md#phase-5-implementation-contract--coachdriver-split)): `CoachDriver` schedules (trigger coalescing, transcription-settlement admission, forward-only route state and its delivery tokens) and `CoachAttemptRunner` executes one snapshotted target (tool loop, history commit, off-path compaction), sharing only the `CoachTranscriptLedger` boundary. Plus the pure forward-only `BrainRouteSession`, `TranscriptionSettlementGate`, `CoachHistory` (client-managed session memory), `CoachCapabilities` (the session's switched-on
+  tool set, composed once at Start), and `ToolDefs` (coach tool schemas).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-facing screen port and the pure, Foundation-only capture logic: the `ScreenCapturing` contract, the `ScreenSnapshot` model, front-window selection over window-server candidates, and reading-order OCR layout (`ScreenCapturing`, `ScreenSnapshot`, `FrontWindowSelector`, `WindowCandidate`, `TextFragment`, `RecognizedTextLayout`). No process or file I/O; the kernel dependency guard rejects `Process`/`FileManager` here.
 - `Sources/JarvisScreenCapture/` — the OS-bound screen-capture adapter behind that port ([lean-coaching-core.md → Phase 4 contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)): `ScreenCaptureRunner` owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory — it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for — and `ScreenCaptureCLI` shoots the display frozen into the attempt's `SessionPlan` revision, or the main display. Depends inward on `JarvisCore`; composed by `WindowScopedScreenCapture` in `JarvisApp`; tested headlessly in `JarvisScreenCaptureTests`.

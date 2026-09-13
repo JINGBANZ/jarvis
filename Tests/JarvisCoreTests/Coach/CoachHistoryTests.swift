@@ -105,6 +105,91 @@ import Testing
         #expect(prefix!.count < h.snapshot().count)                // the tail stays verbatim
     }
 
+    /// Ten same-cost messages with a tool call and its result at indices 5 and 6. The greedy 60%
+    /// budget lands *between* them: five fillers fit, the cheap call fits, the result does not.
+    /// That is the only boundary the snapping exists for, so a fixture that does not reach it
+    /// tests nothing — which is why both tests below assert where the boundary actually fell.
+    private static let callIndex = 5
+    private static let resultIndex = 6
+
+    private func historyWithAPairAtTheGreedyBoundary(
+        call: RawToolCall, result: String
+    ) -> CoachHistory {
+        let filler = String(repeating: "x", count: 400)
+        let history = CoachHistory()
+        history.commit(
+            Array(repeating: ChatMessage.user(filler), count: Self.callIndex)
+                + [.assistantToolCalls([call]),
+                   .init(role: .tool, text: result, toolCallId: call.id)]
+                + Array(repeating: ChatMessage.user(filler), count: 3))
+        return history
+    }
+
+    /// A summary that replaced an assistant tool call while its result stayed behind would leave an
+    /// orphaned output, which providers reject. The boundary moves rather than splitting the pair.
+    @Test func theCompactionPrefixNeverSplitsACallFromItsResult() throws {
+        let call = RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")
+        let h = historyWithAPairAtTheGreedyBoundary(
+            call: call, result: String(repeating: "y", count: 400))
+
+        let prefix = try #require(h.compactionPrefix())
+
+        // Snapped forward over the result. Without snapping this is `callIndex + 1`, which is the
+        // regression: the call inside the summarized span, its answer left behind.
+        #expect(prefix.count == Self.resultIndex + 1)
+        let messages = h.snapshot()
+        let calledBefore = Set(messages.prefix(prefix.count).flatMap { $0.toolCalls ?? [] }.map(\.id))
+        let answeredAfter = Set(messages.dropFirst(prefix.count).compactMap(\.toolCallId))
+        #expect(calledBefore.isDisjoint(with: answeredAfter))
+    }
+
+    /// A loaded tool's schema and guidance are the only copy the model has. Summarizing them away
+    /// would leave it holding a tool it can no longer call correctly, so the pair survives verbatim
+    /// under the summary, and the summarizer never sees it twice.
+    @Test func loadPairsSurviveASummaryAndStayOutOfIt() throws {
+        let load = RawToolCall(id: "l1", name: "load_tool",
+                               argumentsJSON: #"{"name":"search_prep_notes"}"#)
+        let result = "Loaded search_prep_notes. Arguments JSON Schema: {}"
+            + String(repeating: " padding", count: 44)
+        let h = historyWithAPairAtTheGreedyBoundary(call: load, result: result)
+        let before = h.estimatedTokens
+
+        let prefix = try #require(h.compactionPrefix())
+
+        // The pair is inside the span being replaced, which is what makes the rest meaningful.
+        #expect(prefix.count == Self.resultIndex + 1)
+        // ...and withheld from the summarizer, so its text is never folded into the summary that
+        // will sit directly above the verbatim copy.
+        #expect(prefix.messages.count == prefix.count - 2)
+        #expect(!prefix.messages.contains { $0.toolCallId == "l1" })
+        #expect(!prefix.messages.contains { $0.toolCalls?.contains(load) == true })
+
+        #expect(h.compact(prefixCount: prefix.count, summary: "the gist",
+                          revision: prefix.revision))
+
+        let kept = h.snapshot()
+        #expect(kept[0].text?.contains("the gist") == true)
+        #expect(kept[1].toolCalls?.map(\.name) == ["load_tool"])
+        #expect(kept[2].text?.contains("Loaded search_prep_notes") == true)
+        #expect(kept[2].toolCallId == "l1")
+        #expect(h.estimatedTokens < before)
+    }
+
+    /// A budget that reaches only a retained pair leaves nothing to summarize. Compacting it would
+    /// send the summarizer an empty prompt and stack a summary of nothing above the pair it kept.
+    @Test func aPrefixOfNothingButRetainedPairsIsNotCompacted() {
+        let h = CoachHistory()
+        h.commit([
+            .assistantToolCalls([RawToolCall(id: "l1", name: "load_tool",
+                                             argumentsJSON: #"{"name":"search_prep_notes"}"#)]),
+            .init(role: .tool, text: "Loaded search_prep_notes.", toolCallId: "l1"),
+            .user(String(repeating: "x", count: 4000)),
+        ])
+
+        #expect(h.compactionPrefix() == nil)
+        #expect(h.snapshot().count == 3)
+    }
+
     @Test func compactReplacesPrefixWithSummary() {
         let h = CoachHistory()
         h.commit([.user("old one"), .user("old two"), .user("recent")])

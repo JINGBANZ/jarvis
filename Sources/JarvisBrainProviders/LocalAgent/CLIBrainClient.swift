@@ -12,6 +12,10 @@ public struct CLIBrainClient: BrainClient, Sendable {
     let traffic: (any BrainTrafficAuditing)?
     let trafficTag: String
     let expectedInstructions: String
+    /// The tools this client was warmed with — every tool the session offers, hot or deferred. The
+    /// per-turn array is narrower (hot plus whatever the model has loaded), so the instruction
+    /// comparison below reads this, not the turn's array.
+    let initialTools: [ToolDef]
     let configuration: LocalAgentConversationConfiguration
     let runtime: CLIBrainRuntime
     private let runtimeLease: CLIBrainRuntime.Lease
@@ -50,6 +54,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
         self.traffic = traffic
         self.trafficTag = trafficTag
         self.expectedInstructions = instructions
+        self.initialTools = tools
         self.configuration = configuration
         self.runtime = resolvedRuntime
         self.runtimeLease = resolvedRuntime.acquireLease()
@@ -135,10 +140,19 @@ public struct CLIBrainClient: BrainClient, Sendable {
             }
         }
 
+        // The turn's array says what the model may call now, and it narrows and widens again as
+        // deferred tools are loaded; the baked block already lists every tool the session offers, so
+        // a load must not be allowed to rewrite it. What still has to hold is that every tool the
+        // turn offers is one this process was warmed with, schema included — comparing whole
+        // definitions is what keeps a changed schema under an unchanged name a hard error (#273).
+        // A `tools: []` call against a coach client therefore no longer throws: it offers nothing.
+        guard tools.allSatisfy(initialTools.contains) else {
+            throw Self.error("local agent offered a tool it was not initialized with")
+        }
         let renderedAll = renderConversation(messages)
         let actualInstructions = Self.composeInstructions(
             system: renderedAll.system,
-            tools: tools,
+            tools: initialTools,
             toolChoice: Self.instructionChoice(toolChoice))
         guard actualInstructions == expectedInstructions else {
             throw Self.error("local-agent instructions changed after runtime initialization")
