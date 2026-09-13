@@ -177,7 +177,7 @@ preview is running. The plain setters
 ## Shortcuts
 
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
-They work during a session; code is available in Coding and general sessions only. Hints and
+They work during a session; code is available in a session that started with it enabled. Hints and
 explanations are fallbacks for proactive coaching; the code hotkey requests a snippet only when the session started with code enabled; [architecture.md](./architecture.md#on-demand-coaching-shortcuts)
 defines their context, output, and scheduling behavior. Each card uses `HotkeyBindingView` and the
 existing recorder, requiring Command or Option. A successful rebind takes effect immediately and
@@ -205,9 +205,10 @@ content. The Overlay Box distinguishes semibold hints from regular explanation p
 shows an example. Neither surface's visibility preference changes.
 
 The **Overlay → Overlay Box** card includes **Show code with hints**, off by default, persisted by
-`CodePreferences`. It is captured at Start: enabled coding/general sessions reserve the
-[dedicated code area](./architecture.md#on-demand-coaching-shortcuts) and request matching snippets
-alongside hints. Saved changes affect the next Start; they do not alter the active dock or prompt.
+`CodePreferences`. It is captured at Start: an enabled session reserves the
+[dedicated code area](./architecture.md#on-demand-coaching-shortcuts) and requests matching snippets
+alongside hints, and the prompt's code guidance is what keeps one off a hint that needs no code.
+Saved changes affect the next Start; they do not alter the active dock or prompt.
 The hotkey requests the next snippet only for a session that started with code enabled. Turning the
 setting off releases the binding. The **Shortcuts → Show code** recorder stays visible and editable;
 when disabled it points to Overlay settings. Rebinding still reports conflicts, but leaves the binding

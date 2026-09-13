@@ -292,10 +292,12 @@ Explanation text follows the existing coaching history and Activity paths. It op
 never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
 only the brief caption if that surface is enabled; it does not force a hidden surface on.
 
-**Show code with hints** enables matching snippets in Coding or general sessions, defaulting off.
-`SessionPlan.codeEnabled` is frozen at Start and preserved across screen revisions. The app resolves
-the session format at Start, so non-coding sessions cannot reserve an empty code area. Only enabled
-sessions receive the shortened code guidance in their fixed system prompt. The Show code shortcut
+**Show code with hints** enables matching snippets, defaulting off. `SessionPlan.codeEnabled` is
+frozen at Start, preserved across screen revisions, and is the whole gate: only an enabled session
+reserves the code area and receives the shortened code guidance in its fixed system prompt. Nothing
+in the runtime asks what kind of question this is — that guidance is what keeps a snippet off a
+conceptual hint, by telling the model to leave `codeSnippet` null when no implementation would
+help. The Show code shortcut
 requests the next snippet; it never edits the preference or enables code during a disabled session.
 Saved settings take effect on the next Start. Tool-field removal is deferred with explanations to #273.
 The fixed `speak.codeSnippet` schema carries language, placement, code, and corrected-line indices;
