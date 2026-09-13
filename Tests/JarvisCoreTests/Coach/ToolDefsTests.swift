@@ -35,7 +35,7 @@ import Testing
         #expect(speakTool.parametersJSON.contains(
             "A small Mermaid graph for a private architecture sketch. "
                 + "Null unless a loaded skill asks for a diagram."))
-        #expect(JarvisPrompts.Coach.ToolGuidance.speak.hasSuffix("""
+        #expect(speakTool.guidance.hasSuffix("""
             Set mermaid to null. Attach a graph only when a loaded skill has told you to, and only
             for the case it describes.
             """))
@@ -43,9 +43,6 @@ import Testing
 
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
-        #expect(captureScreenTool.description == JarvisPrompts.Coach.ToolDescription.captureScreen)
-        #expect(speakTool.description == JarvisPrompts.Coach.ToolDescription.speak)
-        #expect(staySilentTool.description == JarvisPrompts.Coach.ToolDescription.staySilent)
         #expect(captureScreenTool.description.contains("one fresh result satisfies that request"))
         #expect(speakTool.description.contains("up to 3 short standalone overlay lines"))
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
@@ -127,9 +124,9 @@ import Testing
     /// The tip style governs `speak` and travels with it; `speak` is always offered, so this text
     /// still reaches the model in every session.
     @Test func coachPromptHasOneConsistentFullSolutionRule() {
-        #expect(JarvisPrompts.Coach.ToolGuidance.speak
+        #expect(speakTool.guidance
             .contains("Give a full solution only when \"me\" explicitly asks"))
-        #expect(!JarvisPrompts.Coach.ToolGuidance.speak.contains("never the whole answer"))
+        #expect(!speakTool.guidance.contains("never the whole answer"))
         #expect(!JarvisPrompts.Coach.system.contains("never the whole answer"))
     }
 
@@ -138,7 +135,7 @@ import Testing
     /// vocabulary already in front of the user; a genuinely necessary new term is glossed, not
     /// dropped, because accuracy outranks brevity.
     @Test func coachPromptGroundsTipVocabularyInWhatTheUserAlreadySees() {
-        let prompt = JarvisPrompts.Coach.ToolGuidance.speak
+        let prompt = speakTool.guidance
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         #expect(prompt.contains("Name things with the words already in front of \"me\""))
         // Either speaker: the interviewer's spoken terms are also in front of the user, and
