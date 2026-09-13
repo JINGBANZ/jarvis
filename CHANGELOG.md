@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4](https://github.com/JINGBANZ/jarvis/compare/v0.2.3...v0.2.4) (2026-09-13)
+
+
+### Features
+
+* **coach:** load coaching skills on demand and retire the interview format ([#305](https://github.com/JINGBANZ/jarvis/issues/305)) ([04552c8](https://github.com/JINGBANZ/jarvis/commit/04552c899bd7f7ead0e2c6905afa8372a9b6a9ef))
+* **coach:** load coaching tools on demand and let the user switch them off ([#301](https://github.com/JINGBANZ/jarvis/issues/301)) ([a455688](https://github.com/JINGBANZ/jarvis/commit/a455688a1a76aa1ba89db30d373e0db789976d6a))
+
 ## [0.2.3](https://github.com/JINGBANZ/jarvis/compare/v0.2.2...v0.2.3) (2026-09-13)
 
 
