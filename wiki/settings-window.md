@@ -286,7 +286,8 @@ list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
 OpenAI API and Codex CLI share one concrete model list; Claude Code exposes the current concrete
-release in each supported family. Concrete releases, never rolling aliases such as `sonnet` or
+releases, including the latest in each supported family and older choices needed to preserve saved
+routes. Adding a model keeps provider defaults and existing selections stable. Concrete releases, never rolling aliases such as `sonnet` or
 `opus` or a CLI's own default: a saved route must keep naming the release the user picked, and an
 alias silently retargets it the day the provider advances it. Each provider remembers its own model; without a valid preference,
 the first entry in that provider's catalog is selected. The **Reasoning effort** picker
@@ -294,7 +295,9 @@ the first entry in that provider's catalog is selected. The **Reasoning effort**
 provider is active; its default lives with the others in
 [`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
-three shared levels pass through.
+three shared levels pass through. `OpenAIBrainClient` also clamps None to Low for GPT-6 Astra and
+raises the output budget to at least the Low budget, because Astra requires reasoning. The stored
+effort remains unchanged, and other OpenAI models retain the selected effort.
 
 **Interview format.** The Coaching-card picker defaults to **None** (base prompt only), with
 **Coding**, **Behavioral**, **System Design**, and **General Technical** as explicit selections.

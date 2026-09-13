@@ -51,6 +51,22 @@ import Foundation
         #expect(reloaded.effort == .high)
     }
 
+    @Test func latestModelsAndExistingFableRoundTripWithoutChangingEffort() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        let primary = BrainTarget(provider: .openAI, modelID: "gpt-6-astra")
+        let fallbacks = [
+            BrainTarget(provider: .codexCLI, modelID: "gpt-6-astra"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-fable-5-1"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-fable-5"),
+        ]
+        p.route = BrainRoute(primary: primary, fallbackTargets: fallbacks)
+        p.effort = .none
+        let reloaded = BrainPreferences(defaults: d)
+        #expect(reloaded.route.targets == [primary] + fallbacks)
+        #expect(reloaded.effort == .none)
+    }
+
     @Test func unknownStoredModelFallsBackToDefault() {
         let d = freshDefaults()
         d.set("gpt-removed-from-catalog", forKey: "brain.model")
