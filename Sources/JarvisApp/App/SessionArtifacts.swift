@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisEvaluation
 
 /// Owns everything a coaching session leaves on disk.
 ///
@@ -58,7 +59,7 @@ final class SessionArtifacts {
         // Application Support/Jarvis left by another tool) keeps its mode, which would leak session-dir
         // names. Tighten it best-effort, mirroring FileSecretStore.setApiKey.
         try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: base.path)
-        // File creation and every later write run on the shared bounded evidence worker. Start only
+        // Evidence file creation and later writes run on the shared bounded evidence worker. Start only
         // creates a lightweight session handle and never waits for an older session's disk access.
         // The human-facing projection is composed here, not reached for inside the kernel: the
         // handle owns the one admission point, and ActivityLog renders what the worker hands it.
@@ -113,56 +114,31 @@ final class SessionArtifacts {
         Set(closingAuditPaths.map { URL(fileURLWithPath: $0, isDirectory: true) })
     }
 
-    /// A unique id for a session (one per Start), used as its log subdirectory name. Sortable
-    /// timestamp + a short random suffix so two Starts in the same second don't collide.
+    /// Build identity is part of the directory name already created at Start, not a second file.
     func newSessionID() -> String {
-        let f = DateFormatter()
-        // Fixed-format timestamp: pin locale + calendar so the name is always Gregorian yyyy-MM-dd
-        // and lexically sortable, regardless of the user's locale or system calendar (Apple QA1480).
-        f.locale = Locale(identifier: "en_US_POSIX")
-        f.calendar = Calendar(identifier: .gregorian)
-        f.dateFormat = "yyyy-MM-dd_HH-mm-ss"
-        let suffix = String(UUID().uuidString.prefix(4))
-        return "\(f.string(from: Date()))_\(suffix)"
+        SessionDirectoryID.make(
+            isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
+            version: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
     }
 
-    /// Where session logs go. `build-app.sh --run` passes a `--log-dir` pointing at the repo's
-    /// gitignored, workspace-local `.jarvis/` (the app is launched by `open` from an arbitrary cwd, so
-    /// it can't find the repo itself). When the bundle is opened directly with no `--log-dir`, fall back
-    /// to a per-user app-data dir alongside the API key — `~/Library/Application Support/Jarvis/sessions/`
-    /// — which is always writable and owner-only. Each Start nests a per-session subdir under this base
-    /// (see `beginNewSession`).
+    /// Bundle location, not launch arguments or cwd, keeps each development worktree's history
+    /// beside its source. The same base feeds Start, Activity, and retention.
     func logDirectory() -> URL {
-        let args = CommandLine.arguments
-        if let i = args.firstIndex(of: "--log-dir"), i + 1 < args.count {
-            return URL(fileURLWithPath: args[i + 1])
-        }
-        return secretFile.directoryURL.appendingPathComponent("sessions")
+        SessionStore.baseDirectory(
+            isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
+            bundleURL: Bundle.main.bundleURL,
+            appDataDirectory: secretFile.directoryURL)
     }
 
-    /// The agentic evaluator must inspect the live source checkout, not a baked description. Prefer
-    /// an explicit launch argument, then the workspace-local `.jarvis/` parent used by build-app.sh,
-    /// then the directory containing a locally built app bundle. A redistributed bundle without a
-    /// checkout simply reports evaluation unavailable instead of running a weaker evaluator.
-    func evaluationRepositoryDirectory() -> URL? {
-        let args = CommandLine.arguments
-        var candidates: [URL] = []
-        if let i = args.firstIndex(of: "--repo-dir"), i + 1 < args.count {
-            candidates.append(URL(fileURLWithPath: args[i + 1]))
-        }
-        let logs = logDirectory().standardizedFileURL
-        if logs.lastPathComponent == ".jarvis" {
-            candidates.append(logs.deletingLastPathComponent())
-        }
-        candidates.append(Bundle.main.bundleURL.deletingLastPathComponent())
-
-        return candidates.first { candidate in
-            let root = candidate.standardizedFileURL
-            return FileManager.default.fileExists(
-                atPath: root.appendingPathComponent("Package.swift").path)
-                && FileManager.default.fileExists(
-                    atPath: root.appendingPathComponent("Sources/JarvisCore").path)
-        }?.standardizedFileURL
+    /// The session's directory name is structured data: it carries the version identity that
+    /// `EvaluationSource` turns into a source choice, so the name is read here rather than any
+    /// file inside the session.
+    func evaluationSource(for session: URL) -> EvaluationSource {
+        EvaluationSource.resolve(
+            isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
+            bundleURL: Bundle.main.bundleURL,
+            sessionID: session.lastPathComponent,
+            currentVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String)
     }
 
     /// Hand the live session back at teardown and forget it, so a replacement Start opens a fresh

@@ -16,6 +16,45 @@ import Testing
             == (expected.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor))
     }
 
+    /// A preprocessor directive is load-bearing; coloring it inert would be worse than no coloring.
+    @MainActor @Test func hashOpensACommentOnlyInHashCommentLanguages() throws {
+        let plain = try firstColor("cpp", "include <vector>")
+        let comment = try firstColor("swift", "// count seen")
+        #expect(comment != plain)
+        #expect(try firstColor("cpp", "#include <vector>") == plain)
+        #expect(try firstColor("c", "#define MAX 100") == plain)
+        #expect(try firstColor("swift", "#available(macOS 14, *)") == plain)
+        #expect(try firstColor("python", "# count seen") == comment)
+        // `language` is free text from the model, so short and capitalized forms must land too.
+        #expect(try firstColor("Python", "# count seen") == comment)
+        #expect(try firstColor("py", "# count seen") == comment)
+        #expect(try firstColor("bash", "# count seen") == comment)
+    }
+
+    /// The dock re-shows the same snippet on every frame of a resize drag; only a genuine change
+    /// of snippet or font size may re-lex it.
+    @MainActor @Test func unchangedSnippetKeepsItsRenderedText() throws {
+        let snippet = try #require(CodeSnippet(language: "swift", placement: "Inside solve",
+            code: "let value = 1\nreturn value"))
+        let dock = CodeSnippetView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        dock.show(snippet, fontSize: 18)
+        dock.layoutSubtreeIfNeeded()
+        let scroll = try #require(dock.subviews.compactMap { $0 as? NSScrollView }.first)
+        let document = try #require(scroll.documentView)
+        let text = try #require(document.subviews.compactMap { $0 as? NSTextView }.first)
+        let storage = try #require(text.textStorage)
+        let marker = NSAttributedString.Key("JarvisRenderMarker")
+        storage.addAttribute(marker, value: true, range: NSRange(location: 0, length: storage.length))
+
+        dock.show(snippet, fontSize: 18)
+        dock.layoutSubtreeIfNeeded()
+        #expect(dock.codeText.attribute(marker, at: 0, effectiveRange: nil) as? Bool == true)
+        #expect(dock.codeText.string == snippet.code)
+
+        dock.show(snippet, fontSize: 14)
+        #expect(dock.codeText.attribute(marker, at: 0, effectiveRange: nil) == nil)
+    }
+
     @MainActor @Test func deliveryAcceptsOnlyVisibleCodeAndExplanation() throws {
         let box = OverlayBoxPanel()
         let sink = BroadcastOverlay([box])
@@ -73,6 +112,51 @@ import Testing
         box.setCodeEnabled(true)
         #expect(box.currentCodeSnippet == nil)
         #expect(box.currentCodeHeight > 0)
+    }
+
+    @MainActor @Test func codeAppearanceDoesNotInheritHistoryAppearance() throws {
+        let previousWindows = Set(NSApplication.shared.windows.map(\.windowNumber))
+        let box = OverlayBoxPanel()
+        let window = try #require(NSApplication.shared.windows.first { !previousWindows.contains($0.windowNumber) })
+        let content = try #require(window.contentView)
+        let dock = try #require(content.subviews.compactMap { $0 as? CodeSnippetView }.first)
+        box.setEnabled(true)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
+        box.setCodeEnabled(true)
+        box.setCodeFontSize(14)
+        box.setCodeBackgroundOpacity(0.2)
+        box.setFontSize(30)
+        box.setOpacity(0.9)
+        let snippet = try #require(CodeSnippet(language: "swift", placement: "Start", code: "return result"))
+        #expect(box.deliverCodeSnippet(snippet) == snippet)
+        let font = try #require(dock.codeText.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+        #expect(font.pointSize == 14)
+        #expect(abs(box.currentCodeBackgroundOpacity - 0.2) < 0.001)
+        #expect(content.layer?.backgroundColor == nil)
+        #expect(abs(box.currentBoxOpacity - 0.9) < 0.001)
+        box.setCodeBackgroundOpacity(0)
+        #expect(box.currentCodeBackgroundOpacity == 0)
+        #expect(dock.codeText.string == snippet.code)
+    }
+
+    @MainActor @Test func savedCodePreviewDoesNotChangeSessionAvailability() throws {
+        let box = OverlayBoxPanel()
+        box.setEnabled(true)
+        box.setCodePreviewEnabled(true)
+        box.showAppearancePreview(true)
+        #expect(box.currentCodeSnippet != nil)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false); box.showAppearancePreview(false) }
+        #expect(box.currentCodeHeight == 0)
+        let snippet = try #require(CodeSnippet(language: "swift", placement: "Start", code: "return result"))
+        #expect(box.deliverCodeSnippet(snippet) == nil)
+        box.setCodeEnabled(true)
+        #expect(box.deliverCodeSnippet(snippet) == snippet)
+        box.setCodePreviewEnabled(false)
+        #expect(box.currentCodeSnippet == snippet)
+        box.setSessionLive(false)
+        #expect(box.currentCodeHeight == 0)
     }
 
     @MainActor @Test func hintsPreserveCodeAndPreviewCannotReplaceLiveDelivery() throws {
@@ -200,6 +284,13 @@ import Testing
         dock.dismissButton.performClick(nil)
         #expect(dismissed)
     }
+}
+
+/// The color of the first character, compared against a baseline render rather than a literal.
+@MainActor private func firstColor(_ language: String, _ code: String) throws -> NSColor {
+    let snippet = try #require(CodeSnippet(language: language, placement: "Top of file", code: code))
+    return try #require(CodeSnippetFormatting.render(snippet, fontSize: 16)
+        .attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)
 }
 
 private func luminance(_ color: NSColor) -> CGFloat {

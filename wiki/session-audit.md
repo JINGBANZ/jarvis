@@ -35,8 +35,12 @@ Two projections read that one stack:
 | The **Activity window** ([`ActivityLog`](../Sources/JarvisCore/Diagnostics/ActivityLog.swift)) | The high-level human story, drawn from the closed [`ActivityEvent`](../Sources/JarvisCore/Diagnostics/ActivityEvent.swift) presentation set |
 | The **owner-only session folder** | The detailed record an agent or evaluator inspects: provider traffic, attempt provenance, and `jarvis-debug.log` |
 
-The closed presentation set is what keeps transport, retry, timing, lifecycle, and raw-error detail
-out of the human view. Sharing one stack grants no producer a path to author free-form human copy.
+The closed presentation set is what keeps transport, retry, timing, and lifecycle detail out of the
+human view. Sharing one stack grants no producer a path to author free-form human copy. A failure
+presentation quotes the provider's identity and redacted message inside its fixed frame, the way a
+`heard` row quotes speech: the frame and the choice of clause stay Core's, and the quoted evidence is
+what makes an unclassified cause diagnosable from a screenshot (see
+[architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)).
 
 Provider traffic is kept at the wire level, the exact request and response bodies with images
 redacted, rather than as provider-neutral messages: cache-busting prefix changes and tool-schema

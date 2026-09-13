@@ -13,6 +13,7 @@ final class OverlayCodeDividerView: NSView {
         super.init(frame: frame)
         setAccessibilityElement(true)
         setAccessibilityRole(.splitter)
+        setAccessibilityOrientation(.horizontal)
         setAccessibilityLabel("Resize code and hints")
     }
 
@@ -20,6 +21,26 @@ final class OverlayCodeDividerView: NSView {
 
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// VoiceOver's keyboard adjustment commands use these actions without making the panel key.
+    override func accessibilityPerformIncrement() -> Bool { adjustHeight(by: 20) }
+    override func accessibilityPerformDecrement() -> Bool { adjustHeight(by: -20) }
+
+    override func accessibilityValue() -> Any? { NSNumber(value: Double(frame.midY)) }
+    override func accessibilityValueDescription() -> String? {
+        "Code area height: \(Int(frame.midY.rounded())) points"
+    }
+
+    /// Reuse the panel's bounds and report whether an accessible adjustment actually moved it.
+    private func adjustHeight(by delta: CGFloat) -> Bool {
+        guard !isHiddenOrHasHiddenAncestor, window?.isVisible == true,
+              let onHeightChanged else { return false }
+        let previous = frame.midY
+        onHeightChanged(previous + delta)
+        guard frame.midY != previous else { return false }
+        NSAccessibility.post(element: self, notification: .valueChanged)
+        return true
+    }
 
     override func updateTrackingAreas() {
         super.updateTrackingAreas()

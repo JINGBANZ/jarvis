@@ -135,8 +135,10 @@ Narrow and explicit. Data leaves the machine only via:
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, coaching-attempt provenance, brain traffic,
   saved screenshots, and source checkout because correlation across those inputs is the audit's
-  purpose. Evaluation is unavailable without a live checkout; the app never substitutes a weaker
-  API-only audit.
+  purpose. Development uses the live checkout containing the bundle; release evaluation fetches
+  public source from `github.com/JINGBANZ/jarvis` (redirecting to GitHub's archive host) at the
+  session's recorded version. This request sends the release version, never session contents.
+  The two source paths and provenance contract are in [build-and-run.md](./build-and-run.md).
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: audio is either
@@ -155,7 +157,7 @@ the **per-session log directory** — owner-only and bounded; see below.
 > *debuggability-over-retention* choice. A future `store:false` change must also preserve stateless
 > tool-loop reasoning continuity; it is not part of the public-launch hardening.
 
-**The per-session log directory is the one bounded form of disk persistence, hardened to stay
+**The per-session log directory is the bounded session-data persistence, hardened to stay
 owner-only.** It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
 the screenshots the model looked at, alongside `jarvis-debug.log`) — the model's spoken tips and the
 transcribed "heard:" lines so a session can be reviewed afterward — plus the **coaching-attempt
@@ -168,13 +170,23 @@ directory also holds its derived `eval-transcript.txt`, `eval-report.md`, and br
 `eval-report.html`. The evaluator receives this complete owner-only session directory;
 `jarvis-activity.jsonl` is not copied or prefiltered into another prompt artifact. Every
 launch writes this record as the default session-review affordance. The files go to a per-session
-directory in the **gitignored, workspace-local `.jarvis/`** (passed to the `open`-launched app via
-`--log-dir` by `build-app.sh --run`) — or, when the bundle is opened directly with no `--log-dir`, a
-per-user **`~/Library/Application Support/Jarvis/sessions/`** alongside the API key — at **`0600`**
+directory under the build-specific base defined by
+[`SessionStore.baseDirectory`](../Sources/JarvisCore/Diagnostics/SessionStore.swift), following the
+[history isolation contract](./build-and-run.md#the-live-activity-viewer), at **`0600`**
 owner-only permissions inside a **`0700`** dir, **fresh each session**, and **never `/tmp`**
 (world-readable, shared across user accounts). Growth is bounded: each Start prunes to the **10 most recent** session
 dirs, and the viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and
 readable by this user account and by nothing else. See [build-and-run.md](./build-and-run.md).
+
+Build identity lives in the session directory name, with its validation defined by
+[`SessionDirectoryID`](../Sources/JarvisCore/Diagnostics/SessionDirectoryID.swift).
+Evaluation downloads public repository source into an owner-only per-user temporary directory for
+one run and removes it when that run ends. Nothing persists between evaluations, and session-derived
+data is never copied into that tree, so private evidence and public source stay separate.
+[`ReleaseSourceStore`](../Sources/JarvisEvaluation/ReleaseSourceStore.swift) owns the exact path and
+permissions; [build-and-run.md](./build-and-run.md#the-live-activity-viewer) defines source selection
+and mismatch disclosure. Version text is validated before it reaches a path or download URL, and a
+failed, cancelled, or incomplete extraction takes its directory with it.
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 

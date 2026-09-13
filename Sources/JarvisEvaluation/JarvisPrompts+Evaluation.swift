@@ -10,12 +10,15 @@ extension JarvisPrompts {
             attemptsFilename: String,
             healthFilename: String,
             activityFilename: String,
-            reportFilename: String
+            reportFilename: String,
+            workspaceProvenance: String
         ) -> String {
             """
             You are evaluating one completed session of Jarvis, a proactive macOS coaching assistant. \
             Your workspace is a checkout of the Jarvis source repository, and the session directory is:
                 \(sessionDirectoryPath)
+
+            \(workspaceProvenance)
 
             Use the repository and session only as read-only evidence. You have file, search, and shell \
             tools: inspect the original artifacts, follow relevant evidence into the implementation, and \

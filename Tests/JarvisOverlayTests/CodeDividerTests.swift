@@ -61,6 +61,42 @@ import Testing
         #expect(history.frame.height >= 44)
     }
 
+    @MainActor @Test func accessibilityActionsAdjustBothWaysWithinBoundsWithoutTakingFocus() throws {
+        let (box, window) = try makeBox()
+        box.setCodeEnabled(true)
+        box.setEnabled(true)
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
+        let divider = try divider(in: window)
+        let originalHeight = box.currentCodeHeight
+        let originalFrame = box.currentFrame
+        let keyWindow = NSApp.keyWindow
+        let active = NSApp.isActive
+        #expect(divider.accessibilityPerformIncrement())
+        #expect(box.currentCodeHeight > originalHeight)
+        #expect(divider.accessibilityPerformDecrement())
+        #expect(abs(box.currentCodeHeight - originalHeight) < 0.01)
+        try drag(divider, by: 2000)
+        let maximum = box.currentCodeHeight
+        #expect(!divider.accessibilityPerformIncrement())
+        #expect(box.currentCodeHeight == maximum)
+        #expect(divider.accessibilityPerformDecrement())
+        #expect(box.currentCodeHeight < maximum)
+        try drag(divider, by: -2000)
+        let minimum = box.currentCodeHeight
+        #expect(!divider.accessibilityPerformDecrement())
+        #expect(box.currentCodeHeight == minimum)
+        #expect(box.currentFrame == originalFrame)
+        #expect(NSApp.keyWindow === keyWindow)
+        #expect(NSApp.isActive == active)
+        box.clickCollapseButton()
+        #expect(!divider.accessibilityPerformIncrement())
+        box.clickCollapseButton()
+        #expect(abs(box.currentCodeHeight - minimum) < 0.01)
+        box.setSessionLive(false)
+        #expect(!divider.accessibilityPerformIncrement())
+    }
+
     @MainActor private func makeBox() throws -> (OverlayBoxPanel, NSWindow) {
         let existing = Set(NSApplication.shared.windows.map(ObjectIdentifier.init))
         let box = OverlayBoxPanel(contentSize: NSSize(width: 503, height: 503))

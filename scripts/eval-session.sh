@@ -4,7 +4,7 @@
 # The sole evaluator runs through an agentic CLI (Claude Code / Codex) whose workspace is this repo
 # checkout PLUS the complete session directory. The auditor reads the full Activity log and raw
 # traffic whenever useful, then verifies each finding against the harness's own code
-# (Prompts/, CoachHistory.swift, CoachDriver.swift, ToolDefs.swift, …) instead of guessing
+# (Prompts/, Coach/Tools/, CoachHistory.swift, CoachDriver.swift, …) instead of guessing
 # from a reduced prompt.
 #
 # The script and Activity's Evaluate button both call the same Foundation-only evaluator. The agent
@@ -24,16 +24,9 @@ cd "$(dirname "$0")/.."
 # under the workspace-local .jarvis/ (where the app writes per-session logs).
 SESSION_DIR="${1:-}"
 if [[ -z "$SESSION_DIR" ]]; then
-  # Newest session by *name*: ids are sortable timestamps (2026-06-16_10-00-00_xxxx), and the
-  # glob is lexicographic, so the last match is the latest session. Mtime would lie here — merely
-  # re-auditing an old session (or regenerating its HTML) bumps its directory mtime.
-  for d in .jarvis/*/; do
-    [[ -d "$d" ]] && SESSION_DIR="$d"
-  done
-  if [[ -z "$SESSION_DIR" ]]; then
-    echo "no session directory found under .jarvis/ — pass one explicitly" >&2
-    exit 1
-  fi
+  # Prefixes identify the build, not recency. Share Activity's timestamp parser rather than sorting
+  # whole names or mtimes (which change when a saved session is evaluated).
+  SESSION_DIR="$(swift run EvalPrep --latest "$PWD/.jarvis")"
   echo "▶ auditing most recent session: $SESSION_DIR"
 fi
 [[ -d "$SESSION_DIR" ]] || { echo "not a directory: $SESSION_DIR" >&2; exit 1; }

@@ -156,46 +156,4 @@ public enum GeminiLiveSession {
               let raw = goAway["timeLeft"] as? String, raw.hasSuffix("s") else { return nil }
         return TimeInterval(raw.dropLast())
     }
-
-    /// Maps a WebSocket close code (and, for the one code that needs it, the close reason text) to a
-    /// terminal failure. `nil` for every other code, so the caller's normal reconnect-with-backoff
-    /// behavior is unaffected.
-    ///
-    /// Takes the raw close code as an `Int` rather than `URLSessionWebSocketTask.CloseCode`, and the
-    /// reason as a plain `String` rather than the `Data` the delegate callback actually receives —
-    /// both are Foundation networking types, and this file lives in the coaching kernel, which may
-    /// depend only on deterministic in-memory policy, never an OS/transport type (`scripts/check-
-    /// coaching-kernel.sh`). `URLSessionWebSocketTask.CloseCode` is `RawRepresentable` with `Int` raw
-    /// values, so the call site passes `closeCode.rawValue`; it also UTF-8-decodes the `Data` reason
-    /// before passing it here.
-    ///
-    /// EMPIRICAL FACT, established against the live endpoint with a deliberately invalid API key —
-    /// do not "simplify" this away without re-verifying against the real server: Gemini does NOT
-    /// reject a bad key with an HTTP 401 at the WebSocket handshake, and does NOT send an `{"error":
-    /// ...}` frame either (the Live API has no `error` server-message frame at all — see
-    /// https://ai.google.dev/api/live for the exhaustive `BidiGenerateContentServerMessage` list).
-    /// The handshake succeeds, and the server then closes the socket with code 1008 (policy
-    /// violation). That makes close code 1008 the only signal available for a rejected key, and it is
-    /// exactly the "proven permanent provider-boundary failure" AGENTS.md allows to exhaust a target
-    /// immediately, skipping the usual reconnect backoff.
-    ///
-    /// 1008 is not exclusively a rejected key, though — Google reuses it as a GENERIC rejection code
-    /// that also covers a retired/unrecognized model id and an unsupported request shape. All three
-    /// are still permanent provider-boundary failures a retry cannot fix, so 1008 stays terminal
-    /// either way; only the classification differs. The close `reason` text is the one available
-    /// signal for telling them apart, but Google does not document its wording as a stable contract,
-    /// so this matches a couple of narrow, stable substrings rather than parsing sentence structure.
-    /// The captured wording for a rejected key was: "Request had invalid authentication credentials.
-    /// Expected OAuth 2 access token, login cookie or other valid authentication credential...".
-    /// DEFAULT MUST STAY `.configurationRejected`: an unrecognized 1008 reason must never claim the
-    /// key itself was rejected — that would send a user to rotate a perfectly good key.
-    public static func terminalFailure(forCloseCode closeCode: Int, reason: String?) -> TranscriptionFailureReason? {
-        guard closeCode == 1008 else { return nil }
-        let normalized = (reason ?? "").lowercased()
-        let authenticationMarkers = ["authentication", "credential"]
-        if authenticationMarkers.contains(where: normalized.contains) {
-            return .authenticationFailed
-        }
-        return .configurationRejected
-    }
 }
