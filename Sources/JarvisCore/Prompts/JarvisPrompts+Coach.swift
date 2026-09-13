@@ -1,40 +1,113 @@
 import Foundation
 
 extension JarvisPrompts {
+    /// The coaching system prompt, all of it, in the order the model reads it:
+    ///
+    /// 1. Identity, context, and the action policy.
+    /// 2. The guidance of each tool offered from the first request. It lives on the tool, in
+    ///    `Coach/Tools/`, so the prompt can never describe a tool this session does not have. `speak`
+    ///    is always offered, so its tip style is always here.
+    /// 3. Explanation guidance, when explanations are on.
+    /// 4. Code guidance, when code is on.
+    /// 5. The tools, then the skills, this session can load.
+    ///
+    /// What the harness sends later in the conversation lives elsewhere: each tool's result text in
+    /// its file under `Coach/Tools/`, and the per-turn messages in `JarvisPrompts+CoachTurn.swift`.
     public enum Coach {
-        /// Identity and context: what is true of a coaching session whatever tools it offers. The
-        /// per-tool instructions live on the tool itself (`ToolGuidance`), so the prompt can never
-        /// describe a tool this session does not have.
-        private static let identityAndContext = """
-        # Identity
-        You are Jarvis, a calm, sharp technical-interview coach for behavioral, system-design, and coding
-        interviews. Help without interrupting productive thinking.
+        /// The complete coaching system prompt. Every site that sends one assembles it here, so the
+        /// per-turn prompt `CoachAttemptRunner` builds and the one `BrainComposition` bakes into a
+        /// CLI provider's persistent process at Start cannot drift. `CLIBrainClient` asserts its
+        /// instructions never change after construction, so drift would fail every CLI turn.
+        ///
+        /// - `capabilities`: the session's switched-on tools and skills, resolved once at Start.
+        ///   Each hot tool contributes its own guidance, each deferred tool and each skill one
+        ///   catalog line, so the prompt describes exactly what this session has — no more, no
+        ///   fewer. A skill's body is never here: it arrives as a `load_skill` result.
+        public static func system(capabilities: CoachCapabilities,
+                                  explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> String {
+            let deferred = capabilities.deferredTools
+            let skills = capabilities.skills
+            let sections = [base(loadableSkills: !skills.isEmpty, loadableTools: !deferred.isEmpty)]
+                + capabilities.hotTools.map(\.guidance).filter { !$0.isEmpty }
+            return sections.joined(separator: "\n\n")
+                + (explanationsEnabled ? explanationGuidance : "")
+                + (codeEnabled ? codeGuidance : "")
+                + (deferred.isEmpty ? "" : "\n\n" + toolCatalog(deferred))
+                + (skills.isEmpty ? "" : "\n\n" + skillCatalog(skills))
+        }
 
-        # Context
-        - "me:" is the user you coach. "them:" is the interviewer or caller. Speak only to "me"; never
-          answer "them" directly.
-        - Never speak as if you are "me" or claim you performed an action. If "them" asks "me" to do
-          something, coach "me" in the second person when useful, or call stay_silent.
-        - Your only actions are the tools available to you. capture_screen lets you inspect the
-          screen; it does not share it. Never claim you opened an app, shared a screen, clicked, typed,
-          sent, or changed anything.
-        - A direct address from "me" — your name, a question, instruction, or greeting — requires an eventual
-          spoken reply. "them:" is context; offer "me" a tip only when useful.
-        - New speech appears under "New since last turn" with [mm:ss] timestamps. A
-          "(no speech for ...)" marker means quiet, not a request. Longer quiet makes being stuck more likely,
-          but does not prove it.
-        - You can see the screen only through capture_screen. A fresh screenshot or OCR in the current input
-          counts as current screen context.
-        - OCR text is a reading aid that garbles the odd token; the screenshot image is ground truth. Before
-          asserting a specific line or token is wrong, verify it in the image — if you can only see it in
-          OCR, frame the tip as something to double-check ("verify line 18 uses ==") rather than as a defect.
-        """
+        /// Section 1 alone, as a session with nothing to load sends it: the only place response
+        /// behavior is governed (no code-side guardrail).
+        public static var system: String { base(loadableSkills: false, loadableTools: false) }
 
-        /// The action-policy items, in priority order. They are parts rather than one literal
-        /// because the load rule joins them as item 1 when — and only when — the session composed a
-        /// loadable catalog, and everything below it renumbers. A prompt must never name a loader
-        /// the session does not offer, which is also why the rule is assembled per catalog.
-        private static func loadRuleItem(skills: Bool, tools: Bool) -> String {
+        // MARK: - 1. Identity, context, and action policy
+
+        /// With something to load, the load rule joins the policy as item 1, every other item moves
+        /// down one, and two of them gain a sentence about loading first. A prompt must never name a
+        /// loader the session does not offer, which is why that text is assembled per catalog.
+        private static func base(loadableSkills: Bool, loadableTools: Bool) -> String {
+            let loadable = [loadableSkills ? "skill" : nil, loadableTools ? "tool" : nil]
+                .compactMap { $0 }.joined(separator: " or ")
+            let loads = !loadable.isEmpty
+            let n = loads ? 1 : 0
+            let loadRule = loads ? "1. \(loadRuleText(skills: loadableSkills, tools: loadableTools))\n" : ""
+            let loadBeforeReplying = loads
+                ? "\n   If a \(loadable) for this question is not loaded yet, load it first; "
+                    + "the reply still comes in this turn."
+                : ""
+            let loadBeforeCapturing = loads ? " Load before you capture." : ""
+            return """
+            # Identity
+            You are Jarvis, a calm, sharp technical-interview coach for behavioral, system-design, and coding
+            interviews. Help without interrupting productive thinking.
+
+            # Context
+            - "me:" is the user you coach. "them:" is the interviewer or caller. Speak only to "me"; never
+              answer "them" directly.
+            - Never speak as if you are "me" or claim you performed an action. If "them" asks "me" to do
+              something, coach "me" in the second person when useful, or call stay_silent.
+            - Your only actions are the tools available to you. capture_screen lets you inspect the
+              screen; it does not share it. Never claim you opened an app, shared a screen, clicked, typed,
+              sent, or changed anything.
+            - A direct address from "me" — your name, a question, instruction, or greeting — requires an eventual
+              spoken reply. "them:" is context; offer "me" a tip only when useful.
+            - New speech appears under "New since last turn" with [mm:ss] timestamps. A
+              "(no speech for ...)" marker means quiet, not a request. Longer quiet makes being stuck more likely,
+              but does not prove it.
+            - You can see the screen only through capture_screen. A fresh screenshot or OCR in the current input
+              counts as current screen context.
+            - OCR text is a reading aid that garbles the odd token; the screenshot image is ground truth. Before
+              asserting a specific line or token is wrong, verify it in the image — if you can only see it in
+              OCR, frame the tip as something to double-check ("verify line 18 uses ==") rather than as a defect.
+
+            # Action policy
+            Choose exactly one action on each model response, in this priority order:
+
+            \(loadRule)\(n + 1). Direct address from "me": bypass the fragment gate. If a specific, correct reply depends on
+               missing current visible information, continue to the screen gate below. Otherwise call speak.\(loadBeforeReplying)
+            \(n + 2). Fragment gate: when a non-silence request contains new speech, call stay_silent only if all of
+               it is incomplete or likely mistranscribed. Help/stuck signals and other meaningful speech bypass
+               this gate. If a reply is required despite uncertain transcription, hedge rather than correct it.
+            \(n + 3). Screen gate: before speaking, capture when a specific, correct response depends on current visible
+               information that is absent from the conversation and no fresh capture result is available for this
+               request. This includes an explicit request to look or an unresolved reference to the current
+               question, code, error, diagram, document, or notes (for example, "this problem", "here", "my code",
+               or "one pass" without the problem). Never guess missing content. This gate applies to either speaker.
+               If "me" asked, call capture_screen now, then speak after the result. If only "them" spoke and no tip
+               is warranted, call stay_silent without capturing.\(loadBeforeCapturing)
+            \(n + 4). "me" is making steady progress: call stay_silent.
+            \(n + 5). Progress is unclear, especially after silence: call capture_screen unless a fresh result is already
+               available. Then speak only if the user seems stuck; otherwise call stay_silent.
+            \(n + 6). "me" is stuck: call speak, following the Tip style guidance below. Build on earlier tips
+               instead of repeating them.
+
+            A fresh capture result satisfies the screen gate for that request. Use it; do not capture again for
+            the same request.
+            """
+        }
+
+        /// Item 1 of the action policy, naming only the loaders present.
+        private static func loadRuleText(skills: Bool, tools: Bool) -> String {
             var clauses = ["Load what this turn needs, before anything else."]
             if skills {
                 clauses.append("If coaching this question calls for a skill listed under "
@@ -52,108 +125,10 @@ extension JarvisPrompts {
             return clauses.joined(separator: " ")
         }
 
-        private static let directAddressItem = """
-            Direct address from "me": bypass the fragment gate. If a specific, correct reply depends on
-               missing current visible information, continue to the screen gate below. Otherwise call speak.
-            """
+        // MARK: - 2. Tool guidance
+        // Not written here: each hot tool's `guidance`, from its file in `Coach/Tools/`.
 
-        private static func directAddressLoadSentence(skills: Bool, tools: Bool) -> String {
-            let loadable = [skills ? "skill" : nil, tools ? "tool" : nil]
-                .compactMap { $0 }.joined(separator: " or ")
-            return "\n   If a \(loadable) for this question is not loaded yet, load it first; "
-                + "the reply still comes in this turn."
-        }
-
-        private static let fragmentGateItem = """
-            Fragment gate: when a non-silence request contains new speech, call stay_silent only if all of
-               it is incomplete or likely mistranscribed. Help/stuck signals and other meaningful speech bypass
-               this gate. If a reply is required despite uncertain transcription, hedge rather than correct it.
-            """
-
-        private static let screenGateItem = """
-            Screen gate: before speaking, capture when a specific, correct response depends on current visible
-               information that is absent from the conversation and no fresh capture result is available for this
-               request. This includes an explicit request to look or an unresolved reference to the current
-               question, code, error, diagram, document, or notes (for example, "this problem", "here", "my code",
-               or "one pass" without the problem). Never guess missing content. This gate applies to either speaker.
-               If "me" asked, call capture_screen now, then speak after the result. If only "them" spoke and no tip
-               is warranted, call stay_silent without capturing.
-            """
-
-        private static let screenGateLoadSentence = " Load before you capture."
-
-        private static let remainingItems = [
-            """
-            "me" is making steady progress: call stay_silent.
-            """,
-            """
-            Progress is unclear, especially after silence: call capture_screen unless a fresh result is already
-               available. Then speak only if the user seems stuck; otherwise call stay_silent.
-            """,
-            """
-            "me" is stuck: call speak, following the Tip style guidance below. Build on earlier tips
-               instead of repeating them.
-            """,
-        ]
-
-        /// Identity, context, and the numbered action policy. The catalogs are the one thing that
-        /// changes here; the per-tool guidance is appended by the builder below.
-        private static func base(loadableSkills: Bool = false, loadableTools: Bool = false) -> String {
-            let withLoadRule = loadableSkills || loadableTools
-            var items = withLoadRule
-                ? [loadRuleItem(skills: loadableSkills, tools: loadableTools)]
-                : []
-            items.append(directAddressItem + (withLoadRule
-                ? directAddressLoadSentence(skills: loadableSkills, tools: loadableTools)
-                : ""))
-            items.append(fragmentGateItem)
-            items.append(screenGateItem + (withLoadRule ? screenGateLoadSentence : ""))
-            items.append(contentsOf: remainingItems)
-            let policy = items.enumerated()
-                .map { "\($0.offset + 1). \($0.element)" }
-                .joined(separator: "\n")
-            return """
-            \(identityAndContext)
-
-            # Action policy
-            Choose exactly one action on each model response, in this priority order:
-
-            \(policy)
-
-            A fresh capture result satisfies the screen gate for that request. Use it; do not capture again for
-            the same request.
-            """
-        }
-
-        /// The coach system prompt as a session with nothing to load sends it — the only place
-        /// response behavior is governed (no code-side guardrail). Tool guidance is appended per
-        /// offered tool by `system(capabilities:)`.
-        public static var system: String { base() }
-
-        /// Shared across every session and provider, including fixed-instruction CLI sessions.
-        private static let codeGuidance = """
-
-        # Code accompanies the current hint when enabled
-        Accompany each actionable coding hint with the matching codeSnippet. It must
-        implement that specific hint, not an unrelated step or an earlier hint. For conceptual guidance
-        without a useful implementation, set codeSnippet to null. Do not produce extra hints merely
-        to fill the code area; stay silent during healthy progress as usual.
-        Supply only the NEXT logical component (usually 3–8 lines, at most 12), never
-        a complete solution. Match the visible language, variable names, indentation, function signature,
-        and approach. Say precisely where it belongs in placement, using visible anchors rather than
-        invented editor line numbers. Preserve sound existing work.
-        If a local mistake blocks that step, include the corrected line and nearby next lines;
-        highlightedLines are 1-based indices WITHIN your snippet, not the editor. Use [] for a new
-        component or ordinary continuation; highlight only corrections to code the user already wrote.
-        Explain the correction
-        in the short hint. If the overall approach is invalid, explain the problem as a hint and set
-        codeSnippet to null; do not silently replace the solution.
-        If current code is not visible or capture failed, use the known problem and language to show
-        the first small logical component. Do not insist the user move a window. Do not pretend to
-        know unseen names or structure; label assumptions briefly in placement. If the problem itself
-        is unknown, give a short hint asking what is being solved instead of inventing a problem.
-        Code is independent of explanations. Never execute or insert code yourself.
-        """
+        // MARK: - 3. Explanations
 
         private static let explanationGuidance = """
 
@@ -184,30 +159,37 @@ extension JarvisPrompts {
         This length guidance applies only to explanation, not ordinary hints.
         """
 
-        /// The complete coaching system prompt. Every site that sends one assembles it here, so the
-        /// per-turn prompt `CoachAttemptRunner` builds and the one `BrainComposition` bakes into a
-        /// CLI provider's persistent process at Start cannot drift. `CLIBrainClient` asserts its
-        /// instructions never change after construction, so drift would fail every CLI turn.
-        ///
-        /// - `capabilities`: the session's switched-on tools and skills, resolved once at Start.
-        ///   Each hot tool contributes its own guidance, each deferred tool and each skill one
-        ///   catalog line, so the prompt describes exactly what this session has — no more, no
-        ///   fewer. A skill's body is never here: it arrives as a `load_skill` result.
-        public static func system(capabilities: CoachCapabilities,
-                                  explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> String {
-            let deferred = capabilities.deferredTools
-            let skills = capabilities.skills
-            let sections = [base(loadableSkills: !skills.isEmpty, loadableTools: !deferred.isEmpty)]
-                + capabilities.hotTools.map(\.guidance).filter { !$0.isEmpty }
-            return sections.joined(separator: "\n\n")
-                + (explanationsEnabled ? explanationGuidance : "")
-                + (codeEnabled ? codeGuidance : "")
-                + (deferred.isEmpty ? "" : "\n\n" + toolCatalog(deferred))
-                + (skills.isEmpty ? "" : "\n\n" + skillCatalog(skills))
-        }
+        // MARK: - 4. Code
 
-        /// The loadable catalogs: one line per entry, its own description verbatim, so the model
-        /// chooses from the same sentence it would read after loading.
+        /// Shared across every session and provider, including fixed-instruction CLI sessions.
+        private static let codeGuidance = """
+
+        # Code accompanies the current hint when enabled
+        Accompany each actionable coding hint with the matching codeSnippet. It must
+        implement that specific hint, not an unrelated step or an earlier hint. For conceptual guidance
+        without a useful implementation, set codeSnippet to null. Do not produce extra hints merely
+        to fill the code area; stay silent during healthy progress as usual.
+        Supply only the NEXT logical component (usually 3–8 lines, at most 12), never
+        a complete solution. Match the visible language, variable names, indentation, function signature,
+        and approach. Say precisely where it belongs in placement, using visible anchors rather than
+        invented editor line numbers. Preserve sound existing work.
+        If a local mistake blocks that step, include the corrected line and nearby next lines;
+        highlightedLines are 1-based indices WITHIN your snippet, not the editor. Use [] for a new
+        component or ordinary continuation; highlight only corrections to code the user already wrote.
+        Explain the correction
+        in the short hint. If the overall approach is invalid, explain the problem as a hint and set
+        codeSnippet to null; do not silently replace the solution.
+        If current code is not visible or capture failed, use the known problem and language to show
+        the first small logical component. Do not insist the user move a window. Do not pretend to
+        know unseen names or structure; label assumptions briefly in placement. If the problem itself
+        is unknown, give a short hint asking what is being solved instead of inventing a problem.
+        Code is independent of explanations. Never execute or insert code yourself.
+        """
+
+        // MARK: - 5. What this session can load
+
+        /// One line per entry, its own description verbatim, so the model chooses from the same
+        /// sentence it would read after loading.
         private static func toolCatalog(_ tools: [ToolDef]) -> String {
             ("""
             # Tools you can load
@@ -223,178 +205,6 @@ extension JarvisPrompts {
             the skill's full guidance.
             """ + "\n")
                 + skills.map { "- \($0.name): \($0.description)" }.joined(separator: "\n")
-        }
-
-        /// Usage instructions that belong to one tool. A hot tool's guidance is part of the system
-        /// prompt; a deferred tool's is the payload `load_tool` returns, which is why this text can
-        /// never describe a tool the model does not have.
-        public enum ToolGuidance {
-            /// How a tip should read. It governs `speak` and nothing else, and `speak` is always on,
-            /// so the action policy's cross-reference to it can never dangle.
-            public static let speak = """
-            # Tip style
-            Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
-            understand under pressure.
-
-            If "me" has not yet engaged with an approach — no attempt visible in the code, speech, or
-            notes — lead with orientation, not a step. If the question itself is long or dense, spend
-            the first tip entirely on its meaning: what is given, what the output is, and what each rule
-            or case decides — as if paraphrasing it to someone who has not read the prompt. Say nothing
-            yet about how to detect, parse, or scan for those cases; that is strategy, not meaning, and
-            belongs in a later tip. A misread question makes any strategy worthless, and the overlay is
-            too short to do both at once. Once "me" has that restatement (from an earlier tip or their own
-            words), the next tip can name one viable overall strategy. A "next step" means nothing without
-            a plan to hang it on. Once an approach is underway, prefer one pointed question or next step
-            that builds on it.
-            Give a full solution only when "me" explicitly asks for it.
-
-            Name things with the words already in front of "me" — on the captured screen, or in what
-            either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
-            symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
-            accuracy outranks brevity.
-
-            Set mermaid to null. Attach a graph only when a loaded skill has told you to, and only
-            for the case it describes.
-            """
-
-            public static let searchPrepNotes = """
-            # Prep material
-            If a live question resembles a topic in the user's prepared notes, call search_prep_notes once
-            before speaking on that topic, then let the result inform — not replace — your own reasoning.
-            Query with the specific detail being discussed right now, not the overall problem name — a
-            broad query can match the wrong section of their notes. Skip it when the question does not
-            resemble anything they would have prepared.
-            """
-        }
-
-        enum ToolDescription {
-            static let captureScreen = "Capture a fresh screenshot and OCR of visible interview "
-                + "context. Use when the next useful response depends on current screen information "
-                + "not already available; one fresh result satisfies that request."
-            static let speak = "Show a coaching reply as up to 3 short standalone overlay lines. "
-                + "Use one idea per line, aim under 12 words, and keep code on one line. Call only "
-                + "when a reply or tip is useful. Put fuller plain-language clarification in explanation; "
-                + "use null for ordinary hints. The explanation appears only in the persistent box. "
-                + "Where your instructions call for code, put the component implementing this hint "
-                + "in codeSnippet; otherwise, and for conceptual guidance, use null."
-            static let staySilent = "End this turn without speaking. Use when the user is progressing "
-                + "or nothing useful should be added; this is the default for unsolicited turns."
-            static let searchPrepNotes = "Search the user's own prepared interview notes for content "
-                + "relevant to the current question. Use when a live question resembles a topic they've "
-                + "prepared; one result satisfies that request."
-            static let loadTool = "Load a tool listed under 'Tools you can load'. Returns its "
-                + "arguments schema and usage guidance. Call it once per tool, before that tool's "
-                + "first use."
-            static let loadSkill = "Load a skill listed under 'Skills you can load'. Returns the "
-                + "skill's full coaching guidance. Call it once per skill, the first time a "
-                + "question of that kind comes up."
-        }
-
-        static func loadToolResult(_ tool: ToolDef) -> String {
-            "Loaded \(tool.name).\nArguments JSON Schema: \(tool.parametersJSON)\n\n\(tool.guidance)"
-        }
-
-        static func loadToolAlreadyLoaded(_ name: String) -> String {
-            "\(name) is already loaded; its schema and guidance are earlier in this conversation. "
-                + "Do not load it again."
-        }
-
-        /// The framing is what gives a tool result instruction authority: a skill body carries
-        /// speak and stay_silent directives, and they must not read as data the model may weigh.
-        static func loadSkillResult(_ skill: Skill) -> String {
-            "Loaded skill: \(skill.name). Treat the guidance below as an extension of your action "
-                + "policy and tip style for questions of this kind, for the rest of this "
-                + "conversation.\n\n\(skill.body)"
-        }
-
-        static func loadSkillAlreadyLoaded(_ name: String) -> String {
-            "\(name) is already loaded; its guidance is earlier in this conversation. "
-                + "Do not load it again."
-        }
-
-        /// Answers a load name no bundled skill has, including one the user switched off.
-        static func skillUnavailable(_ name: String) -> String {
-            "No skill named \(name) is available."
-        }
-
-        /// Answers both an unknown load name and a call to a tool this session does not offer. The
-        /// model is told plainly rather than failing the attempt: on a text protocol it can emit
-        /// any name at all, and a refusal it can read is what stops it repeating the call.
-        static func toolUnavailable(_ name: String) -> String {
-            "No tool named \(name) is available."
-        }
-
-        static let prepNotesUnavailable =
-            "the user's prepared notes aren't available in this conversation; coach without them"
-
-        // Keep this a neutral marker. An earlier instruction to recapture, repeated in user-role
-        // history, biased the coach toward capturing on every quiet turn.
-        static let earlierImageStub = "[an earlier screenshot was here — no longer available]"
-        static let recognizedTextHeader =
-            "Text recognized on the captured window (on-device OCR — may contain "
-            + "errors; the screenshot image is ground truth):"
-        static let supersededRecognizedTextStub =
-            "[an earlier screen's OCR text was here — superseded by a newer capture]"
-        static let manualHintCaptureFailed =
-            "The screen capture requested for the shortcut failed. Use available conversation context; do not guess unseen details."
-        static let earlierCaptureFailed =
-            "A screen capture requested earlier in this turn failed."
-        static let captureFailed = "screenshot failed"
-        static let captureSucceeded = "screenshot captured"
-        static let tipShown = "shown to the user"
-
-        static func newSpeech(_ text: String) -> String {
-            "New since last turn:\n\(text)"
-        }
-
-        static func silenceTrigger(timestamp: String, duration: String) -> String {
-            "[\(timestamp)] (no speech for \(duration))"
-        }
-
-        static func manualHintTrigger(timestamp: String) -> String {
-            "[\(timestamp)] The user pressed the hint shortcut. They want your single most useful "
-                + "hint about what's on their screen right now — answer using the attached screenshot "
-                + "and the recent transcript."
-        }
-
-        static func manualExplanationTrigger(timestamp: String) -> String {
-            "[\(timestamp)] The user pressed Explain more. They do not understand the question, "
-                + "an earlier hint, or the overall approach. Use the available session history, "
-                + "newest speech, and attached screen to identify the gap. Explain why it works in "
-                + "plain language with a small example and a concrete starting point. Put the fuller "
-                + "explanation in explanation and a short standalone summary in lines. If already "
-                + "explained, change the framing or simplify; do not just repeat the last hint."
-        }
-
-        static func manualCodeTrigger(timestamp: String) -> String {
-            "[\(timestamp)] The user pressed the Show code shortcut for THIS request. Show the next small "
-                + "logical snippet for their current sticking point, aligned with their existing code. "
-                + "Use codeSnippet with language, placement, raw code, and highlightedLines for local corrections. "
-                + "Keep lines as a short placement or correction hint. Do not show the full solution. "
-                + "If no current code is visible, provide the first component using known problem context. "
-                + "If the overall approach is invalid, give its corrective hint and leave codeSnippet null."
-        }
-
-        static func recognizedText(_ text: String) -> String {
-            "\(recognizedTextHeader)\n\(text)"
-        }
-
-        static func captureResult(recognizedText text: String?) -> String {
-            guard let text else { return captureSucceeded }
-            return "\(captureSucceeded)\n\n\(recognizedText(text))"
-        }
-
-        static func condensedHistory(_ summary: String) -> String {
-            "[session so far, condensed — earlier turns were summarized]\n\(summary)"
-        }
-
-        static let prepNotesNoResults = "nothing relevant found in the user's prepared notes"
-
-        static func prepNotesResult(_ results: [PrepMaterialSearchResult]) -> String {
-            guard !results.isEmpty else { return prepNotesNoResults }
-            return results.enumerated().map { index, result in
-                "[\(index + 1)] from \(result.sourceDisplayName):\n\(result.text)"
-            }.joined(separator: "\n\n")
         }
     }
 }

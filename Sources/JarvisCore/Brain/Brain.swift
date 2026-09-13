@@ -58,7 +58,10 @@ public struct ChatMessage: Sendable {
 public struct ToolDef: Sendable, Equatable {
     public let name: String
     public let description: String
-    /// JSON Schema for parameters, as a JSON string.
+    /// JSON Schema for parameters, as a JSON string. Every object in it sets
+    /// `additionalProperties:false` and lists every key in `required`, because `OpenAIBrainClient`
+    /// sends each tool with `strict:true` Structured Outputs, which requires both. An optional field
+    /// is nullable instead, and an object with no properties is valid as it is.
     public let parametersJSON: String
     /// Usage instructions, rendered into the system prompt for a hot tool and returned by
     /// `load_tool` for a deferred one. Empty when the description says everything.
