@@ -152,8 +152,12 @@ public final class CoachHistory: @unchecked Sendable {
         guard count >= 1 else { return nil }
         let prefix = Array(messages.prefix(count))
         let retained = Set(Self.retainedIndices(in: prefix))
-        return (prefix.indices.filter { !retained.contains($0) }.map { prefix[$0] },
-                count, rewriteRevision)
+        let summarizable = prefix.indices.filter { !retained.contains($0) }.map { prefix[$0] }
+        // A span that is nothing but retained pairs has nothing to summarize: compacting it would
+        // spend a provider round trip on an empty prompt and stack a summary of nothing on top of
+        // the pairs it kept. Skip the pass; a later one starts from a prefix that reaches real turns.
+        guard !summarizable.isEmpty else { return nil }
+        return (summarizable, count, rewriteRevision)
     }
 
     /// A prefix boundary must never fall between an assistant message carrying tool calls and the

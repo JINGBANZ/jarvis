@@ -175,6 +175,21 @@ import Testing
         #expect(h.estimatedTokens < before)
     }
 
+    /// A budget that reaches only a retained pair leaves nothing to summarize. Compacting it would
+    /// send the summarizer an empty prompt and stack a summary of nothing above the pair it kept.
+    @Test func aPrefixOfNothingButRetainedPairsIsNotCompacted() {
+        let h = CoachHistory()
+        h.commit([
+            .assistantToolCalls([RawToolCall(id: "l1", name: "load_tool",
+                                             argumentsJSON: #"{"name":"search_prep_notes"}"#)]),
+            .init(role: .tool, text: "Loaded search_prep_notes.", toolCallId: "l1"),
+            .user(String(repeating: "x", count: 4000)),
+        ])
+
+        #expect(h.compactionPrefix() == nil)
+        #expect(h.snapshot().count == 3)
+    }
+
     @Test func compactReplacesPrefixWithSummary() {
         let h = CoachHistory()
         h.commit([.user("old one"), .user("old two"), .user("recent")])
