@@ -642,11 +642,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             prepSourcesConfigured: !prepMaterialSources.isEmpty)
         brain.capabilities = capabilities
         // The one place a switched-off tool is visible: Activity never mentions what was not
-        // offered, and a name in preferences that matched nothing is honored as nothing.
-        let honoredDisabled = CoachCapabilities
-            .compose(disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty)
-            .tools.map(\.name)
-            .filter { capabilities.tool(named: $0) == nil }
+        // offered. Read from the persisted names, so a name that matched nothing is reported as
+        // nothing and the loader — which is synthesized, not switchable — is never named here.
+        let honoredDisabled = brain.preferences.disabledTools
+            .subtracting(CoachCapabilities.fixedToolNames)
+            .filter { name in
+                CoachCapabilities
+                    .compose(disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty)
+                    .tool(named: name) != nil
+            }
+            .sorted()
         jlog("Jarvis coach capabilities: hot="
             + capabilities.hotTools.map(\.name).joined(separator: ",")
             + " deferred=" + (capabilities.catalogNames.isEmpty
@@ -681,15 +686,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             interviewFormat: interviewFormat)
 
         // Building the index reads files and can shell out to `textutil`, so it runs off the Start
-        // path entirely rather than delaying it — a search that fires before this lands returns no
-        // matches for that one attempt. The tool itself was offered from Start, with the rest of the
-        // session's fixed set. Tracked and cancelled in `stop()` for the same reason compaction is:
-        // an untracked task would keep reading files and spawning textutil subprocesses after the
-        // session it belongs to has already torn down.
-        prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
-            let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
-            guard !Task.isCancelled else { return }
-            driver?.installPrepMaterial(index)
+        // path entirely rather than delaying it — a search that fires before this lands finds no
+        // index for that one attempt. The tool itself was catalogued from Start, with the rest of
+        // the session's fixed set. Tracked and cancelled in `stop()` for the same reason compaction
+        // is: an untracked task would keep reading files and spawning textutil subprocesses after
+        // the session it belongs to has already torn down. Skipped entirely when the session does
+        // not offer the search, so switching the capability off also stops its file work rather
+        // than building a port nothing can reach.
+        if capabilities.tool(named: searchPrepNotesTool.name) != nil {
+            prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
+                let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
+                guard !Task.isCancelled else { return }
+                driver?.installPrepMaterial(index)
+            }
         }
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.

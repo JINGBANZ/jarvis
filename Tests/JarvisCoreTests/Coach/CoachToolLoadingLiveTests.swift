@@ -62,7 +62,6 @@ import JarvisBrainProviders
         let catalogued = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
         let directory = try liveDirectory(provider)
         let traffic = FileSessionAudit(directory: directory)
-        defer { Task { _ = await traffic.close() } }
         // Each run gets its own client: a CLI target bakes the prompt for the capabilities it was
         // built with, so the two shapes cannot share one warmed process. The bare run is the same
         // question with nothing to load, so the difference is what a load costs the user in the
@@ -76,7 +75,13 @@ import JarvisBrainProviders
               let bare = try await coach(provider, capabilities: .default,
                                          asking: Self.explicitQuestion,
                                          directory: directory, traffic: traffic)
-        else { return }
+        else {
+            _ = await traffic.close()
+            return
+        }
+        // `record` only enqueues on the shared audit worker, so the traffic file is complete only
+        // once close has drained it. Read it after that, never alongside it.
+        _ = await traffic.close()
 
         let kinds = loaded.activity.kinds
         #expect(loaded.outcome == .spoke)

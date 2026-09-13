@@ -530,13 +530,16 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         return .cancelled
                     }
                     // A missing port is the offered tool being used before indexing finished, or
-                    // after it found nothing usable. The model was told the tool exists because a
+                    // after indexing found nothing usable in any configured source — the builder
+                    // installs no port either way. The model was told the tool exists because a
                     // source is configured, so the call is legitimate: say the notes aren't there
-                    // rather than claiming they were read and found wanting. `prepNotesObservation`
-                    // stays unset so a retry after the index lands is not fed this answer.
+                    // rather than claiming they were read and found wanting. Which of the two it is
+                    // stays in `jlog`; Activity says only that coaching went ahead without them.
+                    // `prepNotesObservation` stays unset so a retry after an index lands is not fed
+                    // this answer.
                     guard let prepMaterial = attempt.prepMaterial else {
-                        jlog("📎 prep notes searched before the index finished building — "
-                             + "answering without them")
+                        jlog("📎 no prep-notes index yet (still building, or no source held usable "
+                             + "text) — answering without them")
                         activity?.record(.prepNotesUnavailable)
                         appendToolContinuation(
                             toolCallId: callID,

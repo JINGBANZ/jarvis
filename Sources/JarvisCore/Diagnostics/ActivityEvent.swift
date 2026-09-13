@@ -85,9 +85,11 @@ public enum ActivityEvent: Sendable {
     case prepNotesSearched(query: String, matchCount: Int)
     /// The brain pulled in a capability it was offered but had not loaded yet.
     case capabilityLoaded(kind: CapabilityKind, name: String)
-    /// The brain looked for prepared notes in a session that offers them, but the index had not
-    /// finished building. A distinct row rather than a zero-match search, which would claim the
-    /// notes were read and found wanting.
+    /// The brain looked for prepared notes in a session that offers them and they were not there to
+    /// search. A fixed degradation notice: the tip that follows is not informed by the user's own
+    /// material, which is worth seeing. It is not a zero-match search, which would claim the notes
+    /// were read and found wanting, and it states no timing — whether the index is still building
+    /// or finished with nothing usable belongs in `jlog`.
     case prepNotesUnavailable
 
     var response: ActivityResponse? {
@@ -173,7 +175,7 @@ public enum ActivityEvent: Sendable {
         case .capabilityLoaded(let kind, let name):
             return (.capabilityLoaded, "📎 loaded the \(name) \(kind.rawValue)", nil)
         case .prepNotesUnavailable:
-            return (.prepNotesUnavailable, "📎 prep notes aren't ready yet", nil)
+            return (.prepNotesUnavailable, "📎 couldn't check your prep notes — coaching without them", nil)
         }
     }
 }

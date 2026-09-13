@@ -57,10 +57,26 @@ import Testing
 
         #expect(capabilities.callable(loaded: []).map(\.name)
             == ["capture_screen", "speak", "stay_silent"])
+        // The loader drops out once nothing is left to load: offering it then invites a call that
+        // can only be refused, and each one spends an iteration of the bounded tool loop.
         #expect(capabilities.callable(loaded: ["later"]).map(\.name)
             == ["capture_screen", "speak", "stay_silent", "later"])
         #expect(capabilities.catalogNames == ["later"])
         #expect(capabilities.tool(named: "later") == deferred)
         #expect(capabilities.tool(named: "nope") == nil)
+    }
+
+    /// The loader exists only while something remains to load, whether that is because the session
+    /// composed no catalog or because the model has since loaded all of it.
+    @Test func theLoaderDisappearsOnceEverythingIsLoaded() {
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true)
+
+        #expect(capabilities.callable(loaded: []).map(\.name)
+            == ["capture_screen", "speak", "stay_silent", "load_tool"])
+        #expect(capabilities.callable(loaded: ["search_prep_notes"]).map(\.name)
+            == ["capture_screen", "speak", "stay_silent", "search_prep_notes"])
+        // Still in `tools`, so a stale call is answered rather than refused as unknown.
+        #expect(capabilities.tool(named: CoachCapabilities.loadToolName) != nil)
     }
 }

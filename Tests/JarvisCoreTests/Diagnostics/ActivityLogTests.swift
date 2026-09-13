@@ -225,9 +225,9 @@ import Foundation
             == "think")
     }
 
-    /// One row per load, and a distinct row for notes that are not ready — never a zero-match
-    /// search, which would claim the notes were read and found wanting.
-    @Test func capabilityLoadsAndUnreadyPrepNotesEachGetTheirOwnRow() async throws {
+    /// One row per load, and a distinct row for notes that were not there to search — never a
+    /// zero-match search, which would claim the notes were read and found wanting.
+    @Test func capabilityLoadsAndMissingPrepNotesEachGetTheirOwnRow() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
         evidence.record(.capabilityLoaded(kind: .tool, name: "search_prep_notes"))
@@ -237,9 +237,14 @@ import Foundation
 
         #expect(snapshot.rows.count == 2)
         #expect(snapshot.rows[0].contains("loaded the search_prep_notes tool"))
-        #expect(snapshot.rows[1].contains("prep notes aren't ready yet"))
+        // A degradation notice, not a progress report: the row says coaching went ahead without
+        // the notes, and never which of "still building" or "nothing usable" caused it.
+        #expect(snapshot.rows[1].contains("couldn't check your prep notes"))
+        #expect(snapshot.rows[1].contains("coaching without them"))
+        #expect(!snapshot.rows[1].contains("yet"))
         #expect(ActivityLog.cssClass(for: "📎 loaded the search_prep_notes tool") == "think")
-        #expect(ActivityLog.cssClass(for: "📎 prep notes aren't ready yet") == "think")
+        #expect(ActivityLog.cssClass(
+            for: "📎 couldn't check your prep notes — coaching without them") == "think")
     }
 
     /// `Kind` is on-disk identity: a tool reading a complete log matches these strings.

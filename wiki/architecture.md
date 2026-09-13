@@ -97,8 +97,8 @@ moments the model judges worthwhile.
    new transcript delta, the timing context (seconds silent, session elapsed), and the session's
    switched-on tool set. `capture_screen`, `speak`, and `stay_silent` are always there; `load_tool`
    and a one-line catalog entry for `search_prep_notes` join them when prep sources are configured
-   (see [Capabilities](#capabilities)). The timing is what lets the model tell "thinking" from
-   "stuck."
+   and the user has not switched that capability off (see [Capabilities](#capabilities)). The timing
+   is what lets the model tell "thinking" from "stuck."
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
    visible context missing from the conversation — including unresolved references such as “this”
    or “here” — and no fresh capture is already available for that request. It may also capture when
@@ -115,7 +115,8 @@ moments the model judges worthwhile.
    requiring a tool call prevents the emission rather than filtering it afterwards.
 6. Activity records every brain action, through the session's one evidence handle: successful or
    failed `capture_screen`, `speak`, `stay_silent`, each prep-notes search, each capability load, and
-   prepared notes that are not ready yet. Heard rows and model-facing transcript deltas share `ConversationChronology`:
+   the fixed notice that a tip went out without the user's prepared notes. Heard rows and
+   model-facing transcript deltas share `ConversationChronology`:
    occurrence time is authoritative, and insertion order breaks timestamp ties. A late-finalizing
    earlier utterance is therefore inserted before a faster later reply. When Activity reaches its
    memory backstop, Core sends the discarded insertion identities so the live DOM trims in lockstep
@@ -174,10 +175,15 @@ a turn. An attempt that fails simply loads again, at the cost of one round trip,
 keeps those pairs verbatim under the summary for the same reason ([`CoachHistory`](../Sources/JarvisCore/Coach/CoachHistory.swift)).
 
 `search_prep_notes` is the first deferred tool. It is in the catalog when prep-material *sources* are
-configured, which is deliberately not "an index exists": building the index reads files and shells
-out to `textutil`, so it runs off the Start path and the search port arrives after the first
-attempts. A search that lands before it says the notes are not ready. That is the honest answer, and
-it costs nothing, where changing the offered set mid-session would cost the whole session.
+configured and the user has not switched it off. "Configured" is deliberately not "an index exists":
+building the index reads files and shells out to `textutil`, so it runs off the Start path and the
+search port arrives after the first
+attempts. A search that finds no index says so and coaching continues without the notes. That is the
+honest answer, and it costs nothing, where changing the offered set mid-session would cost the whole
+session. The same answer covers indexing that finished with nothing usable, because the builder
+installs no port in either case; which one it was stays in `jlog`, and Activity carries only the
+fixed notice that a tip went out without the user's own material. Switching the capability off also
+skips the index build, so the file reading and `textutil` work stop with it.
 
 A call to a tool the session does not offer is answered with a plain "no tool named X is available"
 rather than failing the attempt. Only a CLI target can reach that branch, since it reconstructs calls

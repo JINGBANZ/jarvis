@@ -232,10 +232,10 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(result.text?.contains("token bucket notes") == true)
     }
 
-    /// The index builds off the Start path, so an early search finds no port. The model was told
-    /// the notes exist, so it is told plainly that they are not ready — not that they were read and
-    /// found wanting, and not by failing the attempt.
-    @Test func searchingBeforeTheIndexIsReadyAnswersAndKeepsCoaching() async throws {
+    /// No port means the index is still building, or finished with nothing usable in any source.
+    /// Both answer the same way: the model was told the notes exist, so it is told plainly that they
+    /// are not there — not that they were read and found wanting, and not by failing the attempt.
+    @Test func searchingWithNoIndexAnswersAndKeepsCoaching() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],

@@ -276,7 +276,7 @@ extension JarvisPrompts {
         }
 
         static let prepNotesUnavailable =
-            "the user's prepared notes are not ready in this conversation; coach without them"
+            "the user's prepared notes aren't available in this conversation; coach without them"
 
         // Keep this a neutral marker. An earlier instruction to recapture, repeated in user-role
         // history, biased the coach toward capturing on every quiet turn.
