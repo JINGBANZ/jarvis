@@ -11,7 +11,8 @@ cd "$(dirname "$0")/.."
 # fail the normal test run instead of waiting on a future manual audit to notice it.
 #
 # Covered paths — the kernel per the destination diagram:
-#   Coach/          attempt scheduler, forward-only route state, attempt runner, history commit
+#   Coach/          attempt scheduler, forward-only route state, attempt runner, history commit,
+#                   and the coach tools' model-facing definitions (Coach/Tools/)
 #   Transcription/  finalized transcript admission and the transcription ports
 #   Triggers/       trigger and turn-substance policy feeding the scheduler
 #   Overlay/        the enabled overlay output port (delivery itself; the AppKit panels in

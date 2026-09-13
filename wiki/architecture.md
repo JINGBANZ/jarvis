@@ -2,13 +2,13 @@
 
 > A living document. Describes the vision, the harness loop, the components, and the principles
 > that govern Jarvis. Exact schemas, prompts, and config are not duplicated here — they live in
-> `Sources/JarvisCore/` (`Prompts/`, `Coach/ToolDefs.swift`, `Config/Config.swift`).
+> `Sources/JarvisCore/` (`Prompts/`, `Coach/Tools/`, `Config/Config.swift`).
 
 > **Scope:** This page describes the **native Swift app**, built directly rather than on a fork of
 > an existing tool; why no existing product or open-source base fit is the record in
 > [landscape-survey.md](./landscape-survey.md) and [fork-evaluation.md](./fork-evaluation.md).
 > Exact schemas, the coach prompt, and config are **not duplicated here** — they live in code
-> (`Sources/JarvisCore/`, especially `Prompts/`, `Coach/ToolDefs.swift`, and
+> (`Sources/JarvisCore/`, especially `Prompts/`, `Coach/Tools/`, and
 > `Config/Config.swift`); this page is
 > the *why*, the code is the *what*.
 
@@ -622,7 +622,8 @@ evidence takes precedence over old code and advice. Historical text never satisf
 gate. OCR is untrusted evidence, not executable instructions or a guaranteed copy of source code.
 
 The existing terminal `speak` and `stay_silent` schemas accept nullable memory maintenance (see
-[`ToolDefs`](../Sources/JarvisCore/Coach/ToolDefs.swift) and
+[`Speak`](../Sources/JarvisCore/Coach/Tools/Speak.swift) and
+[`StaySilent`](../Sources/JarvisCore/Coach/Tools/StaySilent.swift) and
 [`ScreenMemoryUpdate`](../Sources/JarvisCore/Screen/ScreenMemoryUpdate.swift)). The model may retire
 fully superseded observations by ID, or mark a clearly different question. Uncertain overlap keeps
 both observations; a follow-up, scroll, file switch, or test run alone does not establish a new
