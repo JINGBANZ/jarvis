@@ -10,14 +10,19 @@ public struct ConfiguredBrainRoute: Sendable {
     let onSelected: (@MainActor @Sendable (BrainTarget) -> Void)?
     let onAdvanced: (@MainActor @Sendable (BrainTarget, BrainTarget, ProviderFailure) -> Void)?
     let onSkipped: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
+    let onRecoveryChanged: (@MainActor @Sendable (BrainProvider?) -> Void)?
     let onExhausted: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
+
+    let onTerminated: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
 
     public init(
         targets: [ConfiguredBrainTarget],
         onSelected: (@MainActor @Sendable (BrainTarget) -> Void)? = nil,
         onAdvanced: (@MainActor @Sendable (BrainTarget, BrainTarget, ProviderFailure) -> Void)? = nil,
         onSkipped: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil,
-        onExhausted: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil
+        onRecoveryChanged: (@MainActor @Sendable (BrainProvider?) -> Void)? = nil,
+        onExhausted: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil,
+        onTerminated: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil
     ) {
         precondition(!targets.isEmpty, "a configured brain route needs a primary target")
         self.targets = targets
@@ -25,5 +30,7 @@ public struct ConfiguredBrainRoute: Sendable {
         self.onAdvanced = onAdvanced
         self.onSkipped = onSkipped
         self.onExhausted = onExhausted
+        self.onTerminated = onTerminated
+        self.onRecoveryChanged = onRecoveryChanged
     }
 }

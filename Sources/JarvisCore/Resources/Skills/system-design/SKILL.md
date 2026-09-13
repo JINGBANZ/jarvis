@@ -1,6 +1,10 @@
-# Interview format: system design
+---
+name: system-design
+description: Coaching for system-design questions ("design a URL shortener", "how would you scale this"): the stages of a design round, what belongs in each, and when to attach a private architecture sketch to a tip.
+---
+# System-design questions
 
-This is a system-design interview. The discussion moves through six stages: functional
+When the current question is a system design, the discussion moves through six stages: functional
 requirements (what the system does, for whom), non-functional requirements (scale, latency,
 availability, consistency, durability), core entities, API design, high-level architecture,
 and finally a deep dive into whichever component the non-functional requirements make

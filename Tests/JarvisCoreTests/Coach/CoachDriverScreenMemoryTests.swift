@@ -184,7 +184,7 @@ import Testing
     }
 
     @Test func terminalSchemasExposeStrictNullableMaintenance() throws {
-        for tool in [speakTool, staySilentTool, systemDesignSpeakTool] {
+        for tool in [speakTool, staySilentTool] {
             let schema = try #require(JSONSerialization.jsonObject(with: Data(tool.parametersJSON.utf8)) as? [String: Any])
             let properties = try #require(schema["properties"] as? [String: Any])
             let maintenance = try #require(properties["screenMemory"] as? [String: Any])

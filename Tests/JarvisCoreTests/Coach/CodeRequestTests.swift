@@ -58,12 +58,14 @@ import Testing
         #expect((sink.codeUpdates.last ?? nil) == nil)
     }
 
+    /// The Show code switch is the whole gate: any session that has it on can deliver a snippet,
+    /// and the prompt's code guidance is what keeps one off a conceptual hint.
     @Test(arguments: [TriggerReason.manualHint, .manualCode])
-    func generalTechnicalSessionsCanDeliverCode(_ reason: TriggerReason) async throws {
+    func anySessionWithCodeEnabledCanDeliverIt(_ reason: TriggerReason) async throws {
         let code = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Initialize state"], codeSnippet: code)])])
         let sink = CodeRequestSink()
-        let driver = makeDriver(brain, RollingTranscript(), sink, format: .generalTechnical, codeEnabled: true)
+        let driver = makeDriver(brain, RollingTranscript(), sink, codeEnabled: true)
         #expect(await driver.handleTrigger(reason) == .spoke)
         #expect(sink.codeUpdates == [code])
         #expect(brain.calls.count == 1)
@@ -98,16 +100,6 @@ import Testing
         let restarted = makeDriver(brain, RollingTranscript(), sink, codeEnabled: !enabled)
         #expect(await restarted.handleTrigger(.manualHint) == .spoke)
         #expect((sink.codeUpdates.last ?? nil) == (enabled ? nil : snippet))
-    }
-
-    @Test(arguments: [InterviewFormat.behavioral, .systemDesign])
-    func enabledNonCodingHintsStillSuppressCode(_ format: InterviewFormat) async throws {
-        let code = try #require(CodeSnippet(language: "Python", placement: "Start", code: "seen = {}"))
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "one", lines: ["Consider the requirements"], codeSnippet: code)])])
-        let sink = CodeRequestSink()
-        let driver = makeDriver(brain, RollingTranscript(), sink, format: format, codeEnabled: true)
-        #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(sink.codeUpdates == [nil])
     }
 
     @Test(arguments: [true, false])
@@ -218,7 +210,7 @@ import Testing
     }
 
     private func makeDriver(_ brain: BrainClient, _ transcript: RollingTranscript, _ sink: OverlayRendering,
-                            screen: ScreenCapturing = FakeScreen(), format: InterviewFormat? = nil,
+                            screen: ScreenCapturing = FakeScreen(),
                             codeEnabled: Bool = false, explanationsEnabled: Bool = true,
                             activity: (any ActivityEventRecording)? = nil) -> CoachDriver {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
@@ -227,7 +219,7 @@ import Testing
             screen: screen, overlay: sink, clock: ManualClock(now: 100),
             plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen,
                               explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
-            activity: activity, interviewFormat: format)
+            activity: activity)
     }
 }
 

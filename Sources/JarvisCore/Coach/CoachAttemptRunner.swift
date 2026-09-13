@@ -57,22 +57,18 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
-    /// Fixed prompt text for the session. In automatic mode that text tells the model to choose from
-    /// current evidence per response; no mutable runtime classification is required.
-    private let interviewFormatAddendum: String
-    private let interviewFormat: InterviewFormat?
-    /// The session's tool set, resolved at Start by `sessionCoachTools` and sent verbatim on every
-    /// request. Deriving it per attempt is what let it drift from the schemas a local-agent target
-    /// was warmed with (#273), so this is a plain `let` even though `prepMaterial` lands later.
-    private let sessionTools: [ToolDef]
-    /// Whether this session offers `search_prep_notes` at all, read from `sessionTools` so the tool
-    /// list and the system prompt that describes it cannot disagree.
-    private var offersPrepNotes: Bool {
-        sessionTools.contains { $0.name == searchPrepNotesTool.name }
-    }
+    /// The session's switched-on tool set, resolved at Start. Deriving it per attempt is what let
+    /// it drift from the schemas a local-agent target was warmed with (#273), so this is a plain
+    /// `let` even though `prepMaterial` lands later.
+    private let capabilities: CoachCapabilities
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
+    /// What the session has loaded: a deferred tool by name, a skill under a `skill:` key so the
+    /// two namespaces cannot collide. A load belongs to the attempt that made it and lands here
+    /// only when that attempt commits a turn, so "already loaded" is true exactly when the loaded
+    /// content is in the committed history the next request replays.
+    private var loadedCapabilities: Set<String> = []
     /// Guards the single off-path compaction run (see `startCompactionIfIdle`).
     private var isCompacting = false
     /// A compaction asked for while one was already running, run once the current pass ends.
@@ -92,11 +88,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)?,
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
-        sessionTools: [ToolDef],
-        interviewFormatAddendum: String = "",
-        interviewFormat: InterviewFormat? = nil
+        capabilities: CoachCapabilities
     ) {
-        self.sessionTools = sessionTools
+        self.capabilities = capabilities
         self.config = config
         self.transcript = transcript
         self.screen = screen
@@ -106,8 +100,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
         self.coachingAttempts = coachingAttempts
         self.activity = activity
         self.ledger = ledger
-        self.interviewFormatAddendum = interviewFormatAddendum
-        self.interviewFormat = interviewFormat
     }
 
     private func takeNextAttemptID() -> Int {
@@ -117,8 +109,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
         }
     }
 
-    /// Safety backstop against a pathological model that loops on capture_screen forever.
-    private let maxToolIterations = 4
+    /// Safety backstop against a pathological model that loops on capture_screen forever. The
+    /// longest sensible chain is load a skill, load a tool, search, capture, speak — five
+    /// responses, and the two spare absorb a second skill on an ambiguous question or one wasted
+    /// response, so a reasonable attempt does not die on the cap.
+    private let maxToolIterations = 7
 
     struct PendingCoachingWork {
         var reason: TriggerReason
@@ -143,6 +138,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
             screenObservation + (prepNotesObservation.map { [$0] } ?? [])
         }
         var preparedManualReason: TriggerReason?
+        /// The actual input boundary, so failure cannot discard speech finalized during inference.
+        var attemptedTranscriptBoundary = 0
 
         init(reason: TriggerReason) {
             self.reason = reason
@@ -199,6 +196,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
             sessionElapsedSeconds: now - sessionStart)
         let transcriptStartIndex = ledger.committedCount
         let delta = transcript.renderFrom(index: transcriptStartIndex)
+        work.attemptedTranscriptBoundary = delta.upTo
         let classifications = delta.lines.map { TurnSubstance.classification(of: $0.text) }
         let brainFacingOffsets = classifications.indices.filter {
             classifications[$0].isSubstantive
@@ -238,13 +236,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
             ledger.commit(through: delta.upTo)
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
-        // Describing search_prep_notes when it isn't actually offered invites the model to call a
-        // tool it doesn't have — and that call is a hard attempt failure (below), so `prepMaterial`
-        // must track the real tool set (`tools`, below) exactly, not just hint at it.
-        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
+        let codeAllowed = attempt.plan.codeEnabled
+        // One value describes the tools and offers them, so the prompt cannot name a tool the
+        // request does not carry — the state that invited a hallucinated call.
         let systemPrompt = JarvisPrompts.Coach.system(
-            prepMaterial: offersPrepNotes,
-            formatAddendum: interviewFormatAddendum,
+            capabilities: capabilities,
             explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         // Freeze once: persistent CLI conversations require a byte-identical prefix on continuations.
         let screenBoundary = screenMemory.latestID
@@ -331,14 +327,22 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 result: .failed(outcome: .brainError, failure: failure, work: work))
         }
 
-        // Sent verbatim, never rebuilt per attempt: these are the schemas a local-agent target was
-        // warmed with, and it rejects the turn if what it is sent no longer composes to them.
-        let tools = sessionTools
+        // Loads made by this attempt, session state only once it commits a turn. Every failure and
+        // cancellation path discards them, so the next attempt simply loads again — one round trip,
+        // and no "already loaded" answer pointing at a conversation that never happened.
+        var loadedThisAttempt: Set<String> = []
+        let alreadyLoaded = runnerLock.withLock { loadedCapabilities }
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
             while iterations < maxToolIterations {
                 iterations += 1
+                // What the model may call right now. On the API path this is the declared array, so
+                // a load in one iteration makes the tool callable in the next; on a CLI target,
+                // whose baked instructions list every switched-on tool, it is only the membership
+                // the runner checks below.
+                let loaded = alreadyLoaded.union(loadedThisAttempt)
+                let tools = capabilities.callable(loaded: loaded)
                 let response: BrainResponse
                 do {
                     let requestContext = CoachingRequestAttribution.context(
@@ -413,6 +417,24 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     requestSequence += 1
                 }
 
+                // A call to something this session does not offer is answered, not executed and not
+                // failed: a CLI target reconstructs calls from prompt text and can name anything,
+                // and a switched-off tool must stay switched off. The API path cannot reach here —
+                // an undeclared tool is not callable there.
+                guard let called = capabilities.tool(named: call.toolName) else {
+                    jlog("⚠️ \(call.toolName) isn't available in this session — telling the model so")
+                    appendToolContinuation(
+                        toolCallId: call.callID,
+                        resultText: JarvisPrompts.Coach.toolUnavailable(call.toolName),
+                        newPhase: requestPhase)
+                    continue
+                }
+                if called.deferLoading, !loaded.contains(called.name) {
+                    // Offered but used before loading: only a text protocol can do this, and the
+                    // call is honest, so run it rather than spend a round trip teaching protocol.
+                    jlog("… \(called.name) was called before it was loaded — running it anyway")
+                }
+
                 switch call {
                 case .captureScreen(let callID):
                     let screen = self.screen
@@ -462,9 +484,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
+                    let diagram = mermaid.flatMap(DiagramHint.init)
                     if mermaid != nil && diagram == nil {
-                        jlog("Diagram hint omitted: unsupported graph or interview format")
+                        jlog("Diagram hint omitted: unsupported graph")
                     }
                     let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?, code: CodeSnippet?) in
                         guard !Task.isCancelled else { return (false, nil, nil) }
@@ -485,20 +507,18 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         ["language": $0.language, "placement": $0.placement, "code": $0.code,
                          "highlightedLines": $0.highlightedLines]
                     }
-                    var arguments: [String: Any] = [
+                    // `mermaid` is always present because one speak schema declares it on every
+                    // brain; null records that no diagram was delivered, which is what the model
+                    // should read back when the runtime dropped or never rendered one.
+                    let arguments: [String: Any] = [
                         "lines": lines,
+                        "mermaid": diagram == nil ? NSNull() : mermaid as Any,
                         "explanation": explanation as Any? ?? NSNull(),
                         "codeSnippet": codeArguments as Any? ?? NSNull(),
                         // Maintenance executes from the original response; replay stays schema-valid
                         // without presenting already-applied observation IDs as another action.
                         "screenMemory": NSNull(),
                     ]
-                    // Only the System Design speak schema declares `mermaid`, and both set
-                    // additionalProperties:false: replaying the key elsewhere would show the model
-                    // a field its own tool definition forbids.
-                    if interviewFormat == .systemDesign {
-                        arguments["mermaid"] = diagram == nil ? NSNull() : mermaid as Any
-                    }
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
                     let deliveredCalls = response.rawToolCalls.filter { $0.id == callID }.map { call in
                         RawToolCall(id: call.id, name: call.name,
@@ -513,6 +533,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                                            visibleIDs: visibleScreenIDs, keepingID: carriedScreenID,
                                            turnMessages: &turnMessages)
                     history.commit(CoachHistory.omittingScreenText(turnMessages))
+                    commitLoads(loadedThisAttempt)
                     ledger.commit(through: delta.upTo)
                     return .completed(.spoke)
 
@@ -527,6 +548,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                                            visibleIDs: visibleScreenIDs, keepingID: carriedScreenID,
                                            turnMessages: &turnMessages)
                     commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
+                    commitLoads(loadedThisAttempt)
                     ledger.commit(through: delta.upTo)
                     return .completed(.silentByModel)
 
@@ -535,24 +557,25 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         jlog("… attempt cancelled (stopped) before searching prep notes")
                         return .cancelled
                     }
-                    // The tool is in the session's set only when prep sources were configured at
-                    // Start, so a call here without it means a non-schema-enforced provider (a CLI
-                    // protocol reconstructing calls from free-form prompt text) emitted one anyway —
-                    // reject it rather than silently returning an empty result with a real-looking
-                    // Activity entry implying prep material was actually checked.
-                    guard offersPrepNotes else {
-                        jlog("⚠️ search_prep_notes called without prep material configured — "
-                             + "scheduling fresh attempt")
-                        return .failed(
-                            outcome: .brainError,
-                            failure: Self.unusableResponse(
-                                "search_prep_notes called without prep material configured",
-                                from: attempt.target),
-                            work: work)
+                    // A missing port is the offered tool being used before indexing finished, or
+                    // after indexing found nothing usable in any configured source — the builder
+                    // installs no port either way. The model was told the tool exists because a
+                    // source is configured, so the call is legitimate: say the notes aren't there
+                    // rather than claiming they were read and found wanting. Which of the two it is
+                    // stays in `jlog`; Activity says only that coaching went ahead without them.
+                    // `prepNotesObservation` stays unset so a retry after an index lands is not fed
+                    // this answer.
+                    guard let prepMaterial = attempt.prepMaterial else {
+                        jlog("📎 no prep-notes index yet (still building, or no source held usable "
+                             + "text) — answering without them")
+                        activity?.record(.prepNotesUnavailable)
+                        appendToolContinuation(
+                            toolCallId: callID,
+                            resultText: JarvisPrompts.Coach.prepNotesUnavailable,
+                            newPhase: .searchPrepNotesContinuation)
+                        continue
                     }
-                    // A nil port here is the offered tool being used before indexing finished, or
-                    // after it found nothing usable. Both are honestly "no matches", not a failure.
-                    let results = attempt.prepMaterial?.search(query: query) ?? []
+                    let results = prepMaterial.search(query: query)
                     jlog("📎 searched prep notes for \"\(query)\" — \(results.count) match(es)")
                     activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
                     // Mirrors capture_screen: if the very next request in this attempt fails, a
@@ -566,6 +589,54 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         toolCallId: callID,
                         resultText: JarvisPrompts.Coach.prepNotesResult(results),
                         newPhase: .searchPrepNotesContinuation)
+
+                case .loadTool(let callID, let name):
+                    let resultText: String
+                    if let tool = capabilities.tool(named: name), tool.deferLoading {
+                        if loaded.contains(name) {
+                            jlog("📎 \(name) was already loaded — saying so instead of repeating it")
+                            resultText = JarvisPrompts.Coach.loadToolAlreadyLoaded(name)
+                        } else {
+                            loadedThisAttempt.insert(tool.name)
+                            jlog("📎 loaded the \(tool.name) tool")
+                            // The definition's name, never the model's argument: Activity states
+                            // what Jarvis did, not what it was asked for.
+                            activity?.record(.capabilityLoaded(kind: .tool, name: tool.name))
+                            resultText = JarvisPrompts.Coach.loadToolResult(tool)
+                        }
+                    } else {
+                        jlog("⚠️ nothing named \(name) to load — telling the model so")
+                        resultText = JarvisPrompts.Coach.toolUnavailable(name)
+                    }
+                    appendToolContinuation(
+                        toolCallId: callID,
+                        resultText: resultText,
+                        newPhase: .loadToolContinuation)
+
+                case .loadSkill(let callID, let name):
+                    let resultText: String
+                    if let skill = capabilities.skill(named: name) {
+                        // Namespaced, so a skill and a tool of the same name stay separate loads.
+                        if loaded.contains(CoachCapabilities.loadedKey(forSkill: name)) {
+                            jlog("📎 the \(name) skill was already loaded — saying so instead of "
+                                 + "repeating it")
+                            resultText = JarvisPrompts.Coach.loadSkillAlreadyLoaded(name)
+                        } else {
+                            loadedThisAttempt.insert(CoachCapabilities.loadedKey(forSkill: skill.name))
+                            jlog("📎 loaded the \(skill.name) skill")
+                            // The catalog's name, never the model's argument: Activity states what
+                            // Jarvis did, not what it was asked for.
+                            activity?.record(.capabilityLoaded(kind: .skill, name: skill.name))
+                            resultText = JarvisPrompts.Coach.loadSkillResult(skill)
+                        }
+                    } else {
+                        jlog("⚠️ no skill named \(name) to load — telling the model so")
+                        resultText = JarvisPrompts.Coach.skillUnavailable(name)
+                    }
+                    appendToolContinuation(
+                        toolCallId: callID,
+                        resultText: resultText,
+                        newPhase: .loadSkillContinuation)
                 }
             }
 
@@ -605,6 +676,15 @@ final class CoachAttemptRunner: @unchecked Sendable {
         guard !deltaText.isEmpty || turn.count > 1 else { return }
         history.commit(CoachHistory.omittingScreenText(turn))
     }
+
+    /// Called only where the attempt has just committed its turn. A load always adds a call and its
+    /// result to the turn, so the `turn.count > 1` test in `commitIfWorthKeeping` above cannot drop
+    /// a turn that loaded something — which is what makes "already loaded" point at real history.
+    private func commitLoads(_ names: Set<String>) {
+        guard !names.isEmpty else { return }
+        runnerLock.withLock { loadedCapabilities.formUnion(names) }
+    }
+
 
     /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
     /// Cancellation asks the capture adapter to terminate its helper, then waits for `capture()` to

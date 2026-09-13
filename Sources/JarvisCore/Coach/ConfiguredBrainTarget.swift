@@ -36,8 +36,4 @@ public struct ConfiguredBrainTarget: Sendable {
         brain?.prepare()
     }
 
-    func terminate() {
-        brain?.terminate()
-        summarizer?.terminate()
-    }
 }

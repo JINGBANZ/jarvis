@@ -166,6 +166,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             width: appearance.boxWidth, height: appearance.boxHeight))
         overlayBox.setFontSize(appearance.boxFontSize)
         overlayBox.setOpacity(appearance.boxOpacity)
+        overlayBox.setCodeFontSize(appearance.codeFontSize)
+        overlayBox.setCodeBackgroundOpacity(appearance.codeBackgroundOpacity)
         overlayBox.setDiagramsEnabled(appearance.boxDiagramsEnabled)
         // The panel reports a finished resize drag; persistence stays here, beside the other
         // overlay settings, so the panel keeps knowing nothing about UserDefaults.
@@ -211,7 +213,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     detectedCLIs: clis,
                     update: change == .topology ? .topologyEdit : .effortEdit)
             },
-            transcriptionPreferences: transcriptionPreferences)
+            transcriptionPreferences: transcriptionPreferences,
+            prepMaterialPreferences: prepMaterialPreferences)
         let connectionsSection = ConnectionsSection(
             detector: brain.detector,
             keyStore: secretFile,
@@ -222,7 +225,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 preferences: hotkeyPreferences,
                 explanationPreferences: explanationPreferences,
                 codePreferences: codePreferences,
-                onCodeChanged: { [weak self] in self?.refreshOptionalShortcut(.showCode) },
                 boxEnabled: { [weak self] in self?.appearance.boxEnabled == true },
                 onExplanationsChanged: { [weak self] in self?.refreshOptionalShortcut(.explainMore) },
                 hasActiveHotkey: { [weak self] shortcut in
@@ -237,7 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     // than falsely claiming a rebind that never happened.
                     guard let self else { return .failed(status: -1) }
                     let outcome = self.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
-                    if self.requestManualHint != nil, !self.sessionAllows(shortcut) {
+                    if (shortcut == .showCode && !self.codePreferences.isEnabled)
+                        || (self.requestManualHint != nil && !self.sessionAllows(shortcut)) {
                         self.hotkeys?.unregister(shortcut) // Validate ownership, then release until Start.
                     }
                     return outcome
@@ -246,6 +249,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             brainSection,
             connectionsSection,
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
+                codePreferences: codePreferences,
+                onCodeChanged: { [weak self] in self?.refreshOptionalShortcut(.showCode) },
                 onBoxEnabledChanged: { [weak self] enabled in
                     guard let self, !enabled else { return }
                     self.explanationPreferences.isEnabled = false
@@ -337,12 +342,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionConfiguration = transcriptionPreferences.configuration
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
-        // Resolve once because CLI providers bake the prompt into their session. None adds nothing.
-        let interviewFormat = brain.preferences.interviewFormat
-        let interviewFormatAddendum = interviewFormat?.promptAddendum ?? ""
         let explanationsEnabled = explanationPreferences.isEnabled && appearance.boxEnabled
         let codeEnabled = codePreferences.isEnabled && appearance.boxEnabled
-            && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         // The brain's key stays OpenAI-only (above); transcription reads whichever credential the
         // selected provider owns — Apple Speech has none, so this is "" there and unused.
@@ -491,8 +492,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 apiKey: key,
                 transcriptionKey: transcriptionKey,
                 brainRoute: brainRoute,
-                interviewFormatAddendum: interviewFormatAddendum,
-                interviewFormat: interviewFormat,
                 explanationsEnabled: explanationsEnabled,
                 codeEnabled: codeEnabled,
                 transcriptionConfiguration: transcriptionConfiguration,
@@ -553,8 +552,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         apiKey key: String,
         transcriptionKey: String,
         brainRoute: BrainRoute,
-        interviewFormatAddendum: String,
-        interviewFormat: InterviewFormat?,
         explanationsEnabled: Bool,
         codeEnabled: Bool,
         transcriptionConfiguration: TranscriptionConfiguration,
@@ -588,7 +585,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         transcript = RollingTranscript()
         artifacts.beginNewSession()  // rotate to a fresh session dir + activity/debug log
         overlayBox.clear() // …and a fresh response history for the new conversation
-        overlayBox.setInterviewFormat(interviewFormat)
         switch transcriptionConfiguration.provider {
         case .openAI:
             jlog(
@@ -627,14 +623,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         } else {
             hotkeys?.unregister(.explainMore)
         }
-        brain.interviewFormatAddendum = interviewFormatAddendum
-        // One tool set for the session, handed to both the targets that bake it into their
+        // One capability set for the session, handed to both the targets that bake it into their
         // instructions and the driver that sends it. Prep material counts as configured sources, not
         // a finished index: the index lands later and must not change what the session offers (#273).
         let prepMaterialSources = prepMaterialPreferences.sources
-        let sessionTools = sessionCoachTools(
-            interviewFormat: interviewFormat, prepMaterial: !prepMaterialSources.isEmpty)
-        brain.coachTools = sessionTools
+        let bundledSkills = SkillCatalog.bundled()
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: brain.preferences.disabledTools,
+            disabledSkills: brain.preferences.disabledSkills,
+            prepSourcesConfigured: !prepMaterialSources.isEmpty,
+            skills: bundledSkills)
+        brain.capabilities = capabilities
+        // The one place a switched-off capability is visible: Activity never mentions what was not
+        // offered. Read from the persisted names, so a name that matched nothing is reported as
+        // nothing and a loader — which is synthesized, not switchable — is never named here.
+        let everything = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty,
+            skills: bundledSkills)
+        let honoredDisabled = brain.preferences.disabledTools
+            .subtracting(CoachCapabilities.fixedToolNames)
+            .filter { everything.tool(named: $0) != nil }
+            .sorted()
+            + brain.preferences.disabledSkills
+            .filter { everything.skill(named: $0) != nil }
+            .sorted()
+        jlog("Jarvis coach capabilities: hot="
+            + capabilities.hotTools.map(\.name).joined(separator: ",")
+            + " deferred=" + (capabilities.catalogNames.isEmpty
+                ? "(none)" : capabilities.catalogNames.joined(separator: ","))
+            + " skills=" + (capabilities.skills.isEmpty
+                ? "(none)" : capabilities.skills.map(\.name).joined(separator: ","))
+            + " switched-off=" + (honoredDisabled.isEmpty
+                ? "(none)" : honoredDisabled.joined(separator: ",")))
         let configuredRoute = brain.makeConfiguredRoute(
             brainRoute,
             detectedCLIs: detectedCLIs,
@@ -658,20 +678,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             coachingAttempts: artifacts.sessionAudit,
             plan: freshSessionPlan(),
             activity: artifacts.sessionAudit,
-            coachTools: sessionTools,
-            interviewFormatAddendum: interviewFormatAddendum,
-            interviewFormat: interviewFormat)
+            capabilities: capabilities)
 
         // Building the index reads files and can shell out to `textutil`, so it runs off the Start
-        // path entirely rather than delaying it — a search that fires before this lands returns no
-        // matches for that one attempt. The tool itself was offered from Start, with the rest of the
-        // session's fixed set. Tracked and cancelled in `stop()` for the same reason compaction is:
-        // an untracked task would keep reading files and spawning textutil subprocesses after the
-        // session it belongs to has already torn down.
-        prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
-            let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
-            guard !Task.isCancelled else { return }
-            driver?.installPrepMaterial(index)
+        // path entirely rather than delaying it — a search that fires before this lands finds no
+        // index for that one attempt. The tool itself was catalogued from Start, with the rest of
+        // the session's fixed set. Tracked and cancelled in `stop()` for the same reason compaction
+        // is: an untracked task would keep reading files and spawning textutil subprocesses after
+        // the session it belongs to has already torn down. Skipped entirely when the session does
+        // not offer the search, so switching the capability off also stops its file work rather
+        // than building a port nothing can reach.
+        if capabilities.tool(named: searchPrepNotesTool.name) != nil {
+            prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
+                let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
+                guard !Task.isCancelled else { return }
+                driver?.installPrepMaterial(index)
+            }
         }
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
@@ -994,6 +1016,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         _ error: UserFacingError, context: UserFacingError.PresentationContext
     ) {
         errorReporter.reportImmediately(error, context: context)
+    }
+
+    func brainRecoveryDidChange(_ provider: BrainProvider?) {
+        guard let readinessSession else { return }
+        observeReadiness(.brainRecovery(provider), for: readinessSession)
+    }
+
+    func brainCycleDidFail(_ provider: BrainProvider) {
+        guard let readinessSession else { return }
+        let firstFailure = !readiness.hasFailedCoachingCycle
+        observeReadiness(.brainCycleFailed(provider), for: readinessSession)
+        guard firstFailure else { return }
+        let message = "Model cycle failed."
+        overlayCaption?.showError(message)
     }
 
     func brainTargetDidChange(_ target: BrainTarget?) {

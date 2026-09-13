@@ -509,44 +509,132 @@ import JarvisCore
     /// Every session shape a target can be warmed with must survive its own turns. These are the
     /// combinations that used to throw `instructions changed after runtime initialization` on every
     /// attempt, because composition baked the plain `coachTools` while the coach loop sent a
-    /// format-resolved or prep-material set (#273). Both sides now resolve through
-    /// `sessionCoachTools`, so warming with a session's set and sending it back must dispatch.
-    @Test(arguments: [
-        (InterviewFormat?.none, false), (.systemDesign, false), (.coding, true), (.behavioral, true),
-    ])
-    func aSessionsOwnToolSetDispatchesOnItsOwnTarget(
-        format: InterviewFormat?, prepMaterial: Bool
-    ) async throws {
+    /// prep-material set (#273). Both sides now resolve through `CoachCapabilities`, so warming
+    /// with a session's set and sending it back must dispatch.
+    @Test(arguments: [false, true])
+    func aSessionsOwnToolSetDispatchesOnItsOwnTarget(prepMaterial: Bool) async throws {
         let workDir = try makeWorkDir()
         let backend = FakeLocalAgentRuntime(
             replies: [#"{"tool":"speak","arguments":{"lines":["tip"],"mermaid":null}}"#])
-        let tools = sessionCoachTools(interviewFormat: format, prepMaterial: prepMaterial)
-        let prompt = JarvisPrompts.Coach.system(
-            prepMaterial: prepMaterial, formatAddendum: format?.promptAddendum ?? "")
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: prepMaterial)
+        let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
         let client = makeClient(provider: .claudeCode, workDir: workDir,
                                 runtime: CLIBrainRuntime(backend: backend),
-                                systemPrompt: prompt, tools: tools)
+                                systemPrompt: prompt, tools: capabilities.tools)
 
         let response = try await client.respond(
             messages: [.system(prompt), .user("help")],
-            tools: tools,
+            tools: capabilities.tools,
             toolChoice: .required)
 
         #expect(response.toolCalls.isEmpty == false)
         client.terminate()
     }
 
+    /// The per-turn array narrows to what the model may call now and widens again as it loads, all
+    /// without touching the instructions the process was warmed with — which a CLI target requires.
+    @Test func aLoadedToolInTheTurnsArrayLeavesTheBakedInstructionsAlone() async throws {
+        let workDir = try makeWorkDir()
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true)
+        let backend = FakeLocalAgentRuntime(replies: [
+            #"{"tool":"speak","arguments":{"lines":["tip"]}}"#,
+            #"{"tool":"speak","arguments":{"lines":["tip"]}}"#,
+        ])
+        let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
+        let client = makeClient(provider: .claudeCode, workDir: workDir,
+                                runtime: CLIBrainRuntime(backend: backend),
+                                systemPrompt: prompt, tools: capabilities.tools)
+
+        for loaded in [Set<String>(), ["search_prep_notes"]] {
+            let response = try await client.respond(
+                messages: [.system(prompt), .user("help")],
+                tools: capabilities.callable(loaded: loaded),
+                toolChoice: .required)
+            #expect(response.toolCalls.isEmpty == false)
+        }
+
+        // Every switched-on tool is named in the one baked block, hot schemas and catalog alike.
+        #expect(client.expectedInstructions.contains("# Tools you can load"))
+        #expect(client.expectedInstructions.contains("load_tool"))
+        #expect(client.expectedInstructions.contains(JarvisPrompts.LocalAgent.deferredToolsNote))
+        client.terminate()
+    }
+
+    /// A skill is not a tool: it is named in the baked system text and its body arrives in the turn
+    /// as a `load_skill` result, so loading one leaves the per-turn array — and the freeze on the
+    /// instructions the process was warmed with — untouched.
+    @Test func aSkillCatalogIsBakedAndLoadingOneLeavesTheToolArrayAlone() async throws {
+        let workDir = try makeWorkDir()
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false,
+            skills: [Skill(name: "behavioral", description: "Coaching for behavioral questions.",
+                           body: "Organize the answer as STAR.")])
+        let backend = FakeLocalAgentRuntime(replies: [
+            #"{"tool":"load_skill","arguments":{"name":"behavioral"}}"#,
+            #"{"tool":"speak","arguments":{"lines":["tip"]}}"#,
+        ])
+        let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
+        let client = makeClient(provider: .claudeCode, workDir: workDir,
+                                runtime: CLIBrainRuntime(backend: backend),
+                                systemPrompt: prompt, tools: capabilities.tools)
+
+        for _ in 0..<2 {
+            let response = try await client.respond(
+                messages: [.system(prompt), .user("help")],
+                tools: capabilities.callable(loaded: []),
+                toolChoice: .required)
+            #expect(response.toolCalls.isEmpty == false)
+        }
+
+        #expect(client.expectedInstructions.contains("# Skills you can load"))
+        #expect(client.expectedInstructions.contains("- behavioral: Coaching for behavioral questions."))
+        #expect(client.expectedInstructions.contains("- load_skill — "))
+        // The body is not in the instructions; it only ever reaches the model as a tool result.
+        #expect(!client.expectedInstructions.contains("Organize the answer as STAR."))
+        client.terminate()
+    }
+
+    /// Only the hot tools get a schema in the protocol block. A deferred tool is named in the
+    /// catalog inside the system text, and its schema arrives as a `load_tool` result in the turn.
+    @Test func theToolProtocolRendersHotSchemasThenPointsAtTheCatalog() {
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true)
+
+        let block = JarvisPrompts.LocalAgent.toolProtocol(
+            tools: capabilities.tools, toolChoice: .required)
+
+        #expect(block.contains("These are the tools you can call right now:"))
+        #expect(block.contains("- load_tool — "))
+        #expect(!block.contains("- search_prep_notes — "))
+        #expect(!block.contains(searchPrepNotesTool.parametersJSON))
+        let note = try! #require(block.range(of: JarvisPrompts.LocalAgent.deferredToolsNote))
+        let speakSchema = try! #require(block.range(of: speakTool.parametersJSON))
+        let jsonLine = try! #require(block.range(of: "End your reply with a single line"))
+        #expect(speakSchema.upperBound < note.lowerBound)
+        #expect(note.upperBound < jsonLine.lowerBound)
+
+        // With nothing to load the pointer is absent, like the catalog it points at.
+        #expect(!JarvisPrompts.LocalAgent
+            .toolProtocol(tools: CoachCapabilities.default.tools, toolChoice: .required)
+            .contains(JarvisPrompts.LocalAgent.deferredToolsNote))
+    }
+
     /// The other half of the contract: drift is still rejected loudly. Tool names alone are not
-    /// enough, because `toolProtocol` renders each schema verbatim into the baked instructions.
+    /// enough, because `toolProtocol` renders each schema verbatim into the baked instructions, so
+    /// the turn's tools are compared as whole definitions against what the process was warmed with.
     @Test func aChangedSchemaUnderTheSameToolNameIsStillRejected() async throws {
         let workDir = try makeWorkDir()
         let backend = FakeLocalAgentRuntime(
             replies: [#"{"tool":"speak","arguments":{"lines":["tip"]}}"#])
-        let baked = JarvisPrompts.Coach.system(prepMaterial: false, formatAddendum: "")
+        let baked = JarvisPrompts.Coach.system(capabilities: .default)
         let client = makeClient(provider: .claudeCode, workDir: workDir,
                                 runtime: CLIBrainRuntime(backend: backend),
                                 systemPrompt: baked, tools: coachTools)
-        let sent = coachTools.map { $0.name == speakTool.name ? systemDesignSpeakTool : $0 }
+        let widened = ToolDef(name: speakTool.name, description: speakTool.description,
+                              parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}}},"required":["lines"],"additionalProperties":false}"#)
+        let sent = coachTools.map { $0.name == speakTool.name ? widened : $0 }
 
         do {
             _ = try await client.respond(
@@ -556,7 +644,7 @@ import JarvisCore
             Issue.record("a changed speak schema reached the runtime unrejected")
         } catch {
             #expect(String(describing: error)
-                .contains("instructions changed after runtime initialization"))
+                .contains("offered a tool it was not initialized with"))
         }
         client.terminate()
     }

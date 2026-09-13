@@ -29,8 +29,13 @@ public enum Defaults {
         /// Keeps a coaching turn fast (sub-2s target) while still allowing tool calls.
         public static let effort: ReasoningEffort = .low
 
-        /// No stored default: absence selects None (base prompt only).
-        public static let interviewFormatKey = "brain.interviewFormat"
+        public static let disabledToolsKey = "brain.disabledTools"
+        /// Every composable tool is on until the user switches one off.
+        public static let disabledTools: [String] = []
+
+        public static let disabledSkillsKey = "brain.disabledSkills"
+        /// Every bundled skill is on until the user switches one off.
+        public static let disabledSkills: [String] = []
 
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
         /// their selection; CLI providers store under a suffixed key each.
@@ -174,6 +179,16 @@ public enum Defaults {
     /// durable history rather than a flashing caption. The box is a session surface: switched on, it
     /// appears on Start and goes away on Stop.
     public enum Overlay {
+        /// Appearance of the code area within the persistent box.
+        public enum Code {
+            public static let fontSizeKey = "overlayCode.fontSize"
+            public static let fontSize: Double = 18
+            public static let fontSizeRange: ClosedRange<Double> = 12...18
+            public static let opacityKey = "overlayCode.backgroundOpacity"
+            public static let opacity: Double = 1
+            public static let opacityRange: ClosedRange<Double> = 0...1
+        }
+
 
         /// The transient on-screen tip that fades after each response.
         public enum Caption {

@@ -1,8 +1,7 @@
 import AppKit
 import JarvisCore
 
-/// Native, memory-only rendering for the box-and-arrow Mermaid subset. An attachment keeps the
-/// diagram with its hint in the existing scrollable, capture-excluded panel, without a third window.
+/// Native, memory-only rendering for the box-and-arrow Mermaid subset in the pinned design area.
 @MainActor
 enum DiagramHintImage {
     static func render(_ graph: DiagramHint, fitting available: NSSize) -> NSImage {

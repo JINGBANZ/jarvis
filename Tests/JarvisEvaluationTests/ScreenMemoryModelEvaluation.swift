@@ -10,7 +10,7 @@ import JarvisBrainProviders
 struct ScreenMemoryModelEvaluation {
     @Test func retainedEvidenceInformsCoaching() async throws {
         let executable = try #require(ProcessInfo.processInfo.environment["JARVIS_EVAL_CLAUDE"])
-        let prompt = JarvisPrompts.Coach.system(prepMaterial: false, formatAddendum: "", explanationsEnabled: false)
+        let prompt = JarvisPrompts.Coach.system(capabilities: .default, explanationsEnabled: false)
         let client = CLIBrainClient(
             provider: .claudeCode, executable: URL(fileURLWithPath: executable),
             model: BrainModelCatalog.defaultModel(for: .claudeCode).id,

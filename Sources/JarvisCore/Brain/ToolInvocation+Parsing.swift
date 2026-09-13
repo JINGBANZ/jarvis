@@ -1,6 +1,28 @@
 import Foundation
 
 public extension ToolInvocation {
+    /// The tool this call names — the inverse of `parse`, and the one place a runner asks "was this
+    /// tool offered?" without re-reading the wire call.
+    var toolName: String {
+        switch self {
+        case .captureScreen: captureScreenTool.name
+        case .speak: speakTool.name
+        case .staySilent: staySilentTool.name
+        case .searchPrepNotes: searchPrepNotesTool.name
+        case .loadTool: CoachCapabilities.loadToolName
+        case .loadSkill: CoachCapabilities.loadSkillName
+        }
+    }
+
+    /// The id this call must be answered on.
+    var callID: String {
+        switch self {
+        case .captureScreen(let id), .staySilent(let id): id
+        case .speak(let id, _, _, _, _): id
+        case .searchPrepNotes(let id, _), .loadTool(let id, _), .loadSkill(let id, _): id
+        }
+    }
+
     /// Map a wire-level tool call (name + JSON arguments) to a typed invocation — the one place the
     /// coach tool names are interpreted, shared by every brain client. Unknown tool → nil (callers
     /// log and skip). `speak` is nil unless `lines` decodes to at least one non-blank string: the
@@ -32,6 +54,17 @@ public extension ToolInvocation {
             let query = (object?["query"] as? String ?? "").trimmingCharacters(in: .whitespaces)
             guard !query.isEmpty else { return nil }
             return .searchPrepNotes(callId: callId, query: query)
+        case CoachCapabilities.loadToolName, CoachCapabilities.loadSkillName:
+            // The literal names, not `ToolDef`s: each loader is composed per Start around the
+            // catalog it can offer, so there is no one definition to compare against here.
+            let object = (try? JSONSerialization.jsonObject(
+                with: Data(argumentsJSON.utf8))) as? [String: Any]
+            let loaded = (object?["name"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !loaded.isEmpty else { return nil }
+            return name == CoachCapabilities.loadToolName
+                ? .loadTool(callId: callId, name: loaded)
+                : .loadSkill(callId: callId, name: loaded)
         default:
             return nil
         }
