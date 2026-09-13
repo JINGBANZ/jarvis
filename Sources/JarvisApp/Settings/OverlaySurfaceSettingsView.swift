@@ -57,7 +57,8 @@ final class OverlaySurfaceSettingsView: NSView {
     private let diagramRow: SettingsRowView?
 
     var preferredHeight: CGFloat {
-        Self.headerHeight + (toggle.state == .on ? SettingsStyle.rowHeight * (diagramRow == nil ? 2 : 3) : 0)
+        guard toggle.state == .on else { return Self.headerHeight }
+        return Self.headerHeight + SettingsStyle.rowHeight * (diagramRow == nil ? 2 : 3)
     }
 
     init(
@@ -125,7 +126,7 @@ final class OverlaySurfaceSettingsView: NSView {
         toggle.state = enabled ? .on : .off
         toggle.target = target
         toggle.action = enableAction
-        toggle.setAccessibilityLabel("Show \(title.lowercased())")
+        toggle.setAccessibilityLabel(title.hasPrefix("Show ") ? title : "Show \(title.lowercased())")
         stateLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stateLabel.alignment = .right
         stateLabel.textColor = .secondaryLabelColor
@@ -196,16 +197,19 @@ final class OverlaySurfaceSettingsView: NSView {
             height: 18)
 
         if toggle.state == .on {
-            let extraHeight = diagramRow == nil ? 0 : SettingsStyle.rowHeight
-            diagramRow?.frame = NSRect(x: 0, y: 0, width: content.bounds.width, height: extraHeight)
-            opacityRow.frame = NSRect(
-                x: 0,
-                y: extraHeight,
-                width: content.bounds.width,
-                height: SettingsStyle.rowHeight)
             sizeRow.frame = NSRect(
                 x: 0,
-                y: SettingsStyle.rowHeight + extraHeight,
+                y: headerY - SettingsStyle.rowHeight,
+                width: content.bounds.width,
+                height: SettingsStyle.rowHeight)
+            opacityRow.frame = NSRect(
+                x: 0,
+                y: headerY - SettingsStyle.rowHeight * 2,
+                width: content.bounds.width,
+                height: SettingsStyle.rowHeight)
+            diagramRow?.frame = NSRect(
+                x: 0,
+                y: headerY - SettingsStyle.rowHeight * 3,
                 width: content.bounds.width,
                 height: SettingsStyle.rowHeight)
         }

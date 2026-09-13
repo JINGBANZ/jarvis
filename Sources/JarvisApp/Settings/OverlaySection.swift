@@ -9,6 +9,9 @@ final class OverlaySection: NSObject, SettingsSection {
     let fillsTab = true
 
     private let onBoxEnabledChanged: (Bool) -> Void
+    private let codePreferences: CodePreferences
+    private let onCodeChanged: () -> Void
+    private var codeView: OverlaySurfaceSettingsView?
     private let appearance: OverlayAppearance
     private let caption: OverlayCaptionApplying
     private let box: OverlayBoxApplying
@@ -19,7 +22,10 @@ final class OverlaySection: NSObject, SettingsSection {
     private var boxView: OverlaySurfaceSettingsView?
 
     init(appearance: OverlayAppearance, caption: OverlayCaptionApplying, box: OverlayBoxApplying,
+         codePreferences: CodePreferences, onCodeChanged: @escaping () -> Void,
          onBoxEnabledChanged: @escaping (Bool) -> Void = { _ in }) {
+        self.codePreferences = codePreferences
+        self.onCodeChanged = onCodeChanged
         self.onBoxEnabledChanged = onBoxEnabledChanged
         self.appearance = appearance
         self.caption = caption
@@ -79,6 +85,24 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityAccessibilityLabel: "Overlay box opacity",
             diagramToggle: diagramToggle)
 
+        codeView = makeSurface(
+            title: "Show code with hints",
+            description: "Automatic coding snippets · takes effect next Start",
+            symbolName: "chevron.left.forwardslash.chevron.right",
+            tint: .systemOrange,
+            enabled: codePreferences.isEnabled,
+            enableAction: #selector(codeEnabledChanged),
+            sizeValue: appearance.codeFontSize,
+            sizeRange: Defaults.Overlay.Code.fontSizeRange,
+            sizeAction: #selector(codeSizeChanged),
+            sizeAccessibilityLabel: "Code text size",
+            opacityTitle: "Background opacity",
+            opacityValue: appearance.codeBackgroundOpacity,
+            opacityRange: Defaults.Overlay.Code.opacityRange,
+            opacityAction: #selector(codeOpacityChanged),
+            opacityAccessibilityLabel: "Code background opacity")
+        if let codeView { boxView?.addSubview(codeView) }
+
         if let captionView { document.addSubview(captionView) }
         if let boxView { document.addSubview(boxView) }
         scrollView.onViewportChanged = { [weak self] in self?.relayout() }
@@ -131,12 +155,14 @@ final class OverlaySection: NSObject, SettingsSection {
     }
 
     private func relayout() {
-        guard let scrollView, let documentView, let captionView, let boxView else { return }
+        guard let scrollView, let documentView, let captionView, let boxView, let codeView else { return }
 
         let viewport = scrollView.contentView.bounds.size
         let width = max(320, viewport.width)
+        let codeHeight = appearance.boxEnabled ? codeView.preferredHeight : 0
+        let boxHeight = boxView.preferredHeight + codeHeight
         let contentHeight =
-            captionView.preferredHeight + SettingsStyle.sectionSpacing + boxView.preferredHeight
+            captionView.preferredHeight + SettingsStyle.sectionSpacing + boxHeight
         let documentHeight = max(viewport.height, contentHeight)
 
         documentView.frame = NSRect(x: 0, y: 0, width: width, height: documentHeight)
@@ -149,9 +175,12 @@ final class OverlaySection: NSObject, SettingsSection {
         top = captionView.frame.minY - SettingsStyle.sectionSpacing
         boxView.frame = NSRect(
             x: 0,
-            y: top - boxView.preferredHeight,
+            y: top - boxHeight,
             width: width,
-            height: boxView.preferredHeight)
+            height: boxHeight)
+        // Code remains subordinate to Box; the section owns the composition and visibility.
+        codeView.isHidden = !appearance.boxEnabled
+        codeView.frame = NSRect(x: 0, y: 0, width: width, height: codeHeight)
         revealTop()
     }
 
@@ -164,6 +193,9 @@ final class OverlaySection: NSObject, SettingsSection {
     }
 
     func didBecomeActive() {
+        codeView?.updateEnabledState(codePreferences.isEnabled)
+        box.setCodePreviewEnabled(codePreferences.isEnabled)
+        relayout()
         caption.showAppearancePreview(appearance.captionEnabled)
         box.showAppearancePreview(appearance.boxEnabled)
     }
@@ -193,6 +225,8 @@ final class OverlaySection: NSObject, SettingsSection {
         onBoxEnabledChanged(enabled)
         box.setEnabled(enabled)
         box.showAppearancePreview(enabled)
+        codeView?.updateEnabledState(codePreferences.isEnabled)
+        box.setCodePreviewEnabled(codePreferences.isEnabled)
         boxView?.updateEnabledState(enabled)
         relayout()
     }
@@ -225,7 +259,34 @@ final class OverlaySection: NSObject, SettingsSection {
         updateReadouts()
     }
 
+    @objc private func codeEnabledChanged(_ sender: NSSwitch) {
+        codePreferences.isEnabled = sender.state == .on
+        onCodeChanged()
+        codeView?.updateEnabledState(codePreferences.isEnabled)
+        box.setCodePreviewEnabled(codePreferences.isEnabled)
+        relayout()
+    }
+
+    @objc private func codeSizeChanged(_ sender: NSSlider) {
+        appearance.codeFontSize = sender.doubleValue.rounded()
+        sender.doubleValue = appearance.codeFontSize
+        box.setCodeFontSize(appearance.codeFontSize)
+        updateReadouts()
+    }
+
+    @objc private func codeOpacityChanged(_ sender: NSSlider) {
+        appearance.codeBackgroundOpacity = (sender.doubleValue * 100).rounded() / 100
+        sender.doubleValue = appearance.codeBackgroundOpacity
+        box.setCodeBackgroundOpacity(appearance.codeBackgroundOpacity)
+        updateReadouts()
+    }
+
     private func updateReadouts() {
+        let codePoints = Int(appearance.codeFontSize.rounded())
+        let codePercent = Int((appearance.codeBackgroundOpacity * 100).rounded())
+        codeView?.updateReadouts(size: "\(codePoints) pt", opacity: "\(codePercent)%")
+        codeView?.sizeSlider.setAccessibilityValueDescription("\(codePoints) points")
+        codeView?.opacitySlider.setAccessibilityValueDescription("\(codePercent) percent")
         let captionPoints = Int(appearance.captionFontSize.rounded())
         let captionPercent = Int((appearance.captionBackgroundOpacity * 100).rounded())
         captionView?.updateReadouts(
