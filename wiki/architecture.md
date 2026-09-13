@@ -152,10 +152,10 @@ path still works for testing/practice; it is simply not latency-critical there.)
 
 ### Capabilities
 
-What a session can do is one value, `CoachCapabilities`, composed at Start from the user's switches
-and from whether prep-material sources are configured, then read by everything: the prompt the coach
-loop builds per turn, and the prompt and tool list `BrainComposition` bakes into a CLI provider's
-persistent process. One value is the whole point. `CLIBrainClient` renders each tool's
+What a session can do is one value, `CoachCapabilities`, composed at Start from the user's switches,
+the bundled skills, and whether prep-material sources are configured, then read by everything: the
+prompt the coach loop builds per turn, and the prompt and tool list `BrainComposition` bakes into a
+CLI provider's persistent process. One value is the whole point. `CLIBrainClient` renders each tool's
 `parametersJSON` verbatim into the instructions its process is warmed with, so a set derived twice
 could disagree and fail every remaining attempt on that target until the route exhausted.
 
@@ -169,9 +169,26 @@ cannot call is not in the prompt at all. Jarvis defers on every brain in the sam
 using a provider's own tool-search feature: the route can move between brains mid-session over one
 shared history, and a plain tool result replays on any of them.
 
+A **skill** is coaching guidance for a kind of question, bundled as
+`Sources/JarvisCore/Resources/Skills/<name>/SKILL.md` in the agentskills.io format: frontmatter
+naming the skill and describing it in one line, then the body. `SkillCatalog` reads and validates
+them at Start (a small hand-written frontmatter reader — two keys do not warrant a YAML dependency
+in a package that builds under Command Line Tools alone), and a file it rejects costs its own
+guidance, never the session. The switched-on skills are the second catalog; `load_skill` returns one
+body, framed as an extension of the action policy and tip style so the directives inside it read as
+instructions rather than as data. A skill never becomes a callable tool, and its body is never in
+the prompt.
+
+Nothing preselects a skill at Start. The model reads the one-line description and loads what the
+question in front of it needs, which is what lets one session coach a behavioral question and then a
+design question. The alternative of a runtime classifier adds a model call and a wrong answer to
+recover from; concatenating every skill into the prompt pays for all of them on every request and
+was what a single "general technical" skill existed to work around. The description is written for
+the model, with an example, because that line is all it sees before deciding.
+
 A load belongs to the attempt that made it and becomes session state only when that attempt commits
 a turn. An attempt that fails simply loads again, at the cost of one round trip, and in exchange
-"already loaded" is true exactly when the schema and guidance are in history the model can still read. Compaction
+"already loaded" is true exactly when the loaded content is in history the model can still read. Compaction
 keeps those pairs verbatim under the summary for the same reason ([`CoachHistory`](../Sources/JarvisCore/Coach/CoachHistory.swift)).
 
 `search_prep_notes` is the first deferred tool. It is in the catalog when prep-material *sources* are
@@ -185,26 +202,29 @@ installs no port in either case; which one it was stays in `jlog`, and Activity 
 fixed notice that a tip went out without the user's own material. Switching the capability off also
 skips the index build, so the file reading and `textutil` work stop with it.
 
-A call to a tool the session does not offer is answered with a plain "no tool named X is available"
-rather than failing the attempt. Only a CLI target can reach that branch, since it reconstructs calls
-from prompt text and can name anything; on the API path an undeclared tool is not callable at all.
-The per-attempt response cap is 7: two more than the longest sensible chain once skills also load on
-demand, which is load a skill, load a tool, search, capture, speak.
+A call to a tool the session does not offer, or a load naming something it does not have, is answered
+with a plain "no tool named X is available" rather than failing the attempt. Only a CLI target can
+reach the first branch, since it reconstructs calls from prompt text and can name anything; on the
+API path an undeclared tool is not callable at all. The per-attempt response cap is 7: two more than
+the longest sensible chain, which is load a skill, load a tool, search, capture, speak.
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
-capture, and a turn cannot end without one of the other two. `load_tool` has none either, because it
-is composed only while something remains to load. See
-[settings-window.md](./settings-window.md) for the user-facing card.
+capture, and a turn cannot end without one of the other two. Neither loader has one either, because
+each is composed only while its catalog has something left in it. The manual-hint shortcut forces
+`speak` on every response and therefore cannot load: a hotkey tip before the session's first
+automatic load coaches without a skill. See [settings-window.md](./settings-window.md) for the
+user-facing card.
 
 ### Private architecture hints
 
-An explicitly selected System Design session can attach a visual sketch to `speak` during the
-high-level-architecture stage. The format addendum tells the model when a graph is helpful; the
-harness does not classify interview stages. The nullable diagram field is part of the one `speak`
-schema on every brain and in every session, one schema being what keeps the tool list a CLI process
-is warmed with equal to the one the loop sends. `CoachAttemptRunner` renders a supplied graph only
-in a System Design session, and ignores diagram output elsewhere. Keeping it on `speak` also makes the
-manual-hint shortcut work in one response.
+The model can attach a visual sketch to `speak` during the high-level-architecture stage of a design
+discussion. The nullable diagram field is part of the one `speak` schema on every brain and in every
+session, one schema being what keeps the tool list a CLI process is warmed with equal to the one the
+loop sends. Prompt text alone governs it: the tip style says to leave it null unless a loaded skill
+asks for a graph, the field's own description says the same, and the system-design skill is what
+asks. The runtime renders any graph it can parse and classifies nothing — a gate on a session type
+is exactly what the capability model removed, and a stray diagram in a session that loaded no skill
+is a prompt fix. Keeping it on `speak` also makes the manual-hint shortcut work in one response.
 
 [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) accepts a bounded Mermaid subset:
 rectangular labeled boxes and directed connections. The parser owns the precise grammar and limits;
@@ -238,8 +258,8 @@ Hints and explanations are proactive. The shared coach prompt distinguishes need
 from not understanding the question, earlier guidance, or the overall approach using the available
 session history, newest speech, and current screen. Clear confusion warrants an explanation; silence
 or unchanged code alone does not. Repeated confusion calls for simpler framing or a smaller example,
-while productive progress calls for silence. This policy applies across interview formats without a
-separate classifier, timer, or model request.
+while productive progress calls for silence. This policy applies to every kind of question without
+a separate classifier, timer, or model request.
 
 Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
 **⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
@@ -272,10 +292,12 @@ Explanation text follows the existing coaching history and Activity paths. It op
 never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
 only the brief caption if that surface is enabled; it does not force a hidden surface on.
 
-**Show code with hints** enables matching snippets in Coding or general sessions, defaulting off.
-`SessionPlan.codeEnabled` is frozen at Start and preserved across screen revisions. The app resolves
-the session format at Start, so non-coding sessions cannot reserve an empty code area. Only enabled
-sessions receive the shortened code guidance in their fixed system prompt. The Show code shortcut
+**Show code with hints** enables matching snippets, defaulting off. `SessionPlan.codeEnabled` is
+frozen at Start, preserved across screen revisions, and is the whole gate: only an enabled session
+reserves the code area and receives the shortened code guidance in its fixed system prompt. Nothing
+in the runtime asks what kind of question this is — that guidance is what keeps a snippet off a
+conceptual hint, by telling the model to leave `codeSnippet` null when no implementation would
+help. The Show code shortcut
 requests the next snippet; it never edits the preference or enables code during a disabled session.
 Saved settings take effect on the next Start. Tool-field removal is deferred with explanations to #273.
 The fixed `speak.codeSnippet` schema carries language, placement, code, and corrected-line indices;
@@ -589,7 +611,7 @@ rather than a per-turn screenshot.
   and the capture's OCR text (in the tool result) is what persists, and reasoning items are dropped;
   and past a token threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
-  interview-format-neutral briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
+  briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
   treats non-ASCII scripts conservatively; the exact retention and topic-retirement policy lives in
   [`JarvisPrompts.HistorySummary.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift).
   Compaction uses one Core-owned workload deadline across providers and fails soft: a slow or failed
@@ -599,37 +621,30 @@ rather than a per-turn screenshot.
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
-- **Interview format is an optional Start-time addendum (`InterviewFormat` in
-  `Sources/JarvisCore/Config/`).** The picker defaults to **None**, which supplies the byte-for-byte
-  base coach prompt. Coding, Behavioral, System Design, and General Technical are explicit choices.
-  This keeps behavior unchanged for a user who never opens Settings. General Technical is one
-  purpose-built routing skill, not a concatenation of specialist prompts: it selects relevant
-  format-specific guidance from the newest conversation and available screen evidence. Screen
-  capture remains on demand under the base action policy; no fresh capture is assumed on every turn.
-  There is no runtime classifier or persisted question classification.
+- **Coaching guidance is loaded on demand, not chosen at Start** (see
+  [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
+  policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
+  model loads when the question calls for it. Three skills ship: behavioral shapes candidate-owned
+  answers with STAR and prepared criteria, labels constructed examples, and avoids refining an
+  answer that is already concrete and complete; coding covers representation and invariant guidance,
+  local implementation and defect diagnosis, and boundary tests for a post-completion hint the base
+  policy already warrants; system-design supplies the stage vocabulary from requirements through
+  trade-offs, and asks for a diagram in the one stage that benefits. The base prompt keeps what is
+  true of every session: when to speak or stay silent, hint length, and comprehension before
+  strategy. Finishing code alone still does not trigger a hint, and there is no runtime classifier
+  or persisted question classification.
 
-  The base prompt owns when to speak or stay silent, the hint length, and conditional comprehension
-  before strategy. Coding adds representation/invariant guidance, local implementation and defect
-  diagnosis, and boundary-test content for a post-completion hint already warranted by the base
-  policy. Finishing code alone does not trigger a hint. Behavioral shapes candidate-owned answers
-  with STAR and prepared criteria, labels constructed examples, and avoids refinement of a concrete,
-  complete, aligned answer. General Technical follows the same behavioral completion standard.
-  System Design supplies stage vocabulary from requirements through trade-offs.
+  A skill body describes a *kind of question*, never "this session", because a load can arrive
+  mid-interview into a discussion that has already been about something else. New skills need only a
+  new folder; user-supplied skill files are not supported. `SkillCatalog` probes the installed-app,
+  SwiftPM, and test layouts, since packaging copies `Jarvis_JarvisCore.bundle` into
+  `Contents/Resources` and `swift test` has neither.
 
-  Each explicit format is a Markdown file under `Sources/JarvisCore/Resources/Skills/`; missing content
-  resolves to an empty addendum, and Settings filters it out. `InterviewFormat.promptAddendum` loads
-  the selected resource through `skillMarkdownURL(named:)`, including installed-app, SwiftPM, and test
-  layouts. Packaging copies `Jarvis_JarvisCore.bundle` into `Contents/Resources`. New formats require an
-  enum case and display name as well as a resource; user-supplied skill files are not supported.
-  Nil resolves directly to an empty string, preserving the default rather than composing skills.
-
-  The selected text is frozen at Start (`BrainComposition.interviewFormatAddendum`) and reused during
-  provider reapply. Both OpenAI and CLI construction use
-  `JarvisPrompts.Coach.system(capabilities:formatAddendum:)`; passing resolved text keeps resource I/O
-  outside coaching turns. CLI instructions remain fixed for the session, while General Technical can
-  use new task evidence within those instructions.
-  [Private architecture hints](#private-architecture-hints) require explicit **System Design** at
-  runtime; General Technical's system-design guidance does not enable diagrams.
+  The composed set is frozen at Start (`BrainComposition.capabilities`) and reused during provider
+  reapply; both OpenAI and CLI construction call `JarvisPrompts.Coach.system(capabilities:)`, which
+  keeps file I/O off coaching turns. CLI instructions stay fixed for the session: a skill's body
+  reaches those models inside the turn, as a tool result, never by rewriting what the process was
+  warmed with.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
@@ -1041,10 +1056,9 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 ## 6. Non-Goals (v1)
 
 - A tiered sensitivity dial, or code-level coaching modes with separate trigger gates or
-  runtime state. One harness spans behavioral, system-design, and coding questions; an optional
-  Start-time interview-format selection specializes the model's coaching policy and, for System
-  Design, enables private architecture sketches inside that shared loop — see
-  [§ Models and APIs](#models-and-apis) — while retaining the same scheduling.
+  runtime state. One harness spans behavioral, system-design, and coding questions; the model loads
+  the matching skill inside that shared loop — see [§ Capabilities](#capabilities) — and the
+  scheduling stays the same whichever it loads.
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global

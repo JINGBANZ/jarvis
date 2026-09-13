@@ -13,8 +13,8 @@ import Testing
         #expect(Defaults.Brain.providerKey == "brain.provider")
         #expect(Defaults.Brain.fallbackTargetsKey == "brain.fallbackTargets")
         #expect(Defaults.Brain.effortKey == "brain.reasoningEffort")
-        #expect(Defaults.Brain.interviewFormatKey == "brain.interviewFormat")
         #expect(Defaults.Brain.disabledToolsKey == "brain.disabledTools")
+        #expect(Defaults.Brain.disabledSkillsKey == "brain.disabledSkills")
         #expect(Defaults.Transcription.providerKey == "transcription.provider")
         #expect(Defaults.Transcription.openAIModelKey == "transcription.openai.model")
         #expect(Defaults.Transcription.openAIExpectedLanguagesKey

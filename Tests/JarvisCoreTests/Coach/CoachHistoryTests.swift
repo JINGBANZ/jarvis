@@ -143,14 +143,17 @@ import Testing
         #expect(calledBefore.isDisjoint(with: answeredAfter))
     }
 
-    /// A loaded tool's schema and guidance are the only copy the model has. Summarizing them away
-    /// would leave it holding a tool it can no longer call correctly, so the pair survives verbatim
-    /// under the summary, and the summarizer never sees it twice.
-    @Test func loadPairsSurviveASummaryAndStayOutOfIt() throws {
-        let load = RawToolCall(id: "l1", name: "load_tool",
+    /// A loaded tool's schema and guidance, and a loaded skill's body, are the only copy the model
+    /// has. Summarizing them away would leave it holding a capability it can no longer use
+    /// correctly, so the pair survives verbatim under the summary, and the summarizer never sees it
+    /// twice.
+    @Test(arguments: [("load_tool", "Loaded search_prep_notes. Arguments JSON Schema: {}"),
+                      ("load_skill", "Loaded skill: behavioral. Organize the answer as STAR.")])
+    func loadPairsSurviveASummaryAndStayOutOfIt(loader: String, loaded: String) throws {
+        let load = RawToolCall(id: "l1", name: loader,
                                argumentsJSON: #"{"name":"search_prep_notes"}"#)
-        let result = "Loaded search_prep_notes. Arguments JSON Schema: {}"
-            + String(repeating: " padding", count: 44)
+        // Padded to one filler's length, so both cases land on the same greedy boundary.
+        let result = loaded.padding(toLength: 401, withPad: " padding", startingAt: 0)
         let h = historyWithAPairAtTheGreedyBoundary(call: load, result: result)
         let before = h.estimatedTokens
 
@@ -169,8 +172,8 @@ import Testing
 
         let kept = h.snapshot()
         #expect(kept[0].text?.contains("the gist") == true)
-        #expect(kept[1].toolCalls?.map(\.name) == ["load_tool"])
-        #expect(kept[2].text?.contains("Loaded search_prep_notes") == true)
+        #expect(kept[1].toolCalls?.map(\.name) == [loader])
+        #expect(kept[2].text == result)
         #expect(kept[2].toolCallId == "l1")
         #expect(h.estimatedTokens < before)
     }

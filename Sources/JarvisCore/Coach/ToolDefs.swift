@@ -12,11 +12,12 @@ public let captureScreenTool = ToolDef(
 /// One schema on every brain and in every session. `mermaid` is nullable rather than absent because
 /// that is what makes a field optional under strict Structured Outputs, and because a second speak
 /// variant is what let the tool array a local-agent process was warmed with drift from the one the
-/// coach loop later sent (#273). Whether a supplied graph is rendered is a runtime decision.
+/// coach loop later sent (#273). When a graph belongs on a tip is prompt text's decision, not the
+/// runtime's: any graph the renderer can parse reaches the overlay.
 public let speakTool = ToolDef(
     name: "speak",
     description: JarvisPrompts.Coach.ToolDescription.speak,
-    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"mermaid":{"type":["string","null"],"description":"A small Mermaid graph for a private architecture sketch. Null unless the coaching guidance for this session asks for a diagram."},"explanation":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}"#,
+    parametersJSON: #"{"type":"object","properties":{"lines":{"type":"array","items":{"type":"string"}},"mermaid":{"type":["string","null"],"description":"A small Mermaid graph for a private architecture sketch. Null unless a loaded skill asks for a diagram."},"explanation":{"type":["string","null"]},"codeSnippet":{"type":["object","null"],"properties":{"language":{"type":"string"},"placement":{"type":"string"},"code":{"type":"string"},"highlightedLines":{"type":"array","items":{"type":"integer"}}},"required":["language","placement","code","highlightedLines"],"additionalProperties":false}},"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}"#,
     guidance: JarvisPrompts.Coach.ToolGuidance.speak
 )
 

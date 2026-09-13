@@ -4,26 +4,30 @@ import JarvisCore
 /// The Capabilities card in Brain Settings: what the coach can do, and which parts of it the user
 /// wants offered.
 ///
-/// Writes go straight to `preferences.disabledTools` and nothing else. A session resolves its
-/// capabilities once at Start, and both the coach loop and a warmed local-agent process are built
-/// from that one value, so a mid-session change could only make them disagree — which is why this
-/// card never calls the reapply path and says so in its header.
+/// Writes go straight to `preferences.disabledTools` / `preferences.disabledSkills` and nothing
+/// else. A session resolves its capabilities once at Start, and both the coach loop and a warmed
+/// local-agent process are built from that one value, so a mid-session change could only make them
+/// disagree — which is why this card never calls the reapply path and says so in its header.
 @MainActor
 final class CapabilitiesControls: NSObject {
     private let preferences: BrainPreferences
     private let prepMaterialPreferences: PrepMaterialPreferences
+    /// Read once, with the rest of the card's inputs: the same granularity as the Start the
+    /// switches apply at.
+    private let skills = SkillCatalog.bundled()
 
     private var card: SettingsCardView?
     private var rows: [SettingsRowView] = []
 
     var preferredHeight: CGFloat {
-        SettingsStyle.cardHeaderHeight + CGFloat(max(rows.count, Self.rowCount))
+        SettingsStyle.cardHeaderHeight + CGFloat(max(rows.count, rowCount))
             * SettingsStyle.rowHeight
     }
 
-    /// Three always-on tools plus prep-notes search. Read before `makeView` runs, when `rows` is
-    /// still empty, so the card reserves its real height from the first layout pass.
-    private static let rowCount = 4
+    /// Three always-on tools, prep-notes search, and one row per bundled skill. Read before
+    /// `makeView` runs, when `rows` is still empty, so the card reserves its real height from the
+    /// first layout pass.
+    private var rowCount: Int { 4 + skills.count }
 
     init(preferences: BrainPreferences, prepMaterialPreferences: PrepMaterialPreferences) {
         self.preferences = preferences
@@ -69,12 +73,37 @@ final class CapabilitiesControls: NSObject {
             // The row stretches its control to `controlWidth`; a switch keeps its own size and sits
             // at the trailing edge, as the Shortcuts toggles do.
             controlSize: NSSize(width: 44, height: 26),
-            showsSeparator: false)
+            showsSeparator: !skills.isEmpty)
         content.addSubview(prepRow)
         rows.append(prepRow)
 
+        // A switched-off skill keeps its row: nothing is hidden, so it can be switched back on.
+        for (index, skill) in skills.enumerated() {
+            let toggle = NSSwitch()
+            toggle.state = preferences.disabledSkills.contains(skill.name) ? .off : .on
+            toggle.tag = index
+            toggle.target = self
+            toggle.action = #selector(skillChanged)
+            toggle.setAccessibilityLabel(Self.title(for: skill))
+            toggle.identifier = NSUserInterfaceItemIdentifier("capability-skill-\(skill.name)")
+            let row = SettingsRowView(
+                title: Self.title(for: skill),
+                detail: "Loaded when a matching question comes up",
+                controlView: toggle,
+                controlSize: NSSize(width: 44, height: 26),
+                showsSeparator: index < skills.count - 1)
+            content.addSubview(row)
+            rows.append(row)
+        }
+
         layoutRows()
         return card
+    }
+
+    /// "system-design" reads as "System design": the skill's own name, in sentence case.
+    private static func title(for skill: Skill) -> String {
+        skill.name.replacingOccurrences(of: "-", with: " ").prefix(1).uppercased()
+            + skill.name.replacingOccurrences(of: "-", with: " ").dropFirst()
     }
 
     private static func title(for toolName: String) -> String {
@@ -106,5 +135,18 @@ final class CapabilitiesControls: NSObject {
         }
         preferences.disabledTools = disabled
         jlog("Jarvis: prep notes search \(sender.state == .on ? "on" : "off") for the next Start.")
+    }
+
+    @objc private func skillChanged(_ sender: NSSwitch) {
+        guard skills.indices.contains(sender.tag) else { return }
+        let name = skills[sender.tag].name
+        var disabled = preferences.disabledSkills
+        if sender.state == .on {
+            disabled.remove(name)
+        } else {
+            disabled.insert(name)
+        }
+        preferences.disabledSkills = disabled
+        jlog("Jarvis: \(name) skill \(sender.state == .on ? "on" : "off") for the next Start.")
     }
 }

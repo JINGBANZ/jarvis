@@ -181,9 +181,10 @@ public final class CoachHistory: @unchecked Sendable {
     }
 
     /// Tool calls whose results the model must keep word for word after a summary: a loaded tool's
-    /// schema and guidance are the only copy it has, and summarizing them away mid-session would
-    /// leave it holding a tool it can no longer call correctly.
-    public static let retainedToolNames: Set<String> = [CoachCapabilities.loadToolName]
+    /// schema and guidance, or a loaded skill's body, are the only copy it has, and summarizing
+    /// them away mid-session would leave it holding a capability it can no longer use correctly.
+    public static let retainedToolNames: Set<String> =
+        [CoachCapabilities.loadToolName, CoachCapabilities.loadSkillName]
 
     /// The call/result pairs inside `messages` that survive compaction verbatim, in order.
     public static func retainedPairs(in messages: [ChatMessage]) -> [ChatMessage] {

@@ -400,6 +400,26 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(after.contains("\"name\":\"search_prep_notes\""))
     }
 
+    /// A skill is never a declared tool — only its loader is, with the switched-on names as an
+    /// enum, so a schema-enforcing provider cannot be asked for one that is not offered.
+    @Test func encodesTheSkillLoaderWithItsCatalogEnum() async throws {
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false,
+            skills: [Skill(name: "behavioral", description: "d", body: "b"),
+                     Skill(name: "system-design", description: "d", body: "b")])
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+
+        _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
+
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"load_skill\""))
+        #expect(body.contains("\"enum\":[\"behavioral\",\"system-design\"]"))
+        #expect(body.contains("\"strict\":true"))
+        #expect(!body.contains("\"load_tool\""))
+    }
+
     /// The load and the use happen in one attempt, which is one `BrainConversation`. Each request
     /// inside it must declare the array it was handed, or a tool loaded in one iteration would not
     /// be callable in the next.

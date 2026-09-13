@@ -29,6 +29,18 @@ import Testing
         #expect(speakTool.parametersJSON.contains("\"additionalProperties\":false"))
     }
 
+    /// Nothing in the runtime decides when a diagram belongs, so both places the model can read
+    /// about the field say the same thing: a loaded skill is what asks for one.
+    @Test func theDiagramFieldIsGovernedByPromptTextAlone() {
+        #expect(speakTool.parametersJSON.contains(
+            "A small Mermaid graph for a private architecture sketch. "
+                + "Null unless a loaded skill asks for a diagram."))
+        #expect(JarvisPrompts.Coach.ToolGuidance.speak.hasSuffix("""
+            Set mermaid to null. Attach a graph only when a loaded skill has told you to, and only
+            for the case it describes.
+            """))
+    }
+
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
         #expect(captureScreenTool.description == JarvisPrompts.Coach.ToolDescription.captureScreen)

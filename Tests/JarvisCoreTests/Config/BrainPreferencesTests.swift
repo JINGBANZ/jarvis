@@ -21,8 +21,6 @@ import Foundation
         #expect(p.fallbackTargets.isEmpty)
         #expect(p.route.targets == [p.primaryTarget])
         #expect(p.primaryTarget.provider == Defaults.Brain.provider)
-        // Absence is the persisted representation of None, not an explicit override.
-        #expect(p.interviewFormat == nil)
     }
 
     /// Storing what is OFF is what makes a tool added in a later version on by default.
@@ -37,6 +35,18 @@ import Foundation
         #expect(d.stringArray(forKey: Defaults.Brain.disabledToolsKey) == ["search_prep_notes"])
     }
 
+    /// Skills switch off the same way, and nothing is required, so nothing is dropped on write.
+    @Test func disabledSkillsRoundTripAndDefaultToNothingSwitchedOff() {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        #expect(p.disabledSkills.isEmpty)
+
+        p.disabledSkills = ["system-design"]
+
+        #expect(BrainPreferences(defaults: d).disabledSkills == ["system-design"])
+        #expect(d.stringArray(forKey: Defaults.Brain.disabledSkillsKey) == ["system-design"])
+    }
+
     /// A session cannot run without these, so the preference cannot record them as off — not even
     /// through a hand-edited plist, which the next write normalizes away.
     @Test func theToolsASessionNeedsAreDroppedOnWrite() {
@@ -46,23 +56,6 @@ import Foundation
         p.disabledTools = CoachCapabilities.fixedToolNames.union(["search_prep_notes"])
 
         #expect(p.disabledTools == ["search_prep_notes"])
-    }
-
-    @Test(arguments: InterviewFormat.allCases)
-    func interviewFormatOverrideRoundTripsAndClearsBackToNone(_ format: InterviewFormat) {
-        let d = freshDefaults()
-        let p = BrainPreferences(defaults: d)
-        p.interviewFormat = format
-        #expect(BrainPreferences(defaults: d).interviewFormat == format)
-        p.interviewFormat = nil
-        #expect(BrainPreferences(defaults: d).interviewFormat == nil)
-        #expect(d.string(forKey: "brain.interviewFormat") == nil)
-    }
-
-    @Test func unknownStoredInterviewFormatFallsBackToNone() {
-        let d = freshDefaults()
-        d.set("architecture-review", forKey: "brain.interviewFormat")
-        #expect(BrainPreferences(defaults: d).interviewFormat == nil)
     }
 
     @Test func roundTripsThroughDefaults() {

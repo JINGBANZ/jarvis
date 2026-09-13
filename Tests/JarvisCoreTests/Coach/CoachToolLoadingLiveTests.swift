@@ -23,6 +23,12 @@ import JarvisBrainProviders
         "Jarvis, they just asked me to design a rate limiter. What did I prepare on this?"
     private static let implicitQuestion =
         "Jarvis, they just asked me to design a rate limiter. What should I cover?"
+    /// Direct addresses again, one clearly behavioral and one clearly a design round, so the only
+    /// open question is which skill the model reaches for.
+    private static let behavioralQuestion =
+        "Jarvis, they just asked me to tell them about a time I disagreed with my manager. How should I answer?"
+    private static let designQuestion =
+        "Jarvis, they just asked me to design a URL shortener. Where should I start?"
 
     /// Text worth finding: specific enough that a tip built on it is visibly built on it.
     private static let notes = PrepMaterialIndex(chunks: [
@@ -43,19 +49,58 @@ import JarvisBrainProviders
     ])
 
     @Test func theModelLoadsPrepSearchAndUsesItInOneAttempt() async throws {
+        for provider in Self.requestedProviders() { try await verify(provider) }
+    }
+
+    /// The same question of the skill catalog: offered one line per skill, does the model pick the
+    /// one this question calls for, load it, and coach in the same attempt? Two questions, because
+    /// picking the right one out of three is the part a unit test cannot answer.
+    @Test func theModelLoadsTheSkillTheQuestionCallsFor() async throws {
+        let providers = Self.requestedProviders()
+        guard !providers.isEmpty else { return }
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false, skills: SkillCatalog.bundled())
+        for provider in providers {
+            let directory = try liveDirectory(provider)
+            let traffic = FileSessionAudit(directory: directory)
+            var loaded: [String: String] = [:]
+            for (question, expected) in [(Self.behavioralQuestion, "behavioral"),
+                                         (Self.designQuestion, "system-design")] {
+                guard let coached = try await coach(provider, capabilities: capabilities,
+                                                    asking: question, directory: directory,
+                                                    traffic: traffic) else { break }
+                #expect(coached.outcome == .spoke)
+                let names = coached.activity.events.compactMap { event -> String? in
+                    guard case .capabilityLoaded(let kind, let name) = event, kind == .skill
+                    else { return nil }
+                    return name
+                }
+                #expect(names == [expected])
+                loaded[expected] = "\(names.joined(separator: ",")) in \(coached.milliseconds)ms"
+            }
+            _ = await traffic.close()
+            print("""
+                JARVIS_LIVE_CAPABILITY provider=\(provider.rawValue) \
+                behavioral=\(loaded["behavioral"] ?? "(none)") \
+                system_design=\(loaded["system-design"] ?? "(none)")
+                """)
+        }
+    }
+
+    /// Nothing runs unless the environment asks for it by provider; an unknown value is a mistake
+    /// worth reporting rather than a silent no-op.
+    private static func requestedProviders() -> [BrainProvider] {
         guard let requested = ProcessInfo.processInfo
-            .environment["JARVIS_LIVE_CAPABILITY_PROVIDER"] else { return }
-        let providers: [BrainProvider]
+            .environment["JARVIS_LIVE_CAPABILITY_PROVIDER"] else { return [] }
         switch requested {
-        case "all": providers = [.openAI, .claudeCode, .codexCLI]
-        case BrainProvider.openAI.rawValue: providers = [.openAI]
-        case BrainProvider.claudeCode.rawValue: providers = [.claudeCode]
-        case BrainProvider.codexCLI.rawValue: providers = [.codexCLI]
+        case "all": return [.openAI, .claudeCode, .codexCLI]
+        case BrainProvider.openAI.rawValue: return [.openAI]
+        case BrainProvider.claudeCode.rawValue: return [.claudeCode]
+        case BrainProvider.codexCLI.rawValue: return [.codexCLI]
         default:
             Issue.record("unknown JARVIS_LIVE_CAPABILITY_PROVIDER value: \(requested)")
-            return
+            return []
         }
-        for provider in providers { try await verify(provider) }
     }
 
     private func verify(_ provider: BrainProvider) async throws {
@@ -202,8 +247,7 @@ import JarvisBrainProviders
             reasoningEffort: ReasoningEffort.low.rawValue,
             workDirectory: directory, timeout: BrainWorkloadTimeout.liveCoaching,
             traffic: traffic, trafficTag: "coach",
-            systemPrompt: JarvisPrompts.Coach.system(
-                capabilities: capabilities, formatAddendum: ""),
+            systemPrompt: JarvisPrompts.Coach.system(capabilities: capabilities),
             tools: capabilities.tools,
             toolChoice: .required,
             runtime: CLIBrainRuntime(

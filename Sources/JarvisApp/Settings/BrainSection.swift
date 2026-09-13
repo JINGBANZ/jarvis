@@ -22,7 +22,7 @@ final class BrainSection: NSObject, SettingsSection {
     let fillsTab = true
 
     private static let coachingCardHeight =
-        SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight * 2
+        SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
 
     private let preferences: BrainPreferences
     private let detector: AgentCLIDetector
@@ -30,11 +30,6 @@ final class BrainSection: NSObject, SettingsSection {
         (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
     private let capabilities: CapabilitiesControls
     private let transcription: TranscriptionControls
-    /// Only formats with real content are offered — showing an entry that does nothing is worse
-    /// than not showing it, and it means a later `<format>.md` addition needs zero Swift changes to
-    /// appear here. Computed once (`promptAddendum` reads a file per access) since this section is
-    /// built once per app launch, not per keystroke.
-    private let availableFormats = InterviewFormat.allCases.filter { !$0.promptAddendum.isEmpty }
 
     private var pageView: SettingsPageView?
     private var scrollView: SettingsScrollView?
@@ -179,34 +174,11 @@ final class BrainSection: NSObject, SettingsSection {
             showsSeparator: false)
         content.addSubview(effortRow)
 
-        // None (index 0) persists as nil; explicit formats remain optional overrides.
-        let formatPopup = NSPopUpButton()
-        formatPopup.addItem(withTitle: "None")
-        formatPopup.addItems(withTitles: availableFormats.map(\.displayName))
-        formatPopup.target = self
-        formatPopup.action = #selector(interviewFormatChanged)
-        formatPopup.setAccessibilityLabel("Interview format")
-        if let format = preferences.interviewFormat,
-           let index = availableFormats.firstIndex(of: format) {
-            formatPopup.selectItem(at: index + 1)
-        } else {
-            formatPopup.selectItem(at: 0)
-        }
-        let formatRow = SettingsRowView(
-            title: "Interview format",
-            detail: "Applies on the next Start",
-            controlView: formatPopup)
-        content.addSubview(formatRow)
-
-        card.onLayout = { [weak card, weak effortRow, weak formatRow] in
-            guard let card, let effortRow, let formatRow else { return }
-            var top = card.bodyFrame.maxY
-            top -= effortRow.preferredHeight
+        card.onLayout = { [weak card, weak effortRow] in
+            guard let card, let effortRow else { return }
             effortRow.frame = NSRect(
-                x: 0, y: top, width: card.bodyFrame.width, height: effortRow.preferredHeight)
-            top -= formatRow.preferredHeight
-            formatRow.frame = NSRect(
-                x: 0, y: top, width: card.bodyFrame.width, height: formatRow.preferredHeight)
+                x: 0, y: card.bodyFrame.maxY - effortRow.preferredHeight,
+                width: card.bodyFrame.width, height: effortRow.preferredHeight)
         }
         card.onLayout?()
         return card
@@ -271,17 +243,6 @@ final class BrainSection: NSObject, SettingsSection {
         guard ReasoningEffort.allCases.indices.contains(row) else { return }
         preferences.effort = ReasoningEffort.allCases[row]
         preferencesDidChange(.effort)
-    }
-
-    /// Fixed for the whole session like the transcription language/model choice — applies on the
-    /// next Start only, so this never triggers the CLI-preflight reapply `preferencesDidChange` owns.
-    @objc private func interviewFormatChanged(_ sender: NSPopUpButton) {
-        let row = sender.indexOfSelectedItem
-        guard row == 0 || availableFormats.indices.contains(row - 1) else { return }
-        let format = row == 0 ? nil : availableFormats[row - 1]
-        preferences.interviewFormat = format
-        jlog("Jarvis: \(format?.displayName ?? "None") interview format selected for the "
-            + "next Start.")
     }
 
     private func preferencesDidChange(_ change: PreferenceChange) {

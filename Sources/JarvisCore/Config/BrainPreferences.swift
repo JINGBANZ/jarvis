@@ -96,17 +96,6 @@ public final class BrainPreferences {
         set { defaults.set(newValue.rawValue, forKey: Defaults.Brain.effortKey) }
     }
 
-    /// An explicit format override. `nil` keeps the base prompt unchanged.
-    public var interviewFormat: InterviewFormat? {
-        get {
-            guard let raw = defaults.string(forKey: Defaults.Brain.interviewFormatKey) else {
-                return nil
-            }
-            return InterviewFormat(rawValue: raw)
-        }
-        set { defaults.set(newValue?.rawValue, forKey: Defaults.Brain.interviewFormatKey) }
-    }
-
     /// Tool names the user switched off in Settings → Brain → Capabilities, applied at the next
     /// Start. Storing what is OFF rather than what is ON means a tool added in a later version is
     /// on for everyone who never opened the card. The tools a session cannot run without are
@@ -121,6 +110,17 @@ public final class BrainPreferences {
                 newValue.subtracting(CoachCapabilities.fixedToolNames).sorted(),
                 forKey: Defaults.Brain.disabledToolsKey)
         }
+    }
+
+    /// Skill names the user switched off, on the same terms as `disabledTools`: stored as what is
+    /// OFF, applied at the next Start. No skill is required for a session to run, so nothing is
+    /// dropped on write; a name matching no bundled skill is simply honored as nothing.
+    public var disabledSkills: Set<String> {
+        get {
+            Set(defaults.stringArray(forKey: Defaults.Brain.disabledSkillsKey)
+                ?? Defaults.Brain.disabledSkills)
+        }
+        set { defaults.set(newValue.sorted(), forKey: Defaults.Brain.disabledSkillsKey) }
     }
 
     private func persistedTarget(from value: Any) -> BrainTarget? {

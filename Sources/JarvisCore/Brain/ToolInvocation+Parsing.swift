@@ -10,6 +10,7 @@ public extension ToolInvocation {
         case .staySilent: staySilentTool.name
         case .searchPrepNotes: searchPrepNotesTool.name
         case .loadTool: CoachCapabilities.loadToolName
+        case .loadSkill: CoachCapabilities.loadSkillName
         }
     }
 
@@ -18,7 +19,7 @@ public extension ToolInvocation {
         switch self {
         case .captureScreen(let id), .staySilent(let id): id
         case .speak(let id, _, _, _, _): id
-        case .searchPrepNotes(let id, _), .loadTool(let id, _): id
+        case .searchPrepNotes(let id, _), .loadTool(let id, _), .loadSkill(let id, _): id
         }
     }
 
@@ -53,15 +54,17 @@ public extension ToolInvocation {
             let query = (object?["query"] as? String ?? "").trimmingCharacters(in: .whitespaces)
             guard !query.isEmpty else { return nil }
             return .searchPrepNotes(callId: callId, query: query)
-        case CoachCapabilities.loadToolName:
-            // The literal name, not a `ToolDef`: the loader is composed per Start around the
+        case CoachCapabilities.loadToolName, CoachCapabilities.loadSkillName:
+            // The literal names, not `ToolDef`s: each loader is composed per Start around the
             // catalog it can offer, so there is no one definition to compare against here.
             let object = (try? JSONSerialization.jsonObject(
                 with: Data(argumentsJSON.utf8))) as? [String: Any]
-            let name = (object?["name"] as? String ?? "")
+            let loaded = (object?["name"] as? String ?? "")
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !name.isEmpty else { return nil }
-            return .loadTool(callId: callId, name: name)
+            guard !loaded.isEmpty else { return nil }
+            return name == CoachCapabilities.loadToolName
+                ? .loadTool(callId: callId, name: loaded)
+                : .loadSkill(callId: callId, name: loaded)
         default:
             return nil
         }

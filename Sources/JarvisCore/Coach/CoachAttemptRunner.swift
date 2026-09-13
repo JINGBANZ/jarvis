@@ -55,10 +55,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
-    /// Fixed prompt text for the session. In automatic mode that text tells the model to choose from
-    /// current evidence per response; no mutable runtime classification is required.
-    private let interviewFormatAddendum: String
-    private let interviewFormat: InterviewFormat?
     /// The session's switched-on tool set, resolved at Start. Deriving it per attempt is what let
     /// it drift from the schemas a local-agent target was warmed with (#273), so this is a plain
     /// `let` even though `prepMaterial` lands later.
@@ -66,10 +62,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
-    /// Deferred tools the session has loaded. A load belongs to the attempt that made it and lands
-    /// here only when that attempt commits a turn, so "already loaded" is true exactly when the
-    /// load's schema and guidance are in the committed history the next request replays.
-    private var loadedTools: Set<String> = []
+    /// What the session has loaded: a deferred tool by name, a skill under a `skill:` key so the
+    /// two namespaces cannot collide. A load belongs to the attempt that made it and lands here
+    /// only when that attempt commits a turn, so "already loaded" is true exactly when the loaded
+    /// content is in the committed history the next request replays.
+    private var loadedCapabilities: Set<String> = []
     /// Guards the single off-path compaction run (see `startCompactionIfIdle`).
     private var isCompacting = false
     /// A compaction asked for while one was already running, run once the current pass ends.
@@ -89,9 +86,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)?,
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
-        capabilities: CoachCapabilities,
-        interviewFormatAddendum: String = "",
-        interviewFormat: InterviewFormat? = nil
+        capabilities: CoachCapabilities
     ) {
         self.capabilities = capabilities
         self.config = config
@@ -103,8 +98,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
         self.coachingAttempts = coachingAttempts
         self.activity = activity
         self.ledger = ledger
-        self.interviewFormatAddendum = interviewFormatAddendum
-        self.interviewFormat = interviewFormat
     }
 
     private func takeNextAttemptID() -> Int {
@@ -115,9 +108,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
     }
 
     /// Safety backstop against a pathological model that loops on capture_screen forever. The
-    /// longest sensible chain once skills also load on demand is load a skill, load a tool, search,
-    /// capture, speak — five responses, and the two spare keep a reasonable attempt from dying on
-    /// the cap.
+    /// longest sensible chain is load a skill, load a tool, search, capture, speak — five
+    /// responses, and the two spare absorb a second skill on an ambiguous question or one wasted
+    /// response, so a reasonable attempt does not die on the cap.
     private let maxToolIterations = 7
 
     struct PendingCoachingWork {
@@ -239,12 +232,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
             ledger.commit(through: delta.upTo)
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
-        let codeAllowed = attempt.plan.codeEnabled && (interviewFormat == nil || interviewFormat == .coding || interviewFormat == .generalTechnical)
+        let codeAllowed = attempt.plan.codeEnabled
         // One value describes the tools and offers them, so the prompt cannot name a tool the
         // request does not carry — the state that invited a hallucinated call.
         let systemPrompt = JarvisPrompts.Coach.system(
             capabilities: capabilities,
-            formatAddendum: interviewFormatAddendum,
             explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
         if reason.isManual && work.preparedManualReason != reason {
@@ -321,7 +313,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // cancellation path discards them, so the next attempt simply loads again — one round trip,
         // and no "already loaded" answer pointing at a conversation that never happened.
         var loadedThisAttempt: Set<String> = []
-        let alreadyLoaded = runnerLock.withLock { loadedTools }
+        let alreadyLoaded = runnerLock.withLock { loadedCapabilities }
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
@@ -469,9 +461,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    let diagram = interviewFormat == .systemDesign ? mermaid.flatMap(DiagramHint.init) : nil
+                    let diagram = mermaid.flatMap(DiagramHint.init)
                     if mermaid != nil && diagram == nil {
-                        jlog("Diagram hint omitted: unsupported graph or interview format")
+                        jlog("Diagram hint omitted: unsupported graph")
                     }
                     let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?, code: CodeSnippet?) in
                         guard !Task.isCancelled else { return (false, nil, nil) }
@@ -588,6 +580,31 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         toolCallId: callID,
                         resultText: resultText,
                         newPhase: .loadToolContinuation)
+
+                case .loadSkill(let callID, let name):
+                    let resultText: String
+                    if let skill = capabilities.skill(named: name) {
+                        // Namespaced, so a skill and a tool of the same name stay separate loads.
+                        if loaded.contains(CoachCapabilities.loadedKey(forSkill: name)) {
+                            jlog("📎 the \(name) skill was already loaded — saying so instead of "
+                                 + "repeating it")
+                            resultText = JarvisPrompts.Coach.loadSkillAlreadyLoaded(name)
+                        } else {
+                            loadedThisAttempt.insert(CoachCapabilities.loadedKey(forSkill: skill.name))
+                            jlog("📎 loaded the \(skill.name) skill")
+                            // The catalog's name, never the model's argument: Activity states what
+                            // Jarvis did, not what it was asked for.
+                            activity?.record(.capabilityLoaded(kind: .skill, name: skill.name))
+                            resultText = JarvisPrompts.Coach.loadSkillResult(skill)
+                        }
+                    } else {
+                        jlog("⚠️ no skill named \(name) to load — telling the model so")
+                        resultText = JarvisPrompts.Coach.skillUnavailable(name)
+                    }
+                    appendToolContinuation(
+                        toolCallId: callID,
+                        resultText: resultText,
+                        newPhase: .loadSkillContinuation)
                 }
             }
 
@@ -616,8 +633,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
     /// a turn that loaded something — which is what makes "already loaded" point at real history.
     private func commitLoads(_ names: Set<String>) {
         guard !names.isEmpty else { return }
-        runnerLock.withLock { loadedTools.formUnion(names) }
+        runnerLock.withLock { loadedCapabilities.formUnion(names) }
     }
+
 
     /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
     /// Cancellation asks the capture adapter to terminate its helper, then waits for `capture()` to
