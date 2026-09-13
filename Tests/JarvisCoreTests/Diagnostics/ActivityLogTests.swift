@@ -241,7 +241,7 @@ import Foundation
         let persisted = try Self.persistedRows(in: dir)
         #expect(persisted.count == 1)
         #expect(persisted[0].message == "⚠️ Codex CLI didn't respond in time "
-            + "(local agent runtime timed out after 60s) — coaching cycle failed; listening continues")
+            + "(local agent runtime timed out after 60s) — coaching failed; listening continues")
         #expect(persisted[0].kind == ActivityEvent.Kind.coachingCycleFailed.rawValue)
         #expect(ActivityLog.isHumanFacing(message: persisted[0].message, imageFile: nil))
         // Rows written before event kinds existed carry the two older wordings; the legacy filter
@@ -277,7 +277,7 @@ import Foundation
         #expect(persisted[0].message
             == "\u{26A0}\u{FE0F} OpenAI API couldn't be reached for coaching "
             + "(network -1009: the internet connection appears to be offline) "
-            + "\u{2014} coaching cycle failed; listening continues; check your network or VPN")
+            + "\u{2014} coaching failed; listening continues; check your network or VPN")
         #expect(persisted[1].message
             == "\u{26A0}\u{FE0F} Claude Code isn't signed in \u{2014} skipping it; "
             + "sign in to the CLI and press Start again")
@@ -374,7 +374,7 @@ import Foundation
         #expect(messages[1] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …)")
         #expect(ActivityLog.cssClass(for: messages[1]) == "err")
         #expect(messages[2] == "⏹ session ended by error — audio capture became unavailable (no input device)")
-        #expect(messages[3] == "⚠️ Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …) — coaching cycle failed; listening continues")
+        #expect(messages[3] == "⚠️ Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …) — coaching failed; listening continues")
         #expect(messages[4] == "⚠️ system audio stopped — the transcription connection to OpenAI was lost (close 1006); microphone coaching continues")
         #expect(messages[5].contains("current coaching session continues"))
         // Provider text reaches a row only after redaction, so a quoted message can never carry a
@@ -420,6 +420,7 @@ import Foundation
             .transcriptionStopped(failure: region),
             .audioCaptureUnavailable(failure: capture),
             .unexpectedError(detail: "Couldn't prepare Apple Speech"),
+            .brainRecoveryExpired(last: leaky),
         ]
         let rendered = reasons.map { ActivityEvent.sessionEnded(reason: $0).rendered }
         let messages = rendered.map { $0.message }
@@ -436,6 +437,8 @@ import Foundation
         #expect(ActivityLog.cssClass(for: messages[6]) == "err")
         #expect(messages[7] == "⏹ session ended by error — audio capture became unavailable (no input device)")
         #expect(messages[8] == "⏹ session ended by error — Couldn't prepare Apple Speech")
+        #expect(messages[9] == "⏹ session ended by error — coaching kept failing for 10 minutes; last error: Codex CLI failed (exit 1: OAuth token expired; Authorization: Bearer …)")
+        #expect(ActivityLog.cssClass(for: messages[9]) == "err")
         #expect(messages.allSatisfy { !$0.contains("abc123token") })
         #expect(rendered.map { $0.kind } == Array(
             repeating: ActivityEvent.Kind.sessionEnded,

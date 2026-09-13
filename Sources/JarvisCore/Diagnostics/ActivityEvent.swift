@@ -108,7 +108,7 @@ public enum ActivityEvent: Sendable {
         case .coachingCycleFailed(let failure):
             return (
                 .coachingCycleFailed,
-                "⚠️ \(failure.activitySentenceWithoutAdvice) — coaching cycle failed; listening continues"
+                "⚠️ \(failure.activitySentenceWithoutAdvice) — coaching failed; listening continues"
                     + failure.activityAdvice,
                 nil
             )

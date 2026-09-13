@@ -145,8 +145,6 @@ public protocol BrainClient: Sendable {
     func makeConversation() async throws -> any BrainConversation
     /// Begin preparing provider resources for the currently reachable route target.
     func prepare()
-    /// Release provider resources when a route target can no longer be selected this session.
-    func terminate()
 }
 
 public extension BrainClient {
@@ -163,9 +161,6 @@ public extension BrainClient {
 
     /// Stateless clients have no provider runtime to prepare.
     func prepare() {}
-
-    /// Stateless clients have no provider runtime to release.
-    func terminate() {}
 }
 
 private struct ForwardingBrainConversation: BrainConversation {

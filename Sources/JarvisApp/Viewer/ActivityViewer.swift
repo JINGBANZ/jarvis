@@ -507,7 +507,7 @@ private extension JarvisReadiness.Status {
         case .blocked:
             ("Blocked", "blocked")
         case .cycleFailed(let provider):
-            ("\(provider.displayName) cycle failed — listening continues", "blocked")
+            ("\(provider.displayName) coaching failed, still listening", "blocked")
         case .recovering(.brainResponse(let provider), _):
             ("\(provider.displayName) coaching attempt failed — retrying", "recovering")
         case .recovering:

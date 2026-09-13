@@ -12,6 +12,8 @@ public enum SessionEndReason: Sendable, Equatable {
     case openAIAPIKeyMissing
     case permissionsMissing
     case brainRouteExhausted(last: ProviderFailure)
+    /// Coaching kept failing for `BrainCycleRecovery.ceiling`; carries the most recent failure.
+    case brainRecoveryExpired(last: ProviderFailure)
     case transcriptionStopped(failure: ProviderFailure)
     case audioCaptureUnavailable(failure: ProviderFailure)
     /// Jarvis-authored copy from the error catalog for a stop with no provider behind it.
@@ -31,6 +33,8 @@ public enum SessionEndReason: Sendable, Equatable {
             "session ended by error — a required permission is missing; check System Settings → Privacy & Security"
         case .brainRouteExhausted(let last):
             "session ended by error — all configured provider targets were exhausted; last target: \(last.activitySentence)"
+        case .brainRecoveryExpired(let last):
+            "session ended by error — coaching kept failing for \(Int(BrainCycleRecovery.ceiling / 60)) minutes; last error: \(last.activitySentence)"
         case .transcriptionStopped(let failure):
             "session ended by error — \(failure.activitySentence)"
         case .audioCaptureUnavailable(let failure):

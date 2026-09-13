@@ -700,7 +700,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     /// A complete response that ignores `tool_choice: required` is a failed attempt, not a
     /// deliberate silence decision.
-    @Test func noToolCallsEndRequestAfterThreeAttemptsWithoutRendering() async {
+    @Test func noToolCallsEndCycleAfterThreeAttemptsWithoutRendering() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: Array(repeating: .init(toolCalls: []), count: 4)
             + [.init(toolCalls: [.staySilent(callId: "complete")])])
@@ -1097,7 +1097,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "continue on fallback", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(refreshedPrimary.callCount == 0)
-        #expect(refreshedPrimary.terminationCount == 0)
         #expect(refreshedFallback.calls.count == 1)
     }
 
@@ -1128,7 +1127,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(reconfiguredPrimary.callCount == 0)
         #expect(reconfiguredPrimary.preparationCount == 0)
-        #expect(reconfiguredPrimary.terminationCount == 0)
         #expect(reconfiguredFallback.calls.count == 1)
         #expect(reconfiguredFallback.preparationCount == 1)
     }
@@ -1627,16 +1625,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(first.callCount == 3)
         #expect(second.callCount == 1)
-        #expect(first.terminationCount == 0)
-        #expect(second.terminationCount == 0)
         #expect(exhausted.targets.map(\.provider) == [.claudeCode])
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(exhausted.targets.count == 1)
-        #expect(first.terminationCount == 0)
-        #expect(second.terminationCount == 0)
     }
 
-    @Test func advancingTheRouteRetainsClientsForAFutureCycle() async {
+    @Test func advancingPastAPermanentPrimarySpeaksOnTheFallback() async {
         let primaryTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
         let fallbackTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let permanent = brainFailure(.permanent, "provider boundary is permanently unavailable")
@@ -1663,8 +1657,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "advance cleanly", at: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
-        #expect(primary.terminationCount == 0)
-        #expect(summarizer.terminationCount == 0)
         #expect(fallback.calls.count == 1)
     }
 
@@ -2318,7 +2310,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     /// Incomplete output never renders, even across an outage longer than the fallback threshold.
-    @Test func incompleteResponsesEndRequestWithoutRenderingPartialOutput() async {
+    @Test func incompleteResponsesEndCycleWithoutRenderingPartialOutput() async {
         let brain = ScriptedBrain(script: Array(repeating:
             .init(toolCalls: [], rawToolCalls: [], incompleteReason: "max_output_tokens"), count: 4)
             + [.init(toolCalls: [.staySilent(callId: "complete")])])
@@ -2331,7 +2323,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     /// Each exhausted tool loop becomes a fresh attempt without rendering unfinished work.
-    @Test func repeatedToolLoopExhaustionEndsRequest() async {
+    @Test func repeatedToolLoopExhaustionEndsCycle() async {
         let brain = ScriptedBrain(script: Array(repeating:
             .init(toolCalls: [.captureScreen(callId: "c")],
                   rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")]),
@@ -2432,8 +2424,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(recorder.providers == [.openAI, .openAI, nil])
         #expect(replacement.callCount == 0)
         clock.set(650)
+        // The replacement's first failed cycle starts a new streak, so its ceiling is a full one.
         #expect(await driver.handleTrigger(.manualHint) == .brainError)
-        #expect(await waitUntilAsync { await delays.durations == [50] })
+        #expect(await waitUntilAsync { await delays.durations == [600] })
         driver.cancelBackgroundWork()
     }
 
@@ -2588,7 +2581,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 target: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), brain: brain)],
                 onTerminated: { _, failure in recorder.record(failure) }),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: clock, automaticAttemptDelay: { _ in })
-        clock.set(600)
         #expect(await driver.handleTrigger(.manualHint) == .brainError)
         #expect(await driver.handleTrigger(.manualHint) == .brainError)
         #expect(brain.callCount == 1)
@@ -2596,29 +2588,60 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(recorder.failures.first?.message == "invalid key")
     }
 
-    @Test func failedCycleDeadlineEndsSessionWithoutAnotherTrigger() async {
+    /// The deadline belongs to the streak's first failed cycle, but the session end reports the
+    /// streak's latest cause through its own reason rather than route exhaustion.
+    @Test func failedCycleDeadlineEndsSessionWithTheLatestFailure() async {
         let clock = ManualClock()
         let deadline = AsyncGate()
-        let recorder = RouteFailureRecorder()
-        let brain = ThrowingBrain()
-        let transcript = RollingTranscript()
-        let driver = CoachDriver(config: .default, transcript: transcript,
+        let expired = RouteFailureRecorder()
+        let exhausted = RouteFailureRecorder()
+        // The first cycle throws; every later attempt returns no tool call, a different failure.
+        let brain = ScriptedThrowBrain(
+            script: [nil, nil, nil, .init(toolCalls: [])],
+            error: brainFailure(.temporary, "first outage"))
+        let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
             route: ConfiguredBrainRoute(targets: [ConfiguredBrainTarget(
                 target: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), brain: brain)],
-                onTerminated: { _, failure in recorder.record(failure) }),
+                onTerminated: { _, failure in exhausted.record(failure) },
+                onRecoveryExpired: { expired.record($0) }),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: clock, automaticAttemptDelay: { _ in },
             recoveryDelay: { _ in await deadline.enter() })
         defer { driver.cancelBackgroundWork() }
         #expect(await driver.handleTrigger(.manualHint) == .brainError)
+        #expect(await driver.handleTrigger(.manualHint) == .brainError)
         await deadline.waitUntilEntered()
         clock.set(600)
         await deadline.release()
-        #expect(await waitUntilAsync { recorder.failures.count == 1 })
-        #expect(recorder.failures.first?.message == "No coaching cycle succeeded in 10 minutes.")
-        #expect(brain.callCount == 3)
+        #expect(await waitUntilAsync { expired.failures.count == 1 })
+        #expect(expired.messages == ["provider returned no required coaching tool call"])
+        #expect(exhausted.failures.isEmpty)
+        #expect(brain.calls.count == 6)
     }
 
-    @Test func successCancelsDeadlineAndLaterFailureUsesNewSuccessTime() async {
+    /// Idle time is not an outage. The first failure after a long quiet stretch keeps the session
+    /// and starts a full ceiling of its own.
+    @Test func firstFailureAfterLongQuietKeepsTheSession() async {
+        let clock = ManualClock()
+        let delays = RecoveryDelayProbe()
+        let ended = RouteFailureRecorder()
+        let brain = ThrowingBrain(error: brainFailure(.temporary, "provider timed out"))
+        let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
+            route: ConfiguredBrainRoute(targets: [ConfiguredBrainTarget(
+                target: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), brain: brain)],
+                onTerminated: { _, failure in ended.record(failure) },
+                onRecoveryExpired: { ended.record($0) }),
+            screen: FakeScreen(), overlay: FakeOverlay(), clock: clock, automaticAttemptDelay: { _ in },
+            recoveryDelay: { seconds in try await delays.wait(seconds) })
+        defer { driver.cancelBackgroundWork() }
+        clock.set(1_440)
+        #expect(await driver.handleTrigger(.manualHint) == .brainError)
+        #expect(await waitUntilAsync { await delays.durations == [600] })
+        #expect(await driver.handleTrigger(.manualHint) == .brainError)
+        #expect(brain.callCount == 6)
+        #expect(ended.failures.isEmpty)
+    }
+
+    @Test func successCancelsDeadlineAndTheNextStreakRestartsTheCeiling() async {
         let clock = ManualClock()
         let delays = RecoveryDelayProbe()
         let recorder = RouteFailureRecorder()
@@ -2638,7 +2661,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await waitUntilAsync { await delays.cancellations == 1 })
         clock.set(650)
         #expect(await driver.handleTrigger(.manualHint) == .brainError)
-        #expect(await waitUntilAsync { await delays.durations == [600, 50] })
+        #expect(await waitUntilAsync { await delays.durations == [600, 600] })
         #expect(recorder.failures.isEmpty)
     }
 
@@ -2696,7 +2719,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await outcome.value == .cancelled)
         #expect(recorder.failures.isEmpty)
         #expect(brain.callCount == 2)
-        #expect(brain.terminationCount == 0)
     }
 
     @Test func newSpeechWakesFastRetryWithLatestTranscript() async {
@@ -2964,10 +2986,8 @@ final class ThrowingBrain: BrainClient, @unchecked Sendable {
     private let error: Error
     private var calls = 0
     private var preparations = 0
-    private var terminations = 0
     var callCount: Int { lock.withLock { calls } }
     var preparationCount: Int { lock.withLock { preparations } }
-    var terminationCount: Int { lock.withLock { terminations } }
 
     init(error: Error = NSError(
         domain: "test", code: 401,
@@ -2982,10 +3002,6 @@ final class ThrowingBrain: BrainClient, @unchecked Sendable {
 
     func prepare() {
         lock.withLock { preparations += 1 }
-    }
-
-    func terminate() {
-        lock.withLock { terminations += 1 }
     }
 }
 

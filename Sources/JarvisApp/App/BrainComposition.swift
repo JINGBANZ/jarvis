@@ -297,6 +297,11 @@ final class BrainComposition {
                       self.host.liveSessionDirectory == sessionDirectory else { return }
                 self.host.reportBrainError(
                     .brainRouteExhausted(target: target, failure: failure), context: .runtime)
+            },
+            onRecoveryExpired: { [weak self] failure in
+                guard let self, self.host.liveCoachDriver != nil,
+                      self.host.liveSessionDirectory == sessionDirectory else { return }
+                self.host.reportBrainError(.brainRecoveryExpired(failure: failure), context: .runtime)
             })
     }
 
