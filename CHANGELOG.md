@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.3](https://github.com/JINGBANZ/jarvis/compare/v0.2.2...v0.2.3) (2026-09-13)
+
+
+### Features
+
+* **overlay:** configure automatic code display and appearance ([#289](https://github.com/JINGBANZ/jarvis/issues/289)) ([a343988](https://github.com/JINGBANZ/jarvis/commit/a34398853e3eccc30bd0d67ff5898fd233f9c391))
+* **overlay:** pin system design diagrams for the session ([#291](https://github.com/JINGBANZ/jarvis/issues/291)) ([b7cade6](https://github.com/JINGBANZ/jarvis/commit/b7cade6ad5f8595f82e7285a7a9b9f52aecf2cd5))
+* **providers:** consolidate provider failure handling and surface the cause in Activity ([#284](https://github.com/JINGBANZ/jarvis/issues/284)) ([cf503f5](https://github.com/JINGBANZ/jarvis/commit/cf503f55a5a39763250385db5e5110436eed5e61))
+
+
+### Bug Fixes
+
+* **coach:** bound failed coaching cycles without stopping recoverable sessions ([#283](https://github.com/JINGBANZ/jarvis/issues/283)) ([5057848](https://github.com/JINGBANZ/jarvis/commit/505784867944cfa78154f740bc8cfc856ca5029b))
+* **coach:** code snippets drop valid payloads, miscolor directives, and re-lex on resize ([#295](https://github.com/JINGBANZ/jarvis/issues/295)) ([199accd](https://github.com/JINGBANZ/jarvis/commit/199accda539fcac4be96f6a35438e0911ef2e913))
+* **coach:** resolve one fixed tool set per session ([#274](https://github.com/JINGBANZ/jarvis/issues/274)) ([39715e5](https://github.com/JINGBANZ/jarvis/commit/39715e59d23d8c6ed1795f343d716c8a6bed5eed))
+* **evaluation:** use session version identity with disclosed source fallback ([#293](https://github.com/JINGBANZ/jarvis/issues/293)) ([6fe8726](https://github.com/JINGBANZ/jarvis/commit/6fe872680663864ead657040090d64cf45e6383d))
+
 ## [0.2.2](https://github.com/JINGBANZ/jarvis/compare/v0.2.1...v0.2.2) (2026-09-10)
 
 
