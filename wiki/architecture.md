@@ -188,8 +188,8 @@ skips the index build, so the file reading and `textutil` work stop with it.
 A call to a tool the session does not offer is answered with a plain "no tool named X is available"
 rather than failing the attempt. Only a CLI target can reach that branch, since it reconstructs calls
 from prompt text and can name anything; on the API path an undeclared tool is not callable at all.
-The per-attempt response cap is 7, two more than the longest sensible chain of load, search, capture,
-speak.
+The per-attempt response cap is 7: two more than the longest sensible chain once skills also load on
+demand, which is load a skill, load a tool, search, capture, speak.
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
 capture, and a turn cannot end without one of the other two. `load_tool` has none either, because it
