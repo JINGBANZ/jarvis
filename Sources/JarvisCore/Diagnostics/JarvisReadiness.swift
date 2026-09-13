@@ -38,6 +38,7 @@ public final class JarvisReadiness {
         case permissions
         case credentials
         case brainPreparation
+        case brainResponse(BrainProvider)
         case transcriptionPreparation
         case transcriptionEndpoints
         case capture
@@ -73,6 +74,7 @@ public final class JarvisReadiness {
         case blocked(Blocker)
         case recovering(Requirement, attempt: Int?)
         case ready(ReadyMode)
+        case cycleFailed(BrainProvider)
         case stopped
     }
 
@@ -101,6 +103,8 @@ public final class JarvisReadiness {
         )
         case capture(CaptureReadinessMonitor.Readiness)
         case captureRecovery(inProgress: Bool)
+        case brainRecovery(BrainProvider?)
+        case brainCycleFailed(BrainProvider)
     }
 
     /// Effects are deliberately presentation- and lifecycle-free. The app renders `statusChanged`
@@ -152,6 +156,10 @@ public final class JarvisReadiness {
     private var endpointStates: [CaptureReadinessMonitor.Stream: TranscriptionConnectionState] = [:]
     private var captureState: CaptureReadinessMonitor.Readiness?
     private var captureRecoveryInProgress = false
+    private var recoveringBrain: BrainProvider?
+    /// Independent of higher-priority capture status so caption streak suppression remains stable.
+    public var hasFailedCoachingCycle: Bool { failedBrain != nil }
+    private var failedBrain: BrainProvider?
 
     public init() {}
 
@@ -170,6 +178,8 @@ public final class JarvisReadiness {
         endpointStates = [:]
         captureState = nil
         captureRecoveryInProgress = false
+        recoveringBrain = nil
+        failedBrain = nil
         return (session, transition(to: reducedStatus()))
     }
 
@@ -236,6 +246,13 @@ public final class JarvisReadiness {
 
         case .captureRecovery(let inProgress):
             captureRecoveryInProgress = inProgress
+
+        case .brainRecovery(let provider):
+            recoveringBrain = provider
+            if provider == nil { failedBrain = nil }
+        case .brainCycleFailed(let provider):
+            recoveringBrain = nil
+            failedBrain = provider
         }
     }
 
@@ -283,6 +300,11 @@ public final class JarvisReadiness {
         if configuration.requiresSystemAudio, captureState != .microphoneOnly,
            endpointStates[.system] != .ready {
             return .checking(.transcriptionEndpoints)
+        }
+
+        if let failedBrain { return .cycleFailed(failedBrain) }
+        if let recoveringBrain {
+            return .recovering(.brainResponse(recoveringBrain), attempt: nil)
         }
 
         switch captureState {

@@ -1023,6 +1023,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         errorReporter.reportImmediately(error, context: context)
     }
 
+    func brainRecoveryDidChange(_ provider: BrainProvider?) {
+        guard let readinessSession else { return }
+        observeReadiness(.brainRecovery(provider), for: readinessSession)
+    }
+
+    func brainCycleDidFail(_ provider: BrainProvider) {
+        guard let readinessSession else { return }
+        let firstFailure = !readiness.hasFailedCoachingCycle
+        observeReadiness(.brainCycleFailed(provider), for: readinessSession)
+        guard firstFailure else { return }
+        let message = "Model cycle failed."
+        overlayCaption?.showError(message)
+    }
+
     func brainTargetDidChange(_ target: BrainTarget?) {
         brainSection.setActiveTarget(target)
     }
