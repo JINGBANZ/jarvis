@@ -109,7 +109,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
     /// Safety backstop against a pathological model that loops on capture_screen forever. The
     /// longest sensible chain is load a skill, load a tool, search, capture, speak — five
-    /// responses, and the two spare keep a reasonable attempt from dying on the cap.
+    /// responses, and the two spare absorb a second skill on an ambiguous question or one wasted
+    /// response, so a reasonable attempt does not die on the cap.
     private let maxToolIterations = 7
 
     struct PendingCoachingWork {
@@ -584,12 +585,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     let resultText: String
                     if let skill = capabilities.skill(named: name) {
                         // Namespaced, so a skill and a tool of the same name stay separate loads.
-                        if loaded.contains(Self.skillKey(name)) {
+                        if loaded.contains(CoachCapabilities.loadedKey(forSkill: name)) {
                             jlog("📎 the \(name) skill was already loaded — saying so instead of "
                                  + "repeating it")
                             resultText = JarvisPrompts.Coach.loadSkillAlreadyLoaded(name)
                         } else {
-                            loadedThisAttempt.insert(Self.skillKey(skill.name))
+                            loadedThisAttempt.insert(CoachCapabilities.loadedKey(forSkill: skill.name))
                             jlog("📎 loaded the \(skill.name) skill")
                             // The catalog's name, never the model's argument: Activity states what
                             // Jarvis did, not what it was asked for.
@@ -635,8 +636,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
         runnerLock.withLock { loadedCapabilities.formUnion(names) }
     }
 
-    /// Skills and tools share one loaded set; this keeps their names apart inside it.
-    private static func skillKey(_ name: String) -> String { "skill:\(name)" }
 
     /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
     /// Cancellation asks the capture adapter to terminate its helper, then waits for `capture()` to

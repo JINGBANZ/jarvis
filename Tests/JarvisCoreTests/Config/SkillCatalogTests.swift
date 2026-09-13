@@ -52,9 +52,27 @@ import Testing
         ("---\nname: behavioral-\ndescription: d\n---\nBody.", .invalidName("behavioral-")),
         ("---\nname: behavioral\ndescription: d\ncontinued on a second line\n---\nBody.",
          .malformedFrontmatterLine("continued on a second line")),
+        ("---\nname: behavioral\ndescription: d\n---\n\n  \n", .missingBody),
     ])
     func aMalformedFileIsRejected(text: String, expected: SkillParseError) {
         #expect(throws: expected) { try SkillCatalog.parse(text, folderName: "behavioral") }
+    }
+
+    /// A skill saved with Windows line endings must still load: `CharacterSet.whitespaces` does not
+    /// include `\r`, so an un-normalized reader would see `"---\r"`, reject the fence, and drop the
+    /// whole skill with only a debug-log line to say so.
+    @Test func crlfLineEndingsParseTheSameAsUnixOnes() throws {
+        let skill = try SkillCatalog.parse(
+            valid.replacingOccurrences(of: "\n", with: "\r\n"), folderName: "behavioral")
+
+        #expect(skill.name == "behavioral")
+        #expect(skill.description
+            == #"Coaching for behavioral questions ("tell me about a time...")."#)
+        #expect(skill.body == """
+            # Behavioral questions
+
+            When the current question is behavioral, organize the answer as STAR.
+            """)
     }
 
     @Test func aNameLongerThanSixtyFourCharactersIsRejected() {

@@ -57,6 +57,27 @@ import Testing
         #expect(object["mermaid"] as? String == "flowchart LR\nA[Client] --> B[API]")
     }
 
+    /// The other half of that contract: when the runtime rendered no diagram, history must say so,
+    /// or the model reads its own rejected graph back as delivered and builds on a sketch the user
+    /// never saw.
+    @Test func replayedArgumentsCarryNullWhereNoDiagramWasDelivered() async throws {
+        let arguments = #"{"lines":["Start with the API."],"mermaid":"not a graph"}"#
+        let response = BrainResponse(
+            toolCalls: [try #require(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: arguments))],
+            rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: arguments)])
+        let brain = ScriptedBrain(script: [response, response])
+        let overlay = DiagramRecordingOverlay()
+        let driver = makeDriver(brain: brain, overlay: BroadcastOverlay([overlay]))
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+
+        #expect(overlay.diagram == nil)
+        let call = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
+        let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
+        #expect(object["mermaid"] is NSNull)
+    }
+
     /// A graph the renderer cannot parse costs the sketch, never the tip.
     @Test func malformedDiagramStillDeliversHint() async {
         let overlay = DiagramRecordingOverlay()

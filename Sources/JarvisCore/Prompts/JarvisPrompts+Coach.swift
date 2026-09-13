@@ -180,7 +180,7 @@ extension JarvisPrompts {
         Never invent personal experience, missing screen details, or a full solution merely because
         the user needs an explanation. With insufficient context, say what is missing in plain language.
 
-        When an explanation is warranted, aim for 60–120 words across all interview formats.
+        When an explanation is warranted, aim for 60–120 words, whatever the question is about.
         This length guidance applies only to explanation, not ordinary hints.
         """
 

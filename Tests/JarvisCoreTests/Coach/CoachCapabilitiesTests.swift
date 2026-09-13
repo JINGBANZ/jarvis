@@ -108,17 +108,27 @@ import Testing
         #expect(capabilities.tool(named: "nope") == nil)
     }
 
-    /// The loader exists only while something remains to load, whether that is because the session
-    /// composed no catalog or because the model has since loaded all of it.
-    @Test func theLoaderDisappearsOnceEverythingIsLoaded() {
+    /// A loader exists only while something remains for it to load, whether that is because the
+    /// session composed no catalog or because the model has since loaded all of it. Each loader
+    /// answers for its own catalog: loading every skill must not withdraw `load_tool`, or the other
+    /// way round.
+    @Test func eachLoaderDisappearsOnceItsOwnCatalogIsLoaded() {
         let capabilities = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true)
+            disabledTools: [], prepSourcesConfigured: true, skills: skills)
+        let skillKeys = skills.map { CoachCapabilities.loadedKey(forSkill: $0.name) }
 
         #expect(capabilities.callable(loaded: []).map(\.name)
+            == ["capture_screen", "speak", "stay_silent", "load_tool", "load_skill"])
+        #expect(capabilities.callable(loaded: Set([skillKeys[0]])).map(\.name)
+            == ["capture_screen", "speak", "stay_silent", "load_tool", "load_skill"])
+        #expect(capabilities.callable(loaded: Set(skillKeys)).map(\.name)
             == ["capture_screen", "speak", "stay_silent", "load_tool"])
         #expect(capabilities.callable(loaded: ["search_prep_notes"]).map(\.name)
+            == ["capture_screen", "speak", "stay_silent", "load_skill", "search_prep_notes"])
+        #expect(capabilities.callable(loaded: Set(skillKeys + ["search_prep_notes"])).map(\.name)
             == ["capture_screen", "speak", "stay_silent", "search_prep_notes"])
-        // Still in `tools`, so a stale call is answered rather than refused as unknown.
+        // Both stay in `tools`, so a stale call is answered rather than refused as unknown.
         #expect(capabilities.tool(named: CoachCapabilities.loadToolName) != nil)
+        #expect(capabilities.tool(named: CoachCapabilities.loadSkillName) != nil)
     }
 }

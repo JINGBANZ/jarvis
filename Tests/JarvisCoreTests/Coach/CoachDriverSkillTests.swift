@@ -79,9 +79,11 @@ import Testing
         #expect(result.text?.contains("Organize the answer as STAR.") == true)
         #expect(result.text?.hasPrefix("Loaded skill: behavioral.") == true)
         #expect(result.text?.contains("extension of your action policy") == true)
-        // A skill is guidance, never a callable tool: the declared array does not change.
+        // A skill is guidance, never a callable tool: loading one adds no tool to the array, and
+        // the loader stays only because the other skill is still unloaded.
         #expect(brain.offeredTools[0].map(\.name) == brain.offeredTools[1].map(\.name))
         #expect(!brain.offeredTools[1].map(\.name).contains("behavioral"))
+        #expect(brain.offeredTools[1].map(\.name).contains("load_skill"))
         #expect(activity.kinds == [.capabilityLoaded, .tip])
         #expect(activity.events.contains { event in
             if case .capabilityLoaded(let kind, let name) = event {

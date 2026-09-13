@@ -34,7 +34,9 @@ public enum SkillCatalog {
     /// skip: silently dropping it is how a description continued onto a second line would ship
     /// truncated.
     public static func parse(_ text: String, folderName: String) throws -> Skill {
-        let lines = text.components(separatedBy: "\n")
+        // Normalized first: `CharacterSet.whitespaces` is Zs plus tab, so a CRLF file would leave a
+        // trailing \r on the opening fence and the whole skill would be skipped as unparseable.
+        let lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         guard lines.first?.trimmingCharacters(in: .whitespaces) == fence else {
             throw SkillParseError.missingFrontmatter
         }
@@ -68,11 +70,12 @@ public enum SkillCatalog {
         guard description.count <= descriptionLimit else {
             throw SkillParseError.descriptionTooLong(description.count)
         }
-        return Skill(
-            name: name,
-            description: description,
-            body: lines[(closing + 1)...].joined(separator: "\n")
-                .trimmingCharacters(in: .whitespacesAndNewlines))
+        let body = lines[(closing + 1)...].joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Validated like the two keys above, and for the same reason: a skill with nothing after
+        // the frontmatter would load successfully and hand the model an empty guidance block.
+        guard !body.isEmpty else { throw SkillParseError.missingBody }
+        return Skill(name: name, description: description, body: body)
     }
 
     private static let fence = "---"
@@ -146,6 +149,7 @@ public enum SkillParseError: Error, Equatable, CustomStringConvertible {
     case nameDoesNotMatchFolder(name: String, folder: String)
     case missingDescription
     case descriptionTooLong(Int)
+    case missingBody
 
     public var description: String {
         switch self {
@@ -157,6 +161,7 @@ public enum SkillParseError: Error, Equatable, CustomStringConvertible {
         case .nameDoesNotMatchFolder(let name, let folder): "name \(name) is not its folder \(folder)"
         case .missingDescription: "frontmatter has no description"
         case .descriptionTooLong(let count): "description is \(count) characters, over 1024"
+        case .missingBody: "nothing follows the frontmatter"
         }
     }
 }

@@ -91,16 +91,24 @@ public struct CoachCapabilities: Sendable, Equatable {
     public static let `default` = compose(disabledTools: [], prepSourcesConfigured: false)
 
     /// What the model may call right now: every hot tool, plus the deferred tools already loaded.
-    /// The loader drops out once nothing is left to load, on the same rule that keeps it out of a
-    /// session with no catalog — a tool offered with nothing to do invites a call that can only be
-    /// refused, and each one spends an iteration of the bounded tool loop.
+    /// Each loader drops out once its own catalog is exhausted, on the same rule that keeps it out
+    /// of a session with no catalog — a tool offered with nothing to do invites a call that can
+    /// only be refused, and each one spends an iteration of the bounded tool loop.
     public func callable(loaded: Set<String>) -> [ToolDef] {
-        let anythingLeftToLoad = deferredTools.contains { !loaded.contains($0.name) }
+        let toolsLeft = deferredTools.contains { !loaded.contains($0.name) }
+        let skillsLeft = skills.contains { !loaded.contains(Self.loadedKey(forSkill: $0.name)) }
         return tools.filter { tool in
-            if tool.name == Self.loadToolName { return anythingLeftToLoad }
-            return !tool.deferLoading || loaded.contains(tool.name)
+            switch tool.name {
+            case Self.loadToolName: return toolsLeft
+            case Self.loadSkillName: return skillsLeft
+            default: return !tool.deferLoading || loaded.contains(tool.name)
+            }
         }
     }
+
+    /// Skills and deferred tools share one loaded set; this is what keeps their names apart in it.
+    /// It lives here because `callable` above is the other reader of that convention.
+    public static func loadedKey(forSkill name: String) -> String { "skill:\(name)" }
 
     public func tool(named name: String) -> ToolDef? {
         tools.first { $0.name == name }
