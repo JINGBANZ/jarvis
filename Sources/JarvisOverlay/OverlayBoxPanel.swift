@@ -27,6 +27,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private let box: ResizeReportingView
     private let textView: NSTextView
     private let codeView = CodeSnippetView(frame: .zero)
+    private let codeDivider = OverlayCodeDividerView(frame: .zero)
+    /// A user-selected proportion takes precedence over content sizing for this session.
+    private var codeHeightFraction: CGFloat?
     private var codeSnippet: CodeSnippet?
     private var codeEnabled = Defaults.Code.enabled
     private static let sampleCode = CodeSnippet(language: "swift", placement: "At the start of solve",
@@ -178,11 +181,19 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
         box.addSubview(scroll)
         box.addSubview(codeView)
+        box.addSubview(codeDivider)
         codeView.isHidden = true
         box.addSubview(header)
         box.addSubview(affordance)   // topmost, so its tracking area sees the whole box
         panel.contentView = box
         super.init()
+        codeDivider.onHeightChanged = { [weak self] height in
+            guard let self, !self.codeDivider.isHidden else { return }
+            let available = max(0, self.box.bounds.height - self.chrome.height)
+            guard available > 0 else { return }
+            self.codeHeightFraction = self.boundedCodeHeight(height, available: available) / available
+            self.layoutCode()
+        }
         codeView.onDismiss = { [weak self] in
             guard let self else { return }
             if self.display == .log { self.codeSnippet = nil }
@@ -306,16 +317,27 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         layoutCode()
     }
 
+    private func boundedCodeHeight(_ proposed: CGFloat, available: CGFloat) -> CGFloat {
+        // At the minimum panel size, preserving a hint line takes priority over the code floor.
+        min(max(0, available - 44), max(96, proposed))
+    }
+
     private func layoutCode() {
         let available = max(0, box.bounds.height - chrome.height)
-        let preferred = min(box.bounds.height * 0.45,
-            codeView.preferredHeight(viewportWidth: box.bounds.width))
-        // Preserve the header and one history line even at the minimum expanded size.
-        let height = codeView.isHidden ? 0 : min(max(0, available - 44), max(96, preferred))
+        codeDivider.isHidden = codeView.isHidden
+        let preferred = codeHeightFraction.map { $0 * available }
+            ?? min(box.bounds.height * 0.45,
+                   codeView.preferredHeight(viewportWidth: box.bounds.width))
+        let height = codeView.isHidden ? 0 : boundedCodeHeight(preferred, available: available)
         codeView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
         codeView.needsLayout = true
         codeView.layoutSubtreeIfNeeded()
-        scroll.frame = NSRect(x: 0, y: height, width: box.bounds.width, height: max(0, available - height))
+        // Overlay the boundary so the grab target does not consume the small panel's content budget.
+        let dividerHeight = OverlayCodeDividerView.thickness
+        codeDivider.frame = NSRect(x: 0, y: height - dividerHeight / 2,
+                                   width: box.bounds.width, height: dividerHeight)
+        scroll.frame = NSRect(x: 0, y: height, width: box.bounds.width,
+                              height: max(0, available - height))
     }
 
     public func deliver(_ lines: [String], perLineSeconds: [TimeInterval],
@@ -435,6 +457,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Start also rolls a collapsed box back open, because collapse belongs to the conversation the
     /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
+        if live && !isSessionLive { codeHeightFraction = nil }
         isSessionLive = live
         if !live { header.setInterviewFormat(nil) }
         if !live { codeSnippet = nil }
