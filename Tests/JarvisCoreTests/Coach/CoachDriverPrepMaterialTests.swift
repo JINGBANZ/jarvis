@@ -108,16 +108,18 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(
                     id: "p1", name: "search_prep_notes",
                     argumentsJSON: #"{"query":"rate limiter"}"#)]),
+            .init(toolCalls: [.staySilent(callId: "recovered")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, prepMaterial: nil)
         transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
 
         let outcome = await driver.handleTrigger(.turnEnd)
 
-        // A temporary failure correctly triggers automatic retry (same as any other malformed
-        // response) — the scripted brain just keeps replaying the same call, so what matters here
-        // is that it's treated as a failure at all, never as a silent empty-result success.
-        #expect(outcome == .brainError)
+        // The invalid tool call fails its attempt. The next request starts fresh rather than
+        // accepting an empty tool result and continuing the malformed conversation.
+        #expect(outcome == .silentByModel)
+        #expect(brain.calls.count == 2)
+        #expect(!brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "p1" })
     }
 
     @Test func systemPromptOmitsPrepMaterialGuidanceWhenNotConfigured() async {

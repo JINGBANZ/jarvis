@@ -13,7 +13,7 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
     private let label: NSTextField
     /// One coaching tip: its lines and how long each one is shown (aligned arrays; `seconds[i]`
     /// is the display time for `lines[i]`, scaled to that line's length — see `OverlayTiming`).
-    private struct Tip { let lines: [String]; let seconds: [TimeInterval] }
+    private struct Tip { let lines: [String]; let seconds: [TimeInterval]; var isError = false }
     /// Tips waiting their turn. A tip the user may still be reading is never cut off by a newer one —
     /// arrivals queue here and play in order once the current tip finishes.
     private var queue: [Tip] = []
@@ -133,6 +133,11 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
         Task { @MainActor in self.show(tip) }
     }
 
+    /// A fixed request failure uses the existing capture-excluded caption surface.
+    public func showError(_ message: String) {
+        show(Tip(lines: [message], seconds: [4], isError: true))
+    }
+
     private func show(_ tip: Tip) {
         // Caption switched off: suppress the tip entirely (the Box still logs it via its own sink).
         guard isEnabled else { return }
@@ -168,6 +173,7 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
             if queue.isEmpty { hide() } else { pumpQueue() }
             return
         }
+        label.textColor = tip.isError ? .systemRed : .white
         label.stringValue = tip.lines[line]
         resizeToFit()   // grow the panel so a long line isn't clipped
         panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
@@ -248,6 +254,7 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
             tickWorkItem?.cancel(); tickWorkItem = nil   // pause the active tip; `active` keeps its line index for resume
             reassertCaptureExclusion()
             isPreviewing = true
+            label.textColor = .white
             label.stringValue = Self.previewText
             resizeToFit()
             panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay

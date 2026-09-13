@@ -24,7 +24,7 @@ public enum ActivityEvent: Sendable {
         case tip
         case stayedSilent
         case sessionEnded
-        case coachingTurnFailed
+        case coachingCycleFailed = "coachingTurnFailed"
         case systemAudioStopped
         case settingsChangeNotApplied
         case brainChangeApplied
@@ -52,10 +52,9 @@ public enum ActivityEvent: Sendable {
     /// so a producer cannot author copy; a provider-caused end carries the classified failure and
     /// Activity renders its sentence.
     case sessionEnded(reason: SessionEndReason)
-    /// One coaching response failed temporarily and a fresh attempt will retry while capture and
-    /// transcription remain live. The failure carries its own sentence: the frame is fixed, and
+    /// One coaching cycle exhausted its finite route budget while capture and transcription remain live. The failure carries its own sentence: the frame is fixed, and
     /// what the provider said (already redacted) is quoted inside it.
-    case coachingTurnFailed(failure: ProviderFailure)
+    case coachingCycleFailed(failure: ProviderFailure)
     /// The secondary system-audio transcription stopped while microphone coaching continued. The
     /// failure that stopped it is quoted, so a degraded session still says why it degraded.
     case systemAudioStopped(failure: ProviderFailure)
@@ -106,10 +105,10 @@ public enum ActivityEvent: Sendable {
             return (.stayedSilent, "🤫 stayed silent — nothing useful to add", nil)
         case .sessionEnded(let reason):
             return (.sessionEnded, "⏹ \(reason.activityMessage)", nil)
-        case .coachingTurnFailed(let failure):
+        case .coachingCycleFailed(let failure):
             return (
-                .coachingTurnFailed,
-                "⚠️ \(failure.activitySentenceWithoutAdvice) — retrying while listening continues"
+                .coachingCycleFailed,
+                "⚠️ \(failure.activitySentenceWithoutAdvice) — coaching cycle failed; listening continues"
                     + failure.activityAdvice,
                 nil
             )

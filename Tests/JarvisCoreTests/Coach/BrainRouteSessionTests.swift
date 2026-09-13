@@ -2,6 +2,22 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct BrainRouteSessionTests {
+    @Test func lastTargetEndsRequestAfterThreeTemporaryFailures() {
+        var route = BrainRouteSession(targetCount: 1)
+        #expect(route.recordFailure(.temporary) == .stay(failureCount: 1))
+        #expect(route.recordFailure(.temporary) == .stay(failureCount: 2))
+        #expect(route.recordFailure(.temporary) == .exhausted(last: 0))
+    }
+
+    @Test func newRequestStartsWithFreshRouteBudget() {
+        var route = BrainRouteSession(targetCount: 2)
+        _ = route.recordFailure(.permanent)
+        _ = route.recordFailure(.permanent)
+        route = BrainRouteSession(targetCount: 2)
+        #expect(route.activeIndex == 0)
+        #expect(route.recordFailure(.temporary) == .stay(failureCount: 1))
+    }
+
     @Test func thirdTemporaryFailureAdvances() {
         var route = BrainRouteSession(targetCount: 2)
 

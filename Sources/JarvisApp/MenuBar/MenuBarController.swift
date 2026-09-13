@@ -147,7 +147,7 @@ final class MenuBarController: NSObject {
 private extension JarvisReadiness.Status {
     var keepsSessionActive: Bool {
         switch self {
-        case .checking, .recovering, .ready:
+        case .checking, .recovering, .ready, .cycleFailed:
             true
         case .blocked, .stopped:
             false
@@ -161,7 +161,7 @@ private extension JarvisReadiness.Status {
         switch self {
         case .checking, .recovering: .preflight
         case .ready: .active
-        case .blocked: .blocked
+        case .blocked, .cycleFailed: .blocked
         case .stopped: nil
         }
     }
@@ -172,6 +172,10 @@ private extension JarvisReadiness.Status {
             "Jarvis is starting — \(requirement.menuDescription)"
         case .blocked(let blocker):
             "Jarvis is blocked — \(blocker.menuDescription)"
+        case .cycleFailed(let provider):
+            "\(provider.displayName) cycle failed — listening continues"
+        case .recovering(.brainResponse(let provider), _):
+            "\(provider.displayName) coaching attempt failed — listening continues; retrying"
         case .recovering(let requirement, let attempt):
             if let attempt {
                 "Jarvis is recovering — \(requirement.menuDescription), attempt \(attempt)"
@@ -194,6 +198,7 @@ private extension JarvisReadiness.Requirement {
         case .permissions: "checking permissions"
         case .credentials: "checking credentials"
         case .brainPreparation: "preparing the brain provider"
+        case .brainResponse(let provider): "waiting for \(provider.displayName)"
         case .transcriptionPreparation: "preparing transcription"
         case .transcriptionEndpoints: "connecting transcription"
         case .capture: "verifying audio capture"
