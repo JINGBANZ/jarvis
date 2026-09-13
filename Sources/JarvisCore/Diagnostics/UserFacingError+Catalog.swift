@@ -104,6 +104,15 @@ public extension UserFacingError {
               sessionEndReason: .brainRouteExhausted(last: failure))
     }
 
+    /// A streak of failed coaching cycles reached the recovery ceiling without one success. Ends as
+    /// quietly as route exhaustion; Activity carries the most recent failure as the explanation.
+    static func brainRecoveryExpired(failure: ProviderFailure) -> UserFacingError {
+        .init(title: "Coaching stopped",
+              message: "\(failure.activitySentence)\n\nCoaching kept failing for \(Int(BrainCycleRecovery.ceiling / 60)) minutes, so the session ended. Check Settings → Brain, then Start again.",
+              severity: .terminal,
+              sessionEndReason: .brainRecoveryExpired(last: failure))
+    }
+
     /// Audio capture couldn't be built or started (no input device, permission, unreadable rate, …).
     /// Fatal — there's nothing to coach from.
     static func captureFailed(failure: ProviderFailure) -> UserFacingError {

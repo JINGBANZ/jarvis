@@ -33,8 +33,8 @@ import AppKit
         let panel = OverlayCaptionPanel()
         panel.setEnabled(true)
         defer { panel.setEnabled(false) }
-        panel.showError("Model cycle failed.")
-        #expect(panel.currentText == "Model cycle failed.")
+        panel.showError("Coaching failed. I'm still listening.")
+        #expect(panel.currentText == "Coaching failed. I'm still listening.")
         #expect(panel.currentSharingType == .none)
     }
 

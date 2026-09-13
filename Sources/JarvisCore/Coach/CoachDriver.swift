@@ -49,7 +49,7 @@ public final class CoachDriver: @unchecked Sendable {
     private let stateLock = NSLock()
     private let recoveryDelay: @Sendable (TimeInterval) async throws -> Void
     private let clock: Clock
-    private var recovery: BrainCycleRecovery
+    private var recovery = BrainCycleRecovery()
     private var recoveryDeadlineTask: Task<Void, Never>?
     private var sessionTerminated = false
 
@@ -117,6 +117,7 @@ public final class CoachDriver: @unchecked Sendable {
         /// redirect the already-committed event to a second callback nor suppress this one.
         let callback: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
         var terminalCallback: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil
+        var expiredCallback: (@MainActor @Sendable (ProviderFailure) -> Void)? = nil
     }
 
     // Committing a route notice and delivering it are deliberately separate phases: the commit
@@ -181,7 +182,6 @@ public final class CoachDriver: @unchecked Sendable {
     ) {
         self.recoveryDelay = recoveryDelay
         self.clock = clock
-        self.recovery = BrainCycleRecovery(startedAt: sessionStart ?? clock.now())
         self.plan = plan
         self.activity = activity
         self._prepMaterial = prepMaterial
@@ -291,7 +291,8 @@ public final class CoachDriver: @unchecked Sendable {
             onSkipped: route.onSkipped,
             onRecoveryChanged: route.onRecoveryChanged,
             onExhausted: route.onExhausted,
-            onTerminated: route.onTerminated)
+            onTerminated: route.onTerminated,
+            onRecoveryExpired: route.onRecoveryExpired)
         let activeReplacement = refreshesActiveTarget && !routeIsExhausted
             ? configuredRoute.targets[routeSession.activeIndex]
             : nil
@@ -321,7 +322,8 @@ public final class CoachDriver: @unchecked Sendable {
             onSkipped: route.onSkipped,
             onRecoveryChanged: route.onRecoveryChanged,
             onExhausted: route.onExhausted,
-            onTerminated: route.onTerminated)
+            onTerminated: route.onTerminated,
+            onRecoveryExpired: route.onRecoveryExpired)
         let activeReplacement = routeIsExhausted
             ? nil
             : configuredRoute.targets[routeSession.activeIndex]
@@ -667,7 +669,8 @@ public final class CoachDriver: @unchecked Sendable {
                 target: configured.target,
                 failure: failure,
                 callback: configuredRoute.onExhausted,
-                terminalCallback: configuredRoute.onTerminated)
+                terminalCallback: configuredRoute.onTerminated,
+                expiredCallback: configuredRoute.onRecoveryExpired)
         case .stay:
             preconditionFailure("skipping an unavailable target cannot stay")
         }
@@ -735,7 +738,8 @@ public final class CoachDriver: @unchecked Sendable {
                     target: attempt.target,
                     failure: failure,
                     callback: configuredRoute.onExhausted,
-                terminalCallback: configuredRoute.onTerminated))
+                terminalCallback: configuredRoute.onTerminated,
+                expiredCallback: configuredRoute.onRecoveryExpired))
         }
     }
 
@@ -743,7 +747,7 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.lock()
         // A committed hint or silence is session progress even if Settings replaced the route
         // while its snapshotted attempt was running. Only cursor health belongs to that topology.
-        recovery.succeed(at: clock.now())
+        recovery.succeed()
         recoveryDeadlineTask?.cancel()
         recoveryDeadlineTask = nil
         if routeTopologyRevision == attempt.routeTopologyRevision
@@ -787,24 +791,25 @@ public final class CoachDriver: @unchecked Sendable {
                 jlog("Jarvis coach: ignoring route exhaustion from a superseded Settings revision")
                 return false
             }
-            let health = stateLock.withLock { () -> (terminalFailure: ProviderFailure?, delay: TimeInterval) in
-                recovery.fail(at: clock.now())
+            let health = stateLock.withLock { () -> (allPermanent: Bool, expired: Bool, remaining: TimeInterval) in
+                recovery.fail(at: clock.now(), failure: delivery.failure)
                 let allPermanent = configuredRoute.targets.allSatisfy {
                     recovery.permanentFailures[$0.target] != nil
                 }
                 let expired = recovery.ceilingReached(at: clock.now())
                 sessionTerminated = allPermanent || expired
-                return (allPermanent ? delivery.failure : (expired ? Self.ceilingFailure(delivery.target) : nil),
-                    max(0, recovery.lastSuccess + 600 - clock.now()))
+                return (allPermanent, expired, recovery.remainingBeforeCeiling(at: clock.now()))
             }
-            if let failure = health.terminalFailure {
-                delivery.terminalCallback?(delivery.target, failure)
+            if health.allPermanent {
+                delivery.terminalCallback?(delivery.target, delivery.failure)
+            } else if health.expired {
+                delivery.expiredCallback?(delivery.failure)
             } else {
                 activity?.record(.coachingCycleFailed(failure: delivery.failure))
                 delivery.callback?(delivery.target, delivery.failure)
                 stateLock.withLock {
                     if recoveryDeadlineTask == nil {
-                        recoveryDeadlineTask = makeRecoveryDeadlineTask(after: health.delay, delivery: delivery)
+                        recoveryDeadlineTask = makeRecoveryDeadlineTask(after: health.remaining)
                     }
                 }
             }
@@ -822,34 +827,29 @@ public final class CoachDriver: @unchecked Sendable {
 
     // Keep self weak while sleeping and cancel explicitly on success/teardown. Constructing this
     // task inside the nested MainActor delivery closure triggers a Swift 6.3 task-allocation trap.
-    private func makeRecoveryDeadlineTask(
-        after seconds: TimeInterval, delivery: RouteExhaustionDelivery
-    ) -> Task<Void, Never> {
+    private func makeRecoveryDeadlineTask(after seconds: TimeInterval) -> Task<Void, Never> {
         let delay = recoveryDelay
         return Task.detached { [weak self] in
             do { try await delay(seconds) } catch { return }
             guard !Task.isCancelled, let self else { return }
-            await self.terminateExpiredRecovery(delivery)
+            await self.terminateExpiredRecovery()
         }
     }
 
-    private func terminateExpiredRecovery(_ delivery: RouteExhaustionDelivery) async {
+    /// The deadline task is created by the streak's first failed cycle, so it reads the streak's
+    /// latest failure when it fires rather than the one it was created with.
+    private func terminateExpiredRecovery() async {
         await MainActor.run {
-            let callback = stateLock.withLock {
-                guard !Task.isCancelled, !sessionTerminated,
-                      recovery.ceilingReached(at: clock.now()) else {
-                    return Optional<(@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)>.none
-                }
+            let expiry = stateLock.withLock {
+                () -> (callback: (@MainActor @Sendable (ProviderFailure) -> Void)?, failure: ProviderFailure)? in
+                guard !Task.isCancelled, !sessionTerminated, let streak = recovery.streak,
+                      recovery.ceilingReached(at: clock.now()) else { return nil }
                 sessionTerminated = true
-                return configuredRoute.onTerminated
+                return (configuredRoute.onRecoveryExpired, streak.lastFailure)
             }
-            callback?(delivery.target, Self.ceilingFailure(delivery.target))
+            guard let expiry else { return }
+            expiry.callback?(expiry.failure)
         }
-    }
-
-    private static func ceilingFailure(_ target: BrainTarget) -> ProviderFailure {
-        ProviderFailure(source: .brain(target.provider), stage: .request, category: .unknown,
-            disposition: .permanent, identity: .init(), message: "No coaching cycle succeeded in 10 minutes.")
     }
 
     private func waitForCycleCooldown() async -> Bool {

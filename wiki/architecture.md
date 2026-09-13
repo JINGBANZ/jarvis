@@ -464,12 +464,17 @@ cycle with the provider's redacted cause.
 A later explicit coaching shortcut or new finalized speech starts a fresh cycle at the primary;
 silence without new transcript does not. Consecutive failed cycles delay that admission by 0, 5, 15,
 45, then at most 120 seconds. New input coalesces during the cooldown, and the admitted attempt
-snapshots the latest conversation. Any successful terminal coaching action resets the cooldown.
+snapshots the latest conversation. Any successful terminal coaching action resets the cooldown and
+ends the failure streak.
 Proven permanent target failures remain excluded for the session, including across fresh cycles and
-Settings edits; when all configured targets are permanently unavailable, the existing terminal
-`brainRouteExhausted` path ends the session and Activity names the cause. If at least one cycle has
-failed and ten minutes pass since the last success (or session start), the same path ends the session
-with that explanation, even without new speech. These terminal paths add no live presentation.
+Settings edits; when all configured targets are permanently unavailable, `brainRouteExhausted` ends
+the session and Activity names the cause. A failure streak that reaches the recovery ceiling
+([`BrainCycleRecovery.ceiling`](../Sources/JarvisCore/Coach/BrainCycleRecovery.swift), ten minutes)
+without a success ends the session through its own `brainRecoveryExpired` reason, even without new
+speech, and Activity quotes the most recent failed cycle's cause. The ceiling clock starts at the
+streak's first failed cycle, not at the last success. Silence probes stop after a long quiet stretch,
+so a clock measured from the last success would end an idle session on its first failure. These
+terminal paths add no live presentation.
 
 Provider clients remain owned until replacement or session teardown. Stop cancels pending/in-flight
 work and the recovery deadline. This policy is implemented by `BrainRouteSession`,

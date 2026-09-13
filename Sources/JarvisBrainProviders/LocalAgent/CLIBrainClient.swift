@@ -87,10 +87,6 @@ public struct CLIBrainClient: BrainClient, Sendable {
         }
     }
 
-    public func terminate() {
-        runtimeLease.release()
-    }
-
     public func prepare() {
         runtime.prepareInBackground(for: configuration)
     }

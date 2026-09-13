@@ -53,9 +53,6 @@ import JarvisCore
         #expect(BrainWorkloadTimeout.liveCoaching == 15)
         #expect(claude.configuration.timeout == BrainWorkloadTimeout.liveCoaching)
         #expect(codex.configuration.timeout == BrainWorkloadTimeout.liveCoaching)
-
-        claude.terminate()
-        codex.terminate()
     }
 
     @Test func historyCompactionDeadlineIsProviderNeutral() throws {
@@ -80,9 +77,6 @@ import JarvisCore
                 == BrainWorkloadTimeout.historyCompaction)
         #expect(codexSummarizer.configuration.timeout
                 == BrainWorkloadTimeout.historyCompaction)
-
-        claudeSummarizer.terminate()
-        codexSummarizer.terminate()
     }
 
     /// Setup and inference are budgeted separately, so a slow runtime start cannot quietly shorten
@@ -361,48 +355,48 @@ import JarvisCore
         let backend = FakeLocalAgentRuntime(
             replies: [#"{"tool":"stay_silent","arguments":{}}"#])
         let runtime = CLIBrainRuntime(backend: backend)
-        let firstTargetCoach = makeClient(
-            provider: .codexCLI,
-            workDir: workDir,
-            runtime: runtime,
-            systemPrompt: "first coach",
-            tools: coachTools)
-        let firstTargetSummarizer = makeClient(
-            provider: .codexCLI,
-            workDir: workDir,
-            runtime: runtime,
-            systemPrompt: "first summarizer",
-            tools: [])
-        let fallbackCoach = makeClient(
-            provider: .codexCLI,
-            workDir: workDir,
-            runtime: runtime,
-            systemPrompt: "fallback coach",
-            tools: coachTools)
-        let fallbackSummarizer = makeClient(
-            provider: .codexCLI,
-            workDir: workDir,
-            runtime: runtime,
-            systemPrompt: "fallback summarizer",
-            tools: [])
+        // A client holds its runtime lease for as long as it exists, so dropping a client from this
+        // table is how its owner releases the runtime.
+        var clients = [
+            "first coach": makeClient(
+                provider: .codexCLI,
+                workDir: workDir,
+                runtime: runtime,
+                systemPrompt: "first coach",
+                tools: coachTools),
+            "first summarizer": makeClient(
+                provider: .codexCLI,
+                workDir: workDir,
+                runtime: runtime,
+                systemPrompt: "first summarizer",
+                tools: []),
+            "fallback coach": makeClient(
+                provider: .codexCLI,
+                workDir: workDir,
+                runtime: runtime,
+                systemPrompt: "fallback coach",
+                tools: coachTools),
+            "fallback summarizer": makeClient(
+                provider: .codexCLI,
+                workDir: workDir,
+                runtime: runtime,
+                systemPrompt: "fallback summarizer",
+                tools: []),
+        ]
 
-        firstTargetCoach.terminate()
-        firstTargetSummarizer.terminate()
+        clients["first coach"] = nil
+        clients["first summarizer"] = nil
         #expect(backend.terminationCount == 0)
 
-        _ = try await fallbackCoach.respond(
+        _ = try await clients["fallback coach"]?.respond(
             messages: [.system("fallback coach"), .user("continue forward")],
             tools: coachTools,
             toolChoice: .required)
         #expect(await backend.openCount == 1)
 
-        fallbackCoach.terminate()
+        clients["fallback coach"] = nil
         #expect(backend.terminationCount == 0)
-        fallbackSummarizer.terminate()
-        #expect(backend.terminationCount == 1)
-
-        firstTargetCoach.terminate()
-        fallbackSummarizer.terminate()
+        clients["fallback summarizer"] = nil
         #expect(backend.terminationCount == 1)
     }
 
@@ -533,7 +527,6 @@ import JarvisCore
             toolChoice: .required)
 
         #expect(response.toolCalls.isEmpty == false)
-        client.terminate()
     }
 
     /// The other half of the contract: drift is still rejected loudly. Tool names alone are not
@@ -558,7 +551,6 @@ import JarvisCore
             #expect(String(describing: error)
                 .contains("instructions changed after runtime initialization"))
         }
-        client.terminate()
     }
 
     private func makeClient(
