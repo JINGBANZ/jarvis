@@ -93,38 +93,38 @@ public extension UserFacingError {
     }
 
     /// The finite user-authorized brain route was exhausted. Individual target failures never use
-    /// this terminal path; their raw detail stays diagnostic while pending work moves forward.
+    /// this terminal path; they retry or advance the route while pending work moves forward.
     static func brainRouteExhausted(
-        lastProvider: BrainProvider,
-        reason: String
+        target: BrainTarget,
+        failure: ProviderFailure
     ) -> UserFacingError {
         .init(title: "Brain fallback route exhausted",
-              message: "\(reason)\n\nCoaching stopped after every configured target was exhausted. The last target was \(lastProvider.displayName). Check Settings → Brain, then Start again.",
+              message: "\(failure.activitySentence)\n\nCoaching stopped after every configured target was exhausted. The last target was \(target.provider.displayName). Check Settings → Brain, then Start again.",
               severity: .terminal,
-              sessionEndReason: .brainRouteExhausted(lastProvider: lastProvider))
+              sessionEndReason: .brainRouteExhausted(last: failure))
     }
 
-    /// Audio capture couldn't be built or started. `reason` is the human-readable cause from the capture
-    /// layer (no input device, permission, unreadable rate, …). Fatal — there's nothing to coach from.
-    static func captureFailed(reason: String) -> UserFacingError {
-        .init(title: "Couldn't start audio capture", message: reason, severity: .fatal,
-              sessionEndReason: .audioCaptureUnavailable)
+    /// Audio capture couldn't be built or started (no input device, permission, unreadable rate, …).
+    /// Fatal — there's nothing to coach from.
+    static func captureFailed(failure: ProviderFailure) -> UserFacingError {
+        .init(title: "Couldn't start audio capture", message: failure.message, severity: .fatal,
+              sessionEndReason: .audioCaptureUnavailable(failure: failure))
     }
 
     /// Audio capture started, then became unavailable after a route rebuild. Coaching cannot
     /// continue, but a runtime failure must stop without activating the app.
-    static func captureStopped(reason: String) -> UserFacingError {
-        .init(title: "Audio capture stopped", message: reason, severity: .terminal,
-              sessionEndReason: .audioCaptureUnavailable)
+    static func captureStopped(failure: ProviderFailure) -> UserFacingError {
+        .init(title: "Audio capture stopped", message: failure.message, severity: .terminal,
+              sessionEndReason: .audioCaptureUnavailable(failure: failure))
     }
 
     /// The mic ("me") transcription endpoint gave up — NOT a mic-hardware failure (that's
     /// `captureStopped`). Coaching can't continue, so stop without revealing UI.
-    static func transcriptionStopped(reason: TranscriptionFailureReason) -> UserFacingError {
+    static func transcriptionStopped(failure: ProviderFailure) -> UserFacingError {
         .init(title: "Transcription stopped",
-              message: "Jarvis could not continue because \(reason.activityDescription).",
+              message: "Jarvis could not continue because \(failure.activitySentence).",
               severity: .terminal,
-              sessionEndReason: .transcriptionStopped(reason: reason))
+              sessionEndReason: .transcriptionStopped(failure: failure))
     }
 
     /// The system-audio ("them") endpoint gave up. The mic still works, so this is a graceful

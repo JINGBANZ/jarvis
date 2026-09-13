@@ -279,7 +279,8 @@ import JarvisCore
                 toolChoice: .required)
             Issue.record("expected runtime failure")
         } catch {
-            #expect(BrainFailure(error).disposition == .temporary)
+            #expect(LocalAgentFailureClassifier.classify(
+                error: error, provider: .claudeCode).disposition == .temporary)
             #expect(error.localizedDescription.contains("app-server unavailable"))
         }
         _ = await traffic.closeForTesting()

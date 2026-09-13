@@ -10,7 +10,9 @@ public struct ConfiguredBrainTarget: Sendable {
     public let target: BrainTarget
     let brain: BrainClient?
     let summarizer: BrainClient?
-    let unavailabilityDetail: String?
+    /// Set when the app proved the target unavailable while assembling the route (a missing or
+    /// signed-out CLI). Carried into the skip and exhaustion notices so Activity names the reason.
+    let unavailability: ProviderFailure?
 
     public init(
         target: BrainTarget,
@@ -20,14 +22,14 @@ public struct ConfiguredBrainTarget: Sendable {
         self.target = target
         self.brain = brain
         self.summarizer = summarizer
-        self.unavailabilityDetail = nil
+        self.unavailability = nil
     }
 
-    public init(unavailable target: BrainTarget, detail: String) {
+    public init(unavailable target: BrainTarget, failure: ProviderFailure) {
         self.target = target
         self.brain = nil
         self.summarizer = nil
-        self.unavailabilityDetail = detail
+        self.unavailability = failure
     }
 
     func prepare() {

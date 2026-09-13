@@ -719,13 +719,13 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
     }
 
     fileprivate static func error(_ detail: String) -> NSError {
-        NSError(domain: "CodexAppServerRuntime", code: 1,
+        NSError(domain: LocalAgentFailureClassifier.codexAppServerDomain, code: 1,
                 userInfo: [NSLocalizedDescriptionKey: detail])
     }
 
     fileprivate static func timeoutError(_ detail: String) -> NSError {
         NSError(
-            domain: "CodexAppServerRuntime",
+            domain: LocalAgentFailureClassifier.codexAppServerDomain,
             code: NSURLErrorTimedOut,
             userInfo: [NSLocalizedDescriptionKey: detail])
     }

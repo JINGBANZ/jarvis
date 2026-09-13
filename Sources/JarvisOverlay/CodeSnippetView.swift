@@ -18,7 +18,7 @@ final class CodeSnippetView: NSView {
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        // This opaque backing deliberately does not inherit the history's configurable opacity.
+        // The code backdrop has its own opacity, independent of the history fill.
         layer?.backgroundColor = Self.background.cgColor
         title.textColor = NSColor(white: 0.86, alpha: 1)
         title.font = .systemFont(ofSize: 11, weight: .semibold)

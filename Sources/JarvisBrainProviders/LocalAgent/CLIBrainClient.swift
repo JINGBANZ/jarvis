@@ -88,7 +88,7 @@ public struct CLIBrainClient: BrainClient, Sendable {
                 requestRecord: nil,
                 respondEntered: openEntered,
                 kind: .preRequestFailure)
-            throw BrainFailure(error)
+            throw LocalAgentFailureClassifier.classify(error: error, provider: provider)
         }
     }
 
@@ -344,13 +344,13 @@ public struct CLIBrainClient: BrainClient, Sendable {
     }
 
     static func error(_ message: String, code: Int = 1) -> NSError {
-        NSError(domain: "CLIBrainClient", code: code,
+        NSError(domain: LocalAgentFailureClassifier.clientDomain, code: code,
                 userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     static func timeoutError(seconds: TimeInterval) -> NSError {
         NSError(
-            domain: "CLIBrainClient",
+            domain: LocalAgentFailureClassifier.clientDomain,
             code: NSURLErrorTimedOut,
             userInfo: [
                 NSLocalizedDescriptionKey:
@@ -435,7 +435,7 @@ private actor CLIBrainConversation: BrainConversation {
                 respondEntered: respondEntered,
                 kind: dispatchWitness.wasDispatched ? .providerCall : .preRequestFailure)
             if Task.isCancelled || error is CancellationError { throw error }
-            throw BrainFailure(error)
+            throw LocalAgentFailureClassifier.classify(error: error, provider: client.provider)
         }
     }
 

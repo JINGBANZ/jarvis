@@ -212,11 +212,12 @@ private func speakResponseBody(arguments: String) -> Data {
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
             Issue.record("expected a classified HTTP failure")
-        } catch let failure as BrainFailure {
+        } catch let failure as ProviderFailure {
             #expect(failure.disposition == .permanent)
-            #expect(failure.detail.contains("unauthorized"))
+            #expect(failure.message.contains("unauthorized"))
+            #expect(failure.identity.httpStatus == 401)
         } catch {
-            Issue.record("expected BrainFailure, got \(error)")
+            Issue.record("expected ProviderFailure, got \(error)")
         }
     }
 
@@ -228,15 +229,15 @@ private func speakResponseBody(arguments: String) -> Data {
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
             Issue.record("expected a classified HTTP failure")
-        } catch let failure as BrainFailure {
+        } catch let failure as ProviderFailure {
             #expect(failure.disposition == .temporary)
         } catch {
-            Issue.record("expected BrainFailure, got \(error)")
+            Issue.record("expected ProviderFailure, got \(error)")
         }
     }
 
     @Test func generic404PreservesSessionButModelNotFoundStopsAtProviderBoundary() async {
-        let cases: [(Data, BrainFailure.Disposition)] = [
+        let cases: [(Data, ProviderFailure.Disposition)] = [
             (Data(#"{"error":{"message":"route unavailable"}}"#.utf8), .temporary),
             (Data(#"{"error":{"code":"model_not_found","type":"invalid_request_error"}}"#.utf8),
              .permanent),
@@ -248,10 +249,10 @@ private func speakResponseBody(arguments: String) -> Data {
             do {
                 _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
                 Issue.record("expected a classified HTTP failure")
-            } catch let failure as BrainFailure {
+            } catch let failure as ProviderFailure {
                 #expect(failure.disposition == expected)
             } catch {
-                Issue.record("expected BrainFailure, got \(error)")
+                Issue.record("expected ProviderFailure, got \(error)")
             }
         }
     }
@@ -264,10 +265,29 @@ private func speakResponseBody(arguments: String) -> Data {
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
             Issue.record("expected a classified HTTP failure")
-        } catch let failure as BrainFailure {
+        } catch let failure as ProviderFailure {
             #expect(failure.disposition == .permanent)
         } catch {
-            Issue.record("expected BrainFailure, got \(error)")
+            Issue.record("expected ProviderFailure, got \(error)")
+        }
+    }
+
+    /// A transport error never reaches the message: `URLError.localizedDescription` embeds the
+    /// failing URL, so the fixed table describes it and the identity keeps the code.
+    @Test func transportFailuresCarryTheCodeAndNoURL() async {
+        let client = OpenAIBrainClient(
+            apiKey: "sk-x", model: "gpt-5.5",
+            send: { _ in throw URLError(.cannotConnectToHost) })
+        do {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+            Issue.record("expected a classified transport failure")
+        } catch let failure as ProviderFailure {
+            #expect(failure.category == .unreachable)
+            #expect(failure.disposition == .temporary)
+            #expect(failure.identity.transportCode == URLError.cannotConnectToHost.rawValue)
+            #expect(failure.message == "could not connect to the server")
+        } catch {
+            Issue.record("expected ProviderFailure, got \(error)")
         }
     }
 

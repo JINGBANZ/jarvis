@@ -18,6 +18,10 @@ jobs:
       && github.actor != 'dependabot[bot]'
       && !startsWith(github.head_ref, 'release-please--')
     uses: JINGBANZ/workflows/.github/workflows/claude-code-review.yml@main
+    with:
+      # The issue-worker opens PRs as the pipeline's GitHub App; without this allow-list entry the
+      # review action rejects bot-initiated runs, so agent PRs would land unreviewed-by-Claude.
+      allowed-bots: jingbanz-agent
     permissions:
       contents: read
       pull-requests: read

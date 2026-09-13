@@ -151,7 +151,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         case completed(TurnOutcome)
         case failed(
             outcome: TurnOutcome,
-            failure: BrainFailure,
+            failure: ProviderFailure,
             work: PendingCoachingWork
         )
         case skipped(TurnOutcome)
@@ -161,6 +161,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
     struct AttemptExecution {
         let id: Int?
         let result: AttemptResult
+    }
+
+    /// The kernel's own verdict that a provider answered but the answer cannot be used. The provider
+    /// reported nothing, so there is no identity to carry: the stage and the message say what was
+    /// wrong. Always temporary: the next attempt asks the same target again.
+    private static func unusableResponse(
+        _ message: String, from target: BrainTarget
+    ) -> ProviderFailure {
+        ProviderFailure(
+            source: .brain(target.provider), stage: .response, category: .response,
+            disposition: .temporary, identity: .init(), message: message)
     }
 
     /// Run one attempt on one immutable target snapshot.
@@ -291,9 +302,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("… attempt cancelled (interrupted)")
                 return AttemptExecution(id: attemptID, result: .cancelled)
             }
-            let failure = BrainFailure(error)
+            // Classified at the provider boundary when the adapter knew what it was; this passes
+            // one through unchanged and gives anything else the safe temporary default.
+            let failure = ProviderFailure(
+                unclassified: error, source: .brain(attempt.target.provider), stage: .request)
             jlog("Jarvis coach: brain conversation failed on \(reason) via "
-                 + "\(attempt.target.provider.displayName): \(failure.detail)")
+                 + "\(attempt.target.provider.displayName): \(failure.errorDescription ?? "")")
             return AttemptExecution(
                 id: attemptID,
                 result: .failed(outcome: .brainError, failure: failure, work: work))
@@ -334,9 +348,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         jlog("… attempt cancelled (interrupted)")
                         return .cancelled
                     }
-                    let failure = BrainFailure(error)
+                    let failure = ProviderFailure(
+                        unclassified: error, source: .brain(attempt.target.provider),
+                        stage: .request)
                     jlog("Jarvis coach: brain request failed on \(reason) via "
-                         + "\(attempt.target.provider.displayName): \(failure.detail)")
+                         + "\(attempt.target.provider.displayName): \(failure.errorDescription ?? "")")
                     return .failed(outcome: .brainError, failure: failure, work: work)
                 }
 
@@ -351,9 +367,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("⚠️ response incomplete (\(incompleteReason)) — scheduling fresh attempt")
                     return .failed(
                         outcome: .truncated,
-                        failure: BrainFailure(
-                            disposition: .temporary,
-                            detail: "incomplete response: \(incompleteReason)"),
+                        failure: Self.unusableResponse(
+                            "incomplete response: \(incompleteReason)", from: attempt.target),
                         work: work)
                 }
 
@@ -361,9 +376,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("⚠️ required coaching action missing — scheduling fresh attempt")
                     return .failed(
                         outcome: .brainError,
-                        failure: BrainFailure(
-                            disposition: .temporary,
-                            detail: "provider returned no required coaching tool call"),
+                        failure: Self.unusableResponse(
+                            "provider returned no required coaching tool call",
+                            from: attempt.target),
                         work: work)
                 }
 
@@ -572,9 +587,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
             jlog("⚠️ tool loop exhausted — scheduling fresh attempt")
             return .failed(
                 outcome: .exhausted,
-                failure: BrainFailure(
-                    disposition: .temporary,
-                    detail: "coaching tool loop exhausted"),
+                failure: Self.unusableResponse(
+                    "coaching tool loop exhausted", from: attempt.target),
                 work: work)
         }()
 
