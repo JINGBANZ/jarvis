@@ -1,5 +1,9 @@
 import Foundation
 
+/// The three coaching actions every session offers. `CoachCapabilities.compose` builds the session's
+/// full set from these plus whatever the user's configuration adds.
+public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
+
 /// What one coaching session can do: the tools it offers, hot or deferred, and the skills it can
 /// load — resolved once at Start.
 ///
@@ -32,9 +36,6 @@ public struct CoachCapabilities: Sendable, Equatable {
     public var deferredTools: [ToolDef] { tools.filter(\.deferLoading) }
     public var catalogNames: [String] { deferredTools.map(\.name) }
 
-    public static let loadToolName = "load_tool"
-    public static let loadSkillName = "load_skill"
-
     /// Names the user cannot switch off: Jarvis cannot start without screen capture, a turn cannot
     /// end without speak or stay silent, and the loaders are included so a hand-edited plist cannot
     /// remove one while its catalog still has entries. A loader needs no switch of its own: it
@@ -59,31 +60,23 @@ public struct CoachCapabilities: Sendable, Equatable {
             .sorted { $0.name < $1.name }
         return CoachCapabilities(
             tools: coachTools
-                + (deferred.isEmpty ? [] : [loader(named: loadToolName,
-                                                   description: JarvisPrompts.Coach.ToolDescription.loadTool,
-                                                   catalogNames: deferred.map(\.name))])
-                + (offeredSkills.isEmpty ? [] : [loader(named: loadSkillName,
-                                                        description: JarvisPrompts.Coach.ToolDescription.loadSkill,
-                                                        catalogNames: offeredSkills.map(\.name))])
+                + (deferred.isEmpty ? [] : [loadTool(catalogNames: deferred.map(\.name))])
+                + (offeredSkills.isEmpty ? [] : [loadSkill(catalogNames: offeredSkills.map(\.name))])
                 + extras,
             skills: offeredSkills)
     }
 
-    /// Both loaders are built per Start rather than as globals: the `name` schema is an enum of the
-    /// catalog names actually present, so on a schema-enforcing provider a misspelled name cannot
-    /// be emitted at all. Each list is fixed at Start, which keeps a CLI target's baked
-    /// instructions constant.
-    private static func loader(named name: String, description: String,
-                               catalogNames: [String]) -> ToolDef {
+    /// The schema both loaders share. They are built per Start rather than as globals: the `name`
+    /// schema is an enum of the catalog names actually present, so on a schema-enforcing provider a
+    /// misspelled name cannot be emitted at all. Each list is fixed at Start, which keeps a CLI
+    /// target's baked instructions constant.
+    static func loaderParametersJSON(catalogNames: [String]) -> String {
         let names = catalogNames
             .map { "\"\($0.replacingOccurrences(of: "\"", with: "\\\""))\"" }
             .joined(separator: ",")
-        return ToolDef(
-            name: name,
-            description: description,
-            parametersJSON: #"{"type":"object","properties":{"name":{"type":"string","enum":["#
-                + names
-                + #"]}},"required":["name"],"additionalProperties":false}"#)
+        return #"{"type":"object","properties":{"name":{"type":"string","enum":["#
+            + names
+            + #"]}},"required":["name"],"additionalProperties":false}"#
     }
 
     /// The three coaching actions and nothing else: what a session composed without configuration

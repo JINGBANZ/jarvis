@@ -7,16 +7,16 @@ import Testing
     private let withCatalog = CoachCapabilities(
         tools: coachTools + [ToolDef(
             name: "search_prep_notes",
-            description: JarvisPrompts.Coach.ToolDescription.searchPrepNotes,
+            description: searchPrepNotesTool.description,
             parametersJSON: "{}",
-            guidance: JarvisPrompts.Coach.ToolGuidance.searchPrepNotes,
+            guidance: searchPrepNotesTool.guidance,
             deferLoading: true)])
 
     /// The tip style moved onto `speak`, and `speak` is always offered, so a session with nothing
     /// to load still sends exactly the base prompt plus that guidance.
     @Test func bareBuilderIsTheBasePromptPlusTipStyle() {
         #expect(JarvisPrompts.Coach.system(capabilities: .default, explanationsEnabled: false)
-            == JarvisPrompts.Coach.system + "\n\n" + JarvisPrompts.Coach.ToolGuidance.speak)
+            == JarvisPrompts.Coach.system + "\n\n" + speakTool.guidance)
     }
 
     /// A prompt names a loader only when the session has something to load, and renumbers the rest
@@ -42,7 +42,7 @@ import Testing
         let offered = JarvisPrompts.Coach.system(
             capabilities: withCatalog, explanationsEnabled: false)
         #expect(offered.contains(
-            "- search_prep_notes: \(JarvisPrompts.Coach.ToolDescription.searchPrepNotes)"))
+            "- search_prep_notes: \(searchPrepNotesTool.description)"))
         #expect(!offered.contains("# Prep material"))
     }
 

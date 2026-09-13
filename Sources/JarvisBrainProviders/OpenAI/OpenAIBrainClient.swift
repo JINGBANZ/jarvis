@@ -182,7 +182,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             // turns on Structured Outputs for the call's arguments — the model is constrained to the
             // schema, so e.g. `speak`'s `lines` always decodes as an array of strings (no splitting
             // client-side). Strict requires every object in `parameters` to set
-            // additionalProperties:false and list all its keys as required (see ToolDefs).
+            // additionalProperties:false and list all its keys as required (see ToolDef.parametersJSON).
             return ["type": "function", "name": t.name, "description": t.description,
                     "parameters": params, "strict": true]
         }

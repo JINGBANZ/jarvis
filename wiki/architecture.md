@@ -2,13 +2,13 @@
 
 > A living document. Describes the vision, the harness loop, the components, and the principles
 > that govern Jarvis. Exact schemas, prompts, and config are not duplicated here — they live in
-> `Sources/JarvisCore/` (`Prompts/`, `Coach/ToolDefs.swift`, `Config/Config.swift`).
+> `Sources/JarvisCore/` (`Prompts/`, `Coach/Tools/`, `Config/Config.swift`).
 
 > **Scope:** This page describes the **native Swift app**, built directly rather than on a fork of
 > an existing tool; why no existing product or open-source base fit is the record in
 > [landscape-survey.md](./landscape-survey.md) and [fork-evaluation.md](./fork-evaluation.md).
 > Exact schemas, the coach prompt, and config are **not duplicated here** — they live in code
-> (`Sources/JarvisCore/`, especially `Prompts/`, `Coach/ToolDefs.swift`, and
+> (`Sources/JarvisCore/`, especially `Prompts/`, `Coach/Tools/`, and
 > `Config/Config.swift`); this page is
 > the *why*, the code is the *what*.
 

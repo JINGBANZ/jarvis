@@ -172,7 +172,7 @@ import JarvisBrainProviders
             return
         }
         let catalogued = rows.compactMap { $0["instructions"] as? String }
-            .filter { $0.contains(JarvisPrompts.Coach.ToolDescription.searchPrepNotes) }
+            .filter { $0.contains(searchPrepNotesTool.description) }
         #expect(!catalogued.isEmpty)
         #expect(Set(catalogued).count == 1, "a CLI target's instructions must never change")
         #expect(catalogued.first?.contains("- \(searchPrepNotesTool.name) — ") == false)
