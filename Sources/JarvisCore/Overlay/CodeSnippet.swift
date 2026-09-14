@@ -19,7 +19,7 @@ public struct CodeSnippet: Sendable, Equatable {
         let language = language.trimmingCharacters(in: .whitespacesAndNewlines)
         let lineCount = normalized.components(separatedBy: "\n").count
         guard !normalized.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              normalized.count <= 2400, lineCount <= 12,
+              normalized.count <= 2400, lineCount <= 24,
               !placement.isEmpty, placement.count <= 160, language.count <= 40,
               !placement.contains(where: { $0.isNewline }),
               !language.contains(where: { $0.isNewline }) else { return nil }

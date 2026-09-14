@@ -304,7 +304,10 @@ The fixed `speak.codeSnippet` schema carries language, placement, code, and corr
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) bounds and validates it without
 truncating code. Highlight arrays are bounded before normalization, and trimming leading blank lines
 rebases correction indices. Invalid attachments retain the useful text hint. The prompt requests one logical
-component matching visible names, language, and structure. Local mistakes include a highlighted
+component matching visible names, language, and structure. Its guidance favors straightforward syntax,
+explicit control flow, and intermediate variables that candidates can follow under interview pressure.
+Readable expansion is allowed within the snippet bounds; panel space is handled by font fitting and
+scrolling rather than dense expressions. Local mistakes include a highlighted
 correction and relevant next lines; an invalid overall approach receives a corrective hint instead.
 Without visible code, known problem context supports a first component without inventing unseen names.
 
