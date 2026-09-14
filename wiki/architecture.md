@@ -217,15 +217,29 @@ remain interpretable and a question map does not become one oversized search res
 Markdown constructs retain paragraph behavior. Long prose paragraphs, fenced code, and individual
 rows with their headers can exceed the target; long sections can still span chunks
 (see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
+
+Search guidance normally calls for one query per topic. When the results only point to a named
+story or section and lack usable facts, the model may make one focused follow-up using that title
+and identifying details, then stops searching. Empty or unavailable results do not authorize a
+retry. Resolving an explicit reference lets the coach supply the answer content instead of asking
+the candidate to consult a document index during the interview. This bounded exception is shared
+by all prep formats and interview topics; it changes guidance, not the search index or runtime
+scheduling (see [`SearchPrepNotes`](../Sources/JarvisCore/Coach/Tools/SearchPrepNotes.swift)).
+
 The behavioral skill evaluates all returned excerpts against the exact question and distinguishes
-personal events from drafts, hypothetical approaches, and criteria. A retrieval miss is missing
-evidence, not permission to invent the candidate's history.
+personal events from drafts, hypothetical approaches, and criteria. Its hints contain supported
+answer content matched to the question or current gap, without relying on story IDs, section labels,
+or unexplained project shorthand. Compact wording preserves each action's owner and status and each
+metric's qualifier. When no supported story fits, the coach asks for a real example or identifies
+the missing fact. A retrieval miss cannot establish that the candidate has never had that experience
+or authorize invention.
 
 A call to a tool the session does not offer, or a load naming something it does not have, is answered
 with a plain "no tool named X is available" rather than failing the attempt. Only a CLI target can
 reach the first branch, since it reconstructs calls from prompt text and can name anything; on the
-API path an undeclared tool is not callable at all. The per-attempt response cap is 7: two more than
-the longest sensible chain, which is load a skill, load a tool, search, capture, speak.
+API path an undeclared tool is not callable at all. The per-attempt response cap is 7, leaving room
+for loading a skill and tool, an initial search and its permitted reference follow-up, a capture,
+and a terminal coaching action.
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
 capture, and a turn cannot end without one of the other two. Neither loader has one either, because
