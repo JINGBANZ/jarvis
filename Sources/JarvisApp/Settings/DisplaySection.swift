@@ -113,8 +113,8 @@ final class DisplaySection: NSObject, SettingsSection {
 
         let note = NSTextField(wrappingLabelWithString:
             "Jarvis captures only when the brain requests visual context. If the active window "
-            + "is Chrome and page-text access is available, semantic text is preferred. Otherwise "
-            + "the current window uses OCR; screenshots still carry images and diagrams.")
+            + "is Chrome and page-text access is available, semantic text is added alongside OCR. "
+            + "Screenshots still carry images and diagrams.")
         note.translatesAutoresizingMaskIntoConstraints = false
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         note.textColor = .secondaryLabelColor
@@ -190,8 +190,15 @@ final class DisplaySection: NSObject, SettingsSection {
 
     private func reloadBrowserTextControl() {
         guard let browserTextSwitch else { return }
+        if preferences.reconcileBrowserTextAvailability(
+            isAvailable: BrowserAccessibilityPermission.isGranted
+        ) {
+            onChange()
+        }
         browserTextSwitch.state = preferences.browserTextEnabled ? .on : .off
-        browserTextSwitch.isEnabled = isSessionStopped()
+        // Turning access off is immediate and cannot expose more data. Enabling remains a stopped-
+        // session operation because it may present macOS privacy UI.
+        browserTextSwitch.isEnabled = isSessionStopped() || preferences.browserTextEnabled
         if preferences.browserTextEnabled, BrowserAccessibilityPermission.isGranted {
             browserTextSwitch.toolTip = "Enabled for foreground Chrome tabs"
         } else if preferences.browserTextEnabled {
@@ -202,22 +209,23 @@ final class DisplaySection: NSObject, SettingsSection {
     }
 
     @objc private func browserTextChanged(_ sender: NSSwitch) {
-        guard isSessionStopped() else {
-            reloadBrowserTextControl()
-            return
-        }
         if sender.state == .off {
             preferences.browserTextEnabled = false
             onChange()
             reloadBrowserTextControl()
             return
         }
-
-        preferences.browserTextEnabled = true
-        onChange()
+        guard isSessionStopped() else {
+            reloadBrowserTextControl()
+            return
+        }
         if !BrowserAccessibilityPermission.isGranted {
             BrowserAccessibilityPermission.request()
         }
+        // A request may be denied or deferred to System Settings. Persist only a live grant so the
+        // switch never claims that unavailable page text is enabled.
+        preferences.browserTextEnabled = BrowserAccessibilityPermission.isGranted
+        onChange()
         reloadBrowserTextControl()
     }
 }

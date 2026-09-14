@@ -5,19 +5,14 @@ import Foundation
 public struct ScreenSnapshot: Sendable, Equatable {
     /// Base64-encoded JPEG, as `screencapture` produced it.
     public let imageBase64: String
-    /// Source- and coverage-labeled text, or nil when unavailable. Derived from the screen, so it
-    /// goes only where the image goes.
-    public let textEvidence: ScreenTextEvidence?
-    /// Capture origin only; a window can show many documents. Never use this as file identity.
-    public let sourceID: String?
-
+    /// Source- and coverage-labeled text. Accessibility and OCR are complementary, so an active
+    /// Chrome capture may contain both. Derived from the screen, so it goes only where the image goes.
+    public let textEvidence: [ScreenTextEvidence]
     public init(
         imageBase64: String,
-        textEvidence: ScreenTextEvidence? = nil,
-        sourceID: String? = nil
+        textEvidence: [ScreenTextEvidence] = []
     ) {
         self.imageBase64 = imageBase64
         self.textEvidence = textEvidence
-        self.sourceID = sourceID
     }
 }

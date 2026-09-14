@@ -5,8 +5,8 @@ public protocol ImageTextRecognizing: Sendable {
     func recognizedText(inJPEG jpeg: Data) -> String?
 }
 
-/// Chooses one text sidecar for an active-window screenshot. Browser semantics win when the user
-/// opted in and the exact foreground tab yields text; every other path performs OCR once.
+/// Collects complementary text sidecars for an active-window screenshot. Accessibility can reach
+/// beyond the viewport while OCR covers pixels that virtualized editors and canvases omit.
 public struct ScreenTextResolver: Sendable {
     private let browser: any BrowserAccessibilityReading
     private let ocr: any ImageTextRecognizing
@@ -19,22 +19,30 @@ public struct ScreenTextResolver: Sendable {
     public func resolve(
         jpeg: Data,
         window: WindowCandidate,
-        browserTextEnabled: Bool
-    ) -> ScreenTextEvidence? {
-        if browserTextEnabled,
-           let evidence = browser.readActiveTab(for: window),
-           evidence.source == .browserAccessibility,
-           evidence.coverage == .activeTabAccessibilityTree,
-           !evidence.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return evidence
+        browserDocumentIdentity: BrowserDocumentIdentity?
+    ) -> [ScreenTextEvidence] {
+        var evidence: [ScreenTextEvidence] = []
+        if let browserDocumentIdentity,
+           let browserEvidence = browser.readActiveTab(
+               for: window,
+               matching: browserDocumentIdentity),
+           browserEvidence.source == .browserAccessibility,
+           browserEvidence.coverage == .activeTabAccessibilityTree,
+           !browserEvidence.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            evidence.append(browserEvidence)
         }
 
-        guard let text = ocr.recognizedText(inJPEG: jpeg),
-              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { return nil }
-        return ScreenTextEvidence(
-            text: text,
-            source: .onDeviceOCR,
-            coverage: .currentViewport)
+        if let text = ocr.recognizedText(inJPEG: jpeg),
+           !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            evidence.append(ScreenTextEvidence(
+                text: text,
+                source: .onDeviceOCR,
+                coverage: .currentViewport))
+        }
+        return evidence
+    }
+
+    public func browserDocumentIdentity(for window: WindowCandidate) -> BrowserDocumentIdentity? {
+        browser.documentIdentity(for: window)
     }
 }

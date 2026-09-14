@@ -6,18 +6,18 @@ import Foundation
 /// at commit, `stay_silent` turns leave no trace, and once the estimate passes the compaction threshold
 /// the oldest span is replaced with a short summary (see `CoachAttemptRunner.compactIfNeeded`).
 ///
-/// The runner commits `omittingScreenText` output: exact OCR belongs to `ScreenObservationMemory`,
-/// outside lossy conversation compaction. Conversation growth is append-only between compactions.
-/// Direct callers that supply raw screen text still receive the defensive masking documented on `commit`.
+/// Growth is strictly append-only between compactions — the message prefix stays byte-identical
+/// across requests, which is exactly what OpenAI's prompt cache needs to keep hitting.
 ///
-/// `@unchecked Sendable`: all mutable state is guarded by `lock`.
+/// `@unchecked Sendable`: `lock` serializes every access to `messages` and `rewriteRevision`; any
+/// future mutable state must use the same lock.
 public final class CoachHistory: @unchecked Sendable {
     private let lock = NSLock()
     private var messages: [ChatMessage] = []
     /// Bumped whenever committed messages are rewritten in place rather than merely appended to.
     /// Compaction reads history, then writes a summary of it much later from another task; growth in
-    /// the tail is safe for that, but an in-place OCR collapse is not, because the summary would
-    /// reintroduce the very screen text the collapse just retired.
+    /// the tail is safe for that, but an in-place screen-text collapse is not, because the summary
+    /// would reintroduce the very screen text the collapse just retired.
     private var rewriteRevision: UInt = 0
 
     public init() {}
@@ -30,12 +30,12 @@ public final class CoachHistory: @unchecked Sendable {
 
     /// Commit a finished turn's messages (the user delta, and any capture/speak calls with their
     /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Two kinds of
-    /// message are rewritten at commit. The runner strips OCR before this boundary, so the raw-OCR
-    /// collapse below applies only when a caller supplies unmasked screen text:
-    /// - **Screenshots** are replaced with a text stub (observation masking). The capture's OCR text
-    ///   — what the model actually reads — rides in the tool-result message and stays verbatim; the
+    /// message are rewritten at commit:
+    /// - **Screenshots** are replaced with a text stub (observation masking). The capture's text
+    ///   evidence — what the model actually reads — rides in the tool-result message and stays
+    ///   verbatim; the
     ///   pixels are ~1–2k tokens re-billed on every later request, and the model can always capture
-    ///   a fresh look. When the turn carries a NEW OCR block, every earlier OCR dump — committed
+    ///   a fresh look. When the turn carries NEW screen text, every earlier evidence dump — committed
     ///   history and any older capture within the same turn — collapses to a one-line stub:
     ///   near-identical screens re-billed forever, and a session-audit caught the model
     ///   "correcting" code the user had already fixed by reading a stale dump. Unlike the two
@@ -61,7 +61,7 @@ public final class CoachHistory: @unchecked Sendable {
         if let newest = turn.lastIndex(where: { $0.text?.contains(screenTextHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededScreenText)
             rewriteRevision &+= 1
-            // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
+            // One tool loop may capture more than once — only its newest text evidence stays verbatim.
             for i in turn.indices where i < newest {
                 turn[i] = Self.collapsingSupersededScreenText(turn[i])
             }
@@ -74,7 +74,7 @@ public final class CoachHistory: @unchecked Sendable {
         })
     }
 
-    /// Rewrite one committed message so its OCR block becomes the catalog's superseded marker.
+    /// Rewrite one committed message so its screen-text block becomes the superseded marker.
     /// Text before the block — e.g. a successful capture result — survives.
     private static func collapsingSupersededScreenText(_ m: ChatMessage) -> ChatMessage {
         guard let text = m.text,
@@ -86,18 +86,6 @@ public final class CoachHistory: @unchecked Sendable {
                 + JarvisPrompts.Coach.supersededScreenTextStub,
             toolCallId: m.toolCallId
         )
-    }
-
-    /// The runner owns raw screen text separately, including captures from failed attempts. Strip it before
-    /// conversation commit so summaries cannot revive an evicted or retired observation.
-    static func omittingScreenText(_ messages: [ChatMessage]) -> [ChatMessage] {
-        messages.map { message in
-            guard let text = message.text,
-                  let header = text.range(of: JarvisPrompts.Coach.screenTextHeader) else { return message }
-            return ChatMessage(role: message.role,
-                               text: String(text[..<header.lowerBound]) + JarvisPrompts.ScreenMemory.historyStub,
-                               toolCallId: message.toolCallId)
-        }
     }
 
     /// The commit-time conversion of a verbatim passthrough message: keep its `function_call` items
@@ -228,7 +216,7 @@ public final class CoachHistory: @unchecked Sendable {
     /// `compactionPrefix` is replaced. One deliberate prompt-cache miss; cache-hot again afterwards.
     ///
     /// Rejects a summary written against a since-rewritten prefix, reporting whether it applied. The
-    /// summary is produced off the attempt path, so a capture committed meanwhile can collapse OCR
+    /// summary is produced off the attempt path, so a capture committed meanwhile can collapse text
     /// inside that prefix; applying the older summary would put the retired screen text straight back
     /// into history and let a later tip cite code the user has already changed. Dropping it is safe —
     /// history is unchanged and the next completed attempt compacts again from a fresh prefix.

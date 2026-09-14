@@ -16,9 +16,9 @@ skills through `load_skill`, with no Start-time selection
 diagram boundary are defined in
 [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
-before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
-answered without a reflexive capture. Bounded [screen observation memory](./architecture.md#screen-observation-memory)
-retains earlier question/code OCR across scrolling, separately from conversation summaries.
+before `speak`; a fresh screenshot with current-viewport OCR satisfies that request, while a fully
+stated question can be answered without a reflexive capture. When enabled and granted, Chrome
+Accessibility adds bounded active-tab text that may include content outside the viewport.
 The independent Transcription setting keeps **OpenAI as the
 default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Transcribe** and
 **GPT Live Transcribe**, adds opt-in, on-device **Apple Speech** on macOS 26 or later, and adds
@@ -198,13 +198,13 @@ coaching kernel's dependency rules are enforced by `scripts/check-coaching-kerne
 
 ## Next action
 
-Run the [screen-memory signed-app smoke](./build-and-run.md#screen-memory-validation) in a development
-bundle: opt into Chrome text while stopped, observe a long page across scrolling, verify exact-window
-matching with two Chrome windows, and compare a normal page with a virtualized editor and diagram.
-Then deny Accessibility and switch apps to verify current-viewport OCR fallback. Offline tests cover
-typed evidence routing, secure-subtree exclusion, retention, bounded loss, terminal maintenance,
-retries, and compaction; real Chrome Accessibility coverage and qualified coaching behavior remain
-acceptance blockers.
+Run the [browser screen-text signed-app smoke](./build-and-run.md#browser-screen-text-validation) in a
+development bundle: opt into Chrome text while stopped, observe a long page across scrolling, verify
+exact-window matching with two same-sized Chrome windows and docked DevTools, and compare a normal
+page with a virtualized editor and diagram. Then deny Accessibility and switch apps to verify OCR
+still accompanies every active-window capture. Offline tests cover dual-source routing, secure-subtree
+exclusion, bounded extraction, editor priority, and window selection; real Chrome coverage remains an
+acceptance blocker.
 
 Run the provider-failure live smoke, which is the only way to see the refused-handshake and
 never-ready paths: with an obviously invalid OpenAI key, Start ends the session within about three
@@ -337,11 +337,9 @@ playback, remains in
 
 ## Built
 
-Bounded historical question/code observations are owned by
-[`ScreenObservationMemory`](../Sources/JarvisCore/Screen/ScreenObservationMemory.swift) and supplied by
-`CoachAttemptRunner` alongside current evidence. The model can retire superseded observations and
-recognize clear question boundaries through existing terminal actions. See
-[screen observation memory](./architecture.md#screen-observation-memory) for limits and uncertainty.
+Active-window captures always attach current-viewport OCR. With the optional Chrome Accessibility
+grant, the same capture also attaches bounded active-tab text that may include off-screen content.
+The sources are labeled separately and no dedicated historical screen-text cache is maintained.
 
 **Coaching skills and tools load on demand.** A session's capabilities are one value composed at
 Start (`CoachCapabilities`), and each tool carries its own usage guidance. Prep-notes search is a
@@ -406,7 +404,7 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
   and skills, composed once at Start), and `Tools/` (one file per coach tool, holding its name, description, schema, guidance, and result text).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-facing screen port and the pure, Foundation-only capture logic: the `ScreenCapturing` contract, the `ScreenSnapshot` model, front-window selection over window-server candidates, and reading-order OCR layout (`ScreenCapturing`, `ScreenSnapshot`, `FrontWindowSelector`, `WindowCandidate`, `TextFragment`, `RecognizedTextLayout`). No process or file I/O; the kernel dependency guard rejects `Process`/`FileManager` here.
-- `Sources/JarvisScreenCapture/` — the OS-bound screen-capture adapter behind that port ([lean-coaching-core.md → Phase 4 contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)): `ScreenCaptureRunner` owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory — it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for — and `ScreenCaptureCLI` shoots the display frozen into the attempt's `SessionPlan` revision, or the main display. Depends inward on `JarvisCore`; composed by `WindowScopedScreenCapture` in `JarvisApp`; tested headlessly in `JarvisScreenCaptureTests`.
+- `Sources/JarvisScreenCapture/` — the OS-bound screen-capture adapter behind that port ([lean-coaching-core.md → Phase 4 contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)): `ScreenCaptureRunner` owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory — it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for — `ScreenCaptureCLI` shoots the display frozen into the attempt's `SessionPlan` revision, and the browser reader combines bounded Accessibility text with current-window OCR. Depends inward on `JarvisCore`; composed by `WindowScopedScreenCapture` in `JarvisApp`; tested headlessly in `JarvisScreenCaptureTests`.
 - `Sources/JarvisCore/Overlay/` — the enabled output port: overlay text model, length-proportional timing, and fan-out (`OverlayRendering`, `OverlayTiming`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — the control plane: config, owner-only secrets, transcription/brain/screen/overlay preferences, the immutable `SessionPlan` revision a coaching attempt runs against so no turn reads storage, and the reader for the bundled coaching skills (`Config`, `Secrets`, `Credential`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`, `OverlayAppearance`, `SessionPlan`, `Skill`, `SkillCatalog`; skill content in `Sources/JarvisCore/Resources/Skills/<name>/SKILL.md`, behavior in [architecture.md → Capabilities](./architecture.md#capabilities)). The kernel dependency guard rejects `UserDefaults`, every preference store, and `SecretStore` inside the kernel — `Config/` itself is excluded from that guard, which is why `SkillCatalog`'s file I/O lives here rather than in `Coach/`.
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).

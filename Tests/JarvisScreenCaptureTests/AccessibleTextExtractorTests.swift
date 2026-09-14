@@ -20,7 +20,7 @@ import Testing
         #expect(!result.truncated)
     }
 
-    @Test func removesAdjacentDuplicateLeavesWithoutMergingSeparateOccurrences() {
+    @Test func preservesRepeatedLines() {
         let root = AccessibilityNode(role: "AXWebArea", children: [
             .init(role: "AXStaticText", text: "Constraints"),
             .init(role: "AXStaticText", text: "Constraints"),
@@ -30,7 +30,48 @@ import Testing
 
         let result = AccessibleTextExtractor().extract(root)
 
-        #expect(result.text == "Constraints\n0 <= n\nConstraints")
+        #expect(result.text == "Constraints\nConstraints\n0 <= n\nConstraints")
+    }
+
+    @Test func joinsInlineTextWithinSemanticBlock() {
+        let root = AccessibilityNode(role: "AXWebArea", children: [
+            .init(role: "AXHeading", children: [
+                .init(role: "AXStaticText", text: "Calculate"),
+                .init(role: "AXStaticText", text: "Total"),
+            ]),
+            .init(role: "AXParagraph", children: [
+                .init(role: "AXStaticText", text: "Return"),
+                .init(role: "AXStaticText", text: "quantity × price."),
+            ]),
+        ])
+
+        let result = AccessibleTextExtractor().extract(root)
+
+        #expect(result.text == "Calculate Total\nReturn quantity × price.")
+    }
+
+    @Test func editorTextPrecedesPageChromeWithinByteLimit() {
+        let root = AccessibilityNode(role: "AXWebArea", children: [
+            .init(role: "AXNavigation", children: [
+                .init(role: "AXStaticText", text: "A very long navigation label"),
+            ]),
+            .init(role: "AXTextArea", text: "guard quantity >= 0"),
+        ])
+
+        let result = AccessibleTextExtractor(byteLimit: 19).extract(root)
+
+        #expect(result.text == "guard quantity >= 0")
+        #expect(result.truncated)
+    }
+
+    @Test func editorValueDoesNotRepeatMirroredDescendants() {
+        let root = AccessibilityNode(role: "AXWebArea", children: [
+            .init(role: "AXTextArea", text: "let total = quantity * price", children: [
+                .init(role: "AXStaticText", text: "let total = quantity * price"),
+            ]),
+        ])
+
+        #expect(AccessibleTextExtractor().extract(root).text == "let total = quantity * price")
     }
 
     @Test func byteLimitClipsAtUnicodeScalarAndDisclosesLoss() {

@@ -10,7 +10,7 @@ import Testing
     }
 
     /// Observation masking: no screenshot survives commit as pixels — each becomes a text stub so it
-    /// stops being re-billed on every later request (the OCR tool-result text carries what the model
+    /// stops being re-billed on every later request (the text evidence carries what the model
     /// reads; a fresh look is always one capture_screen away).
     @Test func imagesBecomeStubsAtCommit() {
         let h = CoachHistory()
@@ -25,10 +25,10 @@ import Testing
         #expect(!snap.contains { ($0.text ?? "").contains("capture_screen") })
     }
 
-    /// A new capture's OCR supersedes every earlier dump: older blocks collapse to a one-line stub
-    /// (stale screen text misleads and re-bills), while text before the block and the newest OCR
+    /// A new capture supersedes every earlier screen-text dump: older blocks collapse to a one-line
+    /// stub (stale screen text misleads and re-bills), while text before the block and the newest evidence
     /// stay verbatim.
-    @Test func newCaptureCollapsesSupersededOCR() {
+    @Test func newCaptureCollapsesSupersededScreenText() {
         let ocr = { (body: String) in "\(JarvisPrompts.Coach.screenTextHeader)\n\(body)" }
         let h = CoachHistory()
         h.commit([.user("turn 1"),
@@ -50,9 +50,9 @@ import Testing
         #expect(h.snapshot().contains { $0.toolCallId == "c1" })     // tool-result pairing intact
     }
 
-    /// A single tool loop may capture more than once; only the turn's own newest OCR survives
+    /// A single tool loop may capture more than once; only the turn's newest text evidence survives
     /// verbatim — the earlier same-turn capture is as stale as any committed one.
-    @Test func multiCaptureTurnKeepsOnlyItsNewestOCR() {
+    @Test func multiCaptureTurnKeepsOnlyItsNewestScreenText() {
         let ocr = { (body: String) in "\(JarvisPrompts.Coach.screenTextHeader)\n\(body)" }
         let h = CoachHistory()
         h.commit([.user("turn"),
@@ -212,16 +212,16 @@ import Testing
     /// and history left untouched; the next completed attempt compacts from a fresh prefix.
     @Test func compactRejectsASummaryWrittenAgainstSupersededScreenText() {
         let h = CoachHistory()
-        let ocr = JarvisPrompts.Coach.screenText(ScreenTextEvidence(
+        let ocr = JarvisPrompts.Coach.screenText([ScreenTextEvidence(
             text: "int hl = countHeight(root.left);",
             source: .onDeviceOCR,
-            coverage: .currentViewport))
+            coverage: .currentViewport)])
         h.commit([.init(role: .tool, text: ocr, toolCallId: "c1"), .user("first")])
         let stale = h.compactionPrefix()!
 
         // A newer capture lands while the summary is still being written.
-        h.commit([.init(role: .tool, text: JarvisPrompts.Coach.screenText(ScreenTextEvidence(
-            text: "fixed line", source: .onDeviceOCR, coverage: .currentViewport)),
+        h.commit([.init(role: .tool, text: JarvisPrompts.Coach.screenText([ScreenTextEvidence(
+            text: "fixed line", source: .onDeviceOCR, coverage: .currentViewport)]),
                         toolCallId: "c2")])
 
         #expect(!h.compact(prefixCount: stale.count, summary: "old screen said hl", revision: stale.revision))

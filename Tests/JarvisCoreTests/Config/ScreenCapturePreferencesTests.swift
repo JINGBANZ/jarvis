@@ -85,4 +85,20 @@ import Foundation
         ScreenCapturePreferences(defaults: d).browserTextEnabled = true
         #expect(ScreenCapturePreferences(defaults: d).browserTextEnabled)
     }
+
+    @Test func revokedBrowserTextAvailabilityClearsPersistedOptIn() {
+        let preferences = ScreenCapturePreferences(defaults: freshDefaults())
+        preferences.browserTextEnabled = true
+
+        #expect(preferences.reconcileBrowserTextAvailability(isAvailable: false))
+        #expect(!preferences.browserTextEnabled)
+    }
+
+    @Test func availableBrowserTextPreservesPersistedOptIn() {
+        let preferences = ScreenCapturePreferences(defaults: freshDefaults())
+        preferences.browserTextEnabled = true
+
+        #expect(!preferences.reconcileBrowserTextAvailability(isAvailable: true))
+        #expect(preferences.browserTextEnabled)
+    }
 }

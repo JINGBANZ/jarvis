@@ -101,8 +101,8 @@ private struct ReviewScreen: ScreenCapturing {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
         succeeds ? ScreenSnapshot(
             imageBase64: "fresh-image",
-            textEvidence: ScreenTextEvidence(
-                text: "fresh-ocr", source: .onDeviceOCR, coverage: .currentViewport)) : nil
+            textEvidence: [ScreenTextEvidence(
+                text: "fresh-ocr", source: .onDeviceOCR, coverage: .currentViewport)]) : nil
     }
     func cancelCapture() {}
 }

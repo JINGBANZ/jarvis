@@ -60,6 +60,15 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Defaults.Screen.browserTextEnabledKey) }
     }
 
+    /// Clears an opt-in that the system can no longer honor, such as after Accessibility access
+    /// is revoked in System Settings. Returns whether the persisted setting changed.
+    @discardableResult
+    public func reconcileBrowserTextAvailability(isAvailable: Bool) -> Bool {
+        guard browserTextEnabled, !isAvailable else { return false }
+        browserTextEnabled = false
+        return true
+    }
+
     /// The display a capture must explicitly target (`screencapture -D`), or nil when a plain
     /// capture — which shoots the main display — is right: active-window scope, where fallbacks
     /// must not be steered by an index left over from an old entire-display selection, and

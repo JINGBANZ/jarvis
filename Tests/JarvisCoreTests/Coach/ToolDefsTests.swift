@@ -49,21 +49,28 @@ import Testing
     }
 
     @Test func capturedTextLabelsSourceCoverageAndUncertainty() {
-        let browser = JarvisPrompts.Coach.captureResult(textEvidence: ScreenTextEvidence(
+        let browser = JarvisPrompts.Coach.captureResult(textEvidence: [ScreenTextEvidence(
             text: "earlier requirement",
             source: .browserAccessibility,
             coverage: .activeTabAccessibilityTree,
-            truncated: true))
+            truncated: true)])
         #expect(browser.contains("Chrome Accessibility"))
         #expect(browser.contains("may include off-screen text"))
-        #expect(browser.contains("was truncated"))
+        #expect(browser.contains("truncated"))
         #expect(browser.contains("earlier requirement"))
 
-        let ocr = JarvisPrompts.Coach.captureResult(textEvidence: ScreenTextEvidence(
-            text: "visible code", source: .onDeviceOCR, coverage: .currentViewport))
-        #expect(ocr.contains("on-device OCR"))
+        let ocr = JarvisPrompts.Coach.captureResult(textEvidence: [ScreenTextEvidence(
+            text: "visible code", source: .onDeviceOCR, coverage: .currentViewport)])
+        #expect(ocr.contains("On-device OCR"))
         #expect(ocr.contains("current screenshot viewport"))
-        #expect(ocr.contains("screenshot image is ground truth"))
+    }
+
+    @Test func captureToolOwnsScreenEvidenceGuidanceAndSchemasHaveNoMemoryMaintenance() {
+        #expect(captureScreenTool.guidance.contains("Use both sources together"))
+        #expect(captureScreenTool.guidance.contains("screenshot as ground truth"))
+        #expect(!JarvisPrompts.Coach.system.contains("Accessibility text may extend beyond"))
+        #expect(!speakTool.parametersJSON.contains("screenMemory"))
+        #expect(!staySilentTool.parametersJSON.contains("screenMemory"))
     }
 
     @Test func coachPromptRequiresMissingVisibleContextBeforeSpeaking() {
@@ -78,9 +85,9 @@ import Testing
     /// "correcting" an already-correct line it had misread from OCR noise. OCR-only sightings turn
     /// into a double-check tip (the overlay is one-way; there's no dialogue to "ask" in).
     @Test func coachPromptGroundsLineLevelClaimsInTheImage() {
-        #expect(JarvisPrompts.Coach.system.contains("the screenshot image is ground truth"))
-        #expect(JarvisPrompts.Coach.system.contains("verify it in the image"))
-        #expect(JarvisPrompts.Coach.system.contains("frame the tip as something to double-check"))
+        #expect(captureScreenTool.guidance.contains("screenshot as ground truth"))
+        #expect(captureScreenTool.guidance.contains("verify it in the image"))
+        #expect(captureScreenTool.guidance.contains("frame the tip as something to double-check"))
     }
 
     @Test func coachPromptTreatsFreshCaptureAsSatisfyingScreenGate() {

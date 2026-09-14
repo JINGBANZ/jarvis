@@ -289,55 +289,38 @@ changes host networking, or runs in the normal build/test gate.
 See [transcription-benchmark.md](./transcription-benchmark.md) for commands, architecture, scoring,
 acceptance, privacy, result interpretation, and when each mode should be run.
 
-## Screen memory validation
+## Browser screen-text validation
 
-`CoachDriverScreenMemoryTests` exercises scrolling, current-image-only replay, silent captures,
-capture failure, question reset across provider recovery, incomplete-response rejection, session
-isolation and compaction. `ScreenObservationMemoryTests` covers byte/count bounds, Unicode clipping,
-origin ambiguity, deduplication, and strict maintenance decoding.
+Focused tests in `JarvisScreenCaptureTests` cover dual Accessibility/OCR routing, secure-subtree
+exclusion, bounded Unicode-safe extraction, repeated lines, inline text blocks, editor priority, and
+selection among same-sized Chrome windows and multiple web areas. Fixture trees do not validate real
+Chrome behavior, Vision OCR fidelity, or macOS permission transitions.
 
-An opt-in synthetic model check uses the production Claude adapter, coach prompt and tool schemas.
-It sends fixture typed screen evidence, without a live screenshot or microphone, and prints replies for semantic
-review. Set `JARVIS_SCREEN_MEMORY_EVAL=1` and `JARVIS_EVAL_CLAUDE` to an absolute path to an installed,
-signed-in Claude executable, then run `./scripts/run-tests.sh --filter ScreenMemoryModelEvaluation`.
-This consumes subscription inference and is disabled in the normal Gate. It checks a split question,
-hidden implementation, an earlier possible bug, a visible fix, and a different question; a small
-synthetic run is directional evidence rather than an OCR or model-accuracy guarantee.
-
-Accessibility coverage and OCR fidelity are separate acceptance checks: fixture strings bypass the
-real Chrome tree, JPEG capture, and Vision. Use a long ordinary Chrome article or problem page,
-multiple Chrome windows, a virtualized editor, and a page with a diagram. Compare the semantic text
-against both visible and offscreen content, verify the exact foreground window is selected, and
-confirm lazy, virtualized, canvas, and image content is treated as absent rather than invented.
-Disable or deny Accessibility and repeat with OCR to verify current-viewport fallback. Keep any
-captured evidence only in an owner-only workspace-local `.jarvis/` session directory.
-
-Historical observations have no image for token verification. Qualified model output is a behavioral
-check, not a deterministic guarantee. Exact-text deduplication bounds storage but does not establish
-low redundancy for edited captures; one observation can consume the entire text budget.
-The current-observation reference encoding also changes when the current capture changes. Evaluate
-these limits alongside Accessibility coverage before treating retained text as reliable interview evidence.
+The capture behavior and source limitations are canonical in
+[`settings-window.md#capture-scope`](./settings-window.md#capture-scope). Local artifacts and
+provider-retention boundaries are canonical in [`sandbox.md`](./sandbox.md).
 
 For the signed-app smoke, use Active window capture and Chrome with **Read Chrome page text** enabled:
 
-- Capture the top of a question with a distinctive constraint; scroll through two later sections and
-  request a hint. Confirm the answer accounts for the earlier constraint.
-- Capture an initialization and helper, scroll below them, then request a hint. Confirm Jarvis does
-  not call the hidden implementation absent. Show a test failure that implicates an earlier line;
-  confirm any diagnosis based on historical text is qualified in the short hint itself.
-- Revisit and fix that line. Confirm later tips prefer the new version. Switch tabs or files without
-  changing the problem and confirm Jarvis neither invents a merged file nor assumes a new question.
-- Clearly move to an unrelated question; confirm old question text leaves subsequent model requests.
-  Stop and Start again and confirm no prior-session screen memory is supplied.
-- Open two Chrome windows and verify the captured screenshot and semantic text come from the same
-  foreground window. Confirm capture does not focus, scroll, or otherwise change either page.
-- Show a diagram and confirm the screenshot supplies visual information missing from Accessibility.
-  Repeat with a virtualized editor and verify missing offscreen lines are not treated as present.
-- Put text in a password field and confirm it does not appear in model-facing traffic.
-- Revoke Accessibility, switch to another app, and repeat a failed capture and provider-recovery
-  attempt. Confirm OCR is current-viewport-only, available older semantic text remains historical
-  context, and no growing image or browser-text archive is created. Entire-display scope has no text
-  evidence and cannot contribute to this memory.
+- On a long ordinary article or problem page, capture while scrolled near the bottom and confirm the
+  Accessibility block contains useful off-screen text while the OCR block matches the viewport.
+- Open a virtualized editor and confirm current visible code appears through OCR even when the
+  Accessibility tree exposes only a small editor region.
+- Dock DevTools, then capture the page and confirm semantic text comes from the page web area. Repeat
+  with two same-sized Chrome windows and confirm the screenshot and text use the focused window.
+- Show a diagram and confirm the screenshot supplies visual information absent from Accessibility.
+  Put text in a password field and confirm it does not appear in model-facing traffic.
+- Deny or revoke Accessibility and confirm the setting remains Off while active-window OCR continues.
+  Enable it while stopped, start a session, then turn it Off and confirm the next attempt omits the
+  Accessibility block without presenting privacy UI.
+- Confirm capture does not focus, scroll, mutate, or otherwise change Chrome. Normal bounded session
+  artifacts may include `shot-N.jpg` and `brain-traffic.jsonl`, whose existing wire-audit records can
+  contain current browser text. Confirm Jarvis creates no rolling image archive or separate
+  browser-text archive and never replays historical screenshots.
+
+Accessibility is not complete HTML or a complete editor buffer. Lazy, virtualized, canvas, image, and
+hidden content may be absent; OCR is limited to visible pixels and may misread tokens. Jarvis sends
+both current sources when available and keeps no separate historical screen-text cache.
 
 ## Live smoke checklist
 

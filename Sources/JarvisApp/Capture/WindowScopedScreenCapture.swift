@@ -4,7 +4,7 @@ import JarvisCore
 import JarvisScreenCapture
 
 /// Captures just the frontmost app window (`screencapture -l`) when the capture scope is
-/// `.activeWindow`, with browser Accessibility text preferred over an on-device OCR fallback. Falls back
+/// `.activeWindow`, with on-device OCR and optional browser Accessibility text. Falls back
 /// to a full-display capture (`ScreenCaptureCLI` — the plan's chosen display in `.entireDisplay`
 /// scope, the main display otherwise) when no eligible window is on screen or the window capture
 /// command fails. A cleanup-integrity failure returns without fallback. Full-display captures skip
@@ -32,6 +32,13 @@ struct WindowScopedScreenCapture: ScreenCapturing {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
         if selection.scope == .activeWindow,   // frozen with the attempt, like the display index
            let window = Self.frontWindow() {
+            // Read the page identity around the JPEG operation. The resolver accepts browser text
+            // only while this exact document remains active, so a tab switch cannot pair text from
+            // a new page with pixels from the old one.
+            let browserDocumentIdentity = selection.browserTextEnabled
+                ? textResolver.browserDocumentIdentity(for: window)
+                : nil
+            guard !Task.isCancelled else { return nil }
             let outcome = runner.capture(
                 arguments: ["-x", "-o", "-t", "jpg", "-l", "\(window.windowID)"])
             switch outcome {
@@ -41,8 +48,7 @@ struct WindowScopedScreenCapture: ScreenCapturing {
                     textEvidence: textResolver.resolve(
                         jpeg: jpeg,
                         window: window,
-                        browserTextEnabled: selection.browserTextEnabled),
-                    sourceID: "window:\(window.windowID)")
+                        browserDocumentIdentity: browserDocumentIdentity))
             case .cleanupFailed, .cancelled:
                 return nil
             case .failed:

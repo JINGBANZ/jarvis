@@ -471,13 +471,17 @@ user turns it on while Jarvis is stopped and grants the optional macOS Accessibi
 chosen for the screenshot. It extracts bounded text from that window's active web area, excludes
 secure fields, and may include content above or below the viewport. It does not read raw HTML,
 background tabs, browsing history, cookies, or hidden form values, and it never scrolls or changes
-the page. Accessibility trees remain incomplete for lazy or virtualized content, editors such as
-Monaco, canvas, images, and diagrams.
+the page. Jarvis checks the active document identity around JPEG capture and discards Accessibility
+text if the tab changes, leaving OCR as the matching evidence. Accessibility trees remain incomplete
+for lazy or virtualized content, editors such as
+Monaco, canvas, images, and diagrams. The switch remains Off unless permission is live. Enabling may
+request permission only while stopped; turning it Off is available during a session and applies to
+the next coaching attempt.
 
-When browser text is disabled, unavailable, empty, or unsupported, `ScreenTextRecognizer` uses
-Apple Vision OCR (`.accurate`, language correction off) on the current screenshot. OCR runs only as
-that fallback and is marked as current-viewport, fallible evidence. It is sent with the fresh image
-but is not retained in screen memory. The screenshot stays ground truth for diagrams and layout.
+`ScreenTextRecognizer` always runs Apple Vision OCR (`.accurate`, language correction off) on an
+active-window screenshot. OCR is marked as current-viewport, fallible evidence and accompanies
+Accessibility text when that source is available. The screenshot stays ground truth for diagrams,
+layout, and visible exact-token claims. Screen evidence has no separate historical cache.
 Nothing eligible on screen falls back to a full shot of the **main display**; fallback and
 entire-display captures omit text evidence because a whole display would include unrelated clutter.
 
@@ -487,7 +491,7 @@ first, matching that order) and refresh when displays are plugged or unplugged w
 visible. The chosen display persists as the 1-based `-D` index alongside the scope.
 
 The scope, display, and browser-text choice are frozen in the session plan used by an attempt. A
-change while stopped applies to the next session plan. Reads are validated: an unrecognized
+change applies at the next attempt boundary. Reads are validated: an unrecognized
 stored scope falls back to the default, a stored index < 1 clamps to the main display, and if the
 chosen display no longer exists (the monitor was unplugged since it was chosen) `screencapture -D`
 fails and `ScreenCaptureCLI` reshoots the main display rather than dropping the screenshot.
@@ -524,7 +528,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture scope and optional Chrome text controls |
 | `Sources/JarvisApp/Capture/BrowserAccessibilityPermission.swift` | User-initiated Accessibility grant and status |
 | `Sources/JarvisScreenCapture/BrowserAccessibilityReader.swift` | Bounded, read-only active-tab semantic extraction |
-| `Sources/JarvisScreenCapture/ScreenTextResolver.swift` | Accessibility-first selection with current-view OCR fallback |
+| `Sources/JarvisScreenCapture/ScreenTextResolver.swift` | Combines optional Accessibility text with current-view OCR |
 | `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
@@ -537,7 +541,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + route validation |
 | `Sources/JarvisCore/Coach/CoachDriver.swift` | Between-attempt route application and attempt orchestration |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
-| `Sources/JarvisScreenCapture/ScreenCaptureCLI.swift` | `ScreenCaptureCLI` — reads the selection at capture time, falls back to the main display |
+| `Sources/JarvisScreenCapture/ScreenCaptureCLI.swift` | Executes the attempt's frozen `SessionPlan` capture selection and handles main-display fallback |
 | `Sources/JarvisCore/Overlay/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |
 | `Sources/JarvisCore/Config/TranscriptionPreferences.swift` | Persisted transcription selection + validation |
 | `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the caption + box |

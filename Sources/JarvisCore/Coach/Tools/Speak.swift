@@ -28,12 +28,8 @@ public let speakTool = ToolDef(
                 "placement":{"type":"string"},
                 "code":{"type":"string"},
                 "highlightedLines":{"type":"array","items":{"type":"integer"}}
-            },"required":["language","placement","code","highlightedLines"],"additionalProperties":false},
-            "screenMemory":{"type":["object","null"],"properties":{
-                "newQuestion":{"type":"boolean"},
-                "obsoleteObservationIDs":{"type":"array","items":{"type":"integer"}}
-            },"required":["newQuestion","obsoleteObservationIDs"],"additionalProperties":false}
-        },"required":["lines","mermaid","explanation","codeSnippet","screenMemory"],"additionalProperties":false}
+            },"required":["language","placement","code","highlightedLines"],"additionalProperties":false}
+        },"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}
         """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
     guidance: """
         # Tip style

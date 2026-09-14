@@ -102,7 +102,7 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
             imageBase64: payload,
             textEvidence: recognizedText.map {
                 ScreenTextEvidence(text: $0, source: .onDeviceOCR, coverage: .currentViewport)
-            })
+            }.map { [$0] } ?? [])
     }
     func cancelCapture() {}
 }

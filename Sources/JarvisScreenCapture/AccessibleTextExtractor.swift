@@ -25,8 +25,6 @@ struct AccessibleTextExtractor: Sendable {
         var byteCount = 0
         var visited = 0
         var truncated = false
-        var lastLine: String?
-
         while let next = stack.popLast() {
             guard visited < nodeLimit else {
                 truncated = true
@@ -36,34 +34,73 @@ struct AccessibleTextExtractor: Sendable {
 
             if next.node.isSecure || next.node.role == "AXSecureTextField" { continue }
 
-            if let raw = next.node.text {
-                let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !line.isEmpty, line != lastLine {
-                    let separatorBytes = lines.isEmpty ? 0 : 1
-                    let available = max(0, byteLimit - byteCount - separatorBytes)
-                    let bounded = Self.prefix(line, bytes: available)
-                    if !bounded.isEmpty {
-                        lines.append(bounded)
-                        byteCount += separatorBytes + bounded.utf8.count
-                        lastLine = bounded
-                    }
-                    if bounded.utf8.count < line.utf8.count {
-                        truncated = true
-                        break
-                    }
+            let block = Self.blockText(next.node)
+            if let block {
+                let separatorBytes = lines.isEmpty ? 0 : 1
+                let available = max(0, byteLimit - byteCount - separatorBytes)
+                let bounded = Self.prefix(block, bytes: available)
+                if !bounded.isEmpty {
+                    lines.append(bounded)
+                    byteCount += separatorBytes + bounded.utf8.count
                 }
+                if bounded.utf8.count < block.utf8.count {
+                    truncated = true
+                    break
+                }
+                if Self.blockRoles.contains(next.node.role) { continue }
             }
 
             if next.depth >= depthLimit {
                 if !next.node.children.isEmpty { truncated = true }
                 continue
             }
-            for child in next.node.children.reversed() {
-                stack.append((child, next.depth + 1))
+            let ordered = next.node.children.enumerated().sorted { left, right in
+                let leftPriority = Self.containsEditor(left.element)
+                let rightPriority = Self.containsEditor(right.element)
+                return leftPriority == rightPriority ? left.offset < right.offset : leftPriority
+            }
+            for child in ordered.reversed() {
+                stack.append((child.element, next.depth + 1))
             }
         }
 
         return AccessibleTextExtraction(text: lines.joined(separator: "\n"), truncated: truncated)
+    }
+
+    private static let blockRoles: Set<String> = [
+        "AXHeading", "AXParagraph", "AXTextArea", "AXTextField", "AXListItem",
+    ]
+
+    private static let editorRoles: Set<String> = ["AXTextArea", "AXTextField"]
+
+    private static func containsEditor(_ node: AccessibilityNode) -> Bool {
+        editorRoles.contains(node.role) || node.children.contains(where: containsEditor)
+    }
+
+    private static func blockText(_ node: AccessibilityNode) -> String? {
+        if blockRoles.contains(node.role) {
+            if editorRoles.contains(node.role), let raw = node.text {
+                let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty { return text }
+            }
+            var pieces: [String] = []
+            collectText(node, into: &pieces)
+            let text = pieces.joined(separator: " ")
+            return text.isEmpty ? nil : text
+        }
+        guard let raw = node.text else { return nil }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private static func collectText(_ node: AccessibilityNode, into pieces: inout [String]) {
+        if let raw = node.text {
+            let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !text.isEmpty { pieces.append(text) }
+        }
+        for child in node.children where !child.isSecure && child.role != "AXSecureTextField" {
+            collectText(child, into: &pieces)
+        }
     }
 
     private static func prefix(_ text: String, bytes limit: Int) -> String {

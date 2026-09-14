@@ -26,9 +26,4 @@ public struct ScreenTextEvidence: Sendable, Equatable {
         self.coverage = coverage
         self.truncated = truncated
     }
-
-    /// OCR cannot support exact historical claims after its source image leaves the request.
-    public var isRetainable: Bool {
-        source == .browserAccessibility && coverage == .activeTabAccessibilityTree
-    }
 }
