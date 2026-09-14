@@ -212,7 +212,9 @@ should show one "loaded the search_prep_notes tool" row and a tip built on the n
 Prep notes search off in Settings should leave a Start carrying neither the tool nor its catalog
 line. The model's own choice to load is covered on all three brains by the opt-in
 `CoachToolLoadingLiveTests` (`JARVIS_LIVE_CAPABILITY_PROVIDER`); what is left is the app path around
-it, and a System Design session on a CLI brain rendering a diagram.
+it, a System Design session on a CLI brain rendering a diagram, and the two fresh-session **⌥⌘J**
+presses in [build-and-run.md](./build-and-run.md#live-smoke-checklist) on OpenAI and one CLI brain,
+where the first press should load its skill before the tip and the second should take one round trip.
 
 Run the [evaluation source smoke](./build-and-run.md#live-smoke-checklist) in a development bundle
 and an installed release: source/version selection, per-run fetch and discard, actionable failures,
@@ -330,7 +332,9 @@ Start (`CoachCapabilities`), and each tool carries its own usage guidance. Prep-
 deferred tool and each bundled skill a catalog entry: the prompt lists them one line each, and the
 model calls `load_tool` or `load_skill` to receive the schema and guidance, or the skill's body, as
 a tool result inside the turn that needs it. Settings → Brain → Capabilities switches any of them
-off for the next Start; screen capture, speak, and stay silent are always on. See
+off for the next Start; screen capture, speak, and stay silent are always on. The coaching shortcuts
+run the same loop: a press may load and search before its tip, never stays silent or captures
+again, and is forced to speak at the response cap (`CoachAttemptRunner`). See
 [architecture.md → Capabilities](./architecture.md#capabilities).
 
 **Show code with hints**, configured under Overlay Box with independent live code text-size and

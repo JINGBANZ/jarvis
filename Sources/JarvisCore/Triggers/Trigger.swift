@@ -5,7 +5,7 @@ import Foundation
 public enum TriggerReason: Sendable, Equatable {
     case turnEnd                              // the transcriber finalized an utterance
     case silence(secondsQuiet: TimeInterval)  // no speech for the current backoff interval
-    case manualHint                           // capture + force a hint, one trip
+    case manualHint                           // capture + a hint the attempt always ends in
     case manualExplanation                    // capture + explain the current confusion
 
     case manualCode                           // capture + next logical snippet, hotkey only

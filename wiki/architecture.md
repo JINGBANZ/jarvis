@@ -210,10 +210,24 @@ the longest sensible chain, which is load a skill, load a tool, search, capture,
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
 capture, and a turn cannot end without one of the other two. Neither loader has one either, because
-each is composed only while its catalog has something left in it. The manual-hint shortcut forces
-`speak` on every response and therefore cannot load: a hotkey tip before the session's first
-automatic load coaches without a skill. See [settings-window.md](./settings-window.md) for the
-user-facing card.
+each is composed only while its catalog has something left in it. See
+[settings-window.md](./settings-window.md) for the user-facing card.
+
+A [coaching shortcut](#on-demand-coaching-shortcuts) press runs this same loop, so even the first press
+of a session can load the skill or tool its question needs and search prep notes, and its loads commit
+when it speaks, like any attempt's. What a press may call is narrowed on each response instead: every
+callable tool except `stay_silent` and `capture_screen`, since its screen is already in the first
+request, and the response at the cap is forced to `speak`. A press therefore always ends in a tip and
+never runs out of responses. When `speak` is the only tool left, the request is the plain forced
+`speak`, one round trip. On OpenAI the narrowing is an `allowed_tools` choice over the unchanged
+declared array, which keeps the cached prefix of automatic attempts (`OpenAIBrainClient.encodeBody`).
+A CLI target is told its set in the turn trailer while its baked instructions stay those of a required
+choice, and the client enforces the set itself: on every response of a press, a reply that calls
+outside it or cannot be parsed has its prose spoken, because failing that response would leave the
+user waiting on a retry. The accepted cost is a round trip for each first load and each search, and
+the OpenAI client resends the whole input, screenshot included, on each one. One load followed by a
+forced `speak` was rejected as too narrow: the shortcut is the fallback for a need the automatic path
+missed, so it should not be the less capable of the two.
 
 ### Private architecture hints
 
@@ -224,7 +238,8 @@ loop sends. Prompt text alone governs it: the tip style says to leave it null un
 asks for a graph, the field's own description says the same, and the system-design skill is what
 asks. The runtime renders any graph it can parse and classifies nothing — a gate on a session type
 is exactly what the capability model removed, and a stray diagram in a session that loaded no skill
-is a prompt fix. Keeping it on `speak` also makes the manual-hint shortcut work in one response.
+is a prompt fix. Keeping it on `speak` also means a diagram arrives with its tip and never costs a
+response of its own.
 
 [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) accepts a bounded Mermaid subset:
 rectangular labeled boxes and directed connections. The parser owns the precise grammar and limits;
@@ -264,8 +279,10 @@ a separate classifier, timer, or model request.
 Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
 **⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
 clarification of the relevant gap, which may span several earlier hints; **Show code** (default
-**⌥⌘K**) requests the next small coding component. All snapshot a fresh screen,
-include the available conversation, and force `speak` in one brain round trip. If capture fails, the
+**⌥⌘K**) requests the next small coding component. All snapshot a fresh screen into the first
+request, include the available conversation, and always end in a tip: a press may load a skill or
+tool and search prep notes first, but never stays silent or captures again (see
+[Capabilities](#capabilities)). If capture fails, the
 request identifies the missing screen and uses available context without inventing visible details.
 They share the ordinary single-flight coach loop and provider route. Natural wakes preserve pending
 manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass unsettled
@@ -521,7 +538,7 @@ failed conversation plus every newer finalized transcript item. If nothing new a
 attempt uses the same pending conversation. Every automatic attempt waits while either transcription
 stream owns unfinished work so it does not cross an earlier utterance that is about to finalize. An
 explicit coaching shortcut interrupts that postponement even after the wait begins and upgrades the same
-pending-work attempt to a forced hint; ordinary natural triggers remain parked until transcription
+pending-work attempt to a shortcut attempt, which always ends in a hint; ordinary natural triggers remain parked until transcription
 settles. `TriggerReason` remains the model-facing
 reason that made coaching useful (`turnEnd`, `silence`, `manualHint`, `manualExplanation`, or `manualCode`); pending work is scheduler
 state, not a fourth instruction to the model. An automatic attempt with no newer trigger reuses the

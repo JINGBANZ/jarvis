@@ -276,8 +276,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
             work.preparedManualReason = reason
         }
 
-        let toolChoice: ToolChoice =
-            reason.isManual ? .force(speakTool.name) : .required
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
@@ -325,6 +323,21 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // the runner checks below.
                 let loaded = alreadyLoaded.union(loadedThisAttempt)
                 let tools = capabilities.callable(loaded: loaded)
+                // A shortcut press joins the loop but must end in a visible hint: it may load and
+                // search, never stay silent or capture again (the screen went into its first
+                // request), and its last permitted response is forced to speak. With only speak
+                // left, that is the plain forced request a session with nothing to load sends.
+                let toolChoice: ToolChoice
+                if reason.isManual {
+                    let permitted = tools.map(\.name).filter {
+                        $0 != staySilentTool.name && $0 != captureScreenTool.name
+                    }
+                    toolChoice = iterations == maxToolIterations || permitted == [speakTool.name]
+                        ? .force(speakTool.name)
+                        : .allowed(permitted)
+                } else {
+                    toolChoice = .required
+                }
                 let response: BrainResponse
                 do {
                     let requestContext = CoachingRequestAttribution.context(
