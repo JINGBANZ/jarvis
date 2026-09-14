@@ -78,4 +78,11 @@ import Foundation
         p.displayIndex = 3
         #expect(p.explicitDisplay == nil)
     }
+
+    @Test func browserTextDefaultsOffAndRoundTripsThroughDefaults() {
+        let d = freshDefaults()
+        #expect(!ScreenCapturePreferences(defaults: d).browserTextEnabled)
+        ScreenCapturePreferences(defaults: d).browserTextEnabled = true
+        #expect(ScreenCapturePreferences(defaults: d).browserTextEnabled)
+    }
 }
