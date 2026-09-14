@@ -90,7 +90,11 @@ replacement socket replays the rest after a half-open failure. The scoped reconn
 that speech captured while that socket is unavailable returns after recovery. The brain can also run
 through a locally installed Claude Code or Codex CLI on the user's subscription; Brain offers both
 as route targets, while Connections reports their externally managed account readiness and owns the
-shared OpenAI API-key editor. Codex also remains available to the explicit agentic session
+shared OpenAI API-key editor. CLI discovery supports nvm installs and bundled Codex executables
+when launched from Finder; its search and failure behavior are defined in
+[Settings → Brain](./settings-window.md#brain) and implemented by
+[`AgentCLIDetector`](../Sources/JarvisBrainProviders/LocalAgent/AgentCLIDetector.swift).
+Codex also remains available to the explicit agentic session
 evaluator. The ordered provider route uses one primary
 plus a user-editable ordered fallback list, one target per coaching attempt, no failed-request replay
 inside the attempt, automatic pending-work attempts with the newest finalized transcript, the

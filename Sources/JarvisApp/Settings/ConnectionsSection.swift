@@ -151,7 +151,7 @@ final class ConnectionsSection: NSObject, SettingsSection {
                 continue
             }
             guard let cli = detectedCLIs[provider] else {
-                set(label, text: "Not installed", color: .secondaryLabelColor)
+                set(label, text: "Not found", color: .secondaryLabelColor)
                 continue
             }
             switch cli.authenticationStatus {

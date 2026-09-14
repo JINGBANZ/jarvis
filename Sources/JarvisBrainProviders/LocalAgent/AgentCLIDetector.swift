@@ -13,14 +13,19 @@ import JarvisCore
 public struct AgentCLIDetector: Sendable {
     private let home: URL
     private let pathVariable: String?
+    private let applicationDirectories: [URL]
     private let authStatusTimeout: TimeInterval
     private let temporaryDirectory: URL
 
     public init(home: URL = URL(fileURLWithPath: NSHomeDirectory()),
                 pathVariable: String? = ProcessInfo.processInfo.environment["PATH"],
                 authStatusTimeout: TimeInterval = 2,
-                temporaryDirectory: URL = FileManager.default.temporaryDirectory) {
+                temporaryDirectory: URL = FileManager.default.temporaryDirectory,
+                applicationDirectories: [URL]? = nil) {
         self.home = home
+        self.applicationDirectories = applicationDirectories ?? [
+            home.appendingPathComponent("Applications"), URL(fileURLWithPath: "/Applications"),
+        ]
         self.pathVariable = pathVariable
         self.authStatusTimeout = authStatusTimeout
         self.temporaryDirectory = temporaryDirectory
@@ -70,7 +75,7 @@ public struct AgentCLIDetector: Sendable {
     /// direct API, which has nothing to detect).
     public func detect(_ provider: BrainProvider) -> DetectedAgentCLI? {
         guard let name = provider.cliExecutableName else { return nil }
-        guard let url = firstExecutable(named: name) else { return nil }
+        guard let url = firstExecutable(named: name, provider: provider) else { return nil }
         return DetectedAgentCLI(
             provider: provider,
             executableURL: url,
@@ -94,19 +99,24 @@ public struct AgentCLIDetector: Sendable {
             home.appendingPathComponent(".bun/bin").path,
             home.appendingPathComponent(".npm-global/bin").path,
             home.appendingPathComponent(".cargo/bin").path,       // codex's rust install
-        ]
+        ] + nvmDirectories(home: home)
     }
 
     /// Stable $PATH entries first, then common install locations. Apps opened from a terminal inherit
     /// that terminal's PATH, which can contain short-lived launcher wrappers under the system temp
     /// directory. A long-running app must not retain one of those paths after its owner exits.
-    private func firstExecutable(named name: String) -> URL? {
+    private func firstExecutable(named name: String, provider: BrainProvider) -> URL? {
         let dirs = Self.stableSearchDirectories(
             pathVariable: pathVariable,
             home: home,
             temporaryDirectory: temporaryDirectory
         )
-        for dir in dirs where !dir.isEmpty {
+        let bundled = provider == .codexCLI ? applicationDirectories.flatMap { directory in
+            ["Codex.app", "ChatGPT.app"].map {
+                directory.appendingPathComponent("\($0)/Contents/Resources").path
+            }
+        } : []
+        for dir in dirs + bundled where !dir.isEmpty {
             let candidate = URL(fileURLWithPath: dir).appendingPathComponent(name)
             if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
         }

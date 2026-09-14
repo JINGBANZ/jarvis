@@ -246,7 +246,13 @@ locally installed **Claude Code** / **Codex CLI**. Claude uses a session-scoped 
 coaching on the user's existing Claude *subscription* instead of the key, and Codex likewise coaches
 through a session-scoped app-server on the user's ChatGPT subscription (`CLIBrainClient`; see
 [architecture.md](./architecture.md#local-cli-brain-providers)). Installed CLIs are auto-detected by `AgentCLIDetector`: binary
-discovery is a pure file probe over $PATH + the known install dirs, while Claude sign-in uses its
+discovery is a pure file probe over stable $PATH entries and common installation directories,
+including nvm's versioned Node installs. Explicit PATH selections win; nvm fallbacks are searched
+newest first. Codex also checks the Codex and ChatGPT app bundles in the user's and system
+Applications directories after standalone installs. Discovery never sources shell startup scripts,
+which could hang or present UI during live preflight. The selected executable's directory leads
+the child PATH for both status probes and runtime launches so adjacent interpreters remain usable.
+Claude sign-in uses its
 non-billing `auth status --json` command under a short timeout because account metadata can outlive
 an expired OAuth session. Codex keeps using its auth-file marker and a bounded capability probe.
 Settings runs these probes asynchronously and keeps local-provider controls selectable while the
@@ -433,7 +439,7 @@ claim that the account is healthy.
 
 Claude Code and Codex CLI keep authentication in their own tools. Connections runs the existing
 bounded `AgentCLIDetector` probes and reports **Signed in**, **Signed out**, **Sign-in unknown**, or
-**Not installed** without opening a login flow or storing another secret. The page's compact ready
+**Not found** without opening a login flow or storing another secret. The page's compact ready
 count includes every managed API key that is saved and confirmed signed-in local accounts.
 
 An OpenAI key is required only when OpenAI is selected for transcription or appears anywhere in the
@@ -512,7 +518,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
 | `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers |
-| `Sources/JarvisCore/Brain/Adapters/LocalAgent/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
+| `Sources/JarvisBrainProviders/LocalAgent/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
 | `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisEvaluation/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |
