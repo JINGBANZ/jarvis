@@ -182,10 +182,19 @@ private extension ScreenSnapshot {
 
     @Test func screenEvidenceBypassesLossyConversationCompaction() throws {
         var memory = ScreenObservationMemory()
-        memory.record(text: "All pairs must use distinct indices.", sourceID: nil, elapsedSeconds: 0)
+        memory.record(
+            evidence: ScreenTextEvidence(
+                text: "All pairs must use distinct indices.",
+                source: .browserAccessibility,
+                coverage: .activeTabAccessibilityTree),
+            sourceID: nil,
+            elapsedSeconds: 0)
         let history = CoachHistory()
         history.commit(CoachHistory.omittingScreenText([
-            .user(JarvisPrompts.Coach.recognizedText("All pairs must use distinct indices.")),
+            .user(JarvisPrompts.Coach.screenText(ScreenTextEvidence(
+                text: "All pairs must use distinct indices.",
+                source: .browserAccessibility,
+                coverage: .activeTabAccessibilityTree))),
             .user("Please give a hint."), .user("More conversation.")
         ]))
         let prefix = try #require(history.compactionPrefix())

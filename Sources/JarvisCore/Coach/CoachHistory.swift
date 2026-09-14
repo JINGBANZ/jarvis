@@ -57,8 +57,8 @@ public final class CoachHistory: @unchecked Sendable {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
         var turn = turn
-        let ocrHeader = JarvisPrompts.Coach.recognizedTextHeader
-        if let newest = turn.lastIndex(where: { $0.text?.contains(ocrHeader) == true }) {
+        let screenTextHeader = JarvisPrompts.Coach.screenTextHeader
+        if let newest = turn.lastIndex(where: { $0.text?.contains(screenTextHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededOCR)
             rewriteRevision &+= 1
             // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
@@ -76,12 +76,12 @@ public final class CoachHistory: @unchecked Sendable {
     /// Text before the block — e.g. a successful capture result — survives.
     private static func collapsingSupersededOCR(_ m: ChatMessage) -> ChatMessage {
         guard let text = m.text,
-              let header = text.range(of: JarvisPrompts.Coach.recognizedTextHeader)
+              let header = text.range(of: JarvisPrompts.Coach.screenTextHeader)
         else { return m }
         return ChatMessage(
             role: m.role,
             text: String(text[..<header.lowerBound])
-                + JarvisPrompts.Coach.supersededRecognizedTextStub,
+                + JarvisPrompts.Coach.supersededScreenTextStub,
             toolCallId: m.toolCallId
         )
     }
@@ -91,7 +91,7 @@ public final class CoachHistory: @unchecked Sendable {
     static func omittingScreenText(_ messages: [ChatMessage]) -> [ChatMessage] {
         messages.map { message in
             guard let text = message.text,
-                  let header = text.range(of: JarvisPrompts.Coach.recognizedTextHeader) else { return message }
+                  let header = text.range(of: JarvisPrompts.Coach.screenTextHeader) else { return message }
             return ChatMessage(role: message.role,
                                text: String(text[..<header.lowerBound]) + JarvisPrompts.ScreenMemory.historyStub,
                                toolCallId: message.toolCallId)

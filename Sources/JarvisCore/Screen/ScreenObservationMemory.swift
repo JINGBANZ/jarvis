@@ -6,6 +6,8 @@ struct ScreenObservationMemory {
     struct Observation: Encodable, Equatable {
         let id: Int
         let sourceID: String?
+        let source: ScreenTextEvidence.Source
+        let coverage: ScreenTextEvidence.Coverage
         let elapsedSeconds: Int
         let text: String
         let truncated: Bool
@@ -16,6 +18,8 @@ struct ScreenObservationMemory {
     private struct ContextObservation: Encodable {
         let id: Int
         let sourceID: String?
+        let source: ScreenTextEvidence.Source
+        let coverage: ScreenTextEvidence.Coverage
         let elapsedSeconds: Int
         let text: String?
         let truncated: Bool
@@ -24,6 +28,8 @@ struct ScreenObservationMemory {
         init(_ observation: Observation, current: Observation?) {
             id = observation.id
             sourceID = observation.sourceID
+            source = observation.source
+            coverage = observation.coverage
             elapsedSeconds = observation.elapsedSeconds
             truncated = observation.truncated
             let sameText = current.map {
@@ -47,21 +53,33 @@ struct ScreenObservationMemory {
     }
 
     @discardableResult
-    mutating func record(text: String, sourceID: String?, elapsedSeconds: TimeInterval) -> Int? {
+    mutating func record(
+        evidence: ScreenTextEvidence,
+        sourceID: String?,
+        elapsedSeconds: TimeInterval
+    ) -> Int? {
+        guard evidence.isRetainable else { return nil }
+        let text = evidence.text
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
         latestID += 1
         // A partial copy is explicitly marked. UTF-8 clipping never manufactures a broken scalar.
         let bounded = Self.prefix(text, bytes: byteLimit)
         let source = sourceID.flatMap { $0.utf8.count <= 128 ? $0 : nil }
-        let truncated = bounded.utf8.count < text.utf8.count
+        let truncated = evidence.truncated || bounded.utf8.count < text.utf8.count
         if truncated { hasOmissions = true }
         if let source, !truncated {
             // A window is only provenance, not a filename. Never infer edits/overlap from its ID.
             observations.removeAll { $0.sourceID == source && !$0.truncated && $0.text == text }
         }
         let seconds = elapsedSeconds.isFinite ? Int(min(max(0, elapsedSeconds), 1_000_000_000)) : 0
-        observations.append(Observation(id: latestID, sourceID: source, elapsedSeconds: seconds,
-                                        text: bounded, truncated: truncated))
+        observations.append(Observation(
+            id: latestID,
+            sourceID: source,
+            source: evidence.source,
+            coverage: evidence.coverage,
+            elapsedSeconds: seconds,
+            text: bounded,
+            truncated: truncated))
         while observations.count > observationLimit
             || observations.reduce(0, { $0 + $1.text.utf8.count }) > byteLimit
             || observations.first?.text.isEmpty == true {

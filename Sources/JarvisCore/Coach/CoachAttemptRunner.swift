@@ -274,7 +274,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     let observation = ChatMessage.user(
                         (observationID.map(JarvisPrompts.ScreenMemory.observation) ?? "")
-                            + JarvisPrompts.Coach.recognizedText(text))
+                            + JarvisPrompts.Coach.screenText(shot.textEvidence!))
                     observations.append(observation)
                 }
                 work.screenObservation = observations
@@ -455,14 +455,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         let observationLabel = observationID.map(JarvisPrompts.ScreenMemory.observation) ?? ""
                         work.screenObservation = [
                             .user(observationLabel + JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.textEvidence?.text
+                                textEvidence: shot.textEvidence
                             )),
                             .userImage(shot.imageBase64),
                         ]
                         appendToolContinuation(
                             toolCallId: callID,
                             resultText: observationLabel + JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.textEvidence?.text),
+                                textEvidence: shot.textEvidence),
                             extraMessages: [.userImage(shot.imageBase64)],
                             newPhase: .captureScreenContinuation)
                     } else {
@@ -656,8 +656,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
     }
 
     private func recordScreen(_ shot: ScreenSnapshot) -> Int? {
-        guard let text = shot.textEvidence?.text else { return nil }
-        return screenMemory.record(text: text, sourceID: shot.sourceID,
+        guard let evidence = shot.textEvidence else { return nil }
+        return screenMemory.record(evidence: evidence, sourceID: shot.sourceID,
                                    elapsedSeconds: clock.now() - sessionStart)
     }
 

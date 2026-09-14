@@ -74,7 +74,7 @@ extension JarvisPrompts {
             - New speech appears under "New since last turn" with [mm:ss] timestamps. A
               "(no speech for ...)" marker means quiet, not a request. Longer quiet makes being stuck more likely,
               but does not prove it.
-            - You can see the screen only through capture_screen. A fresh screenshot or OCR in the current input
+            - You can see the screen only through capture_screen. A fresh screenshot or screen text in the current input
               counts as current screen context.
             - OCR text is a reading aid that garbles the odd token; the screenshot image is ground truth. Before
               asserting a specific line or token is wrong, verify it in the image — if you can only see it in

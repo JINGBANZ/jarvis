@@ -29,7 +29,7 @@ import Testing
     /// (stale screen text misleads and re-bills), while text before the block and the newest OCR
     /// stay verbatim.
     @Test func newCaptureCollapsesSupersededOCR() {
-        let ocr = { (body: String) in "\(JarvisPrompts.Coach.recognizedTextHeader)\n\(body)" }
+        let ocr = { (body: String) in "\(JarvisPrompts.Coach.screenTextHeader)\n\(body)" }
         let h = CoachHistory()
         h.commit([.user("turn 1"),
                   .init(role: .tool, text: "screenshot captured\n\n\(ocr("if (min < sum)"))", toolCallId: "c1")])
@@ -38,13 +38,13 @@ import Testing
 
         h.commit([.user(ocr("if (sum < min)"))])                     // hint-path OCR rides as a user message
         var texts = h.snapshot().compactMap(\.text)
-        #expect(texts.contains("screenshot captured\n\n\(JarvisPrompts.Coach.supersededRecognizedTextStub)"))  // prefix survives
+        #expect(texts.contains("screenshot captured\n\n\(JarvisPrompts.Coach.supersededScreenTextStub)"))  // prefix survives
         #expect(!texts.joined().contains("if (min < sum)"))          // stale body gone
         #expect(texts.contains { $0.contains("if (sum < min)") })    // newest OCR verbatim
 
         h.commit([.init(role: .tool, text: "screenshot captured\n\n\(ocr("rewritten"))", toolCallId: "c2")])
         texts = h.snapshot().compactMap(\.text)
-        #expect(texts.contains(JarvisPrompts.Coach.supersededRecognizedTextStub))                // the user-shaped OCR collapsed whole
+        #expect(texts.contains(JarvisPrompts.Coach.supersededScreenTextStub))                // the user-shaped OCR collapsed whole
         #expect(!texts.joined().contains("if (sum < min)"))
         #expect(texts.contains { $0.contains("rewritten") })
         #expect(h.snapshot().contains { $0.toolCallId == "c1" })     // tool-result pairing intact
@@ -53,14 +53,14 @@ import Testing
     /// A single tool loop may capture more than once; only the turn's own newest OCR survives
     /// verbatim — the earlier same-turn capture is as stale as any committed one.
     @Test func multiCaptureTurnKeepsOnlyItsNewestOCR() {
-        let ocr = { (body: String) in "\(JarvisPrompts.Coach.recognizedTextHeader)\n\(body)" }
+        let ocr = { (body: String) in "\(JarvisPrompts.Coach.screenTextHeader)\n\(body)" }
         let h = CoachHistory()
         h.commit([.user("turn"),
                   .init(role: .tool, text: "screenshot captured\n\n\(ocr("first look"))", toolCallId: "c1"),
                   .init(role: .tool, text: "screenshot captured\n\n\(ocr("second look"))", toolCallId: "c2")])
         let texts = h.snapshot().compactMap(\.text)
         #expect(!texts.joined().contains("first look"))
-        #expect(texts.contains("screenshot captured\n\n\(JarvisPrompts.Coach.supersededRecognizedTextStub)"))
+        #expect(texts.contains("screenshot captured\n\n\(JarvisPrompts.Coach.supersededScreenTextStub)"))
         #expect(texts.contains { $0.contains("second look") })
         #expect(h.snapshot().contains { $0.toolCallId == "c1" })     // pairing intact, text collapsed
     }
@@ -212,18 +212,22 @@ import Testing
     /// and history left untouched; the next completed attempt compacts from a fresh prefix.
     @Test func compactRejectsASummaryWrittenAgainstSupersededScreenText() {
         let h = CoachHistory()
-        let ocr = JarvisPrompts.Coach.recognizedText("int hl = countHeight(root.left);")
+        let ocr = JarvisPrompts.Coach.screenText(ScreenTextEvidence(
+            text: "int hl = countHeight(root.left);",
+            source: .onDeviceOCR,
+            coverage: .currentViewport))
         h.commit([.init(role: .tool, text: ocr, toolCallId: "c1"), .user("first")])
         let stale = h.compactionPrefix()!
 
         // A newer capture lands while the summary is still being written.
-        h.commit([.init(role: .tool, text: JarvisPrompts.Coach.recognizedText("fixed line"),
+        h.commit([.init(role: .tool, text: JarvisPrompts.Coach.screenText(ScreenTextEvidence(
+            text: "fixed line", source: .onDeviceOCR, coverage: .currentViewport)),
                         toolCallId: "c2")])
 
         #expect(!h.compact(prefixCount: stale.count, summary: "old screen said hl", revision: stale.revision))
         let texts = h.snapshot().compactMap(\.text).joined(separator: "\n")
         #expect(!texts.contains("old screen said hl"))                     // summary dropped
-        #expect(texts.contains(JarvisPrompts.Coach.supersededRecognizedTextStub))  // collapse survives
+        #expect(texts.contains(JarvisPrompts.Coach.supersededScreenTextStub))  // collapse survives
 
         // A fresh prefix compacts normally.
         let fresh = h.compactionPrefix()!

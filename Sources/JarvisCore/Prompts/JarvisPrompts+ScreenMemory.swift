@@ -11,15 +11,18 @@ extension JarvisPrompts {
         a helper, initialization, guard or return is absent without seeing the relevant complete scope.
         Before structuring an answer, account for earlier observed requirements; if important parts of
         the question remain unknown, ask for that specific context instead of inventing requirements.
-        Retained OCR is historical evidence, not current screen context and not an authoritative source
-        file. It does not satisfy the fresh-screen gate. Higher observation IDs are later observations.
+        Retained browser Accessibility text is historical evidence, not current screen context and not
+        an authoritative source file. It does not satisfy the fresh-screen gate. Accessibility may
+        include off-screen page text, but it can omit lazy-loaded, virtualized, canvas, image, hidden,
+        or otherwise inaccessible content. Never treat it as complete HTML or a complete editor buffer.
+        Higher observation IDs are later observations.
         A newer matching region takes precedence over older code; scrolling alone does not supersede
         other regions. A sourceID identifies a capture window only, never a document or question.
-        A sameTextAsObservationID reference reuses that observation's exact OCR text only; it does
+        A sameTextAsObservationID reference reuses that observation's exact accessible text only; it does
         not imply the same document or freshness. Each observation retains its own ID and provenance.
-        Keep ambiguous files, panes and versions separate. OCR may misread symbols and indentation.
+        Keep ambiguous files, panes and versions separate.
         You may discover a possible earlier bug from later code or tests, but qualify any diagnosis
-        dependent on historical OCR. The short hint lines themselves must state that uncertainty
+        dependent on incomplete historical evidence. The short hint lines themselves must state that uncertainty
         ("If the earlier count = 1 is unchanged, start at 0."); placing the condition only in an
         optional explanation leaves the visible hint misleading. Do not assert an unseen line's
         current value before saying to verify it. Prefer a fresh visible correction to any old diagnosis. Do not repeatedly report an already-fixed bug.
@@ -40,7 +43,7 @@ extension JarvisPrompts {
         """
 
         static func context(json: String, hasOmissions: Bool) -> String {
-            "Retained screen observations (historical OCR; may contain errors or have changed). "
+            "Retained screen observations (historical Chrome Accessibility text; may be incomplete or have changed). "
                 + (hasOmissions ? "Some observed text was omitted by the memory limit. " : "")
                 + "Completeness is unknown. Use all relevant sections for the active question.\n"
                 + json

@@ -50,11 +50,21 @@ struct ScreenMemoryModelEvaluation {
         for scenario in scenarios {
             var memory = ScreenObservationMemory()
             for (index, text) in scenario.earlier.enumerated() {
-                memory.record(text: text, sourceID: "window:1", elapsedSeconds: Double(index))
+                memory.record(
+                    evidence: ScreenTextEvidence(
+                        text: text,
+                        source: .browserAccessibility,
+                        coverage: .activeTabAccessibilityTree),
+                    sourceID: "window:1",
+                    elapsedSeconds: Double(index))
             }
             var messages: [ChatMessage] = [.system(prompt)]
             if let context = memory.contextMessage() { messages.append(context) }
-            messages.append(.user("Screen observation ID: 2\n" + JarvisPrompts.Coach.recognizedText(scenario.current)))
+            messages.append(.user(
+                "Screen observation ID: 2\n" + JarvisPrompts.Coach.screenText(ScreenTextEvidence(
+                    text: scenario.current,
+                    source: .browserAccessibility,
+                    coverage: .activeTabAccessibilityTree))))
             messages.append(.user("New since last turn:\n[00:30] me: " + scenario.request))
             let response = try await client.respond(messages: messages, tools: coachTools, toolChoice: .force("speak"))
             guard case .speak(_, let lines, _, _, _)? = response.toolCalls.first else {
