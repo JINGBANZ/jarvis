@@ -4,7 +4,7 @@ import JarvisCore
 import JarvisScreenCapture
 
 /// Captures just the frontmost app window (`screencapture -l`) when the capture scope is
-/// `.activeWindow`, with an on-device OCR of the shot riding along as `recognizedText`. Falls back
+/// `.activeWindow`, with browser Accessibility text preferred over an on-device OCR fallback. Falls back
 /// to a full-display capture (`ScreenCaptureCLI` — the plan's chosen display in `.entireDisplay`
 /// scope, the main display otherwise) when no eligible window is on screen or the window capture
 /// command fails. A cleanup-integrity failure returns without fallback. Full-display captures skip

@@ -270,11 +270,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 let observationID = recordScreen(shot)
                 work.screenMemoryID = observationID
                 if let observationID { visibleScreenIDs.insert(observationID) }
-                if let text = shot.textEvidence?.text {
+                if let evidence = shot.textEvidence {
+                    let text = evidence.text
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     let observation = ChatMessage.user(
                         (observationID.map(JarvisPrompts.ScreenMemory.observation) ?? "")
-                            + JarvisPrompts.Coach.screenText(shot.textEvidence!))
+                            + JarvisPrompts.Coach.screenText(evidence))
                     observations.append(observation)
                 }
                 work.screenObservation = observations

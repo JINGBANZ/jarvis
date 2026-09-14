@@ -33,16 +33,27 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
     public init() {}
 
     public func readActiveTab(for window: WindowCandidate) -> ScreenTextEvidence? {
-        guard AXIsProcessTrusted(),
-              NSRunningApplication(processIdentifier: pid_t(window.ownerPID))?.bundleIdentifier
+        guard AXIsProcessTrusted() else {
+            jlog("🔤 browser text unavailable — Accessibility permission is not granted")
+            return nil
+        }
+        guard NSRunningApplication(processIdentifier: pid_t(window.ownerPID))?.bundleIdentifier
                 == Self.chromeBundleID
-        else { return nil }
+        else {
+            jlog("🔤 browser text unavailable — foreground app is not supported")
+            return nil
+        }
 
         let application = AXUIElementCreateApplication(pid_t(window.ownerPID))
         AXUIElementSetMessagingTimeout(application, Self.messagingTimeout)
-        guard let axWindow = matchingWindow(in: application, target: window),
-              let webArea = firstWebArea(in: axWindow)
-        else { return nil }
+        guard let axWindow = matchingWindow(in: application, target: window) else {
+            jlog("🔤 browser text unavailable — foreground window could not be matched uniquely")
+            return nil
+        }
+        guard let webArea = firstWebArea(in: axWindow) else {
+            jlog("🔤 browser text unavailable — active tab did not expose a web area")
+            return nil
+        }
 
         var visited = 0
         var sourceTruncated = false
@@ -58,7 +69,10 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
             nodeLimit: Self.nodeLimit,
             depthLimit: Self.depthLimit
         ).extract(tree)
-        guard !extraction.text.isEmpty else { return nil }
+        guard !extraction.text.isEmpty else {
+            jlog("🔤 browser text unavailable — active tab exposed no semantic text")
+            return nil
+        }
         return ScreenTextEvidence(
             text: extraction.text,
             source: .browserAccessibility,

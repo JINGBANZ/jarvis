@@ -95,7 +95,7 @@ public enum Defaults {
     /// What `capture_screen` shoots when the brain asks for visual context.
     public enum Screen {
         public static let scopeKey = "screen.captureScope"
-        /// The frontmost window — the most private option, and the only one with an OCR sidecar.
+        /// The frontmost window — the most private option, and the only one with text evidence.
         public static let scope: ScreenCaptureScope = .activeWindow
 
         public static let displayIndexKey = "screen.captureDisplayIndex"
