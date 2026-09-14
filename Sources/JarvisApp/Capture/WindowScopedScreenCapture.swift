@@ -29,9 +29,9 @@ struct WindowScopedScreenCapture: ScreenCapturing {
 
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
         if selection.scope == .activeWindow,   // frozen with the attempt, like the display index
-           let windowID = Self.frontWindowID() {
+           let window = Self.frontWindow() {
             let outcome = runner.capture(
-                arguments: ["-x", "-o", "-t", "jpg", "-l", "\(windowID)"])
+                arguments: ["-x", "-o", "-t", "jpg", "-l", "\(window.windowID)"])
             switch outcome {
             case let .captured(jpeg):
                 return ScreenSnapshot(
@@ -40,7 +40,7 @@ struct WindowScopedScreenCapture: ScreenCapturing {
                         ScreenTextEvidence(
                             text: $0, source: .onDeviceOCR, coverage: .currentViewport)
                     },
-                    sourceID: "window:\(windowID)")
+                    sourceID: "window:\(window.windowID)")
             case .cleanupFailed, .cancelled:
                 return nil
             case .failed:
@@ -55,7 +55,7 @@ struct WindowScopedScreenCapture: ScreenCapturing {
     }
 
     /// Dumps the on-screen window list (front-to-back, all displays) into Core's selector.
-    private static func frontWindowID() -> Int? {
+    private static func frontWindow() -> WindowCandidate? {
         guard let entries = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                        kCGNullWindowID) as? [[String: Any]]
         else { return nil }
@@ -65,10 +65,17 @@ struct WindowScopedScreenCapture: ScreenCapturing {
                   let layer = entry[kCGWindowLayer as String] as? Int
             else { return nil }
             let bounds = entry[kCGWindowBounds as String] as? [String: Double]
-            return WindowCandidate(windowID: id, ownerPID: pid, layer: layer,
-                                   width: bounds?["Width"] ?? 0, height: bounds?["Height"] ?? 0)
+            return WindowCandidate(
+                windowID: id,
+                ownerPID: pid,
+                layer: layer,
+                x: bounds?["X"] ?? 0,
+                y: bounds?["Y"] ?? 0,
+                width: bounds?["Width"] ?? 0,
+                height: bounds?["Height"] ?? 0)
         }
-        return FrontWindowSelector.frontWindowID(in: candidates,
-                                                 ownPID: Int(ProcessInfo.processInfo.processIdentifier))
+        return FrontWindowSelector.frontWindow(
+            in: candidates,
+            ownPID: Int(ProcessInfo.processInfo.processIdentifier))
     }
 }
