@@ -47,6 +47,7 @@ final class SessionComposition {
     private let overlayBox: OverlayBoxPanel            // persistent, movable history of every spoken response
     private let readiness: JarvisReadiness
     private let errorReporter: ErrorReporter
+    private let makeAttemptAuditing: (FileSessionAudit) -> any CoachingAttemptAuditing
     private let makeAudioSource: MakeAudioSource
 
     /// Recreated on every `start`: the transcript must live and die with the driver/transcriber
@@ -98,6 +99,10 @@ final class SessionComposition {
         overlayBox: OverlayBoxPanel,
         readiness: JarvisReadiness,
         errorReporter: ErrorReporter,
+        // The port a session's coach records attempts through, built from the session's evidence
+        // handle once Start has created it. Production records straight into that handle; a caller
+        // that must watch attempts start and finish wraps it.
+        makeAttemptAuditing: @escaping (FileSessionAudit) -> any CoachingAttemptAuditing = { $0 },
         makeAudioSource: @escaping MakeAudioSource
     ) {
         self.brain = brain
@@ -106,6 +111,7 @@ final class SessionComposition {
         self.overlayBox = overlayBox
         self.readiness = readiness
         self.errorReporter = errorReporter
+        self.makeAttemptAuditing = makeAttemptAuditing
         self.makeAudioSource = makeAudioSource
         networkDiagnostics.start()
     }
@@ -149,7 +155,8 @@ final class SessionComposition {
         // lines as "new since last turn" — their [mm:ss] stamps minted against the previous
         // transcriber's clock — and anchor silence math to old speech.
         transcript = RollingTranscript()
-        artifacts.beginNewSession()  // rotate to a fresh session dir + activity/debug log
+        let audit = artifacts.beginNewSession()  // rotate to a fresh session dir + activity/debug log
+        let attemptAuditing = makeAttemptAuditing(audit)
         overlayBox.clear() // …and a fresh response history for the new conversation
         switch transcriptionConfiguration.provider {
         case .openAI:
@@ -231,7 +238,7 @@ final class SessionComposition {
             overlay: overlaySink,
             clock: clock,
             sessionStart: conversationStart,
-            coachingAttempts: artifacts.sessionAudit,
+            coachingAttempts: attemptAuditing,
             plan: freshSessionPlan(screen: inputs.screen),
             activity: artifacts.sessionAudit,
             capabilities: capabilities)

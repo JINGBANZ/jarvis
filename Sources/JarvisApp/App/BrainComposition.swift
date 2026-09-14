@@ -40,15 +40,22 @@ protocol BrainCompositionHost: AnyObject {
 /// applied* notice while the existing session continues.
 @MainActor
 final class BrainComposition {
-    let preferences = BrainPreferences()
+    /// The route, effort, and capability switches a Start and every live reapply read. Normal launches
+    /// use the standard defaults; a caller with its own isolated suite passes that instead.
+    let preferences: BrainPreferences
     /// Shared with the Settings sections so a detection performed there is the one this uses.
     let detector = AgentCLIDetector()
     private let secrets: any SecretStore
     private unowned let host: BrainCompositionHost
 
-    init(secrets: any SecretStore, host: BrainCompositionHost) {
+    init(
+        secrets: any SecretStore,
+        host: BrainCompositionHost,
+        preferences: BrainPreferences = BrainPreferences()
+    ) {
         self.secrets = secrets
         self.host = host
+        self.preferences = preferences
     }
 
     /// The target a fresh session starts on, recorded so the first selection is not announced as a
