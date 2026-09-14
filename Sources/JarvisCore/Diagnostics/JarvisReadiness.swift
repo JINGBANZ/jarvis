@@ -147,7 +147,10 @@ public final class JarvisReadiness {
     public private(set) var status: Status = .stopped
 
     private var nextGeneration: UInt64 = 0
-    private var activeSession: Session?
+    /// The attempt observations currently count for, or nil once it stopped. The app reads this
+    /// rather than mirroring the token, so the Start path and the session composition agree on
+    /// which attempt is current without sharing a second copy.
+    public private(set) var activeSession: Session?
     private var configuration = Configuration()
     private var permissionState: CheckState = .satisfied
     private var credentialState: CheckState = .satisfied

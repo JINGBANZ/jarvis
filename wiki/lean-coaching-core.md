@@ -1099,7 +1099,7 @@ The implementation agent should begin with these current boundaries:
   [`RealtimeContinuityReporter.swift`](../Sources/JarvisApp/Capture/RealtimeContinuityReporter.swift),
   and [`CaptureReadinessMonitor.swift`](../Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift).
 - Composition and attempt boundaries: the session runtime in
-  [`AppDelegate.swift`](../Sources/JarvisApp/App/AppDelegate.swift) with
+  [`SessionComposition.swift`](../Sources/JarvisApp/App/SessionComposition.swift) with
   [`SessionArtifacts.swift`](../Sources/JarvisApp/App/SessionArtifacts.swift) and
   [`BrainComposition.swift`](../Sources/JarvisApp/App/BrainComposition.swift); the scheduler in
   [`CoachDriver.swift`](../Sources/JarvisCore/Coach/CoachDriver.swift) with

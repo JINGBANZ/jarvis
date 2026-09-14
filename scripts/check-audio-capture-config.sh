@@ -10,7 +10,10 @@ benchmark_runner_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunne
 benchmark_fixtures_source="Sources/JarvisApp/Benchmark/SyntheticSpeechFixtures.swift"
 benchmark_script="scripts/transcription-benchmark.sh"
 normal_session_contract="Sources/JarvisCore/Transcription/TranscriptionSession.swift"
-normal_app_wiring="Sources/JarvisApp/App/AppDelegate.swift"
+normal_app_wiring=(
+    "Sources/JarvisApp/App/AppDelegate.swift"
+    "Sources/JarvisApp/App/SessionComposition.swift"
+)
 session_factory="Sources/JarvisApp/Capture/TranscriptionSessionFactory.swift"
 if [ ! -f "$capture_source" ]; then
     echo "Audio capture guard: $capture_source not found; refusing to pass." >&2
@@ -58,8 +61,14 @@ if ! /usr/bin/grep -Fq 'transportControl.beginInterruption()' "$benchmark_reconn
     echo "Reconnect benchmark must scope interruption to Jarvis's transcription transport." >&2
     exit 1
 fi
+for wiring_source in "${normal_app_wiring[@]}"; do
+    if [ ! -f "$wiring_source" ]; then
+        echo "Audio capture guard: $wiring_source not found; refusing to pass." >&2
+        exit 1
+    fi
+done
 if /usr/bin/grep -Fq 'TranscriptionBenchmark' "$normal_session_contract" \
-    || /usr/bin/grep -Fq 'TranscriptionBenchmark' "$normal_app_wiring"; then
+    || /usr/bin/grep -Fq 'TranscriptionBenchmark' "${normal_app_wiring[@]}"; then
     echo "Normal transcription contracts and app wiring must not expose benchmark capabilities." >&2
     exit 1
 fi
