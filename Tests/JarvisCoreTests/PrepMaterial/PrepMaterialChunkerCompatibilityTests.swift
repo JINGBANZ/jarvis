@@ -62,6 +62,39 @@ import Testing
         #expect(chunks.map(\.text) == [text])
     }
 
+    @Test(arguments: ["-", "--", ":-", "-:", ":-:"])
+    func shortTableDelimitersRepeatHeaders(_ delimiter: String) {
+        let header = "| Key | Value |\n| \(delimiter) | - |"
+        let rows = ["| first | a value |", "| second | another value |"]
+        let chunks = PrepMaterialChunker.chunk(
+            text: header + "\n" + rows.joined(separator: "\n"),
+            sourceDisplayName: "notes.md", targetWordCount: 12)
+        #expect(chunks.map(\.text) == rows.map { header + "\n" + $0 })
+    }
+
+    @Test(arguments: [8, 400])
+    func consecutiveHeadingsStayWithFollowingEvidence(_ targetWordCount: Int) throws {
+        let section = "# Mentoring\n\n## Apprentice\n\nI explained fundamentals and the apprentice became an engineer."
+        let chunks = PrepMaterialChunker.chunk(
+            text: section + "\n\n## Delivery\n\nWe shipped a release.",
+            sourceDisplayName: "notes.md", targetWordCount: targetWordCount)
+        let result = try #require(PrepMaterialIndex(chunks: chunks).search(query: "Mentoring").first)
+        #expect(result.text == section)
+        #expect(chunks.count == 2)
+    }
+
+    @Test func headingBeforeOversizedTableStaysWithFirstRows() throws {
+        let heading = "# Storage\n\n## Latency"
+        let header = "| Strategy | Benefit |\n|---|---|"
+        let rows = ["| Cache | fast reads |", "| Replica | stale reads |"]
+        let chunks = PrepMaterialChunker.chunk(
+            text: heading + "\n\n" + header + "\n" + rows.joined(separator: "\n"),
+            sourceDisplayName: "design.md", targetWordCount: 12)
+        #expect(chunks.map(\.text) == [heading + "\n\n" + header + "\n" + rows[0], header + "\n" + rows[1]])
+        let result = try #require(PrepMaterialIndex(chunks: chunks).search(query: "Latency").first)
+        #expect(result.text.contains(rows[0]))
+    }
+
     @Test func splitComparisonTablesKeepHeadersWithEveryRow() {
         let header = "| Strategy | Benefit | Risk |\n|---|---|---|"
         let rows = (1...8).map { "| Strategy\($0) | fast reads | stale results |" }

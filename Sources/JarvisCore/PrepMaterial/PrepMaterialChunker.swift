@@ -5,6 +5,7 @@ public enum PrepMaterialChunker {
     /// Keeps prose paragraphs intact. Markdown sections start fresh; fenced code remains intact,
     /// and recognized pipe tables split between rows with their column headers repeated.
     /// Oversized paragraphs, code blocks, and individual table rows can exceed the target.
+    /// Pending headings stay with their following content even when that exceeds the target.
     public static func chunk(
         text: String,
         sourceDisplayName: String,
@@ -21,6 +22,7 @@ public enum PrepMaterialChunker {
         var chunks: [PrepMaterialChunk] = []
         var current: [String] = []
         var currentWordCount = 0
+        var currentHasContent = false
 
         func flush() {
             guard !current.isEmpty else { return }
@@ -28,21 +30,27 @@ public enum PrepMaterialChunker {
                 sourceDisplayName: sourceDisplayName, text: current.joined(separator: "\n\n")))
             current.removeAll()
             currentWordCount = 0
+            currentHasContent = false
         }
 
         for paragraph in paragraphs {
             if isMarkdown, let tables = splitMarkdownTable(paragraph, targetWordCount: targetWordCount) {
-                flush()
-                chunks.append(contentsOf: tables.map {
-                    PrepMaterialChunk(sourceDisplayName: sourceDisplayName, text: $0)
-                })
+                if currentHasContent { flush() }
+                for table in tables {
+                    current.append(table)
+                    flush()
+                }
                 continue
             }
-            if isMarkdown, isMarkdownHeading(paragraph) { flush() }
+            // A heading-only hit has no evidence for retrieval. Keep consecutive headings with
+            // their first content block rather than emitting them at section or budget boundaries.
+            if isMarkdown, isMarkdownHeading(paragraph), currentHasContent { flush() }
             let wordCount = paragraph.split(whereSeparator: \.isWhitespace).count
-            if currentWordCount + wordCount > targetWordCount, !current.isEmpty { flush() }
+            if currentWordCount + wordCount > targetWordCount, currentHasContent { flush() }
             current.append(paragraph)
             currentWordCount += wordCount
+            currentHasContent = currentHasContent || !isMarkdown
+                || !paragraph.components(separatedBy: "\n").allSatisfy(isMarkdownHeading)
         }
         flush()
         return chunks
