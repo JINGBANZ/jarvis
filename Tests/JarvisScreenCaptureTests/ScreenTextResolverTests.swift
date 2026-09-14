@@ -115,7 +115,7 @@ import Testing
     }
 
     private func identity(_ value: String) -> BrowserDocumentIdentity {
-        BrowserDocumentIdentity(value: value, deadline: .greatestFiniteMagnitude)
+        BrowserDocumentIdentity(value: value)
     }
 }
 
@@ -132,7 +132,7 @@ private final class FakeBrowserReader: BrowserAccessibilityReading, @unchecked S
     }
 
     func documentIdentity(for window: WindowCandidate) -> BrowserDocumentIdentity? {
-        BrowserDocumentIdentity(value: identity, deadline: .greatestFiniteMagnitude)
+        BrowserDocumentIdentity(value: identity)
     }
 
     func readActiveTab(

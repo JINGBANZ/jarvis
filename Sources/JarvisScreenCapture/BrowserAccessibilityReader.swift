@@ -3,24 +3,6 @@ import ApplicationServices
 import Foundation
 import JarvisCore
 
-public struct BrowserDocumentIdentity: Sendable, Equatable {
-    let value: String
-    let deadline: TimeInterval
-
-    init(value: String, deadline: TimeInterval) {
-        self.value = value
-        self.deadline = deadline
-    }
-}
-
-public protocol BrowserAccessibilityReading: Sendable {
-    func documentIdentity(for window: WindowCandidate) -> BrowserDocumentIdentity?
-    func readActiveTab(
-        for window: WindowCandidate,
-        matching documentIdentity: BrowserDocumentIdentity
-    ) -> ScreenTextEvidence?
-}
-
 /// Read-only macOS Accessibility adapter for the exact foreground Chrome window selected for the
 /// screenshot. It never prompts, performs actions, changes attributes, or reads another Chrome
 /// window when the selected window cannot be matched.
@@ -48,6 +30,8 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
     private static let searchableNodeLimit = 512
     private static let primedProcesses = PrimedProcesses()
 
+    /// `@unchecked Sendable`: `lock` serializes every access to `pids`; any future mutable state
+    /// must use the same lock.
     private final class PrimedProcesses: @unchecked Sendable {
         private let lock = NSLock()
         private var pids: Set<pid_t> = []
@@ -70,8 +54,7 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
               let page = pageWebArea(in: axWindow, budget: budget)
         else { return nil }
         return BrowserDocumentIdentity(
-            value: identity(for: page.element, url: page.url, window: window),
-            deadline: deadline)
+            value: identity(for: page.element, url: page.url, window: window))
     }
 
     public func readActiveTab(
@@ -79,7 +62,7 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
         matching documentIdentity: BrowserDocumentIdentity
     ) -> ScreenTextEvidence? {
         guard let application = preparedApplication(for: window) else { return nil }
-        let deadline = documentIdentity.deadline
+        let deadline = ProcessInfo.processInfo.systemUptime + Self.readDeadline
         let budget = AccessibilityReadBudget(deadline: deadline, byteLimit: Self.byteLimit)
         _ = attribute(application, kAXRoleAttribute as CFString, budget: budget)
         guard let axWindow = matchingWindow(in: application, target: window, budget: budget) else {
@@ -249,8 +232,8 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
                 return
             }
             let pause = min(0.05, budget.remaining)
-            if pause > 0 { Thread.sleep(forTimeInterval: pause) }
-        } while !budget.isExpired
+            if pause > 0, !Task.isCancelled { Thread.sleep(forTimeInterval: pause) }
+        } while !budget.isExpired && !Task.isCancelled
     }
 
     private func identity(
