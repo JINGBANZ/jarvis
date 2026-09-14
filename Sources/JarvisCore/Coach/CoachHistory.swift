@@ -8,7 +8,7 @@ import Foundation
 ///
 /// The runner commits `omittingScreenText` output: exact OCR belongs to `ScreenObservationMemory`,
 /// outside lossy conversation compaction. Conversation growth is append-only between compactions.
-/// Direct callers that supply raw OCR still receive the defensive masking documented on `commit`.
+/// Direct callers that supply raw screen text still receive the defensive masking documented on `commit`.
 ///
 /// `@unchecked Sendable`: all mutable state is guarded by `lock`.
 public final class CoachHistory: @unchecked Sendable {
@@ -59,10 +59,12 @@ public final class CoachHistory: @unchecked Sendable {
         var turn = turn
         let screenTextHeader = JarvisPrompts.Coach.screenTextHeader
         if let newest = turn.lastIndex(where: { $0.text?.contains(screenTextHeader) == true }) {
-            messages = messages.map(Self.collapsingSupersededOCR)
+            messages = messages.map(Self.collapsingSupersededScreenText)
             rewriteRevision &+= 1
             // One tool loop may capture more than once — only the turn's newest OCR stays verbatim.
-            for i in turn.indices where i < newest { turn[i] = Self.collapsingSupersededOCR(turn[i]) }
+            for i in turn.indices where i < newest {
+                turn[i] = Self.collapsingSupersededScreenText(turn[i])
+            }
         }
         messages.append(contentsOf: turn.compactMap { m in
             if let raw = m.rawItemsJSON { return Self.convertRawItems(raw) }
@@ -74,7 +76,7 @@ public final class CoachHistory: @unchecked Sendable {
 
     /// Rewrite one committed message so its OCR block becomes the catalog's superseded marker.
     /// Text before the block — e.g. a successful capture result — survives.
-    private static func collapsingSupersededOCR(_ m: ChatMessage) -> ChatMessage {
+    private static func collapsingSupersededScreenText(_ m: ChatMessage) -> ChatMessage {
         guard let text = m.text,
               let header = text.range(of: JarvisPrompts.Coach.screenTextHeader)
         else { return m }
@@ -86,7 +88,7 @@ public final class CoachHistory: @unchecked Sendable {
         )
     }
 
-    /// The runner owns raw OCR separately, including captures from failed attempts. Strip it before
+    /// The runner owns raw screen text separately, including captures from failed attempts. Strip it before
     /// conversation commit so summaries cannot revive an evicted or retired observation.
     static func omittingScreenText(_ messages: [ChatMessage]) -> [ChatMessage] {
         messages.map { message in

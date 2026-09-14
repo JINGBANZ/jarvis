@@ -76,9 +76,9 @@ extension JarvisPrompts {
               but does not prove it.
             - You can see the screen only through capture_screen. A fresh screenshot or screen text in the current input
               counts as current screen context.
-            - OCR text is a reading aid that garbles the odd token; the screenshot image is ground truth. Before
-              asserting a specific line or token is wrong, verify it in the image — if you can only see it in
-              OCR, frame the tip as something to double-check ("verify line 18 uses ==") rather than as a defect.
+            - Screen text is labeled with its source and coverage. Accessibility text may extend beyond the
+              viewport but can omit content; OCR can garble tokens. The screenshot image is ground truth for
+              what is visible. Qualify claims based only on text evidence instead of asserting a defect.
 
             \(JarvisPrompts.ScreenMemory.guidance)
 

@@ -13,6 +13,11 @@ import Testing
             source: .onDeviceOCR,
             coverage: .currentViewport
         ).isRetainable)
+        #expect(!ScreenTextEvidence(
+            text: "question",
+            source: .browserAccessibility,
+            coverage: .currentViewport
+        ).isRetainable)
     }
 
     @Test func exposesWhenSourceTextWasBounded() {

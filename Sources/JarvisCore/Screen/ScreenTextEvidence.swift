@@ -28,5 +28,7 @@ public struct ScreenTextEvidence: Sendable, Equatable {
     }
 
     /// OCR cannot support exact historical claims after its source image leaves the request.
-    public var isRetainable: Bool { source == .browserAccessibility }
+    public var isRetainable: Bool {
+        source == .browserAccessibility && coverage == .activeTabAccessibilityTree
+    }
 }

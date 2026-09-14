@@ -24,6 +24,7 @@ public struct ScreenTextResolver: Sendable {
         if browserTextEnabled,
            let evidence = browser.readActiveTab(for: window),
            evidence.source == .browserAccessibility,
+           evidence.coverage == .activeTabAccessibilityTree,
            !evidence.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return evidence
         }

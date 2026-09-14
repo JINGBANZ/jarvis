@@ -36,6 +36,21 @@ import Testing
         #expect(ocr.callCount == 1)
     }
 
+    @Test func mismatchedAccessibilityCoverageFallsBackToOCR() {
+        let browser = FakeBrowserReader(result: ScreenTextEvidence(
+            text: "untrusted coverage",
+            source: .browserAccessibility,
+            coverage: .currentViewport))
+        let ocr = FakeImageTextRecognizer(result: "visible text")
+
+        let result = ScreenTextResolver(browser: browser, ocr: ocr).resolve(
+            jpeg: Data(), window: window, browserTextEnabled: true)
+
+        #expect(result == ScreenTextEvidence(
+            text: "visible text", source: .onDeviceOCR, coverage: .currentViewport))
+        #expect(ocr.callCount == 1)
+    }
+
     @Test func disabledAccessibilityGoesStraightToOCR() {
         let browser = FakeBrowserReader(result: ScreenTextEvidence(
             text: "should not be read",
