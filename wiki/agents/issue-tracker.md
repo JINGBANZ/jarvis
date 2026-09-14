@@ -4,22 +4,23 @@ Issues and specs live as GitHub issues on [`JINGBANZ/jarvis`](https://github.com
 the `gh` CLI; it infers the repo from the clone you're standing in, so no `--repo` flag is needed —
 including from a worktree under `.claude/worktrees/`.
 
-## Automation: the issue worker is paused
+## Automation: the issue worker is active
 
 `.github/workflows/issue-worker.yml` fires on `issues: [opened]` and, for an author with write
-permission, runs an agent that implements the issue end to end and opens a PR. **It is currently
-disabled**, so filing an issue here just files it. Publish tickets freely.
+permission — or the pipeline's own app — runs an agent on a per-run GitHub App installation token that
+implements the issue end to end and opens a PR. **That PR still needs owner approval to merge**, so an
+agent run produces a proposal, not a merged change.
 
-The pause is repo state rather than a code change — the workflow file is untouched, so nothing in a
-`git pull` reveals it and this file cannot tell you the current status. **Before filing issues in bulk,
-run `gh workflow list --all` and confirm Issue Worker reads `disabled_manually`.** If it reads `active`,
-filing is executing again: a batch of tickets becomes a batch of concurrent agent runs and PRs, started
-together regardless of any blocking edges between them — don't bulk-file until it is paused again.
-`gh workflow enable "Issue Worker"` is what turns it back on.
+Whether the workflow is enabled is repo state rather than a code change — the workflow file gives no
+hint, so a `git pull` doesn't reveal it and this file cannot tell you the current status. **Before
+filing issues in bulk, run `gh workflow list --all` and check what Issue Worker reads.** While it reads
+`active`, filing executes: a batch of tickets becomes a batch of concurrent agent runs and PRs, started
+together regardless of any blocking edges between them — pause the worker with
+`gh workflow disable "Issue Worker"` before batch-filing, and `gh workflow enable "Issue Worker"` to
+turn it back on.
 
-`.github/workflows/issue-opener.yml` is still active and files an issue on its own daily at 19:07 UTC
-(03:07 Beijing, UTC+8). With the worker paused, those issues wait for someone to pick them up instead of
-being worked automatically.
+`.github/workflows/issue-opener.yml` also files an issue on its own daily at 19:07 UTC (03:07 Beijing,
+UTC+8); as the pipeline's own app, each of those opens triggers a worker run like any other.
 
 ## Operations
 
