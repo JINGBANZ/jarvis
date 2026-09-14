@@ -178,7 +178,7 @@ import Testing
             "code": "    if ch in seen:\n        left = max(left, seen[ch] + 1)", "highlightedLines": [2]]
         for oversized in [false, true] {
             var value = snippet
-            if oversized { value["code"] = Array(repeating: "x = 1", count: 13).joined(separator: "\n") }
+            if oversized { value["code"] = Array(repeating: "x = 1", count: 25).joined(separator: "\n") }
             let json = try JSONSerialization.data(withJSONObject: ["lines": ["Keep the left edge moving forward."], "codeSnippet": value])
             let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: String(decoding: json, as: UTF8.self))
             guard case .speak(_, let lines, _, _, let code) = call else { Issue.record("Expected hint"); continue }
