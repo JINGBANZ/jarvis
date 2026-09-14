@@ -165,4 +165,17 @@ import Testing
         #expect(e.message.contains("Claude Code"))
         #expect(e.sessionEndReason == .brainRouteExhausted(last: failure))
     }
+
+    @Test func expiredBrainRecoveryStopsQuietlyAndCarriesTheLatestFailure() {
+        let failure = ProviderFailure(
+            source: .brain(.openAI), stage: .request, category: .unavailable,
+            disposition: .temporary, identity: .init(), message: "upstream overloaded")
+        let e = UserFacingError.brainRecoveryExpired(failure: failure)
+        #expect(e.severity == .terminal)
+        #expect(!e.severity.showsAlert)
+        #expect(e.severity.stopsSession)
+        #expect(e.message.contains("upstream overloaded"))
+        #expect(e.message.contains("10 minutes"))
+        #expect(e.sessionEndReason == .brainRecoveryExpired(last: failure))
+    }
 }

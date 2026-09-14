@@ -1028,8 +1028,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let firstFailure = !readiness.hasFailedCoachingCycle
         observeReadiness(.brainCycleFailed(provider), for: readinessSession)
         guard firstFailure else { return }
-        let message = "Model cycle failed."
-        overlayCaption?.showError(message)
+        overlayCaption?.showError("Coaching failed. I'm still listening.")
     }
 
     func brainTargetDidChange(_ target: BrainTarget?) {

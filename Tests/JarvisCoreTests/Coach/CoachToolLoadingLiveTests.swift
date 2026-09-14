@@ -193,7 +193,6 @@ import JarvisBrainProviders
         guard let client = try makeClient(
             provider, capabilities: capabilities, directory: directory, traffic: traffic)
         else { return nil }
-        defer { client.terminate() }
         let transcript = RollingTranscript()
         let activity = RecordingActivity()
         let overlay = FakeOverlay()

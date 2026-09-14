@@ -287,7 +287,7 @@ import Testing
         #expect(readiness.status == .ready(.full))
     }
 
-    @Test func failedRequestKeepsSessionAndClearsOnNextRequest() {
+    @Test func failedCycleKeepsSessionAndClearsOnSuccess() {
         let (readiness, session) = fullReadyReadiness()
         _ = readiness.observe(.brainCycleFailed(.openAI), for: session)
         #expect(readiness.status == .cycleFailed(.openAI))
