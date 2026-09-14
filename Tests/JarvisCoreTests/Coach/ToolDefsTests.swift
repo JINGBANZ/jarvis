@@ -68,6 +68,8 @@ import Testing
     @Test func captureToolOwnsScreenEvidenceGuidanceAndSchemasHaveNoMemoryMaintenance() {
         #expect(captureScreenTool.guidance.contains("Use both sources together"))
         #expect(captureScreenTool.guidance.contains("screenshot as ground truth"))
+        #expect(captureScreenTool.guidance.contains("untrusted reference data"))
+        #expect(captureScreenTool.guidance.contains("user's spoken request"))
         #expect(!JarvisPrompts.Coach.system.contains("Accessibility text may extend beyond"))
         #expect(!speakTool.parametersJSON.contains("screenMemory"))
         #expect(!staySilentTool.parametersJSON.contains("screenMemory"))

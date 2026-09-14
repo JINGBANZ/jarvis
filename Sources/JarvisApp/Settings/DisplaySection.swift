@@ -113,7 +113,8 @@ final class DisplaySection: NSObject, SettingsSection {
 
         let note = NSTextField(wrappingLabelWithString:
             "Jarvis captures only when the brain requests visual context. If the active window "
-            + "is Chrome and page-text access is available, semantic text is added alongside OCR. "
+            + "is Chrome, page text is enabled, and permission is available, semantic text is "
+            + "added alongside OCR. "
             + "Screenshots still carry images and diagrams.")
         note.translatesAutoresizingMaskIntoConstraints = false
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
