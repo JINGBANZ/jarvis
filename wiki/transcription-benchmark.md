@@ -49,7 +49,7 @@ nor participates in coaching.
 
 The normal app constructs transcription sessions without benchmark instrumentation. Its
 [`TranscriptionSession`](../Sources/JarvisCore/Transcription/TranscriptionSession.swift) contract and
-`AppDelegate` wiring expose no benchmark callback or transport-fault capability. Only
+`AppDelegate` and `SessionComposition` wiring expose no benchmark callback or transport-fault capability. Only
 [`TranscriptionBenchmarkRunner`](../Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner.swift)
 supplies the optional
 [`TranscriptionBenchmarkInstrumentation`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmarkInstrumentation.swift)

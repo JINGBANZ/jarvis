@@ -23,7 +23,7 @@ import JarvisCore
 /// calls `AudioDeviceStop` (which drains in-flight callbacks) before destroying anything. Client
 /// audio delivery is moved onto one serial queue so encoding/network work cannot stall Core Audio;
 /// `onUnavailable` is invoked outside the lock.
-final class AggregateEchoCapture: @unchecked Sendable {
+final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
     private struct SequencedAudioChunk: Sendable {
         let data: Data
         let sequence: UInt64
@@ -90,24 +90,19 @@ final class AggregateEchoCapture: @unchecked Sendable {
     private var systemSequence: UInt64 = 0
 
     init(audioFormat: TranscriptionAudioFormat,
-         onMicCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
-         onSystemCaptured: @escaping @Sendable (UInt64, Int, TimeInterval) -> Void,
-         onMicClean: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void,
-         onSystem: @escaping @Sendable (Data, UInt64, TimeInterval) -> Void,
          localTurnDetectionSilenceDuration: TimeInterval?,
-         onMicSpeechEvent: @escaping @Sendable (LocalSpeechEvent, UInt64) -> Void,
-         onSystemSpeechEvent: @escaping @Sendable (LocalSpeechEvent, UInt64) -> Void) {
+         delivery: AudioDelivery) {
         self.audioFormat = audioFormat
         // AEC always runs at 48 kHz; the wire rate is the selected provider's requirement. Gemini's
         // 16 kHz is an exact 3:1 decimation from 48, so there is never a second resampling stage.
         micDown = Resampler(fromHz: Self.aecRate, toHz: Double(audioFormat.sampleRate))
         sysDown = Resampler(fromHz: Self.aecRate, toHz: Double(audioFormat.sampleRate))
-        self.onMicCaptured = onMicCaptured
-        self.onSystemCaptured = onSystemCaptured
-        self.onMicClean = onMicClean
-        self.onSystem = onSystem
-        self.onMicSpeechEvent = onMicSpeechEvent
-        self.onSystemSpeechEvent = onSystemSpeechEvent
+        onMicCaptured = delivery.onMicCaptured
+        onSystemCaptured = delivery.onSystemCaptured
+        onMicClean = delivery.onMicClean
+        onSystem = delivery.onSystem
+        onMicSpeechEvent = delivery.onMicSpeechEvent
+        onSystemSpeechEvent = delivery.onSystemSpeechEvent
         usesLocalTurnDetection = localTurnDetectionSilenceDuration != nil
         if let localTurnDetectionSilenceDuration {
             // Detectors see post-AEC audio, which is always at the AEC rate regardless of the

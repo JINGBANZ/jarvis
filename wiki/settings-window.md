@@ -96,7 +96,7 @@ the durable history rather than a flashing caption. `AppDelegate` applies both e
 The box is a **session surface**: switched on, it reaches the screen on Start (already cleared, for the
 new conversation) and leaves it on Stop, so a stopped Jarvis puts nothing on the desktop. Two flags in
 `OverlayBoxPanel` decide it — the Settings switch (`setEnabled`) and the session (`setSessionLive`,
-called by `AppDelegate` from the one line that declares a session live and the one that ends it) — and
+called by `SessionComposition` from the one line that declares a session live and the one that ends it) — and
 a single private `applyVisibility()` derives `isEnabled && isSessionLive`. Keeping that rule in one
 place is why the panel, not the two call sites, owns it: switching the box on from Settings while
 stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides

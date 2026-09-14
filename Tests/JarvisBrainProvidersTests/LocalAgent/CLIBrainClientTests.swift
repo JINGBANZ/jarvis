@@ -481,8 +481,6 @@ import JarvisCore
                 + "Do not call `capture_screen`, `stay_silent`."))
         // "must call speak" is what the coach prompt reads as "do not load first".
         #expect(!turn.text.contains("MUST call"))
-        coach.runtime.terminateNow()
-        allowedCoach.runtime.terminateNow()
     }
 
     /// Every response of a press, not only the forced last one, turns a reply it cannot accept into
