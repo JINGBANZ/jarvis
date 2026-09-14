@@ -62,7 +62,9 @@ extension PrepMaterialChunker {
         let headerCells = lines[0].trimmingCharacters(in: .whitespaces).dropFirst().dropLast()
             .split(separator: "|", omittingEmptySubsequences: false)
         guard cells.count == headerCells.count, cells.allSatisfy({ cell in
-            let dashes = cell.trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: ":"))
+            var dashes = cell.trimmingCharacters(in: .whitespaces)[...]
+            if dashes.first == ":" { dashes.removeFirst() }
+            if dashes.last == ":" { dashes.removeLast() }
             return dashes.count >= 3 && dashes.allSatisfy { $0 == "-" }
         }) else { return nil }
 

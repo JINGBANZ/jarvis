@@ -54,6 +54,14 @@ import Testing
         #expect(chunks.map(\.text) == [text])
     }
 
+    @Test(arguments: ["::---", "---::", "::---::"])
+    func malformedTableAlignmentRemainsOrdinaryText(_ delimiter: String) {
+        let text = "| Key | Value |\n| \(delimiter) | --- |\n| first | a value |\n| second | another value |"
+        let chunks = PrepMaterialChunker.chunk(
+            text: text, sourceDisplayName: "notes.md", targetWordCount: 12)
+        #expect(chunks.map(\.text) == [text])
+    }
+
     @Test func splitComparisonTablesKeepHeadersWithEveryRow() {
         let header = "| Strategy | Benefit | Risk |\n|---|---|---|"
         let rows = (1...8).map { "| Strategy\($0) | fast reads | stale results |" }
