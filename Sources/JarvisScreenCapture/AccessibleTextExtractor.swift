@@ -34,7 +34,7 @@ struct AccessibleTextExtractor: Sendable {
             }
             visited += 1
 
-            if next.node.role == "AXSecureTextField" { continue }
+            if next.node.isSecure || next.node.role == "AXSecureTextField" { continue }
 
             if let raw = next.node.text {
                 let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)

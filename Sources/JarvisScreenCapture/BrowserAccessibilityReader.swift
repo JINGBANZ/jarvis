@@ -110,14 +110,19 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
         }
         visited += 1
         let role = stringAttribute(element, kAXRoleAttribute as CFString) ?? ""
-        if role == Role.secureTextField {
-            return AccessibilityNode(role: role)
+        let isSecure = role == Role.secureTextField
+            || stringAttribute(element, kAXSubroleAttribute as CFString) == Role.secureTextField
+        if isSecure {
+            return AccessibilityNode(role: role, isSecure: true)
         }
 
         let rawChildren = (attribute(element, kAXChildrenAttribute as CFString) as? [AXUIElement]) ?? []
         if depth >= Self.depthLimit {
             if !rawChildren.isEmpty { truncated = true }
-            return AccessibilityNode(role: role, text: semanticText(for: element, role: role))
+            return AccessibilityNode(
+                role: role,
+                text: semanticText(for: element, role: role),
+                isSecure: false)
         }
 
         var children: [AccessibilityNode] = []
@@ -131,8 +136,11 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
             else { break }
             children.append(node)
         }
-        return AccessibilityNode(role: role, text: semanticText(for: element, role: role),
-                                 children: children)
+        return AccessibilityNode(
+            role: role,
+            text: semanticText(for: element, role: role),
+            isSecure: false,
+            children: children)
     }
 
     private func semanticText(for element: AXUIElement, role: String) -> String? {

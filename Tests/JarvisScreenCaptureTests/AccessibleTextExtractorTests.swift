@@ -10,6 +10,7 @@ import Testing
             .init(role: "AXSecureTextField", text: "hunter2", children: [
                 .init(role: "AXStaticText", text: "also secret"),
             ]),
+            .init(role: "AXTextField", text: "subrole secret", isSecure: true),
             .init(role: "AXStaticText", text: "Return the two indices."),
         ])
 

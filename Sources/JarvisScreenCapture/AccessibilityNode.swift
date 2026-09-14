@@ -5,11 +5,18 @@ import Foundation
 struct AccessibilityNode: Sendable, Equatable {
     let role: String
     let text: String?
+    let isSecure: Bool
     let children: [AccessibilityNode]
 
-    init(role: String, text: String? = nil, children: [AccessibilityNode] = []) {
+    init(
+        role: String,
+        text: String? = nil,
+        isSecure: Bool = false,
+        children: [AccessibilityNode] = []
+    ) {
         self.role = role
         self.text = text
+        self.isSecure = isSecure
         self.children = children
     }
 }
