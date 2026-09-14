@@ -2,6 +2,18 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
+private extension ScreenSnapshot {
+    init(imageBase64: String, accessibleText: String, sourceID: String? = nil) {
+        self.init(
+            imageBase64: imageBase64,
+            textEvidence: ScreenTextEvidence(
+                text: accessibleText,
+                source: .browserAccessibility,
+                coverage: .activeTabAccessibilityTree),
+            sourceID: sourceID)
+    }
+}
+
 @Suite struct CoachDriverScreenMemoryTests {
     @Test func scrollingPreservesEarlierRequirementsAndCodeWithoutOldImages() async {
         let brain = ScriptedBrain(script: [
@@ -10,9 +22,9 @@ import Testing
             .init(toolCalls: [.speak(callId: "third", lines: ["Use the constraints above."])]),
         ])
         let screen = SequenceScreen([
-            .init(imageBase64: "FIRST", recognizedText: "Return indices, not values.\nlet seen = [Int: Int]()"),
-            .init(imageBase64: "SECOND", recognizedText: "for (index, value) in nums.enumerated() {"),
-            .init(imageBase64: "THIRD", recognizedText: "return []"),
+            .init(imageBase64: "FIRST", accessibleText: "Return indices, not values.\nlet seen = [Int: Int]()"),
+            .init(imageBase64: "SECOND", accessibleText: "for (index, value) in nums.enumerated() {"),
+            .init(imageBase64: "THIRD", accessibleText: "return []"),
         ])
         let driver = makeDriver(brain: brain, screen: screen)
         for _ in 0..<3 { #expect(await driver.handleTrigger(.manualHint) == .spoke) }
@@ -30,8 +42,8 @@ import Testing
             .init(toolCalls: [.speak(callId: "second", lines: ["Continue."])]),
         ])
         let driver = makeDriver(brain: brain, screen: SequenceScreen([
-            .init(imageBase64: "A", recognizedText: "return count", sourceID: "window:1"),
-            .init(imageBase64: "B", recognizedText: "return count", sourceID: "window:2"),
+            .init(imageBase64: "A", accessibleText: "return count", sourceID: "window:1"),
+            .init(imageBase64: "B", accessibleText: "return count", sourceID: "window:2"),
         ]))
         for _ in 0..<2 { #expect(await driver.handleTrigger(.manualHint) == .spoke) }
         let text = brain.calls.last!.filter { $0.role != .system }.compactMap(\.text).joined(separator: "\n")
@@ -52,9 +64,9 @@ import Testing
             .init(toolCalls: [.speak(callId: "last", lines: ["Continue."])]),
         ])
         let screen = SequenceScreen([
-            .init(imageBase64: "A", recognizedText: "old problem constraint"),
-            .init(imageBase64: "B", recognizedText: "new problem constraint"),
-            .init(imageBase64: "C", recognizedText: "new problem example"),
+            .init(imageBase64: "A", accessibleText: "old problem constraint"),
+            .init(imageBase64: "B", accessibleText: "new problem constraint"),
+            .init(imageBase64: "C", accessibleText: "new problem example"),
         ])
         let driver = makeDriver(brain: brain, screen: screen)
         for _ in 0..<3 { #expect(await driver.handleTrigger(.manualHint) == .spoke) }
@@ -78,10 +90,10 @@ import Testing
             .init(toolCalls: [.speak(callId: "last", lines: ["Continue."])]),
         ])
         var shots: [ScreenSnapshot] = [
-            .init(imageBase64: "A", recognizedText: "old problem constraint"),
-            .init(imageBase64: "B", recognizedText: "new problem constraint"),
+            .init(imageBase64: "A", accessibleText: "old problem constraint"),
+            .init(imageBase64: "B", accessibleText: "new problem constraint"),
         ]
-        if succeeds { shots.append(.init(imageBase64: "C", recognizedText: "new problem example")) }
+        if succeeds { shots.append(.init(imageBase64: "C", accessibleText: "new problem example")) }
         let driver = makeDriver(brain: brain, screen: SequenceScreen(shots))
         for _ in 0..<3 { #expect(await driver.handleTrigger(.manualHint) == .spoke) }
         let text = brain.calls.last!.filter { $0.role != .system }.compactMap(\.text).joined(separator: "\n")
@@ -98,7 +110,7 @@ import Testing
             .init(toolCalls: [.speak(callId: "hint", lines: ["Use the earlier constraint."])]),
         ])
         let driver = makeDriver(brain: brain, screen: SequenceScreen([
-            .init(imageBase64: "A", recognizedText: "Input is already sorted.")
+            .init(imageBase64: "A", accessibleText: "Input is already sorted.")
         ]))
         #expect(await driver.handleTrigger(.silence(secondsQuiet: 20)) == .silentByModel)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -120,10 +132,10 @@ import Testing
             .init(toolCalls: [.speak(callId: "d", lines: ["Continue."])]),
         ])
         let driver = makeDriver(brain: brain, screen: SequenceScreen([
-            .init(imageBase64: "A", recognizedText: "count = 1"),
-            .init(imageBase64: "B", recognizedText: "Count all matching pairs."),
-            .init(imageBase64: "C", recognizedText: "count = 0"),
-            .init(imageBase64: "D", recognizedText: "return count"),
+            .init(imageBase64: "A", accessibleText: "count = 1"),
+            .init(imageBase64: "B", accessibleText: "Count all matching pairs."),
+            .init(imageBase64: "C", accessibleText: "count = 0"),
+            .init(imageBase64: "D", accessibleText: "return count"),
         ]))
         for _ in 0..<4 { _ = await driver.handleTrigger(.manualHint) }
         let text = brain.calls.last!.filter { $0.role != .system }.compactMap(\.text).joined(separator: "\n")
@@ -147,9 +159,9 @@ import Testing
             .init(toolCalls: [.speak(callId: "last", lines: ["Continue."])]),
         ])
         let driver = makeDriver(brain: brain, screen: SequenceScreen([
-            .init(imageBase64: "A", recognizedText: "Earlier required constraint."),
-            .init(imageBase64: "B", recognizedText: "Current example."),
-            .init(imageBase64: "C", recognizedText: "Current code."),
+            .init(imageBase64: "A", accessibleText: "Earlier required constraint."),
+            .init(imageBase64: "B", accessibleText: "Current example."),
+            .init(imageBase64: "C", accessibleText: "Current code."),
         ]))
         for _ in 0..<3 { #expect(await driver.handleTrigger(.manualHint) == .spoke) }
         #expect(brain.calls.last!.compactMap(\.text).joined().contains("Earlier required constraint."))
@@ -158,11 +170,11 @@ import Testing
     @Test func freshDriverDoesNotInheritPreviousSessionEvidence() async {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Continue."])])])
         let first = makeDriver(brain: brain, screen: SequenceScreen([
-            .init(imageBase64: "A", recognizedText: "session one private code")
+            .init(imageBase64: "A", accessibleText: "session one private code")
         ]))
         #expect(await first.handleTrigger(.manualHint) == .spoke)
         let second = makeDriver(brain: brain, screen: SequenceScreen([
-            .init(imageBase64: "B", recognizedText: "session two question")
+            .init(imageBase64: "B", accessibleText: "session two question")
         ]))
         #expect(await second.handleTrigger(.manualHint) == .spoke)
         #expect(!brain.calls.last!.compactMap(\.text).joined().contains("session one private code"))

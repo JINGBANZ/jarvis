@@ -270,7 +270,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 let observationID = recordScreen(shot)
                 work.screenMemoryID = observationID
                 if let observationID { visibleScreenIDs.insert(observationID) }
-                if let text = shot.recognizedText {
+                if let text = shot.textEvidence?.text {
                     jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                     let observation = ChatMessage.user(
                         (observationID.map(JarvisPrompts.ScreenMemory.observation) ?? "")
@@ -446,7 +446,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     if let shot {
                         jlog("👁 looking at your screen")
                         activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
-                        if let text = shot.recognizedText {
+                        if let text = shot.textEvidence?.text {
                             jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
                         }
                         let observationID = recordScreen(shot)
@@ -455,14 +455,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         let observationLabel = observationID.map(JarvisPrompts.ScreenMemory.observation) ?? ""
                         work.screenObservation = [
                             .user(observationLabel + JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.recognizedText
+                                recognizedText: shot.textEvidence?.text
                             )),
                             .userImage(shot.imageBase64),
                         ]
                         appendToolContinuation(
                             toolCallId: callID,
                             resultText: observationLabel + JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.recognizedText),
+                                recognizedText: shot.textEvidence?.text),
                             extraMessages: [.userImage(shot.imageBase64)],
                             newPhase: .captureScreenContinuation)
                     } else {
@@ -656,7 +656,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
     }
 
     private func recordScreen(_ shot: ScreenSnapshot) -> Int? {
-        guard let text = shot.recognizedText else { return nil }
+        guard let text = shot.textEvidence?.text else { return nil }
         return screenMemory.record(text: text, sourceID: shot.sourceID,
                                    elapsedSeconds: clock.now() - sessionStart)
     }

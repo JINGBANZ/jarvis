@@ -102,6 +102,10 @@ public enum Defaults {
         /// 1-based, as `screencapture -D` counts displays (1 = the menu-bar display).
         public static let displayIndex = 1
         public static let displayIndexMinimum = 1
+
+        public static let browserTextEnabledKey = "screen.browserTextEnabled"
+        /// Accessibility is a broad optional grant and therefore starts disabled.
+        public static let browserTextEnabled = false
     }
 
     // MARK: - Hotkey

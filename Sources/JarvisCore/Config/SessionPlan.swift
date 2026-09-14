@@ -10,10 +10,13 @@ public struct ScreenCaptureSelection: Sendable, Equatable {
     /// The display a capture must explicitly target (`screencapture -D`), or nil when a plain
     /// capture — which shoots the main display — is right.
     public let explicitDisplay: Int?
+    /// User opt-in frozen with the attempt. The OS grant is still checked silently at capture time.
+    public let browserTextEnabled: Bool
 
-    public init(scope: ScreenCaptureScope, explicitDisplay: Int?) {
+    public init(scope: ScreenCaptureScope, explicitDisplay: Int?, browserTextEnabled: Bool) {
         self.scope = scope
         self.explicitDisplay = explicitDisplay
+        self.browserTextEnabled = browserTextEnabled
     }
 }
 
@@ -52,13 +55,18 @@ public struct SessionPlan: Sendable, Equatable {
     public static let `default` = SessionPlan(
         revision: 0,
         screen: ScreenCaptureSelection(
-            scope: Defaults.Screen.scope, explicitDisplay: nil))
+            scope: Defaults.Screen.scope,
+            explicitDisplay: nil,
+            browserTextEnabled: Defaults.Screen.browserTextEnabled))
 }
 
 public extension ScreenCapturePreferences {
     /// Read the persisted screen selection once, at a revision boundary. Every later capture in the
     /// attempt reads the returned value, never this store.
     var selection: ScreenCaptureSelection {
-        ScreenCaptureSelection(scope: scope, explicitDisplay: explicitDisplay)
+        ScreenCaptureSelection(
+            scope: scope,
+            explicitDisplay: explicitDisplay,
+            browserTextEnabled: browserTextEnabled)
     }
 }

@@ -98,7 +98,11 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
     }
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
         captureCount += 1
-        return ScreenSnapshot(imageBase64: payload, recognizedText: recognizedText)
+        return ScreenSnapshot(
+            imageBase64: payload,
+            textEvidence: recognizedText.map {
+                ScreenTextEvidence(text: $0, source: .onDeviceOCR, coverage: .currentViewport)
+            })
     }
     func cancelCapture() {}
 }

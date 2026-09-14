@@ -48,6 +48,18 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
         set { defaults.set(newValue.rawValue, forKey: Defaults.Screen.scopeKey) }
     }
 
+    /// Whether active-window captures may read semantic text from a supported foreground browser.
+    /// The macOS permission is checked independently at capture time; this is the user's opt-in.
+    public var browserTextEnabled: Bool {
+        get {
+            guard defaults.object(forKey: Defaults.Screen.browserTextEnabledKey) != nil else {
+                return Defaults.Screen.browserTextEnabled
+            }
+            return defaults.bool(forKey: Defaults.Screen.browserTextEnabledKey)
+        }
+        set { defaults.set(newValue, forKey: Defaults.Screen.browserTextEnabledKey) }
+    }
+
     /// The display a capture must explicitly target (`screencapture -D`), or nil when a plain
     /// capture — which shoots the main display — is right: active-window scope, where fallbacks
     /// must not be steered by an index left over from an old entire-display selection, and
