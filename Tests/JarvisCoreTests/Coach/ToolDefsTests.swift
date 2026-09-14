@@ -2,9 +2,8 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ToolDefsTests {
-    @Test(arguments: [speakTool, systemDesignSpeakTool])
-    func speakSchemaLeavesHighlightLimitToLocalValidation(_ tool: ToolDef) {
-        #expect(!tool.parametersJSON.contains("\"maxItems\""))
+    @Test func speakSchemaLeavesHighlightLimitToLocalValidation() {
+        #expect(!speakTool.parametersJSON.contains("\"maxItems\""))
         #expect(CodeSnippet(language: "swift", placement: "Inside solve", code: "return result",
                             highlightedLines: Array(repeating: 1, count: 13)) == nil)
     }
@@ -20,17 +19,30 @@ import Testing
     /// so the client no longer splits a free-form string.
     @Test func speakToolReturnsStrictLinesArray() {
         #expect(speakTool.parametersJSON.contains("\"lines\""))
+        // One schema on every brain: `mermaid` is declared always, nullable so strict Structured
+        // Outputs treats it as optional while it stays in `required`.
+        #expect(speakTool.parametersJSON.contains(#""mermaid":{"type":["string","null"]"#))
+        #expect(speakTool.parametersJSON.contains(#""required":["lines","mermaid""#))
         #expect(speakTool.parametersJSON.contains("\"array\""))
         #expect(speakTool.parametersJSON.contains("\"required\""))
         // strict mode requires additionalProperties:false on every object in the schema.
         #expect(speakTool.parametersJSON.contains("\"additionalProperties\":false"))
     }
 
+    /// Nothing in the runtime decides when a diagram belongs, so both places the model can read
+    /// about the field say the same thing: a loaded skill is what asks for one.
+    @Test func theDiagramFieldIsGovernedByPromptTextAlone() {
+        #expect(speakTool.parametersJSON.contains(
+            "A small Mermaid graph for a private architecture sketch. "
+                + "Null unless a loaded skill asks for a diagram."))
+        #expect(speakTool.guidance.hasSuffix("""
+            Set mermaid to null. Attach a graph only when a loaded skill has told you to, and only
+            for the case it describes.
+            """))
+    }
+
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
-        #expect(captureScreenTool.description == JarvisPrompts.Coach.ToolDescription.captureScreen)
-        #expect(speakTool.description == JarvisPrompts.Coach.ToolDescription.speak)
-        #expect(staySilentTool.description == JarvisPrompts.Coach.ToolDescription.staySilent)
         #expect(captureScreenTool.description.contains("one fresh result satisfies that request"))
         #expect(speakTool.description.contains("up to 3 short standalone overlay lines"))
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
@@ -109,8 +121,12 @@ import Testing
         #expect(JarvisPrompts.Coach.system.contains("Never claim you opened an app"))
     }
 
+    /// The tip style governs `speak` and travels with it; `speak` is always offered, so this text
+    /// still reaches the model in every session.
     @Test func coachPromptHasOneConsistentFullSolutionRule() {
-        #expect(JarvisPrompts.Coach.system.contains("Give a full solution only when \"me\" explicitly asks"))
+        #expect(speakTool.guidance
+            .contains("Give a full solution only when \"me\" explicitly asks"))
+        #expect(!speakTool.guidance.contains("never the whole answer"))
         #expect(!JarvisPrompts.Coach.system.contains("never the whole answer"))
     }
 
@@ -119,7 +135,8 @@ import Testing
     /// vocabulary already in front of the user; a genuinely necessary new term is glossed, not
     /// dropped, because accuracy outranks brevity.
     @Test func coachPromptGroundsTipVocabularyInWhatTheUserAlreadySees() {
-        let prompt = JarvisPrompts.Coach.system.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let prompt = speakTool.guidance
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         #expect(prompt.contains("Name things with the words already in front of \"me\""))
         // Either speaker: the interviewer's spoken terms are also in front of the user, and
         // interviewer questions are first-class coaching input.

@@ -64,7 +64,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
-| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, interview format, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; interview format and transcription changes take effect on the next Start. |
+| `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, the coach's switchable capabilities, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; capability and transcription changes take effect on the next Start. |
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in four stacked cards — **OpenAI API**, **Gemini API**, **Claude Code**, **Codex CLI**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key checks it with one models-list request and shows the vendor's verdict under the row. Saving never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also has **Show diagrams**, enabled by default, and **Show code with hints** with its own appearance controls. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
@@ -101,11 +101,6 @@ a single private `applyVisibility()` derives `isEnabled && isSessionLive`. Keepi
 place is why the panel, not the two call sites, owns it: switching the box on from Settings while
 stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides
 the rule while the Overlay tab is open and re-derives it on close.
-
-The session’s selected interview format appears beside the name in the box’s existing header
-(for example, **Jarvis · Coding**). It uses the same Start-time selection as the coaching prompt,
-remains visible when collapsed, and survives clearing responses. With no selection or after Stop,
-the title reads **Jarvis**. The format shares the header’s sizing and adds no extra row.
 
 Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
 backdrop, not a hidden one. Nothing here takes a surface off screen: that is the On/Off toggle, and
@@ -182,7 +177,7 @@ preview is running. The plain setters
 ## Shortcuts
 
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
-They work during a session; code is available in Coding and general sessions only. Hints and
+They work during a session; code is available in a session that started with it enabled. Hints and
 explanations are fallbacks for proactive coaching; the code hotkey requests a snippet only when the session started with code enabled; [architecture.md](./architecture.md#on-demand-coaching-shortcuts)
 defines their context, output, and scheduling behavior. Each card uses `HotkeyBindingView` and the
 existing recorder, requiring Command or Option. A successful rebind takes effect immediately and
@@ -210,9 +205,10 @@ content. The Overlay Box distinguishes semibold hints from regular explanation p
 shows an example. Neither surface's visibility preference changes.
 
 The **Overlay → Overlay Box** card includes **Show code with hints**, off by default, persisted by
-`CodePreferences`. It is captured at Start: enabled coding/general sessions reserve the
-[dedicated code area](./architecture.md#on-demand-coaching-shortcuts) and request matching snippets
-alongside hints. Saved changes affect the next Start; they do not alter the active dock or prompt.
+`CodePreferences`. It is captured at Start: an enabled session reserves the
+[dedicated code area](./architecture.md#on-demand-coaching-shortcuts) and requests matching snippets
+alongside hints, and the prompt's code guidance is what keeps one off a hint that needs no code.
+Saved changes affect the next Start; they do not alter the active dock or prompt.
 The hotkey requests the next snippet only for a session that started with code enabled. Turning the
 setting off releases the binding. The **Shortcuts → Show code** recorder stays visible and editable;
 when disabled it points to Overlay settings. Rebinding still reports conflicts, but leaves the binding
@@ -238,8 +234,8 @@ older readers and the session evaluator; structured fields drive the sectioned v
 The Brain tab owns the whole "who answers a coaching attempt" decision, persisted through
 `BrainPreferences` (UserDefaults).
 
-The page header sits above one vertically scrolling stack of three rounded groups: **Provider
-route**, **Coaching**, then **Transcription**. The Provider group is one uninterrupted route: Primary and every
+The page header sits above one vertically scrolling stack of four rounded groups: **Provider
+route**, **Coaching**, **Capabilities**, then **Transcription**. The Provider group is one uninterrupted route: Primary and every
 Fallback row share the same label / provider / model alignment, with ordering actions only on
 fallbacks. There are no row dividers or permanent explanatory paragraphs. Fallback rows expand the
 outer document instead of hiding inside a second scroll area. While coaching runs, a compact **In
@@ -250,7 +246,13 @@ locally installed **Claude Code** / **Codex CLI**. Claude uses a session-scoped 
 coaching on the user's existing Claude *subscription* instead of the key, and Codex likewise coaches
 through a session-scoped app-server on the user's ChatGPT subscription (`CLIBrainClient`; see
 [architecture.md](./architecture.md#local-cli-brain-providers)). Installed CLIs are auto-detected by `AgentCLIDetector`: binary
-discovery is a pure file probe over $PATH + the known install dirs, while Claude sign-in uses its
+discovery is a pure file probe over stable $PATH entries and common installation directories,
+including nvm's versioned Node installs. Explicit PATH selections win; nvm fallbacks are searched
+newest first. Codex also checks the Codex and ChatGPT app bundles in the user's and system
+Applications directories after standalone installs. Discovery never sources shell startup scripts,
+which could hang or present UI during live preflight. The selected executable's directory leads
+the child PATH for both status probes and runtime launches so adjacent interpreters remain usable.
+Claude sign-in uses its
 non-billing `auth status --json` command under a short timeout because account metadata can outlive
 an expired OAuth session. Codex keeps using its auth-file marker and a bounded capability probe.
 Settings runs these probes asynchronously and keeps local-provider controls selectable while the
@@ -305,11 +307,21 @@ provider is active; its default lives with the others in
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
 three shared levels pass through.
 
-**Interview format.** The Coaching-card picker defaults to **None** (base prompt only), with
-**Coding**, **Behavioral**, **System Design**, and **General Technical** as explicit selections.
-The selected addendum applies on the next Start. General Technical uses available conversation and
-screen context; capture remains on demand. Per-format policy and the explicit System Design
-requirement for diagrams are defined in [architecture.md → Models and APIs](./architecture.md#models-and-apis).
+**Capabilities.** This card lists what the coach can do and lets the user switch parts of it off.
+Screen capture, speak, and stay silent are shown as rows with no control and the detail "Always on":
+Jarvis cannot start without screen capture, and a turn cannot end without one of the other two. Prep
+notes search has a switch, disabled until a prep-material source exists, because a switch that can
+only mean "off either way" reads as a broken control. Below the tools, one row per bundled skill —
+**Behavioral**, **Coding**, **System design** — each switched on by default and detailed "Loaded
+when a matching question comes up". A switched-off skill keeps its row, greyed by its own switch
+rather than hidden, so it can be switched back on. The card writes
+`BrainPreferences.disabledTools` and `BrainPreferences.disabledSkills`, the names that are OFF, so a
+capability added in a later version is on for everyone who never opened this card, and nothing else:
+a session resolves its capabilities once at Start and both the coach loop and a warmed CLI process
+are built from that one value, so applying a change mid-session could only make them disagree. The
+header says "Applies on the next Start". The prep switch's enabled state and the skill list are read
+when the card is built, so adding a source in Prep material enables it the next time Settings opens.
+See [architecture.md → Capabilities](./architecture.md#capabilities).
 
 **Transcription.** This group owns the separate speech-to-text role without conflating it with the
 brain route. Its picker contains **OpenAI** (the default), **Gemini**, and **Apple Speech (macOS
@@ -427,7 +439,7 @@ claim that the account is healthy.
 
 Claude Code and Codex CLI keep authentication in their own tools. Connections runs the existing
 bounded `AgentCLIDetector` probes and reports **Signed in**, **Signed out**, **Sign-in unknown**, or
-**Not installed** without opening a login flow or storing another secret. The page's compact ready
+**Not found** without opening a login flow or storing another secret. The page's compact ready
 count includes every managed API key that is saved and confirmed signed-in local accounts.
 
 An OpenAI key is required only when OpenAI is selected for transcription or appears anywhere in the
@@ -490,7 +502,8 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SettingsCardView.swift` | Rounded group boundary, optional header, and resize callback |
 | `Sources/JarvisApp/Settings/SettingsRowView.swift` | Shared label/help/trailing-control row |
 | `Sources/JarvisApp/Settings/SettingsScrollView.swift` | Viewport-change adapter for variable-height card documents |
-| `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Interview format + Transcription |
+| `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Capabilities + Transcription |
+| `Sources/JarvisApp/Settings/CapabilitiesControls.swift` | The Capabilities card: always-on rows, the prep-notes-search switch, and one switch per bundled skill |
 | `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini) + external CLI account readiness |
 | `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The one models-list request behind a saved key's verdict |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
@@ -505,7 +518,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
 | `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers |
-| `Sources/JarvisCore/Brain/Adapters/LocalAgent/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
+| `Sources/JarvisBrainProviders/LocalAgent/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
 | `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisEvaluation/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |

@@ -507,8 +507,8 @@ their own contract before implementation.
   `import JarvisCore`: `SessionEvidenceIndex`, `SessionMetrics`, `EvaluationTranscript`,
   `SessionAuditEvidence`, `AgenticEvaluation`, `AgenticEvaluator`, `EvalReportPage`,
   `JSONLRecords`, and `JarvisPrompts+Evaluation` (still an extension of Core's public
-  `JarvisPrompts` namespace, so predefined model-facing text remains auditable under that one
-  name). `JSONLRecords` moves although the issue body does not list it: it is loss-aware parsing
+  `JarvisPrompts` namespace, so its model-facing text stays on the same audit surface as Core's
+  prompts). `JSONLRecords` moves although the issue body does not list it: it is loss-aware parsing
   consumed only by the sealed-session readers; nothing on the live path parses JSONL.
 - Core keeps the live recording side — `FileSessionAudit` with its worker/writer, the typed audit
   events and observer ports, `ActivityLog`, `SessionStore`, `jlog`. The boundary reads: Core records
@@ -789,8 +789,8 @@ all. It is a pure move: no behavior, invocation, parsing, timing, or classificat
   the process runner and phase timings, the runtime lifetime, and the Claude Code, Codex exec, and
   Codex app-server runtimes — moved unchanged apart from `import JarvisCore`.
 - `JarvisPrompts+LocalAgent` moves with the adapters. It stays an extension of Core's public
-  `JarvisPrompts` namespace, so every predefined model-facing string Jarvis ships is still auditable
-  under that one name — the same rule the evaluation prompts follow.
+  `JarvisPrompts` namespace, so its model-facing text stays on the same audit surface as Core's
+  prompts, the same rule the evaluation prompts follow.
 - `JarvisEvaluation` gains a dependency on `JarvisBrainProviders`, because the agentic evaluator
   genuinely runs a local agent CLI: it reuses the same detector, invocation shape, and process
   runner rather than keeping a second copy of that plumbing. The dependency graph stays acyclic and

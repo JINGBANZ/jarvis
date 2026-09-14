@@ -69,23 +69,17 @@ final class BrainComposition {
     private var activeBrainTarget: BrainTarget?
     private var pendingBrainChangeFrom: BrainTarget?
 
-    /// The current session's resolved interview-format guidance, fixed once at Start (set directly
-    /// by the App before the first `makeConfiguredRoute` call) and reused by every later hot
-    /// reapply — `applyBrainPreferencesToRunningSession` never re-reads `preferences.interviewFormat`
-    /// live, so a Settings edit mid-session cannot retroactively change a value that was meant to be
-    /// fixed for the whole session. Baked into the CLI system prompt through the same
-    /// `JarvisPrompts.Coach.system(prepMaterial:formatAddendum:)` builder `CoachAttemptRunner`
-    /// calls per turn.
-    var interviewFormatAddendum = ""
     var explanationsEnabled = true
     var codeEnabled = false
 
-    /// The current session's tool set, fixed once at Start on exactly the same terms as
-    /// `interviewFormatAddendum` and set from the same place, before the first `makeConfiguredRoute`
-    /// call. A local-agent target bakes these schemas into its process instructions and rejects any
-    /// later turn that no longer composes to them, so this must be the same value the session's
-    /// `CoachDriver` was given — resolve both from `sessionCoachTools` (#273).
-    var coachTools: [ToolDef] = JarvisCore.coachTools
+    /// The current session's capability set, fixed once at Start (set directly by the App before
+    /// the first `makeConfiguredRoute` call) and reused by every later hot reapply, so a Settings
+    /// edit mid-session cannot retroactively change a value meant to be fixed for the whole
+    /// session. A local-agent target bakes these schemas and this prompt into its process
+    /// instructions and rejects any later turn that no longer composes to them, so this must be
+    /// the same value the session's `CoachDriver` was given (#273). Baked in through the same
+    /// `JarvisPrompts.Coach.system(capabilities:)` builder `CoachAttemptRunner` calls per turn.
+    var capabilities: CoachCapabilities = .default
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -150,19 +144,13 @@ final class BrainComposition {
                                        workDirectory: sessionDir,
                                        timeout: BrainWorkloadTimeout.liveCoaching,
                                        traffic: host.liveSessionEvidence, trafficTag: "coach",
-                                       // Prep material is described whenever the session's tool set
-                                       // carries search_prep_notes, which is decided at Start from
-                                       // the configured sources — the index itself lands later, off
-                                       // the Start path. Reading it from the same tool set the coach
-                                       // loop sends is what keeps these instructions valid for the
-                                       // whole session (#273).
+                                       // Prompt and tool list come from the one value resolved at
+                                       // Start, which is what keeps these baked instructions valid
+                                       // for the whole session (#273).
                                        systemPrompt: JarvisPrompts.Coach.system(
-                                           prepMaterial: coachTools.contains {
-                                               $0.name == searchPrepNotesTool.name
-                                           },
-                                           formatAddendum: interviewFormatAddendum,
+                                           capabilities: capabilities,
                                            explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
-                                       tools: coachTools,
+                                       tools: capabilities.tools,
                                        toolChoice: .required,
                                        runtime: runtimes.coach,
                                        prewarm: prewarm)

@@ -95,7 +95,7 @@ cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$SPARKLE"
 # SwiftPM emits each resource-bearing target's resources as its own side-by-side bundle — JarvisApp's
-# (the Silero VAD model) and JarvisCore's (the interview-format skill Markdown files). Copy both into
+# (the Silero VAD model) and JarvisCore's (the bundled coaching skills). Copy both into
 # Contents/Resources so `Bundle.module` resolves inside the assembled app, not just from .build.
 ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisApp.bundle" \
       "$APP/Contents/Resources/Jarvis_JarvisApp.bundle"

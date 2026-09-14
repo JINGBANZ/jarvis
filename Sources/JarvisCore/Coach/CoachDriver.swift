@@ -175,10 +175,8 @@ public final class CoachDriver: @unchecked Sendable {
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
         recoveryDelay: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
         activity: (any ActivityEventRecording)? = nil,
-        coachTools: [ToolDef]? = nil,
-        prepMaterial: (any PrepMaterialSearching)? = nil,
-        interviewFormatAddendum: String = "",
-        interviewFormat: InterviewFormat? = nil
+        capabilities: CoachCapabilities = .default,
+        prepMaterial: (any PrepMaterialSearching)? = nil
     ) {
         self.recoveryDelay = recoveryDelay
         self.clock = clock
@@ -200,13 +198,8 @@ public final class CoachDriver: @unchecked Sendable {
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
-            // The app passes the same set it baked into a local-agent target's instructions. The
-            // fallback keeps a session composed without one consistent with what it was given.
-            sessionTools: coachTools
-                ?? sessionCoachTools(
-                    interviewFormat: interviewFormat, prepMaterial: prepMaterial != nil),
-            interviewFormatAddendum: interviewFormatAddendum,
-            interviewFormat: interviewFormat)
+            // The app passes the same value it baked into a local-agent target's instructions.
+            capabilities: capabilities)
     }
 
     private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { _ in
