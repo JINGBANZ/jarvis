@@ -12,7 +12,11 @@
 implemented.** The coach's capabilities are composed once at Start and the model loads what a
 question needs: prep-notes search as a deferred tool, and the behavioral, coding, and system-design
 skills through `load_skill`, with no Start-time selection
-([architecture.md → Capabilities](./architecture.md#capabilities)). Their coaching policy and the
+([architecture.md → Capabilities](./architecture.md#capabilities)). Behavioral coaching distinguishes
+experience, personal, and hypothetical questions and preserves prep-note factual boundaries.
+[`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift) respects Markdown
+section starts and splits long question tables between rows; retrieval remains keyword-based.
+Their coaching policy and the
 diagram boundary are defined in
 [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`

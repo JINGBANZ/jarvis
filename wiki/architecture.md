@@ -202,6 +202,15 @@ installs no port in either case; which one it was stays in `jlog`, and Activity 
 fixed notice that a tip went out without the user's own material. Switching the capability off also
 skips the index build, so the file reading and `textutil` work stop with it.
 
+Prep search uses local keyword ranking over paragraph chunks. Markdown headings at paragraph starts
+begin fresh chunks so short story sections retain their accuracy notes; long pipe tables split
+between rows so a question map does not become one oversized search result. Long prose paragraphs
+and individual rows stay intact, and sections longer than the target can still span chunks
+(see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
+The behavioral skill evaluates all returned excerpts against the exact question and distinguishes
+personal events from drafts, hypothetical approaches, and criteria. A retrieval miss is missing
+evidence, not permission to invent the candidate's history.
+
 A call to a tool the session does not offer, or a load naming something it does not have, is answered
 with a plain "no tool named X is available" rather than failing the attempt. Only a CLI target can
 reach the first branch, since it reconstructs calls from prompt text and can name anything; on the
@@ -655,8 +664,9 @@ rather than a per-turn screenshot.
   [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
   policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
   model loads when the question calls for it. Three skills ship: behavioral shapes candidate-owned
-  answers with STAR and prepared criteria, labels constructed examples, and avoids refining an
-  answer that is already concrete and complete; coding covers representation and invariant guidance,
+  experience answers with STAR, handles personal and hypothetical questions directly, preserves
+  prep-material caveats, and reserves labeled fictional examples for an explicit practice request.
+  It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
   local implementation and defect diagnosis, and boundary tests for a post-completion hint the base
   policy already warrants; system-design supplies the stage vocabulary from requirements through
   trade-offs, and asks for a diagram in the one stage that benefits. The base prompt keeps what is
