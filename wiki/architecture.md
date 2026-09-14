@@ -312,7 +312,11 @@ correction and relevant next lines; an invalid overall approach receives a corre
 Without visible code, known problem context supports a first component without inventing unseen names.
 
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) pins the snippet in a separate
-bottom scroll area inside the existing capture-excluded panel. Its dark background defaults to opaque
+bottom scroll area inside the existing capture-excluded panel. The horizontal divider adjusts
+its height by dragging or through VoiceOver increment/decrement actions. The chosen proportion
+survives new hints, clear, collapse/expand, and panel resizing for the current session; a new session
+restores automatic content sizing. Adjustment preserves space for hints and uses the same bounds
+for pointer and accessibility input, without activating Jarvis or taking keyboard focus. Its dark background defaults to opaque
 and has its own opacity, independent of the history fill (see [Overlay appearance](./settings-window.md#overlay-appearance)). Long code lines wrap within the dock without changing
 source text or correction highlights. The dock measures wrapped content to use available space;
 code uses its configured compact monospace size and shrinks only as needed to fit, down to a readable minimum
