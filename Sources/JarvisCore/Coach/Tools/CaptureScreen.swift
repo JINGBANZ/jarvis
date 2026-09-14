@@ -35,7 +35,7 @@ extension JarvisPrompts.Coach {
         evidence.map { item in
             let source = item.source == .browserAccessibility
                 ? "Chrome Accessibility (active-tab tree, may include off-screen text)"
-                : "On-device OCR (current screenshot viewport)"
+                : "On-device OCR (current screenshot viewport, may contain errors)"
             let omission = item.truncated ? " — truncated" : ""
             return "\(screenTextHeader) — \(source)\(omission):\n\(item.text)"
         }.joined(separator: "\n\n")
