@@ -14,7 +14,8 @@ question needs: prep-notes search as a deferred tool, and the behavioral, coding
 skills through `load_skill`, with no Start-time selection
 ([architecture.md → Capabilities](./architecture.md#capabilities)). Behavioral coaching distinguishes
 experience, personal, and hypothetical questions and preserves prep-note factual boundaries in
-self-contained hints. The [prep-search policy](./architecture.md#capabilities) permits one focused
+self-contained hints that pair a new question’s assessment focus with supported answer content.
+The [prep-search policy](./architecture.md#capabilities) permits one focused
 follow-up to resolve a returned story or section reference when usable facts are missing.
 All supported prep formats (`.md`, `.txt`, `.pdf`, `.docx`) are available to every interview type.
 [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift) applies section

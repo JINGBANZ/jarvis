@@ -227,8 +227,12 @@ by all prep formats and interview topics; it changes guidance, not the search in
 scheduling (see [`SearchPrepNotes`](../Sources/JarvisCore/Coach/Tools/SearchPrepNotes.swift)).
 
 The behavioral skill evaluates all returned excerpts against the exact question and distinguishes
-personal events from drafts, hypothetical approaches, and criteria. Its hints contain supported
-answer content matched to the question or current gap, without relying on story IDs, section labels,
+personal events from drafts, hypothetical approaches, and criteria. For a new question, the opening
+hint pairs the specific behavior or reasoning a strong answer would demonstrate with supported
+answer content or a focused recall question. This assessment focus is inferred from the question,
+without claiming private interviewer intent or inventing company criteria, so the candidate can
+choose and emphasize relevant evidence. Follow-up hints address the current gap without repeating
+that framing, and sufficient answers still call for silence. Hints do not rely on story IDs, section labels,
 or unexplained project shorthand. Compact wording preserves each action's owner and status and each
 metric's qualifier. When no supported story fits, the coach asks for a real example or identifies
 the missing fact. A retrieval miss cannot establish that the candidate has never had that experience
