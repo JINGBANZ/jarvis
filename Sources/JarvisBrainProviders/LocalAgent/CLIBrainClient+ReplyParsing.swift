@@ -4,20 +4,28 @@ import JarvisCore
 /// Mapping a persistent runtime's completed reply into the brain contract.
 extension CLIBrainClient {
     /// Map the reply back into the brain contract. No tools → the text IS the payload (summarizer /
-    /// evaluator). Otherwise parse the protocol JSON. Unlike the Responses API, a forced tool is
-    /// only *prompted* here, so it's enforced client-side: a `force(speak)` turn (the hint hotkey)
-    /// never accepts a different tool, and degrades to speaking the reply's prose — an explicit
-    /// keypress must produce a visible hint, not silently vanish on a formatting slip.
+    /// evaluator). Otherwise parse the protocol JSON. Unlike the Responses API, a narrowed tool
+    /// choice is only *prompted* here, so it's enforced client-side: a coaching shortcut's turn
+    /// (`allowed` or `force(speak)`) never accepts a tool outside its set, and degrades to speaking
+    /// the reply's prose. That holds on every response of the attempt, not only the forced last one:
+    /// an explicit keypress must produce a visible hint, not a failed attempt and a silent retry.
     func parse(reply: String, tools: [ToolDef], toolChoice: ToolChoice) -> BrainResponse {
         let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !tools.isEmpty else {
             return BrainResponse(toolCalls: [], outputText: text.isEmpty ? nil : text)
         }
+        // Nil under `.required`, where an unknown name must still reach the runner so it can answer
+        // "not available" and let the turn continue.
+        let permitted: [String]? = switch toolChoice {
+        case .force(let name): [name]
+        case .allowed(let names): names
+        case .auto, .required: nil
+        }
         let extracted = Self.extractToolCall(from: text)
         if let (name, argumentsJSON, _) = extracted {
             let callId = "cli_\(UUID().uuidString.prefix(8))"
-            if case .force(let forced) = toolChoice, name != forced {
-                jlog("Jarvis coach: CLI called '\(name)' where '\(forced)' was forced — recovering")
+            if let permitted, !permitted.contains(name) {
+                jlog("Jarvis coach: CLI called '\(name)', which this turn does not permit; recovering")
             } else if let invocation = ToolInvocation.parse(callId: callId, name: name,
                                                             argumentsJSON: argumentsJSON) {
                 return BrainResponse(toolCalls: [invocation],
@@ -27,7 +35,7 @@ extension CLIBrainClient {
                 jlog("Jarvis coach: CLI tool call '\(name)' was unknown or malformed")
             }
         }
-        if case .force(let name) = toolChoice, name == speakTool.name {
+        if permitted?.contains(speakTool.name) == true {
             // Speak the reply's prose — everything before the (wrong or malformed) protocol
             // object, or the whole reply when there was none.
             let prose = extracted.map { String(text[..<$0.jsonStart]) } ?? text

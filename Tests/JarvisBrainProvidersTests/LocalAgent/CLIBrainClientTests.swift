@@ -455,6 +455,77 @@ import JarvisCore
         #expect(response.rawToolCalls.first?.argumentsJSON.contains("Try a hash map here.") == true)
     }
 
+    /// A coaching shortcut's session with a skill left to load, and the choice its press sends.
+    private let shortcutCapabilities = CoachCapabilities.compose(
+        disabledTools: [], prepSourcesConfigured: false,
+        skills: [Skill(name: "behavioral", description: "Coaching for behavioral questions.",
+                       body: "STAR.")])
+    private let shortcutChoice = ToolChoice.allowed(["speak", "load_skill"])
+
+    /// The allowed set is the turn's to state: the baked instructions are the ones `.required`
+    /// warmed the process with, so a press cannot trip the drift guard.
+    @Test func allowedChoiceKeepsTheBakedInstructionsAndStatesItsSetInTheTrailer() async throws {
+        let workDir = try makeWorkDir()
+        let (coach, backend) = client(
+            workDir: workDir,
+            replies: [#"{"tool":"speak","arguments":{"lines":["tip"]}}"#],
+            tools: shortcutCapabilities.tools)
+        let (allowedCoach, _) = client(
+            workDir: workDir, replies: [], tools: shortcutCapabilities.tools,
+            toolChoice: shortcutChoice)
+        #expect(allowedCoach.expectedInstructions == coach.expectedInstructions)
+
+        _ = try await coach.respond(
+            messages: [.system("coach prompt"), .user("help")],
+            tools: shortcutCapabilities.callable(loaded: []),
+            toolChoice: shortcutChoice)
+
+        let turns = await backend.turns
+        let turn = try #require(turns.first)
+        #expect(turn.text.contains(
+            "This turn ends with a `speak` call. Before it you may call only `load_skill`. "
+                + "Do not call `capture_screen`, `stay_silent`."))
+        // "must call speak" is what the coach prompt reads as "do not load first".
+        #expect(!turn.text.contains("MUST call"))
+        coach.terminate()
+        allowedCoach.terminate()
+    }
+
+    /// Every response of a press, not only the forced last one, turns a reply it cannot accept into
+    /// its spoken prose: a failed attempt there would leave the user waiting on a retry.
+    @Test func allowedChoiceSpeaksTheProseOfAReplyItCannotAccept() throws {
+        let (client, _) = client(
+            workDir: try makeWorkDir(), replies: [], tools: shortcutCapabilities.tools)
+        for call in [
+            #"{"tool":"stay_silent","arguments":{}}"#,
+            #"{"tool":"capture_screen","arguments":{}}"#,
+            #"{"tool":"read_my_email","arguments":{}}"#,
+            #"{"tool":"speak","arguments":{}}"#,
+            "",
+        ] {
+            let response = client.parse(
+                reply: "Lead with the conflict.\n\(call)",
+                tools: shortcutCapabilities.callable(loaded: []),
+                toolChoice: shortcutChoice)
+            guard case .speak(_, let lines, nil, nil, nil) = response.toolCalls.first else {
+                Issue.record("expected the prose to be spoken for \(call)")
+                continue
+            }
+            #expect(lines == ["Lead with the conflict."])
+        }
+    }
+
+    @Test func allowedChoiceAcceptsACallItPermits() throws {
+        let (client, _) = client(
+            workDir: try makeWorkDir(), replies: [], tools: shortcutCapabilities.tools)
+        let response = client.parse(
+            reply: #"{"tool":"load_skill","arguments":{"name":"behavioral"}}"#,
+            tools: shortcutCapabilities.callable(loaded: []),
+            toolChoice: shortcutChoice)
+        #expect(response.toolCalls.first == .loadSkill(callId: response.rawToolCalls[0].id,
+                                                       name: "behavioral"))
+    }
+
     @Test func malformedSpeakArgumentsAreNotAnEmptySpokenTurn() async throws {
         let (client, _) = client(
             workDir: try makeWorkDir(),

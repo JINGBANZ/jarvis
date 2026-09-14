@@ -478,6 +478,33 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"name\":\"speak\""))
     }
 
+    /// A coaching shortcut narrows what may be called through tool_choice alone. The declared array
+    /// is the one a `.required` request carries, which keeps the cached prefix the same.
+    @Test func allowedToolChoiceEncodesAllowedToolsOverTheSameDeclaredArray() async throws {
+        let tools = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false,
+            skills: [Skill(name: "behavioral", description: "d", body: "b")]).tools
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: tools, toolChoice: .required)
+        let required = try #require(
+            try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
+        _ = try await client.respond(messages: [.user("hi")], tools: tools,
+                                     toolChoice: .allowed(["speak", "load_skill"]))
+        let allowed = try #require(
+            try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
+
+        let choice = try #require(allowed["tool_choice"] as? [String: Any])
+        #expect(choice["type"] as? String == "allowed_tools")
+        #expect(choice["mode"] as? String == "required")
+        #expect(choice["tools"] as? [[String: String]] == [
+            ["type": "function", "name": "speak"],
+            ["type": "function", "name": "load_skill"],
+        ])
+        #expect(allowed["tools"] as? NSArray == required["tools"] as? NSArray)
+    }
+
     /// With a traffic log wired, a successful round trip lands in `brain-traffic.jsonl` — the raw
     /// eval pipeline input — tagged, with the request body and response body both present.
     @Test func successfulRoundTripIsRecordedToTrafficLog() async throws {

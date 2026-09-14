@@ -1044,7 +1044,8 @@ public final class CoachDriver: @unchecked Sendable {
                 }
 
                 // A trigger may arrive while the delay is sleeping. Consume it before the shared
-                // admission boundary so an explicit manual hint retains its force-speak semantics.
+                // admission boundary so an explicit shortcut keeps its manual semantics: no
+                // settlement wait, and an attempt that always ends in a hint.
                 wake = takePendingTriggerSnapshot()
                 if let reason = wake.trigger?.reason {
                     receivedTrigger = true

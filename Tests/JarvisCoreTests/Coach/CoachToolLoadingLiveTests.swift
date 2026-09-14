@@ -87,6 +87,58 @@ import JarvisBrainProviders
         }
     }
 
+    /// The hint shortcut pressed before the session has loaded anything, on a question that calls
+    /// for a skill: the press may load it and must still end in a clean tip, in one attempt. Whether
+    /// it loads is asserted on OpenAI and measured on the CLI arms, because the press's own text
+    /// competes with the load rule and the providers weigh the two differently. A CLI target is only
+    /// told what its press permits, so this is also where its turn trailer meets the load rule.
+    /// The capture fails on purpose, since the fake screen has no real image to send, which leaves
+    /// the question in the transcript, as a quiet whiteboard round would.
+    @Test func aShortcutPressMayLoadTheSkillItsQuestionNeeds() async throws {
+        let providers = Self.requestedProviders()
+        guard !providers.isEmpty else { return }
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false, skills: SkillCatalog.bundled())
+        for provider in providers {
+            let directory = try liveDirectory(provider)
+            let traffic = FileSessionAudit(directory: directory)
+            guard let pressed = try await coach(
+                provider, capabilities: capabilities, asking: Self.pressedDesignQuestion,
+                speaker: .them, trigger: .manualHint, screen: UnavailableScreen(),
+                directory: directory, traffic: traffic)
+            else {
+                _ = await traffic.close()
+                break
+            }
+            _ = await traffic.close()
+            let kinds = pressed.activity.kinds
+            let names = pressed.activity.events.compactMap { event -> String? in
+                guard case .capabilityLoaded(let kind, let name) = event, kind == .skill
+                else { return nil }
+                return name
+            }
+            let tip = pressed.overlay.rendered.last?.joined(separator: " | ") ?? "(none)"
+            #expect(pressed.outcome == .spoke)
+            if !provider.usesLocalCLI {
+                #expect(names == ["system-design"])
+            }
+            if let load = kinds.firstIndex(of: .capabilityLoaded), let spoke = kinds.firstIndex(of: .tip) {
+                #expect(load < spoke)
+            }
+            #expect(!tip.contains("\"tool\""))
+            print("""
+                JARVIS_LIVE_CAPABILITY provider=\(provider.rawValue) \
+                press_ms=\(pressed.milliseconds) \
+                loaded=\(names.isEmpty ? "(none)" : names.joined(separator: ",")) \
+                actions=\(kinds.map(\.rawValue).joined(separator: ">")) \
+                tip=\(tip)
+                """)
+        }
+    }
+
+    private static let pressedDesignQuestion =
+        "Let's design a URL shortener. Walk me through your high-level architecture."
+
     /// Nothing runs unless the environment asks for it by provider; an unknown value is a mistake
     /// worth reporting rather than a silent no-op.
     private static func requestedProviders() -> [BrainProvider] {
@@ -188,6 +240,8 @@ import JarvisBrainProviders
 
     private func coach(
         _ provider: BrainProvider, capabilities: CoachCapabilities, asking question: String,
+        speaker: Speaker = .me, trigger: TriggerReason = .turnEnd,
+        screen: ScreenCapturing = FakeScreen(),
         directory: URL, traffic: FileSessionAudit
     ) async throws -> Coached? {
         guard let client = try makeClient(
@@ -202,15 +256,15 @@ import JarvisBrainProviders
         let driver = CoachDriver(
             config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: client)]),
-            screen: FakeScreen(), overlay: overlay, clock: ManualClock(now: 100),
+            screen: screen, overlay: overlay, clock: ManualClock(now: 100),
             automaticAttemptDelay: { _ in },
             activity: activity,
             capabilities: capabilities,
             prepMaterial: Self.notes)
-        transcript.append(.init(speaker: .me, text: question, at: 100))
+        transcript.append(.init(speaker: speaker, text: question, at: 100))
 
         let started = ContinuousClock.now
-        let outcome = await driver.handleTrigger(.turnEnd)
+        let outcome = await driver.handleTrigger(trigger)
         let elapsed = started.duration(to: .now).components
         return Coached(
             outcome: outcome, activity: activity, overlay: overlay,

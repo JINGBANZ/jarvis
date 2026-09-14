@@ -99,6 +99,17 @@ import Testing
         #expect(toolsOnly.contains("If a tool for this question is not loaded yet"))
     }
 
+    /// A coaching shortcut may load, and only the response at its cap is forced to `speak`: the API
+    /// enforces that one on OpenAI, and a CLI trailer says "You MUST call the `speak` tool" only
+    /// there. So the load rule's last sentence stays exactly as written and now describes that one
+    /// response; rewording it for the shortcut would change what every automatic request says.
+    @Test func theLoadRuleStillDefersToAForcedSpeak() {
+        let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true, skills: skills))
+        #expect(prompt.contains("never the same name twice. When the turn tells you that you must "
+            + "call speak, do not load or capture first; speak with what you have."))
+    }
+
     /// With every skill switched off and nothing to load, the session is back to the bare prompt —
     /// the successor of the old "no format selected ⇒ base prompt" invariant.
     @Test func everythingSwitchedOffIsTheBarePrompt() {
