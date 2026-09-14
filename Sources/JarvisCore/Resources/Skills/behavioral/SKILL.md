@@ -48,7 +48,9 @@ about a time” as an event the candidate experienced.
 For a new interviewer question, pair the answer prompt with what the question is assessing.
 Start with a short “Show…” line naming the specific behavior or reasoning a strong answer would
 demonstrate. Infer this focus from the question; do not claim knowledge of private interviewer
-intent or invent company criteria. Use the remaining lines for concrete supported answer content,
+intent or invent company criteria. Include this focus for personal, motivation, and hypothetical
+questions too; advice about tone alone does not explain what a strong answer demonstrates.
+Use the remaining lines for concrete supported answer content,
 or one focused recall question when personal evidence is missing. The assessment focus must help
 the candidate choose and emphasize evidence, not just name a generic trait or repeat STAR labels.
 Do not repeat this framing during follow-ups or interrupt a sufficient answer to add it.
