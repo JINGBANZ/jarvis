@@ -1,0 +1,1 @@
+Design question. Our /search endpoint's p99 latency is four seconds at two hundred requests per second. Walk through how you would find the bottleneck, then redesign the service for a hundred times the traffic.
