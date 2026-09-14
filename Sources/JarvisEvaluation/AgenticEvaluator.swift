@@ -27,22 +27,48 @@ public struct AgenticEvaluator: Sendable {
         }
     }
 
-    private let repositoryDirectory: URL
+    private let source: EvaluationSource
+    private let sourceStore: ReleaseSourceStore
     private let preferredProvider: BrainProvider?
     private let detector: AgentCLIDetector
     private let timeout: TimeInterval
 
-    public init(repositoryDirectory: URL, preferredProvider: BrainProvider? = nil,
+    public init(source: EvaluationSource, preferredProvider: BrainProvider? = nil,
                 detector: AgentCLIDetector = AgentCLIDetector(),
+                sourceStore: ReleaseSourceStore = ReleaseSourceStore(),
                 timeout: TimeInterval = 15 * 60) {
-        self.repositoryDirectory = repositoryDirectory
+        self.source = source
+        self.sourceStore = sourceStore
         self.preferredProvider = preferredProvider?.usesLocalCLI == true ? preferredProvider : nil
         self.detector = detector
         self.timeout = timeout
     }
 
-    public func evaluate(sessionDirectory: URL) async throws -> String {
-        let prompt = try await prepare(sessionDirectory: sessionDirectory)
+    public func evaluate(sessionDirectory: URL,
+                         onFetchingSource: @MainActor @Sendable (Bool) -> Void = { _ in }) async throws -> String {
+        let repositoryDirectory: URL
+        let isRelease: Bool
+        let provenance: String
+        // Release source is fetched for this run alone. The defer must outlive the CLI invocation
+        // below, so it belongs to the whole function rather than to the case that creates it.
+        var fetched: ReleaseSourceStore.Checkout?
+        defer { fetched?.discard() }
+        switch source {
+        case .localCheckout(let directory):
+            repositoryDirectory = directory
+            isRelease = false
+            provenance = source.workspaceProvenance
+        case .release(let version, let fallbackVersion):
+            await onFetchingSource(true)
+            let checkout = try await sourceStore.fetch(version: version,
+                                                       fallbackVersion: fallbackVersion)
+            fetched = checkout
+            repositoryDirectory = checkout.directory
+            provenance = source.releaseProvenance(using: checkout.version)
+            await onFetchingSource(false)
+            isRelease = true
+        }
+        let prompt = try await prepare(sessionDirectory: sessionDirectory, workspaceProvenance: provenance)
         try Task.checkCancellation()
         let providers = preferredProvider.map { [$0] } ?? [.claudeCode, .codexCLI]
         let detected = await detector.detectFirstAsync(providers).map { [$0] } ?? []
@@ -54,7 +80,7 @@ public struct AgenticEvaluator: Sendable {
 
         let invocation = Self.invocation(
             for: cli, prompt: prompt, repositoryDirectory: repositoryDirectory,
-            sessionDirectory: sessionDirectory, timeout: timeout)
+            sessionDirectory: sessionDirectory, timeout: timeout, isReleaseSource: isRelease)
         let output: AgentCLIOutput
         do {
             output = try await AgentCLIProcessRunner.run(invocation)
@@ -73,15 +99,17 @@ public struct AgenticEvaluator: Sendable {
         }
         try Task.checkCancellation()
         return try AgenticEvaluation.saveReport(
-            output.stdout, agentName: cli.executableURL.lastPathComponent, in: sessionDirectory)
+            output.stdout, agentName: cli.executableURL.lastPathComponent, in: sessionDirectory,
+            workspaceProvenance: provenance)
     }
 
     /// Traffic rendering can read a long session, so keep it off the main actor used by Activity.
-    private func prepare(sessionDirectory: URL) async throws -> String {
+    private func prepare(sessionDirectory: URL, workspaceProvenance: String) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 continuation.resume(with: Result {
-                    try AgenticEvaluation.prepare(sessionDir: sessionDirectory)
+                    try AgenticEvaluation.prepare(sessionDir: sessionDirectory,
+                                                  workspaceProvenance: workspaceProvenance)
                 })
             }
         }
@@ -101,7 +129,7 @@ public struct AgenticEvaluator: Sendable {
 
     static func invocation(for cli: DetectedAgentCLI, prompt: String,
                            repositoryDirectory: URL, sessionDirectory: URL,
-                           timeout: TimeInterval) -> AgentCLIRun {
+                           timeout: TimeInterval, isReleaseSource: Bool = false) -> AgentCLIRun {
         let arguments: [String]
         switch cli.provider {
         case .claudeCode:
@@ -117,12 +145,12 @@ public struct AgenticEvaluator: Sendable {
                 "--add-dir", sessionDirectory.path,
             ]
         case .codexCLI:
+            // Release source is an extracted archive without .git, so Codex must allow that workspace.
             arguments = [
                 "exec", "--ephemeral", "--sandbox", "read-only",
                 "--ignore-user-config", "--ignore-rules",
                 "-c", "mcp_servers={}",
-                prompt,
-            ]
+            ] + (isReleaseSource ? ["--skip-git-repo-check"] : []) + [prompt]
         case .openAI:
             preconditionFailure("Agentic evaluation requires a local agent CLI")
         }

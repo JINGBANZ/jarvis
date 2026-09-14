@@ -33,6 +33,15 @@ public enum Credential: String, Sendable, Hashable, CaseIterable {
         }
     }
 
+    /// The vendor alone, for a sentence that already names the key ("OpenAI refused the key"), where
+    /// `displayName`'s "API" suffix would read as part of the claim.
+    public var vendorName: String {
+        switch self {
+        case .openAIAPIKey: "OpenAI"
+        case .geminiAPIKey: "Gemini"
+        }
+    }
+
     /// Placeholder shown in the empty key-entry field, shaped like a real key from this provider so
     /// the field doesn't show OpenAI's `sk-…` shape on every credential card.
     public var placeholderHint: String {

@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.2.3](https://github.com/JINGBANZ/jarvis/compare/v0.2.2...v0.2.3) (2026-09-13)
+
+
+### Features
+
+* **overlay:** configure automatic code display and appearance ([#289](https://github.com/JINGBANZ/jarvis/issues/289)) ([a343988](https://github.com/JINGBANZ/jarvis/commit/a34398853e3eccc30bd0d67ff5898fd233f9c391))
+* **overlay:** pin system design diagrams for the session ([#291](https://github.com/JINGBANZ/jarvis/issues/291)) ([b7cade6](https://github.com/JINGBANZ/jarvis/commit/b7cade6ad5f8595f82e7285a7a9b9f52aecf2cd5))
+* **providers:** consolidate provider failure handling and surface the cause in Activity ([#284](https://github.com/JINGBANZ/jarvis/issues/284)) ([cf503f5](https://github.com/JINGBANZ/jarvis/commit/cf503f55a5a39763250385db5e5110436eed5e61))
+
+
+### Bug Fixes
+
+* **coach:** bound failed coaching cycles without stopping recoverable sessions ([#283](https://github.com/JINGBANZ/jarvis/issues/283)) ([5057848](https://github.com/JINGBANZ/jarvis/commit/505784867944cfa78154f740bc8cfc856ca5029b))
+* **coach:** code snippets drop valid payloads, miscolor directives, and re-lex on resize ([#295](https://github.com/JINGBANZ/jarvis/issues/295)) ([199accd](https://github.com/JINGBANZ/jarvis/commit/199accda539fcac4be96f6a35438e0911ef2e913))
+* **coach:** resolve one fixed tool set per session ([#274](https://github.com/JINGBANZ/jarvis/issues/274)) ([39715e5](https://github.com/JINGBANZ/jarvis/commit/39715e59d23d8c6ed1795f343d716c8a6bed5eed))
+* **evaluation:** use session version identity with disclosed source fallback ([#293](https://github.com/JINGBANZ/jarvis/issues/293)) ([6fe8726](https://github.com/JINGBANZ/jarvis/commit/6fe872680663864ead657040090d64cf45e6383d))
+
+## [0.2.2](https://github.com/JINGBANZ/jarvis/compare/v0.2.1...v0.2.2) (2026-09-10)
+
+
+### Features
+
+* **coach:** add behavioral interview skill ([#262](https://github.com/JINGBANZ/jarvis/issues/262)) ([5f0c260](https://github.com/JINGBANZ/jarvis/commit/5f0c260a93b35001326cad0cf1533a113ffd912e))
+* **coach:** add coding and opt-in general technical skills ([#261](https://github.com/JINGBANZ/jarvis/issues/261)) ([b6f1ff8](https://github.com/JINGBANZ/jarvis/commit/b6f1ff8f7ed9408eefe162f0babe5a8a64e1dc83))
+* **coach:** explain confusion proactively and on shortcut ([#270](https://github.com/JINGBANZ/jarvis/issues/270)) ([c221510](https://github.com/JINGBANZ/jarvis/commit/c22151035bcfd8390f3cf086e3e38c68a7f70c68))
+* **coach:** give question meaning before strategy when the user hasn't engaged ([#257](https://github.com/JINGBANZ/jarvis/issues/257)) ([e4d7098](https://github.com/JINGBANZ/jarvis/commit/e4d70983864dc2be9c11e7546de9f87e22f028a0))
+* **coach:** show contextual code snippets with hints ([#272](https://github.com/JINGBANZ/jarvis/issues/272)) ([df34152](https://github.com/JINGBANZ/jarvis/commit/df3415208609fd1d1c4402ecfad78de0c1b9dfc4))
+* **coach:** show private system-design diagram hints ([#267](https://github.com/JINGBANZ/jarvis/issues/267)) ([b1272b4](https://github.com/JINGBANZ/jarvis/commit/b1272b4f5b6b2fd925f44903fadf9e11a0a6a61b))
+* **overlay:** add a header to the Overlay Box and draw its resize affordance ([#269](https://github.com/JINGBANZ/jarvis/issues/269)) ([8a83228](https://github.com/JINGBANZ/jarvis/commit/8a83228eac1c5397956f79c01d1f52e6796fd51f))
+* **overlay:** show the session interview format above history ([#281](https://github.com/JINGBANZ/jarvis/issues/281)) ([23b978b](https://github.com/JINGBANZ/jarvis/commit/23b978bb3825f384ed038db235a83f1bf68ee0ea))
+* **transcription:** add Gemini as a third transcription provider ([#268](https://github.com/JINGBANZ/jarvis/issues/268)) ([dc3d02c](https://github.com/JINGBANZ/jarvis/commit/dc3d02c35b5a37be7843b2718be952f02090d19d))
+
+
+### Bug Fixes
+
+* **activity:** separate hint explanation and code sections ([#286](https://github.com/JINGBANZ/jarvis/issues/286)) ([2147360](https://github.com/JINGBANZ/jarvis/commit/2147360e40999da653f960a0cb0fcbf21267cd53))
+* **coach:** clarify explanation policy ([#285](https://github.com/JINGBANZ/jarvis/issues/285)) ([f08b9ba](https://github.com/JINGBANZ/jarvis/commit/f08b9bab99c37e0f7555b322d835a543aad4ed2d))
+* **overlay:** wrap and fit code snippets within the panel ([#287](https://github.com/JINGBANZ/jarvis/issues/287)) ([0316d7f](https://github.com/JINGBANZ/jarvis/commit/0316d7f515018c97a07de80e520a3bfb86c8116b))
+* **settings:** keep shortcut cards at full width ([#282](https://github.com/JINGBANZ/jarvis/issues/282)) ([3a3fb21](https://github.com/JINGBANZ/jarvis/commit/3a3fb21a99df83ed72aea77d2ba924944f080dbd))
+
 ## [0.2.1](https://github.com/JINGBANZ/jarvis/compare/v0.2.0...v0.2.1) (2026-09-05)
 
 

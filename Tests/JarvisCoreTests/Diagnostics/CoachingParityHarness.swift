@@ -16,8 +16,8 @@ import JarvisBrainProviders
 /// 1. The primary target fails three temporary transport attempts and exhausts, the preflight-proven
 ///    unavailable middle target is skipped, and the route advances to the final target, which
 ///    delivers one tip (`.spoke`).
-/// 2. The final target fails three temporary attempts, so the route terminally exhausts
-///    (`.brainError`).
+/// 2. The final target fails two temporary attempts, then a proven permanent failure exhausts
+///    the route (`.brainError`).
 ///
 /// The harness is evidence-agnostic: a variant hands its observer wiring to `run` and gets back a
 /// `Snapshot` to compare against the absent-evidence baseline. A later slice that adds a new
@@ -118,7 +118,11 @@ enum CoachingParityHarness {
             traffic: observers.brainTraffic,
             send: { request in
                 try requests.append(request)
-                guard finalCalls.next() == 1 else { throw transportFailure }
+                let call = finalCalls.next()
+                if call == 4 {
+                    throw ProviderFailure(source: .brain(.openAI), stage: .request, category: .unknown, disposition: .permanent, identity: .init(), message: "injected permanent failure")
+                }
+                guard call == 1 else { throw transportFailure }
                 return (
                     speakResponse,
                     HTTPURLResponse(
@@ -138,11 +142,14 @@ enum CoachingParityHarness {
                     ConfiguredBrainTarget(target: primaryTarget, brain: primary),
                     ConfiguredBrainTarget(
                         unavailable: unavailableTarget,
-                        detail: "preflight-proven unavailable"),
+                        failure: ProviderFailure(
+                            source: .brain(unavailableTarget.provider), stage: .process,
+                            category: .unavailable, disposition: .permanent, identity: .init(),
+                            message: "preflight-proven unavailable")),
                     ConfiguredBrainTarget(target: finalTarget, brain: final),
                 ],
-                onAdvanced: { transitions.append(.advanced(from: $0, to: $1)) },
-                onSkipped: { transitions.append(.skipped($0)) },
+                onAdvanced: { previous, current, _ in transitions.append(.advanced(from: previous, to: current)) },
+                onSkipped: { target, _ in transitions.append(.skipped(target)) },
                 onExhausted: { target, _ in transitions.append(.exhausted(target)) }),
             screen: FakeScreen(),
             overlay: overlay,

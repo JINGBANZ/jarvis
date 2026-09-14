@@ -212,11 +212,12 @@ private func speakResponseBody(arguments: String) -> Data {
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
             Issue.record("expected a classified HTTP failure")
-        } catch let failure as BrainFailure {
+        } catch let failure as ProviderFailure {
             #expect(failure.disposition == .permanent)
-            #expect(failure.detail.contains("unauthorized"))
+            #expect(failure.message.contains("unauthorized"))
+            #expect(failure.identity.httpStatus == 401)
         } catch {
-            Issue.record("expected BrainFailure, got \(error)")
+            Issue.record("expected ProviderFailure, got \(error)")
         }
     }
 
@@ -228,15 +229,15 @@ private func speakResponseBody(arguments: String) -> Data {
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
             Issue.record("expected a classified HTTP failure")
-        } catch let failure as BrainFailure {
+        } catch let failure as ProviderFailure {
             #expect(failure.disposition == .temporary)
         } catch {
-            Issue.record("expected BrainFailure, got \(error)")
+            Issue.record("expected ProviderFailure, got \(error)")
         }
     }
 
     @Test func generic404PreservesSessionButModelNotFoundStopsAtProviderBoundary() async {
-        let cases: [(Data, BrainFailure.Disposition)] = [
+        let cases: [(Data, ProviderFailure.Disposition)] = [
             (Data(#"{"error":{"message":"route unavailable"}}"#.utf8), .temporary),
             (Data(#"{"error":{"code":"model_not_found","type":"invalid_request_error"}}"#.utf8),
              .permanent),
@@ -248,10 +249,10 @@ private func speakResponseBody(arguments: String) -> Data {
             do {
                 _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
                 Issue.record("expected a classified HTTP failure")
-            } catch let failure as BrainFailure {
+            } catch let failure as ProviderFailure {
                 #expect(failure.disposition == expected)
             } catch {
-                Issue.record("expected BrainFailure, got \(error)")
+                Issue.record("expected ProviderFailure, got \(error)")
             }
         }
     }
@@ -264,10 +265,29 @@ private func speakResponseBody(arguments: String) -> Data {
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
             Issue.record("expected a classified HTTP failure")
-        } catch let failure as BrainFailure {
+        } catch let failure as ProviderFailure {
             #expect(failure.disposition == .permanent)
         } catch {
-            Issue.record("expected BrainFailure, got \(error)")
+            Issue.record("expected ProviderFailure, got \(error)")
+        }
+    }
+
+    /// A transport error never reaches the message: `URLError.localizedDescription` embeds the
+    /// failing URL, so the fixed table describes it and the identity keeps the code.
+    @Test func transportFailuresCarryTheCodeAndNoURL() async {
+        let client = OpenAIBrainClient(
+            apiKey: "sk-x", model: "gpt-5.5",
+            send: { _ in throw URLError(.cannotConnectToHost) })
+        do {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+            Issue.record("expected a classified transport failure")
+        } catch let failure as ProviderFailure {
+            #expect(failure.category == .unreachable)
+            #expect(failure.disposition == .temporary)
+            #expect(failure.identity.transportCode == URLError.cannotConnectToHost.rawValue)
+            #expect(failure.message == "could not connect to the server")
+        } catch {
+            Issue.record("expected ProviderFailure, got \(error)")
         }
     }
 
@@ -355,6 +375,74 @@ private func speakResponseBody(arguments: String) -> Data {
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"strict\":true"))
+    }
+
+    /// A deferred tool is undeclared until the model loads it, so the only array the provider ever
+    /// sees is what the session may call right now — loader included, with its catalog enum.
+    @Test func encodesTheLoaderAndDeclaresADeferredToolOnlyOnceLoaded() async throws {
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true)
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+
+        _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
+        let before = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(before.contains("\"load_tool\""))
+        #expect(before.contains("\"enum\":[\"search_prep_notes\"]"))
+        #expect(before.contains("\"strict\":true"))
+        #expect(!before.contains("\"name\":\"search_prep_notes\""))
+
+        _ = try await client.respond(
+            messages: [.user("hi")],
+            tools: capabilities.callable(loaded: ["search_prep_notes"]))
+        let after = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(after.contains("\"name\":\"search_prep_notes\""))
+    }
+
+    /// A skill is never a declared tool — only its loader is, with the switched-on names as an
+    /// enum, so a schema-enforcing provider cannot be asked for one that is not offered.
+    @Test func encodesTheSkillLoaderWithItsCatalogEnum() async throws {
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false,
+            skills: [Skill(name: "behavioral", description: "d", body: "b"),
+                     Skill(name: "system-design", description: "d", body: "b")])
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+
+        _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
+
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"load_skill\""))
+        #expect(body.contains("\"enum\":[\"behavioral\",\"system-design\"]"))
+        #expect(body.contains("\"strict\":true"))
+        #expect(!body.contains("\"load_tool\""))
+    }
+
+    /// The load and the use happen in one attempt, which is one `BrainConversation`. Each request
+    /// inside it must declare the array it was handed, or a tool loaded in one iteration would not
+    /// be callable in the next.
+    @Test func aConversationDeclaresEachRequestsOwnTools() async throws {
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true)
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        let conversation = try await client.makeConversation()
+
+        _ = try await conversation.respond(
+            messages: [.user("hi")], tools: capabilities.callable(loaded: []),
+            toolChoice: .required)
+        #expect(!(String(data: box.get() ?? Data(), encoding: .utf8) ?? "")
+            .contains("\"name\":\"search_prep_notes\""))
+
+        _ = try await conversation.respond(
+            messages: [.user("hi")], tools: capabilities.callable(loaded: ["search_prep_notes"]),
+            toolChoice: .required)
+        #expect((String(data: box.get() ?? Data(), encoding: .utf8) ?? "")
+            .contains("\"name\":\"search_prep_notes\""))
+        await conversation.finish()
     }
 
     /// Default tool choice is "auto".

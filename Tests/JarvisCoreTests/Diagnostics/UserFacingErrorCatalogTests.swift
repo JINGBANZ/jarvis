@@ -75,31 +75,43 @@ import Testing
             .contains("press Start again"))
     }
 
+    /// What the capture layer records when the aggregate device goes away.
+    private static let noInputDevice = ProviderFailure(
+        source: .capture, stage: .local, category: .unavailable, disposition: .permanent,
+        identity: .init(), message: "no input device")
+
     @Test func captureFailedIsFatalAndCarriesReason() {
-        let e = UserFacingError.captureFailed(reason: "no input device")
+        let e = UserFacingError.captureFailed(failure: Self.noInputDevice)
         #expect(e.severity == .fatal)
         #expect(e.severity.stopsSession)
         #expect(e.message.contains("no input device"))
-        #expect(e.sessionEndReason == .audioCaptureUnavailable)
+        #expect(e.sessionEndReason == .audioCaptureUnavailable(failure: Self.noInputDevice))
     }
 
     @Test func runtimeCaptureFailureStopsQuietlyAndCarriesReason() {
-        let e = UserFacingError.captureStopped(reason: "route disappeared")
+        let e = UserFacingError.captureStopped(failure: Self.noInputDevice)
         #expect(e.severity == .terminal)
         #expect(e.severity.stopsSession)
         #expect(!e.severity.showsAlert)
-        #expect(e.message.contains("route disappeared"))
-        #expect(e.sessionEndReason == .audioCaptureUnavailable)
+        #expect(e.message.contains("no input device"))
+        #expect(e.sessionEndReason == .audioCaptureUnavailable(failure: Self.noInputDevice))
     }
 
+    /// Whatever a transcription boundary reports, the stop is terminal and quiet, and the message is
+    /// the failure's own sentence, so the alert-free stop still says what happened.
     @Test func transcriptionStoppedIsTerminal() {
-        for reason in TranscriptionFailureReason.allCases {
-            let error = UserFacingError.transcriptionStopped(reason: reason)
+        for category in ProviderFailure.Category.allCases {
+            let failure = ProviderFailure(
+                source: .transcription(.openAI), stage: .session, category: category,
+                disposition: .permanent, identity: .init(closeCode: 3000),
+                message: "Incorrect API key provided: sk-abc123456789")
+            let error = UserFacingError.transcriptionStopped(failure: failure)
             #expect(error.severity == .terminal)
             #expect(error.severity.stopsSession)
             #expect(!error.severity.showsAlert)
-            #expect(error.message.contains(reason.activityDescription))
-            #expect(error.sessionEndReason == .transcriptionStopped(reason: reason))
+            #expect(error.message == "Jarvis could not continue because \(failure.activitySentence).")
+            #expect(!error.message.contains("sk-abc123456789"))
+            #expect(error.sessionEndReason == .transcriptionStopped(failure: failure))
         }
     }
 
@@ -137,15 +149,20 @@ import Testing
     }
 
     @Test func exhaustedBrainRouteStopsQuietlyAndKeepsDiagnosticDetail() {
+        let failure = ProviderFailure(
+            source: .brain(.claudeCode), stage: .process, category: .unknown,
+            disposition: .temporary, identity: .init(), message: "OAuth session expired")
         let e = UserFacingError.brainRouteExhausted(
-            lastProvider: .claudeCode,
-            reason: "OAuth session expired")
+            target: BrainTarget(
+                provider: .claudeCode,
+                modelID: BrainModelCatalog.defaultModel(for: .claudeCode).id),
+            failure: failure)
         #expect(e.severity == .terminal)
         #expect(!e.severity.showsAlert)
         #expect(e.severity.stopsSession)
         #expect(e.title.contains("route exhausted"))
         #expect(e.message.contains("OAuth session expired"))
         #expect(e.message.contains("Claude Code"))
-        #expect(e.sessionEndReason == .brainRouteExhausted(lastProvider: .claudeCode))
+        #expect(e.sessionEndReason == .brainRouteExhausted(last: failure))
     }
 }

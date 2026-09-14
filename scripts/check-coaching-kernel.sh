@@ -11,7 +11,8 @@ cd "$(dirname "$0")/.."
 # fail the normal test run instead of waiting on a future manual audit to notice it.
 #
 # Covered paths — the kernel per the destination diagram:
-#   Coach/          attempt scheduler, forward-only route state, attempt runner, history commit
+#   Coach/          attempt scheduler, forward-only route state, attempt runner, history commit,
+#                   and the coach tools' model-facing definitions (Coach/Tools/)
 #   Transcription/  finalized transcript admission and the transcription ports
 #   Triggers/       trigger and turn-substance policy feeding the scheduler
 #   Overlay/        the enabled overlay output port (delivery itself; the AppKit panels in
@@ -34,6 +35,9 @@ cd "$(dirname "$0")/.."
 #   PrepMaterial/   the PrepMaterialSearching port, chunk model, and pure BM25 index — same shape as
 #                   Screen/: file reading and per-format extraction (PDFKit, textutil) live at the
 #                   macOS edge in Sources/JarvisApp/PrepMaterial, behind the port.
+#   Providers/      the provider-neutral failure record, redaction, and per-vendor classifiers the
+#                   route policy and socket lifecycle consume. Foundation-only: adapters hand in
+#                   status codes, JSON, close reasons, and NSError domain/code, never URLSession types.
 #   Diagnostics/CaptureReadinessMonitor.swift, AudioContinuityWitness*.swift,
 #   AudioContinuityMatcher.swift
 #                   the capture-heartbeat source and capture health policy, which the diagram
@@ -69,6 +73,7 @@ kernel_paths=(
     Sources/JarvisCore/Prompts
     Sources/JarvisCore/Screen
     Sources/JarvisCore/PrepMaterial
+    Sources/JarvisCore/Providers
     Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift
     Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift
     "Sources/JarvisCore/Diagnostics/AudioContinuityWitness+Types.swift"

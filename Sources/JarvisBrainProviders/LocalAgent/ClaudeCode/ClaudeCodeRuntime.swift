@@ -104,7 +104,7 @@ actor ClaudeCodeRuntime: LocalAgentRuntimeBackend {
     }
 
     private static func error(_ detail: String) -> NSError {
-        NSError(domain: "ClaudeCodeRuntime", code: 1,
+        NSError(domain: LocalAgentFailureClassifier.claudeCodeDomain, code: 1,
                 userInfo: [NSLocalizedDescriptionKey: detail])
     }
 }
@@ -132,7 +132,7 @@ private final class ClaudeCodeConversation: LocalAgentConversation, Sendable {
 
 /// `@unchecked Sendable` is justified because `finishLock` guards the only mutable property,
 /// `finished`; the process and lifetime references provide their own synchronization.
-private final class ClaudeCodeQuery: @unchecked Sendable {
+final class ClaudeCodeQuery: @unchecked Sendable {
     private let process: AgentRuntimeProcess
     private let lifetime: AgentRuntimeLifetime
     private let finishLock = NSLock()
@@ -339,8 +339,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
     /// Marks the deadline expiring between reads, so `describingTurnFailure` can restate it with the
     /// same budget and stream detail it gives a timeout raised inside the read itself.
     private static func deadlineExpired() -> NSError {
-        NSError(domain: "ClaudeCodeRuntime", code: NSURLErrorTimedOut,
-                userInfo: [NSLocalizedDescriptionKey: "Claude response timed out"])
+        timedOut("Claude response timed out")
     }
 
     /// The process layer reports how long its final read waited, which is not the turn's budget: a
@@ -350,7 +349,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
     ///
     /// The original description is kept verbatim: `AgentRuntimeProcess` appends the CLI's stderr tail
     /// to its timeout, and that tail is often the most decisive evidence there is.
-    private static func describingTurnFailure(
+    static func describingTurnFailure(
         _ error: Error,
         budget: TimeInterval,
         dispatchedAt: UInt64,
@@ -359,11 +358,11 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
         let nsError = error as NSError
         let isRuntimeTimeout = nsError.domain == AgentRuntimeProcess.errorDomain
             && nsError.code == NSURLErrorTimedOut
-        let isDeadlineBetweenReads = nsError.domain == "ClaudeCodeRuntime"
+        let isDeadlineBetweenReads = nsError.domain == LocalAgentFailureClassifier.claudeCodeDomain
             && nsError.code == NSURLErrorTimedOut
         guard isRuntimeTimeout || isDeadlineBetweenReads else { return error }
         let elapsed = milliseconds(from: dispatchedAt, to: DispatchTime.now().uptimeNanoseconds)
-        return Self.error(
+        return Self.timedOut(
             "Claude did not finish the turn within \(Int(budget))s "
             + "(elapsed \(elapsed)ms; \(trace.summary)) — \(nsError.localizedDescription)")
     }
@@ -384,7 +383,15 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
     }
 
     private static func error(_ detail: String) -> NSError {
-        NSError(domain: "ClaudeCodeRuntime", code: 1,
+        NSError(domain: LocalAgentFailureClassifier.claudeCodeDomain, code: 1,
+                userInfo: [NSLocalizedDescriptionKey: detail])
+    }
+
+    /// A restated timeout has to keep `NSURLErrorTimedOut`: that code is the only thing telling
+    /// `LocalAgentFailureClassifier` this was a timeout and not an unclassified CLI fault, and
+    /// `error(_:)` would flatten it to the generic code 1.
+    private static func timedOut(_ detail: String) -> NSError {
+        NSError(domain: LocalAgentFailureClassifier.claudeCodeDomain, code: NSURLErrorTimedOut,
                 userInfo: [NSLocalizedDescriptionKey: detail])
     }
 }
@@ -395,7 +402,7 @@ private final class ClaudeCodeQuery: @unchecked Sendable {
 /// why a turn stalled: a timeout behind a run of `system/thinking_tokens` is a slow model, while one
 /// that goes quiet after `rate_limit_event` is not. Counting them costs nothing and turns an opaque
 /// timeout into a diagnosable one.
-private struct StreamTrace {
+struct StreamTrace {
     private var counts: [String: Int] = [:]
 
     mutating func record(_ payload: [String: Any]) {

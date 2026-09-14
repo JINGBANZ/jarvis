@@ -66,7 +66,7 @@ The small optional probe points remain inside the provider adapters because read
 commit, provider-final, reconciled-final, and replay evidence exists only at those private production
 boundaries. The injected observer follows the same absence-means-disabled shape as the session-audit
 ports, but it is a separate benchmark-owned contract. The reconnect controller likewise exists only
-for an explicit reconnect run and owns the hold outside `RealtimeTranscriber`'s normal state.
+for an explicit reconnect run and owns the hold outside `WebSocketConnection`'s normal state.
 
 ## Running It
 

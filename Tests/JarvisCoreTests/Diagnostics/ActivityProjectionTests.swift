@@ -109,7 +109,7 @@ import Testing
         #expect(jsonl.contains("💬 say the number"))
         #expect(jsonl.contains("\"k\":\"manualHint\""))
         #expect(jsonl.contains("\"k\":\"tip\""))
-        // The human record stays free of transport, retry, and raw-error detail.
+        // The human record stays free of transport, retry, and audit-envelope detail.
         #expect(!jsonl.contains("audit_version"))
     }
 
