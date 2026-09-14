@@ -456,24 +456,29 @@ display it lives on — via `screencapture -l`, which reads the window's own bac
 even when partially covered; `-o` omits the shadow). Jarvis's own windows, non-app layers (dock,
 panels), and tiny layer-0 helper windows are skipped.
 
-The window shot also gets an **on-device OCR sidecar**: `ScreenTextRecognizer` (Apple Vision,
-`.accurate`, language correction off so code identifiers survive) recognizes the text and Core's
-`RecognizedTextLayout` rebuilds reading order; `CoachDriver` sends it in the `capture_screen`
-tool-result text beside the image, flagged as fallible, so the model reads exact code instead of
-deciphering pixels. OCR, not accessibility-tree extraction: Chrome exposes web content only under
-assistive-tech flags and Monaco virtualizes to the visible lines, so OCR gets the same text
-generically with none of the per-app fragility. Nor is the text a substitute for the image, which
-stays ground truth: diagrams and layout need vision, and OCR mangles the odd identifier. Nothing eligible on screen → fall back to a full shot of the **main display**;
-fallback and entire-display captures skip OCR deliberately (a whole display's text would feed the
-surrounding clutter back to the model as tokens).
+The window shot also gets typed text evidence. **Read Chrome page text** is off by default. When the
+user turns it on while Jarvis is stopped and grants the optional macOS Accessibility permission,
+`BrowserAccessibilityReader` performs read-only queries against the exact foreground Chrome window
+chosen for the screenshot. It extracts bounded text from that window's active web area, excludes
+secure fields, and may include content above or below the viewport. It does not read raw HTML,
+background tabs, browsing history, cookies, or hidden form values, and it never scrolls or changes
+the page. Accessibility trees remain incomplete for lazy or virtualized content, editors such as
+Monaco, canvas, images, and diagrams.
+
+When browser text is disabled, unavailable, empty, or unsupported, `ScreenTextRecognizer` uses
+Apple Vision OCR (`.accurate`, language correction off) on the current screenshot. OCR runs only as
+that fallback and is marked as current-viewport, fallible evidence. It is sent with the fresh image
+but is not retained in screen memory. The screenshot stays ground truth for diagrams and layout.
+Nothing eligible on screen falls back to a full shot of the **main display**; fallback and
+entire-display captures omit text evidence because a whole display would include unrelated clutter.
 
 The **Entire display** entries are named and numbered the way `screencapture -D` counts displays
 (1 = the main display, the one with the menu bar; the dropdown enumerates `NSScreen.screens`, main
 first, matching that order) and refresh when displays are plugged or unplugged while the tab is
 visible. The chosen display persists as the 1-based `-D` index alongside the scope.
 
-Both values are read **at capture time** (`WindowScopedScreenCapture` / `ScreenCaptureCLI`), so a
-change applies to the very next screenshot with no restart. Reads are validated: an unrecognized
+The scope, display, and browser-text choice are frozen in the session plan used by an attempt. A
+change while stopped applies to the next session plan. Reads are validated: an unrecognized
 stored scope falls back to the default, a stored index < 1 clamps to the main display, and if the
 chosen display no longer exists (the monitor was unplugged since it was chosen) `screencapture -D`
 fails and `ScreenCaptureCLI` reshoots the main display rather than dropping the screenshot.
@@ -507,8 +512,11 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/APIKeyControls.swift` | Collapsed Jarvis-managed API-key editor, one instance per `Credential` |
 | `Sources/JarvisCore/Transcription/TranscriptionProvider.swift` | Provider identities, labels, per-provider credential + audio format |
 | `Sources/JarvisApp/Settings/OverlaySection.swift` | Overlay-appearance tab |
+| `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture scope and optional Chrome text controls |
+| `Sources/JarvisApp/Capture/BrowserAccessibilityPermission.swift` | User-initiated Accessibility grant and status |
+| `Sources/JarvisScreenCapture/BrowserAccessibilityReader.swift` | Bounded, read-only active-tab semantic extraction |
+| `Sources/JarvisScreenCapture/ScreenTextResolver.swift` | Accessibility-first selection with current-view OCR fallback |
 | `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
-| `Sources/JarvisApp/Settings/DisplaySection.swift` | Capture-scope tab (scope + display in one dropdown) |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
 | `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers |
