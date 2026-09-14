@@ -19,7 +19,9 @@ import JarvisScreenCapture
 struct WindowScopedScreenCapture: ScreenCapturing {
     private let runner: ScreenCaptureRunner
     private let fallback: ScreenCaptureCLI
-    private let recognizer = ScreenTextRecognizer()
+    private let textResolver = ScreenTextResolver(
+        browser: BrowserAccessibilityReader(),
+        ocr: ScreenTextRecognizer())
 
     init(captureDirectory: URL) {
         let runner = ScreenCaptureRunner(captureDirectory: captureDirectory)
@@ -36,10 +38,10 @@ struct WindowScopedScreenCapture: ScreenCapturing {
             case let .captured(jpeg):
                 return ScreenSnapshot(
                     imageBase64: jpeg.base64EncodedString(),
-                    textEvidence: recognizer.recognizedText(inJPEG: jpeg).map {
-                        ScreenTextEvidence(
-                            text: $0, source: .onDeviceOCR, coverage: .currentViewport)
-                    },
+                    textEvidence: textResolver.resolve(
+                        jpeg: jpeg,
+                        window: window,
+                        browserTextEnabled: selection.browserTextEnabled),
                     sourceID: "window:\(window.windowID)")
             case .cleanupFailed, .cancelled:
                 return nil

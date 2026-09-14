@@ -14,4 +14,14 @@ import Testing
             coverage: .currentViewport
         ).isRetainable)
     }
+
+    @Test func exposesWhenSourceTextWasBounded() {
+        let evidence = ScreenTextEvidence(
+            text: "partial question",
+            source: .browserAccessibility,
+            coverage: .activeTabAccessibilityTree,
+            truncated: true)
+
+        #expect(evidence.truncated)
+    }
 }

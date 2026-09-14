@@ -18,11 +18,13 @@ public struct ScreenTextEvidence: Sendable, Equatable {
     public let text: String
     public let source: Source
     public let coverage: Coverage
+    public let truncated: Bool
 
-    public init(text: String, source: Source, coverage: Coverage) {
+    public init(text: String, source: Source, coverage: Coverage, truncated: Bool = false) {
         self.text = text
         self.source = source
         self.coverage = coverage
+        self.truncated = truncated
     }
 
     /// OCR cannot support exact historical claims after its source image leaves the request.
