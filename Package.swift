@@ -125,6 +125,15 @@ let package = Package(
             name: "JarvisScreenCaptureTests",
             dependencies: ["JarvisScreenCapture", "JarvisCore"]
         ),
+        // Live e2e tests: each launches the signed development app in its live e2e mode against real
+        // providers and asserts on the session folder it leaves. The Gate compiles this target but
+        // never runs it (`run-tests.sh` skips it); `scripts/run-live-tests.sh` is its one entry
+        // point. Fixtures and scenarios are read by path at run time, never bundled.
+        .testTarget(
+            name: "JarvisLiveTests",
+            dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisEvaluation"],
+            exclude: ["Fixtures", "Scenarios"]
+        ),
         // WebKit-driven end-to-end tests for the activity viewer's shipped HTML/JS. Kept separate
         // from JarvisCoreTests so the core's own test target stays Foundation-only and the
         // "JarvisCore is UI-free" boundary holds literally. See wiki/build-and-run.md.
