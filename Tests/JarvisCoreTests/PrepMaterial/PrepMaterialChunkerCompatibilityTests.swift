@@ -2,6 +2,25 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct PrepMaterialChunkerCompatibilityTests {
+    @Test(arguments: ["md", "txt", "pdf", "docx"])
+    func everySupportedFormatCanSupplyEveryInterviewTopic(_ fileExtension: String) throws {
+        // PDF/Word fixtures represent extracted text: format decoding precedes this shared index.
+        let materials = [
+            ("behavioral", "mentoring", "Mentoring: I coached an apprentice into an engineering role."),
+            ("coding", "binary", "Binary search: halve the remaining sorted range each iteration."),
+            ("system-design", "replication", "Replication: asynchronous copies trade freshness for availability."),
+        ]
+        let chunks = materials.flatMap { topic, _, text in
+            PrepMaterialChunker.chunk(text: text, sourceDisplayName: "\(topic).\(fileExtension)")
+        }
+        let index = PrepMaterialIndex(chunks: chunks)
+        for (topic, query, text) in materials {
+            let result = try #require(index.search(query: query).first)
+            #expect(result.sourceDisplayName == "\(topic).\(fileExtension)")
+            #expect(result.text == text)
+        }
+    }
+
     @Test(arguments: ["notes.txt", "design.pdf", "resume.docx", "untitled"])
     func nonMarkdownSourcesKeepLiteralSymbolsInTheirParagraphs(_ name: String) {
         let text = "Context.\n\n# A literal heading-like line\n\n| input | output |\n| value | result |"

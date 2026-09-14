@@ -202,6 +202,11 @@ installs no port in either case; which one it was stays in `jlog`, and Activity 
 fixed notice that a tip went out without the user's own material. Switching the capability off also
 skips the index build, so the file reading and `textutil` work stop with it.
 
+Prep material is shared across interview types: `.md`, `.txt`, `.pdf`, and `.docx` sources can all
+supply behavioral, coding, or system-design preparation, including mixed-topic documents. No skill
+or topic filters sources by file format. Extraction depends on the file format; coaching depends
+on the question and retrieved evidence.
+
 Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
 handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
 literal hash or pipe characters. Markdown headings at paragraph starts begin fresh chunks so short
