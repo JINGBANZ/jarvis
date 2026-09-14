@@ -86,8 +86,9 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 | Task | Command |
 |---|---|
 | Compile | `swift build` |
-| Test | `./scripts/run-tests.sh` (never raw `swift test`) |
+| Test | `./scripts/run-tests.sh` (never raw `swift test`, except from `run-live-tests.sh`, the one other caller, because `run-tests.sh` skips the live target by name) |
 | Build or run app | `./scripts/build-app.sh [release\|debug]` or `./scripts/build-app.sh --run` |
+| Live e2e tests | `./scripts/run-live-tests.sh [scenario] [--evaluate] [--keep-going]` |
 | **Gate** | `swift build && ./scripts/run-tests.sh` |
 
 ## Development rules
@@ -104,8 +105,8 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
   timers, and speech-activity events.
 - Use Swift 6 strict concurrency. Do not use `@unchecked` or `nonisolated(unsafe)` without a written
   reason. Keep one primary type per file; name focused extensions `Type+Purpose.swift`.
-- Use swift-testing for Core, Overlay, and Viewer behavior. Verify `JarvisApp` through the live smoke
-  checklist because it depends on TCC permissions and real capture devices.
+- Use swift-testing for Core, Overlay, and Viewer behavior. Verify `JarvisApp` through the live e2e
+  tests (`wiki/live-e2e-tests.md`) because it depends on TCC permissions and real capture devices.
 - Work in an isolated git worktree. PRs squash-merge with the PR number in the subject.
 - Read `wiki/AGENTS.md` before wiki edits; the wiki is the design source of truth.
 
@@ -125,7 +126,9 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 
 ## Gotchas
 
-- Command Line Tools are sufficient; no Xcode project exists. The committed AEC archive is arm64-only.
+- The Gate and the live e2e tests need only the Command Line Tools; no Xcode project exists.
+  Developer desktops also have full Xcode and the Xcode MCP; see `wiki/build-and-run.md#toolchain`.
+  The committed AEC archive is arm64-only.
 - Launch the signed app through `./scripts/build-app.sh --run` / `open`, never the bare executable.
 
 ## Agent skills

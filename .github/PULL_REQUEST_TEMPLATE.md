@@ -33,16 +33,11 @@ coaching-attempt and provider-route boundaries.
 
 ```
 
-### Live smoke — optional, and only for `JarvisApp` changes
+### Live e2e
 
 <!--
-Skip this section entirely for Core, Overlay, docs, or CI changes.
-
-CI can neither grant TCC permissions nor drive real capture devices, so App-layer behavior is only
-ever confirmed by hand in the signed app (`./scripts/build-app.sh --run`). If you ran one, say what
-you did and what you saw. If you cannot — no Apple silicon Mac, no signing identity, no microphone
-or screen access to spare — say so and leave it; a maintainer runs it before merge. A missing live
-smoke is never a reason not to open the pull request.
+Paste `results.txt` from `./scripts/run-live-tests.sh` when app-layer behavior changed, or say why
+the run was not needed.
 -->
 
 ## Out of scope

@@ -75,7 +75,7 @@ a worst-case 3-line tip (~6s/line under the prompt's ~12-word limit) can hold th
 delay a fresher queued tip — which cuts against the "stale tip is worse than none" principle above. A
 per-tip total budget (scale the lines down proportionally past a ceiling) was considered and
 **deferred**: in practice tips are mostly 1–2 short lines, so we'd rather judge real pacing in the
-live smoke run before adding another knob. Revisit if multi-line tips feel like they linger.
+[live e2e run](./live-e2e-tests.md) before adding another knob. Revisit if multi-line tips feel like they linger.
 
 ## Where it lives
 

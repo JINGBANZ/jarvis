@@ -5,11 +5,17 @@
 > posture in [sandbox.md](./sandbox.md). Anything here that's a plain value or wiring lives in code —
 > this page captures the non-obvious mechanics and the decisions behind them.
 
-## Toolchain — SwiftPM + Command Line Tools, no full Xcode
+## Toolchain
 
 The Command Line Tools SDK (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk`) ships
 ScreenCaptureKit, AVFoundation, AppKit, SwiftUI, Vision, CoreAudio, and Security — everything Jarvis
-needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`. No `.xcodeproj`.
+needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`.
+
+The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Line Tools, which is
+what CI runs; no Xcode project exists. Developer desktops also have full Xcode and the Xcode MCP,
+whose macOS workflow builds, launches, stops, and reads logs, so an agent may drive the app that way;
+the scripts use `open`. The live e2e tests assume the three TCC grants, an OpenAI key saved in the
+secrets file, and signed-in Claude Code and Codex CLIs.
 
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested
@@ -24,10 +30,14 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
   Foundation-only sealed-session evaluation library shared by the app and `EvalPrep`.
   `JarvisApp` is the thin executable that wires the libraries to the side-effectful macOS
   frameworks (mic, ScreenCaptureKit, the realtime websocket, the menu bar). That split is what
-  lets most of the system be verified headless.
+  lets most of the system be verified headless. `JarvisLiveTests` is the test target of the
+  [live e2e tests](./live-e2e-tests.md): it drives the signed app, and it is the only test target
+  that reaches real providers.
 - **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
-  search/rpath flags that plain `swift test` lacks CLT-only. (One sharp edge: a direct
+  search/rpath flags that plain `swift test` lacks CLT-only and passes `--skip JarvisLiveTests`, so
+  the Gate compiles the live target but never runs it. `run-live-tests.sh` sources the same flags
+  from `scripts/lib/swift-test-flags.sh`. (One sharp edge: a direct
   `@MainActor async @Test` miscompiles on the CLT swift-testing — async UI tests use a `nonisolated`
   `@Test` that `await`s a `@MainActor` helper; see `OverlayInvisibilityTests`.)
 
@@ -171,6 +181,7 @@ omits the item rather than offering an action that a self-signed build could nev
 | `./scripts/run-tests.sh` | Build + run the unit/offline-pipeline tests (no key, no permissions). |
 | `./scripts/build-app.sh [release\|debug]` | Build, bundle, sign `Jarvis Dev.app` (default `release`). Creates the `Jarvis Dev` signing identity on first run. |
 | `./scripts/build-app.sh --run` | Same development build, then launch it. Per-session logs land in the workspace `.jarvis/` (see below). |
+| `./scripts/run-live-tests.sh [scenario] [--evaluate] [--keep-going]` | Build the debug app and run the live e2e scenarios against real providers ([live-e2e-tests.md](./live-e2e-tests.md)). |
 
 - **Always launch with `open "./Jarvis Dev.app"`**, never the bare binary — running it from a shell makes
   TCC attribute the grant to the *terminal*, so the app reports Microphone, System Audio Recording,
@@ -289,74 +300,9 @@ changes host networking, or runs in the normal build/test gate.
 See [transcription-benchmark.md](./transcription-benchmark.md) for commands, architecture, scoring,
 acceptance, privacy, result interpretation, and when each mode should be run.
 
-## Live smoke checklist
+## Live e2e tests
 
-Some behavior can only be verified with a real key, a mic, and granted permissions. Run
-`./scripts/build-app.sh --run`, choose **Start Jarvis**, and use the new
-`.jarvis/<session>/jarvis-debug.log` for readiness and diagnostics. Use Settings → Activity only for
-the human-facing coaching record. The current validation priority lives in
-[`status.md`](./status.md#next-action).
-
-- Start while no other app is playing audio. Confirm the macOS recording indicator appears
-  immediately and that the debug log shows nonzero mic **and** system capture counters *before*
-  `Jarvis: coaching ready (mic + system audio).` — readiness now waits on actual frame arrival, not
-  just ready provider sockets, so system playback must not be required to wake the microphone. Then
-  speak into the microphone and play speech through system audio; confirm both appear as finalized
-  `heard:` entries in Activity. If frames never arrive, confirm Jarvis stops (mic) or degrades to
-  microphone-only (system) instead of reporting ready.
-- With a prep-material source configured, ask a question that matches the notes. Confirm Activity
-  shows "loaded the search_prep_notes tool" followed by the search and the tip, all in one attempt,
-  and that in `brain-traffic.jsonl` the first request did not declare `search_prep_notes` while the
-  request after the load did. Repeat on Claude Code and Codex with at least two coaching turns after
-  the load, and confirm no "instructions changed after runtime initialization" line in
-  `jarvis-debug.log`. Switch Prep notes search off in Settings → Brain → Capabilities, Start again,
-  and confirm the tool and its catalog line are absent from that file's `tools` and `instructions`.
-- Ask a behavioral question through the normal audio path. Confirm Activity shows "loaded the
-  behavioral skill" and then the tip, both in one attempt, and note the time from question to first
-  tip. In the same session, describe a system to design: expect "loaded the system-design skill" and
-  a tip whose diagram renders in the Overlay Box. Start a fresh session, stay silent with a design
-  prompt on screen, and press **⌥⌘J**: expect the shortcut row, one screen view, "loaded the
-  system-design skill", and a tip with a diagram, all in one attempt and with no reasoning text on
-  the overlay. Press again and confirm that press is one round trip; note the press-to-tip time of
-  both. Repeat the two presses on one CLI brain. Switch System design off in
-  Settings → Brain → Capabilities, Start again, and confirm `brain-traffic.jsonl` never names it in
-  the system text and that it is never loaded. Repeat the two loads on Claude Code and Codex with at
-  least two coaching turns after each, and confirm no "instructions changed after runtime
-  initialization" line in `jarvis-debug.log`.
-- Create an overlapping exchange where a longer interviewer question finalizes after a short user
-  reply. Confirm Activity places the question first and the first automatic brain request uses the
-  same order. Repeat while a prior brain call is in flight to exercise the queued-attempt boundary.
-- Show an interview question without speaking its details, then ask, “Jarvis, how can I solve this in
-  one pass?” Confirm Activity shows exactly one screen view followed by a screen-specific tip. A fully
-  stated behavioral question should not cause an unnecessary capture.
-- On a turn where the brain has nothing useful to add, confirm Activity shows a `stayed silent`
-  entry, so a deliberate no-op cannot look like a stalled brain.
-- Press **⌥⌘J** with a question visible; confirm a shortcut entry, one screen view, and a tip appear in
-  Activity, with a load row before the tip when a skill applies and the session has not loaded it
-  yet. With a prep source configured, press it on a "tell me about a time" prompt and expect the
-  behavioral skill load, the prep-notes tool load, a search, and the tip, all in one attempt.
-- Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
-  controls and preview follow the toggle, and confirm the choice survives relaunch.
-- Validate realtime recovery with `./scripts/transcription-benchmark.sh reconnect`; do not disable the
-  Mac's network connection. Confirm its summary reports both scoped-interruption phrases exactly once.
-- Confirm the development build's menu has **no** update item. In a signed release build, confirm
-  **Check for Updates** is greyed out while a session runs, is enabled once stopped, and reports the
-  app is up to date when run against the current release.
-- Choose **Stop Jarvis** and confirm Activity ends with `session ended by user`, with no later
-  transcription or coaching events.
-- In Activity, choose the stopped session and click **Evaluate**. Confirm the button shows
-  **Fetching source…** for a release, then **Evaluating…**, the report opens when the agent finishes,
-  and the button then shows **Open report**. Verify a release session still uses its recorded version
-  after an app update, and that a second evaluation of the same session fetches its source again.
-  Evaluate an older timestamp-only session and a session with an unavailable release tag; confirm the
-  running release is used and the saved report discloses the unknown version or mismatch. Evaluate
-  while offline and confirm the dialog names the session's own recorded version. Cancelling from
-  Activity during fetching must stop the download and leave no source tree behind. Quit also stops
-  it, but terminates immediately, so the run's temporary directory is left for the OS to reclaim.
-  For development, verify both
-  `build-app.sh --run` and plain `open` use the bundle's checkout for both history and source. Repeat
-  with a second worktree and confirm neither its history nor release history appears in the first.
-  Confirm prefixed and older sessions
-  remain in time order in Activity, retention, and the terminal evaluator's default selection.
-  Confirm the report uses the four generic sections, cites concrete session or source anchors for
-  findings, and keeps unavailable evidence in **Evidence gaps** instead of inventing a conclusion.
+Behavior that needs real grants, capture devices, providers, and CLIs is verified by
+`./scripts/run-live-tests.sh`, which drives the development app through scripted interview scenarios
+and asserts on the session folders they leave. [live-e2e-tests.md](./live-e2e-tests.md) holds the
+prerequisites, the case index, and the manual checks that stay outside the command.

@@ -31,7 +31,7 @@ flowchart TD
 
 ## Developer quick start
 
-Requires Swift 6 and the macOS Command Line Tools.
+Requires Swift 6 and the macOS [Command Line Tools](./wiki/build-and-run.md#toolchain).
 
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
