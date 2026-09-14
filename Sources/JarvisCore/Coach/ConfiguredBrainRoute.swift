@@ -12,8 +12,11 @@ public struct ConfiguredBrainRoute: Sendable {
     let onSkipped: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
     let onRecoveryChanged: (@MainActor @Sendable (BrainProvider?) -> Void)?
     let onExhausted: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
-
+    /// Every configured target is permanently unavailable; carries the last target proven so.
     let onTerminated: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
+    /// A failure streak reached `BrainCycleRecovery.ceiling` without a success; carries the most
+    /// recent cycle's failure.
+    let onRecoveryExpired: (@MainActor @Sendable (ProviderFailure) -> Void)?
 
     public init(
         targets: [ConfiguredBrainTarget],
@@ -22,7 +25,8 @@ public struct ConfiguredBrainRoute: Sendable {
         onSkipped: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil,
         onRecoveryChanged: (@MainActor @Sendable (BrainProvider?) -> Void)? = nil,
         onExhausted: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil,
-        onTerminated: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil
+        onTerminated: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil,
+        onRecoveryExpired: (@MainActor @Sendable (ProviderFailure) -> Void)? = nil
     ) {
         precondition(!targets.isEmpty, "a configured brain route needs a primary target")
         self.targets = targets
@@ -31,6 +35,7 @@ public struct ConfiguredBrainRoute: Sendable {
         self.onSkipped = onSkipped
         self.onExhausted = onExhausted
         self.onTerminated = onTerminated
+        self.onRecoveryExpired = onRecoveryExpired
         self.onRecoveryChanged = onRecoveryChanged
     }
 }

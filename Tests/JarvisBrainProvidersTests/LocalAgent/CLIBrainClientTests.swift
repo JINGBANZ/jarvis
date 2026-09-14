@@ -53,9 +53,6 @@ import JarvisCore
         #expect(BrainWorkloadTimeout.liveCoaching == 15)
         #expect(claude.configuration.timeout == BrainWorkloadTimeout.liveCoaching)
         #expect(codex.configuration.timeout == BrainWorkloadTimeout.liveCoaching)
-
-        claude.terminate()
-        codex.terminate()
     }
 
     @Test func historyCompactionDeadlineIsProviderNeutral() throws {
@@ -80,9 +77,6 @@ import JarvisCore
                 == BrainWorkloadTimeout.historyCompaction)
         #expect(codexSummarizer.configuration.timeout
                 == BrainWorkloadTimeout.historyCompaction)
-
-        claudeSummarizer.terminate()
-        codexSummarizer.terminate()
     }
 
     /// Setup and inference are budgeted separately, so a slow runtime start cannot quietly shorten
@@ -361,48 +355,48 @@ import JarvisCore
         let backend = FakeLocalAgentRuntime(
             replies: [#"{"tool":"stay_silent","arguments":{}}"#])
         let runtime = CLIBrainRuntime(backend: backend)
-        let firstTargetCoach = makeClient(
-            provider: .codexCLI,
-            workDir: workDir,
-            runtime: runtime,
-            systemPrompt: "first coach",
-            tools: coachTools)
-        let firstTargetSummarizer = makeClient(
-            provider: .codexCLI,
-            workDir: workDir,
-            runtime: runtime,
-            systemPrompt: "first summarizer",
-            tools: [])
-        let fallbackCoach = makeClient(
-            provider: .codexCLI,
-            workDir: workDir,
-            runtime: runtime,
-            systemPrompt: "fallback coach",
-            tools: coachTools)
-        let fallbackSummarizer = makeClient(
-            provider: .codexCLI,
-            workDir: workDir,
-            runtime: runtime,
-            systemPrompt: "fallback summarizer",
-            tools: [])
+        // A client holds its runtime lease for as long as it exists, so dropping a client from this
+        // table is how its owner releases the runtime.
+        var clients = [
+            "first coach": makeClient(
+                provider: .codexCLI,
+                workDir: workDir,
+                runtime: runtime,
+                systemPrompt: "first coach",
+                tools: coachTools),
+            "first summarizer": makeClient(
+                provider: .codexCLI,
+                workDir: workDir,
+                runtime: runtime,
+                systemPrompt: "first summarizer",
+                tools: []),
+            "fallback coach": makeClient(
+                provider: .codexCLI,
+                workDir: workDir,
+                runtime: runtime,
+                systemPrompt: "fallback coach",
+                tools: coachTools),
+            "fallback summarizer": makeClient(
+                provider: .codexCLI,
+                workDir: workDir,
+                runtime: runtime,
+                systemPrompt: "fallback summarizer",
+                tools: []),
+        ]
 
-        firstTargetCoach.terminate()
-        firstTargetSummarizer.terminate()
+        clients["first coach"] = nil
+        clients["first summarizer"] = nil
         #expect(backend.terminationCount == 0)
 
-        _ = try await fallbackCoach.respond(
+        _ = try await clients["fallback coach"]?.respond(
             messages: [.system("fallback coach"), .user("continue forward")],
             tools: coachTools,
             toolChoice: .required)
         #expect(await backend.openCount == 1)
 
-        fallbackCoach.terminate()
+        clients["fallback coach"] = nil
         #expect(backend.terminationCount == 0)
-        fallbackSummarizer.terminate()
-        #expect(backend.terminationCount == 1)
-
-        firstTargetCoach.terminate()
-        fallbackSummarizer.terminate()
+        clients["fallback summarizer"] = nil
         #expect(backend.terminationCount == 1)
     }
 
@@ -453,6 +447,77 @@ import JarvisCore
         }
         #expect(lines == ["Try a hash map here."])
         #expect(response.rawToolCalls.first?.argumentsJSON.contains("Try a hash map here.") == true)
+    }
+
+    /// A coaching shortcut's session with a skill left to load, and the choice its press sends.
+    private let shortcutCapabilities = CoachCapabilities.compose(
+        disabledTools: [], prepSourcesConfigured: false,
+        skills: [Skill(name: "behavioral", description: "Coaching for behavioral questions.",
+                       body: "STAR.")])
+    private let shortcutChoice = ToolChoice.allowed(["speak", "load_skill"])
+
+    /// The allowed set is the turn's to state: the baked instructions are the ones `.required`
+    /// warmed the process with, so a press cannot trip the drift guard.
+    @Test func allowedChoiceKeepsTheBakedInstructionsAndStatesItsSetInTheTrailer() async throws {
+        let workDir = try makeWorkDir()
+        let (coach, backend) = client(
+            workDir: workDir,
+            replies: [#"{"tool":"speak","arguments":{"lines":["tip"]}}"#],
+            tools: shortcutCapabilities.tools)
+        let (allowedCoach, _) = client(
+            workDir: workDir, replies: [], tools: shortcutCapabilities.tools,
+            toolChoice: shortcutChoice)
+        #expect(allowedCoach.expectedInstructions == coach.expectedInstructions)
+
+        _ = try await coach.respond(
+            messages: [.system("coach prompt"), .user("help")],
+            tools: shortcutCapabilities.callable(loaded: []),
+            toolChoice: shortcutChoice)
+
+        let turns = await backend.turns
+        let turn = try #require(turns.first)
+        #expect(turn.text.contains(
+            "This turn ends with a `speak` call. Before it you may call only `load_skill`. "
+                + "Do not call `capture_screen`, `stay_silent`."))
+        // "must call speak" is what the coach prompt reads as "do not load first".
+        #expect(!turn.text.contains("MUST call"))
+        coach.runtime.terminateNow()
+        allowedCoach.runtime.terminateNow()
+    }
+
+    /// Every response of a press, not only the forced last one, turns a reply it cannot accept into
+    /// its spoken prose: a failed attempt there would leave the user waiting on a retry.
+    @Test func allowedChoiceSpeaksTheProseOfAReplyItCannotAccept() throws {
+        let (client, _) = client(
+            workDir: try makeWorkDir(), replies: [], tools: shortcutCapabilities.tools)
+        for call in [
+            #"{"tool":"stay_silent","arguments":{}}"#,
+            #"{"tool":"capture_screen","arguments":{}}"#,
+            #"{"tool":"read_my_email","arguments":{}}"#,
+            #"{"tool":"speak","arguments":{}}"#,
+            "",
+        ] {
+            let response = client.parse(
+                reply: "Lead with the conflict.\n\(call)",
+                tools: shortcutCapabilities.callable(loaded: []),
+                toolChoice: shortcutChoice)
+            guard case .speak(_, let lines, nil, nil, nil) = response.toolCalls.first else {
+                Issue.record("expected the prose to be spoken for \(call)")
+                continue
+            }
+            #expect(lines == ["Lead with the conflict."])
+        }
+    }
+
+    @Test func allowedChoiceAcceptsACallItPermits() throws {
+        let (client, _) = client(
+            workDir: try makeWorkDir(), replies: [], tools: shortcutCapabilities.tools)
+        let response = client.parse(
+            reply: #"{"tool":"load_skill","arguments":{"name":"behavioral"}}"#,
+            tools: shortcutCapabilities.callable(loaded: []),
+            toolChoice: shortcutChoice)
+        #expect(response.toolCalls.first == .loadSkill(callId: response.rawToolCalls[0].id,
+                                                       name: "behavioral"))
     }
 
     @Test func malformedSpeakArgumentsAreNotAnEmptySpokenTurn() async throws {
@@ -529,7 +594,6 @@ import JarvisCore
             toolChoice: .required)
 
         #expect(response.toolCalls.isEmpty == false)
-        client.terminate()
     }
 
     /// The per-turn array narrows to what the model may call now and widens again as it loads, all
@@ -559,7 +623,6 @@ import JarvisCore
         #expect(client.expectedInstructions.contains("# Tools you can load"))
         #expect(client.expectedInstructions.contains("load_tool"))
         #expect(client.expectedInstructions.contains(JarvisPrompts.LocalAgent.deferredToolsNote))
-        client.terminate()
     }
 
     /// A skill is not a tool: it is named in the baked system text and its body arrives in the turn
@@ -593,7 +656,6 @@ import JarvisCore
         #expect(client.expectedInstructions.contains("- load_skill — "))
         // The body is not in the instructions; it only ever reaches the model as a tool result.
         #expect(!client.expectedInstructions.contains("Organize the answer as STAR."))
-        client.terminate()
     }
 
     /// Only the hot tools get a schema in the protocol block. A deferred tool is named in the
@@ -646,7 +708,6 @@ import JarvisCore
             #expect(String(describing: error)
                 .contains("offered a tool it was not initialized with"))
         }
-        client.terminate()
     }
 
     private func makeClient(

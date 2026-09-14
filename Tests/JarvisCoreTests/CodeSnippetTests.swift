@@ -2,6 +2,14 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct CodeSnippetTests {
+    @Test func preservesExpandedComponentAndLateCorrectionHighlights() throws {
+        let code = (1...24).map { "    values.append(\($0))" }.joined(separator: "\n")
+        let snippet = try #require(CodeSnippet(language: "python", placement: "Inside the current block",
+            code: code, highlightedLines: [13, 24]))
+        #expect(snippet.code == code)
+        #expect(snippet.highlightedLines == [13, 24])
+    }
+
     @Test(arguments: ["\r", "\u{2028}"])
     func rejectsUnsupportedNewlinesThatWouldBypassLineLimit(_ separator: String) {
         let code = Array(repeating: "return value", count: 13).joined(separator: separator)
@@ -28,7 +36,7 @@ import Testing
         #expect(snippet.highlightedLines == [2])
         #expect(snippet.language == "swift")
         #expect(snippet.placement == "Inside solve")
-        #expect(CodeSnippet(language: "", placement: "x", code: String(repeating: "x\n", count: 13)) == nil)
+        #expect(CodeSnippet(language: "", placement: "x", code: String(repeating: "x\n", count: 25)) == nil)
         #expect(CodeSnippet(language: "", placement: "x", code: String(repeating: "x", count: 2401)) == nil)
         #expect(CodeSnippet(language: "", placement: " ", code: "x") == nil)
         #expect(CodeSnippet(language: "", placement: "x", code: " \n ") == nil)

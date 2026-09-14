@@ -66,9 +66,11 @@ import Testing
         #expect(box.currentCodeHeight <= 360)
     }
 
-    @Test func tinyViewportKeepsAllCodeReachableAtReadableSize() throws {
+    @Test(arguments: [String(repeating: "a", count: 220),
+        (1...24).map { "    values.append(\($0))" }.joined(separator: "\n")])
+    func tinyViewportKeepsAllCodeReachableAtReadableSize(_ code: String) throws {
         let snippet = try #require(CodeSnippet(language: "text", placement: "Current component",
-            code: String(repeating: "a", count: 220)))
+            code: code))
         let dock = CodeSnippetView(frame: NSRect(x: 0, y: 0, width: 240, height: 96))
         dock.show(snippet, fontSize: 32)
         dock.layoutSubtreeIfNeeded()

@@ -50,7 +50,8 @@ import JarvisCore
             pathVariable: pathVariable,
             authStatusTimeout: authStatusTimeout,
             temporaryDirectory: temporaryDirectory
-                ?? home.appendingPathComponent("synthetic-system-temporary-directory")
+                ?? home.appendingPathComponent("synthetic-system-temporary-directory"),
+            applicationDirectories: [home.appendingPathComponent("Applications")]
         )
     }
 
@@ -81,6 +82,65 @@ import JarvisCore
         let d = detector(home: home, pathVariable: "/nonexistent")
         #expect(d.detect(.claudeCode)?.executableURL.path
                 == home.appendingPathComponent(".claude/local/claude").path)
+    }
+
+    @Test func discoversNVMClaudeWithMinimalLaunchdPATH() async throws {
+        guard !systemWideCLIInstalled else { return }
+        let home = try makeHome()
+        defer { try? fm.removeItem(at: home) }
+        let bin = home.appendingPathComponent(".nvm/versions/node/v20.18.3/bin")
+        try installBinary("claude", in: bin, script: "#!/usr/bin/env jarvis-test-node\n")
+        try installBinary("jarvis-test-node", in: bin, script: """
+            #!/bin/sh
+            printf '%s\\n' '{"loggedIn":true}'
+            """)
+        let cli = detector(home: home, pathVariable: "/usr/bin:/bin").detect(.claudeCode)
+        #expect(cli?.executableURL == bin.appendingPathComponent("claude"))
+        #expect(cli?.authenticationStatus == .signedIn)
+        let executable = try #require(cli?.executableURL)
+        let output = try await AgentCLIProcessRunner.run(AgentCLIRun(
+            executable: executable, arguments: [], stdin: nil,
+            workingDirectory: home, timeout: 10))
+        #expect(output.exitCode == 0)
+        #expect(output.stdout.contains("\"loggedIn\":true"))
+    }
+
+    @Test func nvmDiscoveryUsesNewestInstalledVersionButHonorsPATH() throws {
+        guard !systemWideCLIInstalled else { return }
+        let home = try makeHome()
+        defer { try? fm.removeItem(at: home) }
+        let older = home.appendingPathComponent(".nvm/versions/node/v9.9.0/bin")
+        let newer = home.appendingPathComponent(".nvm/versions/node/v20.18.3/bin")
+        // An incomplete newer install and unrelated directories must not hide a usable CLI.
+        try write("not executable", to: home.appendingPathComponent(".nvm/versions/node/v30.0.0/bin/claude"))
+        try installBinary("claude", in: home.appendingPathComponent(".nvm/versions/node/invalid/bin"))
+        try installBinary("claude", in: older)
+        try installBinary("claude", in: newer)
+        #expect(detector(home: home, pathVariable: "/usr/bin:/bin")
+            .detect(.claudeCode)?.executableURL == newer.appendingPathComponent("claude"))
+        #expect(detector(home: home, pathVariable: older.path)
+            .detect(.claudeCode)?.executableURL == older.appendingPathComponent("claude"))
+    }
+
+    @Test(arguments: ["ChatGPT.app", "Codex.app"])
+    func discoversBundledCodexWithMinimalLaunchdPATH(app: String) throws {
+        guard !systemWideCLIInstalled else { return }
+        let home = try makeHome()
+        defer { try? fm.removeItem(at: home) }
+        let resources = home.appendingPathComponent("Applications/\(app)/Contents/Resources")
+        try installBinary("codex", in: resources, script: """
+            #!/bin/sh
+            printf '%s\\n' 'shell_tool stable true'
+            """)
+        try write("{}", to: home.appendingPathComponent(".codex/auth.json"))
+        let cli = detector(home: home, pathVariable: "/usr/bin:/bin").detect(.codexCLI)
+        #expect(cli?.executableURL == resources.appendingPathComponent("codex"))
+        #expect(cli?.authenticationStatus == .signedIn)
+        #expect(cli?.supportedFeatures == ["shell_tool"])
+        let standalone = home.appendingPathComponent("standalone")
+        try installBinary("codex", in: standalone)
+        #expect(detector(home: home, pathVariable: standalone.path).detect(.codexCLI)?.executableURL
+                == standalone.appendingPathComponent("codex"))
     }
 
     @Test func pathTakesPrecedenceOverFallbackDirs() throws {

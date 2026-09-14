@@ -92,7 +92,11 @@ replacement socket replays the rest after a half-open failure. The scoped reconn
 that speech captured while that socket is unavailable returns after recovery. The brain can also run
 through a locally installed Claude Code or Codex CLI on the user's subscription; Brain offers both
 as route targets, while Connections reports their externally managed account readiness and owns the
-shared OpenAI API-key editor. Codex also remains available to the explicit agentic session
+shared OpenAI API-key editor. CLI discovery supports nvm installs and bundled Codex executables
+when launched from Finder; its search and failure behavior are defined in
+[Settings → Brain](./settings-window.md#brain) and implemented by
+[`AgentCLIDetector`](../Sources/JarvisBrainProviders/LocalAgent/AgentCLIDetector.swift).
+Codex also remains available to the explicit agentic session
 evaluator. The ordered provider route uses one primary
 plus a user-editable ordered fallback list, one target per coaching attempt, no failed-request replay
 inside the attempt, automatic pending-work attempts with the newest finalized transcript, the
@@ -218,7 +222,9 @@ should show one "loaded the search_prep_notes tool" row and a tip built on the n
 Prep notes search off in Settings should leave a Start carrying neither the tool nor its catalog
 line. The model's own choice to load is covered on all three brains by the opt-in
 `CoachToolLoadingLiveTests` (`JARVIS_LIVE_CAPABILITY_PROVIDER`); what is left is the app path around
-it, and a System Design session on a CLI brain rendering a diagram.
+it, a System Design session on a CLI brain rendering a diagram, and the two fresh-session **⌥⌘J**
+presses in [build-and-run.md](./build-and-run.md#live-smoke-checklist) on OpenAI and one CLI brain,
+where the first press should load its skill before the tip and the second should take one round trip.
 
 Run the [evaluation source smoke](./build-and-run.md#live-smoke-checklist) in a development bundle
 and an installed release: source/version selection, per-run fetch and discard, actionable failures,
@@ -342,7 +348,9 @@ Start (`CoachCapabilities`), and each tool carries its own usage guidance. Prep-
 deferred tool and each bundled skill a catalog entry: the prompt lists them one line each, and the
 model calls `load_tool` or `load_skill` to receive the schema and guidance, or the skill's body, as
 a tool result inside the turn that needs it. Settings → Brain → Capabilities switches any of them
-off for the next Start; screen capture, speak, and stay silent are always on. See
+off for the next Start; screen capture, speak, and stay silent are always on. The coaching shortcuts
+run the same loop: a press may load and search before its tip, never stays silent or captures
+again, and is forced to speak at the response cap (`CoachAttemptRunner`). See
 [architecture.md → Capabilities](./architecture.md#capabilities).
 
 **Show code with hints**, configured under Overlay Box with independent live code text-size and
@@ -351,11 +359,12 @@ Its capability is fixed at Start; the configurable fallback hotkey requests code
 guidance only in enabled sessions. Settings changes take effect on the next Start.
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) validates bounded attachments;
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) keeps them in a syntax-colored
-bottom dock while hints continue above. Code wraps and uses a compact font sized to fit the available
+bottom dock while hints continue above. Its draggable divider lets the user choose the code/hint
+proportion for the current session (see [`OverlayCodeDividerView`](../Sources/JarvisOverlay/OverlayCodeDividerView.swift)). Code wraps and uses a compact font sized to fit the available
 section; vertical scrolling remains a fallback at small panel sizes. Disabling Overlay Box turns off the saved code setting,
 releases its shortcut, and clears/disables the live dock until code is enabled for a new Start.
 Runtime authorization suppresses code when the session capability is off;
-each new hint replaces or clears its matching snippet.
+new code replaces the pinned snippet, while hints without code leave it available to read.
 See [architecture.md](./architecture.md#on-demand-coaching-shortcuts) for behavior and failure handling.
 Signed synthetic dock/shortcut checks and model scenarios cover the feature; real interview audio,
 capture, cross-app shortcuts, and screen-sharing exclusion still need live verification.

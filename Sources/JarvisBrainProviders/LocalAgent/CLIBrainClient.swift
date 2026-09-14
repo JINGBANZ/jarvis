@@ -92,10 +92,6 @@ public struct CLIBrainClient: BrainClient, Sendable {
         }
     }
 
-    public func terminate() {
-        runtimeLease.release()
-    }
-
     public func prepare() {
         runtime.prepareInBackground(for: configuration)
     }
@@ -191,15 +187,8 @@ public struct CLIBrainClient: BrainClient, Sendable {
             }
         }
         if !tools.isEmpty {
-            let forcedToolName: String?
-            if case .force(let name) = toolChoice {
-                forcedToolName = name
-            } else {
-                forcedToolName = nil
-            }
             textRun.append(JarvisPrompts.LocalAgent.answerTrailer(
-                forcedToolName: forcedToolName
-            ))
+                toolChoice: toolChoice, tools: tools))
         }
         flushText()
 
@@ -316,9 +305,13 @@ public struct CLIBrainClient: BrainClient, Sendable {
              + parts.joined(separator: " "))
     }
 
+    /// A narrowed choice bakes the same instructions as `.required`; what it permits is rendered in
+    /// the turn trailer, so a shortcut press cannot trip the drift guard in `prepareTurn` (#273).
     static func instructionChoice(_ choice: ToolChoice) -> ToolChoice {
-        if case .force = choice { return .required }
-        return choice
+        switch choice {
+        case .allowed, .force: .required
+        case .auto, .required: choice
+        }
     }
 
     struct MessageIdentity: Sendable, Equatable {

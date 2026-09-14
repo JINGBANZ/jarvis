@@ -17,8 +17,6 @@ struct ScreenMemoryModelEvaluation {
             workDirectory: URL(fileURLWithPath: NSTemporaryDirectory()),
             timeout: 90, systemPrompt: prompt, tools: coachTools, toolChoice: .required,
             prewarm: false)
-        defer { client.terminate() }
-
         struct Scenario {
             let name: String
             let earlier: [String]
@@ -66,7 +64,18 @@ struct ScreenMemoryModelEvaluation {
                     source: .browserAccessibility,
                     coverage: .activeTabAccessibilityTree))))
             messages.append(.user("New since last turn:\n[00:30] me: " + scenario.request))
-            let response = try await client.respond(messages: messages, tools: coachTools, toolChoice: .force("speak"))
+            let conversation = try await client.makeConversation()
+            let response: BrainResponse
+            do {
+                response = try await conversation.respond(
+                    messages: messages,
+                    tools: coachTools,
+                    toolChoice: .force("speak"))
+                await conversation.finish()
+            } catch {
+                await conversation.finish()
+                throw error
+            }
             guard case .speak(_, let lines, _, _, _)? = response.toolCalls.first else {
                 Issue.record("Expected a reply for \(scenario.name)"); continue
             }

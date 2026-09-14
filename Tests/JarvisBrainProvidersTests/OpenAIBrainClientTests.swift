@@ -317,7 +317,7 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"name\":\"capture_screen\""))
     }
 
-    @Test func everySelectableOpenAIModelReusesTheSharedEffort() async throws {
+    @Test func everySelectableOpenAIModelRespectsItsEffortFloor() async throws {
         for model in BrainModelCatalog.models(for: .openAI) {
             for effort in ReasoningEffort.allCases {
                 let box = CapturedBody()
@@ -337,9 +337,29 @@ private func speakResponseBody(arguments: String) -> Data {
                 #expect(request["model"] as? String == model.id)
                 #expect(
                     (request["reasoning"] as? [String: Any])?["effort"] as? String
-                        == effort.rawValue)
+                        == (model.id == "gpt-6-astra" && effort == .none ? "low" : effort.rawValue))
+                #expect(request["max_output_tokens"] as? Int
+                    == (model.id == "gpt-6-astra" && effort == .none
+                        ? ReasoningEffort.low.maxOutputTokens : effort.maxOutputTokens))
             }
         }
+    }
+
+    @Test func astraClampsNoneWithoutReducingALargerOutputBudget() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(
+            apiKey: "sk-x", model: "gpt-6-astra", reasoningEffort: "none",
+            maxOutputTokens: 25_000,
+            send: { request in
+                box.set(request.httpBody)
+                return (Data(#"{"output":[]}"#.utf8), http(200))
+            })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        let body = try #require(box.get())
+        let request = try #require(
+            try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect((request["reasoning"] as? [String: Any])?["effort"] as? String == "low")
+        #expect(request["max_output_tokens"] as? Int == 25_000)
     }
 
     /// The caller's `max_output_tokens` budget is encoded verbatim — this is what carries the
@@ -476,6 +496,33 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"tool_choice\""))
         #expect(body.contains("\"type\":\"function\""))
         #expect(body.contains("\"name\":\"speak\""))
+    }
+
+    /// A coaching shortcut narrows what may be called through tool_choice alone. The declared array
+    /// is the one a `.required` request carries, which keeps the cached prefix the same.
+    @Test func allowedToolChoiceEncodesAllowedToolsOverTheSameDeclaredArray() async throws {
+        let tools = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false,
+            skills: [Skill(name: "behavioral", description: "d", body: "b")]).tools
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: tools, toolChoice: .required)
+        let required = try #require(
+            try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
+        _ = try await client.respond(messages: [.user("hi")], tools: tools,
+                                     toolChoice: .allowed(["speak", "load_skill"]))
+        let allowed = try #require(
+            try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
+
+        let choice = try #require(allowed["tool_choice"] as? [String: Any])
+        #expect(choice["type"] as? String == "allowed_tools")
+        #expect(choice["mode"] as? String == "required")
+        #expect(choice["tools"] as? [[String: String]] == [
+            ["type": "function", "name": "speak"],
+            ["type": "function", "name": "load_skill"],
+        ])
+        #expect(allowed["tools"] as? NSArray == required["tools"] as? NSArray)
     }
 
     /// With a traffic log wired, a successful round trip lands in `brain-traffic.jsonl` — the raw

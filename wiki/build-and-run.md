@@ -364,8 +364,11 @@ the human-facing coaching record. The current validation priority lives in
 - Ask a behavioral question through the normal audio path. Confirm Activity shows "loaded the
   behavioral skill" and then the tip, both in one attempt, and note the time from question to first
   tip. In the same session, describe a system to design: expect "loaded the system-design skill" and
-  a tip whose diagram renders in the Overlay Box. Press **⌥⌘J** in a fresh session before any load
-  and confirm the overlay shows an ordinary tip with no reasoning text. Switch System design off in
+  a tip whose diagram renders in the Overlay Box. Start a fresh session, stay silent with a design
+  prompt on screen, and press **⌥⌘J**: expect the shortcut row, one screen view, "loaded the
+  system-design skill", and a tip with a diagram, all in one attempt and with no reasoning text on
+  the overlay. Press again and confirm that press is one round trip; note the press-to-tip time of
+  both. Repeat the two presses on one CLI brain. Switch System design off in
   Settings → Brain → Capabilities, Start again, and confirm `brain-traffic.jsonl` never names it in
   the system text and that it is never loaded. Repeat the two loads on Claude Code and Codex with at
   least two coaching turns after each, and confirm no "instructions changed after runtime
@@ -379,7 +382,9 @@ the human-facing coaching record. The current validation priority lives in
 - On a turn where the brain has nothing useful to add, confirm Activity shows a `stayed silent`
   entry, so a deliberate no-op cannot look like a stalled brain.
 - Press **⌥⌘J** with a question visible; confirm a shortcut entry, one screen view, and a tip appear in
-  Activity.
+  Activity, with a load row before the tip when a skill applies and the session has not loaded it
+  yet. With a prep source configured, press it on a "tell me about a time" prompt and expect the
+  behavioral skill load, the prep-notes tool load, a search, and the tip, all in one attempt.
 - Confirm saved screenshots exclude both overlay surfaces. Toggle each overlay in Settings, verify its
   controls and preview follow the toggle, and confirm the choice survives relaunch.
 - Validate realtime recovery with `./scripts/transcription-benchmark.sh reconnect`; do not disable the

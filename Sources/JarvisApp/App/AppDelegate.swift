@@ -285,7 +285,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             self?.stop(reason: reason)
         }
 
-        // While a session is running, screenshot + ask the brain for a hint in one trip; otherwise
+        // While a session is running, screenshot + ask the brain for a hint; otherwise
         // beep — there's no live driver/conversation to hint from when stopped.
         hotkeys?.onRequest = { [weak self] shortcut in
             guard let self, let fire = self.requestManualHint else {
@@ -898,7 +898,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     state, for: .system, readinessSession: readinessSession)
             }
         }
-        // Arm the hint hotkey for this session: capture the screen and force a one-trip hint, routed
+        // Arm the hint hotkey for this session: capture the screen and ask for a guaranteed hint, routed
         // through the same turn box as audio triggers (so Stop cancels it and rapid presses coalesce).
         self.requestManualHint = { shortcut in
             turns.run { await driver.handleTrigger(shortcut.triggerReason) }
@@ -1035,8 +1035,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let firstFailure = !readiness.hasFailedCoachingCycle
         observeReadiness(.brainCycleFailed(provider), for: readinessSession)
         guard firstFailure else { return }
-        let message = "Model cycle failed."
-        overlayCaption?.showError(message)
+        overlayCaption?.showError("Coaching failed. I'm still listening.")
     }
 
     func brainTargetDidChange(_ target: BrainTarget?) {

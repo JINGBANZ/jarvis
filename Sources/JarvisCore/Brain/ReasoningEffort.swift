@@ -2,8 +2,8 @@ import Foundation
 
 /// How hard the brain model thinks before answering, passed to the Responses API as
 /// `reasoning.effort`. One global setting applied to whichever `BrainModel` is selected — the four
-/// levels below are shared across every selectable OpenAI, Claude Code, and Codex CLI model. CLI
-/// adapters clamp only when a provider has a higher floor. Lower effort favors speed and fewer
+/// levels below express the preference for OpenAI, Claude Code, and Codex CLI models. Provider
+/// adapters clamp when the selected model or CLI has a higher floor. Lower effort favors speed and fewer
 /// tokens; higher effort thinks more completely. `rawValue` is the exact API string.
 public enum ReasoningEffort: String, CaseIterable, Sendable {
     case none

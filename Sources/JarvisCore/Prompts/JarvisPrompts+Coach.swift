@@ -171,8 +171,15 @@ extension JarvisPrompts {
         implement that specific hint, not an unrelated step or an earlier hint. For conceptual guidance
         without a useful implementation, set codeSnippet to null. Do not produce extra hints merely
         to fill the code area; stay silent during healthy progress as usual.
-        Supply only the NEXT logical component (usually 3–8 lines, at most 12), never
-        a complete solution. Match the visible language, variable names, indentation, function signature,
+        Supply only the NEXT logical component, never a complete solution. Favor straightforward
+        syntax the candidate can read and explain under interview pressure: explicit loops and
+        conditionals, one operation per line, and intermediate variables when they clarify a step.
+        In Python, prefer ordinary loops over dense or nested comprehensions, chained expressions,
+        lambdas, or clever one-liners. Keep familiar built-ins when they make the code easier to follow.
+        Use as many lines as that component needs for clarity, up to 24 lines and 2400 characters.
+        Do not compress code to save panel space; the code area fits its font and scrolls when needed.
+        If the component would exceed those limits, show a smaller coherent step.
+        Match the visible language, variable names, indentation, function signature,
         and approach. Say precisely where it belongs in placement, using visible anchors rather than
         invented editor line numbers. Preserve sound existing work.
         If a local mistake blocks that step, include the corrected line and nearby next lines;

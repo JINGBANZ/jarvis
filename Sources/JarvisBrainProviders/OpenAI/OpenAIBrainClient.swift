@@ -45,10 +45,14 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 send: Sender? = nil) {
         self.apiKey = apiKey
         self.model = model
-        self.reasoningEffort = reasoningEffort
+        // Astra requires at least low reasoning. Match its budget without rewriting the user's
+        // shared preference, which can still disable reasoning on the other OpenAI models.
+        let requiresReasoning = model == "gpt-6-astra" && reasoningEffort == "none"
+        self.reasoningEffort = requiresReasoning ? ReasoningEffort.low.rawValue : reasoningEffort
         self.endpoint = endpoint
         self.timeout = timeout
-        self.maxOutputTokens = maxOutputTokens
+        self.maxOutputTokens = requiresReasoning
+            ? max(maxOutputTokens, ReasoningEffort.low.maxOutputTokens) : maxOutputTokens
         self.promptCacheKey = promptCacheKey
         self.traffic = traffic
         self.trafficTag = trafficTag
@@ -187,12 +191,20 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                     "parameters": params, "strict": true]
         }
 
-        // Responses tool_choice: the strings "auto"/"required", or a {type:function,name} object to
-        // force one specific function.
+        // Responses tool_choice: the strings "auto"/"required", an allowed_tools object to require a
+        // call from a subset, or a {type:function,name} object to force one specific function. The
+        // subset narrows tool_choice rather than the declared `tools`, so the cached prefix is the
+        // same one the automatic path sends.
         let toolChoiceJSON: Any
         switch toolChoice {
         case .auto: toolChoiceJSON = "auto"
         case .required: toolChoiceJSON = "required"
+        case .allowed(let names):
+            toolChoiceJSON = [
+                "type": "allowed_tools",
+                "mode": "required",
+                "tools": names.map { ["type": "function", "name": $0] },
+            ] as [String: Any]
         case .force(let name): toolChoiceJSON = ["type": "function", "name": name]
         }
 

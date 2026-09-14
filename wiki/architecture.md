@@ -212,10 +212,24 @@ the longest sensible chain, which is load a skill, load a tool, search, capture,
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
 capture, and a turn cannot end without one of the other two. Neither loader has one either, because
-each is composed only while its catalog has something left in it. The manual-hint shortcut forces
-`speak` on every response and therefore cannot load: a hotkey tip before the session's first
-automatic load coaches without a skill. See [settings-window.md](./settings-window.md) for the
-user-facing card.
+each is composed only while its catalog has something left in it. See
+[settings-window.md](./settings-window.md) for the user-facing card.
+
+A [coaching shortcut](#on-demand-coaching-shortcuts) press runs this same loop, so even the first press
+of a session can load the skill or tool its question needs and search prep notes, and its loads commit
+when it speaks, like any attempt's. What a press may call is narrowed on each response instead: every
+callable tool except `stay_silent` and `capture_screen`, since its screen is already in the first
+request, and the response at the cap is forced to `speak`. A press therefore always ends in a tip and
+never runs out of responses. When `speak` is the only tool left, the request is the plain forced
+`speak`, one round trip. On OpenAI the narrowing is an `allowed_tools` choice over the unchanged
+declared array, which keeps the cached prefix of automatic attempts (`OpenAIBrainClient.encodeBody`).
+A CLI target is told its set in the turn trailer while its baked instructions stay those of a required
+choice, and the client enforces the set itself: on every response of a press, a reply that calls
+outside it or cannot be parsed has its prose spoken, because failing that response would leave the
+user waiting on a retry. The accepted cost is a round trip for each first load and each search, and
+the OpenAI client resends the whole input, screenshot included, on each one. One load followed by a
+forced `speak` was rejected as too narrow: the shortcut is the fallback for a need the automatic path
+missed, so it should not be the less capable of the two.
 
 ### Private architecture hints
 
@@ -226,7 +240,8 @@ loop sends. Prompt text alone governs it: the tip style says to leave it null un
 asks for a graph, the field's own description says the same, and the system-design skill is what
 asks. The runtime renders any graph it can parse and classifies nothing — a gate on a session type
 is exactly what the capability model removed, and a stray diagram in a session that loaded no skill
-is a prompt fix. Keeping it on `speak` also makes the manual-hint shortcut work in one response.
+is a prompt fix. Keeping it on `speak` also means a diagram arrives with its tip and never costs a
+response of its own.
 
 [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) accepts a bounded Mermaid subset:
 rectangular labeled boxes and directed connections. The parser owns the precise grammar and limits;
@@ -266,8 +281,10 @@ a separate classifier, timer, or model request.
 Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
 **⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
 clarification of the relevant gap, which may span several earlier hints; **Show code** (default
-**⌥⌘K**) requests the next small coding component. All snapshot a fresh screen,
-include the available conversation, and force `speak` in one brain round trip. If capture fails, the
+**⌥⌘K**) requests the next small coding component. All snapshot a fresh screen into the first
+request, include the available conversation, and always end in a tip: a press may load a skill or
+tool and search prep notes first, but never stays silent or captures again (see
+[Capabilities](#capabilities)). If capture fails, the
 request identifies the missing screen and uses available context without inventing visible details.
 They share the ordinary single-flight coach loop and provider route. Natural wakes preserve pending
 manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass unsettled
@@ -306,19 +323,27 @@ The fixed `speak.codeSnippet` schema carries language, placement, code, and corr
 [`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) bounds and validates it without
 truncating code. Highlight arrays are bounded before normalization, and trimming leading blank lines
 rebases correction indices. Invalid attachments retain the useful text hint. The prompt requests one logical
-component matching visible names, language, and structure. Local mistakes include a highlighted
+component matching visible names, language, and structure. Its guidance favors straightforward syntax,
+explicit control flow, and intermediate variables that candidates can follow under interview pressure.
+Readable expansion is allowed within the snippet bounds; panel space is handled by font fitting and
+scrolling rather than dense expressions. Local mistakes include a highlighted
 correction and relevant next lines; an invalid overall approach receives a corrective hint instead.
 Without visible code, known problem context supports a first component without inventing unseen names.
 
 [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) pins the snippet in a separate
-bottom scroll area inside the existing capture-excluded panel. Its dark background defaults to opaque
+bottom scroll area inside the existing capture-excluded panel. The horizontal divider adjusts
+its height by dragging or through VoiceOver increment/decrement actions. The chosen proportion
+survives new hints, clear, collapse/expand, and panel resizing for the current session; a new session
+restores automatic content sizing. Adjustment preserves space for hints and uses the same bounds
+for pointer and accessibility input, without activating Jarvis or taking keyboard focus. Its dark background defaults to opaque
 and has its own opacity, independent of the history fill (see [Overlay appearance](./settings-window.md#overlay-appearance)). Long code lines wrap within the dock without changing
 source text or correction highlights. The dock measures wrapped content to use available space;
 code uses its configured compact monospace size and shrinks only as needed to fit, down to a readable minimum
 (see `CodeSnippetView`). Very small panels retain vertical scrolling rather than clipping code or
-shrinking it indefinitely. Each new hint
-replaces its snippet, or clears the previous code when none is appropriate, so guidance and code agree.
-Dismiss and session clear remove the snippet. While enabled, an empty code area remains reserved;
+shrinking it indefinitely. A new code snippet replaces the pinned snippet. Hints without code
+leave it in place so the user can keep reading while the conversation continues; those hints
+record no new code in Activity or committed tool history.
+Dismiss, session clear, and Stop remove the snippet. While enabled, an empty code area remains reserved;
 a session started with code off has no dock. The dock collapses
 with the header and restores its snippet on expansion. Settings preview
 follows saved code enablement while stopped and restores the real snippet on close. The caption carries
@@ -523,7 +548,7 @@ failed conversation plus every newer finalized transcript item. If nothing new a
 attempt uses the same pending conversation. Every automatic attempt waits while either transcription
 stream owns unfinished work so it does not cross an earlier utterance that is about to finalize. An
 explicit coaching shortcut interrupts that postponement even after the wait begins and upgrades the same
-pending-work attempt to a forced hint; ordinary natural triggers remain parked until transcription
+pending-work attempt to a shortcut attempt, which always ends in a hint; ordinary natural triggers remain parked until transcription
 settles. `TriggerReason` remains the model-facing
 reason that made coaching useful (`turnEnd`, `silence`, `manualHint`, `manualExplanation`, or `manualCode`); pending work is scheduler
 state, not a fourth instruction to the model. An automatic attempt with no newer trigger reuses the
@@ -546,12 +571,17 @@ cycle with the provider's redacted cause.
 A later explicit coaching shortcut or new finalized speech starts a fresh cycle at the primary;
 silence without new transcript does not. Consecutive failed cycles delay that admission by 0, 5, 15,
 45, then at most 120 seconds. New input coalesces during the cooldown, and the admitted attempt
-snapshots the latest conversation. Any successful terminal coaching action resets the cooldown.
+snapshots the latest conversation. Any successful terminal coaching action resets the cooldown and
+ends the failure streak.
 Proven permanent target failures remain excluded for the session, including across fresh cycles and
-Settings edits; when all configured targets are permanently unavailable, the existing terminal
-`brainRouteExhausted` path ends the session and Activity names the cause. If at least one cycle has
-failed and ten minutes pass since the last success (or session start), the same path ends the session
-with that explanation, even without new speech. These terminal paths add no live presentation.
+Settings edits; when all configured targets are permanently unavailable, `brainRouteExhausted` ends
+the session and Activity names the cause. A failure streak that reaches the recovery ceiling
+([`BrainCycleRecovery.ceiling`](../Sources/JarvisCore/Coach/BrainCycleRecovery.swift), ten minutes)
+without a success ends the session through its own `brainRecoveryExpired` reason, even without new
+speech, and Activity quotes the most recent failed cycle's cause. The ceiling clock starts at the
+streak's first failed cycle, not at the last success. Silence probes stop after a long quiet stretch,
+so a clock measured from the last success would end an idle session on its first failure. These
+terminal paths add no live presentation.
 
 Provider clients remain owned until replacement or session teardown. Stop cancels pending/in-flight
 work and the recovery deadline. This policy is implemented by `BrainRouteSession`,

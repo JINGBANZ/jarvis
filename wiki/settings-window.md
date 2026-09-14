@@ -246,7 +246,13 @@ locally installed **Claude Code** / **Codex CLI**. Claude uses a session-scoped 
 coaching on the user's existing Claude *subscription* instead of the key, and Codex likewise coaches
 through a session-scoped app-server on the user's ChatGPT subscription (`CLIBrainClient`; see
 [architecture.md](./architecture.md#local-cli-brain-providers)). Installed CLIs are auto-detected by `AgentCLIDetector`: binary
-discovery is a pure file probe over $PATH + the known install dirs, while Claude sign-in uses its
+discovery is a pure file probe over stable $PATH entries and common installation directories,
+including nvm's versioned Node installs. Explicit PATH selections win; nvm fallbacks are searched
+newest first. Codex also checks the Codex and ChatGPT app bundles in the user's and system
+Applications directories after standalone installs. Discovery never sources shell startup scripts,
+which could hang or present UI during live preflight. The selected executable's directory leads
+the child PATH for both status probes and runtime launches so adjacent interpreters remain usable.
+Claude sign-in uses its
 non-billing `auth status --json` command under a short timeout because account metadata can outlive
 an expired OAuth session. Codex keeps using its auth-file marker and a bounded capability probe.
 Settings runs these probes asynchronously and keeps local-provider controls selectable while the
@@ -291,7 +297,8 @@ list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
 OpenAI API and Codex CLI share one concrete model list; Claude Code exposes the current concrete
-release in each supported family. Concrete releases, never rolling aliases such as `sonnet` or
+releases, including the latest in each supported family and older choices needed to preserve saved
+routes. Adding a model keeps provider defaults and existing selections stable. Concrete releases, never rolling aliases such as `sonnet` or
 `opus` or a CLI's own default: a saved route must keep naming the release the user picked, and an
 alias silently retargets it the day the provider advances it. Each provider remembers its own model; without a valid preference,
 the first entry in that provider's catalog is selected. The **Reasoning effort** picker
@@ -299,7 +306,9 @@ the first entry in that provider's catalog is selected. The **Reasoning effort**
 provider is active; its default lives with the others in
 [`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
-three shared levels pass through.
+three shared levels pass through. `OpenAIBrainClient` also clamps None to Low for GPT-6 Astra and
+raises the output budget to at least the Low budget, because Astra requires reasoning. The stored
+effort remains unchanged, and other OpenAI models retain the selected effort.
 
 **Capabilities.** This card lists what the coach can do and lets the user switch parts of it off.
 Screen capture, speak, and stay silent are shown as rows with no control and the detail "Always on":
@@ -433,7 +442,7 @@ claim that the account is healthy.
 
 Claude Code and Codex CLI keep authentication in their own tools. Connections runs the existing
 bounded `AgentCLIDetector` probes and reports **Signed in**, **Signed out**, **Sign-in unknown**, or
-**Not installed** without opening a login flow or storing another secret. The page's compact ready
+**Not found** without opening a login flow or storing another secret. The page's compact ready
 count includes every managed API key that is saved and confirmed signed-in local accounts.
 
 An OpenAI key is required only when OpenAI is selected for transcription or appears anywhere in the
@@ -520,7 +529,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
 | `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers |
-| `Sources/JarvisCore/Brain/Adapters/LocalAgent/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
+| `Sources/JarvisBrainProviders/LocalAgent/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
 | `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisEvaluation/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |

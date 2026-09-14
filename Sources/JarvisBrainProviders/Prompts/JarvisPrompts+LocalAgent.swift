@@ -38,10 +38,26 @@ extension JarvisPrompts {
 
         static let screenshotPlaceholder = roleBlock("user", text: "(screenshot below)")
 
-        static func answerTrailer(forcedToolName: String?) -> String {
+        /// What this response may call, when the turn narrows it. The baked protocol only ever says
+        /// "pick exactly one tool", so the narrower choice lives here and never rewrites the
+        /// instructions the process was warmed with. The allowed form states where the turn ends
+        /// without saying "you must call speak": the coach prompt reads that phrase as "do not load
+        /// first", which is exactly what an allowed turn permits.
+        static func answerTrailer(toolChoice: ToolChoice, tools: [ToolDef]) -> String {
+            func names(_ list: [String]) -> String {
+                list.map { "`\($0)`" }.joined(separator: ", ")
+            }
             var trailer = "Answer now, following the tool protocol."
-            if let forcedToolName {
-                trailer += " You MUST call the `\(forcedToolName)` tool this turn."
+            switch toolChoice {
+            case .force(let name):
+                trailer += " You MUST call the `\(name)` tool this turn."
+            case .allowed(let allowed):
+                trailer += " This turn ends with a `\(speakTool.name)` call. Before it you may call only "
+                    + names(allowed.filter { $0 != speakTool.name })
+                    + ". Do not call "
+                    + names(tools.map(\.name).filter { !allowed.contains($0) }) + "."
+            case .auto, .required:
+                break
             }
             return trailer
         }
@@ -71,9 +87,10 @@ extension JarvisPrompts {
                     + "Use {} for a tool with no arguments."
             )
             switch toolChoice {
-            case .required, .force:
-                // `.force` stays byte-identical to `.required` here so one forced hint does not
-                // rewrite the cacheable system prefix. Its tool name belongs in the turn trailer.
+            case .required, .allowed, .force:
+                // A narrowed choice stays byte-identical to `.required` here so a shortcut press
+                // does not rewrite the cacheable system prefix. What it permits belongs in the turn
+                // trailer.
                 lines.append(
                     "You MUST pick exactly one tool this turn — the JSON object is your entire answer."
                 )

@@ -139,13 +139,15 @@ public struct BrainResponse: Sendable {
 /// How the model may use tools on a given turn. `required` (some tool, model's pick) is what
 /// audio-driven turns use: with `stay_silent` in the tool set every decision — nudge, look, or stay
 /// quiet — is a clean tool call and the model never emits plain text into the stored conversation.
-/// `force(name)` (require exactly that function) is used by the manual-hint hotkey, which forces
-/// `speak` so an explicit ⌥⌘J keypress always yields a visible hint in one round trip (see
-/// `CoachDriver.runTurn` + `TriggerReason.manualHint`). `auto` (zero or more calls) remains for tests
-/// and future callers that genuinely want optional tool use.
+/// `allowed(names)` is `required` narrowed to the listed tools while the declared array stays whole,
+/// and `force(name)` requires exactly that function. A coaching shortcut uses both: it may load and
+/// search but never stay silent or recapture, and its last permitted response forces `speak`, so an
+/// explicit keypress always ends in a visible hint (see `CoachAttemptRunner.runAttempt`). `auto`
+/// (zero or more calls) is for tool-less callers such as history compaction.
 public enum ToolChoice: Sendable, Equatable {
     case auto
     case required
+    case allowed([String])
     case force(String)
 }
 
@@ -169,8 +171,6 @@ public protocol BrainClient: Sendable {
     func makeConversation() async throws -> any BrainConversation
     /// Begin preparing provider resources for the currently reachable route target.
     func prepare()
-    /// Release provider resources when a route target can no longer be selected this session.
-    func terminate()
 }
 
 public extension BrainClient {
@@ -187,9 +187,6 @@ public extension BrainClient {
 
     /// Stateless clients have no provider runtime to prepare.
     func prepare() {}
-
-    /// Stateless clients have no provider runtime to release.
-    func terminate() {}
 }
 
 private struct ForwardingBrainConversation: BrainConversation {
