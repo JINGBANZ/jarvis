@@ -2,7 +2,7 @@ import Foundation
 
 /// What the overlay needs to do; the real NSPanel impl lives in JarvisOverlay.
 public protocol OverlayRendering: AnyObject {
-    /// Deliver or clear the independent code area and report accepted visible content.
+    /// Deliver new code and report accepted visible content; nil preserves the current code and returns nil.
     @MainActor func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet?
     /// Sampled at delivery, since the user can hide the persistent surface during a request.
     @MainActor var acceptsDetail: Bool { get }

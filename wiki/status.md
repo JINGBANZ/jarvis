@@ -348,7 +348,7 @@ proportion for the current session (see [`OverlayCodeDividerView`](../Sources/Ja
 section; vertical scrolling remains a fallback at small panel sizes. Disabling Overlay Box turns off the saved code setting,
 releases its shortcut, and clears/disables the live dock until code is enabled for a new Start.
 Runtime authorization suppresses code when the session capability is off;
-each new hint replaces or clears its matching snippet.
+new code replaces the pinned snippet, while hints without code leave it available to read.
 See [architecture.md](./architecture.md#on-demand-coaching-shortcuts) for behavior and failure handling.
 Signed synthetic dock/shortcut checks and model scenarios cover the feature; real interview audio,
 capture, cross-app shortcuts, and screen-sharing exclusion still need live verification.

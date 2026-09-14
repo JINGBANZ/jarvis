@@ -315,6 +315,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     public func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? {
+        // A hint without code must not interrupt reading or report the pinned snippet as new output.
+        guard let snippet else { return nil }
         codeSnippet = acceptsDetail && codeEnabled ? snippet : nil
         refreshDetails()
         if panel.isVisible { reassertCaptureExclusion() }

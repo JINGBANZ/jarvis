@@ -41,7 +41,7 @@ import Testing
     }
 
     @Test(arguments: [TriggerReason.turnEnd, .manualHint, .manualExplanation])
-    func enabledHintsDeliverMatchingCodeAndClearOnNextHint(_ reason: TriggerReason) async throws {
+    func enabledHintsDeliverMatchingCodeAndReportNoCodeForTextOnlyHint(_ reason: TriggerReason) async throws {
         let snippet = try #require(CodeSnippet(language: "Python", placement: "In loop", code: "seen[ch] = right"))
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "one", lines: ["Remember the position"], codeSnippet: snippet)]),

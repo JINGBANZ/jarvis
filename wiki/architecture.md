@@ -338,9 +338,10 @@ and has its own opacity, independent of the history fill (see [Overlay appearanc
 source text or correction highlights. The dock measures wrapped content to use available space;
 code uses its configured compact monospace size and shrinks only as needed to fit, down to a readable minimum
 (see `CodeSnippetView`). Very small panels retain vertical scrolling rather than clipping code or
-shrinking it indefinitely. Each new hint
-replaces its snippet, or clears the previous code when none is appropriate, so guidance and code agree.
-Dismiss and session clear remove the snippet. While enabled, an empty code area remains reserved;
+shrinking it indefinitely. A new code snippet replaces the pinned snippet. Hints without code
+leave it in place so the user can keep reading while the conversation continues; those hints
+record no new code in Activity or committed tool history.
+Dismiss, session clear, and Stop remove the snippet. While enabled, an empty code area remains reserved;
 a session started with code off has no dock. The dock collapses
 with the header and restores its snippet on expansion. Settings preview
 follows saved code enablement while stopped and restores the real snippet on close. The caption carries
