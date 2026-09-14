@@ -259,9 +259,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     self.hotkeys?.unregister(.explainMore)
                     self.hotkeys?.unregister(.showCode)
                 }),
-            DisplaySection(preferences: screenPreferences) { [weak self] in
-                self?.reapplySessionPlan()
-            },
+            DisplaySection(
+                preferences: screenPreferences,
+                isSessionStopped: { [weak self] in
+                    guard let self else { return false }
+                    return self.pendingStartTask == nil
+                        && self.transcriber == nil
+                        && !self.sessionIsLive
+                        && self.pendingTurnDrainIDs.isEmpty
+                },
+                onChange: { [weak self] in self?.reapplySessionPlan() }),
             PrepMaterialSection(preferences: prepMaterialPreferences),
             hotkeySection,
             ActivitySection(viewer: activityViewer),

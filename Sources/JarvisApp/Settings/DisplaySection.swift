@@ -11,11 +11,19 @@ final class DisplaySection: NSObject, SettingsSection {
     /// Called after an edit is persisted so the host can freeze a fresh control-plane revision for
     /// the next attempt. A turn already running keeps the revision it snapshotted.
     private let onChange: () -> Void
+    private let isSessionStopped: () -> Bool
     private var popup: NSPopUpButton?
+    private var browserTextSwitch: NSSwitch?
     private var screenObserver: NSObjectProtocol?
+    private var activationObserver: NSObjectProtocol?
 
-    init(preferences: ScreenCapturePreferences, onChange: @escaping () -> Void = {}) {
+    init(
+        preferences: ScreenCapturePreferences,
+        isSessionStopped: @escaping () -> Bool = { true },
+        onChange: @escaping () -> Void = {}
+    ) {
         self.preferences = preferences
+        self.isSessionStopped = isSessionStopped
         self.onChange = onChange
     }
 
@@ -29,7 +37,14 @@ final class DisplaySection: NSObject, SettingsSection {
         self.popup = popup
         reloadItems()
 
-        let cardHeight = SettingsStyle.cardHeaderHeight + 64
+        let browserTextSwitch = NSSwitch()
+        browserTextSwitch.target = self
+        browserTextSwitch.action = #selector(browserTextChanged)
+        browserTextSwitch.setAccessibilityLabel("Read Chrome page text")
+        self.browserTextSwitch = browserTextSwitch
+        reloadBrowserTextControl()
+
+        let cardHeight = SettingsStyle.cardHeaderHeight + 128
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
         card.translatesAutoresizingMaskIntoConstraints = false
@@ -40,11 +55,23 @@ final class DisplaySection: NSObject, SettingsSection {
             controlView: popup,
             controlSize: NSSize(width: 300, height: 32),
             preferredHeight: 64,
+            showsSeparator: true)
+        let browserTextRow = SettingsRowView(
+            title: "Read Chrome page text",
+            detail: "Optional Accessibility access; may include off-screen text",
+            controlView: browserTextSwitch,
+            controlSize: NSSize(width: 46, height: 28),
+            preferredHeight: 64,
             showsSeparator: false)
         card.contentView?.addSubview(row)
-        card.onLayout = { [weak card, weak row] in
-            guard let card, let row else { return }
-            row.frame = card.bodyFrame
+        card.contentView?.addSubview(browserTextRow)
+        card.onLayout = { [weak card, weak row, weak browserTextRow] in
+            guard let card, let row, let browserTextRow else { return }
+            let body = card.bodyFrame
+            row.frame = NSRect(x: body.minX, y: body.midY,
+                               width: body.width, height: body.height / 2)
+            browserTextRow.frame = NSRect(x: body.minX, y: body.minY,
+                                          width: body.width, height: body.height / 2)
         }
 
         let callout = makeCallout()
@@ -86,7 +113,8 @@ final class DisplaySection: NSObject, SettingsSection {
 
         let note = NSTextField(wrappingLabelWithString:
             "Jarvis captures only when the brain requests visual context. If the active window "
-            + "is unavailable, or a chosen display disconnects, the main display is used.")
+            + "is Chrome and page-text access is available, semantic text is preferred. Otherwise "
+            + "the current window uses OCR; screenshots still carry images and diagrams.")
         note.translatesAutoresizingMaskIntoConstraints = false
         note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         note.textColor = .secondaryLabelColor
@@ -106,6 +134,7 @@ final class DisplaySection: NSObject, SettingsSection {
 
     func didBecomeActive() {
         reloadItems()
+        reloadBrowserTextControl()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
@@ -113,11 +142,20 @@ final class DisplaySection: NSObject, SettingsSection {
         ) { [weak self] _ in
             Task { @MainActor in self?.reloadItems() }
         }
+        activationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.reloadBrowserTextControl() }
+        }
     }
 
     func didResignActive() {
         if let screenObserver { NotificationCenter.default.removeObserver(screenObserver) }
+        if let activationObserver { NotificationCenter.default.removeObserver(activationObserver) }
         screenObserver = nil
+        activationObserver = nil
     }
 
     /// Row 0 is the active-window scope; on rows 1…n the row number is the display's
@@ -148,5 +186,38 @@ final class DisplaySection: NSObject, SettingsSection {
             preferences.displayIndex = row
         }
         onChange()
+    }
+
+    private func reloadBrowserTextControl() {
+        guard let browserTextSwitch else { return }
+        browserTextSwitch.state = preferences.browserTextEnabled ? .on : .off
+        browserTextSwitch.isEnabled = isSessionStopped()
+        if preferences.browserTextEnabled, BrowserAccessibilityPermission.isGranted {
+            browserTextSwitch.toolTip = "Enabled for foreground Chrome tabs"
+        } else if preferences.browserTextEnabled {
+            browserTextSwitch.toolTip = "Accessibility permission is missing; captures use OCR"
+        } else {
+            browserTextSwitch.toolTip = "Off; captures use current-window OCR"
+        }
+    }
+
+    @objc private func browserTextChanged(_ sender: NSSwitch) {
+        guard isSessionStopped() else {
+            reloadBrowserTextControl()
+            return
+        }
+        if sender.state == .off {
+            preferences.browserTextEnabled = false
+            onChange()
+            reloadBrowserTextControl()
+            return
+        }
+
+        preferences.browserTextEnabled = true
+        onChange()
+        if !BrowserAccessibilityPermission.isGranted {
+            BrowserAccessibilityPermission.request()
+        }
+        reloadBrowserTextControl()
     }
 }
