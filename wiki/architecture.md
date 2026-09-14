@@ -202,10 +202,15 @@ installs no port in either case; which one it was stays in `jlog`, and Activity 
 fixed notice that a tip went out without the user's own material. Switching the capability off also
 skips the index build, so the file reading and `textutil` work stop with it.
 
-Prep search uses local keyword ranking over paragraph chunks. Markdown headings at paragraph starts
-begin fresh chunks so short story sections retain their accuracy notes; long pipe tables split
-between rows so a question map does not become one oversized search result. Long prose paragraphs
-and individual rows stay intact, and sections longer than the target can still span chunks
+Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
+handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
+literal hash or pipe characters. Markdown headings at paragraph starts begin fresh chunks so short
+story sections retain their accuracy notes. Fenced code blocks stay intact, including blank lines;
+indented code is not interpreted as headings or tables. Recognized leading/trailing-pipe tables with
+an explicit delimiter row split between rows and repeat their column headers, so comparison rows
+remain interpretable and a question map does not become one oversized search result. Unsupported
+Markdown constructs retain paragraph behavior. Long prose paragraphs, fenced code, and individual
+rows with their headers can exceed the target; long sections can still span chunks
 (see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
 The behavioral skill evaluates all returned excerpts against the exact question and distinguishes
 personal events from drafts, hypothetical approaches, and criteria. A retrieval miss is missing
