@@ -317,7 +317,7 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"name\":\"capture_screen\""))
     }
 
-    @Test func everySelectableOpenAIModelReusesTheSharedEffort() async throws {
+    @Test func everySelectableOpenAIModelRespectsItsEffortFloor() async throws {
         for model in BrainModelCatalog.models(for: .openAI) {
             for effort in ReasoningEffort.allCases {
                 let box = CapturedBody()
@@ -337,9 +337,29 @@ private func speakResponseBody(arguments: String) -> Data {
                 #expect(request["model"] as? String == model.id)
                 #expect(
                     (request["reasoning"] as? [String: Any])?["effort"] as? String
-                        == effort.rawValue)
+                        == (model.id == "gpt-6-astra" && effort == .none ? "low" : effort.rawValue))
+                #expect(request["max_output_tokens"] as? Int
+                    == (model.id == "gpt-6-astra" && effort == .none
+                        ? ReasoningEffort.low.maxOutputTokens : effort.maxOutputTokens))
             }
         }
+    }
+
+    @Test func astraClampsNoneWithoutReducingALargerOutputBudget() async throws {
+        let box = CapturedBody()
+        let client = OpenAIBrainClient(
+            apiKey: "sk-x", model: "gpt-6-astra", reasoningEffort: "none",
+            maxOutputTokens: 25_000,
+            send: { request in
+                box.set(request.httpBody)
+                return (Data(#"{"output":[]}"#.utf8), http(200))
+            })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        let body = try #require(box.get())
+        let request = try #require(
+            try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect((request["reasoning"] as? [String: Any])?["effort"] as? String == "low")
+        #expect(request["max_output_tokens"] as? Int == 25_000)
     }
 
     /// The caller's `max_output_tokens` budget is encoded verbatim — this is what carries the

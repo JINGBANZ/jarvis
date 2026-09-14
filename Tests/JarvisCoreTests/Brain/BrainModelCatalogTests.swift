@@ -8,9 +8,10 @@ import Testing
         #expect(Set(ids).count == ids.count)   // no duplicate model ids
     }
 
-    @Test func sharedOpenAIListContainsExactlySixModels() {
+    @Test func sharedOpenAIListIncludesLatestModel() {
         #expect(BrainModelCatalog.all.map(\.id) == [
             "gpt-5.6-sol",
+            "gpt-6-astra",
             "gpt-5.6-terra",
             "gpt-5.6-luna",
             "gpt-5.5",
@@ -19,10 +20,11 @@ import Testing
         ])
     }
 
-    @Test func claudeCodeListsOnlyTheNewestReleaseInEachFamily() {
+    @Test func claudeCodeIncludesLatestReleaseAndPreservesSavedModels() {
         #expect(BrainModelCatalog.models(for: .claudeCode).map(\.id) == [
             "claude-opus-5",
             "claude-sonnet-5",
+            "claude-fable-5-1",
             "claude-fable-5",
             "claude-haiku-4-5",
         ])
@@ -42,7 +44,7 @@ import Testing
     @Test func everyProviderUsesItsFirstCatalogEntryAsDefault() {
         for provider in BrainProvider.allCases {
             let models = BrainModelCatalog.models(for: provider)
-            #expect(models.count == (provider == .claudeCode ? 4 : 6))
+            #expect(models.count == (provider == .claudeCode ? 5 : 7))
             #expect(Set(models.map(\.id)).count == models.count)
             #expect(models.allSatisfy { !$0.id.isEmpty })
             #expect(BrainModelCatalog.defaultModel(for: provider) == models.first)
