@@ -107,8 +107,9 @@ import JarvisBrainProviders
                 speaker: .them, trigger: .manualHint, screen: UnavailableScreen(),
                 directory: directory, traffic: traffic)
             else {
+                // An unavailable arm is skipped on its own; the arms after it still run.
                 _ = await traffic.close()
-                break
+                continue
             }
             _ = await traffic.close()
             let kinds = pressed.activity.kinds
