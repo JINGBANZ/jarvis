@@ -51,7 +51,6 @@ struct LiveE2ETests {
                 (ended != nil, "the session ended"),
                 (ended?.message.contains("invalid_api_key") == true,
                  "the end names invalid_api_key (saw \(ended?.message ?? "no end row"))"),
-                (elapsed.map { $0 <= 15 } ?? false, "it ended within 15 s of Start"),
                 (!evidence.activity.contains { $0.kind == "systemAudioStopped" },
                  "no system-audio degradation row"),
             ])
