@@ -1,3 +1,4 @@
+#if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import AVFoundation
 import Foundation
 
@@ -70,3 +71,4 @@ struct FixtureSpeech {
         try FileManager.default.removeItem(at: directory)
     }
 }
+#endif

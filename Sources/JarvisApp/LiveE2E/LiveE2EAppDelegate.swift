@@ -1,3 +1,4 @@
+#if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import AppKit
 import Foundation
 import JarvisCore
@@ -33,3 +34,4 @@ final class LiveE2EAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 }
+#endif

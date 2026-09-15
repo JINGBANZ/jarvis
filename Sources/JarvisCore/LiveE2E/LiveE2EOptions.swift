@@ -1,3 +1,4 @@
+#if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import Foundation
 
 /// Launch arguments for the live e2e mode, validated before the app touches a session.
@@ -161,3 +162,4 @@ public struct LiveE2EOptions: Sendable {
         return false
     }
 }
+#endif

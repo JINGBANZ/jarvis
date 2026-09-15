@@ -1,3 +1,4 @@
+#if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import Foundation
 import JarvisCore
 
@@ -15,3 +16,4 @@ struct LiveE2EAttemptObserver: CoachingAttemptAuditing {
         observe(event)
     }
 }
+#endif

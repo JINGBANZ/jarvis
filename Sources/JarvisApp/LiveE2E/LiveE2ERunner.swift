@@ -1,3 +1,4 @@
+#if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import AppKit
 import JarvisBrainProviders
 import JarvisCore
@@ -501,3 +502,4 @@ final class LiveE2ERunner: BrainCompositionHost {
         composition?.brainCycleDidFail(provider)
     }
 }
+#endif

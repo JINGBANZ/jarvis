@@ -1,3 +1,4 @@
+#if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 /// Pure chunk scheduling for the live e2e fixture audio source.
 ///
 /// Feeds two 24 kHz Int16 mono streams in 20 ms chunks. It owns no clock: the caller calls `tick()`
@@ -101,3 +102,4 @@ public struct AudioTimeline: Sendable {
         streams.values.allSatisfy { $0.clips.isEmpty }
     }
 }
+#endif

@@ -1,3 +1,4 @@
+#if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import Foundation
 import JarvisCore
 import os
@@ -32,3 +33,4 @@ final class FixtureScreenCapture: ScreenCapturing {
     /// No helper process or transient file exists to clean up.
     func cancelCapture() {}
 }
+#endif

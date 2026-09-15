@@ -1,3 +1,4 @@
+#if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import Foundation
 import JarvisCore
 
@@ -120,3 +121,4 @@ final class FixtureAudioSource: AudioSource, @unchecked Sendable {
         return events
     }
 }
+#endif

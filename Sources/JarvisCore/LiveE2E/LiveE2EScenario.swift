@@ -1,3 +1,4 @@
+#if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import Foundation
 
 /// One live e2e scenario: the session settings a launch starts with and the ordered steps it drives.
@@ -367,3 +368,4 @@ private struct RawStep: Decodable {
         whileAttemptRunning = try container.decodeIfPresent(Bool.self, forKey: Key("whileAttemptRunning"))
     }
 }
+#endif

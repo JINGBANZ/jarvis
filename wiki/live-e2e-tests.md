@@ -16,7 +16,15 @@ The mode is a sibling of the [transcription benchmark](./transcription-benchmark
 conventions: `--live-e2e` in `Sources/JarvisApp/App/main.swift` selects `LiveE2EAppDelegate`
 (`Sources/JarvisApp/LiveE2E/`), a hidden `.prohibited` process like the benchmark's. It is an app
 mode rather than a test process calling the libraries because the run has to exercise the signed
-app's TCC identity, capture edge, and composition, which only the bundle has.
+app's TCC identity, capture edge, and composition, which only the bundle has. That is also why its
+code lives under `Sources/`, not `Tests/`: nothing in a test target is linked into the app.
+
+The mode exists only in debug builds. `liveE2ESettings` in `Package.swift` defines `JARVIS_LIVE_E2E`
+for debug builds of `JarvisCore` and `JarvisApp`, both live e2e folders and the `main.swift` switch
+compile only under it, and `scripts/check-audio-capture-config.sh` enforces that. The run builds the
+debug app, and the Gate's debug build keeps the code compiling, while the release app that
+`scripts/package-app.sh` builds contains none of it. The launch additionally requires the development
+bundle, so a debug build without that identity still refuses a scenario.
 
 `LiveE2ERunner` hosts the brain composition and drives one scenario through `SessionComposition`,
 the object a production Start uses ([architecture.md → Components](./architecture.md#3-components)).
