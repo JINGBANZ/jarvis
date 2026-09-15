@@ -121,7 +121,8 @@ struct LiveE2EScenarioTests {
 
         #expect(b.brain == .init(primary: .codexCLI, fallbacks: []))
         #expect(b.capabilities == .init(
-            disabledTools: ["search_prep_notes"], disabledSkills: ["behavioral", "system-design"]))
+            disabledTools: ["search_prep_notes"],
+            disabledSkills: ["behavioral", "system-design", "coding-with-ai"]))
         #expect(f04.brain == .init(primary: .claudeCode, fallbacks: []))
         #expect(f04.cli == [.claudeCode: .stub])
         #expect(f04.steps.filter { $0 == .restoreCLI(.claudeCode) }.count == 1)

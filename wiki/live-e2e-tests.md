@@ -137,7 +137,7 @@ layout in the Gate.
 | Scenario | Brain | What it drives |
 |---|---|---|
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
-| B | Codex | Behavioral, system design, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
+| B | Codex | Behavioral, system design, coding with AI, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
 | R | Codex | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Codex | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Codex | Transcription with a run-local invalid OpenAI key. |

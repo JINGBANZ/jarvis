@@ -169,7 +169,7 @@ struct LiveE2ETests {
             let codex = evidence.traffic.filter { $0.tag == "coach" && $0.cliProvider == "codex-cli" }
             results.check("C16", [
                 (!evidence.activity.contains {
-                    ["behavioral", "system-design"].contains($0.loadedCapability?.name ?? "")
+                    ["behavioral", "system-design", "coding-with-ai"].contains($0.loadedCapability?.name ?? "")
                 }, "switched-off skills never load"),
                 (!evidence.activity.contains { $0.kind == "prepNotesSearched" }, "no prep search"),
                 (!b2.isEmpty, "B2 ran an attempt"),
