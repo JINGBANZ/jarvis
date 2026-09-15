@@ -205,11 +205,51 @@ installs no port in either case; which one it was stays in `jlog`, and Activity 
 fixed notice that a tip went out without the user's own material. Switching the capability off also
 skips the index build, so the file reading and `textutil` work stop with it.
 
+Prep material is shared across interview types: `.md`, `.txt`, `.pdf`, and `.docx` sources can all
+supply behavioral, coding, or system-design preparation, including mixed-topic documents. No skill
+or topic filters sources by file format. Extraction depends on the file format; coaching depends
+on the question and retrieved evidence.
+
+Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
+handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
+literal hash or pipe characters. Markdown section boundaries keep short stories with their accuracy
+notes. Consecutive headings stay with their first content block, including the first group of an
+oversized table; trailing headings without content are omitted from the search index because they
+supply no evidence. The source file is unchanged. Fenced code blocks stay intact, including blank
+lines; indented code is not interpreted as headings or tables. Recognized leading/trailing-pipe
+tables with an explicit delimiter row split between rows and repeat their column headers, including
+when a table immediately follows a heading without a blank line. Comparison rows remain
+interpretable and a question map does not become one oversized search result. Unsupported Markdown
+constructs retain paragraph behavior. Long prose paragraphs, fenced code, individual rows with their
+headers, and a heading plus its first content block can exceed the target; long sections can still span chunks
+(see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
+
+Search guidance normally calls for one query per topic. When the results only point to a named
+story or section and lack usable facts, the model may make one focused follow-up using that title
+and identifying details, then stops searching. Empty or unavailable results do not authorize a
+retry. Resolving an explicit reference lets the coach supply the answer content instead of asking
+the candidate to consult a document index during the interview. This bounded exception is shared
+by all prep formats and interview topics; it changes guidance, not the search index or runtime
+scheduling (see [`SearchPrepNotes`](../Sources/JarvisCore/Coach/Tools/SearchPrepNotes.swift)).
+
+The behavioral skill evaluates all returned excerpts against the exact question and distinguishes
+personal events from drafts, hypothetical approaches, and criteria. For a new question, the opening
+hint pairs the specific behavior or reasoning a strong answer would demonstrate with supported
+answer content or a focused recall question. This assessment focus is inferred from the question,
+without claiming private interviewer intent or inventing company criteria, so the candidate can
+choose and emphasize relevant evidence. Follow-up hints address the current gap without repeating
+that framing, and sufficient answers still call for silence. Hints do not rely on story IDs, section labels,
+or unexplained project shorthand. Compact wording preserves each action's owner and status and each
+metric's qualifier. When no supported story fits, the coach asks for a real example or identifies
+the missing fact. A retrieval miss cannot establish that the candidate has never had that experience
+or authorize invention.
+
 A call to a tool the session does not offer, or a load naming something it does not have, is answered
 with a plain "no tool named X is available" rather than failing the attempt. Only a CLI target can
 reach the first branch, since it reconstructs calls from prompt text and can name anything; on the
-API path an undeclared tool is not callable at all. The per-attempt response cap is 7: two more than
-the longest sensible chain, which is load a skill, load a tool, search, capture, speak.
+API path an undeclared tool is not callable at all. The per-attempt response cap is 7, leaving room
+for loading a skill and tool, an initial search and its permitted reference follow-up, a capture,
+and a terminal coaching action.
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
 capture, and a turn cannot end without one of the other two. Neither loader has one either, because
@@ -666,8 +706,9 @@ rather than a per-turn screenshot.
   [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
   policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
   model loads when the question calls for it. Three skills ship: behavioral shapes candidate-owned
-  answers with STAR and prepared criteria, labels constructed examples, and avoids refining an
-  answer that is already concrete and complete; coding covers representation and invariant guidance,
+  experience answers with STAR, handles personal and hypothetical questions directly, preserves
+  prep-material caveats, and reserves labeled fictional examples for an explicit practice request.
+  It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
   local implementation and defect diagnosis, and boundary tests for a post-completion hint the base
   policy already warrants; system-design supplies the stage vocabulary from requirements through
   trade-offs, and asks for a diagram in the one stage that benefits. The base prompt keeps what is
