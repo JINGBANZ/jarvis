@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.2.4](https://github.com/JINGBANZ/jarvis/compare/v0.2.3...v0.2.4) (2026-09-15)
+
+
+### Features
+
+* **brain:** add latest gpt and claude models ([#315](https://github.com/JINGBANZ/jarvis/issues/315)) ([bde57f8](https://github.com/JINGBANZ/jarvis/commit/bde57f87a2391726d06682f3983276b04f31be16))
+* **coach:** add coding with ai guidance ([#329](https://github.com/JINGBANZ/jarvis/issues/329)) ([0f0fd07](https://github.com/JINGBANZ/jarvis/commit/0f0fd0714ddcc30b99dd1c0a003b8dd8a6e976e9))
+* **coach:** let the coaching shortcuts load skills and tools before speaking ([#318](https://github.com/JINGBANZ/jarvis/issues/318)) ([d4f64b2](https://github.com/JINGBANZ/jarvis/commit/d4f64b272b6c5ccb5797eae6355e8c2ee67bb5eb))
+* **coach:** load coaching skills on demand and retire the interview format ([#305](https://github.com/JINGBANZ/jarvis/issues/305)) ([04552c8](https://github.com/JINGBANZ/jarvis/commit/04552c899bd7f7ead0e2c6905afa8372a9b6a9ef))
+* **coach:** load coaching tools on demand and let the user switch them off ([#301](https://github.com/JINGBANZ/jarvis/issues/301)) ([a455688](https://github.com/JINGBANZ/jarvis/commit/a455688a1a76aa1ba89db30d373e0db789976d6a))
+* **coach:** retain bounded screen context across scrolling ([#290](https://github.com/JINGBANZ/jarvis/issues/290)) ([0e45558](https://github.com/JINGBANZ/jarvis/commit/0e4555885d7c94d46292d3d39b61f2df6a61ccb9))
+* **overlay:** make the code and hint divider draggable ([#313](https://github.com/JINGBANZ/jarvis/issues/313)) ([5575e03](https://github.com/JINGBANZ/jarvis/commit/5575e03951323a9770305c107eb7a9768b86af15))
+
+
+### Bug Fixes
+
+* **brain:** reset the signal mask and dispositions when spawning a runtime cli ([#326](https://github.com/JINGBANZ/jarvis/issues/326)) ([42d6e49](https://github.com/JINGBANZ/jarvis/commit/42d6e49bb8f53ad93cc2a5a1fdcd6f3d2acc2baa)), closes [#325](https://github.com/JINGBANZ/jarvis/issues/325)
+* **coach:** enforce the turn's tool choice and recover bad replies in the attempt runner ([#330](https://github.com/JINGBANZ/jarvis/issues/330)) ([8684d29](https://github.com/JINGBANZ/jarvis/commit/8684d292502801a8372a1c2b87505187cc0a156e))
+* **coach:** favor readable interview code hints ([#316](https://github.com/JINGBANZ/jarvis/issues/316)) ([b0f3057](https://github.com/JINGBANZ/jarvis/commit/b0f3057ec4d22e749999b9a5f496a683b475b11b))
+* **coach:** follow up the provider recovery review from [#283](https://github.com/JINGBANZ/jarvis/issues/283) ([#307](https://github.com/JINGBANZ/jarvis/issues/307)) ([6d75b2c](https://github.com/JINGBANZ/jarvis/commit/6d75b2c1158920876c25eef25baeb56013ef7de4))
+* **coach:** ground behavioral hints in prepared evidence ([#324](https://github.com/JINGBANZ/jarvis/issues/324)) ([0c1c794](https://github.com/JINGBANZ/jarvis/commit/0c1c7941ce0c9a34452422b3ac8563144291c868))
+* **connections:** discover nvm and bundled agent clis ([#314](https://github.com/JINGBANZ/jarvis/issues/314)) ([aaa1c34](https://github.com/JINGBANZ/jarvis/commit/aaa1c345e5bb4b79be935ef7665f798d723493ea))
+* **overlay:** retain code across hints without snippets ([#317](https://github.com/JINGBANZ/jarvis/issues/317)) ([740ac07](https://github.com/JINGBANZ/jarvis/commit/740ac07fef2cf25537dca2034b40c0aa593b9dc6))
+
 ## [0.2.3](https://github.com/JINGBANZ/jarvis/compare/v0.2.2...v0.2.3) (2026-09-13)
 
 
