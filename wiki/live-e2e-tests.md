@@ -147,8 +147,10 @@ screenshot `coding-problem.jpg`, the design prompt `design-problem.txt`, and fic
 - **Screen before Start.** Leading `screen` steps run before Start, so the fixture window is already
   front when the first press captures.
 - **Screen swaps by handshake.** The app writes `screen-request.json` into the scenario directory;
-  the test process opens the fixture with `open -a Preview` for images or `open -a TextEdit` for
-  text, then writes `screen-ready`. The test opens the window, not the app, because ghost mode
+  the test process copies the fixture into that directory and opens the copy with `open -a Preview`
+  for images or `open -a TextEdit` for text, then writes `screen-ready`. It opens a copy because
+  `open` fronts an already-open document as first loaded, so an edited fixture would be captured
+  stale. The test opens the window, not the app, because ghost mode
   forbids the app from opening apps. Capture stays in the production active-window scope with no
   AppleScript, so no Automation or Accessibility grant is involved, and as long as nobody clicks
   elsewhere only the fixture window reaches a provider.

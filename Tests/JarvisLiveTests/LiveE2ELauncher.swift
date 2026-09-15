@@ -183,6 +183,10 @@ struct LiveE2ELauncher {
 
     /// The app may not open apps, so it asks on a file and this process opens the fixture: Preview
     /// for images, TextEdit for text. The pause lets the new window reach the front before answering.
+    ///
+    /// It opens a copy inside this launch's directory, never the fixture itself: `open` brings an
+    /// already-open document to the front as it was first loaded, so an edited fixture was captured
+    /// stale.
     private func serveScreenRequest() async throws {
         let request = directory.appendingPathComponent("screen-request.json")
         let ready = directory.appendingPathComponent("screen-ready")
@@ -191,7 +195,13 @@ struct LiveE2ELauncher {
               let data = try? Data(contentsOf: request),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let fixture = object["fixture"] as? String else { return }
-        let url = Self.fixturesDirectory.appendingPathComponent(fixture)
+        let screens = directory.appendingPathComponent("screens", isDirectory: true)
+        try fileManager.createDirectory(
+            at: screens, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let url = screens.appendingPathComponent(fixture)
+        if !fileManager.fileExists(atPath: url.path) {
+            try fileManager.copyItem(at: Self.fixturesDirectory.appendingPathComponent(fixture), to: url)
+        }
         let application = url.pathExtension == "txt" ? "TextEdit" : "Preview"
         Self.run("/usr/bin/open", ["-a", application, url.path])
         try await Task.sleep(for: .seconds(2))
