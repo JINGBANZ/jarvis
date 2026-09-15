@@ -100,9 +100,12 @@ stopped reflecting the wiki and needs a pass.
 Run in the **same change (PR or commit)** as the code, never as a later cleanup. A change that alters
 documented behavior without a doc update is incomplete; stale docs erode trust faster than they rebuild.
 
-1. **[`status.md`](./status.md)** — move built things to "Built" with a file pointer; delete abandoned
-   "Not yet built" items (if a reader might re-propose one, say why not on the design page); update
-   phase + next action.
+1. **[`status.md`](./status.md)** — edit only when one of its sections changes: the phase, the single
+   next action, a "Built" entry (a top-level directory, target, or script added, removed, or renamed),
+   or a "Not yet built" item (built, or abandoned; if a reader might re-propose an abandoned one, say
+   why not on the design page). A change inside an existing "Built" entry updates its design page
+   instead. Never add behavior descriptions, run results, dates, session IDs, or pending checks; those
+   belong in the pull request or an issue.
 2. **Core page(s)** — create or update in place, present tense; touch every page whose meaning the change
    alters, not just the nearest one.
 3. **Rationale** — a non-obvious choice or a rejected alternative goes on the design page beside the

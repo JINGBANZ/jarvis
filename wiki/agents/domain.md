@@ -11,8 +11,8 @@ a single-context repo.
 
 - **[`index.md`](../index.md)** — the navigation layer. Every page is listed there; a page not in the
   index doesn't exist. Read it before grepping the wiki.
-- **[`status.md`](../status.md)** — what is actually built and what to do next. Read it before assuming
-  a feature exists: the design pages describe intent, this one describes reality.
+- **[`status.md`](../status.md)** — the current phase, the next action, and a map of the top-level
+  source areas. Read it to orient, then confirm a specific feature on its design page and in the code.
 - **The design page for the area you're touching** — `architecture.md` for the coaching loop,
   `sandbox.md` for the security and isolation model, `build-and-run.md` for toolchain and packaging,
   and the rest per `index.md`. Read it **before** proposing a direction: a rejected alternative is

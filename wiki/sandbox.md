@@ -28,6 +28,19 @@ and session files; provider choice and egress are explicit in Jarvis's code. Bec
 off, **“screen, not disk” is not a current OS guarantee**: another bug in this process could reach
 files available to the signed-in user.
 
+## Repository automation
+
+The source repository is public, so its automation treats public input as untrusted and gives it no
+direct path to a credential-bearing agent. CI, release, and agent workflows run only on GitHub-hosted
+runners, and no self-hosted runner is registered. The Claude review workflow runs only on
+same-repository pull request branches, and `@claude` answers only the repository owner
+(`.github/workflows/claude-code-review.yml`, `.github/workflows/claude.yml`). CodeRabbit reviews every
+pull request, forks included, as a GitHub App that receives no repository secret. Issue Opener runs on
+a schedule or manual dispatch, and Issue Worker acts only for authors with write access, a check the
+shared workflow owns. The reusable agent workflows track `JINGBANZ/workflows` at `main`; third-party
+Actions are SHA-pinned and updated weekly by Dependabot. A full-history secret scan found no leaked
+credential, so the Git history is kept rather than rewritten.
+
 ## Layers
 
 ### 1. App Sandbox (OS-enforced) — *hardened model; relaxed in the current build*

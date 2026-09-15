@@ -292,9 +292,10 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 
 ## What stays outside the command
 
-These checks need the host network, a second provider, a person at Settings, a signed release, a real
-device change, or macOS's own dialogs, so the run cannot perform them. Each names when to run it and
-what to confirm; the ones still pending are also tracked in [status.md → Next action](./status.md#next-action).
+These checks need the host network, a second provider, a real browser, a person at Settings, a signed
+release, a real device change, or macOS's own dialogs, so the run cannot perform them. Each names when
+to run it and what to confirm. A pull request that changes one of these areas runs its check or names
+it as unverified in its description.
 
 - **Permission gate walk (F03),** when the gate or its permission probes change, because macOS does not
   let automation click its own permission dialogs. Reset the three services and the one persisted
@@ -322,6 +323,11 @@ what to confirm; the ones still pending are also tracked in [status.md → Next 
   saved refuses Start and names the missing credential, and that switching back to OpenAI starts
   cleanly. Leave a Gemini session past ten minutes and confirm the `goAway` rotation replaces the
   socket with no user-visible notice.
+- **Transcription configuration,** when credential requirements or transcription provider selection
+  change, because it needs Settings and Apple Speech on macOS 26. Confirm Apple Speech with a CLI-only
+  brain route starts without an API key while any OpenAI transcription or brain target still requires
+  one, a transcription setting changed mid-session leaves the running snapshot active until the next
+  Start, and a forced Apple analyzer failure never sends audio to OpenAI as a fallback.
 - **Explain more and shortcut bindings,** because the run requests shortcuts without the global
   hotkeys. Press both shortcuts from another app and confirm distinct requests, rebind them
   independently and try a collision, and confirm an explanation after clear confusion and silence
@@ -330,8 +336,20 @@ what to confirm; the ones still pending are also tracked in [status.md → Next 
   work through demonstrated understanding, a local block, a visible bug, completion without tests, and
   valid progress; confirm the overlay stays at most three short lines and healthy progress stays
   silent.
+- **Browser screen text,** when screen capture, OCR, or Chrome Accessibility extraction changes,
+  because the run views a fixture screenshot instead of Chrome. Follow
+  [build-and-run.md → Browser screen-text validation](./build-and-run.md#browser-screen-text-validation).
+- **Coding with AI in CoderPad,** when the `coding-with-ai` skill or browser text extraction changes,
+  because it needs a live CoderPad page with Chrome page text enabled. Establish an AI-assisted
+  workflow and confirm the skill loads, then check an omitted constraint, an AI-only "tests pass"
+  claim, an unresolved algorithm tradeoff, a false AI counterexample, a minimal bug fix with a
+  reproducing test, repeated ineffective repair prompts, and productive review with observed test
+  output. Confirm Jarvis separates proposed from adopted code, qualifies missing evidence, and stays
+  silent during healthy progress. Switch to ordinary coding and confirm AI-specific advice stops;
+  disable the skill and confirm ordinary coding still works on the next Start.
 - **Settings route walk,** because it needs Settings and faults on several targets. Check the first-open
-  Brain state and the Connections **Add API key** state; with multiple fallbacks, force a temporary
+  Brain state, the Connections **Add API key** state, and a signed-in Claude Code in Connections; with
+  multiple fallbacks, force a temporary
   budget transition, a permanent one-attempt transition, an unavailable-target skip, and final route
   exhaustion; exercise a failed replacement with a pending conversation and Stop during a retry; and
   confirm a successful fallback stays active without changing preferences.
