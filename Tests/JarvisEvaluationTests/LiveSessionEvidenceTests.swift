@@ -163,8 +163,8 @@ import Testing
         #expect(first.outcome == "spoke")
         #expect(first.isCommitted)
         #expect(first.transcript == [
-            Evidence.TranscriptEntry(speaker: "them", text: "Design a rate limiter."),
-            Evidence.TranscriptEntry(speaker: "me", text: "Sure."),
+            Evidence.TranscriptEntry(speaker: "them", text: "Design a rate limiter.", at: 1.5),
+            Evidence.TranscriptEntry(speaker: "me", text: "Sure.", at: 3.0),
         ])
 
         let second = try #require(evidence.attempt(id: 2))

@@ -63,7 +63,8 @@ extension LiveSessionEvidence {
             let transcript = (started["transcript"] as? [[String: Any]] ?? []).map {
                 TranscriptEntry(
                     speaker: $0["speaker"] as? String ?? "",
-                    text: $0["text"] as? String ?? "")
+                    text: $0["text"] as? String ?? "",
+                    at: $0["at"] as? Double)
             }
             return Attempt(
                 id: id,

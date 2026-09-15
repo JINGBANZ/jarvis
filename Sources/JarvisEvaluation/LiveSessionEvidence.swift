@@ -42,10 +42,14 @@ public struct LiveSessionEvidence: Sendable {
     public struct TranscriptEntry: Sendable, Equatable {
         public let speaker: String
         public let text: String
+        /// Session-relative speech time. The record keeps lines in insertion order; this is the time
+        /// `ConversationChronology` orders them by for the model.
+        public let at: TimeInterval?
 
-        public init(speaker: String, text: String) {
+        public init(speaker: String, text: String, at: TimeInterval? = nil) {
             self.speaker = speaker
             self.text = text
+            self.at = at
         }
     }
 

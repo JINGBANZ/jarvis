@@ -157,6 +157,9 @@ screenshot `coding-problem.jpg`, the design prompt `design-problem.txt`, and fic
 
 - **Order and count, never wording or duration.** Model phrasing and latency vary between runs, so
   every assertion is an ordering or a count, labeled with its case ID so a failure names the case.
+- **Stored order is not spoken order.** Activity rows and attempt transcripts keep insertion order,
+  and `ConversationChronology` orders them by speech time for the viewer and the model, so a
+  chronology case compares speech times rather than positions in a file.
 - **Activity rows belong to attempts by time and file order.** An Activity row carries no attempt id,
   and attempt records stamp whole seconds. The checker assigns a row to the attempt whose start and
   finish bracket its second and breaks ties by file order, which is safe because attempts are strictly
@@ -198,8 +201,9 @@ the same target without Start ([architecture.md → Ordered provider route](./ar
 Claude Code is the only brain, pointed at a stub executable that exits at once. Every local-agent
 process failure is temporary by design
 ([`LocalAgentFailureClassifier`](../Sources/JarvisCore/Providers/LocalAgent/LocalAgentFailureClassifier.swift)),
-so three questions produce three failed attempts, then one "coaching failed; listening continues"
-row, and no request until new speech. A marker file then makes the stub hand over to the real CLI,
+so each of three questions is its own cycle: its turn-end attempt and two pending-work retries fail
+on the same target, one "coaching failed; listening continues" row follows, and no request is made
+until the next question opens a fresh budget. A marker file then makes the stub hand over to the real CLI,
 and the next question gets a tip on the same target.
 
 An invalid key cannot stand in for the stub. A 401 is a permanent failure: it exhausts a lone target

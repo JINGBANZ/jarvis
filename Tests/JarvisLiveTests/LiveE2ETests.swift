@@ -102,31 +102,39 @@ struct LiveE2ETests {
         var results = LiveE2EResults(scenario: "F04")
         if let evidence = Self.requireEvidence(launch, &results) {
             let says = launch.stepIndices(Self.isSay)
-            let cycleRows = evidence.activity.filter { $0.kind == "coachingTurnFailed" }
-            let cycleSecond = cycleRows.first?.occurredAt?.rounded(.down)
-            let failedBeforeCycle = evidence.attempts.filter { attempt in
-                guard let cycleSecond, attempt.outcome == "brain_error",
-                      let finished = attempt.finishedAt else { return false }
-                return finished <= cycleSecond
-            }
-            let nextQuestion = cycleRows.first.flatMap { cycle in
-                evidence.activity.first { $0.index > cycle.index && $0.kind == "heard" }
-            }
-            let quietAttempts = evidence.attempts.filter { attempt in
-                guard let cycleSecond, let question = nextQuestion?.occurredAt?.rounded(.down),
-                      let started = attempt.startedAt else { return false }
-                return started > cycleSecond && started < question
-            }
             let restored = says.count == 4 ? launch.attempt(forStep: says[3]) : nil
+            // Each question before the restore is its own cycle: its turn-end attempt, then
+            // pending-work retries on the one target until the failure budget exhausts the cycle
+            // (three, `BrainRouteSession.failuresPerTarget`; wiki/architecture.md#ordered-provider-route).
+            let cycleStarts = says.prefix(3).compactMap { launch.attempt(forStep: $0) }
+            let cycles = cycleStarts.enumerated().map { index, first in
+                let end = index + 1 < cycleStarts.count
+                    ? cycleStarts[index + 1].id : (restored?.id ?? Int.max)
+                return evidence.attempts.filter { $0.id >= first.id && $0.id < end }
+            }
+            let cycleRows = evidence.activity.filter { $0.kind == "coachingTurnFailed" }
+            // A cycle's row lands after its last failed attempt and before the next question's
+            // attempt, so no request is made in between.
+            let rowsBetweenCycles = !cycles.isEmpty && cycles.indices.allSatisfy { index in
+                guard index < cycleRows.count,
+                      let row = cycleRows[index].occurredAt?.rounded(.down),
+                      let lastFinished = cycles[index].last?.finishedAt,
+                      let nextStarted = (index + 1 < cycles.count
+                          ? cycles[index + 1].first : restored)?.startedAt else { return false }
+                return row >= lastFinished && row <= nextStarted
+            }
             let restoredTip = restored.map { attempt in
                 evidence.rows(in: attempt).contains { $0.kind == "tip" }
             } ?? false
             results.check("F04", [
-                (cycleRows.count == 1, "one coaching-failed row (saw \(cycleRows.count))"),
-                (failedBeforeCycle.count == 3,
-                 "three failed attempts before it (saw \(failedBeforeCycle.count))"),
-                (nextQuestion != nil && quietAttempts.isEmpty,
-                 "no attempt between the failed cycle and the next question"),
+                (cycles.count == 3 && cycles.allSatisfy { cycle in
+                    cycle.count == 3
+                        && cycle.allSatisfy { $0.outcome == "brain_error" }
+                        && cycle.dropFirst().allSatisfy { $0.trigger == "pending_work" }
+                }, "each question fails three attempts on its own budget (saw \(cycles.map(\.count)))"),
+                (cycleRows.count == cycles.count,
+                 "one coaching-failed row per failed cycle (saw \(cycleRows.count))"),
+                (rowsBetweenCycles, "no attempt between a failed cycle and the next question"),
                 (restored?.provider == "claude-code" && restored?.outcome == "spoke" && restoredTip,
                  "the question after the restore gets a tip on Claude Code (saw "
                     + "\(restored?.provider ?? "no attempt") \(restored?.outcome ?? ""))"),
@@ -364,22 +372,41 @@ struct LiveE2ETests {
             (evidence.activity.contains { $0.message.hasPrefix("🗣 heard (me)") }, "the me stream transcribed"),
         ])
 
-        // G02: the question that started first is placed first, even though the reply finalized first.
-        let transcript = a8?.transcript ?? []
-        let questionLine = transcript.firstIndex {
-            $0.speaker == "them" && Self.normalized($0.text).contains("endpoint")
-        }
-        let replyLine = transcript.firstIndex { $0.speaker == "me" && Self.normalized($0.text).contains("sure") }
+        // G02: an earlier-started question stays ahead of a reply that finalized first. Activity rows
+        // and attempt transcripts are stored in insertion order on purpose, and ConversationChronology
+        // orders them by speech time for the viewer and the model. So the case needs a reply stored
+        // before the question but spoken after it started, in both places. The reply is found by
+        // speaker and time, never by wording: a one-word overlap is often mistranscribed.
         let questionRow = evidence.activity.last {
             $0.message.hasPrefix("🗣 heard (them)") && Self.normalized($0.message).contains("endpoint")
         }
-        let replyRow = evidence.activity.last {
-            $0.message.hasPrefix("🗣 heard (me)") && Self.normalized($0.message).contains("sure")
+        let invertedReplyRow = questionRow.flatMap { question in
+            evidence.activity.first { row in
+                guard let questionTime = question.occurredAt, let replyTime = row.occurredAt else {
+                    return false
+                }
+                return row.message.hasPrefix("🗣 heard (me)") && row.index < question.index
+                    && replyTime > questionTime
+            }
+        }
+        let transcript = a8?.transcript ?? []
+        let questionEntry = transcript.firstIndex {
+            $0.speaker == "them" && Self.normalized($0.text).contains("endpoint")
+        }
+        let invertedReplyEntry = questionEntry.flatMap { questionIndex in
+            transcript[..<questionIndex].first { entry in
+                guard let questionTime = transcript[questionIndex].at, let replyTime = entry.at else {
+                    return false
+                }
+                return entry.speaker == "me" && replyTime > questionTime
+            }
         }
         results.check("G02", [
-            (Self.precedes(questionRow?.index, replyRow?.index), "Activity places the question before the reply"),
-            (Self.precedes(questionLine, replyLine),
-             "A8's request carries the question before the reply (saw speakers \(transcript.map(\.speaker)))"),
+            (invertedReplyRow != nil,
+             "Activity holds a reply stored before the question but spoken after it started"),
+            (invertedReplyEntry != nil,
+             "A8's transcript holds a reply stored before the question but spoken after it started (saw "
+                + "\(transcript.map { "\($0.speaker)@\(Int(($0.at ?? -1).rounded()))s" }))"),
         ])
         results.check("G03", [
             (a8 != nil && a9 != nil, "A8 and A9 each ran an attempt"),
