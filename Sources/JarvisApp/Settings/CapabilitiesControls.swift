@@ -5,9 +5,9 @@ import JarvisCore
 /// wants offered.
 ///
 /// Writes go straight to `preferences.disabledTools` / `preferences.disabledSkills` and nothing
-/// else. A session resolves its capabilities once at Start, and both the coach loop and a warmed
-/// local-agent process are built from that one value, so a mid-session change could only make them
-/// disagree — which is why this card never calls the reapply path and says so in its header.
+/// else. A session resolves its capabilities once at Start and builds its instructions and tool set
+/// from that one value, so a mid-session change would contradict what the model was told earlier in
+/// the conversation — which is why this card never calls the reapply path and says so in its header.
 @MainActor
 final class CapabilitiesControls: NSObject {
     private let preferences: BrainPreferences

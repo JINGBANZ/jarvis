@@ -14,10 +14,9 @@ extension JarvisPrompts {
     /// What the harness sends later in the conversation lives elsewhere: each tool's result text in
     /// its file under `Coach/Tools/`, and the per-turn messages in `JarvisPrompts+CoachTurn.swift`.
     public enum Coach {
-        /// The complete coaching system prompt. Every site that sends one assembles it here, so the
-        /// per-turn prompt `CoachAttemptRunner` builds and the one `BrainComposition` bakes into a
-        /// CLI provider's persistent process at Start cannot drift. `CLIBrainClient` asserts its
-        /// instructions never change after construction, so drift would fail every CLI turn.
+        /// The complete coaching system prompt. `CoachAttemptRunner` assembles it here for every
+        /// request from the session's one capability set, so a session's instructions stay identical
+        /// from its first request to its last, whichever target serves them.
         ///
         /// - `capabilities`: the session's switched-on tools and skills, resolved once at Start.
         ///   Each hot tool contributes its own guidance, each deferred tool and each skill one
@@ -157,7 +156,7 @@ extension JarvisPrompts {
 
         // MARK: - 4. Code
 
-        /// Shared across every session and provider, including fixed-instruction CLI sessions.
+        /// Shared across every session and provider.
         private static let codeGuidance = """
 
         # Code accompanies the current hint when enabled

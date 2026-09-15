@@ -102,6 +102,7 @@ import Testing
         let unavailable = await supervisor.readiness().unavailability(for: .claudeSubscription)
         #expect(unavailable?.category == .unavailable)
         #expect(unavailable?.stage == .process)
+        #expect(unavailable?.message.hasPrefix("the sign-in service ") == true)
     }
 
     @Test func aBuildWithoutTheHelperFailsWithoutLaunching() async {

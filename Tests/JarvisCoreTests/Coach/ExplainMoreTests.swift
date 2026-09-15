@@ -171,7 +171,7 @@ import Testing
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 2)
         guard brain.calls.count == 2 else { return }
-        // Local CLI clients require every continuation to retain the exact prior message prefix.
+        // A continuation keeps the exact prior message prefix, which the provider's prompt cache needs.
         let first = brain.calls[0].map { $0.role.rawValue + ":" + ($0.text ?? "") }
         let continuedPrefix = brain.calls[1].prefix(first.count).map { $0.role.rawValue + ":" + ($0.text ?? "") }
         #expect(continuedPrefix == first)

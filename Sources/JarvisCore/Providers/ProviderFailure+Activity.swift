@@ -31,13 +31,8 @@ extension ProviderFailure {
         var advice: String?
         switch category {
         case .authentication:
-            if case .brain(let provider) = source, provider.usesLocalCLI {
-                clause = "\(name) isn't signed in"
-                advice = "sign in to the CLI and press Start again"
-            } else {
-                clause = "\(name) rejected the API key"
-                advice = "check Settings → Connections"
-            }
+            clause = "\(name) rejected the API key"
+            advice = "check Settings → Connections"
         case .quota:
             clause = "\(name) reported an exhausted quota"
             advice = "check billing"
@@ -83,9 +78,10 @@ extension ProviderFailure {
             return signIn
         case .unreachable:
             return ("\(name) couldn't reach the sign-in service", "quit and reopen Jarvis")
-        // Raised by the supervisor, not by an upstream 5xx, which reads as any provider's outage.
+        // Raised by the supervisor, whose message names what the sign-in service did; an upstream
+        // 5xx arrives at another stage and reads as any provider's outage.
         case .unavailable where stage == .process:
-            return ("\(name) couldn't start the sign-in service", "quit and reopen Jarvis")
+            return ("\(name) is unavailable", "quit and reopen Jarvis")
         case .rejected where identity.httpStatus == 429:
             return ("\(name) reached its usage limit",
                     "wait for the limit to reset, or add a fallback in Settings → Brain")

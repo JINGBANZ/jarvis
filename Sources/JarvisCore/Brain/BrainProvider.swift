@@ -3,37 +3,21 @@ import Foundation
 /// Where the brain (coach and summarizer) runs. `openAI` calls the Responses API with the user's API
 /// key. The subscription providers send the same Responses requests to the bundled CLIProxyAPI helper
 /// on this Mac, which holds the user's ChatGPT or Claude sign-in, so the plan pays for the brain
-/// instead of API metering. The CLI providers keep a locally installed coding-agent runtime alive for
-/// the Jarvis session.
+/// instead of API metering.
 /// Voice transcription is a separately selected provider; choosing a brain changes only who answers
 /// the coaching turns.
 public enum BrainProvider: String, CaseIterable, Sendable {
     case openAI = "openai"
     case codexSubscription = "codex-subscription"
     case claudeSubscription = "claude-subscription"
-    case claudeCode = "claude-code"
-    case codexCLI = "codex-cli"
 
     public var displayName: String {
         switch self {
         case .openAI: return "OpenAI API"
         case .codexSubscription: return "Codex subscription"
         case .claudeSubscription: return "Claude subscription"
-        case .claudeCode: return "Claude Code"
-        case .codexCLI: return "Codex CLI"
         }
     }
-
-    /// The executable a CLI provider is backed by; nil for every HTTP provider.
-    public var cliExecutableName: String? {
-        switch self {
-        case .openAI, .codexSubscription, .claudeSubscription: return nil
-        case .claudeCode: return "claude"
-        case .codexCLI: return "codex"
-        }
-    }
-
-    public var usesLocalCLI: Bool { cliExecutableName != nil }
 
     /// Served by the bundled CLIProxyAPI helper instead of the vendor's own endpoint.
     public var servedByLocalProxy: Bool { proxyModelOwner != nil }
@@ -44,7 +28,7 @@ public enum BrainProvider: String, CaseIterable, Sendable {
         switch self {
         case .codexSubscription: return "openai"
         case .claudeSubscription: return "anthropic"
-        case .openAI, .claudeCode, .codexCLI: return nil
+        case .openAI: return nil
         }
     }
 
@@ -54,7 +38,7 @@ public enum BrainProvider: String, CaseIterable, Sendable {
     public var toolChoicePolicy: ToolChoicePolicy {
         switch self {
         case .claudeSubscription: return .filteredAuto
-        case .openAI, .codexSubscription, .claudeCode, .codexCLI: return .providerEnforced
+        case .openAI, .codexSubscription: return .providerEnforced
         }
     }
 
@@ -64,7 +48,7 @@ public enum BrainProvider: String, CaseIterable, Sendable {
     public var reasoningEffortFloor: ReasoningEffort? {
         switch self {
         case .claudeSubscription: return .low
-        case .openAI, .codexSubscription, .claudeCode, .codexCLI: return nil
+        case .openAI, .codexSubscription: return nil
         }
     }
 }

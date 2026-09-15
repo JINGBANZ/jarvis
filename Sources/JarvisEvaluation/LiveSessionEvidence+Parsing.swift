@@ -142,9 +142,9 @@ extension LiveSessionEvidence {
         return object["state"] as? String
     }
 
-    /// `SessionAuditWorker.encodeTraffic`. `request` is either the Responses API body from
-    /// `BrainAccessor.encodeBody` or the CLI record from `CLIBrainClient.prepareTurn`, which alone
-    /// carries `provider`. A body that was not JSON is stored as a string and reads as empty here.
+    /// `SessionAuditWorker.encodeTraffic`. `request` is the Responses API body from
+    /// `BrainAccessor.encodeBody`; a body that was not JSON is stored as a string and reads as empty
+    /// here. The record names its provider at the top level.
     static func parseTraffic(_ object: [String: Any], index: Int) -> TrafficRecord {
         let context = object["coach_attempt"] as? [String: Any]
         let request = object["request"] as? [String: Any] ?? [:]
@@ -158,7 +158,7 @@ extension LiveSessionEvidence {
             sourceTrigger: context?["source_trigger"] as? String,
             status: object["status"] as? Int,
             error: object["error"] as? String,
-            cliProvider: request["provider"] as? String,
+            provider: object["provider"] as? String ?? request["provider"] as? String,
             instructions: request["instructions"] as? String,
             declaredToolNames: tools.compactMap { $0["name"] as? String },
             toolChoiceType: toolChoice as? String
@@ -177,36 +177,20 @@ extension LiveSessionEvidence {
             speakDiagram: speakDiagram(inResponse: object["response"]))
     }
 
-    /// The speak call's `mermaid` argument. The OpenAI response is the raw Responses body, whose
-    /// `output` lists calls as `function_call` items with JSON-string `arguments`. A CLI response
-    /// (`CLIBrainClient.responseRecord`) keeps the model's text under `reply`, and the call is the
-    /// protocol object inside it. A null and an absent `mermaid` both read as `.none`, as
-    /// `ToolInvocation.parse` reads them. A CLI reply the client turned into a speak call from prose
-    /// holds no protocol object, so it reads as `.noSpeakCall`: this reports what the model wrote.
+    /// The speak call's `mermaid` argument. The response is the raw Responses body, whose `output`
+    /// lists calls as `function_call` items with JSON-string `arguments`. A null and an absent
+    /// `mermaid` both read as `.none`, as `ToolInvocation.parse` reads them. A speak call the runner
+    /// made from a press's prose holds no call in the response, so it reads as `.noSpeakCall`: this
+    /// reports what the model wrote.
     static func speakDiagram(inResponse response: Any?) -> SpeakDiagram {
-        guard let response = response as? [String: Any] else { return .noSpeakCall }
-        let arguments: [String: Any]?
-        if let output = response["output"] as? [[String: Any]] {
-            guard let call = output.first(where: {
-                $0["type"] as? String == "function_call" && $0["name"] as? String == speakTool.name
-            }) else { return .noSpeakCall }
-            arguments = (call["arguments"] as? String).flatMap(jsonObject)
-        } else if let reply = response["reply"] as? String {
-            guard let call = cliToolCall(in: reply), call.name == speakTool.name else {
-                return .noSpeakCall
-            }
-            arguments = call.arguments
-        } else {
-            return .noSpeakCall
-        }
+        guard let output = (response as? [String: Any])?["output"] as? [[String: Any]],
+              let call = output.first(where: {
+                  $0["type"] as? String == "function_call" && $0["name"] as? String == speakTool.name
+              })
+        else { return .noSpeakCall }
+        let arguments = (call["arguments"] as? String).flatMap(jsonObject)
         guard let mermaid = arguments?["mermaid"] as? String else { return .none }
         return .present(mermaid)
-    }
-
-    /// The client's own rule, so a reply the client read as a speak call reads as one here.
-    static func cliToolCall(in reply: String) -> (name: String, arguments: [String: Any])? {
-        guard let call = CLIBrainClient.extractToolCall(from: reply) else { return nil }
-        return (call.name, jsonObject(call.argumentsJSON) ?? [:])
     }
 
     private static func jsonObject(_ text: String) -> [String: Any]? {

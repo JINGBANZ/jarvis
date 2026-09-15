@@ -65,7 +65,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
 | `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, the coach's switchable capabilities, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; capability and transcription changes take effect on the next Start. |
-| `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in four stacked cards — **OpenAI API**, **Gemini API**, **Claude Code**, **Codex CLI**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Claude Code and Codex CLI report their externally managed local-account state without importing or changing those accounts. Saving a key checks it with one models-list request and shows the vendor's verdict under the row. Saving never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
+| `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Subscriptions (`SubscriptionControls`) signs the Codex and Claude subscriptions in and out through the bundled helper. Saving a key checks it with one models-list request and shows the vendor's verdict under the row. Saving never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also has **Show diagrams**, enabled by default, and **Show code with hints** with its own appearance controls. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
 | `HotkeySection` | "Shortcuts" | yes | Independent **Give me a hint**, **Explain more**, and **Show code** recorders, with per-binding failure feedback and persisted combinations. |
@@ -80,9 +80,9 @@ always present, but each tab's content is created lazily on first selection duri
 `show()` promotes the activation policy to `.regular` so the window can become key and accept
 paste/keyboard input. `windowWillClose(_:)` drops it back to `.accessory`. This is the same pattern
 the old API-key dialog and activity viewer each learned independently — now consolidated in one
-place. Initial Brain controls render from preferences immediately. Brain and Connections run CLI
-status and capability subprocesses away from the main actor and update their controls when those
-probes finish, so bounded timeouts cannot delay presentation.
+place. Initial Brain controls render from preferences immediately. Brain and Connections ask the
+bundled helper for sign-in state away from the main actor and update their controls when that probe
+answers, so a helper that is still starting cannot delay presentation.
 
 ## Overlay Appearance
 
@@ -241,32 +241,22 @@ fallbacks. There are no row dividers or permanent explanatory paragraphs. Fallba
 outer document instead of hiding inside a second scroll area. While coaching runs, a compact **In
 use** marker exposes the runtime cursor without moving or rewriting any saved target.
 
-**Primary.** The first row selects a provider and model: the **OpenAI API** (metered by the key), or a
-locally installed **Claude Code** / **Codex CLI**. Claude uses a session-scoped local runtime for
-coaching on the user's existing Claude *subscription* instead of the key, and Codex likewise coaches
-through a session-scoped app-server on the user's ChatGPT subscription (`CLIBrainClient`; see
-[architecture.md](./architecture.md#local-cli-brain-providers)). Installed CLIs are auto-detected by `AgentCLIDetector`: binary
-discovery is a pure file probe over stable $PATH entries and common installation directories,
-including nvm's versioned Node installs. Explicit PATH selections win; nvm fallbacks are searched
-newest first. Codex also checks the Codex and ChatGPT app bundles in the user's and system
-Applications directories after standalone installs. Discovery never sources shell startup scripts,
-which could hang or present UI during live preflight. The selected executable's directory leads
-the child PATH for both status probes and runtime launches so adjacent interpreters remain usable.
-Claude sign-in uses its
-non-billing `auth status --json` command under a short timeout because account metadata can outlive
-an expired OAuth session. Codex keeps using its auth-file marker and a bounded capability probe.
-Settings runs these probes asynchronously and keeps local-provider controls selectable while the
-first result is pending. After detection, the route menus show provider names only and omit
-confirmed-missing, signed-out, or otherwise unselectable alternatives; Connections owns provider
-status text. An unavailable auth probe does not falsely claim logout. An empty, failed, or changed
-Codex feature catalog only narrows the disable flags that are passed; it never widens what a
-coaching thread may do.
+**Primary.** The first row selects a provider and model: the **OpenAI API** (metered by the key), the
+**Codex subscription** (the user's ChatGPT plan), or the **Claude subscription** (the user's Claude
+plan). Both subscriptions are served by the helper bundled in the app and signed in from
+[Connections](#connections); see
+[architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy).
+A subscription can be chosen for a new row only while the helper's last probe proved it signed in,
+so the menu omits a signed-out one; an existing saved row stays visible so the user can repair or
+remove it. The Brain tab probes when it appears, and only starts the helper to do so when a sign-in
+is saved; with none, no subscription is selectable and nothing starts. The route menus show provider
+names only; Connections owns sign-in status text.
 
 A fresh install opens on the **OpenAI API** as Primary, so the Brain tab always shows a complete,
 usable route and Start never fails for want of a provider choice. That default costs the user nothing
 extra: transcription defaults to OpenAI too, so the same one credential covers both, and a user who
-wants a subscription-backed CLI brain changes Primary and Transcription in one visit. There is no
-"unconfigured" state — the saved route is always complete.
+wants a subscription brain signs in from Connections and changes Primary in one visit. There is no
+"unconfigured" state; the saved route is always complete.
 
 **Fallbacks.** Below the primary, an ordered list contains zero or more explicitly authorized
 provider/model targets. **Add fallback** appends a row; each row has provider and model menus,
@@ -289,26 +279,31 @@ activation. The runtime never returns to the primary or an exhausted row. When e
 exhausted, coaching stops and Activity receives fixed typed route-exhausted copy; request details and
 attempt counts remain in `jarvis-debug.log`.
 
-Confirmed-missing or signed-out targets are hidden from new selection while editing; an existing
-saved row stays visible so the user can repair or remove it. If a configured fallback becomes
-unavailable after Start, activation skips it and moves forward without inventing provider requests
-solely to consume the failure budget. Runtime movement through the route never changes the saved
-list. Stop → Start begins at the saved primary again.
+A signed-out subscription is hidden from new selection while editing; an existing saved row stays
+visible so the user can repair or remove it. A configured target that cannot serve when the session
+starts or the route is edited (a signed-out subscription, or a helper that isn't running) stays in
+the runtime route as an unavailable entry: activation skips it with a notice and moves forward
+without inventing provider requests solely to consume the failure budget. Start is refused, with an
+alert naming the first target's next step, only when no target in the route can serve, because a
+route with one usable target can still coach. Runtime movement through the route never changes the
+saved list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
-OpenAI API and Codex CLI share one concrete model list; Claude Code exposes the current concrete
-releases, including the latest in each supported family and older choices needed to preserve saved
-routes. Adding a model keeps provider defaults and existing selections stable. Concrete releases, never rolling aliases such as `sonnet` or
-`opus` or a CLI's own default: a saved route must keep naming the release the user picked, and an
-alias silently retargets it the day the provider advances it. Each provider remembers its own model; without a valid preference,
-the first entry in that provider's catalog is selected. The **Reasoning effort** picker
-(`ReasoningEffort`: None / Low / Medium / High) is stored once and applies uniformly to whichever
-provider is active; its default lives with the others in
-[`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
-per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
-three shared levels pass through. `BrainAccessor` also clamps None to Low for GPT-6 Astra and
-raises the output budget to at least the Low budget, because Astra requires reasoning. The stored
-effort remains unchanged, and other OpenAI models retain the selected effort.
+The OpenAI API and the Codex subscription share one concrete model list; the Claude subscription
+exposes the current concrete Claude releases, including the latest in each supported family and
+older choices needed to preserve saved routes. A listed model the Codex subscription does not serve
+fails at request time with the helper's `model_not_found`, which reads as a configuration failure.
+Adding a model keeps provider defaults and existing selections stable. Concrete releases, never
+rolling aliases such as `sonnet` or `opus`: a saved route must keep naming the release the user
+picked, and an alias silently retargets it the day the provider advances it. Claude Haiku 4.5 is
+listed by its dated id because the helper does not resolve the undated one. Each provider remembers
+its own model; without a valid preference, the first entry in that provider's catalog is selected.
+The **Reasoning effort** picker (`ReasoningEffort`: None / Low / Medium / High) is stored once and
+applies uniformly to whichever provider is active; its default lives with the others in
+[`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). `BrainAccessor` raises None to Low,
+and the output budget to at least the Low budget, for the Claude subscription, because None disables
+thinking on that path and Claude Fable 5.1 rejects it, and for GPT-6 Astra, because Astra requires
+reasoning. The stored effort remains unchanged, and every other target keeps the selected effort.
 
 **Capabilities.** This card lists what the coach can do and lets the user switch parts of it off.
 Screen capture, speak, and stay silent are shown as rows with no control and the detail "Always on":
@@ -320,8 +315,9 @@ when a matching question comes up". A switched-off skill keeps its row, greyed b
 rather than hidden, so it can be switched back on. The card writes
 `BrainPreferences.disabledTools` and `BrainPreferences.disabledSkills`, the names that are OFF, so a
 capability added in a later version is on for everyone who never opened this card, and nothing else:
-a session resolves its capabilities once at Start and both the coach loop and a warmed CLI process
-are built from that one value, so applying a change mid-session could only make them disagree. The
+a session resolves its capabilities once at Start and builds its instructions and tool set from that
+one value, so a mid-session change would contradict what the model was told earlier in the same
+conversation. The
 header says "Applies on the next Start". The prep switch's enabled state and the skill list are read
 when the card is built, so adding a source in Prep material enables it the next time Settings opens.
 See [architecture.md → Capabilities](./architecture.md#capabilities).
@@ -381,25 +377,25 @@ into the matching list until the user edits it. An unsupported Apple locale fail
 rather than choosing a different language. A running `CoachDriver` applies valid brain edits
 atomically at the coaching-attempt boundary while transcript, client-managed history, audio
 pipeline, and session logs continue unchanged. A provider, model, or route-order edit replaces the route for the next
-attempt and resets the session-local cursor to the newly selected primary. The new active local
-runtime begins preparing immediately; ready or in-flight processes owned only by the superseded
-route are terminated. This topology edit is the only way to revisit a target that
+attempt and resets the session-local cursor to the newly selected primary. This topology edit is the
+only way to revisit a target that
 automatic failover left behind. The old active provider is not retained as a hidden fallback; it
 remains available only when the user includes it in the new list.
 
 A reasoning-effort edit instead rebuilds the clients at the current forward-only cursor and preserves
 its failure counts. An attempt already in flight keeps its snapshotted client and remains
 authoritative: its success or failure updates route health normally, and the new effort begins with
-the next attempt. The replacement at the preserved active cursor—whether primary or fallback—starts
-preparing immediately; replacements behind that cursor are terminated without being prepared.
+the next attempt.
 
-A local-CLI target is preflighted first. A confirmed missing binary or signed-out account cannot
-activate; the running route stays intact and Activity records fixed settings-not-applied copy.
-Provider-specific partial tool-loop state from a failed attempt is discarded, while provider-neutral
-pending conversation follows the newly installed route on its next attempt. While stopped, persisted
-changes apply on the **next Start**. Runtime readiness is not a routing signal: if Claude's ready
-query or Codex's app-server is unavailable, that provider attempt fails and follows the normal
-fresh-attempt route policy. Neither CLI ever falls back to a one-shot command.
+An edit to a route that names a subscription reads the helper first, so it meets the sign-ins
+Settings showed. A route edit in which no target can serve is refused: the running route stays
+intact, Activity records fixed settings-not-applied copy, and the same alert as a refused Start
+names the next step. An edit whose route names the OpenAI API while no key is saved is refused the
+same way, without the alert. Provider-specific partial tool-loop state from a failed attempt is
+discarded, while provider-neutral pending conversation follows the newly installed route on its next
+attempt. While stopped, persisted changes apply on the **next Start**. The helper's later state is
+not a routing signal: if it stops or a subscription is signed out mid-session, that target's attempt
+fails and follows the normal fresh-attempt route policy.
 
 Brain-route choices persist via `BrainPreferences`, while the independent transcription provider,
 OpenAI model/expected-language list, and Apple locale persist via `TranscriptionPreferences`. Those
@@ -409,8 +405,8 @@ types own validation and normalization; every key and default value they read co
 
 ## Connections
 
-The Connections tab owns authentication shared across Brain and Transcription. Its four stacked
-cards are **OpenAI API**, **Gemini API**, **Claude Code**, and **Codex CLI**. The OpenAI and Gemini
+The Connections tab owns authentication shared across Brain and Transcription. Its three stacked
+cards are **OpenAI API**, **Gemini API**, and **Subscriptions**. The OpenAI and Gemini
 cards each report and edit only their own Jarvis-managed owner-only file through `APIKeyControls`
 (one instance per `Credential`, keyed by `credential.rawValue` so their accessibility labels,
 identifiers, and saved-key state never collide); each card's action is **Add API key** or **Edit**.
@@ -440,19 +436,35 @@ costs nothing and still proves the key, the network path, and the region; it doe
 which OpenAI only reports on a real request, which is why the wording is "accepted" rather than a
 claim that the account is healthy.
 
-Claude Code and Codex CLI keep authentication in their own tools. Connections runs the existing
-bounded `AgentCLIDetector` probes and reports **Signed in**, **Signed out**, **Sign-in unknown**, or
-**Not found** without opening a login flow or storing another secret. The page's compact ready
-count includes every managed API key that is saved and confirmed signed-in local accounts.
+The **Subscriptions** card (`SubscriptionControls`) has one row each for the **Codex subscription**
+and the **Claude subscription**. Opening Connections probes the bundled helper, starting it if it is
+not running, and reads its credential files, so each row says what a Start would find:
+
+- **Checking…** until the probe answers.
+- **Signed in**, with the account's email and plan, and a **Sign out** button.
+- **Signed out**, with a **Sign in** button.
+- **Not usable** when a sign-in is saved but the helper does not serve that vendor, which usually
+  means the sign-in expired; **Sign in** replaces it.
+- **Not running**, with the helper's own reason and a **Try again** button that probes again.
+- **Signing in…** while a sign-in runs, with a **Cancel** button.
+
+**Sign in** runs the helper's login for that vendor, opens the vendor's sign-in page in the default
+browser, and waits up to ten minutes for the browser to hand the account back. It is the one place
+Jarvis opens a URL, and only because the user pressed the button. A failed sign-in shows the helper's
+redacted reason under the row. **Sign out** deletes that vendor's credential files. Jarvis never
+reads the tokens itself: they stay in the helper's owner-only credential directory, apart from the
+secrets file ([sandbox.md](./sandbox.md) says where, and what a login reaches). The page's compact
+ready count includes every managed API key that is saved and every subscription the last probe
+proved signed in.
 
 An OpenAI key is required only when OpenAI is selected for transcription or appears anywhere in the
 brain route; a Gemini key is required only when Gemini is selected for transcription — Gemini is not
-a brain provider. Apple Speech plus a CLI-only route can start without either key. Saving a managed
-key while a session runs preserves route health: an OpenAI save refreshes both the OpenAI brain
-clients and a live OpenAI transcription socket's future reconnect credential, while a Gemini save
-refreshes only a live Gemini transcription socket's future reconnect credential. Neither ever probes
-or replaces a CLI client, and a saved credential only ever reaches the transcriber built for that same
-provider.
+a brain provider. Apple Speech plus a subscription-only route can start without either key. Saving a
+managed key while a session runs preserves route health: an OpenAI save refreshes both the OpenAI
+brain clients and a live OpenAI transcription socket's future reconnect credential, while a Gemini
+save refreshes only a live Gemini transcription socket's future reconnect credential. Neither ever
+replaces a subscription client, and a saved credential only ever reaches the transcriber built for
+that same provider.
 
 ## Capture Scope
 
@@ -516,7 +528,10 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SettingsScrollView.swift` | Viewport-change adapter for variable-height card documents |
 | `Sources/JarvisApp/Settings/BrainSection.swift` | Minimal Brain tab composition: Provider + Reasoning effort + Capabilities + Transcription |
 | `Sources/JarvisApp/Settings/CapabilitiesControls.swift` | The Capabilities card: always-on rows, the prep-notes-search switch, and one switch per bundled skill |
-| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini) + external CLI account readiness |
+| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini) + the Subscriptions card |
+| `Sources/JarvisApp/Settings/SubscriptionControls.swift` | Subscriptions card: per-subscription status, Sign in, Sign out, and Cancel |
+| `Sources/JarvisBrainProviders/Proxy/LocalProxySupervisor.swift` | Starts, probes, and restarts the bundled helper; owns its credential directory |
+| `Sources/JarvisBrainProviders/Proxy/LocalProxySignIn.swift` | Runs one browser sign-in through the helper and reports its URL and outcome |
 | `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The one models-list request behind a saved key's verdict |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified Primary + ordered fallback card and persistence mutations |
@@ -532,8 +547,8 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity tab |
-| `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers |
-| `Sources/JarvisBrainProviders/LocalAgent/AgentCLIDetector.swift` | CLI binary discovery + bounded authentication-status detection |
+| `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers: the OpenAI API and the two subscriptions |
+| `Sources/JarvisBrainProviders/LocalAgent/AgentCLIDetector.swift` | The evaluator's CLI binary discovery + bounded authentication-status detection |
 | `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisEvaluation/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |

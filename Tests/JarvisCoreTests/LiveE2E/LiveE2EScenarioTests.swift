@@ -13,7 +13,7 @@ struct LiveE2EScenarioTests {
 
     @Test(
         "every shipped scenario decodes and validates",
-        arguments: ["A", "B", "R", "F01-system", "F01-microphone", "F02", "F04"])
+        arguments: ["A", "B", "R", "F01-system", "F01-microphone", "F02"])
     func shippedScenarioValidates(id: String) throws {
         let url = Self.liveTests.appendingPathComponent("Scenarios/\(id).json")
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
@@ -32,12 +32,11 @@ struct LiveE2EScenarioTests {
             fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true))
 
         #expect(scenario.audio == .fixture)
-        #expect(scenario.brain == .init(primary: .claudeCode, fallbacks: []))
+        #expect(scenario.brain == .init(primary: .claudeSubscription, fallbacks: []))
         #expect(scenario.capabilities == .init(disabledTools: [], disabledSkills: []))
         #expect(scenario.prepNotes == "prep-notes.md")
         #expect(scenario.transcription == .init(model: .gpt4oTranscribe, key: .standard))
         #expect(scenario.voices == .init(them: "Samantha", me: "Daniel"))
-        #expect(scenario.cli.isEmpty)
         #expect(scenario.steps == [
             .screen(fixture: "coding-problem.jpg"),
             .press(.hint),
@@ -45,7 +44,7 @@ struct LiveE2EScenarioTests {
             them("Tell me about a time you disagreed with a teammate."),
             .switchBrain(.openAI),
             them("Let's move on to design: our product search is slow, and we are redesigning it. We agreed on twenty thousand searches per second, p99 under three hundred milliseconds, and results up to a minute stale, behind one search API. Now sketch the high-level architecture: which components would you put in, and what is the read path for one request?"),
-            .switchBrain(.codexCLI),
+            .switchBrain(.codexSubscription),
             them("Tell me about a time you pushed back on a decision from your manager."),
             .say(.init(speaker: .me, text: "Jarvis, how can I solve this in one pass?"),
                  overlap: nil, whileAttemptRunning: false),
@@ -109,23 +108,17 @@ struct LiveE2EScenarioTests {
         }
     }
 
-    @Test("scenarios B and F04 ship their capability switches and CLI stub")
-    func scenariosBAndF04MatchTheirSpecification() throws {
+    @Test("scenario B ships its capability switches")
+    func scenarioBMatchesItsSpecification() throws {
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
         let b = try LiveE2EScenario.load(
             from: Self.liveTests.appendingPathComponent("Scenarios/B.json"),
             fixturesDirectory: fixtures)
-        let f04 = try LiveE2EScenario.load(
-            from: Self.liveTests.appendingPathComponent("Scenarios/F04.json"),
-            fixturesDirectory: fixtures)
 
-        #expect(b.brain == .init(primary: .codexCLI, fallbacks: []))
+        #expect(b.brain == .init(primary: .codexSubscription, fallbacks: []))
         #expect(b.capabilities == .init(
             disabledTools: ["search_prep_notes"],
             disabledSkills: ["behavioral", "system-design", "coding-with-ai"]))
-        #expect(f04.brain == .init(primary: .claudeCode, fallbacks: []))
-        #expect(f04.cli == [.claudeCode: .stub])
-        #expect(f04.steps.filter { $0 == .restoreCLI(.claudeCode) }.count == 1)
     }
 
     @Test("every field and step kind decodes into the model")
@@ -136,12 +129,11 @@ struct LiveE2EScenarioTests {
         {
           "id": "Mixed-1",
           "audio": "fixture",
-          "brain": { "primary": "claude-code", "fallbacks": ["openai", "codex-cli"] },
+          "brain": { "primary": "claude-subscription", "fallbacks": ["openai", "codex-subscription"] },
           "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": ["coding"] },
           "prepNotes": "prep-notes.md",
           "transcription": { "model": "gpt-transcribe", "key": "invalid" },
           "voices": { "them": "Samantha", "me": "Daniel" },
-          "cli": { "claude-code": "stub" },
           "steps": [
             { "screen": "coding-problem.jpg" },
             { "press": "explainMore" },
@@ -149,8 +141,7 @@ struct LiveE2EScenarioTests {
             { "say": { "speaker": "me", "text": "One." }, "overlap": { "speaker": "them", "text": "Two.", "afterSeconds": 0.5 } },
             { "say": { "speaker": "them", "text": "Three." }, "whileAttemptRunning": true },
             { "switchBrain": "openai" },
-            { "switchBrain": "claude-code" },
-            { "restoreCLI": "claude-code" },
+            { "switchBrain": "claude-subscription" },
             { "stop": true }
           ]
         }
@@ -160,12 +151,11 @@ struct LiveE2EScenarioTests {
 
         #expect(scenario.id == "Mixed-1")
         #expect(scenario.audio == .fixture)
-        #expect(scenario.brain == .init(primary: .claudeCode, fallbacks: [.openAI, .codexCLI]))
+        #expect(scenario.brain == .init(primary: .claudeSubscription, fallbacks: [.openAI, .codexSubscription]))
         #expect(scenario.capabilities == .init(
             disabledTools: ["search_prep_notes"], disabledSkills: ["coding"]))
         #expect(scenario.prepNotes == "prep-notes.md")
         #expect(scenario.transcription == .init(model: .gptTranscribe, key: .invalid))
-        #expect(scenario.cli == [.claudeCode: .stub])
         #expect(scenario.steps == [
             .screen(fixture: "coding-problem.jpg"),
             .press(.explainMore),
@@ -175,21 +165,19 @@ struct LiveE2EScenarioTests {
                  whileAttemptRunning: false),
             .say(.init(speaker: .them, text: "Three."), overlap: nil, whileAttemptRunning: true),
             .switchBrain(.openAI),
-            .switchBrain(.claudeCode),
-            .restoreCLI(.claudeCode),
+            .switchBrain(.claudeSubscription),
             .stop,
         ])
     }
 
-    @Test("an absent cli and a null prepNotes decode as empty")
-    func absentOptionalsDecodeEmpty() throws {
+    @Test("a null prepNotes decodes as empty")
+    func nullPrepNotesDecodesEmpty() throws {
         let fixtures = try makeFixtures()
         defer { try? FileManager.default.removeItem(at: fixtures) }
 
         let scenario = try LiveE2EScenario.decode(
             Data(Self.scenario().utf8), fixturesDirectory: fixtures)
 
-        #expect(scenario.cli.isEmpty)
         #expect(scenario.prepNotes == nil)
         #expect(scenario.steps == [.stop])
     }
@@ -256,8 +244,8 @@ struct LiveE2EScenarioTests {
             fragment: "steps[0]: stop must be true"),
         RejectedCase(
             name: "switchBrain naming the primary brain",
-            json: scenario(steps: #"[{ "switchBrain": "codex-cli" }, \#(stop)]"#),
-            fragment: #"steps[0]: switchBrain names the current brain "codex-cli""#),
+            json: scenario(steps: #"[{ "switchBrain": "codex-subscription" }, \#(stop)]"#),
+            fragment: #"steps[0]: switchBrain names the current brain "codex-subscription""#),
         RejectedCase(
             name: "switchBrain naming the brain a previous switch selected",
             json: scenario(
@@ -283,16 +271,6 @@ struct LiveE2EScenarioTests {
             name: "a screen fixture that is not a JPEG",
             json: scenario(steps: #"[{ "screen": "prep-notes.md" }, \#(stop)]"#),
             fragment: "steps[0].screen must be a JPEG image"),
-        RejectedCase(
-            name: "restoreCLI without any cli override",
-            json: scenario(steps: #"[{ "restoreCLI": "claude-code" }, \#(stop)]"#),
-            fragment: #"steps[0]: restoreCLI "claude-code" has no "stub" in cli"#),
-        RejectedCase(
-            name: "restoreCLI for a provider that is not stubbed",
-            json: scenario(
-                cli: #"{ "claude-code": "stub" }"#,
-                steps: #"[{ "restoreCLI": "codex-cli" }, \#(stop)]"#),
-            fragment: #"steps[0]: restoreCLI "codex-cli" has no "stub" in cli"#),
         RejectedCase(
             name: "prepNotes with a path separator",
             json: scenario(prepNotes: #""../prep-notes.md""#),
@@ -367,20 +345,17 @@ struct LiveE2EScenarioTests {
         audio: String = "fixture",
         prepNotes: String = "null",
         key: String = "standard",
-        cli: String? = nil,
         steps: String = "[\(stop)]"
     ) -> String {
-        let cliField = cli.map { #""cli": \#($0),"# } ?? ""
         return #"""
         {
           "id": "\#(id)",
           "audio": "\#(audio)",
-          "brain": { "primary": "codex-cli", "fallbacks": [] },
+          "brain": { "primary": "codex-subscription", "fallbacks": [] },
           "capabilities": { "disabledTools": [], "disabledSkills": [] },
           "prepNotes": \#(prepNotes),
           "transcription": { "model": "gpt-4o-transcribe", "key": "\#(key)" },
           "voices": { "them": "Samantha", "me": "Daniel" },
-          \#(cliField)
           "steps": \#(steps)
         }
         """#

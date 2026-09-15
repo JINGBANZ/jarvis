@@ -1,7 +1,7 @@
 {
   "id": "R",
   "audio": "device",
-  "brain": { "primary": "codex-cli", "fallbacks": [] },
+  "brain": { "primary": "codex-subscription", "fallbacks": [] },
   "capabilities": { "disabledTools": [], "disabledSkills": [] },
   "prepNotes": null,
   "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },

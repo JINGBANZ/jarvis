@@ -38,7 +38,7 @@ public enum Defaults {
         public static let disabledSkills: [String] = []
 
         /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
-        /// their selection; CLI providers store under a suffixed key each.
+        /// their selection; every other provider stores under a suffixed key of its own.
         public static func modelKey(for provider: BrainProvider) -> String {
             provider == .openAI ? "brain.model" : "brain.model.\(provider.rawValue)"
         }

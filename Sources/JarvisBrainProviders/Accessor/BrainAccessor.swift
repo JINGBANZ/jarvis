@@ -118,13 +118,13 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
         } catch {
             // Record the failed round trip too — a transport error (timeout, dropped connection) is
             // exactly the kind of issue the session evaluation should see.
-            traffic?.record(tag: trafficTag, request: body, response: nil, status: nil,
+            traffic?.record(tag: trafficTag, provider: provider, request: body, response: nil, status: nil,
                             latencyMs: Self.elapsedMs(since: started),
                             error: OpenAINetworkDiagnostics.errorSummary(error), phases: diagnostics.phases)
             throw error
         }
         let status = http?.statusCode ?? 0
-        traffic?.record(tag: trafficTag, request: body, response: data, status: status,
+        traffic?.record(tag: trafficTag, provider: provider, request: body, response: data, status: status,
                         latencyMs: Self.elapsedMs(since: started), phases: diagnostics.phases)
         guard (200..<300).contains(status) else {
             throw OpenAIFailureClassifier.classify(

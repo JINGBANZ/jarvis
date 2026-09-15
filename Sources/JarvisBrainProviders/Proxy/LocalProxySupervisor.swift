@@ -51,7 +51,8 @@ public actor LocalProxySupervisor {
             case .unavailable(let reason):
                 return ProviderFailure(
                     source: .brain(provider), stage: .process, category: .unavailable,
-                    disposition: .permanent, identity: .init(), message: reason)
+                    disposition: .permanent, identity: .init(),
+                    message: "the sign-in service \(reason)")
             case .ready(_, let signedIn):
                 guard !signedIn.contains(provider) else { return nil }
                 return ProviderFailure(

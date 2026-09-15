@@ -8,16 +8,16 @@ import JarvisBrainProviders
 /// partial total.
 ///
 /// Provider records are handled separately because the same session file can mix them:
-///   - **OpenAI Responses** — `response.usage`: `input_tokens`, `input_tokens_details.cached_tokens`
+///   - **OpenAI Responses** (every current target, the subscriptions included) — `response.usage`: `input_tokens`, `input_tokens_details.cached_tokens`
 ///     (the automatic prefix-cache hit), optional `cache_write_tokens`, and `output_tokens`
 ///     (reasoning tokens included). No per-call dollar cost is recorded, so cost renders as "—".
-///   - **Claude Code warm query** (`CLIBrainClient`) — `response.cli`: `total_cost_usd`, a call-level
-///     `usage` with Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens` split, and
+///   - **Claude Code warm query** (sessions recorded before the subscription targets) —
+///     `response.cli`: `total_cost_usd`, a call-level `usage` with Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens` split, and
 ///     a `modelUsage` map that breaks usage + cost out per model — including the CLI's own internal
 ///     sidecar models (e.g. its haiku pass), which the call-level `usage` alone would hide.
-///   - **Codex app-server** — the response record has no token, cache, or cost usage, so those
+///   - **Codex app-server** (sessions recorded before the subscription targets) — the response record has no token, cache, or cost usage, so those
 ///     values remain unavailable rather than becoming zero.
-///   - **Codex one-shot `exec`** (the summarizer) — `response.runtime.usage`, in Codex's own key
+///   - **Codex one-shot `exec`** (those sessions' summarizer) — `response.runtime.usage`, in Codex's own key
 ///     names: `input_tokens` (cached input included), `cached_input_tokens`,
 ///     `cache_write_input_tokens`, and `output_tokens` (reasoning output included). No cost.
 ///     Which Codex transport served a call is read from the request record's `runtime` name.
@@ -183,7 +183,8 @@ enum SessionMetrics {
                 .flatMap(BrainTrafficAuditEvent.Kind.init(rawValue:)) ?? .providerCall
             var call = Call(number: record.number,
                             tag: entry["tag"] as? String ?? "?",
-                            provider: providerName(request: request, response: response),
+                            provider: providerName(
+                                provider: entry["provider"] as? String, request: request, response: response),
                             model: model,
                             status: entry["status"] as? Int,
                             ms: entry["ms"] as? Int,
@@ -213,7 +214,7 @@ enum SessionMetrics {
                                                        cacheWrite: call.cacheWrite, output: call.output,
                                                        cost: call.cost, calls: 1)
                 }
-            } else if request?["runtime"] as? String == LocalAgentTransport.oneShotExec.rawValue,
+            } else if request?["runtime"] as? String == "one-shot-exec",
                       let usage = (response?["runtime"] as? [String: Any])?["usage"]
                         as? [String: Any] {
                 // Keyed on the transport, not on the envelope: both Codex transports record their
@@ -311,16 +312,21 @@ enum SessionMetrics {
         return lhs + rhs
     }
 
-    static func providerName(request: [String: Any]?, response: [String: Any]?) -> String {
-        switch request?["provider"] as? String {
-        case BrainProvider.claudeCode.rawValue: return BrainProvider.claudeCode.displayName
-        case BrainProvider.codexCLI.rawValue: return BrainProvider.codexCLI.displayName
-        case BrainProvider.openAI.rawValue: return BrainProvider.openAI.displayName
-        case .some(let provider): return provider
+    /// The record's own `provider`. A session recorded before the subscription targets names a CLI
+    /// provider inside its request record instead, and none at all for an OpenAI request.
+    static func providerName(
+        provider: String?, request: [String: Any]?, response: [String: Any]?
+    ) -> String {
+        switch provider ?? (request?["provider"] as? String) {
+        case .some(let raw):
+            if let known = BrainProvider(rawValue: raw) { return known.displayName }
+            switch raw {
+            case "claude-code": return "Claude Code"
+            case "codex-cli": return "Codex CLI"
+            default: return raw
+            }
         case nil:
-            // Direct OpenAI requests are the wire body itself and do not carry Jarvis's provider key.
-            return response?["cli"] == nil ? BrainProvider.openAI.displayName
-                                           : BrainProvider.claudeCode.displayName
+            return response?["cli"] == nil ? BrainProvider.openAI.displayName : "Claude Code"
         }
     }
 }

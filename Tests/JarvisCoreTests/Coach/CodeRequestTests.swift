@@ -151,8 +151,8 @@ import Testing
         }
     }
 
-    /// A CLI brain is not bound by the strict schema's `required` list, so an uncorrected snippet
-    /// arrives without the array at all. Dropping it there would lose code the model did produce.
+    /// A request without `strict`, which is what the Claude subscription sends, does not bind the
+    /// model to the schema's `required` list, so an uncorrected snippet arrives without the array. Dropping it there would lose code the model did produce.
     @Test func snippetWithoutHighlightsSurvivesParsing() throws {
         for payload in [#"{"language":"Python","placement":"In loop","code":"x = 1"}"#,
                         #"{"language":"Python","placement":"In loop","code":"x = 1","highlightedLines":null}"#] {

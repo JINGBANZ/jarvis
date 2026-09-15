@@ -37,9 +37,7 @@ import Testing
                 == "OpenAI API didn't respond in time")
     }
 
-    @Test func localCLIsAreToldToSignInRatherThanRotateAKey() {
-        #expect(make(source: .brain(.claudeCode), category: .authentication).activitySentence
-                == "Claude Code isn't signed in; sign in to the CLI and press Start again")
+    @Test func anAPIKeyProviderIsToldToCheckItsKey() {
         #expect(make(source: .brain(.openAI), category: .authentication).activitySentence
                 == "OpenAI API rejected the API key; check Settings → Connections")
     }
@@ -60,9 +58,9 @@ import Testing
                 == "Codex subscription couldn't reach the sign-in service (network -1004: could not connect to the server); quit and reopen Jarvis")
         let stopped = ProviderFailure(
             source: .brain(.claudeSubscription), stage: .process, category: .unavailable,
-            disposition: .permanent, identity: .init(), message: "keeps stopping")
+            disposition: .permanent, identity: .init(), message: "the sign-in service keeps stopping")
         #expect(stopped.activitySentence
-                == "Claude subscription couldn't start the sign-in service (keeps stopping); quit and reopen Jarvis")
+                == "Claude subscription is unavailable (the sign-in service keeps stopping); quit and reopen Jarvis")
         #expect(make(source: .brain(.codexSubscription), category: .rejected,
                      identity: .init(httpStatus: 429),
                      message: "All credentials for model gpt-5.6-sol are cooling down").activitySentence

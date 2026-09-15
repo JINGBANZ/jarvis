@@ -16,30 +16,33 @@ public struct AgenticEvaluator: Sendable {
         public var errorDescription: String? {
             switch self {
             case .noAgentCLI:
-                "Install and sign in to Claude Code or Codex CLI before evaluating a session."
-            case .preferredAgentUnavailable(let provider):
-                "\(provider) is selected in Settings, but its CLI is not available."
-            case .agentSignedOut(let provider):
-                "\(provider) is signed out. Sign in, then try evaluating again."
-            case .agentFailed(let provider):
-                "\(provider) couldn't finish the evaluation. Check jarvis-debug.log for details."
+                "Install and sign in to Codex or Claude Code before evaluating a session."
+            case .preferredAgentUnavailable(let cli):
+                "\(cli) was requested, but its CLI is not installed."
+            case .agentSignedOut(let cli):
+                "\(cli) is signed out. Sign in, then try evaluating again."
+            case .agentFailed(let cli):
+                "\(cli) couldn't finish the evaluation. Check jarvis-debug.log for details."
             }
         }
     }
 
+    /// Without a request, the first of these that is installed and not signed out runs.
+    static let searchOrder: [AgentCLI] = [.codex, .claude]
+
     private let source: EvaluationSource
     private let sourceStore: ReleaseSourceStore
-    private let preferredProvider: BrainProvider?
+    private let preferredCLI: AgentCLI?
     private let detector: AgentCLIDetector
     private let timeout: TimeInterval
 
-    public init(source: EvaluationSource, preferredProvider: BrainProvider? = nil,
+    public init(source: EvaluationSource, preferredCLI: AgentCLI? = nil,
                 detector: AgentCLIDetector = AgentCLIDetector(),
                 sourceStore: ReleaseSourceStore = ReleaseSourceStore(),
                 timeout: TimeInterval = 15 * 60) {
         self.source = source
         self.sourceStore = sourceStore
-        self.preferredProvider = preferredProvider?.usesLocalCLI == true ? preferredProvider : nil
+        self.preferredCLI = preferredCLI
         self.detector = detector
         self.timeout = timeout
     }
@@ -70,13 +73,9 @@ public struct AgenticEvaluator: Sendable {
         }
         let prompt = try await prepare(sessionDirectory: sessionDirectory, workspaceProvenance: provenance)
         try Task.checkCancellation()
-        let providers = preferredProvider.map { [$0] } ?? [.claudeCode, .codexCLI]
-        let detected = await detector.detectFirstAsync(providers).map { [$0] } ?? []
+        let detected = await detector.detectAllAsync(preferredCLI.map { [$0] } ?? Self.searchOrder)
         try Task.checkCancellation()
-        let cli = try Self.selectCLI(from: detected, preferredProvider: preferredProvider)
-        guard cli.authenticationStatus != .signedOut else {
-            throw EvaluationError.agentSignedOut(cli.provider.displayName)
-        }
+        let cli = try Self.selectCLI(from: detected, preferredCLI: preferredCLI)
 
         let invocation = Self.invocation(
             for: cli, prompt: prompt, repositoryDirectory: repositoryDirectory,
@@ -87,15 +86,15 @@ public struct AgenticEvaluator: Sendable {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
-            jlog("Jarvis: \(cli.provider.displayName) evaluator process failed — \(error.localizedDescription)")
-            throw EvaluationError.agentFailed(cli.provider.displayName)
+            jlog("Jarvis: \(cli.cli.displayName) evaluator process failed — \(error.localizedDescription)")
+            throw EvaluationError.agentFailed(cli.cli.displayName)
         }
 
         guard output.exitCode == 0 else {
             let diagnostic = output.stderr.isEmpty ? output.stdout : output.stderr
-            jlog("Jarvis: \(cli.provider.displayName) evaluator exited \(output.exitCode) — "
+            jlog("Jarvis: \(cli.cli.displayName) evaluator exited \(output.exitCode) — "
                  + String(diagnostic.suffix(2_000)))
-            throw EvaluationError.agentFailed(cli.provider.displayName)
+            throw EvaluationError.agentFailed(cli.cli.displayName)
         }
         try Task.checkCancellation()
         return try AgenticEvaluation.saveReport(
@@ -115,24 +114,32 @@ public struct AgenticEvaluator: Sendable {
         }
     }
 
+    /// A requested CLI runs or is reported, never swapped for another. Otherwise the first detected
+    /// CLI not proven signed out runs; an unconfirmed sign-in is tried rather than refused.
     static func selectCLI(from detected: [DetectedAgentCLI],
-                          preferredProvider: BrainProvider?) throws -> DetectedAgentCLI {
-        if let preferredProvider, preferredProvider.usesLocalCLI {
-            guard let preferred = detected.first(where: { $0.provider == preferredProvider }) else {
-                throw EvaluationError.preferredAgentUnavailable(preferredProvider.displayName)
+                          preferredCLI: AgentCLI?) throws -> DetectedAgentCLI {
+        if let preferredCLI {
+            guard let preferred = detected.first(where: { $0.cli == preferredCLI }) else {
+                throw EvaluationError.preferredAgentUnavailable(preferredCLI.displayName)
+            }
+            guard preferred.authenticationStatus != .signedOut else {
+                throw EvaluationError.agentSignedOut(preferredCLI.displayName)
             }
             return preferred
         }
+        if let ready = detected.first(where: { $0.authenticationStatus != .signedOut }) {
+            return ready
+        }
         guard let first = detected.first else { throw EvaluationError.noAgentCLI }
-        return first
+        throw EvaluationError.agentSignedOut(first.cli.displayName)
     }
 
     static func invocation(for cli: DetectedAgentCLI, prompt: String,
                            repositoryDirectory: URL, sessionDirectory: URL,
                            timeout: TimeInterval, isReleaseSource: Bool = false) -> AgentCLIRun {
         let arguments: [String]
-        switch cli.provider {
-        case .claudeCode:
+        switch cli.cli {
+        case .claude:
             // The prompt directly follows `-p`: `--add-dir` accepts multiple values and would
             // otherwise swallow it. Plan mode and no persistence make this a read-only, stateless
             // audit while still allowing the agent to inspect the checkout and full session.
@@ -144,15 +151,13 @@ public struct AgenticEvaluator: Sendable {
                 "--permission-mode", "plan",
                 "--add-dir", sessionDirectory.path,
             ]
-        case .codexCLI:
+        case .codex:
             // Release source is an extracted archive without .git, so Codex must allow that workspace.
             arguments = [
                 "exec", "--ephemeral", "--sandbox", "read-only",
                 "--ignore-user-config", "--ignore-rules",
                 "-c", "mcp_servers={}",
             ] + (isReleaseSource ? ["--skip-git-repo-check"] : []) + [prompt]
-        case .openAI, .codexSubscription, .claudeSubscription:
-            preconditionFailure("Agentic evaluation requires a local agent CLI")
         }
         return AgentCLIRun(
             executable: cli.executableURL,

@@ -18,7 +18,7 @@ public struct UserFacingError: Error, Sendable, Equatable {
     /// discreet notice is recorded elsewhere);
     /// `.warning` permits a startup alert without touching a running session (a *preflight* failure — the thing
     /// that failed never started, so there is nothing to tear down and a live session must survive,
-    /// e.g. an in-place restart aborted because the brain CLI vanished); `.degraded` is a
+    /// e.g. a route edit refused because no target in it can coach); `.degraded` is a
     /// non-blocking notice the session survives (logged, not alerted).
     public enum Severity: Sendable, Equatable {
         case fatal

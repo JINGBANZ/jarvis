@@ -2,8 +2,8 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// The one value the app's brain composition and the coach loop both read, so the schemas a
-/// local-agent process is warmed with are the schemas the loop later sends (#273).
+/// The one value the system prompt and every request's declared schemas are both built from, so
+/// what a session describes is what it sends (#273).
 @Suite struct CoachCapabilitiesTests {
     /// The loader sits between the always-on actions and the catalog, and exists only while there
     /// is something left to load.

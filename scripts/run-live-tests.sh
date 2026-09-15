@@ -7,7 +7,7 @@ umask 077
 cd "$(dirname "$0")/.."
 
 usage() {
-  echo "usage: $0 [A|B|R|F01|F02|F04|all] [--evaluate] [--keep-going]" >&2
+  echo "usage: $0 [A|B|R|F01|F02|all] [--evaluate] [--keep-going]" >&2
 }
 
 SCENARIO="all"
@@ -15,7 +15,7 @@ EVALUATE=0
 KEEP_GOING=0
 for arg in "$@"; do
   case "$arg" in
-    A|B|R|F01|F02|F04|all) SCENARIO="$arg" ;;
+    A|B|R|F01|F02|all) SCENARIO="$arg" ;;
     --evaluate) EVALUATE=1 ;;
     --keep-going) KEEP_GOING=1 ;;
     *) usage; exit 2 ;;

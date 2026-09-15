@@ -23,7 +23,6 @@ public struct LiveE2EOptions: Sendable {
     public let repositoryDirectory: URL
     public let fixturesDirectory: URL
     public let secretsDirectory: URL?
-    public let claudeCLIOverride: URL?
 
     public static var isRequested: Bool {
         isRequested(in: CommandLine.arguments)
@@ -110,23 +109,12 @@ public struct LiveE2EOptions: Sendable {
             }
             secrets = url
         }
-        var claudeCLI: URL?
-        if let rawClaude = Self.value(after: "--live-e2e-cli-claude", in: arguments) {
-            let url = URL(fileURLWithPath: rawClaude).standardizedFileURL
-            guard Self.isRegularFile(url),
-                  FileManager.default.isExecutableFile(atPath: url.path) else {
-                throw Failure.invalid(
-                    "--live-e2e-cli-claude is not an existing executable file: \(url.path)")
-            }
-            claudeCLI = url
-        }
 
         scenarioURL = scenario
         outputDirectory = output
         repositoryDirectory = repository
         fixturesDirectory = fixtures
         secretsDirectory = secrets
-        claudeCLIOverride = claudeCLI
     }
 
     private static func value(after flag: String, in arguments: [String]) -> String? {

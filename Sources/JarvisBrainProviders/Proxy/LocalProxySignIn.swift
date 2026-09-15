@@ -48,7 +48,7 @@ public struct LocalProxySignIn: Sendable {
         switch provider {
         case .codexSubscription: flag = "-codex-login"
         case .claudeSubscription: flag = "-claude-login"
-        case .openAI, .claudeCode, .codexCLI:
+        case .openAI:
             events.yield(.failed(message: "\(provider.displayName) has no sign-in"))
             return
         }

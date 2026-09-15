@@ -129,7 +129,7 @@ import Testing
 
     @Test func openAIKeyRequirementCombinesTranscriptionAndBrainRoute() {
         let cliOnly = BrainRoute(
-            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
             fallbackTargets: [])
         let routeWithOpenAIFallback = BrainRoute(
             primary: cliOnly.primary,
@@ -153,7 +153,7 @@ import Testing
 
     @Test func geminiTranscriptionNeedsOnlyItsOwnKeyWithACLIBrain() {
         let cliOnly = BrainRoute(
-            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
             fallbackTargets: [])
         #expect(TranscriptionProvider.gemini.requiredCredentials(for: cliOnly) == [.geminiAPIKey])
     }
@@ -161,7 +161,7 @@ import Testing
     /// The combination the old single-Bool gate could not express: Gemini ears, OpenAI brain.
     @Test func geminiEarsWithAnOpenAIBrainNeedBothKeys() {
         let openAIRoute = BrainRoute(
-            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
             fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4")])
         #expect(TranscriptionProvider.gemini.requiredCredentials(for: openAIRoute)
             == [.geminiAPIKey, .openAIAPIKey])
@@ -169,7 +169,7 @@ import Testing
 
     @Test func appleSpeechWithAnOpenAIBrainNeedsTheOpenAIKey() {
         let openAIRoute = BrainRoute(
-            primary: BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
             fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4")])
         #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: openAIRoute)
             == [.openAIAPIKey])

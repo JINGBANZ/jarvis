@@ -15,7 +15,7 @@ struct LiveE2ETests {
     typealias Attempt = LiveSessionEvidence.Attempt
     typealias Row = LiveSessionEvidence.ActivityRow
 
-    // The short scenarios run first: a missing grant, key, or login shows within minutes.
+    // The short scenarios run first: a missing grant, key, or sign-in shows within minutes.
 
     @Test func scenarioR() async throws {
         guard let launcher = await LiveE2ELauncher.begin(scenario: "R") else { return }
@@ -95,56 +95,6 @@ struct LiveE2ETests {
         try launcher.finish(results)
     }
 
-    @Test func scenarioF04() async throws {
-        guard let launcher = await LiveE2ELauncher.begin(scenario: "F04") else { return }
-        let launch = try await launcher.launch(claudeCLI: try launcher.makeClaudeStub())
-        var results = LiveE2EResults(scenario: "F04")
-        if let evidence = Self.requireEvidence(launch, &results) {
-            let says = launch.stepIndices(Self.isSay)
-            let restored = says.count == 4 ? launch.attempt(forStep: says[3]) : nil
-            // Each question before the restore is its own cycle: its turn-end attempt, then
-            // pending-work retries on the one target until the failure budget exhausts the cycle
-            // (three, `BrainRouteSession.failuresPerTarget`; wiki/architecture.md#ordered-provider-route).
-            let cycleStarts = says.prefix(3).compactMap { launch.attempt(forStep: $0) }
-            let cycles = cycleStarts.enumerated().map { index, first in
-                let end = index + 1 < cycleStarts.count
-                    ? cycleStarts[index + 1].id : (restored?.id ?? Int.max)
-                return evidence.attempts.filter { $0.id >= first.id && $0.id < end }
-            }
-            let cycleRows = evidence.activity.filter { $0.kind == "coachingTurnFailed" }
-            // A cycle's row lands after its last failed attempt and before the next question's
-            // attempt, so no request is made in between.
-            let rowsBetweenCycles = !cycles.isEmpty && cycles.indices.allSatisfy { index in
-                guard index < cycleRows.count,
-                      let row = cycleRows[index].occurredAt?.rounded(.down),
-                      let lastFinished = cycles[index].last?.finishedAt,
-                      let nextStarted = (index + 1 < cycles.count
-                          ? cycles[index + 1].first : restored)?.startedAt else { return false }
-                return row >= lastFinished && row <= nextStarted
-            }
-            let restoredTip = restored.map { attempt in
-                evidence.rows(in: attempt).contains { $0.kind == "tip" }
-            } ?? false
-            results.check("F04", [
-                (cycles.count == 3 && cycles.allSatisfy { cycle in
-                    cycle.count == 3
-                        && cycle.allSatisfy { $0.outcome == "brain_error" }
-                        && cycle.dropFirst().allSatisfy { $0.trigger == "pending_work" }
-                }, "each question fails three attempts on its own budget (saw \(cycles.map(\.count)))"),
-                (cycleRows.count == cycles.count,
-                 "one coaching-failed row per failed cycle (saw \(cycleRows.count))"),
-                (rowsBetweenCycles, "no attempt between a failed cycle and the next question"),
-                (restored?.provider == "claude-code" && restored?.outcome == "spoke" && restoredTip,
-                 "the question after the restore gets a tip on Claude Code (saw "
-                    + "\(restored?.provider ?? "no attempt") \(restored?.outcome ?? ""))"),
-                (evidence.activity.filter { $0.kind == "sessionEnded" }.count == 1,
-                 "no session end before Stop"),
-            ])
-            Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
-        }
-        try launcher.finish(results)
-    }
-
     @Test func scenarioB() async throws {
         guard let launcher = await LiveE2ELauncher.begin(scenario: "B") else { return }
         let launch = try await launcher.launch()
@@ -166,7 +116,7 @@ struct LiveE2ETests {
             results.note("C17", b1Summary)
             results.time("B1 press-to-tip", seconds: Self.pressToTip(evidence, b1))
 
-            let codex = evidence.traffic.filter { $0.tag == "coach" && $0.cliProvider == "codex-cli" }
+            let codex = Self.coachTraffic(evidence, on: .codexSubscription)
             results.check("C16", [
                 (!evidence.activity.contains {
                     ["behavioral", "system-design", "coding-with-ai"].contains($0.loadedCapability?.name ?? "")
@@ -186,7 +136,7 @@ struct LiveE2ETests {
             let catalogs = Set(codex.map { Self.skillCatalog(in: $0.instructions ?? "") })
             results.check("C19", catalogs == [["coding"]],
                           "the skills catalog lists only coding (saw \(catalogs.sorted { $0.count < $1.count }))")
-            Self.noteTextProtocol(evidence, &results)
+            Self.noteReplyRecoveries(evidence, &results)
             Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         }
         try launcher.finish(results)
@@ -273,7 +223,9 @@ struct LiveE2ETests {
 
         let a3Sequence = sequence(a3)
         let a4Sequence = sequence(a4)
-        let firstOpenAI = a4.flatMap { evidence.traffic(for: $0) }.first { $0.cliProvider == nil }
+        let firstOpenAI = a4.flatMap { evidence.traffic(for: $0) }.first {
+            $0.tag == "coach" && $0.provider == BrainProvider.openAI.rawValue
+        }
         results.check("C05", [
             (Self.precedes(a3Sequence.firstIndex(of: "load search_prep_notes"),
                            a3Sequence.firstIndex(of: "search")),
@@ -297,8 +249,9 @@ struct LiveE2ETests {
         results.check("C08", [
             (sequence(a5).contains("search"), "A5 searched prep notes (saw \(sequence(a5)))"),
             (loads(a5).isEmpty, "A5 loaded nothing"),
-            (a5.contains { evidence.traffic(for: $0).contains { $0.cliProvider == "codex-cli" } },
-             "A5 ran on Codex"),
+            (a5.contains { evidence.traffic(for: $0).contains {
+                $0.provider == BrainProvider.codexSubscription.rawValue
+            } }, "A5 ran on Codex"),
         ])
         results.time("A5 question-to-tip", seconds: Self.questionToTip(evidence, a5))
         results.check("C09", loads(a1).contains("coding"), "A1 loaded coding (saw \(loads(a1)))")
@@ -323,7 +276,8 @@ struct LiveE2ETests {
         results.note("C13", unexpectedDiagrams.isEmpty
             ? "no diagram outside the architecture stage" : "diagram at \(unexpectedDiagrams)")
 
-        // C14: loaded state survives both switches. OpenAI replays the load pairs Claude Code minted.
+        // C14: loaded state survives both switches. OpenAI replays the load pairs the Claude
+        // subscription made.
         let loadsBeforeSwitch = a4.first.map { switchAttempt in
             evidence.attempts
                 .filter { $0.id < switchAttempt.id && $0.isCommitted }
@@ -335,39 +289,34 @@ struct LiveE2ETests {
             !replayedCalls.contains { call in
                 call.name == (load.kind == "skill" ? "load_skill" : "load_tool")
                     && call.arguments.contains(load.name)
-                    && call.callID.hasPrefix("cli_")
                     && replayedOutputs.contains(call.callID)
             }
         }
-        let codexInstructions = evidence.traffic
-            .filter { $0.tag == "coach" && $0.cliProvider == "codex-cli" }
+        let codexInstructions = Self.coachTraffic(evidence, on: .codexSubscription)
             .compactMap(\.instructions)
         results.check("C14", [
             (loadsBeforeSwitch.count == 3,
              "three loads committed before the OpenAI switch (saw \(loadsBeforeSwitch.map(\.name)))"),
             (!loadsBeforeSwitch.isEmpty && unreplayed.isEmpty,
-             "A4 replays every earlier load pair with its cli_ call id (missing \(unreplayed.map(\.name)))"),
+             "A4 replays every earlier load pair with its result (missing \(unreplayed.map(\.name)))"),
             (evidence.activity.filter { $0.kind == "brainChangeApplied" }.count >= 2,
              "both brain switches applied"),
             (!codexInstructions.isEmpty && Set(codexInstructions).count == 1,
-             "Codex's baked instructions never change"),
+             "Codex's instructions never change"),
         ])
 
         var c15: [LiveE2EResults.Check] = []
-        for provider in ["claude-code", "codex-cli"] {
-            let records = evidence.traffic.filter { $0.tag == "coach" && $0.cliProvider == provider }
+        for provider in [BrainProvider.claudeSubscription, .codexSubscription] {
+            let records = Self.coachTraffic(evidence, on: provider)
             let later = Set(records.compactMap(\.attemptID))
                 .subtracting([records.first?.attemptID].compactMap { $0 })
             c15.append((later.count >= 2,
-                        "\(provider) coached at least two attempts after its first (saw \(later.count))"))
+                        "\(provider.rawValue) coached at least two attempts after its first (saw \(later.count))"))
             c15.append((Set(records.compactMap(\.instructions)).count == 1,
-                        "\(provider) instructions stay identical"))
+                        "\(provider.rawValue) instructions stay identical"))
         }
-        c15.append((!evidence.traffic.contains {
-            ($0.error ?? "").contains("instructions changed after runtime initialization")
-        }, "no instructions-changed error"))
         results.check("C15", c15)
-        Self.noteTextProtocol(evidence, &results)
+        Self.noteReplyRecoveries(evidence, &results)
 
         results.check("G01", [
             (evidence.activity.contains { $0.message.hasPrefix("🗣 heard (them)") }, "the them stream transcribed"),
@@ -437,10 +386,6 @@ struct LiveE2ETests {
              "the second A7 hint differs from the first"),
             (tip(a1) != nil && tip(a1)?.message != tip(a7[0])?.message, "A7's first hint differs from A1's"),
         ])
-        for line in evidence.debugLines(containing: "warm query ready")
-            + evidence.debugLines(containing: "target thread ready") {
-            results.timeDetail(line)
-        }
         Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         try launcher.finish(results)
     }
@@ -456,7 +401,12 @@ struct LiveE2ETests {
         return launch.evidence
     }
 
-    /// G08: the session ends last, its evidence seals, and no CLI child or Codex home outlives it.
+    /// The coach requests one target made, in file order.
+    static func coachTraffic(_ evidence: Evidence, on provider: BrainProvider) -> [Evidence.TrafficRecord] {
+        evidence.traffic.filter { $0.tag == "coach" && $0.provider == provider.rawValue }
+    }
+
+    /// G08: the session ends last, its evidence seals, and no subscription helper outlives the app.
     static func checkCleanEnd(
         _ launch: LiveE2ELaunch, _ evidence: Evidence, endedByUser: Bool,
         _ results: inout LiveE2EResults
@@ -465,8 +415,7 @@ struct LiveE2ETests {
         var checks: [LiveE2EResults.Check] = [
             (last?.kind == "sessionEnded", "the last Activity row is the session end (saw \(last?.kind ?? "no rows"))"),
             (evidence.healthState == "complete", "audit health is complete (saw \(evidence.healthState ?? "missing"))"),
-            (launch.leftoverProcessIDs.isEmpty, "no CLI child survived (pids \(launch.leftoverProcessIDs))"),
-            (launch.leftoverRuntimeHomes.isEmpty, "no Codex runtime home remained (\(launch.leftoverRuntimeHomes))"),
+            (launch.leftoverHelperIDs.isEmpty, "no subscription helper survived (pids \(launch.leftoverHelperIDs))"),
         ]
         if endedByUser {
             checks.append((last?.message.contains("session ended by user") == true, "the session ended by user"))
@@ -474,15 +423,15 @@ struct LiveE2ETests {
         results.check("G08", checks)
     }
 
-    /// C20: text-protocol fallbacks on the CLI brains are reported, never failed.
-    static func noteTextProtocol(_ evidence: Evidence, _ results: inout LiveE2EResults) {
-        let needles = ["was called before it was loaded", "nothing named", "no skill named",
-                       "does not permit", "unknown or malformed"]
+    /// C20: a reply the runner answered instead of running, on any brain, is reported, never failed.
+    static func noteReplyRecoveries(_ evidence: Evidence, _ results: inout LiveE2EResults) {
+        let needles = ["isn't allowed on a shortcut", "didn't match its schema", "had no tool call",
+                       "couldn't run on the last response", "isn't available in this session"]
         let sightings = needles.compactMap { needle -> String? in
             let count = evidence.debugLines(containing: needle).count
             return count > 0 ? "\(count) x \"\(needle)\"" : nil
         }
-        results.note("C20", sightings.isEmpty ? "no text-protocol fallback lines" : sightings.joined(separator: ", "))
+        results.note("C20", sightings.isEmpty ? "no reply recoveries" : sightings.joined(separator: ", "))
     }
 
     /// A step whose provider stalled is judged through its retry (see `retryChain`); each stall is
@@ -536,7 +485,7 @@ struct LiveE2ETests {
         }
     }
 
-    /// Skill names listed under the catalog heading of a baked system prompt.
+    /// Skill names listed under the catalog heading of a system prompt.
     static func skillCatalog(in instructions: String) -> [String] {
         guard let heading = instructions.range(of: "# Skills you can load") else { return [] }
         var names: [String] = []

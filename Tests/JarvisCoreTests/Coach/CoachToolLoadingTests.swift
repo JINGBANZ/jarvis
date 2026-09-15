@@ -185,7 +185,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(brain.offeredTools[2].map(\.name).contains("search_prep_notes"))
     }
 
-    /// A switched-off tool stays switched off, whatever a text-protocol model emits.
+    /// A switched-off tool stays switched off, whatever name a model emits.
     @Test func aCallToAToolTheSessionDoesNotOfferIsRefused() async throws {
         let search = FakePrepMaterialSearch()
         let activity = RecordingActivity()
@@ -210,8 +210,8 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(activity.kinds == [.tip])
     }
 
-    /// Offered but called before loading: only a text protocol can do this, and the call is honest,
-    /// so it runs rather than costing the turn a round trip.
+    /// Offered but called before loading: a model can name a catalog tool the request did not
+    /// declare, and the call is honest, so it runs rather than costing the turn a round trip.
     @Test func aDeferredToolCalledBeforeLoadingStillRuns() async throws {
         let search = FakePrepMaterialSearch(results: [PrepMaterialSearchResult(
             sourceDisplayName: "system-design.md", text: "token bucket notes")])

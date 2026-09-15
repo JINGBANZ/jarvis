@@ -37,37 +37,11 @@ public extension UserFacingError {
             severity: .warning)
     }
 
-    /// The selected brain provider's CLI isn't installed (or was removed since it was selected).
-    /// A *preflight* failure: the Start is refused before anything is torn down, so it must alert
-    /// without stopping — an in-place restart (e.g. a key re-save while running) that trips this
-    /// guard has a live session that must survive.
-    static func brainCLIMissing(provider: String) -> UserFacingError {
-        .init(title: "\(provider) not found",
-              message: "The \(provider) command-line tool isn't installed on this Mac. Install and sign in to it, or switch the brain provider back to the OpenAI API in Settings \u{2192} Brain.",
-              severity: .warning)
-    }
-
-    /// The selected CLI is installed but definitively signed out. Every brain turn would fail, so
-    /// refuse the Start instead of opening a pipeline that can never coach. Same preflight semantics
-    /// as `brainCLIMissing`: alert, but never stop a session that's already running.
-    static func brainCLINotSignedIn(provider: String) -> UserFacingError {
-        .init(title: "\(provider) isn't signed in",
-              message: "Sign in by running the \(provider) command once in Terminal, or switch the brain provider in Settings \u{2192} Brain, then press Start again.",
-              severity: .warning)
-    }
-
-    /// The selected CLI is installed but its status probe failed or timed out. That is not proof of
-    /// being signed out, so this is a degraded notice rather than a Start blocker.
-    static func brainCLISignInUnconfirmed(provider: String) -> UserFacingError {
-        .init(title: "\(provider) sign-in unconfirmed",
-              message: "Couldn't confirm \(provider) is signed in \u{2014} coaching turns may fail. If they do, run the CLI once in Terminal to sign in, then Stop and Start.",
-              severity: .degraded)
-    }
-
     /// No target in the brain route can serve a request: each is a subscription that is signed out
-    /// or whose sign-in service couldn't start. A preflight refusal with the same semantics as a
-    /// missing key: alert on Start, never stop a running session. It carries the first target's
-    /// failure, whose sentence says what to do.
+    /// or whose sign-in service couldn't start. A *preflight* failure: the Start is refused before
+    /// anything is torn down, so it alerts without stopping, and an in-place restart that trips it
+    /// has a live session that must survive. It carries the first target's failure, whose sentence
+    /// says what to do.
     static func brainRouteUnavailable(failure: ProviderFailure) -> UserFacingError {
         .init(title: "\(failure.source.displayName) isn't ready",
               message: "\(failure.activitySentence).",

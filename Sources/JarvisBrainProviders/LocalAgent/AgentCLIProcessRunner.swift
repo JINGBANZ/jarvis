@@ -12,10 +12,8 @@ import JarvisCore
 /// and cancelling the calling task (Stop pressed mid-turn) kills the subprocess immediately — a
 /// cancelled turn's reply can never be used, so the CLI must not keep burning the user's quota.
 public enum AgentCLIProcessRunner {
-    /// Public because it is this adapter's identity on every error that leaves it. The string
-    /// itself belongs to `LocalAgentFailureClassifier`, the one place that reads these domains, so
-    /// classifier and adapter cannot drift apart the way two literals would.
-    public static let errorDomain = LocalAgentFailureClassifier.processRunnerDomain
+    /// Public because it is this adapter's identity on every error that leaves it.
+    public static let errorDomain = "AgentCLIProcessRunner"
 
     /// `timings` is stamped as the run reaches each observable boundary. It is passed in (not
     /// returned) so a cancellation/timeout that unwinds through a throw still leaves the caller the

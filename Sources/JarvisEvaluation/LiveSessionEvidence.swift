@@ -113,10 +113,10 @@ public struct LiveSessionEvidence: Sendable {
         public let sourceTrigger: String?
         public let status: Int?
         public let error: String?
-        /// `request.provider`, which only a CLI target writes; nil means an OpenAI request.
-        public let cliProvider: String?
+        /// The `BrainProvider` raw value that served the request; nil when the record names none.
+        public let provider: String?
         public let instructions: String?
-        /// OpenAI `request.tools[].name`, in order; empty for a CLI request, which declares none.
+        /// `request.tools[].name`, in order.
         public let declaredToolNames: [String]
         /// A string `tool_choice` itself (`auto`, `required`), or an object choice's `type`
         /// (`allowed_tools`, `function`).

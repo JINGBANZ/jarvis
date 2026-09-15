@@ -69,7 +69,7 @@ import JarvisCore
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("claude", in: bin)
         let d = detector(home: home, pathVariable: "/nonexistent:\(bin.path)")
-        let cli = d.detect(.claudeCode)
+        let cli = d.detect(.claude)
         #expect(cli?.executableURL.path == bin.appendingPathComponent("claude").path)
         #expect(cli?.authenticationStatus == .unknown)
     }
@@ -80,7 +80,7 @@ import JarvisCore
         let home = try makeHome()
         try installBinary("claude", in: home.appendingPathComponent(".claude/local"))
         let d = detector(home: home, pathVariable: "/nonexistent")
-        #expect(d.detect(.claudeCode)?.executableURL.path
+        #expect(d.detect(.claude)?.executableURL.path
                 == home.appendingPathComponent(".claude/local/claude").path)
     }
 
@@ -94,7 +94,7 @@ import JarvisCore
             #!/bin/sh
             printf '%s\\n' '{"loggedIn":true}'
             """)
-        let cli = detector(home: home, pathVariable: "/usr/bin:/bin").detect(.claudeCode)
+        let cli = detector(home: home, pathVariable: "/usr/bin:/bin").detect(.claude)
         #expect(cli?.executableURL == bin.appendingPathComponent("claude"))
         #expect(cli?.authenticationStatus == .signedIn)
         let executable = try #require(cli?.executableURL)
@@ -117,9 +117,9 @@ import JarvisCore
         try installBinary("claude", in: older)
         try installBinary("claude", in: newer)
         #expect(detector(home: home, pathVariable: "/usr/bin:/bin")
-            .detect(.claudeCode)?.executableURL == newer.appendingPathComponent("claude"))
+            .detect(.claude)?.executableURL == newer.appendingPathComponent("claude"))
         #expect(detector(home: home, pathVariable: older.path)
-            .detect(.claudeCode)?.executableURL == older.appendingPathComponent("claude"))
+            .detect(.claude)?.executableURL == older.appendingPathComponent("claude"))
     }
 
     @Test(arguments: ["ChatGPT.app", "Codex.app"])
@@ -128,18 +128,14 @@ import JarvisCore
         let home = try makeHome()
         defer { try? fm.removeItem(at: home) }
         let resources = home.appendingPathComponent("Applications/\(app)/Contents/Resources")
-        try installBinary("codex", in: resources, script: """
-            #!/bin/sh
-            printf '%s\\n' 'shell_tool stable true'
-            """)
+        try installBinary("codex", in: resources)
         try write("{}", to: home.appendingPathComponent(".codex/auth.json"))
-        let cli = detector(home: home, pathVariable: "/usr/bin:/bin").detect(.codexCLI)
+        let cli = detector(home: home, pathVariable: "/usr/bin:/bin").detect(.codex)
         #expect(cli?.executableURL == resources.appendingPathComponent("codex"))
         #expect(cli?.authenticationStatus == .signedIn)
-        #expect(cli?.supportedFeatures == ["shell_tool"])
         let standalone = home.appendingPathComponent("standalone")
         try installBinary("codex", in: standalone)
-        #expect(detector(home: home, pathVariable: standalone.path).detect(.codexCLI)?.executableURL
+        #expect(detector(home: home, pathVariable: standalone.path).detect(.codex)?.executableURL
                 == standalone.appendingPathComponent("codex"))
     }
 
@@ -149,7 +145,7 @@ import JarvisCore
         try installBinary("codex", in: bin)
         try installBinary("codex", in: home.appendingPathComponent(".cargo/bin"))
         let d = detector(home: home, pathVariable: bin.path)
-        #expect(d.detect(.codexCLI)?.executableURL.path == bin.appendingPathComponent("codex").path)
+        #expect(d.detect(.codex)?.executableURL.path == bin.appendingPathComponent("codex").path)
     }
 
     @Test func skipsExecutableFromSystemTemporaryPATHAndUsesStableInstall() throws {
@@ -166,7 +162,7 @@ import JarvisCore
             temporaryDirectory: temporaryDirectory
         )
 
-        #expect(d.detect(.codexCLI)?.executableURL.path
+        #expect(d.detect(.codex)?.executableURL.path
                 == stableBin.appendingPathComponent("codex").path)
     }
 
@@ -177,7 +173,7 @@ import JarvisCore
         try fm.createDirectory(at: bin, withIntermediateDirectories: true)
         try write("not a binary", to: bin.appendingPathComponent("claude"))   // 0644, no exec bit
         let d = detector(home: home, pathVariable: bin.path)
-        #expect(d.detect(.claudeCode) == nil)
+        #expect(d.detect(.claude) == nil)
     }
 
     @Test func claudeAuthStatusCommandReportsSignedIn() throws {
@@ -188,7 +184,7 @@ import JarvisCore
             exit 0
             """)
         let d = detector(home: home, pathVariable: nil, authStatusTimeout: 10)
-        #expect(d.detect(.claudeCode)?.authenticationStatus == .signedIn)
+        #expect(d.detect(.claude)?.authenticationStatus == .signedIn)
     }
 
     @Test func claudeAuthStatusOverridesStaleOAuthAccountMarker() throws {
@@ -201,14 +197,14 @@ import JarvisCore
         try write(#"{"oauthAccount":{"emailAddress":"x@y.z"}}"#,
                   to: home.appendingPathComponent(".claude.json"))
         let d = detector(home: home, pathVariable: nil, authStatusTimeout: 10)
-        #expect(d.detect(.claudeCode)?.authenticationStatus == .signedOut)
+        #expect(d.detect(.claude)?.authenticationStatus == .signedOut)
     }
 
     @Test func claudeAuthStatusFailureIsUnknown() throws {
         let home = try makeHome()
         try installBinary("claude", in: home.appendingPathComponent(".claude/local"))
         let d = detector(home: home, pathVariable: nil)
-        #expect(d.detect(.claudeCode)?.authenticationStatus == .unknown)
+        #expect(d.detect(.claude)?.authenticationStatus == .unknown)
     }
 
     @Test func claudeAuthStatusProbeIsBounded() throws {
@@ -218,7 +214,7 @@ import JarvisCore
             sleep 1
             """)
         let d = detector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
-        #expect(d.detect(.claudeCode)?.authenticationStatus == .unknown)
+        #expect(d.detect(.claude)?.authenticationStatus == .unknown)
     }
 
     @Test func claudeAuthStatusProbeDoesNotWaitForInheritedChildStdout() throws {
@@ -233,7 +229,7 @@ import JarvisCore
             """)
         let d = detector(home: home, pathVariable: nil, authStatusTimeout: 0.01)
 
-        let status = d.detect(.claudeCode)?.authenticationStatus
+        let status = d.detect(.claude)?.authenticationStatus
         defer {
             if let contents = try? String(contentsOf: childPID, encoding: .utf8),
                let pid = pid_t(contents.trimmingCharacters(in: .whitespacesAndNewlines)) {
@@ -249,75 +245,23 @@ import JarvisCore
     @Test func codexAuthDetectedViaAuthJSON() throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
-        try installBinary("codex", in: bin, script: """
-            #!/bin/sh
-            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
-                printf '%s\\n' 'shell_tool stable true' 'code_mode_host stable true'
-                exit 0
-            fi
-            exit 2
-            """)
+        try installBinary("codex", in: bin)
         try write("{}", to: home.appendingPathComponent(".codex/auth.json"))
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
-        let cli = d.detect(.codexCLI)
-        #expect(cli?.authenticationStatus == .signedIn)
-        #expect(cli?.supportedFeatures == ["shell_tool", "code_mode_host"])
-    }
-
-    @Test func emptyCodexFeatureCatalogYieldsNoDisableFlags() throws {
-        let home = try makeHome()
-        let bin = home.appendingPathComponent("fakebin")
-        try installBinary("codex", in: bin, script: """
-            #!/bin/sh
-            if [ "$1" = "features" ] && [ "$2" = "list" ]; then
-                exit 0
-            fi
-            exit 2
-            """)
-        let cli = detector(home: home, pathVariable: bin.path).detect(.codexCLI)
-        #expect(cli?.supportedFeatures == [])
-    }
-
-    @Test func codexFeatureProbeFailureFallsBackToNoGuessedFlags() throws {
-        let home = try makeHome()
-        let bin = home.appendingPathComponent("fakebin")
-        try installBinary("codex", in: bin)
-        let d = detector(home: home, pathVariable: bin.path)
-        let cli = d.detect(.codexCLI)
-        #expect(cli?.supportedFeatures == [])
-    }
-
-    @Test func codexFeatureProbeIsBounded() throws {
-        let home = try makeHome()
-        let bin = home.appendingPathComponent("fakebin")
-        try installBinary("codex", in: bin, script: """
-            #!/bin/sh
-            exec sleep 1
-            """)
-        let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 0.01)
-        let cli = d.detect(.codexCLI)
-        #expect(cli?.supportedFeatures == [])
+        #expect(d.detect(.codex)?.authenticationStatus == .signedIn)
+        try fm.removeItem(at: home.appendingPathComponent(".codex/auth.json"))
+        #expect(d.detect(.codex)?.authenticationStatus == .signedOut)
     }
 
     @Test func missingBinaryDetectsNothing() throws {
         guard !systemWideCLIInstalled else { return }
         let home = try makeHome()
         let d = detector(home: home, pathVariable: "/nonexistent")
-        #expect(d.detect(.claudeCode) == nil)
-        #expect(d.detect(.codexCLI) == nil)
+        #expect(d.detect(.claude) == nil)
+        #expect(d.detect(.codex) == nil)
     }
 
-    @Test func openAIProviderHasNothingToDetect() throws {
-        let home = try makeHome()
-        let bin = home.appendingPathComponent("fakebin")
-        try installBinary("claude", in: bin)
-        try installBinary("codex", in: bin)
-        let d = detector(home: home, pathVariable: bin.path)
-        #expect(d.detect(.openAI) == nil)
-        #expect(d.detectAll().map(\.provider) == [.claudeCode, .codexCLI])
-    }
-
-    @Test func asyncDetectionReturnsProbeResults() async throws {
+    @Test func asyncDetectionReturnsRequestedCLIsInOrder() async throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         try installBinary("claude", in: bin, script: """
@@ -326,33 +270,28 @@ import JarvisCore
             """)
         try installBinary("codex", in: bin)
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
-        let result = await d.detectAllAsync()
-        #expect(result.first(where: { $0.provider == .claudeCode })?.authenticationStatus == .signedIn)
+        let result = await d.detectAllAsync([.codex, .claude])
+        #expect(result.map(\.cli) == [.codex, .claude])
+        #expect(result.last?.authenticationStatus == .signedIn)
     }
 
-    @Test func scopedAsyncDetectionProbesOnlyRequestedProvidersOnce() async throws {
+    @Test func asyncDetectionProbesOnlyRequestedCLIsOnce() async throws {
         let home = try makeHome()
         let bin = home.appendingPathComponent("fakebin")
         let claudeProbe = home.appendingPathComponent("claude-probed")
-        let codexProbe = home.appendingPathComponent("codex-probed")
         try installBinary("claude", in: bin, script: """
             #!/bin/sh
             printf 'probe\\n' >> "$HOME/claude-probed"
             printf '%s\\n' '{"loggedIn":true,"authMethod":"claude.ai"}'
             """)
-        try installBinary("codex", in: bin, script: """
-            #!/bin/sh
-            printf 'probe\\n' >> "$HOME/codex-probed"
-            exit 2
-            """)
+        try installBinary("codex", in: bin)
         try write("{}", to: home.appendingPathComponent(".codex/auth.json"))
         let d = detector(home: home, pathVariable: bin.path, authStatusTimeout: 10)
 
-        let result = await d.detectAllAsync([.codexCLI, .openAI, .codexCLI])
-
-        #expect(result.map(\.provider) == [.codexCLI])
-        #expect(fm.fileExists(atPath: codexProbe.path))
+        #expect(await d.detectAllAsync([.codex, .codex]).map(\.cli) == [.codex])
         #expect(!fm.fileExists(atPath: claudeProbe.path))
-        #expect(try String(contentsOf: codexProbe, encoding: .utf8) == "probe\n")
+
+        #expect(await d.detectAllAsync([.claude, .claude]).map(\.cli) == [.claude])
+        #expect(try String(contentsOf: claudeProbe, encoding: .utf8) == "probe\n")
     }
 }

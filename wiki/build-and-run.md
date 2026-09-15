@@ -15,7 +15,7 @@ The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Lin
 what CI runs; no Xcode project exists. Developer desktops also have full Xcode and the Xcode MCP,
 whose macOS workflow builds, launches, stops, and reads logs, so an agent may drive the app that way;
 the scripts use `open`. The live e2e tests assume the three TCC grants, an OpenAI key saved in the
-secrets file, and signed-in Claude Code and Codex CLIs.
+secrets file, and the Codex and Claude subscriptions signed in from Settings → Connections.
 
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested
@@ -25,8 +25,9 @@ secrets file, and signed-in Claude Code and Codex CLIs.
   `JarvisScreenCapture` is the OS-bound `screencapture` process/file adapter behind Core's
   `ScreenCapturing` port, split out so `JarvisScreenCaptureTests` can drive its cancellation,
   cleanup-verification, and latch contract headlessly. `JarvisBrainProviders` is the
-  Foundation-only concrete brain-provider library (the OpenAI Responses client and its HTTP
-  failure classification), composed by the app at Start. `JarvisEvaluation` is the
+  Foundation-only concrete brain-provider library (the Responses client every brain target uses,
+  the bundled subscription helper's supervisor and sign-in, and the agent CLI detector and runner
+  the session evaluator uses), composed by the app at Start. `JarvisEvaluation` is the
   Foundation-only sealed-session evaluation library shared by the app and `EvalPrep`.
   `JarvisApp` is the thin executable that wires the libraries to the side-effectful macOS
   frameworks (mic, ScreenCaptureKit, the realtime websocket, the menu bar). That split is what
@@ -47,6 +48,15 @@ secrets file, and signed-in Claude Code and Codex CLIs.
 identity remains the source in `Resources/Info.plist`; the development script edits only the assembled
 copy, rewriting its name and bundle id, dropping its update feed, and stamping it as a development
 build so the menu's footer caption reads a red `Dev` rather than the release version the plist carries.
+
+Both `build-app.sh` and `package-app.sh` copy the subscription helper,
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), to `Contents/MacOS/cliproxyapi` with
+its MIT license under `Contents/Resources/Licenses/`, from the one pinned release in
+[`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh), so the development and the release
+app run the same helper. The first build downloads the archive into `.build/cliproxyapi/`; every
+build checks its SHA-256 against the pin, so a corrupted or substituted cache fails the build instead
+of shipping, and the binary is never committed. Bumping the helper is that pin plus a Jarvis release
+([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)).
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature
@@ -85,7 +95,9 @@ The `Jarvis Dev` identity above is a **local-dev** device: on any other Mac it's
 Gatekeeper blocks the app. Distributable builds go through `scripts/package-app.sh`, which builds and
 signs the bundle once with a **Developer ID Application** certificate — hardened runtime + secure
 timestamp (both notarization requirements) — with the `audio-input` entitlement that hardened runtime
-requires for microphone capture. It submits a temporary zip of that app to Apple's notary service,
+requires for microphone capture. Nested code is sealed inner to outer, Sparkle's pieces and then the
+subscription helper under the same hardened runtime and timestamp before the app, because
+notarization rejects any executable in the bundle that lacks them. It submits a temporary zip of that app to Apple's notary service,
 staples and validates the app's ticket, then uses the hash-pinned release-only `dmgbuild` tool to
 place the stapled app beside an `Applications` shortcut in `Jarvis.dmg`. The mounted Finder window is
 a fixed icon view: Jarvis on the left, Applications on the right, and a large arrow between them,
@@ -103,7 +115,8 @@ ticket, mounts it read-only, and requires exactly the two visible install target
 Finder metadata and arrow background. `scripts/verify-dmg-layout.py` reads the final `.DS_Store` and
 checks the icon view, window size, chrome, icon size and positions, background link and digest, and
 Applications target position. Release verification also checks the Applications target, mounted app
-version, arm64 architecture, linked macOS 26-or-newer SDK, notices, strict code signature, and
+version, arm64 architecture, the arm64 subscription helper and its license, linked macOS 26-or-newer
+SDK, notices, strict code signature, and
 Gatekeeper policy result before detaching the image. The same SDK guard runs immediately after the
 release build, before signing or notarization; the pre-container app is not accepted as a proxy for
 the downloaded artifact.
@@ -335,7 +348,7 @@ both current sources when available and keeps no separate historical screen-text
 
 ## Live e2e tests
 
-Behavior that needs real grants, capture devices, providers, and CLIs is verified by
+Behavior that needs real grants, capture devices, providers, and subscription sign-ins is verified by
 `./scripts/run-live-tests.sh`, which drives the development app through scripted interview scenarios
 and asserts on the session folders they leave. [live-e2e-tests.md](./live-e2e-tests.md) holds the
 prerequisites, the case index, and the manual checks that stay outside the command.
