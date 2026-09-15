@@ -270,7 +270,7 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   normalized provider-call telemetry. These tables describe recorded facts without declaring a
   defect; missing or partial values stay unavailable instead of becoming zero. The prompt carries no
   checklist of past incidents: one grows without bound and biases the auditor toward known failures
-  while still missing the next shape. Growing CLI request
+  while still missing the next shape. Growing request
   history is common-prefix elided with an explicit pointer back to untouched traffic. The agent uses
   read-only file and source-search tools to follow the evidence, then writes a generic Summary /
   Findings / Evidence gaps / Recommendations report to owner-only `eval-report.md`. A saved session
