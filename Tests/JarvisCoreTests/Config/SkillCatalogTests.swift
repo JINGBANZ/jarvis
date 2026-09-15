@@ -105,7 +105,7 @@ import Testing
     @Test func everyBundledSkillParsesAndCarriesGuidance() throws {
         let skills = SkillCatalog.bundled()
 
-        #expect(skills.map(\.name) == ["behavioral", "coding", "system-design"])
+        #expect(skills.map(\.name) == ["behavioral", "coding", "coding-with-ai", "system-design"])
         for skill in skills {
             #expect(!skill.description.isEmpty)
             #expect(!skill.body.hasPrefix("---"))
@@ -118,6 +118,26 @@ import Testing
         let design = try #require(skills.first { $0.name == "system-design" })
         #expect(design.body.contains("mermaid"))
         #expect(skills.first { $0.name == "coding" }?.body.contains("invariant") == true)
+    }
+
+    @Test func aiCodingUsesTheExistingOptionalSkillCatalog() throws {
+        let skills = SkillCatalog.bundled()
+        let ai = try #require(skills.first { $0.name == "coding-with-ai" })
+        let enabled = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false, skills: skills)
+        #expect(enabled.skill(named: ai.name) == ai)
+        #expect(enabled.tool(named: "load_skill")?.parametersJSON.contains(ai.name) == true)
+        let prompt = JarvisPrompts.Coach.system(capabilities: enabled)
+        #expect(prompt.contains("- \(ai.name): \(ai.description)"))
+        #expect(!prompt.contains(ai.body))
+
+        let disabled = CoachCapabilities.compose(
+            disabledTools: [], disabledSkills: [ai.name],
+            prepSourcesConfigured: false, skills: skills)
+        #expect(disabled.skill(named: ai.name) == nil)
+        #expect(disabled.skill(named: "coding") != nil)
+        #expect(disabled.tool(named: "load_skill")?.parametersJSON.contains(ai.name) == false)
+        #expect(!JarvisPrompts.Coach.system(capabilities: disabled).contains(ai.name))
     }
 
     /// A build that ships no readable skill is a generic coach, not a broken one: no loader, no

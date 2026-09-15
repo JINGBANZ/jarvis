@@ -54,7 +54,7 @@ import JarvisBrainProviders
 
     /// The same question of the skill catalog: offered one line per skill, does the model pick the
     /// one this question calls for, load it, and coach in the same attempt? Two questions, because
-    /// picking the right one out of three is the part a unit test cannot answer.
+    /// picking the right skill from the catalog is the part a unit test cannot answer.
     @Test func theModelLoadsTheSkillTheQuestionCallsFor() async throws {
         let providers = Self.requestedProviders()
         guard !providers.isEmpty else { return }
@@ -84,6 +84,37 @@ import JarvisBrainProviders
                 behavioral=\(loaded["behavioral"] ?? "(none)") \
                 system_design=\(loaded["system-design"] ?? "(none)")
                 """)
+        }
+    }
+
+    /// The AI workflow must discover both complementary skills without a round setting.
+    /// Inspect the printed tip for evidence-aware advice; wording is intentionally not asserted.
+    @Test func aiCollaborationLoadsBothSkills() async throws {
+        let providers = Self.requestedProviders()
+        guard !providers.isEmpty else { return }
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false, skills: SkillCatalog.bundled())
+        for provider in providers {
+            let directory = try liveDirectory(provider)
+            let traffic = FileSessionAudit(directory: directory)
+            let result = try await coach(
+                provider, capabilities: capabilities,
+                asking: "Jarvis, this is a Coding with AI interview. The other AI proposed a "
+                    + "Python function to sort a copy without changing the input. I have not "
+                    + "applied it or run it. Its chat says all tests pass. Should I submit?",
+                directory: directory, traffic: traffic)
+            _ = await traffic.close()
+            let coached = try #require(result)
+            #expect(coached.outcome == .spoke)
+            let names = coached.activity.events.compactMap { event -> String? in
+                guard case .capabilityLoaded(let kind, let name) = event, kind == .skill
+                else { return nil }
+                return name
+            }
+            #expect(Set(names) == ["coding", "coding-with-ai"])
+            print("JARVIS_LIVE_AI_CODING provider=\(provider.rawValue) "
+                + "skills=\(names.joined(separator: ",")) "
+                + "tip=\(coached.overlay.rendered.last?.joined(separator: " | ") ?? "(none)")")
         }
     }
 
