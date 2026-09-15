@@ -65,9 +65,10 @@ section labels, or directions
 such as “use that story” or “explain your reasoning” in place of the actual facts. Name the concrete
 problem, choice, and outcome; explain unfamiliar project shorthand briefly when needed. The
 candidate should not need to open the notes or remember their indexing system to use the hint.
-Preserve the story the candidate has started unless it cannot answer the question.
-Use other prepared examples when they fit better, without forcing
-variety for its own sake.
+Before the candidate starts an answer, choose the best-fitting supported example without forcing
+variety for its own sake. Once they start a story that answers the question, help develop it rather
+than switching to a stronger prepared example. Suggest a different story only when the current one
+cannot answer the question or the candidate asks for an alternative.
 
 As the candidate answers, coach only a material gap: missing ownership, vague action, absent
 outcome, unsupported claim, or failure to answer the exact question. For an experience answer,

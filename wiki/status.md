@@ -9,19 +9,9 @@
 ## Current phase
 
 **General technical-interview coaching, audio reliability, and local CLI brain providers are
-implemented.** The coach's capabilities are composed once at Start and the model loads what a
-question needs: prep-notes search as a deferred tool, and the behavioral, coding, and system-design
-skills through `load_skill`, with no Start-time selection
-([architecture.md → Capabilities](./architecture.md#capabilities)). Behavioral coaching distinguishes
-experience, personal, and hypothetical questions and preserves prep-note factual boundaries in
-self-contained hints that pair a new question’s assessment focus with supported answer content.
-The [prep-search policy](./architecture.md#capabilities) permits one focused
-follow-up to resolve a returned story or section reference when usable facts are missing.
-All supported prep formats (`.md`, `.txt`, `.pdf`, `.docx`) are available to every interview type.
-[`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift) applies section
-and table boundaries only to Markdown sources, preserves fenced code and repeats split-table headers;
-other supported source formats keep paragraph-based chunking. Retrieval remains keyword-based.
-Their coaching policy and the
+implemented.** Coaching skills and prep-material support are available; see
+[architecture.md → Capabilities](./architecture.md#capabilities) for their canonical behavior.
+Coaching policy and the
 diagram boundary are defined in
 [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
