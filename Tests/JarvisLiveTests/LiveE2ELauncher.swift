@@ -307,14 +307,25 @@ actor LiveE2EPreflight {
                 "No OpenAI API key in Jarvis's key file: save one in Jarvis Settings → Connections. "
                     + "OPENAI_API_KEY does not reach an app launched with open."))
         }
-        let detected = await AgentCLIDetector().detectAllAsync([.claudeCode, .codexCLI])
+        // A cold first CLI start can outlast the detector's short status probe, which then reports
+        // unknown rather than signed out. Probe once more before stopping the run over it.
+        var detected = await AgentCLIDetector().detectAllAsync([.claudeCode, .codexCLI])
+        if detected.contains(where: { $0.authenticationStatus == .unknown }) {
+            detected = await AgentCLIDetector().detectAllAsync([.claudeCode, .codexCLI])
+        }
         let clis = Dictionary(uniqueKeysWithValues: detected.map { ($0.provider, $0) })
         for provider in [BrainProvider.claudeCode, .codexCLI] {
             guard let cli = clis[provider] else {
                 return .failure(Failure(message: "\(provider.displayName) CLI was not found."))
             }
-            guard cli.authenticationStatus == .signedIn else {
+            switch cli.authenticationStatus {
+            case .signedIn:
+                continue
+            case .signedOut:
                 return .failure(Failure(message: "\(provider.displayName) is not signed in."))
+            case .unknown:
+                return .failure(Failure(message:
+                    "\(provider.displayName) sign-in could not be confirmed: its status probe did not answer."))
             }
         }
         return .success(clis)
