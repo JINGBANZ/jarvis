@@ -47,6 +47,8 @@ cd "$(dirname "$0")/.."
 #   Diagnostics/ (rest)
 #                   evidence persistence by definition; only the heartbeat/health files above are
 #                   kernel.
+#   LiveE2E/        the Foundation-only scenario, options, and audio-timeline model of the live e2e
+#                   mode, like Benchmark/; a harness around the kernel, not kernel code.
 #
 # Separately covered (admission_paths below):
 #   Diagnostics/Log.swift

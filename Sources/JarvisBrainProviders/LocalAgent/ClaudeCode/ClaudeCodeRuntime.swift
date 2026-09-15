@@ -75,6 +75,10 @@ actor ClaudeCodeRuntime: LocalAgentRuntimeBackend {
         lifetime.terminateAll()
     }
 
+    nonisolated func awaitTeardown() async {
+        await lifetime.drained()
+    }
+
     private func startPreparationIfNeeded(
         _ configuration: LocalAgentConversationConfiguration,
         deadline: Date? = nil
@@ -204,8 +208,7 @@ final class ClaudeCodeQuery: @unchecked Sendable {
                 return query
             }
         } catch {
-            lifetime.unregister(process)
-            process.terminateNow()
+            lifetime.terminate(process)
             throw error
         }
     }
@@ -307,8 +310,7 @@ final class ClaudeCodeQuery: @unchecked Sendable {
         }
         finished = true
         finishLock.unlock()
-        process.terminateNow()
-        lifetime.unregister(process)
+        lifetime.terminate(process)
     }
 
     private func nextPayload(deadline: Date) async throws -> [String: Any] {

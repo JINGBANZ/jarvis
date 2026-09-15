@@ -1,0 +1,15 @@
+{
+  "id": "B",
+  "audio": "fixture",
+  "brain": { "primary": "codex-cli", "fallbacks": [] },
+  "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": ["behavioral", "system-design", "coding-with-ai"] },
+  "prepNotes": "prep-notes.md",
+  "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "steps": [
+    { "screen": "coding-problem.jpg" },
+    { "press": "hint" },
+    { "say": { "speaker": "them", "text": "Tell me about a time you disagreed with a teammate." } },
+    { "stop": true }
+  ]
+}

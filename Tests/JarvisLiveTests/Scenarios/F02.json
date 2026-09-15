@@ -1,0 +1,12 @@
+{
+  "id": "F02",
+  "audio": "fixture",
+  "brain": { "primary": "codex-cli", "fallbacks": [] },
+  "capabilities": { "disabledTools": [], "disabledSkills": [] },
+  "prepNotes": null,
+  "transcription": { "model": "gpt-4o-transcribe", "key": "invalid" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "steps": [
+    { "stop": true }
+  ]
+}

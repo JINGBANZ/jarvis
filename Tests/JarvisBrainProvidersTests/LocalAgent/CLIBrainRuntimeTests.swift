@@ -514,7 +514,7 @@ import JarvisCore
             provider: .codexCLI,
             codexRuntimeBaseDirectory: directory.appendingPathComponent("agent-runtimes"),
             // "unified_exec" is advertised; "goals" is not, and must never be passed.
-            codexSupportedFeatures: ["shell_tool", "unified_exec", "browser_use"])
+            codexSupportedFeatures: ["shell_tool", "shell_snapshot", "unified_exec", "browser_use"])
         let client = makeClient(
             provider: .codexCLI,
             executable: executable,
@@ -534,7 +534,7 @@ import JarvisCore
         #expect(containsPair("-c", "mcp_servers={}", in: arguments))
         #expect(containsPair("-c", "project_root_markers=[]", in: arguments))
         #expect(containsPair("-c", "project_doc_max_bytes=0", in: arguments))
-        for feature in ["shell_tool", "unified_exec", "browser_use"] {
+        for feature in ["shell_tool", "shell_snapshot", "unified_exec", "browser_use"] {
             #expect(containsPair("--disable", feature, in: arguments))
         }
         #expect(!arguments.contains("goals"))
@@ -552,7 +552,9 @@ import JarvisCore
         #expect((config["project_root_markers"] as? [Any])?.isEmpty == true)
         #expect(config["project_doc_max_bytes"] as? Int == 0)
         let features = try #require(config["features"] as? [String: Bool])
-        #expect(features == ["shell_tool": false, "unified_exec": false, "browser_use": false])
+        #expect(features == [
+            "shell_tool": false, "shell_snapshot": false, "unified_exec": false, "browser_use": false,
+        ])
     }
 
     @Test func codexRejectsANonEphemeralThread() async throws {
@@ -619,6 +621,77 @@ import JarvisCore
         // One app-server, one thread: compaction never opened one.
         #expect(requests(method: "thread/start", in: trace).count == 1)
         #expect(requests(method: "initialize", in: trace).count == 1)
+    }
+
+    /// Codex writes its home (a model cache, system skills) until it has exited, so a home removed at
+    /// the termination signal came back with default permissions. Terminating the runtime returns
+    /// only after the app-server has exited and its home is gone.
+    @Test func codexTerminationRemovesTheRuntimeHomeAfterTheAppServerExits() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let trace = directory.appendingPathComponent("trace")
+        let homeWriterReady = directory.appendingPathComponent("home-writer-ready")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: codexScript(
+                trace: trace,
+                threadResult: Self.ephemeralThreadResult,
+                homeWriterReady: homeWriterReady))
+        let runtimeBase = directory.appendingPathComponent("agent-runtimes")
+        let runtime = CLIBrainRuntime(provider: .codexCLI, codexRuntimeBaseDirectory: runtimeBase)
+        let client = makeClient(
+            provider: .codexCLI,
+            executable: executable,
+            directory: directory,
+            runtime: runtime,
+            prewarm: false)
+
+        _ = try await client.respond(
+            messages: [.system("coach prompt"), .user("help")],
+            tools: coachTools,
+            toolChoice: .required)
+        #expect(runtimeHomes(in: runtimeBase).count == 1)
+        try await waitForFile(homeWriterReady)
+
+        await runtime.terminate()
+
+        #expect(runtimeHomes(in: runtimeBase).isEmpty)
+    }
+
+    /// A summary's one-shot `codex exec` writes the same kind of home, so a summary cancelled by Stop
+    /// must not leave its home behind either.
+    @Test func cancelledCodexExecRemovesItsHomeAfterTheProcessExits() async throws {
+        let directory = try makeWorkDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let homeWriterReady = directory.appendingPathComponent("home-writer-ready")
+        let executable = try makeExecutable(
+            in: directory,
+            named: "fake-codex",
+            script: """
+                #!/bin/sh
+                \(homeWritingHelper(ready: homeWriterReady))
+                while :; do sleep 0.05; done
+                """)
+        let runtimeBase = directory.appendingPathComponent("agent-runtimes")
+        let runtime = CLIBrainRuntime(backend: CodexExecRuntime(homeBaseDirectory: runtimeBase))
+        let summarizer = makeClient(
+            provider: .codexCLI, executable: executable, directory: directory,
+            runtime: runtime, prewarm: false,
+            systemPrompt: "summarize", tools: [], toolChoice: .auto)
+
+        let summary = Task {
+            try await summarizer.respond(
+                messages: [.system("summarize"), .user("older turns")],
+                tools: [],
+                toolChoice: .auto)
+        }
+        try await waitForFile(homeWriterReady)
+        summary.cancel()
+        _ = await summary.result
+        await runtime.terminate()
+
+        #expect(runtimeHomes(in: runtimeBase).isEmpty)
     }
 
     @Test func timedOutCodexCompactionInterruptsOnlyItsThread() async throws {
@@ -922,6 +995,30 @@ import JarvisCore
         runtime.terminateNow()
     }
 
+    /// A process in the Codex group that keeps writing `CODEX_HOME`, recreating it when it is gone,
+    /// until it is killed. It ignores SIGTERM, so it stands for any Codex that has not exited yet when
+    /// Jarvis signals it. `ready` appears once it is writing.
+    private func homeWritingHelper(ready: URL) -> String {
+        """
+        perl -e '
+          $SIG{TERM} = "IGNORE";
+          open(my $ready, ">", $ARGV[0]);
+          close($ready);
+          while (1) {
+            mkdir $ENV{CODEX_HOME};
+            open(my $cache, ">", "$ENV{CODEX_HOME}/models_cache.json");
+            close($cache);
+            select(undef, undef, undef, 0.02);
+          }
+        ' '\(shellQuoted(ready.path))' &
+        """
+    }
+
+    private func runtimeHomes(in base: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? [])
+            .filter { $0.hasPrefix("codex-runtime-") }
+    }
+
     private func makeClient(
         provider: BrainProvider,
         executable: URL,
@@ -977,8 +1074,10 @@ import JarvisCore
         threadStartGate: URL? = nil,
         execReply: String? = nil,
         execItemType: String = "agent_message",
-        execUsage: String = "{}"
+        execUsage: String = "{}",
+        homeWriterReady: URL? = nil
     ) -> String {
+        let homeWriter = homeWriterReady.map { homeWritingHelper(ready: $0) + "\n" } ?? ""
         let recordArguments = argumentsFile.map {
             "printf 'arg=<%s>\\n' \"$@\" > '\(shellQuoted($0.path))'\n"
         } ?? ""
@@ -1006,7 +1105,7 @@ import JarvisCore
         } ?? ""
         return """
             #!/bin/sh
-            \(execBranch)\(recordPID)\(recordArguments)while IFS= read -r line; do
+            \(homeWriter)\(execBranch)\(recordPID)\(recordArguments)while IFS= read -r line; do
               printf 'input: %s\\n' "$line" >> '\(shellQuoted(trace.path))'
               request_id=$(printf '%s' "$line" | sed -n 's/.*"id":\\([0-9][0-9]*\\).*/\\1/p')
               method=$(printf '%s' "$line" | sed -n 's/.*"method":"\\([^"]*\\)".*/\\1/p' | tr -d '\\\\')

@@ -196,6 +196,9 @@ optional evidence copy, every concrete brain adapter and the screen-capture help
 coaching coordinator and app delegate are decomposed into owners with stated boundaries. The
 coaching kernel's dependency rules are enforced by `scripts/check-coaching-kernel.sh` in the Gate.
 
+The [live e2e run](./live-e2e-tests.md) covers the capability, chronology, screen-gate,
+provider-switch, failed-cycle, and readiness paths.
+
 ## Next action
 
 Run the [browser screen-text signed-app smoke](./build-and-run.md#browser-screen-text-validation) in a
@@ -206,10 +209,11 @@ still accompanies every active-window capture. Offline tests cover dual-source r
 exclusion, bounded extraction, editor priority, and window selection; real Chrome coverage remains an
 acceptance blocker.
 
-Run the provider-failure live smoke, which is the only way to see the refused-handshake and
-never-ready paths: with an obviously invalid OpenAI key, Start ends the session within about three
-seconds naming the rejection and its close code; with a valid key and Wi-Fi off, Start ends it within
-about fifteen seconds naming the network cause, with no system-audio degradation row before it; with
+Run the provider-failure live smoke, a
+[manual check outside the live e2e command](./live-e2e-tests.md#what-stays-outside-the-command) and
+the only way to see the never-ready path: with a valid key and Wi-Fi off, Start ends the session
+within about fifteen seconds naming the network cause, with no system-audio degradation row before
+it; with
 a valid key and network, coaching still works and `jarvis-debug.log` carries `socket #1` lines with
 stage names. Both socket providers run one shared lifecycle driver, so the same walk is needed for
 Gemini, plus a session left past its ten-minute cap to see the `goAway` rotation replace the
@@ -217,16 +221,7 @@ socket with no user-visible notice, and the benchmark's reconnect arm
 (`./scripts/transcription-benchmark.sh`), which should report ready at generation 1, then
 `reconnectPrepared`, then ready at generation 2.
 
-Run the capability smoke in the signed app: with a prep source configured, a matching question
-should show one "loaded the search_prep_notes tool" row and a tip built on the notes, and switching
-Prep notes search off in Settings should leave a Start carrying neither the tool nor its catalog
-line. The model's own choice to load is covered on all three brains by the opt-in
-`CoachToolLoadingLiveTests` (`JARVIS_LIVE_CAPABILITY_PROVIDER`); what is left is the app path around
-it, a System Design session on a CLI brain rendering a diagram, and the two fresh-session **⌥⌘J**
-presses in [build-and-run.md](./build-and-run.md#live-smoke-checklist) on OpenAI and one CLI brain,
-where the first press should load its skill before the tip and the second should take one round trip.
-
-Run the [evaluation source smoke](./build-and-run.md#live-smoke-checklist) in a development bundle
+Run the [evaluation source smoke](./live-e2e-tests.md#what-stays-outside-the-command) in a development bundle
 and an installed release: source/version selection, per-run fetch and discard, actionable failures,
 and cancellation on Quit. Offline tests cover the source store and evaluator; native presentation
 and a real release download still need this smoke.
@@ -239,11 +234,9 @@ capture-excluded box, caption summaries stay short, and Stop prevents late deliv
 Gate covers context delivery, caption/box separation, preferences, and manual retry/coalescing;
 real audio, capture, screen sharing, and shortcut use during a live interview still need this smoke.
 
-Run a live mixed practice smoke with the OpenAI brain: request two hints on the same
-untouched coding prompt, then test demonstrated understanding, a local block, a visible bug,
-completion without tests, and valid progress. Move directly into a system-design question and back
-to coding without changing Settings. Confirm the overlay remains at most three short lines, the
-second hint advances rather than repeats, and healthy progress stays silent. This smoke verifies on-demand
+Run a live mixed practice smoke with the OpenAI brain: test demonstrated understanding, a local
+block, a visible bug, completion without tests, and valid progress. Confirm the overlay remains at
+most three short lines and healthy progress stays silent. This smoke verifies on-demand
 screen capture, live transcript, and overlay behavior together before release.
 
 Run a Coding with AI mock in CoderPad with Chrome page text enabled: establish the AI-assisted
@@ -264,10 +257,9 @@ looping; enabling Screen Recording after that
 trip to Settings turns the button into **Quit & Reopen** rather than reopening Settings again;
 allowing everything reaches the menu bar after one relaunch.
 
-Then run the live smoke checklist for the lean coaching core work: Start, Stop, and an immediate
-restart; a coaching turn with a screen view; a Settings change applied to a running session and a
-failed preflight; capture readiness and system-audio degradation to microphone-only; one Claude Code
-and one Codex coaching turn; and browsing a finished session in the Activity window. The offline Gate
+Then run the remaining lean coaching core smoke by hand: Start, Stop, and an immediate restart; a
+coaching turn with a screen view; a Settings change applied to a running session and a failed
+preflight; and browsing a finished session in the Activity window. The offline Gate
 covers everything unit-testable, but `JarvisApp` is verified live by design.
 
 Land [#216](https://github.com/JINGBANZ/jarvis/issues/216): `CoachDriver.captureScreen` still parks
@@ -288,12 +280,8 @@ updates, and fork-workflow approval for the public repository. Keep self-hosted 
 to public forks.
 
 
-Run a live chronology smoke on a fresh session: let one speaker finish a longer question while the
-other gives a short reply, then confirm Activity inserts the question before the reply and the first
-automatic brain request contains that same order. Repeat while a model call is already in flight so
-the queued automatic attempt also waits. This requires live audio permissions and was not exercised
-by the offline gate. Lower-priority runtime and coaching follow-ups from the session audit remain
-parked in [issue #151](https://github.com/JINGBANZ/jarvis/issues/151).
+Lower-priority runtime and coaching follow-ups from the session audit remain parked in
+[issue #151](https://github.com/JINGBANZ/jarvis/issues/151).
 
 Then repeat `./scripts/transcription-benchmark.sh standard` to classify the single GPT Live
 Transcribe bilingual final-stream timeout from the first 36-repetition run. The automated scoped
@@ -315,34 +303,20 @@ both a failing and a passing run, confirming the Gemini endpoint is logged witho
 no Gemini key saved refuses the Start and names the missing credential, and confirm switching back to
 OpenAI and starting again leaves the primary path unregressed.
 
-Then run the live prompt smoke on a fresh session: show an interview question without speaking its
-details, ask “Jarvis, how can I solve this in one pass?”, and confirm the first action is
-exactly one `capture_screen` followed by a screen-specific reply. Then ask a fully stated behavioral
-question and confirm it can answer without an unnecessary capture. Finish the in-app Claude Code
-provider smoke: confirm Settings shows it signed in, then confirm a coaching turn and screen request.
-While that session runs, switch providers and confirm the next completed turn preserves context and
-adds the provider-only success notice to Activity; then exercise a failed replacement and confirm
-the pending conversation is preserved. Verify the first-open Brain state (the OpenAI API selected as Primary,
-with its model and Add fallback usable) plus the Connections **Add API key** state, then configure multiple fallbacks and force a temporary
-failure-budget transition, a proven-permanent one-attempt transition, an unavailable-target skip, and
-final route exhaustion. With only one usable target, keep its brain unavailable for three attempts:
-confirm retries stop, listening continues, and one fixed failure notice appears in Activity and red
-on the enabled overlay. Wait through a silence check and confirm no new request is sent. Then send
-a new hint or finalized speech and confirm a fresh retry budget without Start. Stop during a retry
-must prevent further requests. Confirm no provider-specific tool state crosses attempts and verify a
-successful fallback remains active without changing preferences. Configure Codex as Primary and
-confirm `jarvis-debug.log` reports the target thread ready before the first coaching request and that
-the turn completes on its app-server; then Stop and confirm neither the app-server nor its private
-runtime home survives. Then Stop the Claude smoke and confirm no query child remains. The signed-in
-Foundation-level Claude POC already verifies two turns on one native conversation; this remaining
-smoke covers app wiring, TCC, audio, and overlay presentation. Exercise one
-audio-route switch: Activity should say listening continues, the
-next turn should include any unsent speech, and capture should recover
+Finish the in-app Claude Code provider smoke: confirm Settings shows it signed in. While a session
+runs, exercise a failed provider replacement and confirm the pending conversation is preserved.
+Verify the first-open Brain state (the OpenAI API selected as Primary, with its model and Add
+fallback usable) plus the Connections **Add API key** state, then configure multiple fallbacks and
+force a temporary failure-budget transition, a proven-permanent one-attempt transition, an
+unavailable-target skip, and final route exhaustion. Stop during a retry must prevent further
+requests. Confirm no provider-specific tool state crosses attempts and verify a successful fallback
+remains active without changing preferences. Exercise one audio-route switch: Activity should say
+listening continues, the next turn should include any unsent speech, and capture should recover
 without rotating the session. Stop that session, click **Evaluate**, and confirm the agentic report
 opens with the four generic sections, cites exact session or source anchors for material findings,
-and records unsupported conclusions as evidence gaps. The standard release checklist, including quiet-start capture before system
-playback, remains in
-[build-and-run.md](./build-and-run.md).
+and records unsupported conclusions as evidence gaps. The standing manual checks are listed in
+[live-e2e-tests.md → What stays outside the command](./live-e2e-tests.md#what-stays-outside-the-command),
+and Scenario R covers capture readiness on a quiet start.
 
 ## Built
 
@@ -401,11 +375,13 @@ wants one is prompt text — the tip style, the field's description, and the sys
 a runtime gate.
 
 Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverlay` + `JarvisScreenCapture` harness is green
-(`./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the smoke run.
+(`./scripts/run-tests.sh`); `JarvisApp` is the thin OS shell, verified by the [live e2e run](./live-e2e-tests.md).
 
 - `Sources/JarvisCore/Audio/` — transactional PCM + utterance buffering, bounded speech pre-roll, adaptive content-free activity detection, stable frame-decision endpoints, non-destructive AEC reference alignment, and system-audio timeline preservation (`PCMBuffer`, `SpeechGatedAudioBuffer`, `UtteranceBuffer`, `PCM16Framer`, `SpeechEndpointDetector`, `AudioDownmix`, `AdaptiveAudioActivityDetector`, `PCM16SpeechActivityTracker`, `EchoReferenceAlignment`, `SystemAudioTimeline`).
 - `Sources/JarvisCore/Transcription/` — provider-neutral session/provider contracts and immutable Start configuration, selectable OpenAI model/expected-language values, the OpenAI Realtime wire contract, the Gemini Live wire contract with server-owned finalization, reconnect-safe Jarvis-managed turn coordinator and recovery state, per-item ledger, analyzer-finalization state, per-provider audio format, the socket lifecycle both WebSocket providers share (when to open, what counts as ready, which failures terminate now, how much retry budget is left), and the single spoken-time ordering policy used by the rolling transcript and Activity (`TranscriptionSession`, `SocketLifecyclePolicy`, `TranscriptionProvider`, `TranscriptionConfiguration`, `TranscriptionAudioFormat`, `OpenAITranscriptionModel`, `TranscriptionLanguage`, `TranscriptFiltering`, `RealtimeSession`, `RealtimeJarvisManagedTurnCoordinator`, `RealtimeReconnectTranscriptionRecovery`, `RealtimeTranscriptionLedger`, `GeminiLiveSession`, `GeminiTranscriptionModel`, `GeminiTranscriptionMode`, `TranscriptionFinalizationState`, `ConversationChronology`, `Transcript`, `NoiseReduction`).
 - `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/` — the Foundation-only fixed transcription matrix, optional absence-means-disabled instrumentation, scoring and deterministic summary contract, plus the hidden signed-app runner, process-scoped synthetic system-audio tap, and automated transcription-transport reconnect regression (`TranscriptionBenchmark`, `TranscriptionBenchmarkEvent`, `TranscriptionBenchmarkInstrumentation`, `TranscriptionBenchmarkRunner`, `SystemAudioBenchmarkCapture`; operating, isolation, and scoring contract in [transcription-benchmark.md](./transcription-benchmark.md)).
+- `Sources/JarvisCore/LiveE2E/` + `Sources/JarvisApp/LiveE2E/`: the Foundation-only scenario model, launch options, and audio timeline, plus the hidden signed-app live e2e mode, compiled only into debug builds, whose runner drives one scenario through `SessionComposition` over a fixture audio source fed by synthesized speech and a fixture screen image (`LiveE2EOptions`, `LiveE2EScenario`, `AudioTimeline`, `LiveE2EAppDelegate`, `LiveE2ERunner`, `FixtureAudioSource`, `FixtureScreenCapture`, `FixtureSpeech`; contract in [live-e2e-tests.md](./live-e2e-tests.md)).
+- `Tests/JarvisLiveTests/` + `scripts/run-live-tests.sh`: the live e2e checker and its command. The Gate compiles the target but never runs it. It holds the scenario files, the fixtures, the launcher's preflight and launch, and one test per scenario asserting each case on the session folder (`LiveE2ETests`, `LiveE2ELauncher`).
 - `Sources/JarvisCore/Brain/` — the provider-neutral brain domain, and nothing that runs one: the `BrainClient`/attempt-scoped `BrainConversation` contracts, immutable `BrainTarget`/`BrainRoute`, `BrainProvider`, `BrainModelCatalog` (first per-provider entry is the default), `ReasoningEffort`, and `BrainWorkloadTimeout`. The kernel dependency guard rejects `Process`, `FileManager`, `FileHandle`, and `URLSession` here.
 - `Sources/JarvisCore/Providers/` — what a failure at any provider boundary means, classified once and shared by the brain, transcription, and Settings surfaces ([architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)): the failure record with its Activity sentence table and exhaustion relabelling, the one redaction path provider text takes before a person can see it, and the Save-time credential verdict, and one classifier per vendor plus the transport table (`ProviderFailure`, `ProviderFailure+Activity`, `ProviderFailure+Exhaustion`, `ProviderMessageRedaction`, `CredentialCheck`, `TransportFailureClassifier`, `OpenAI/OpenAIFailureClassifier`, `Gemini/GeminiFailureClassifier`, `LocalAgent/LocalAgentFailureClassifier`, which owns the CLI adapters' error-domain names). Foundation-only under the kernel dependency guard: adapters hand in status codes, JSON, close reasons, and `NSError` domain and code, never `URLSession` types.
 - `Sources/JarvisBrainProviders/` — every concrete brain adapter ([lean-coaching-core.md → Phase 4 contracts](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction)): the OpenAI Responses transport (`OpenAIBrainClient`), and the local-agent CLI subtree — detection, `CLIBrainClient` with its reply parsing, the bounded shared process edge, runtime lifetime, and the Claude Code, Codex exec, and Codex app-server runtimes (`AgentCLIDetector`, `AgentCLIProcessRunner`, `CLIBrainRuntime`, `LocalAgentRuntimeSet`, `ClaudeCodeRuntime`, `CodexAppServerRuntime`, `CodexExecRuntime`), plus their model-facing prompt text. Depends inward on `JarvisCore`; composed by `JarvisApp` at Start, and reused by `JarvisEvaluation` to run the agentic evaluator's CLI.
@@ -418,7 +394,7 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 - `Sources/JarvisCore/Config/` — the control plane: config, owner-only secrets, transcription/brain/screen/overlay preferences, the immutable `SessionPlan` revision a coaching attempt runs against so no turn reads storage, and the reader for the bundled coaching skills (`Config`, `Secrets`, `Credential`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`, `OverlayAppearance`, `SessionPlan`, `Skill`, `SkillCatalog`; skill content in `Sources/JarvisCore/Resources/Skills/<name>/SKILL.md`, behavior in [architecture.md → Capabilities](./architecture.md#capabilities)). The kernel dependency guard rejects `UserDefaults`, every preference store, and `SecretStore` inside the kernel — `Config/` itself is excluded from that guard, which is why `SkillCatalog`'s file I/O lives here rather than in `Coach/`.
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
 - `Sources/JarvisCore/Diagnostics/` — the one [session-evidence stack](./session-audit.md) and the capture-health policy beside it: the versioned `SessionEvent` envelope and its typed producer ports, one bounded worker and per-session handle, the Activity projection with its stable persisted event kinds, occurrence/record timing, typed notices quoting the provider's redacted message inside a fixed frame, and incomplete-record signal, `jlog`'s nonblocking admission, privacy-preserving audio continuity, the capture heartbeat and its critical health policy, authoritative session-readiness composition, chronology-aware session history, and user-facing errors (`SessionEvent`, `FileSessionAudit`, `SessionAuditWorker`, `ActivityLog`, `ActivityEvent`, `ActivityEventRecording`, `BrainTrafficAuditing`, `CoachingAttemptAuditing`, `JarvisLog`, `AudioContinuityWitness`, `CaptureHeartbeat`, `CaptureReadinessMonitor`, `JarvisReadiness`, `SessionStore`, `UserFacingError`).
-- `Sources/JarvisEvaluation/` — the sealed-session evaluation target ([lean-coaching-core.md → Phase 3 contract](./lean-coaching-core.md#phase-3-implementation-contract--evaluation-extraction)): loss-aware JSONL parsing, the neutral session evidence index and normalized provider telemetry, delta-aware transcript rendering, the read-only agentic audit over the complete session directory, and the HTML report page (`JSONLRecords`, `SessionAuditEvidence`, `SessionEvidenceIndex`, `SessionMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `EvalReportPage`). Depends inward on `JarvisCore` and on `JarvisBrainProviders` for the CLI plumbing its agentic evaluator runs; consumed by `JarvisApp` and `EvalPrep`.
+- `Sources/JarvisEvaluation/` — the sealed-session evaluation target ([lean-coaching-core.md → Phase 3 contract](./lean-coaching-core.md#phase-3-implementation-contract--evaluation-extraction)): loss-aware JSONL parsing, the neutral session evidence index and normalized provider telemetry, delta-aware transcript rendering, the read-only agentic audit over the complete session directory, and the HTML report page (`JSONLRecords`, `SessionAuditEvidence`, `SessionEvidenceIndex`, `SessionMetrics`, `EvaluationTranscript`, `AgenticEvaluation`, `AgenticEvaluator`, `EvalReportPage`), plus the reader the live e2e checker asserts through (`LiveSessionEvidence`). Depends inward on `JarvisCore` and on `JarvisBrainProviders` for the CLI plumbing its agentic evaluator runs; consumed by `JarvisApp`, `EvalPrep`, and `JarvisLiveTests`.
 - `Sources/JarvisCore/Prompts/` — with `Coach/Tools/`, the Foundation-only audit surface for predefined model-facing text: the whole coach system prompt in one file, the per-turn coach messages, history compaction, and transcription context (`JarvisPrompts`); the local-agent protocol text and the session-evaluation prompt extend the same namespace from `Sources/JarvisBrainProviders/Prompts/` and `Sources/JarvisEvaluation/`.
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`; plus the box's own chrome — `OverlayBoxHeaderView` and `OverlayBoxHeaderButton` (collapse, the name, clear), `OverlayBoxChrome` (header geometry derived from the box's height), and `OverlayBoxResizeAffordanceView` (the drawn edge affordance, which also owns the resize drag because macOS refuses an inactive app a resize cursor).
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point and the owners split out of the delegate ([lean-coaching-core.md → Phase 5](./lean-coaching-core.md#phase-5-implementation-contract--appdelegate-split)): `AppDelegate` validates and prepares a Start, renders readiness, and composes the menu, Settings, and Activity; `SessionComposition` is the session runtime (everything from an accepted Start to coaching ready, capture-heartbeat handling, and teardown) over an `AudioSource` the caller supplies, which production builds as `AggregateEchoCapture`; `SessionArtifacts` owns the owner-only session directory, the evidence handle in it, retention pruning, and the close bookkeeping, and `BrainComposition` owns provider preflight, brain-client and route construction, and live reapply. Plus `ErrorReporter` (startup alerts and an unconditional no-presentation runtime policy).

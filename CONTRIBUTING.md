@@ -6,9 +6,9 @@ local-process boundaries. Small, testable changes are preferred.
 ## Before opening a pull request
 
 1. To build and run the gate locally, use an Apple silicon Mac with macOS 14.2+, Swift 6, and the
-   Command Line Tools. This is what local validation needs, not a condition of contributing: without
-   that hardware you can still open a pull request, CI runs the gate, and a maintainer runs any
-   live smoke.
+   [Command Line Tools](./wiki/build-and-run.md#toolchain). This is what local validation needs, not
+   a condition of contributing: without that hardware you can still open a pull request, CI runs the
+   gate, and a maintainer runs the [live e2e tests](./wiki/live-e2e-tests.md).
 2. Create a branch or isolated worktree; never commit directly to `main`.
 3. Put Foundation-only logic in `JarvisCore` and keep OS-bound code thin in `JarvisApp` or
    `JarvisOverlay`. Read [`CLAUDE.md`](./CLAUDE.md) and the relevant page under [`wiki/`](./wiki/).

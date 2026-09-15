@@ -62,7 +62,8 @@ extension CLIBrainClient {
     /// Find the protocol object in the reply — the LAST parseable JSON object carrying a "tool" key,
     /// tolerating prose before it, a code fence around it, or `lines` flattened to the top level.
     /// `jsonStart` is where the object begins in `text`, so callers can recover the prose before it.
-    static func extractToolCall(from text: String)
+    /// Public so session evidence readers read a recorded reply exactly as the client read it.
+    public static func extractToolCall(from text: String)
         -> (name: String, argumentsJSON: String, jsonStart: String.Index)? {
         // Length-preserving fence blanking (7 and 3 chars respectively), so indices into `cleaned`
         // remain valid indices into `text`.

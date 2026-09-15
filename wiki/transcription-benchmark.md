@@ -9,7 +9,9 @@
 The benchmark answers a narrow question: **given known audio, does each production transcription
 path receive it continuously and return the expected result with a healthy lifecycle?** It uses the
 real signed `Jarvis Dev.app`, process-scoped system-audio capture, provider sessions, reconnect code,
-and replay buffer. It does not start a coaching session or evaluate what the coach did.
+and replay buffer. It does not start a coaching session or evaluate what the coach did. Its sibling,
+the [live e2e mode](./live-e2e-tests.md), runs whole coaching sessions from synthesized speech and
+asserts on what the coach did.
 
 The runner and scorer have different jobs:
 

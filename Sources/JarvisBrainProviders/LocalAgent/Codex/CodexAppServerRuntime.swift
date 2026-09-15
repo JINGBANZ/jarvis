@@ -279,6 +279,10 @@ actor CodexAppServerRuntime: LocalAgentRuntimeBackend {
         lifetime.terminateAll()
     }
 
+    nonisolated func awaitTeardown() async {
+        await lifetime.drained()
+    }
+
     private func awaitServerPreparation(
         _ preparation: ServerPreparation
     ) async throws -> CodexAppServer {
@@ -798,15 +802,12 @@ private final class CodexAppServerConversation: LocalAgentConversation, @uncheck
 private final class CodexAppServer: @unchecked Sendable {
     private let process: AgentRuntimeProcess
     private let lifetime: AgentRuntimeLifetime
-    private let runtimeHome: URL
     private let lock = NSLock()
     private var finished = false
 
-    private init(process: AgentRuntimeProcess, lifetime: AgentRuntimeLifetime,
-                 runtimeHome: URL) {
+    private init(process: AgentRuntimeProcess, lifetime: AgentRuntimeLifetime) {
         self.process = process
         self.lifetime = lifetime
-        self.runtimeHome = runtimeHome
     }
 
     deinit {
@@ -819,13 +820,6 @@ private final class CodexAppServer: @unchecked Sendable {
                       runtimeBaseDirectory: URL,
                       deadline: Date,
                       lifetime: AgentRuntimeLifetime) async throws -> CodexAppServer {
-        let runtimeHome = try CodexRuntimeHome.create(in: runtimeBaseDirectory)
-        var didStart = false
-        defer {
-            if !didStart {
-                try? FileManager.default.removeItem(at: runtimeHome)
-            }
-        }
         var arguments = [
             "app-server", "--stdio",
             "-c", "mcp_servers={}",
@@ -837,17 +831,25 @@ private final class CodexAppServer: @unchecked Sendable {
             arguments += ["--disable", feature]
         }
 
-        let process = try AgentRuntimeProcess(
-            executable: identity.executable,
-            arguments: arguments,
-            workingDirectory: identity.workDirectory,
-            environmentOverrides: ["CODEX_HOME": runtimeHome.path])
+        let runtimeHome = try CodexRuntimeHome.create(in: runtimeBaseDirectory)
+        let process: AgentRuntimeProcess
         do {
-            try lifetime.register(process)
-            let server = CodexAppServer(
-                process: process,
-                lifetime: lifetime,
-                runtimeHome: runtimeHome)
+            process = try AgentRuntimeProcess(
+                executable: identity.executable,
+                arguments: arguments,
+                workingDirectory: identity.workDirectory,
+                environmentOverrides: ["CODEX_HOME": runtimeHome.path])
+        } catch {
+            // Nothing has run in the home yet, so it can go at once.
+            try? FileManager.default.removeItem(at: runtimeHome)
+            throw error
+        }
+        do {
+            // Codex writes this home until it has exited; removed any sooner, it comes back.
+            try lifetime.register(process, afterExit: {
+                try? FileManager.default.removeItem(at: runtimeHome)
+            })
+            let server = CodexAppServer(process: process, lifetime: lifetime)
             try await server.send(
                 method: "initialize",
                 parameters: [
@@ -887,11 +889,9 @@ private final class CodexAppServer: @unchecked Sendable {
             let readyMs = Int(
                 (DispatchTime.now().uptimeNanoseconds - process.launchedAt) / 1_000_000)
             jlog("Jarvis: Codex app-server ready in \(readyMs)ms")
-            didStart = true
             return server
         } catch {
-            lifetime.unregister(process)
-            process.terminateNow()
+            lifetime.terminate(process)
             throw error
         }
     }
@@ -929,8 +929,6 @@ private final class CodexAppServer: @unchecked Sendable {
         }
         finished = true
         lock.unlock()
-        process.terminateNow()
-        lifetime.unregister(process)
-        try? FileManager.default.removeItem(at: runtimeHome)
+        lifetime.terminate(process)
     }
 }

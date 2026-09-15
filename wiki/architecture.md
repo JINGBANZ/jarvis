@@ -405,6 +405,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
+| **SessionComposition** | Own one session from an accepted Start to coaching ready, capture-heartbeat handling, and Stop, over an `AudioSource` (`Sources/JarvisApp/Capture/AudioSource.swift`) the caller supplies. Production passes `AggregateEchoCapture` and keeps the default screen capture, `WindowScopedScreenCapture`; the [live e2e mode](./live-e2e-tests.md) passes `FixtureAudioSource` and `FixtureScreenCapture`. One composition is what lets the live e2e run exercise the production Start path with only the audio and the screen substituted, instead of a second copy of the wiring that could drift from it. `AppDelegate` keeps Start validation and preflight, readiness rendering, the global shortcuts, the menu, Settings, and Activity; `JarvisReadiness.activeSession` is the one readiness token both check callbacks against. | Composition over the components below. |
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. When a client-commit model is selected, separate Silero VAD instances score these post-AEC streams (resampled to 16 kHz) on the delivery queue rather than the IOProc, and emit content-free turn edges. Both sides then downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3** + **Silero VAD** via Core ML. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `ProviderFailure` feeds attempt outcomes into the finite provider route; cycle exhaustion uses the session recovery policy. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
@@ -627,7 +628,9 @@ terminal paths add no live presentation.
 
 Provider clients remain owned until replacement or session teardown. Stop cancels pending/in-flight
 work and the recovery deadline. This policy is implemented by `BrainRouteSession`,
-`BrainCycleRecovery`, and `CoachDriver`; provider preferences remain unchanged.
+`BrainCycleRecovery`, and `CoachDriver`; provider preferences remain unchanged. Stop also
+terminates the session's local-agent runtimes, and its background drain waits for their processes
+to exit before the session's evidence seals.
 
 ```mermaid
 flowchart TD
@@ -864,14 +867,17 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   to one async closure and its teardown stops tracking a group when the leader is gone, so adopting
   it would retain these wrappers while adding a dependency.
 - **Codex keeps one app-server for the session.** Session Start launches a single `codex app-server`
-  under a private owner-only `CODEX_HOME` containing nothing but an `auth.json` symlink, then prepares
+  under a private owner-only `CODEX_HOME` created with nothing but an `auth.json` symlink, then prepares
   the first target-specific ephemeral thread while transcription connects. The first coaching
   attempt leases that verified thread; each later attempt opens a fresh one and closes it when the
   lease ends. Coach and summarizer can share one runtime because model, prompt, and effort travel per
   `thread/start`, not in the launch identity. A changed target configuration replaces any unused
   prepared thread before opening its own; a prewarm defers to an attempt that is opening and to
   any newer request, so two callers never trade evictions. Releasing the session or route runtime
-  terminates the app-server and every prepared, active, or preparing thread.
+  terminates the app-server and every prepared, active, or preparing thread. Codex writes its own
+  model cache and system skills into the home until it has exited, so the home is removed only after
+  the app-server has exited; removed at the signal, it came back with default permissions. Stop's drain waits for that removal, and a summary's `codex exec` home follows the
+  same rule.
   The isolation goal is to exclude user/project customization, constrain side effects, and reject
   provider-native actions outside Jarvis's coaching contract; the concrete launch and per-thread
   settings live in
@@ -1163,7 +1169,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; the model's own restraint (a tuned system prompt) keeps it from being annoying.
 5. **Make sensitive capabilities explicit.** TCC, owner-only files, provider selection, and narrow
    egress are enforced today; do not claim filesystem isolation until App Sandbox is implemented.
-6. **Self-verifying.** Every build ships with tests and a smoke checklist the agent can run to prove it works.
+6. **Self-verifying.** Every build ships with tests and the [live e2e tests](./live-e2e-tests.md) the agent can run to prove it works.
 7. **One domain, done well.** Ship the technical-interview coach; expand later.
 
 The same principle applies to runtime structure: the

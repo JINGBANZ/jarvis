@@ -1,0 +1,12 @@
+{
+  "id": "F01-microphone",
+  "audio": "fixture-no-microphone",
+  "brain": { "primary": "codex-cli", "fallbacks": [] },
+  "capabilities": { "disabledTools": [], "disabledSkills": [] },
+  "prepNotes": null,
+  "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "steps": [
+    { "stop": true }
+  ]
+}

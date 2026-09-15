@@ -61,11 +61,15 @@ protocol LocalAgentRuntimeBackend: Sendable {
     )
         async throws -> any LocalAgentConversation
     func terminateNow()
+    /// Returns once every process terminated so far has exited and its exit work, such as removing
+    /// a Codex home, has run.
+    func awaitTeardown() async
 }
 
 /// Reference-counted ownership of one provider runtime.
 ///
-/// Releasing the final client owner terminates every child process synchronously.
+/// Releasing the final client owner signals every child process synchronously. Files a process
+/// writes, such as a Codex home, are removed once it has exited; `terminate()` waits for that.
 ///
 /// `@unchecked Sendable` is justified because `backend` is immutable after initialization and
 /// `ownerLock` guards both mutable ownership fields, `ownerCount` and `isTerminated`. Backend
@@ -168,7 +172,16 @@ public final class CLIBrainRuntime: @unchecked Sendable {
         try await backend.openConversation(for: configuration, deadline: deadline)
     }
 
-    func terminateNow() {
+    /// Stop's path: terminate every child process now and return once each has exited and its
+    /// private files are gone, whether or not clients still hold leases.
+    public func terminate() async {
+        terminateNow()
+        await backend.awaitTeardown()
+    }
+
+    /// Signal every child process to terminate without waiting for it, for a caller that may not
+    /// live to await `terminate()`. Idempotent.
+    public func terminateNow() {
         ownerLock.lock()
         let shouldTerminate = !isTerminated
         isTerminated = true

@@ -1,0 +1,31 @@
+{
+  "id": "A",
+  "audio": "fixture",
+  "brain": { "primary": "claude-code", "fallbacks": [] },
+  "capabilities": { "disabledTools": [], "disabledSkills": [] },
+  "prepNotes": "prep-notes.md",
+  "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "steps": [
+    { "screen": "coding-problem.jpg" },
+    { "press": "hint" },
+    { "say": { "speaker": "them", "text": "Great, thanks for joining. We'll get started in just a minute." } },
+    { "say": { "speaker": "them", "text": "Tell me about a time you disagreed with a teammate." } },
+    { "switchBrain": "openai" },
+    { "say": { "speaker": "them", "text": "Let's move on to design: our product search is slow, and we are redesigning it. We agreed on twenty thousand searches per second, p99 under three hundred milliseconds, and results up to a minute stale, behind one search API. Now sketch the high-level architecture: which components would you put in, and what is the read path for one request?" } },
+    { "switchBrain": "codex-cli" },
+    { "say": { "speaker": "them", "text": "Tell me about a time you pushed back on a decision from your manager." } },
+    { "say": { "speaker": "me", "text": "Jarvis, how can I solve this in one pass?" } },
+    { "press": "hint" },
+    { "press": "hint" },
+    {
+      "say": { "speaker": "them", "text": "Back to the slow search endpoint from earlier. Say we redesign that service for a hundred times the traffic. Walk me through the components you would put in, and the read path for one request." },
+      "overlap": { "speaker": "me", "text": "Sure.", "afterSeconds": 3.0 }
+    },
+    {
+      "say": { "speaker": "them", "text": "How would you handle cache invalidation when a record is updated?" },
+      "whileAttemptRunning": true
+    },
+    { "stop": true }
+  ]
+}

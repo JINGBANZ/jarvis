@@ -5,6 +5,9 @@ import JarvisCore
 extension CLIBrainClient {
     /// Defense in depth for a future Codex app-server that first proves a stable tool-free mode.
     /// This drifting feature intersection is never that proof and cannot authorize a launch.
+    ///
+    /// The shell snapshots are listed for privacy, not tools: with them on, Codex dumps the login
+    /// shell's exported environment, secrets included, into the runtime home.
     static let codexDisabledAgentFeatures = [
         "apps",
         "browser_use",
@@ -14,6 +17,8 @@ extension CLIBrainClient {
         "image_generation",
         "multi_agent",
         "plugins",
+        "shell_snapshot",
+        "shell_snapshot_v2",
         "shell_tool",
         "unified_exec",
     ]

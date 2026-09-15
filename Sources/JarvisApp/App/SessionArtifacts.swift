@@ -41,7 +41,13 @@ final class SessionArtifacts {
     /// of any one session — a very long single run still grows its (append-only) logs + screenshots.
     /// Clear all but the current via the viewer's "Clear history".
     private static let retainedSessions = 10
+    /// Nil keeps the bundle-derived base every normal launch uses. A caller that keeps its sessions
+    /// in a directory it owns passes that directory; retention then leaves it to that owner.
+    private let baseDirectory: URL?
 
+    init(baseDirectory: URL? = nil) {
+        self.baseDirectory = baseDirectory
+    }
 
     /// Open a fresh session: a new per-Start subdirectory under the base log dir, with its own
     /// `jarvis-debug.log` and `jarvis-activity.jsonl`. Called on every Start so each coaching run keeps
@@ -76,7 +82,9 @@ final class SessionArtifacts {
         // spares whichever session is current.
         onSessionDidChange?(base, dir)
         jlog("Jarvis: session \(dir.lastPathComponent) (\(dir.path)).")
-        pruneRetainedSessions(base: base, current: dir)
+        if baseDirectory == nil {
+            pruneRetainedSessions(base: base, current: dir)
+        }
         return audit
     }
 
@@ -124,7 +132,8 @@ final class SessionArtifacts {
     /// Bundle location, not launch arguments or cwd, keeps each development worktree's history
     /// beside its source. The same base feeds Start, Activity, and retention.
     func logDirectory() -> URL {
-        SessionStore.baseDirectory(
+        if let baseDirectory { return baseDirectory }
+        return SessionStore.baseDirectory(
             isDevelopmentBuild: Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
             bundleURL: Bundle.main.bundleURL,
             appDataDirectory: secretFile.directoryURL)

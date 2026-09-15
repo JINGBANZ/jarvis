@@ -1,0 +1,18 @@
+{
+  "id": "F04",
+  "audio": "fixture",
+  "brain": { "primary": "claude-code", "fallbacks": [] },
+  "capabilities": { "disabledTools": [], "disabledSkills": [] },
+  "prepNotes": null,
+  "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "cli": { "claude-code": "stub" },
+  "steps": [
+    { "say": { "speaker": "them", "text": "Tell me about a time you had to learn something new quickly." } },
+    { "say": { "speaker": "them", "text": "How do you decide what to work on first when everything is urgent?" } },
+    { "say": { "speaker": "them", "text": "What is the hardest bug you have ever fixed?" } },
+    { "restoreCLI": "claude-code" },
+    { "say": { "speaker": "them", "text": "Tell me about a project you are proud of." } },
+    { "stop": true }
+  ]
+}

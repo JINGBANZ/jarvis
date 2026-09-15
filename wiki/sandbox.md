@@ -115,13 +115,14 @@ Narrow and explicit. Data leaves the machine only via:
   audio follows the separately selected transcription provider.
 - **With Codex selected for coaching**, the payload goes to one session-scoped `codex app-server`
   under the user's own ChatGPT account and OpenAI's consumer retention terms. It runs under a private
-  owner-only `CODEX_HOME` whose only content is an `auth.json` symlink, so no user config, profile,
+  owner-only `CODEX_HOME` created with only an `auth.json` symlink, so no user config, profile,
   plugin, prompt, or execpolicy `.rules` file is loadable — structurally covering what
   `--ignore-user-config` and `--ignore-rules` did. Each attempt opens a fresh thread that is required
   to come back ephemeral, pathless, and free of instruction sources, so no rollout transcript reaches
   `~/.codex`. The thread runs read-only with approvals never, empty MCP config, no project-root
   markers, and zero project-doc bytes; the advertised agentic features are disabled on both the
-  launch argv and the per-thread config; and a prompt forbids built-in tool use. Codex publishes no
+  launch argv and the per-thread config, shell snapshots included, so Codex never writes a copy of
+  the login shell's exported environment into its home; and a prompt forbids built-in tool use. Codex publishes no
   control that removes built-in tools, so this envelope is layered rather than a proof of absence —
   an accepted residual risk, backed by a runtime allowlist that aborts the turn on any server request
   or item event outside agent messages and reasoning. The acceptance is measured, not assumed: on

@@ -637,9 +637,9 @@ rest of Phase 4 and freeze their own contracts before implementation.
   PID/start-time identity, verified deletion, and the cleanup-failure latch) and
   `ScreenCaptureCLI` (entire-display targeting with the main-display reshoot). It depends inward
   on `JarvisCore` only. It clears the architecture contract's bar for a new target through an
-  isolated test boundary: `JarvisApp` is verified only by live smoke, so leaving the runner in the
-  executable would orphan the headless cancellation/cleanup/latch regression tests that prove the
-  privacy contract; they run in `JarvisScreenCaptureTests` instead.
+  isolated test boundary: `JarvisApp` is verified only by the [live e2e tests](./live-e2e-tests.md),
+  so leaving the runner in the executable would orphan the headless cancellation/cleanup/latch
+  regression tests that prove the privacy contract; they run in `JarvisScreenCaptureTests` instead.
 - `Sources/JarvisCore/Screen/` keeps `ScreenCapturing`, `ScreenSnapshot`, `FrontWindowSelector`,
   `WindowCandidate`, `TextFragment`, and `RecognizedTextLayout`.
 - `WindowScopedScreenCapture` in `JarvisApp` still composes the window-scoped shot, Vision OCR,
@@ -687,8 +687,8 @@ rest of Phase 4 and freeze their own contracts before implementation.
   unchanged (imports aside) in `JarvisScreenCaptureTests`; Core's screen tests are pure
   Foundation-only unit tests.
 - The Gate passes: `swift build && ./scripts/run-tests.sh`.
-- Live smoke verification of a screen-tool coaching turn and a cancelled capture in the signed
-  app — App-bound behavior stays on the live smoke checklist, not in the offline gate.
+- Live verification of a screen-tool coaching turn and a cancelled capture in the signed app.
+  App-bound behavior stays with the [live e2e tests](./live-e2e-tests.md), not the offline gate.
 
 ## Phase 4 Implementation Contract — OpenAI provider extraction
 
@@ -1073,8 +1073,9 @@ Composition never starts, stops, or tears anything down, and the runtime never b
 - Three owners with documented boundaries, and no behavior change in Start, Stop, teardown,
   readiness, capture continuity, or error reporting.
 - `scripts/check-ghost-mode.sh` passes with no new exceptions.
-- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus the live smoke checklist for Start,
-  Stop, Settings reapply, and session rotation — `JarvisApp` is verified by live smoke, not units.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus a live check of Start, Stop,
+  Settings reapply, and session rotation. `JarvisApp` is verified by the
+  [live e2e tests](./live-e2e-tests.md), not units.
 
 ## Source Handoff
 

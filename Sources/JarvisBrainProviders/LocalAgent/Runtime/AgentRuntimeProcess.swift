@@ -183,6 +183,17 @@ final class AgentRuntimeProcess: @unchecked Sendable {
         return exitStatus == nil && !isTerminating
     }
 
+    /// Blocks until the launch leader has been reaped, or `deadline` passes. `isRunning` cannot
+    /// answer this: it turns false when termination starts, while the process may still be writing.
+    func waitForExit(until deadline: Date) -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        while exitStatus == nil {
+            guard condition.wait(until: deadline) else { return exitStatus != nil }
+        }
+        return true
+    }
+
     func sendJSONObject(_ object: [String: Any], timeout: TimeInterval) async throws {
         let data = try JSONSerialization.data(withJSONObject: object)
         try await sendLine(String(decoding: data, as: UTF8.self), timeout: timeout)

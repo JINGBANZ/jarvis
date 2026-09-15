@@ -15,9 +15,13 @@ let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().pa
 // does not treat environment-only manifest changes as source changes.
 let forceAppleSpeechFallback =
     ProcessInfo.processInfo.environment["JARVIS_FORCE_APPLE_SPEECH_FALLBACK"] == "1"
-let jarvisAppSwiftSettings: [SwiftSetting] = forceAppleSpeechFallback
+// The live e2e mode (Sources/JarvisApp/LiveE2E and Sources/JarvisCore/LiveE2E) exists only in debug
+// builds, which scripts/run-live-tests.sh and the Gate use. The release build that
+// scripts/package-app.sh ships compiles none of it.
+let liveE2ESettings: [SwiftSetting] = [.define("JARVIS_LIVE_E2E", .when(configuration: .debug))]
+let jarvisAppSwiftSettings: [SwiftSetting] = liveE2ESettings + (forceAppleSpeechFallback
     ? [.define("JARVIS_FORCE_APPLE_SPEECH_FALLBACK")]
-    : []
+    : [])
 
 let package = Package(
     name: "Jarvis",
@@ -32,7 +36,8 @@ let package = Package(
         // skill is a `<name>/SKILL.md` folder that `SkillCatalog` enumerates out of the copied
         // resource bundle, deliberately not through `Bundle.module` (see its probe) — matching how
         // JarvisApp's `.copy("Resources/SileroVAD.mlmodelc")` keeps that resource's directory intact.
-        .target(name: "JarvisCore", resources: [.copy("Resources/Skills")]),
+        .target(
+            name: "JarvisCore", resources: [.copy("Resources/Skills")], swiftSettings: liveE2ESettings),
         // Concrete brain-provider adapters: the OpenAI Responses client with its HTTP failure
         // classification, and the local-agent CLI subtree (Claude Code, Codex exec, and the Codex
         // app server) with its detector, process runner, and runtime lifetime. Extracted per
@@ -124,6 +129,15 @@ let package = Package(
         .testTarget(
             name: "JarvisScreenCaptureTests",
             dependencies: ["JarvisScreenCapture", "JarvisCore"]
+        ),
+        // Live e2e tests: each launches the signed development app in its live e2e mode against real
+        // providers and asserts on the session folder it leaves. The Gate compiles this target but
+        // never runs it (`run-tests.sh` skips it); `scripts/run-live-tests.sh` is its one entry
+        // point. Fixtures and scenarios are read by path at run time, never bundled.
+        .testTarget(
+            name: "JarvisLiveTests",
+            dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisEvaluation"],
+            exclude: ["Fixtures", "Scenarios"]
         ),
         // WebKit-driven end-to-end tests for the activity viewer's shipped HTML/JS. Kept separate
         // from JarvisCoreTests so the core's own test target stays Foundation-only and the

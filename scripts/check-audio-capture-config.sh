@@ -72,6 +72,54 @@ if /usr/bin/grep -Fq 'TranscriptionBenchmark' "$normal_session_contract" \
     echo "Normal transcription contracts and app wiring must not expose benchmark capabilities." >&2
     exit 1
 fi
+# The live e2e mode is selected in main.swift alone: its symbols stay out of normal app wiring and
+# the coaching kernel, and its fixture source never becomes a production audio source.
+live_e2e_status=0
+live_e2e_references="$(/usr/bin/grep -RIl 'LiveE2E' Sources/JarvisApp/App \
+    Sources/JarvisCore/Transcription Sources/JarvisCore/Coach)" || live_e2e_status=$?
+if [ "$live_e2e_status" -gt 1 ]; then
+    echo "Audio capture guard: live e2e scan failed; refusing to pass." >&2
+    exit 1
+fi
+while IFS= read -r reference; do
+    if [ -z "$reference" ] || [ "$reference" = "Sources/JarvisApp/App/main.swift" ]; then
+        continue
+    fi
+    echo "The live e2e mode must stay out of normal app wiring and the coaching kernel: $reference" >&2
+    exit 1
+done <<< "$live_e2e_references"
+fixture_status=0
+fixture_references="$(/usr/bin/grep -RIlE 'FixtureAudioSource|FixtureScreenCapture' Sources)" || fixture_status=$?
+if [ "$fixture_status" -gt 1 ]; then
+    echo "Audio capture guard: fixture source scan failed; refusing to pass." >&2
+    exit 1
+fi
+while IFS= read -r reference; do
+    case "$reference" in
+        ""|Sources/JarvisApp/LiveE2E/*) ;;
+        *)
+            echo "Fixture audio and screen sources belong to the live e2e mode only: $reference" >&2
+            exit 1
+            ;;
+    esac
+done <<< "$fixture_references"
+# The live e2e mode is compiled only into debug builds, so the release app ships none of it.
+if ! /usr/bin/grep -Fq '.define("JARVIS_LIVE_E2E", .when(configuration: .debug))' Package.swift \
+    || ! /usr/bin/grep -Fq 'swiftSettings: liveE2ESettings' Package.swift \
+    || ! /usr/bin/grep -Fq 'liveE2ESettings + ' Package.swift; then
+    echo "Package.swift must define JARVIS_LIVE_E2E for debug builds of JarvisCore and JarvisApp only." >&2
+    exit 1
+fi
+for live_e2e_source in Sources/JarvisApp/LiveE2E/*.swift Sources/JarvisCore/LiveE2E/*.swift; do
+    if ! /usr/bin/head -n 1 "$live_e2e_source" | /usr/bin/grep -Eq '^#if JARVIS_LIVE_E2E( |$)'; then
+        echo "Live e2e sources must compile only into debug builds: $live_e2e_source must start with #if JARVIS_LIVE_E2E" >&2
+        exit 1
+    fi
+done
+if ! /usr/bin/grep -Fq -- '--skip JarvisLiveTests' scripts/run-tests.sh; then
+    echo "The Gate must never run the live e2e target; run-tests.sh has to skip JarvisLiveTests." >&2
+    exit 1
+fi
 if ! /usr/bin/grep -Fq 'benchmark: TranscriptionBenchmarkInstrumentation? = nil' \
     "$session_factory"; then
     echo "Transcription benchmark instrumentation must remain absent by default." >&2

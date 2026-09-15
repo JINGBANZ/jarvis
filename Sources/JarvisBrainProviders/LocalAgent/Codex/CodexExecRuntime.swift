@@ -54,6 +54,10 @@ struct CodexExecRuntime: LocalAgentRuntimeBackend {
     func terminateNow() {
         lifetime.terminateAll()
     }
+
+    func awaitTeardown() async {
+        await lifetime.drained()
+    }
 }
 
 /// One `codex exec` invocation, streamed so a disallowed item can be caught while it happens.
@@ -79,21 +83,25 @@ private struct CodexExecConversation: LocalAgentConversation {
     ) async throws -> LocalAgentTurnResult {
         try Task.checkCancellation()
         let deadline = Date().addingTimeInterval(turn.timeout)
-        let home = try CodexRuntimeHome.create(in: homeBaseDirectory)
-        defer { try? FileManager.default.removeItem(at: home) }
-
         let document = try document(for: turn)
-        let process = try AgentRuntimeProcess(
-            executable: configuration.executable,
-            arguments: arguments(),
-            workingDirectory: configuration.workDirectory,
-            removingEnvironmentVariables: ["ANTHROPIC_API_KEY", "CLAUDECODE"],
-            environmentOverrides: ["CODEX_HOME": home.path])
-        try lifetime.register(process)
-        defer {
-            lifetime.unregister(process)
-            process.terminateNow()
+        let home = try CodexRuntimeHome.create(in: homeBaseDirectory)
+        let process: AgentRuntimeProcess
+        do {
+            process = try AgentRuntimeProcess(
+                executable: configuration.executable,
+                arguments: arguments(),
+                workingDirectory: configuration.workDirectory,
+                removingEnvironmentVariables: ["ANTHROPIC_API_KEY", "CLAUDECODE"],
+                environmentOverrides: ["CODEX_HOME": home.path])
+        } catch {
+            try? FileManager.default.removeItem(at: home)
+            throw error
         }
+        // Codex writes this home until it has exited; removed any sooner, it comes back.
+        try lifetime.register(process, afterExit: {
+            try? FileManager.default.removeItem(at: home)
+        })
+        defer { lifetime.terminate(process) }
 
         let dispatchedAt = DispatchTime.now().uptimeNanoseconds
         try await process.sendLine(document, timeout: max(0.01, deadline.timeIntervalSinceNow))

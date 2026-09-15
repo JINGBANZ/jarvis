@@ -1,11 +1,12 @@
 import Foundation
 import JarvisCore
 
-/// Creates the credential-bearing private home used only by the Codex coaching app-server.
+/// Creates the credential-bearing private home a Codex app-server or `codex exec` runs under.
 ///
 /// The home lives outside both the source checkout and retained session directories. A crash can
 /// therefore leave an owner-only runtime directory behind without exposing its auth symlink to the
-/// completed-session evaluator.
+/// completed-session evaluator. Otherwise the home is removed once its process has exited, never at
+/// the termination signal, because Codex writes it until it has exited.
 ///
 /// Public only for `removeLegacyHomes`: the adapter owns the legacy prefix, and evaluation
 /// preflight in `JarvisEvaluation` must fail closed on it before exposing a session to the auditor.
