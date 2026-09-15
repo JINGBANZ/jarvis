@@ -9,7 +9,8 @@
 ## Current phase
 
 **General technical-interview coaching, audio reliability, and local CLI brain providers are
-implemented.** Coaching skills and prep-material support are available; see
+implemented.** The bundled `coding-with-ai` skill adds on-demand coaching for collaboration with
+another coding AI. Coaching skills and prep-material support are available; see
 [architecture.md → Capabilities](./architecture.md#capabilities) for their canonical behavior.
 Coaching policy and the
 diagram boundary are defined in
@@ -244,6 +245,14 @@ completion without tests, and valid progress. Move directly into a system-design
 to coding without changing Settings. Confirm the overlay remains at most three short lines, the
 second hint advances rather than repeats, and healthy progress stays silent. This smoke verifies on-demand
 screen capture, live transcript, and overlay behavior together before release.
+
+Run a Coding with AI mock in CoderPad with Chrome page text enabled: establish the AI-assisted
+workflow, verify `coding-with-ai` loads, and check one omitted constraint, an AI-only "tests pass"
+claim, repeated ineffective repair prompts, and productive review with observed test output.
+Confirm Jarvis distinguishes proposed versus adopted code, qualifies missing evidence, and stays
+silent during healthy progress. Switch to ordinary coding and confirm AI-specific advice stops;
+disable the skill for the next Start and confirm ordinary coding remains available. The offline
+catalog tests verify discovery and opt-out, not live model choices or CoderPad Accessibility coverage.
 
 Then run the live permission-gate smoke, since the gate runs before anything the Gate can test. After resetting each service in turn (`tccutil reset Microphone com.jarvis.coach.dev`, then
 `ScreenCapture`, then `AudioCapture`) and clearing the one marker Jarvis persists (`defaults delete com.jarvis.coach.dev permissions.screenRecordingAsked`): the gate appears with no menu bar behind it; one walk collects all

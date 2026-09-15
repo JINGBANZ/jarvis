@@ -705,12 +705,17 @@ rather than a per-turn screenshot.
 - **Coaching guidance is loaded on demand, not chosen at Start** (see
   [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
   policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
-  model loads when the question calls for it. Three skills ship: behavioral shapes candidate-owned
+  model loads when the question calls for it. Four skills ship: behavioral shapes candidate-owned
   experience answers with STAR, handles personal and hypothetical questions directly, preserves
   prep-material caveats, and reserves labeled fictional examples for an explicit practice request.
   It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
   local implementation and defect diagnosis, and boundary tests for a post-completion hint the base
-  policy already warrants; system-design supplies the stage vocabulary from requirements through
+  policy already warrants; coding-with-ai adds guidance for directing another AI, reviewing its
+  proposals, distinguishing adopted code and execution evidence, and recovering from ineffective
+  prompting. It composes with coding when offered and applies only while AI collaboration is relevant.
+  Its separate catalog entry keeps that workflow conditional without a round or seniority setting
+  (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
+  System-design supplies the stage vocabulary from requirements through
   trade-offs, and asks for a diagram in the one stage that benefits. The base prompt keeps what is
   true of every session: when to speak or stay silent, hint length, and comprehension before
   strategy. Finishing code alone still does not trigger a hint, and there is no runtime classifier
