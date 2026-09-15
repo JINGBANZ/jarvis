@@ -440,8 +440,16 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // the route's retry delay. A press's prose is its hint instead of that round trip when
                 // the reply calls outside its set or calls nothing, and on the response at the cap
                 // whatever it called, since no later response can recover.
+                // The response's first call decides, whether or not it parsed: `toolCalls` omits a
+                // call whose arguments did not parse, so its first entry can be a later call than
+                // the one the model made first.
+                let firstParsed: ToolInvocation? = if let raw = response.rawToolCalls.first {
+                    response.toolCalls.first { $0.callID == raw.id }
+                } else {
+                    response.toolCalls.first
+                }
                 let call: ToolInvocation
-                if let parsed = response.toolCalls.first {
+                if let parsed = firstParsed {
                     if permitted?.contains(parsed.toolName) ?? true {
                         call = parsed
                     } else if let spoken = Self.spokenProse(response.outputText, permitted: permitted) {

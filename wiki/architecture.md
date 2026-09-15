@@ -271,8 +271,10 @@ missed, so it should not be the less capable of the two.
 The runner checks every reply against the tool choice its own request sent instead of trusting the
 transport to enforce it, because a CLI target's set is only prompted and a provider can return more
 than one call. A call outside the permitted set is answered with a tool result saying it is not
-available on a press, and a call whose arguments fail its tool's schema is answered with that schema;
-either way the model is asked again in the same attempt. A press speaks its reply's prose instead,
+available on a press, and a call whose arguments the typed parser (`ToolInvocation.parse`) cannot use
+is answered with its tool's schema; either way the model is asked again in the same attempt. The
+parser is deliberately more lenient than the schema, so a call the schema would reject but the parser
+can use still runs. The response's first call is the one judged, whether or not it parsed. A press speaks its reply's prose instead,
 the first three lines recorded in history as a `speak` call: in place of that round trip when the
 reply calls outside its set or calls nothing, and on the response at the cap whatever it called.
 When a response carries several calls, the first runs and each other one is answered as not

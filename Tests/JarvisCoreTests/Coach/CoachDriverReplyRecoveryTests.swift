@@ -190,6 +190,27 @@ import Testing
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 
+    /// The parsed list skips a call whose arguments did not parse, so a valid later call must not
+    /// stand in for the malformed first one: the first is answered with its schema and nothing runs.
+    @Test func aMalformedFirstCallIsJudgedBeforeAParsedLaterOne() async throws {
+        let brain = ScriptedBrain(script: [
+            reply(call("speak", id: "m1", arguments: #"{"lines":"[\"a\"]"}"#),
+                  call("stay_silent", id: "q2")),
+            speak,
+        ])
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(brain: brain, overlay: overlay)
+        transcript.append(.init(speaker: .them, text: "What does your code print?", at: 100))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(brain.calls.count == 2)
+        let continuation = brain.calls[1]
+        #expect(toolResult("m1", in: continuation)?.text?.contains("did not match its schema") == true)
+        #expect(toolResult("q2", in: continuation)?.text == JarvisPrompts.Coach.extraCallNotExecuted)
+        #expect(overlay.rendered == [["Start from the read path."]])
+    }
+
     /// Recovery is bounded by the attempt's response cap, with no counter of its own.
     @Test func aPressThatNeverSpeaksFailsAtTheCap() async {
         let brain = ScriptedBrain(script: (1...7).map { reply(call("stay_silent", id: "q\($0)")) })
