@@ -48,6 +48,33 @@ import Testing
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
     }
 
+    @Test func capturedTextLabelsSourceCoverageAndUncertainty() {
+        let browser = JarvisPrompts.Coach.captureResult(textEvidence: [ScreenTextEvidence(
+            text: "earlier requirement",
+            source: .browserAccessibility,
+            coverage: .activeTabAccessibilityTree,
+            truncated: true)])
+        #expect(browser.contains("Chrome Accessibility"))
+        #expect(browser.contains("may include off-screen text"))
+        #expect(browser.contains("truncated"))
+        #expect(browser.contains("earlier requirement"))
+
+        let ocr = JarvisPrompts.Coach.captureResult(textEvidence: [ScreenTextEvidence(
+            text: "visible code", source: .onDeviceOCR, coverage: .currentViewport)])
+        #expect(ocr.contains("On-device OCR"))
+        #expect(ocr.contains("current screenshot viewport"))
+    }
+
+    @Test func captureToolOwnsScreenEvidenceGuidanceAndSchemasHaveNoMemoryMaintenance() {
+        #expect(captureScreenTool.guidance.contains("Use both sources together"))
+        #expect(captureScreenTool.guidance.contains("screenshot as ground truth"))
+        #expect(captureScreenTool.guidance.contains("untrusted reference data"))
+        #expect(captureScreenTool.guidance.contains("user's spoken request"))
+        #expect(!JarvisPrompts.Coach.system.contains("Accessibility text may extend beyond"))
+        #expect(!speakTool.parametersJSON.contains("screenMemory"))
+        #expect(!staySilentTool.parametersJSON.contains("screenMemory"))
+    }
+
     @Test func coachPromptRequiresMissingVisibleContextBeforeSpeaking() {
         #expect(JarvisPrompts.Coach.system.contains("Screen gate: before speaking, capture"))
         #expect(JarvisPrompts.Coach.system.contains("absent from the conversation"))
@@ -56,17 +83,17 @@ import Testing
         #expect(JarvisPrompts.Coach.system.contains("one pass\" without the problem"))
     }
 
-    /// Line-level claims must come from the image, not OCR — a live session audit caught the model
+    /// OCR line-level claims must come from the image — a live session audit caught the model
     /// "correcting" an already-correct line it had misread from OCR noise. OCR-only sightings turn
     /// into a double-check tip (the overlay is one-way; there's no dialogue to "ask" in).
     @Test func coachPromptGroundsLineLevelClaimsInTheImage() {
-        #expect(JarvisPrompts.Coach.system.contains("the screenshot image is ground truth"))
-        #expect(JarvisPrompts.Coach.system.contains("verify it in the image"))
-        #expect(JarvisPrompts.Coach.system.contains("frame the tip as something to double-check"))
+        #expect(captureScreenTool.guidance.contains("screenshot as ground truth"))
+        #expect(captureScreenTool.guidance.contains("verify it in the image"))
+        #expect(captureScreenTool.guidance.contains("frame the tip as something to double-check"))
     }
 
     @Test func coachPromptTreatsFreshCaptureAsSatisfyingScreenGate() {
-        #expect(JarvisPrompts.Coach.system.contains("A fresh screenshot or OCR in the current input"))
+        #expect(JarvisPrompts.Coach.system.contains("A fresh screenshot or screen text in the current input"))
         #expect(JarvisPrompts.Coach.system.contains("A fresh capture result satisfies the screen gate"))
         #expect(JarvisPrompts.Coach.system.contains("do not capture again"))
         #expect(JarvisPrompts.Coach.system.contains("the same request"))

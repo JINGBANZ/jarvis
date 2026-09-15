@@ -300,6 +300,39 @@ changes host networking, or runs in the normal build/test gate.
 See [transcription-benchmark.md](./transcription-benchmark.md) for commands, architecture, scoring,
 acceptance, privacy, result interpretation, and when each mode should be run.
 
+## Browser screen-text validation
+
+Focused tests in `JarvisScreenCaptureTests` cover dual Accessibility/OCR routing, secure-subtree
+exclusion, bounded Unicode-safe extraction, repeated lines, inline text blocks, editor priority, and
+selection among same-sized Chrome windows and multiple web areas. Fixture trees do not validate real
+Chrome behavior, Vision OCR fidelity, or macOS permission transitions.
+
+The capture behavior and source limitations are canonical in
+[`settings-window.md#capture-scope`](./settings-window.md#capture-scope). Local artifacts and
+provider-retention boundaries are canonical in [`sandbox.md`](./sandbox.md).
+
+For the signed-app smoke, use Active window capture and Chrome with **Read Chrome page text** enabled:
+
+- On a long ordinary article or problem page, capture while scrolled near the bottom and confirm the
+  Accessibility block contains useful off-screen text while the OCR block matches the viewport.
+- Open a virtualized editor and confirm current visible code appears through OCR even when the
+  Accessibility tree exposes only a small editor region.
+- Dock DevTools, then capture the page and confirm semantic text comes from the page web area. Repeat
+  with two same-sized Chrome windows and confirm the screenshot and text use the focused window.
+- Show a diagram and confirm the screenshot supplies visual information absent from Accessibility.
+  Put text in a password field and confirm it does not appear in model-facing traffic.
+- Deny or revoke Accessibility and confirm the setting remains Off while active-window OCR continues.
+  Enable it while stopped, start a session, then turn it Off and confirm the next attempt omits the
+  Accessibility block without presenting privacy UI.
+- Confirm capture does not focus, scroll, mutate, or otherwise change Chrome. Normal bounded session
+  artifacts may include `shot-N.jpg` and `brain-traffic.jsonl`, whose existing wire-audit records can
+  contain current browser text. Confirm Jarvis creates no rolling image archive or separate
+  browser-text archive and never replays historical screenshots.
+
+Accessibility is not complete HTML or a complete editor buffer. Lazy, virtualized, canvas, image, and
+hidden content may be absent; OCR is limited to visible pixels and may misread tokens. Jarvis sends
+both current sources when available and keeps no separate historical screen-text cache.
+
 ## Live e2e tests
 
 Behavior that needs real grants, capture devices, providers, and CLIs is verified by

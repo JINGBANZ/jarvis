@@ -246,7 +246,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             brainRoute: route,
             appleSpeechLocale: nil,
             // The fixture capture shows the scenario's image whatever the selection names.
-            screen: ScreenCaptureSelection(scope: Defaults.Screen.scope, explicitDisplay: nil),
+            screen: SessionPlan.default.screen,
             prepSources: prepSources,
             explanationsEnabled: Defaults.Explanations.enabled,
             codeEnabled: Defaults.Code.enabled)

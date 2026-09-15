@@ -99,7 +99,10 @@ import Testing
 private struct ReviewScreen: ScreenCapturing {
     let succeeds: Bool
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
-        succeeds ? ScreenSnapshot(imageBase64: "fresh-image", recognizedText: "fresh-ocr") : nil
+        succeeds ? ScreenSnapshot(
+            imageBase64: "fresh-image",
+            textEvidence: [ScreenTextEvidence(
+                text: "fresh-ocr", source: .onDeviceOCR, coverage: .currentViewport)]) : nil
     }
     func cancelCapture() {}
 }

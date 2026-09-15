@@ -147,8 +147,8 @@ in the Gate.
   a press for its manual attempt. Pacing follows the app's own state, which is what lets the
   chronology and in-flight cases land where they are meant to whatever the provider latency.
 - **An injected screen.** A `screen` step hands a JPEG fixture to `FixtureScreenCapture`, and every
-  later capture returns that image with its on-device recognized text, the snapshot shape the window
-  path produces. Only coding needs one: an interviewer states behavioral and design questions aloud,
+  later capture returns that image with its on-device OCR as current-viewport text evidence, the
+  snapshot the window path produces for a non-browser window. Only coding needs one: an interviewer states behavioral and design questions aloud,
   so Scenario A speaks its design question rather than showing it.
 
 ## Evidence rules

@@ -15,10 +15,10 @@ public enum FrontWindowSelector {
 
     /// `candidates` must be in front-to-back z-order (as `CGWindowListCopyWindowInfo` returns).
     /// Returns nil when nothing eligible is on screen — callers fall back to full-display capture.
-    public static func frontWindowID(in candidates: [WindowCandidate], ownPID: Int) -> Int? {
+    public static func frontWindow(in candidates: [WindowCandidate], ownPID: Int) -> WindowCandidate? {
         candidates.first {
             $0.layer == 0 && $0.ownerPID != ownPID
                 && $0.width >= minimumDimension && $0.height >= minimumDimension
-        }?.windowID
+        }
     }
 }

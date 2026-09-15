@@ -1,18 +1,18 @@
 import Foundation
 
-/// What one screen capture produced: the JPEG the brain will look at, plus — for window-scoped
-/// captures — an on-device OCR of that same image, so the model can read exact text instead of
-/// deciphering pixels (reasoning models are far stronger on text; see wiki/decisions.md).
+/// What one screen capture produced: the JPEG the brain will look at plus optional typed text
+/// evidence from the same foreground context.
 public struct ScreenSnapshot: Sendable, Equatable {
     /// Base64-encoded JPEG, as `screencapture` produced it.
     public let imageBase64: String
-    /// Reading-ordered OCR of the captured image, or nil when unavailable (full-display fallback
-    /// captures skip OCR — a whole display's text would feed the clutter back as tokens — and
-    /// recognition can fail). Derived from the screen, so it goes only where the image goes.
-    public let recognizedText: String?
-
-    public init(imageBase64: String, recognizedText: String? = nil) {
+    /// Source- and coverage-labeled text. Accessibility and OCR are complementary, so an active
+    /// Chrome capture may contain both. Derived from the screen, so it goes only where the image goes.
+    public let textEvidence: [ScreenTextEvidence]
+    public init(
+        imageBase64: String,
+        textEvidence: [ScreenTextEvidence] = []
+    ) {
         self.imageBase64 = imageBase64
-        self.recognizedText = recognizedText
+        self.textEvidence = textEvidence
     }
 }

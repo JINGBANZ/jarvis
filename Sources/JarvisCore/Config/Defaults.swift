@@ -95,13 +95,17 @@ public enum Defaults {
     /// What `capture_screen` shoots when the brain asks for visual context.
     public enum Screen {
         public static let scopeKey = "screen.captureScope"
-        /// The frontmost window — the most private option, and the only one with an OCR sidecar.
+        /// The frontmost window — the most private option, and the only one with text evidence.
         public static let scope: ScreenCaptureScope = .activeWindow
 
         public static let displayIndexKey = "screen.captureDisplayIndex"
         /// 1-based, as `screencapture -D` counts displays (1 = the menu-bar display).
         public static let displayIndex = 1
         public static let displayIndexMinimum = 1
+
+        public static let browserTextEnabledKey = "screen.browserTextEnabled"
+        /// Accessibility is a broad optional grant and therefore starts disabled.
+        public static let browserTextEnabled = false
     }
 
     // MARK: - Hotkey

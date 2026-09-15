@@ -16,8 +16,10 @@ skills through `load_skill`, with no Start-time selection
 diagram boundary are defined in
 [architecture.md → Models and APIs](./architecture.md#models-and-apis). A direct request
 whose specific answer depends on visible context missing from the conversation calls `capture_screen`
-before `speak`; a fresh screenshot/OCR satisfies that request, while a fully stated question can be
-answered without a reflexive capture. The independent Transcription setting keeps **OpenAI as the
+before `speak`; a fresh screenshot with current-viewport OCR satisfies that request, while a fully
+stated question can be answered without a reflexive capture. When enabled and granted, Chrome
+Accessibility adds bounded active-tab text that may include content outside the viewport.
+The independent Transcription setting keeps **OpenAI as the
 default**, keeps **GPT-4o Transcribe** as its default model, adds opt-in **GPT Transcribe** and
 **GPT Live Transcribe**, adds opt-in, on-device **Apple Speech** on macOS 26 or later, and adds
 opt-in **Gemini** over the Gemini Live WebSocket — server-owned turn detection (no client commit, no
@@ -199,9 +201,19 @@ provider-switch, failed-cycle, and readiness paths.
 
 ## Next action
 
-Run the provider-failure live smoke, which is the only way to see the never-ready path: with a
-valid key and Wi-Fi off, Start ends the session within about fifteen seconds naming the network
-cause, with no system-audio degradation row before it; with
+Run the [browser screen-text signed-app smoke](./build-and-run.md#browser-screen-text-validation) in a
+development bundle: opt into Chrome text while stopped, observe a long page across scrolling, verify
+exact-window matching with two same-sized Chrome windows and docked DevTools, and compare a normal
+page with a virtualized editor and diagram. Then deny Accessibility and switch apps to verify OCR
+still accompanies every active-window capture. Offline tests cover dual-source routing, secure-subtree
+exclusion, bounded extraction, editor priority, and window selection; real Chrome coverage remains an
+acceptance blocker.
+
+Run the provider-failure live smoke, a
+[manual check outside the live e2e command](./live-e2e-tests.md#what-stays-outside-the-command) and
+the only way to see the never-ready path: with a valid key and Wi-Fi off, Start ends the session
+within about fifteen seconds naming the network cause, with no system-audio degradation row before
+it; with
 a valid key and network, coaching still works and `jarvis-debug.log` carries `socket #1` lines with
 stage names. Both socket providers run one shared lifecycle driver, so the same walk is needed for
 Gemini, plus a session left past its ten-minute cap to see the `goAway` rotation replace the
@@ -299,6 +311,10 @@ and Scenario R covers capture readiness on a quiet start.
 
 ## Built
 
+Active-window captures always attach current-viewport OCR. With the optional Chrome Accessibility
+grant, the same capture also attaches bounded active-tab text that may include off-screen content.
+The sources are labeled separately and no dedicated historical screen-text cache is maintained.
+
 **Coaching skills and tools load on demand.** A session's capabilities are one value composed at
 Start (`CoachCapabilities`), and each tool carries its own usage guidance. Prep-notes search is a
 deferred tool and each bundled skill a catalog entry: the prompt lists them one line each, and the
@@ -364,7 +380,7 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
   and skills, composed once at Start), and `Tools/` (one file per coach tool, holding its name, description, schema, guidance, and result text).
 - `Sources/JarvisCore/Triggers/` — turn/silence trigger detection, substance classification, and silence backoff (`Trigger`, `TurnSubstance`, `SilenceBackoff`).
 - `Sources/JarvisCore/Screen/` — the model-facing screen port and the pure, Foundation-only capture logic: the `ScreenCapturing` contract, the `ScreenSnapshot` model, front-window selection over window-server candidates, and reading-order OCR layout (`ScreenCapturing`, `ScreenSnapshot`, `FrontWindowSelector`, `WindowCandidate`, `TextFragment`, `RecognizedTextLayout`). No process or file I/O; the kernel dependency guard rejects `Process`/`FileManager` here.
-- `Sources/JarvisScreenCapture/` — the OS-bound screen-capture adapter behind that port ([lean-coaching-core.md → Phase 4 contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)): `ScreenCaptureRunner` owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory — it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for — and `ScreenCaptureCLI` shoots the display frozen into the attempt's `SessionPlan` revision, or the main display. Depends inward on `JarvisCore`; composed by `WindowScopedScreenCapture` in `JarvisApp`; tested headlessly in `JarvisScreenCaptureTests`.
+- `Sources/JarvisScreenCapture/` — the OS-bound screen-capture adapter behind that port ([lean-coaching-core.md → Phase 4 contract](./lean-coaching-core.md#phase-4-implementation-contract--screen-capture-adapter-move)): `ScreenCaptureRunner` owns each cancellable `screencapture` helper and the transient JPEG it writes into the owner-only session directory — it verifies that file is gone before returning, and a capture whose cleanup can't be proven latches the runner so no later capture (or display fallback) starts while a screen-derived file is unaccounted for — `ScreenCaptureCLI` shoots the display frozen into the attempt's `SessionPlan` revision, and the browser reader combines bounded Accessibility text with current-window OCR. Depends inward on `JarvisCore`; composed by `WindowScopedScreenCapture` in `JarvisApp`; tested headlessly in `JarvisScreenCaptureTests`.
 - `Sources/JarvisCore/Overlay/` — the enabled output port: overlay text model, length-proportional timing, and fan-out (`OverlayRendering`, `OverlayTiming`, `BroadcastOverlay`).
 - `Sources/JarvisCore/Config/` — the control plane: config, owner-only secrets, transcription/brain/screen/overlay preferences, the immutable `SessionPlan` revision a coaching attempt runs against so no turn reads storage, and the reader for the bundled coaching skills (`Config`, `Secrets`, `Credential`, `TranscriptionPreferences`, `BrainPreferences`, `ScreenCapturePreferences`, `ScreenCaptureScope`, `OverlayAppearance`, `SessionPlan`, `Skill`, `SkillCatalog`; skill content in `Sources/JarvisCore/Resources/Skills/<name>/SKILL.md`, behavior in [architecture.md → Capabilities](./architecture.md#capabilities)). The kernel dependency guard rejects `UserDefaults`, every preference store, and `SecretStore` inside the kernel — `Config/` itself is excluded from that guard, which is why `SkillCatalog`'s file I/O lives here rather than in `Coach/`.
 - `Sources/JarvisCore/Support/` — small shared runtime primitives (`Clock`, `TurnTaskBox`, `RetrySchedule`, `RetryIncident`).
@@ -374,7 +390,7 @@ Tested `JarvisCore` + `JarvisBrainProviders` + `JarvisEvaluation` + `JarvisOverl
 - `Sources/JarvisOverlay/` — the capture-invisible `NSPanel` surfaces: `OverlayCaptionPanel` (transient), `OverlayBoxPanel` (persistent), `NSPanel+CaptureExclusion`; plus the box's own chrome — `OverlayBoxHeaderView` and `OverlayBoxHeaderButton` (collapse, the name, clear), `OverlayBoxChrome` (header geometry derived from the box's height), and `OverlayBoxResizeAffordanceView` (the drawn edge affordance, which also owns the resize drag because macOS refuses an inactive app a resize cursor).
 - `Sources/JarvisApp/App/` + `MenuBar/` — entry point and the owners split out of the delegate ([lean-coaching-core.md → Phase 5](./lean-coaching-core.md#phase-5-implementation-contract--appdelegate-split)): `AppDelegate` validates and prepares a Start, renders readiness, and composes the menu, Settings, and Activity; `SessionComposition` is the session runtime (everything from an accepted Start to coaching ready, capture-heartbeat handling, and teardown) over an `AudioSource` the caller supplies, which production builds as `AggregateEchoCapture`; `SessionArtifacts` owns the owner-only session directory, the evidence handle in it, retention pruning, and the close bookkeeping, and `BrainComposition` owns provider preflight, brain-client and route construction, and live reapply. Plus `ErrorReporter` (startup alerts and an unconditional no-presentation runtime policy).
 - `Sources/JarvisApp/Updates/UpdateController.swift` — the menu bar's Sparkle-backed **Check for Updates** item: user-initiated checks only, disabled while a session is live, and absent from development builds, which carry no feed ([build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed)).
-- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation, Silero voice-activity detection, and resampling to whichever wire rate the selected provider requires (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `SileroVoiceActivityDetector`, `Resampler`); provider construction (`TranscriptionSessionFactory`); the one socket driver both WebSocket providers run, which owns the `URLSession`, generation counter, timers, and receive and close paths and asks `SocketLifecyclePolicy` for every decision (`WebSocketConnection`, `WebSocketConnectionAdapter`); OpenAI Realtime item/readiness/transactional-reconnect handling as one of its two adapters (`RealtimeTranscriber`); Gemini Live handling with server-owned finalization, no client-managed ledger, and the `goAway` drain (`GeminiLiveTranscriber`); macOS 26+ on-device final-result transcription and model preparation (`AppleSpeechTranscriber`, `AppleSpeechModelPreparation`); continuity/network diagnostics; permission reporting and requesting, including the self-tap tone probe that is the only way to ask for or prove the silently-enforced system-audio grant (`Permissions`, `SystemAudioPermissionProbe`); plus the window-scoped screenshot + OCR edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`).
+- `Sources/JarvisApp/Capture/` — one-clock aggregate mic + sample-preserving system-audio capture that starts without waiting for a system-audio writer, with AEC3 echo cancellation, Silero voice-activity detection, and resampling to whichever wire rate the selected provider requires (`AggregateEchoCapture`, `WebRTCEchoCanceller`, `SileroVoiceActivityDetector`, `Resampler`); provider construction (`TranscriptionSessionFactory`); the one socket driver both WebSocket providers run, which owns the `URLSession`, generation counter, timers, and receive and close paths and asks `SocketLifecyclePolicy` for every decision (`WebSocketConnection`, `WebSocketConnectionAdapter`); OpenAI Realtime item/readiness/transactional-reconnect handling as one of its two adapters (`RealtimeTranscriber`); Gemini Live handling with server-owned finalization, no client-managed ledger, and the `goAway` drain (`GeminiLiveTranscriber`); macOS 26+ on-device final-result transcription and model preparation (`AppleSpeechTranscriber`, `AppleSpeechModelPreparation`); continuity/network diagnostics; permission reporting and requesting, including the optional user-initiated browser Accessibility grant (`Permissions`, `SystemAudioPermissionProbe`, `BrowserAccessibilityPermission`); plus the window-scoped screenshot edge (`WindowScopedScreenCapture`, `ScreenTextRecognizer`). `Sources/JarvisScreenCapture/` owns `BrowserAccessibilityReader` and `ScreenTextResolver` as part of the OS-bound capture adapter.
 - `Sources/JarvisApp/Onboarding/` — the launch permission gate that gathers Microphone, System Audio Recording, and Screen Recording one dialog at a time and keeps Jarvis closed until it holds all three, so no TCC prompt appears mid-session (`PermissionGate`, `PermissionsChecklistView`) ([architecture.md → Permissions](./architecture.md#permissions)).
 - `Sources/JarvisApp/Settings/` — the unified Settings window (`SettingsWindow` hosting Brain behavior, shared Connections, Overlay, Screen, Prep material, and Activity sections), with shared page, rounded-card, responsive-row, and scroll primitives so every tab keeps one visual system without coupling section behavior. Saving an API key runs one models-list check (`CredentialVerifier`) and renders the vendor's verdict under the row from the same table a live session reads ([settings-window.md → Connections](./settings-window.md#connections)).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift` — the global Carbon hint, Explain more, and Show code shortcuts, with independent persisted bindings.

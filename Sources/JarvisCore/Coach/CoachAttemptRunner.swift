@@ -258,10 +258,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("👁 looking at your screen")
                 activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
-                if let text = shot.recognizedText {
-                    jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
-                    let observation = ChatMessage.user(JarvisPrompts.Coach.recognizedText(text))
-                    observations.append(observation)
+                if !shot.textEvidence.isEmpty {
+                    let lines = shot.textEvidence.reduce(0) {
+                        $0 + $1.text.count(where: { $0 == "\n" }) + 1
+                    }
+                    jlog("🔤 read \(lines) lines of on-screen text")
+                    observations.append(.user(JarvisPrompts.Coach.screenText(shot.textEvidence)))
                 }
                 work.screenObservation = observations
             } else {
@@ -441,19 +443,20 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     if let shot {
                         jlog("👁 looking at your screen")
                         activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
-                        if let text = shot.recognizedText {
-                            jlog("🔤 read \(text.count(where: { $0 == "\n" }) + 1) lines of on-screen text")
+                        if !shot.textEvidence.isEmpty {
+                            let lines = shot.textEvidence.reduce(0) {
+                                $0 + $1.text.count(where: { $0 == "\n" }) + 1
+                            }
+                            jlog("🔤 read \(lines) lines of on-screen text")
                         }
                         work.screenObservation = [
-                            .user(JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.recognizedText
-                            )),
+                            .user(JarvisPrompts.Coach.captureResult(textEvidence: shot.textEvidence)),
                             .userImage(shot.imageBase64),
                         ]
                         appendToolContinuation(
                             toolCallId: callID,
                             resultText: JarvisPrompts.Coach.captureResult(
-                                recognizedText: shot.recognizedText),
+                                textEvidence: shot.textEvidence),
                             extraMessages: [.userImage(shot.imageBase64)],
                             newPhase: .captureScreenContinuation)
                     } else {

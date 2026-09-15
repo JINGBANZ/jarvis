@@ -96,9 +96,12 @@ Narrow and explicit. Data leaves the machine only via:
   Speech** on macOS 26+, raw audio remains on-device and `SpeechAnalyzer` emits final text using the
   selected conversation locale. `AssetInventory` may download Apple's language model, but it does
   not upload captured audio.
-- **Screenshot + transcript window → the selected brain provider/model** — and *only* when the
-  model triggers a `capture_screen` and/or a coaching turn. No screen content leaves the machine on
-  idle turns.
+- **Screenshot + available typed screen evidence + transcript window → the selected brain
+  provider/model** — and *only* when the model triggers a `capture_screen` and/or a coaching turn.
+  With the default settings, typed evidence is on-device OCR of the current viewport. If the user
+  explicitly enables **Read Chrome page text** and grants Accessibility, it also contains bounded
+  semantic text from the exact foreground Chrome tab. No screen content leaves the
+  machine on idle turns.
 - **With Claude Code selected for coaching**
   ([architecture.md §4](./architecture.md#local-cli-brain-providers)), the same brain payload instead
   goes to the `claude` subprocess, which sends it to Anthropic under the *user's own signed-in
@@ -141,6 +144,15 @@ Narrow and explicit. Data leaves the machine only via:
   session's recorded version. This request sends the release version, never session contents.
   The two source paths and provenance contract are in [build-and-run.md](./build-and-run.md).
 
+The optional Accessibility grant is broader at the OS boundary than Jarvis's use of it. Jarvis asks
+for that grant only from Settings while stopped, never during a live session. The adapter is limited
+in code to read-only attribute queries for the exact foreground Chrome window and its active web
+area. It does not run JavaScript, invoke Accessibility actions, mutate attributes, read background
+tabs, or access raw HTML, history, cookies, or browser storage. Secure text roles and subroles are
+excluded. Missing permission, an unsupported app, an unmatched window, an absent web area, or empty
+semantic text omits that source while current-screenshot OCR remains available. These failures are
+logged without page text.
+
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: audio is either
 streamed to OpenAI and dropped or analyzed on-device by Apple Speech, the live transcript lives in
@@ -148,6 +160,11 @@ memory, and the transient file `screencapture` writes a frame into is created in
 session directory (never `/tmp`) and deleted —
 with its absence verified — before the capture returns. The one thing persisted *on this machine* is
 the **per-session log directory** — owner-only and bounded; see below.
+
+Jarvis keeps no separate browser-text cache or archive. Accessibility text and OCR accompany their
+current capture; older screenshots are not replayed, and older text evidence collapses when a newer
+capture is committed. Text included in provider requests follows the existing protected wire-audit
+and provider-retention paths described here.
 
 > **Server-side retention for debuggability (current behavior).** Session memory is client-managed
 > (`CoachHistory` — nothing at OpenAI is needed for continuity), but requests are still sent

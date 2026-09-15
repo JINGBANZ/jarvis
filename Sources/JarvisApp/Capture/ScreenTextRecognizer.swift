@@ -1,12 +1,13 @@
 import Foundation
 import Vision
 import JarvisCore
+import JarvisScreenCapture
 
 /// On-device OCR over a captured JPEG (Apple Vision — nothing leaves the machine). `.accurate`
 /// with language correction OFF: correction "fixes" code identifiers (`cnt`, `prevGroupStart`)
 /// into English words, and code fidelity is the whole point. Reading order is reconstructed by
 /// Core's `RecognizedTextLayout`, where the geometry is unit-tested.
-struct ScreenTextRecognizer {
+struct ScreenTextRecognizer: ImageTextRecognizing, Sendable {
     /// Nil when recognition fails or the image holds no text — callers just skip the sidecar.
     func recognizedText(inJPEG jpeg: Data) -> String? {
         let request = VNRecognizeTextRequest()

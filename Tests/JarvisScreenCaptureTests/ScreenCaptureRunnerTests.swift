@@ -77,7 +77,8 @@ import Testing
                 """)
         // The selection is frozen by the attempt's plan revision, so the adapter is handed it
         // rather than reading a preference store at capture time.
-        let selection = ScreenCaptureSelection(scope: .entireDisplay, explicitDisplay: 2)
+        let selection = ScreenCaptureSelection(
+            scope: .entireDisplay, explicitDisplay: 2, browserTextEnabled: false)
         let runner = ScreenCaptureRunner(
             captureDirectory: captureDirectory,
             executable: executable)

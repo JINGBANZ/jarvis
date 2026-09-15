@@ -78,4 +78,27 @@ import Foundation
         p.displayIndex = 3
         #expect(p.explicitDisplay == nil)
     }
+
+    @Test func browserTextDefaultsOffAndRoundTripsThroughDefaults() {
+        let d = freshDefaults()
+        #expect(!ScreenCapturePreferences(defaults: d).browserTextEnabled)
+        ScreenCapturePreferences(defaults: d).browserTextEnabled = true
+        #expect(ScreenCapturePreferences(defaults: d).browserTextEnabled)
+    }
+
+    @Test func revokedBrowserTextAvailabilityClearsPersistedOptIn() {
+        let preferences = ScreenCapturePreferences(defaults: freshDefaults())
+        preferences.browserTextEnabled = true
+
+        #expect(preferences.reconcileBrowserTextAvailability(isAvailable: false))
+        #expect(!preferences.browserTextEnabled)
+    }
+
+    @Test func availableBrowserTextPreservesPersistedOptIn() {
+        let preferences = ScreenCapturePreferences(defaults: freshDefaults())
+        preferences.browserTextEnabled = true
+
+        #expect(!preferences.reconcileBrowserTextAvailability(isAvailable: true))
+        #expect(preferences.browserTextEnabled)
+    }
 }

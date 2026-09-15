@@ -12,11 +12,12 @@ import Testing
             guidance: searchPrepNotesTool.guidance,
             deferLoading: true)])
 
-    /// The tip style moved onto `speak`, and `speak` is always offered, so a session with nothing
-    /// to load still sends exactly the base prompt plus that guidance.
+    /// Hot-tool guidance is appended in declared order. A session with nothing to load therefore
+    /// sends the base prompt followed by capture evidence rules and the tip style.
     @Test func bareBuilderIsTheBasePromptPlusTipStyle() {
         #expect(JarvisPrompts.Coach.system(capabilities: .default, explanationsEnabled: false)
-            == JarvisPrompts.Coach.system + "\n\n" + speakTool.guidance)
+            == [JarvisPrompts.Coach.system, captureScreenTool.guidance, speakTool.guidance]
+                .joined(separator: "\n\n"))
     }
 
     /// A prompt names a loader only when the session has something to load, and renumbers the rest

@@ -88,10 +88,12 @@ import Testing
         let screen = RecordingScreen()
         let started = SessionPlan(
             revision: 1,
-            screen: ScreenCaptureSelection(scope: .activeWindow, explicitDisplay: nil))
+            screen: ScreenCaptureSelection(
+                scope: .activeWindow, explicitDisplay: nil, browserTextEnabled: false))
         let installed = SessionPlan(
             revision: 2,
-            screen: ScreenCaptureSelection(scope: .entireDisplay, explicitDisplay: 3))
+            screen: ScreenCaptureSelection(
+                scope: .entireDisplay, explicitDisplay: 3, browserTextEnabled: true))
 
         // The brain asks for the screen twice, and the plan changes between the two requests.
         let brain = ScriptedBrainWithHook(script: [
@@ -117,10 +119,12 @@ import Testing
         let screen = RecordingScreen()
         let started = SessionPlan(
             revision: 1,
-            screen: ScreenCaptureSelection(scope: .activeWindow, explicitDisplay: nil))
+            screen: ScreenCaptureSelection(
+                scope: .activeWindow, explicitDisplay: nil, browserTextEnabled: false))
         let installed = SessionPlan(
             revision: 2,
-            screen: ScreenCaptureSelection(scope: .entireDisplay, explicitDisplay: 3))
+            screen: ScreenCaptureSelection(
+                scope: .entireDisplay, explicitDisplay: 3, browserTextEnabled: true))
 
         let brain = ScriptedBrainWithHook(script: [
             Self.captureScreenReply("s1"),
@@ -147,23 +151,28 @@ import Testing
         let preferences = ScreenCapturePreferences(defaults: defaults)
 
         #expect(preferences.selection
-            == ScreenCaptureSelection(scope: Defaults.Screen.scope, explicitDisplay: nil))
+            == ScreenCaptureSelection(
+                scope: Defaults.Screen.scope, explicitDisplay: nil, browserTextEnabled: false))
 
         preferences.scope = .entireDisplay
         preferences.displayIndex = 4
+        preferences.browserTextEnabled = true
         #expect(preferences.selection
-            == ScreenCaptureSelection(scope: .entireDisplay, explicitDisplay: 4))
+            == ScreenCaptureSelection(
+                scope: .entireDisplay, explicitDisplay: 4, browserTextEnabled: true))
 
         // The main display needs no explicit -D, so an index of 1 stays nil.
         preferences.displayIndex = 1
         #expect(preferences.selection
-            == ScreenCaptureSelection(scope: .entireDisplay, explicitDisplay: nil))
+            == ScreenCaptureSelection(
+                scope: .entireDisplay, explicitDisplay: nil, browserTextEnabled: true))
 
         // A display index left over from an old entire-display selection must not steer
         // active-window captures.
         preferences.scope = .activeWindow
         preferences.displayIndex = 4
         #expect(preferences.selection
-            == ScreenCaptureSelection(scope: .activeWindow, explicitDisplay: nil))
+            == ScreenCaptureSelection(
+                scope: .activeWindow, explicitDisplay: nil, browserTextEnabled: true))
     }
 }
