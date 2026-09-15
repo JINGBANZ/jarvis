@@ -37,12 +37,22 @@ extension JarvisPrompts.Coach {
     static func screenText(_ evidence: [ScreenTextEvidence]) -> String {
         evidence.map { item in
             let source = item.source == .browserAccessibility
-                ? "Chrome Accessibility (active-tab tree, may include off-screen text)"
-                : "On-device OCR (current screenshot viewport, may contain errors)"
+                ? currentAccessibilitySource : currentOCRSource
             let omission = item.truncated ? " — truncated" : ""
             return "\(screenTextHeader) — \(source)\(omission):\n\(item.text)"
         }.joined(separator: "\n\n")
     }
+
+    static let currentOCRSource = "On-device OCR (current screenshot viewport, may contain errors)"
+    static let currentAccessibilitySource =
+        "Chrome Accessibility (active-tab tree, may include off-screen text)"
+    // What the same evidence says once its turn is committed. Left claiming "current", a capture from
+    // minutes ago answered the screen gate for a later "how do I solve this": through the Codex
+    // subscription the model skipped the fresh look it takes when the words say "earlier".
+    static let earlierOCRSource =
+        "On-device OCR (from an earlier capture; the screen may have changed since, may contain errors)"
+    static let earlierAccessibilitySource =
+        "Chrome Accessibility (from an earlier capture; the screen may have changed since, may include off-screen text)"
 
     static let earlierCaptureFailed =
         "A screen capture requested earlier in this turn failed."

@@ -65,6 +65,28 @@ import Testing
         #expect(h.snapshot().contains { $0.toolCallId == "c1" })     // pairing intact, text collapsed
     }
 
+    /// Committed screen text keeps its words but stops claiming to be the current screen, so a later
+    /// request that needs the screen is free to look again. The capture's own attempt read it as
+    /// current; only memory relabels it.
+    @Test func committedScreenTextIsLabeledAsAnEarlierCapture() throws {
+        let current = JarvisPrompts.Coach.screenText([
+            ScreenTextEvidence(text: "intervals.sort()", source: .onDeviceOCR, coverage: .currentViewport),
+            ScreenTextEvidence(text: "Merge Intervals", source: .browserAccessibility,
+                               coverage: .activeTabAccessibilityTree),
+        ])
+        #expect(current.contains(JarvisPrompts.Coach.currentOCRSource))
+        let h = CoachHistory()
+        h.commit([.user("turn"),
+                  .init(role: .tool, text: "screenshot captured\n\n\(current)", toolCallId: "c1")])
+
+        let committed = try #require(h.snapshot().first { $0.toolCallId == "c1" }?.text)
+        #expect(committed.contains("intervals.sort()") && committed.contains("Merge Intervals"))
+        #expect(committed.contains(JarvisPrompts.Coach.earlierOCRSource))
+        #expect(committed.contains(JarvisPrompts.Coach.earlierAccessibilitySource))
+        #expect(!committed.contains(JarvisPrompts.Coach.currentOCRSource))
+        #expect(!committed.contains(JarvisPrompts.Coach.currentAccessibilitySource))
+    }
+
     /// Raw passthrough items live only inside their turn's tool loop — commit converts them: the
     /// function_call survives as the synthetic id-less call (so the committed tool result never
     /// orphans) and reasoning is dropped; later turns don't need it and a model switch would

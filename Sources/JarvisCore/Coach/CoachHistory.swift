@@ -76,8 +76,22 @@ public final class CoachHistory: @unchecked Sendable {
         messages.append(contentsOf: turn.map { m in
             m.imageBase64JPEG != nil
                 ? .user(JarvisPrompts.Coach.earlierImageStub)
-                : m
+                : Self.labelingScreenTextEarlier(m)
         })
+    }
+
+    /// Committed screen text keeps its words but no longer claims to be the current screen: by the
+    /// next request it describes an earlier capture, and the screen gate must be free to look again.
+    private static func labelingScreenTextEarlier(_ m: ChatMessage) -> ChatMessage {
+        guard let text = m.text, text.contains(JarvisPrompts.Coach.screenTextHeader) else { return m }
+        let relabeled = text
+            .replacingOccurrences(of: JarvisPrompts.Coach.currentOCRSource,
+                                  with: JarvisPrompts.Coach.earlierOCRSource)
+            .replacingOccurrences(of: JarvisPrompts.Coach.currentAccessibilitySource,
+                                  with: JarvisPrompts.Coach.earlierAccessibilitySource)
+        return ChatMessage(
+            role: m.role, text: relabeled, imageBase64JPEG: m.imageBase64JPEG,
+            toolCallId: m.toolCallId, toolCalls: m.toolCalls)
     }
 
     /// The turn without its `stay_silent` calls and the results answering them. A call message
