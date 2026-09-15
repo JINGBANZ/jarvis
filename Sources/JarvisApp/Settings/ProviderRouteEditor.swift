@@ -17,6 +17,8 @@ final class ProviderRouteEditor: NSObject {
     private var primaryRow: BrainTargetRowView?
     private var fallbackRows: [BrainTargetRowView] = []
     private var detectedCLIs: [BrainProvider: DetectedAgentCLI]?
+    /// Subscriptions the last helper probe proved signed in; nil before it answers.
+    private var signedInSubscriptions: Set<BrainProvider>?
     private var activeTarget: BrainTarget?
 
     private static let headerHeight: CGFloat = 42
@@ -44,9 +46,11 @@ final class ProviderRouteEditor: NSObject {
 
     func render(
         detectedCLIs: [BrainProvider: DetectedAgentCLI]?,
+        signedInSubscriptions: Set<BrainProvider>?,
         activeTarget: BrainTarget? = nil
     ) {
         self.detectedCLIs = detectedCLIs
+        self.signedInSubscriptions = signedInSubscriptions
         self.activeTarget = activeTarget
 
         primaryRow?.removeFromSuperview()
@@ -178,6 +182,9 @@ final class ProviderRouteEditor: NSObject {
     }
 
     private func isAvailableForNewSelection(_ provider: BrainProvider) -> Bool {
+        if provider.servedByLocalProxy {
+            return signedInSubscriptions?.contains(provider) == true
+        }
         guard provider.usesLocalCLI, let detectedCLIs else { return true }
         guard let cli = detectedCLIs[provider] else { return false }
         return cli.authenticationStatus != .signedOut
@@ -230,13 +237,13 @@ final class ProviderRouteEditor: NSObject {
     private func primaryProviderChanged(to provider: BrainProvider) {
         guard let model = availablePrimaryModel(for: provider) else {
             NSSound.beep() // ghost-mode-allowed: explicit user action in Settings
-            render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+            render(detectedCLIs: detectedCLIs, signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
             return
         }
         preferences.route = BrainRoute(
             primary: BrainTarget(provider: provider, modelID: model.id),
             fallbackTargets: preferences.fallbackTargets)
-        render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+        render(detectedCLIs: detectedCLIs, signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
         onChange()
     }
 
@@ -245,11 +252,11 @@ final class ProviderRouteEditor: NSObject {
         let candidate = BrainTarget(provider: primary.provider, modelID: model.id)
         guard candidate == primary || !preferences.fallbackTargets.contains(candidate) else {
             NSSound.beep() // ghost-mode-allowed: explicit user action in Settings
-            render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+            render(detectedCLIs: detectedCLIs, signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
             return
         }
         preferences.setModel(model, for: primary.provider)
-        render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+        render(detectedCLIs: detectedCLIs, signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
         onChange()
     }
 
@@ -270,7 +277,7 @@ final class ProviderRouteEditor: NSObject {
         guard let model = availableModel(
             for: provider, replacingTargetAt: index, preferredModelID: preferred) else {
             NSSound.beep() // ghost-mode-allowed: explicit user action in Settings
-            render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+            render(detectedCLIs: detectedCLIs, signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
             return
         }
         targets[index] = BrainTarget(provider: provider, modelID: model.id)
@@ -284,7 +291,7 @@ final class ProviderRouteEditor: NSObject {
         let candidate = BrainTarget(provider: target.provider, modelID: model.id)
         guard !isDuplicate(candidate, replacingTargetAt: index) else {
             NSSound.beep() // ghost-mode-allowed: explicit user action in Settings
-            render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+            render(detectedCLIs: detectedCLIs, signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
             return
         }
         targets[index] = candidate
@@ -308,7 +315,7 @@ final class ProviderRouteEditor: NSObject {
 
     private func save(_ targets: [BrainTarget]) {
         preferences.fallbackTargets = targets
-        render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+        render(detectedCLIs: detectedCLIs, signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
         onChange()
     }
 }

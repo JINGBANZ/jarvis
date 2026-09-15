@@ -145,7 +145,7 @@ public struct AgentCLIDetector: Sendable {
     private func authenticationStatus(_ provider: BrainProvider, executable: URL)
         -> AgentCLIAuthenticationStatus {
         switch provider {
-        case .openAI:
+        case .openAI, .codexSubscription, .claudeSubscription:
             return .unknown
         case .claudeCode:
             return claudeAuthenticationStatus(executable: executable)

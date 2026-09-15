@@ -121,7 +121,7 @@ import Foundation
         let targets = [
             BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
             BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-terra"),
-            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5-20251001"),
         ]
         p.fallbackTargets = targets
         #expect(BrainPreferences(defaults: d).fallbackTargets == targets)
@@ -143,13 +143,13 @@ import Foundation
             ["provider": BrainProvider.codexCLI.rawValue, "modelID": ""],
             ["provider": BrainProvider.codexCLI.rawValue, "modelID": "gpt-5.6-terra"],
             ["provider": BrainProvider.claudeCode.rawValue, "modelID": "claude-opus-5"],
-            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "claude-haiku-4-5"],
+            ["provider": BrainProvider.claudeCode.rawValue, "modelID": "claude-haiku-4-5-20251001"],
         ], forKey: "brain.fallbackTargets")
 
         let expected = [
             BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
             BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-terra"),
-            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5-20251001"),
         ]
         #expect(BrainPreferences(defaults: d).fallbackTargets == expected)
         #expect((d.array(forKey: "brain.fallbackTargets") ?? []).count == expected.count)
@@ -231,7 +231,7 @@ import Foundation
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
         p.setModel(
-            BrainModelCatalog.model(id: "claude-haiku-4-5", for: .claudeCode)!,
+            BrainModelCatalog.model(id: "claude-haiku-4-5-20251001", for: .claudeCode)!,
             for: .claudeCode)
         // A Claude model is not a valid Codex/OpenAI model — those providers stay on their defaults.
         #expect(p.model(for: .openAI) == BrainModelCatalog.defaultModel(for: .openAI))

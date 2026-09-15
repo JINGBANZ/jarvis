@@ -20,18 +20,21 @@ import Testing
         ])
     }
 
-    @Test func claudeCodeIncludesLatestReleaseAndPreservesSavedModels() {
-        #expect(BrainModelCatalog.models(for: .claudeCode).map(\.id) == [
+    @Test func claudeProvidersIncludeLatestReleaseAndPreserveSavedModels() {
+        let expected = [
             "claude-opus-5",
             "claude-sonnet-5",
             "claude-fable-5-1",
             "claude-fable-5",
-            "claude-haiku-4-5",
-        ])
+            "claude-haiku-4-5-20251001",
+        ]
+        #expect(BrainModelCatalog.models(for: .claudeSubscription).map(\.id) == expected)
+        #expect(BrainModelCatalog.models(for: .claudeCode).map(\.id) == expected)
     }
 
-    @Test func openAIAndCodexCLIShareTheSameCatalog() {
+    @Test func openAIFamilyProvidersShareTheSameCatalog() {
         #expect(BrainModelCatalog.models(for: .openAI) == BrainModelCatalog.all)
+        #expect(BrainModelCatalog.models(for: .codexSubscription) == BrainModelCatalog.all)
         #expect(BrainModelCatalog.models(for: .codexCLI) == BrainModelCatalog.all)
     }
 
@@ -44,7 +47,8 @@ import Testing
     @Test func everyProviderUsesItsFirstCatalogEntryAsDefault() {
         for provider in BrainProvider.allCases {
             let models = BrainModelCatalog.models(for: provider)
-            #expect(models.count == (provider == .claudeCode ? 5 : 7))
+            let isClaude = provider == .claudeCode || provider == .claudeSubscription
+            #expect(models.count == (isClaude ? 5 : 7))
             #expect(Set(models.map(\.id)).count == models.count)
             #expect(models.allSatisfy { !$0.id.isEmpty })
             #expect(BrainModelCatalog.defaultModel(for: provider) == models.first)
@@ -53,7 +57,9 @@ import Testing
 
     @Test func providerDefaultsFollowCatalogOrder() {
         #expect(BrainModelCatalog.defaultModel(for: .openAI).id == "gpt-5.6-sol")
+        #expect(BrainModelCatalog.defaultModel(for: .codexSubscription).id == "gpt-5.6-sol")
         #expect(BrainModelCatalog.defaultModel(for: .codexCLI).id == "gpt-5.6-sol")
+        #expect(BrainModelCatalog.defaultModel(for: .claudeSubscription).id == "claude-opus-5")
         #expect(BrainModelCatalog.defaultModel(for: .claudeCode).id == "claude-opus-5")
     }
 
@@ -63,12 +69,14 @@ import Testing
                 == "Claude Opus 5")
         #expect(BrainModelCatalog.model(id: "sonnet", for: .claudeCode) == nil)
         #expect(BrainModelCatalog.model(id: "", for: .codexCLI) == nil)
-        #expect(BrainModelCatalog.model(id: "gpt-5.5", for: .claudeCode) == nil)
+        #expect(BrainModelCatalog.model(id: "gpt-5.5", for: .claudeSubscription) == nil)
     }
 
     @Test func summarizerModelsUseVerifiedProviderBehavior() {
         #expect(BrainModelCatalog.summarizerModelID(for: .openAI) == "gpt-5.4-mini")
-        #expect(BrainModelCatalog.summarizerModelID(for: .claudeCode) == "claude-haiku-4-5")
+        #expect(BrainModelCatalog.summarizerModelID(for: .claudeSubscription) == "claude-haiku-4-5-20251001")
+        #expect(BrainModelCatalog.summarizerModelID(for: .claudeCode) == "claude-haiku-4-5-20251001")
+        #expect(BrainModelCatalog.summarizerModelID(for: .codexSubscription) == "")
         #expect(BrainModelCatalog.summarizerModelID(for: .codexCLI) == "")
     }
 }

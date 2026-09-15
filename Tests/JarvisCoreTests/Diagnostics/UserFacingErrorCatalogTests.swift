@@ -148,6 +148,21 @@ import Testing
         #expect(!e.severity.stopsSession)
     }
 
+    /// A route with no target left to coach is refused like a missing key: alert, never stop, and
+    /// the alert is the failure's own sentence, which says what to do.
+    @Test func anUnavailableRouteAlertsWithoutStoppingAndSaysWhatToDo() {
+        let failure = ProviderFailure(
+            source: .brain(.claudeSubscription), stage: .process, category: .authentication,
+            disposition: .permanent, identity: .init(), message: "")
+        let e = UserFacingError.brainRouteUnavailable(failure: failure)
+        #expect(e.severity == .warning)
+        #expect(e.severity.showsAlert)
+        #expect(!e.severity.stopsSession)
+        #expect(e.title == "Claude subscription isn't ready")
+        #expect(e.message
+            == "Claude subscription isn't signed in; open Settings → Connections, press Sign in for it, then press Start.")
+    }
+
     @Test func exhaustedBrainRouteStopsQuietlyAndKeepsDiagnosticDetail() {
         let failure = ProviderFailure(
             source: .brain(.claudeCode), stage: .process, category: .unknown,

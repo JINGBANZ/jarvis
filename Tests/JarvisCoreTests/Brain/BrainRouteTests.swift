@@ -6,7 +6,7 @@ import Testing
         let primary = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let fallbacks = [
             BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
-            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5"),
+            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5-20251001"),
             BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-sol"),
         ]
 

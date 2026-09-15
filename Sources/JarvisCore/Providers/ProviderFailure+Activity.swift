@@ -24,6 +24,7 @@ extension ProviderFailure {
     }
 
     private var clauseAndAdvice: (clause: String, advice: String?) {
+        if let subscription = subscriptionClauseAndAdvice { return subscription }
         let name = source.displayName
         let surface = source.surfaceNoun
         let clause: String
@@ -64,6 +65,33 @@ extension ProviderFailure {
         }
 
         return (clause, advice)
+    }
+
+    /// A subscription target's failures that have a next step of their own: a signed-out account,
+    /// the bundled sign-in service not answering, and a plan's usage limit. Nil for every other
+    /// failure, which reads as any provider's does.
+    private var subscriptionClauseAndAdvice: (clause: String, advice: String?)? {
+        guard case .brain(let provider) = source, provider.servedByLocalProxy else { return nil }
+        let name = source.displayName
+        let signIn = (clause: "\(name) isn't signed in",
+                      advice: "open Settings → Connections, press Sign in for it, then press Start")
+        // The helper answers `unknown provider for model` both for a signed-out vendor and for a model
+        // it does not serve, so that stays a configuration failure; Start's model-list probe is what
+        // names a signed-out subscription.
+        switch category {
+        case .authentication:
+            return signIn
+        case .unreachable:
+            return ("\(name) couldn't reach the sign-in service", "quit and reopen Jarvis")
+        // Raised by the supervisor, not by an upstream 5xx, which reads as any provider's outage.
+        case .unavailable where stage == .process:
+            return ("\(name) couldn't start the sign-in service", "quit and reopen Jarvis")
+        case .rejected where identity.httpStatus == 429:
+            return ("\(name) reached its usage limit",
+                    "wait for the limit to reset, or add a fallback in Settings → Brain")
+        default:
+            return nil
+        }
     }
 
     /// The quoted evidence alone, with a leading space, or "" when nothing is known. Frames that

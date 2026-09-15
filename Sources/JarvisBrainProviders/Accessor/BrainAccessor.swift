@@ -4,7 +4,8 @@ import JarvisCore
 import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (Core tests on Linux)
 #endif
 
-/// Brain client over the OpenAI **Responses API** (`POST /v1/responses`). System text is passed via
+/// Brain client over the OpenAI **Responses API** (`POST /v1/responses`), sent to OpenAI itself or to
+/// the bundled CLIProxyAPI helper that serves the subscription targets. System text is passed via
 /// `instructions`; the conversation is sent as typed `input` items; function calls are threaded with
 /// `function_call` / `function_call_output`. Every call is self-contained: session memory is
 /// client-managed
@@ -15,6 +16,11 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
     /// Injected transport; returns the body and the HTTP response (for status + headers).
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
 
+    /// OpenAI's own Responses endpoint, used by every target not served by the bundled helper.
+    public static let openAIEndpoint = URL(string: "https://api.openai.com/v1/responses")!
+
+    /// The target this client serves, which every failure it raises names.
+    private let provider: BrainProvider
     private let apiKey: String
     private let model: String
     private let reasoningEffort: String
@@ -30,10 +36,11 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
     private let traffic: (any BrainTrafficAuditing)?
     private let trafficTag: String
 
-    public init(apiKey: String,
+    public init(provider: BrainProvider = .openAI,
+                apiKey: String,
                 model: String,
                 reasoningEffort: String = Defaults.Brain.effort.rawValue,
-                endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
+                endpoint: URL = BrainAccessor.openAIEndpoint,
                 timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
                 // The cap MUST track the effort: it's a combined reasoning+output budget, so a value
                 // too small for the effort truncates the run (the high-effort bug). Callers pass the
@@ -46,6 +53,7 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
                 traffic: (any BrainTrafficAuditing)? = nil,
                 trafficTag: String = "coach",
                 send: Sender? = nil) {
+        self.provider = provider
         self.apiKey = apiKey
         self.model = model
         // The target's floor, and GPT-6 Astra's own of low. Raise the effort and its budget to the
@@ -79,7 +87,7 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
             // A brain request is one round trip with nothing "ready" behind it, which is exactly
             // what this initializer's transport path assumes: a refused connection reads as
             // unreachable, and the failing URL never becomes the message.
-            throw ProviderFailure(unclassified: error, source: .brain(.openAI), stage: .request)
+            throw ProviderFailure(unclassified: error, source: .brain(provider), stage: .request)
         }
     }
 
@@ -120,7 +128,7 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
                         latencyMs: Self.elapsedMs(since: started), phases: diagnostics.phases)
         guard (200..<300).contains(status) else {
             throw OpenAIFailureClassifier.classify(
-                httpStatus: status, body: data, source: .brain(.openAI), stage: .request)
+                httpStatus: status, body: data, source: .brain(provider), stage: .request)
         }
         return try decode(data)
     }

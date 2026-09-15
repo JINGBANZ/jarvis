@@ -86,6 +86,9 @@ ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisCore.bundle" \
       "$APP/Contents/Resources/Jarvis_JarvisCore.bundle"
 rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices" \
        "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
+# The subscription helper, the same pinned release the distributed app bundles.
+source scripts/lib/cliproxyapi.sh
+bundle_cliproxyapi "$APP"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 # Resources/Info.plist remains the production source of truth. Override only the identity fields in

@@ -90,6 +90,10 @@ public enum OpenAIFailureClassifier {
         case "permission_denied", "organization_deactivated", "account_deactivated",
              "unsupported_country_region_territory":
             return (.access, .permanent)
+        case "upstream_authentication_required":
+            // The bundled CLIProxyAPI helper's answer when it holds no signed-in credential for the
+            // requested model's vendor.
+            return (.authentication, .permanent)
         case "model_not_found":
             return (.configuration, .permanent)
         case "invalid_value" where param?.lowercased().hasPrefix("session.") == true:

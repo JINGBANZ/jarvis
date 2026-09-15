@@ -76,6 +76,11 @@ final class LiveE2ERunner: BrainCompositionHost {
     private var brain: BrainComposition!
     private var composition: SessionComposition!
     private var fixtureSource: FixtureAudioSource?
+    /// The same helper a menu Start uses, with the developer's own sign-ins. The run stops it when
+    /// the scenario ends, so no launch leaves one behind.
+    private let supervisor = LocalProxySupervisor(
+        executable: LocalProxySupervisor.bundledExecutable(),
+        home: FileSecretStore().directoryURL.appendingPathComponent("proxy", isDirectory: true))
     private var detectedCLIs: [BrainProvider: DetectedAgentCLI] = [:]
     private var prepSources: [PrepMaterialSource] = []
     private var sessionEnd: SessionEndReason?
@@ -130,6 +135,11 @@ final class LiveE2ERunner: BrainCompositionHost {
         try speech.removeDirectory()
     }
 
+    /// Signals the subscription helper as the process exits, so no launch leaves one running.
+    func terminateProxyHelper() {
+        supervisor.terminateNow()
+    }
+
     // MARK: - Scenario
 
     private func runScenario() async throws {
@@ -139,7 +149,8 @@ final class LiveE2ERunner: BrainCompositionHost {
         let clips = try synthesizeLines(of: scenario)
         try removeGeneratedAudio()
         brain = BrainComposition(
-            secrets: secrets, host: self, preferences: try makePreferences(for: scenario))
+            secrets: secrets, host: self, supervisor: supervisor,
+            preferences: try makePreferences(for: scenario))
         detectedCLIs = try await detectCLIs(for: scenario)
         prepSources = scenario.prepNotes.map {
             [PrepMaterialSource(
@@ -196,7 +207,7 @@ final class LiveE2ERunner: BrainCompositionHost {
                     primary: Self.defaultTarget(for: provider), fallbackTargets: [])
                 // Applied the way a Settings topology edit is: on the next attempt, with the
                 // session's transcript, history, and loaded capabilities intact.
-                brain.applyBrainPreferencesToRunningSession(
+                await brain.applyBrainPreferencesToRunningSession(
                     detectedCLIs: detectedCLIs, update: .topologyEdit)
             case .restoreCLI:
                 // The stub checks for this marker on every launch and hands over to the real CLI.
@@ -238,6 +249,10 @@ final class LiveE2ERunner: BrainCompositionHost {
             recordSettingsFailure: false)
         guard preflight.isReady else { throw Failure.brainUnavailable(primary) }
         if let cli = preflight.cli { detectedCLIs[primary] = cli }
+        let proxy = await brain.proxyReadiness(for: route)
+        if let failure = brain.routeUnavailability(route, detectedCLIs: detectedCLIs, proxy: proxy) {
+            throw Failure.notReadyToStart(failure.activitySentence)
+        }
 
         expectsSessionEnd = scenario.audio == .fixtureNoMicrophone
             || scenario.transcription.key == .invalid
@@ -257,7 +272,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             explanationsEnabled: Defaults.Explanations.enabled,
             codeEnabled: Defaults.Code.enabled)
         guard composition.start(
-            inputs, detectedCLIs: detectedCLIs, readinessSession: readinessSession,
+            inputs, detectedCLIs: detectedCLIs, proxy: proxy, readinessSession: readinessSession,
             reportContext: .runtime)
         else { throw Failure.startFailed }
 

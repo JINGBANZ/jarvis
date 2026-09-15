@@ -64,6 +64,16 @@ public extension UserFacingError {
               severity: .degraded)
     }
 
+    /// No target in the brain route can serve a request: each is a subscription that is signed out
+    /// or whose sign-in service couldn't start. A preflight refusal with the same semantics as a
+    /// missing key: alert on Start, never stop a running session. It carries the first target's
+    /// failure, whose sentence says what to do.
+    static func brainRouteUnavailable(failure: ProviderFailure) -> UserFacingError {
+        .init(title: "\(failure.source.displayName) isn't ready",
+              message: "\(failure.activitySentence).",
+              severity: .warning)
+    }
+
     /// A permission required by the selected session is unavailable. This is distinct from capture
     /// construction: Screen Recording may be optional, and a TCC refusal has its own recovery path.
     static func permissionsMissing(

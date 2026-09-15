@@ -114,6 +114,14 @@ if [[ -e "$EXTRACTED_SPARKLE/Versions/Current/XPCServices" ]]; then
   exit 1
 fi
 
+EXTRACTED_HELPER="$EXTRACTED_APP/Contents/MacOS/cliproxyapi"
+if [[ ! -f "$EXTRACTED_HELPER" || -L "$EXTRACTED_HELPER" || ! -x "$EXTRACTED_HELPER" \
+      || "$(lipo -archs "$EXTRACTED_HELPER")" != "arm64" \
+      || ! -f "$EXTRACTED_APP/Contents/Resources/Licenses/CLIProxyAPI-LICENSE.txt" ]]; then
+  echo "error: disk-image app is missing the arm64 subscription helper or its license" >&2
+  exit 1
+fi
+
 # --deep for verification only: the app now seals Sparkle's update helpers, and every nested
 # signature must hold in the artifact users mount.
 codesign --verify --strict --deep --verbose=2 "$EXTRACTED_APP"

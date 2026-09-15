@@ -152,6 +152,7 @@ final class SessionComposition {
     func start(
         _ inputs: Inputs,
         detectedCLIs: [BrainProvider: DetectedAgentCLI],
+        proxy: LocalProxySupervisor.Readiness?,
         readinessSession: JarvisReadiness.Session,
         reportContext: UserFacingError.PresentationContext
     ) -> Bool {
@@ -229,6 +230,7 @@ final class SessionComposition {
         let configuredRoute = brain.makeConfiguredRoute(
             inputs.brainRoute,
             detectedCLIs: detectedCLIs,
+            proxy: proxy,
             apiKey: inputs.brainAPIKey,
             effort: brain.preferences.effort,
             sessionDirectory: sessionDirectory)

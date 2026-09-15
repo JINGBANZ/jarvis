@@ -46,16 +46,20 @@ final class BrainComposition {
     let preferences: BrainPreferences
     /// Shared with the Settings sections so a detection performed there is the one this uses.
     let detector = AgentCLIDetector()
+    /// The bundled helper serving the subscription targets, shared with Settings.
+    let supervisor: LocalProxySupervisor
     private let secrets: any SecretStore
     private unowned let host: BrainCompositionHost
 
     init(
         secrets: any SecretStore,
         host: BrainCompositionHost,
+        supervisor: LocalProxySupervisor,
         preferences: BrainPreferences = BrainPreferences()
     ) {
         self.secrets = secrets
         self.host = host
+        self.supervisor = supervisor
         self.preferences = preferences
     }
 
@@ -146,6 +150,13 @@ final class BrainComposition {
         return (true, cli)
     }
 
+    /// The helper's state for a route, read once per Start or reapply; nil when no target in the
+    /// route is a subscription, so a route without one never starts the helper.
+    func proxyReadiness(for route: BrainRoute) async -> LocalProxySupervisor.Readiness? {
+        guard route.targets.contains(where: { $0.provider.servedByLocalProxy }) else { return nil }
+        return await supervisor.readiness()
+    }
+
     /// Construct the coach + compaction clients for one preferences snapshot. Both keep writing to
     /// the current session's traffic recorder, so a hot switch remains one auditable conversation.
     private func makeBrainRuntime(
@@ -153,6 +164,7 @@ final class BrainComposition {
         target: BrainTarget,
         effort: ReasoningEffort,
         cli: DetectedAgentCLI?,
+        proxyEndpoint: LocalProxySupervisor.Endpoint?,
         sharedCLIRuntime: CLIBrainRuntime? = nil,
         prewarm: Bool = true
     ) -> BrainRuntime {
@@ -196,17 +208,26 @@ final class BrainComposition {
                                         runtime: runtimes.summarizer,
                                         prewarm: false)
         } else {
+            // One HTTP client serves OpenAI and both subscriptions; only the endpoint, the key, and
+            // the target's tool policy and reasoning floor differ.
+            let endpoint = target.provider.servedByLocalProxy ? proxyEndpoint : nil
+            let summaryModel = BrainModelCatalog.summarizerModelID(for: target.provider)
             coachBase = BrainAccessor(
-                apiKey: key, model: target.modelID,
+                provider: target.provider,
+                apiKey: endpoint?.key ?? key, model: target.modelID,
                 reasoningEffort: effort.rawValue,
+                endpoint: endpoint?.responsesURL ?? BrainAccessor.openAIEndpoint,
                 timeout: BrainWorkloadTimeout.liveCoaching,
                 maxOutputTokens: effort.maxOutputTokens,
                 toolChoicePolicy: target.provider.toolChoicePolicy,
                 minimumReasoningEffort: target.provider.reasoningEffortFloor,
                 traffic: host.liveSessionEvidence, trafficTag: "coach")
             summarizer = BrainAccessor(
-                apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
+                provider: target.provider,
+                apiKey: endpoint?.key ?? key,
+                model: summaryModel.isEmpty ? target.modelID : summaryModel,
                 reasoningEffort: ReasoningEffort.low.rawValue,
+                endpoint: endpoint?.responsesURL ?? BrainAccessor.openAIEndpoint,
                 timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
                 toolChoicePolicy: target.provider.toolChoicePolicy,
                 minimumReasoningEffort: target.provider.reasoningEffortFloor,
@@ -215,12 +236,17 @@ final class BrainComposition {
         return BrainRuntime(coach: coachBase, summarizer: summarizer)
     }
 
-    /// Missing or definitively signed-out fallback CLIs remain in the runtime route as unavailable
-    /// entries. The driver skips them only if the session cursor reaches them.
-    func fallbackUnavailability(
+    /// Why a route target cannot serve this session, or nil when it can: a missing or definitively
+    /// signed-out CLI, or a subscription the helper cannot serve. Such a target stays in the runtime
+    /// route as an unavailable entry, which the driver skips only if the session cursor reaches it.
+    func unavailability(
         for target: BrainTarget,
-        detectedCLI: DetectedAgentCLI?
+        detectedCLI: DetectedAgentCLI?,
+        proxy: LocalProxySupervisor.Readiness?
     ) -> ProviderFailure? {
+        if target.provider.servedByLocalProxy {
+            return (proxy ?? .unavailable(reason: "isn't running")).unavailability(for: target.provider)
+        }
         guard target.provider.usesLocalCLI else { return nil }
         let source = ProviderFailure.Source.brain(target.provider)
         guard let detectedCLI else {
@@ -237,9 +263,24 @@ final class BrainComposition {
         return nil
     }
 
+    /// The first target's failure when no target in the route can serve, so a Start or a route edit
+    /// is refused instead of installing a route that could never coach. Nil when one target can.
+    func routeUnavailability(
+        _ route: BrainRoute,
+        detectedCLIs: [BrainProvider: DetectedAgentCLI],
+        proxy: LocalProxySupervisor.Readiness?
+    ) -> ProviderFailure? {
+        let failures = route.targets.map {
+            unavailability(for: $0, detectedCLI: detectedCLIs[$0.provider], proxy: proxy)
+        }
+        guard failures.allSatisfy({ $0 != nil }) else { return nil }
+        return failures.first.flatMap { $0 }
+    }
+
     func makeConfiguredRoute(
         _ route: BrainRoute,
         detectedCLIs: [BrainProvider: DetectedAgentCLI],
+        proxy: LocalProxySupervisor.Readiness?,
         apiKey key: String,
         effort: ReasoningEffort,
         sessionDirectory: URL,
@@ -252,7 +293,7 @@ final class BrainComposition {
             codexSupportedFeatures: detectedCLIs[.codexCLI]?.supportedFeatures ?? []) : nil
         let targets = route.targets.enumerated().map { index, target -> ConfiguredBrainTarget in
             let cli = detectedCLIs[target.provider]
-            if let failure = fallbackUnavailability(for: target, detectedCLI: cli) {
+            if let failure = unavailability(for: target, detectedCLI: cli, proxy: proxy) {
                 return ConfiguredBrainTarget(unavailable: target, failure: failure)
             }
             let runtime = makeBrainRuntime(
@@ -260,6 +301,7 @@ final class BrainComposition {
                 target: target,
                 effort: effort,
                 cli: cli,
+                proxyEndpoint: proxy?.endpoint,
                 sharedCLIRuntime: target.provider == .codexCLI ? sharedCodexRuntime : nil,
                 prewarm: prewarmPrimary && index == 0)
             return ConfiguredBrainTarget(
@@ -335,14 +377,20 @@ final class BrainComposition {
 
     /// Apply provider/model topology or effort changes without touching capture, transcription,
     /// history, or the session directory. An in-flight turn finishes on its old client snapshot.
+    /// Returns once the change is installed or refused; a route with a subscription target reads
+    /// the helper first, so the edit meets the sign-ins Settings showed.
     func applyBrainPreferencesToRunningSession(
         detectedCLIs: [BrainProvider: DetectedAgentCLI]?,
         apiKeyOverride: String? = nil,
         update: RunningBrainUpdate
-    ) {
+    ) async {
+        guard host.liveCoachDriver != nil, host.isTranscriptionLive,
+              let sessionDirectory = host.liveSessionDirectory
+        else { return }
+        let proxy = await proxyReadiness(for: preferences.route)
         guard let coachDriver = host.liveCoachDriver,
               host.isTranscriptionLive,
-              let sessionDirectory = host.liveSessionDirectory
+              host.liveSessionDirectory == sessionDirectory
         else { return }
         let route = preferences.route
         let key = apiKeyOverride ?? secrets.apiKey(for: .openAIAPIKey) ?? ""
@@ -363,10 +411,18 @@ final class BrainComposition {
             if let cli = preflight.cli {
                 readyCLIs[provider] = cli
             }
+            if let failure = routeUnavailability(route, detectedCLIs: readyCLIs, proxy: proxy) {
+                jlog("Jarvis: can't apply brain settings — no target in the route can coach: "
+                     + (failure.errorDescription ?? ""))
+                host.liveSessionEvidence?.record(.settingsChangeNotApplied)
+                host.reportBrainError(.brainRouteUnavailable(failure: failure), context: .runtime)
+                return
+            }
         }
         let configuredRoute = makeConfiguredRoute(
             route,
             detectedCLIs: readyCLIs,
+            proxy: proxy,
             apiKey: key,
             effort: preferences.effort,
             sessionDirectory: sessionDirectory,
@@ -403,10 +459,12 @@ final class BrainComposition {
             jlog("Jarvis: saved API key will apply to future OpenAI transcription connections.")
             return
         }
-        applyBrainPreferencesToRunningSession(
-            detectedCLIs: nil,
-            apiKeyOverride: key,
-            update: .credentialRefresh)
+        Task {
+            await applyBrainPreferencesToRunningSession(
+                detectedCLIs: nil,
+                apiKeyOverride: key,
+                update: .credentialRefresh)
+        }
     }
 
     /// Where a CLI brain materializes screenshots before a session exists. Only reached when no

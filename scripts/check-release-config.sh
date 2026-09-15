@@ -127,9 +127,20 @@ if ! /usr/bin/grep -Fq 'xcrun notarytool submit "$artifact"' "$package_script"; 
   echo "Release packaging must submit each distribution layer through the shared notarization path." >&2
   exit 1
 fi
+# The subscription helper ships inside the notarized app: the pinned, checksum-verified release,
+# sealed with the hardened runtime before the app, and present in the image users mount.
+cliproxyapi_lib="scripts/lib/cliproxyapi.sh"
+if ! /usr/bin/grep -Eq '^CLIPROXYAPI_SHA256_ARM64="[0-9a-f]{64}"$' "$cliproxyapi_lib" \
+    || ! /usr/bin/grep -Fq 'if [[ "$actual" != "$CLIPROXYAPI_SHA256_ARM64" ]]; then' "$cliproxyapi_lib" \
+    || ! /usr/bin/grep -Fq 'EXTRACTED_HELPER="$EXTRACTED_APP/Contents/MacOS/cliproxyapi"' "$verify_script"; then
+  echo "Release packaging must bundle the checksum-pinned subscription helper and verify it in the image." >&2
+  exit 1
+fi
 package_flow=(
   'ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$SPARKLE"'
+  'bundle_cliproxyapi "$APP"'
   'codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE"'
+  'codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/cliproxyapi"'
   'ditto -c -k --keepParent "$APP" "$APP_NOTARY_ARCHIVE"'
   'notarize_artifact "$APP_NOTARY_ARCHIVE" "application"'
   'xcrun stapler staple "$APP"'

@@ -133,8 +133,8 @@ public final class CLIBrainRuntime: @unchecked Sendable {
             backend = CodexAppServerRuntime(
                 runtimeBaseDirectory: codexRuntimeBaseDirectory,
                 supportedFeatures: codexSupportedFeatures)
-        case .openAI:
-            preconditionFailure("OpenAI does not use a local CLI runtime")
+        case .openAI, .codexSubscription, .claudeSubscription:
+            preconditionFailure("\(provider.displayName) does not use a local CLI runtime")
         }
     }
 

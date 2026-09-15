@@ -26,6 +26,7 @@ final class BrainSection: NSObject, SettingsSection {
 
     private let preferences: BrainPreferences
     private let detector: AgentCLIDetector
+    private let supervisor: LocalProxySupervisor
     private let onPreferencesChanged:
         (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
     private let capabilities: CapabilitiesControls
@@ -39,6 +40,9 @@ final class BrainSection: NSObject, SettingsSection {
     private var transcriptionHeightConstraint: NSLayoutConstraint?
     /// The latest completed probe remains usable while the next refresh runs in the background.
     private var detectedCLIs: [BrainProvider: DetectedAgentCLI]?
+    /// Subscriptions the helper proved signed in on the latest probe; a subscription can be chosen
+    /// only when it is here. Nil until the first probe answers.
+    private var signedInSubscriptions: Set<BrainProvider>?
     /// Deliberately survives a Settings close so an edit made during the probe still reaches the
     /// running coaching session when detection finishes.
     private var detectionTask: Task<Void, Never>?
@@ -49,6 +53,7 @@ final class BrainSection: NSObject, SettingsSection {
     init(
         preferences: BrainPreferences,
         detector: AgentCLIDetector,
+        supervisor: LocalProxySupervisor,
         onPreferencesChanged:
             @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
         transcriptionPreferences: TranscriptionPreferences,
@@ -56,6 +61,7 @@ final class BrainSection: NSObject, SettingsSection {
     ) {
         self.preferences = preferences
         self.detector = detector
+        self.supervisor = supervisor
         self.onPreferencesChanged = onPreferencesChanged
         self.capabilities = CapabilitiesControls(
             preferences: preferences, prepMaterialPreferences: prepMaterialPreferences)
@@ -146,7 +152,7 @@ final class BrainSection: NSObject, SettingsSection {
     func setActiveTarget(_ target: BrainTarget?) {
         activeTarget = target
         pageView?.setStatus(target.map { "\($0.provider.displayName) in use" })
-        providerEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+        providerEditor?.render(detectedCLIs: detectedCLIs, signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
     }
 
     func didBecomeActive() {
@@ -187,11 +193,24 @@ final class BrainSection: NSObject, SettingsSection {
     private func refreshDetection() {
         guard detectionTask == nil else { return }
         let detector = detector
+        let supervisor = supervisor
         detectionTask = Task { [weak self] in
-            let values = await detector.detectAllAsync()
+            async let values = detector.detectAllAsync()
+            // Only a saved sign-in is worth starting the helper for; with none, no subscription can
+            // be chosen and the helper stays unstarted.
+            let hasAccount = SubscriptionControls.providers.contains {
+                !supervisor.accountFiles(for: $0).isEmpty
+            }
+            let readiness = hasAccount ? await supervisor.readiness() : nil
+            let detected = await values
             guard !Task.isCancelled, let self else { return }
             detectionTask = nil
-            detectedCLIs = Dictionary(uniqueKeysWithValues: values.map { ($0.provider, $0) })
+            if case .ready(_, let signedIn) = readiness {
+                signedInSubscriptions = signedIn
+            } else {
+                signedInSubscriptions = []
+            }
+            detectedCLIs = Dictionary(uniqueKeysWithValues: detected.map { ($0.provider, $0) })
             renderDetection()
             if let change = pendingPreferenceChange {
                 pendingPreferenceChange = nil
@@ -201,7 +220,7 @@ final class BrainSection: NSObject, SettingsSection {
     }
 
     private func renderDetection() {
-        providerEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+        providerEditor?.render(detectedCLIs: detectedCLIs, signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
     }
 
     private func recalculateDocumentHeight() {

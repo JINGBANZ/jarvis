@@ -151,7 +151,7 @@ public struct AgenticEvaluator: Sendable {
                 "--ignore-user-config", "--ignore-rules",
                 "-c", "mcp_servers={}",
             ] + (isReleaseSource ? ["--skip-git-repo-check"] : []) + [prompt]
-        case .openAI:
+        case .openAI, .codexSubscription, .claudeSubscription:
             preconditionFailure("Agentic evaluation requires a local agent CLI")
         }
         return AgentCLIRun(
