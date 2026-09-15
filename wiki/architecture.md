@@ -856,8 +856,12 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   leased, and preparing process trees.
 - **The process edge is deliberately narrow and local.** `AgentRuntimeProcess` owns the long-lived
   newline channel, bounded buffering, process-group creation, and launch-proven PID/start-time
-  membership. Its exit monitor observes the exact leader without reaping it, snapshots descendant
-  identities while the original group is still provable, and only then reaps the leader. Teardown
+  membership. Its launch clears the signal mask and resets signal dispositions, because Swift
+  concurrency and GCD threads block SIGTERM and a spawned child inherits that mask; without the reset
+  a CLI never sees graceful termination and only the escalation stops it. Foundation's `Process`
+  already resets both, so the one-shot CLI runs need nothing extra. Its exit monitor observes the
+  exact leader without reaping it, snapshots descendant identities while the original group is
+  still provable, and only then reaps the leader. Teardown
   sends graceful termination to the whole group only while a launch-observed identity proves
   ownership. It retains an exited launch leader as the ownership proof until group-wide escalation,
   reaching helpers forked during teardown; without that proof, escalation stays limited to current
