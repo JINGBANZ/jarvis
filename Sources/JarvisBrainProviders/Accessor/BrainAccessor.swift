@@ -22,6 +22,7 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
     private let timeout: TimeInterval
     private let maxOutputTokens: Int
     private let promptCacheKey: String
+    private let toolChoicePolicy: ToolChoicePolicy
     private let send: Sender?
     /// When set, every round trip (request body, response body, status, latency — or the transport
     /// error) is recorded to the session's `brain-traffic.jsonl`, tagged with `trafficTag` so the
@@ -40,20 +41,29 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
                 // default mirrors the default effort so there's one source of truth, never a magic number.
                 maxOutputTokens: Int = Defaults.Brain.effort.maxOutputTokens,
                 promptCacheKey: String = "jarvis-coach-v1",
+                toolChoicePolicy: ToolChoicePolicy = .providerEnforced,
+                minimumReasoningEffort: ReasoningEffort? = nil,
                 traffic: (any BrainTrafficAuditing)? = nil,
                 trafficTag: String = "coach",
                 send: Sender? = nil) {
         self.apiKey = apiKey
         self.model = model
-        // Astra requires at least low reasoning. Match its budget without rewriting the user's
-        // shared preference, which can still disable reasoning on the other OpenAI models.
-        let requiresReasoning = model == "gpt-6-astra" && reasoningEffort == "none"
-        self.reasoningEffort = requiresReasoning ? ReasoningEffort.low.rawValue : reasoningEffort
+        // The target's floor, and GPT-6 Astra's own of low. Raise the effort and its budget to the
+        // floor without rewriting the user's shared preference, which can still disable reasoning
+        // on other models.
+        let floor = [minimumReasoningEffort, model == "gpt-6-astra" ? ReasoningEffort.low : nil]
+            .compactMap { $0 }.max()
+        if let floor, let selected = ReasoningEffort(rawValue: reasoningEffort), selected < floor {
+            self.reasoningEffort = floor.rawValue
+            self.maxOutputTokens = max(maxOutputTokens, floor.maxOutputTokens)
+        } else {
+            self.reasoningEffort = reasoningEffort
+            self.maxOutputTokens = maxOutputTokens
+        }
         self.endpoint = endpoint
         self.timeout = timeout
-        self.maxOutputTokens = requiresReasoning
-            ? max(maxOutputTokens, ReasoningEffort.low.maxOutputTokens) : maxOutputTokens
         self.promptCacheKey = promptCacheKey
+        self.toolChoicePolicy = toolChoicePolicy
         self.traffic = traffic
         self.trafficTag = trafficTag
         self.send = send
@@ -180,7 +190,17 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
             }
         }
 
-        let toolsJSON: [[String: Any]] = try tools.map { t in
+        // On a `filteredAuto` target the declared array itself carries the permitted set and the
+        // choice is always `auto`. A press then misses the prompt cache from the tools block onward,
+        // measured at about a second on OpenAI, accepted only where the provider can neither force
+        // nor narrow a call.
+        let declared: [ToolDef]
+        switch (toolChoicePolicy, toolChoice) {
+        case (.filteredAuto, .allowed(let names)): declared = tools.filter { names.contains($0.name) }
+        case (.filteredAuto, .force(let name)): declared = tools.filter { $0.name == name }
+        default: declared = tools
+        }
+        let toolsJSON: [[String: Any]] = try declared.map { t in
             let params = try JSONSerialization.jsonObject(with: Data(t.parametersJSON.utf8))
             // Responses API uses a FLAT function tool shape (no nested "function"). `strict:true`
             // turns on Structured Outputs for the call's arguments — the model is constrained to the
@@ -196,7 +216,7 @@ public struct BrainAccessor: BrainClient, @unchecked Sendable {
         // subset narrows tool_choice rather than the declared `tools`, so the cached prefix is the
         // same one the automatic path sends.
         let toolChoiceJSON: Any
-        switch toolChoice {
+        switch toolChoicePolicy == .filteredAuto ? ToolChoice.auto : toolChoice {
         case .auto: toolChoiceJSON = "auto"
         case .required: toolChoiceJSON = "required"
         case .allowed(let names):

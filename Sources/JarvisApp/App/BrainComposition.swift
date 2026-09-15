@@ -201,11 +201,15 @@ final class BrainComposition {
                 reasoningEffort: effort.rawValue,
                 timeout: BrainWorkloadTimeout.liveCoaching,
                 maxOutputTokens: effort.maxOutputTokens,
+                toolChoicePolicy: target.provider.toolChoicePolicy,
+                minimumReasoningEffort: target.provider.reasoningEffortFloor,
                 traffic: host.liveSessionEvidence, trafficTag: "coach")
             summarizer = BrainAccessor(
                 apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
                 reasoningEffort: ReasoningEffort.low.rawValue,
                 timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
+                toolChoicePolicy: target.provider.toolChoicePolicy,
+                minimumReasoningEffort: target.provider.reasoningEffortFloor,
                 traffic: host.liveSessionEvidence, trafficTag: "summarizer")
         }
         return BrainRuntime(coach: coachBase, summarizer: summarizer)

@@ -5,11 +5,16 @@ import Foundation
 /// levels below express the preference for OpenAI, Claude Code, and Codex CLI models. Provider
 /// adapters clamp when the selected model or CLI has a higher floor. Lower effort favors speed and fewer
 /// tokens; higher effort thinks more completely. `rawValue` is the exact API string.
-public enum ReasoningEffort: String, CaseIterable, Sendable {
+public enum ReasoningEffort: String, CaseIterable, Sendable, Comparable {
     case none
     case low
     case medium
     case high
+
+    /// Declaration order, so a provider floor is `max(selected, floor)`.
+    public static func < (lhs: ReasoningEffort, rhs: ReasoningEffort) -> Bool {
+        allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!
+    }
 
     /// Title-case label for the settings picker.
     public var displayName: String {

@@ -29,4 +29,19 @@ public enum BrainProvider: String, CaseIterable, Sendable {
     }
 
     public var usesLocalCLI: Bool { cliExecutableName != nil }
+
+    /// How this provider's requests carry the permitted set; see `ToolChoicePolicy`.
+    public var toolChoicePolicy: ToolChoicePolicy {
+        switch self {
+        case .openAI, .claudeCode, .codexCLI: return .providerEnforced
+        }
+    }
+
+    /// The lowest reasoning effort this provider accepts, raised to without rewriting the user's
+    /// shared preference; nil when every level is accepted.
+    public var reasoningEffortFloor: ReasoningEffort? {
+        switch self {
+        case .openAI, .claudeCode, .codexCLI: return nil
+        }
+    }
 }
