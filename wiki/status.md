@@ -357,10 +357,8 @@ model calls `load_tool` or `load_skill` to receive the schema and guidance, or t
 a tool result inside the turn that needs it. Settings → Brain → Capabilities switches any of them
 off for the next Start; screen capture, speak, and stay silent are always on. The coaching shortcuts
 run the same loop: a press may load and search before its tip, never stays silent or captures
-again, and is forced to speak at the response cap (`CoachAttemptRunner`). The runner checks every
-reply against its request's tool choice on every brain: a disallowed or malformed call is answered
-and the model asked again in the same attempt, and a press speaks its reply's prose when no usable
-call came with it. See [architecture.md → Capabilities](./architecture.md#capabilities).
+again, and is forced to speak at the response cap (`CoachAttemptRunner`). See
+[architecture.md → Capabilities](./architecture.md#capabilities).
 
 **Show code with hints**, configured under Overlay Box with independent live code text-size and
 background-opacity controls (`OverlaySection`, `OverlayAppearance`), optionally supplies the next contextual coding component with each hint.

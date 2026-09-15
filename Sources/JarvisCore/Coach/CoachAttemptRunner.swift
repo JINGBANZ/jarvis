@@ -170,25 +170,16 @@ final class CoachAttemptRunner: @unchecked Sendable {
             disposition: .temporary, identity: .init(), message: message)
     }
 
-    /// A press's prose as its hint: the first three non-empty lines, as a `speak` call and the raw
-    /// call history records for it. Nil unless this response may speak and has prose to say.
-    private static func spokenProse(
-        _ text: String?, permitted: [String]?
-    ) -> (call: ToolInvocation, raw: RawToolCall)? {
+    /// A press's prose as its hint: the first three non-empty lines as a `speak` call. Nil unless this
+    /// response may speak and has prose to say.
+    private static func spokenProse(_ text: String?, permitted: [String]?) -> ToolInvocation? {
         guard permitted?.contains(speakTool.name) == true, let text else { return nil }
         let lines = Array(text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
             .prefix(3))
         guard !lines.isEmpty else { return nil }
-        let id = "runner_" + UUID().uuidString.prefix(8).lowercased()
-        let arguments: [String: Any] = [
-            "lines": lines, "mermaid": NSNull(), "explanation": NSNull(), "codeSnippet": NSNull(),
-        ]
-        // Strings and nulls only, so encoding cannot fail.
-        let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
-        return (.speak(callId: id, lines: lines),
-                RawToolCall(id: id, name: speakTool.name, argumentsJSON: String(decoding: data, as: UTF8.self)))
+        return .speak(callId: "runner_" + UUID().uuidString.prefix(8).lowercased(), lines: lines)
     }
 
     /// Run one attempt on one immutable target snapshot.
@@ -446,18 +437,16 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // Resolve the reply to the one call this iteration runs. A call outside the permitted
                 // set, or one whose arguments did not parse, is answered and the model asked again,
                 // bounded by the cap: a bad reply costs one round trip instead of a failed attempt and
-                // the route's retry delay. A press's prose is its hint when no usable call came with
-                // it. `rawCalls` is what history records for the delivered call, so spoken prose
-                // carries a synthesized `speak` call for its result to answer.
+                // the route's retry delay. A press's prose is its hint instead of that round trip when
+                // the reply calls outside its set or calls nothing, and on the response at the cap
+                // whatever it called, since no later response can recover.
                 let call: ToolInvocation
-                var rawCalls = response.rawToolCalls
                 if let parsed = response.toolCalls.first {
                     if permitted?.contains(parsed.toolName) ?? true {
                         call = parsed
                     } else if let spoken = Self.spokenProse(response.outputText, permitted: permitted) {
                         jlog("⚠️ \(parsed.toolName) isn't allowed on a shortcut — speaking the reply's text")
-                        call = spoken.call
-                        rawCalls = [spoken.raw]
+                        call = spoken
                     } else if atCap {
                         jlog("⚠️ \(parsed.toolName) isn't allowed on a shortcut's last response — "
                              + "scheduling fresh attempt")
@@ -476,7 +465,27 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         continue
                     }
                 } else if let raw = response.rawToolCalls.first {
-                    guard let tool = capabilities.tool(named: raw.name) else {
+                    if atCap, let spoken = Self.spokenProse(response.outputText, permitted: permitted) {
+                        jlog("⚠️ \(raw.name) couldn't run on the last response — speaking the reply's text")
+                        call = spoken
+                    } else if let tool = capabilities.tool(named: raw.name) {
+                        guard !atCap else {
+                            jlog("⚠️ \(tool.name) arguments didn't match its schema on the last response — "
+                                 + "scheduling fresh attempt")
+                            return .failed(
+                                outcome: .brainError,
+                                failure: Self.unusableResponse(
+                                    "provider called \(tool.name) with arguments that did not match its schema",
+                                    from: attempt.target),
+                                work: work)
+                        }
+                        jlog("⚠️ \(tool.name) arguments didn't match its schema — asking for the call again")
+                        appendToolContinuation(
+                            toolCallId: raw.id,
+                            resultText: JarvisPrompts.Coach.argumentsRejected(tool),
+                            newPhase: requestPhase)
+                        continue
+                    } else {
                         jlog("⚠️ \(raw.name) isn't available in this session — telling the model so")
                         appendToolContinuation(
                             toolCallId: raw.id,
@@ -484,26 +493,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: requestPhase)
                         continue
                     }
-                    guard !atCap else {
-                        jlog("⚠️ \(tool.name) arguments didn't match its schema on the last response — "
-                             + "scheduling fresh attempt")
-                        return .failed(
-                            outcome: .brainError,
-                            failure: Self.unusableResponse(
-                                "provider called \(tool.name) with arguments that did not match its schema",
-                                from: attempt.target),
-                            work: work)
-                    }
-                    jlog("⚠️ \(tool.name) arguments didn't match its schema — asking for the call again")
-                    appendToolContinuation(
-                        toolCallId: raw.id,
-                        resultText: JarvisPrompts.Coach.argumentsRejected(tool),
-                        newPhase: requestPhase)
-                    continue
                 } else if let spoken = Self.spokenProse(response.outputText, permitted: permitted) {
                     jlog("⚠️ reply had no tool call — speaking its text as the hint")
-                    call = spoken.call
-                    rawCalls = [spoken.raw]
+                    call = spoken
                 } else {
                     jlog("⚠️ required coaching action missing — scheduling fresh attempt")
                     return .failed(
@@ -609,11 +601,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         "codeSnippet": codeArguments as Any? ?? NSNull(),
                     ]
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
-                    let deliveredCalls = rawCalls.filter { $0.id == callID }.map { call in
-                        RawToolCall(id: call.id, name: call.name,
-                                    argumentsJSON: String(decoding: data, as: UTF8.self))
-                    }
-                    turnMessages.append(.assistantToolCalls(deliveredCalls))
+                    // Built from the delivered call rather than copied from the response, so a hint
+                    // spoken from prose commits a call its result answers.
+                    turnMessages.append(.assistantToolCalls([RawToolCall(
+                        id: callID, name: speakTool.name,
+                        argumentsJSON: String(decoding: data, as: UTF8.self))]))
                     turnMessages.append(.init(
                         role: .tool,
                         text: JarvisPrompts.Coach.tipShown,

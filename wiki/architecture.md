@@ -272,11 +272,12 @@ The runner checks every reply against the tool choice its own request sent inste
 transport to enforce it, because a CLI target's set is only prompted and a provider can return more
 than one call. A call outside the permitted set is answered with a tool result saying it is not
 available on a press, and a call whose arguments fail its tool's schema is answered with that schema;
-either way the model is asked again in the same attempt. On a press, a reply with prose and no call
-the press can use has the first three lines of its prose spoken, recorded in history as a `speak`
-call, with no extra round trip. When a response carries several calls, the first runs and each other
-one is answered as not executed, so a replayed call never lacks a result. The forced response at the
-cap has no later response to answer into, so an unusable reply there fails the attempt and the
+either way the model is asked again in the same attempt. A press speaks its reply's prose instead,
+the first three lines recorded in history as a `speak` call: in place of that round trip when the
+reply calls outside its set or calls nothing, and on the response at the cap whatever it called.
+When a response carries several calls, the first runs and each other one is answered as not
+executed, so a replayed call never lacks a result. The forced response at the cap has no later
+response to answer into, so an unusable reply there with no prose fails the attempt and the
 [ordered route](#ordered-provider-route) retries. An automatic turn whose reply is prose alone fails
 the same way, since it must choose between `speak` and `stay_silent`. Answering instead of failing is
 deliberate: a failed attempt costs the route's retry delay, and on a press it leaves the user waiting

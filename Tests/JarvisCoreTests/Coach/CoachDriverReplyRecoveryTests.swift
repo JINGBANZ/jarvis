@@ -28,13 +28,13 @@ import Testing
     /// One attempt on the runner itself, where a failure is the attempt's own result rather than
     /// the start of the route's retries.
     private func runAttempt(
-        _ reason: TriggerReason, brain: BrainClient
+        _ reason: TriggerReason, brain: BrainClient, overlay: FakeOverlay = FakeOverlay()
     ) async -> CoachAttemptRunner.AttemptResult {
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .them, text: "How would you find a duplicate?", at: 100))
         let runner = CoachAttemptRunner(
             config: .default, transcript: transcript, screen: FakeScreen(),
-            overlay: FakeOverlay(), clock: ManualClock(now: 100), sessionStart: 0,
+            overlay: overlay, clock: ManualClock(now: 100), sessionStart: 0,
             coachingAttempts: nil, activity: nil, ledger: CoachTranscriptLedger(),
             capabilities: .default)
         let target = BrainTarget(
@@ -200,5 +200,23 @@ import Testing
         #expect(outcome == .brainError)
         #expect(failure.message == "provider called stay_silent, which this response did not permit")
         #expect(brain.calls.count == 7)
+    }
+
+    /// Nothing follows the response at the cap, so prose beside a call that cannot run is the hint
+    /// there instead of a failed attempt.
+    @Test func aPressSpeaksTheProseBesideAMalformedCallAtTheCap() async {
+        let silences = (1...6).map { reply(call("stay_silent", id: "q\($0)")) }
+        let malformed = reply(call("speak", id: "m7", arguments: #"{"lines":"[\"a\"]"}"#),
+                              text: "Try a hash map.")
+        let brain = ScriptedBrain(script: silences + [malformed])
+        let overlay = FakeOverlay()
+
+        guard case .completed(let outcome) = await runAttempt(.manualHint, brain: brain, overlay: overlay)
+        else {
+            Issue.record("expected the prose to be spoken at the cap"); return
+        }
+        #expect(outcome == .spoke)
+        #expect(brain.calls.count == 7)
+        #expect(overlay.rendered == [["Try a hash map."]])
     }
 }
