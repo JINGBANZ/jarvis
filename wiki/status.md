@@ -248,7 +248,8 @@ screen capture, live transcript, and overlay behavior together before release.
 
 Run a Coding with AI mock in CoderPad with Chrome page text enabled: establish the AI-assisted
 workflow, verify `coding-with-ai` loads, and check one omitted constraint, an AI-only "tests pass"
-claim, repeated ineffective repair prompts, and productive review with observed test output.
+claim, an unresolved algorithm tradeoff, a false AI counterexample, a minimal bug fix with a
+reproducing test, repeated ineffective repair prompts, and productive review with observed test output.
 Confirm Jarvis distinguishes proposed versus adopted code, qualifies missing evidence, and stays
 silent during healthy progress. Switch to ordinary coding and confirm AI-specific advice stops;
 disable the skill for the next Start and confirm ordinary coding remains available. The offline

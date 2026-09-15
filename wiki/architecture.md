@@ -711,8 +711,9 @@ rather than a per-turn screenshot.
   It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
   local implementation and defect diagnosis, and boundary tests for a post-completion hint the base
   policy already warrants; coding-with-ai adds guidance for directing another AI, reviewing its
-  proposals, distinguishing adopted code and execution evidence, and recovering from ineffective
-  prompting. It composes with coding when offered and applies only while AI collaboration is relevant.
+  proposals, challenging an approach against constraints, distinguishing adopted code and execution
+  evidence, verifying counterexamples, and checking minimal fixes against reproducing and regression
+  cases. It composes with coding when offered and applies only while AI collaboration is relevant.
   Its separate catalog entry keeps that workflow conditional without a round or seniority setting
   (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
   System-design supplies the stage vocabulary from requirements through
