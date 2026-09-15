@@ -59,7 +59,7 @@ public struct ToolDef: Sendable, Equatable {
     public let name: String
     public let description: String
     /// JSON Schema for parameters, as a JSON string. Every object in it sets
-    /// `additionalProperties:false` and lists every key in `required`, because `OpenAIBrainClient`
+    /// `additionalProperties:false` and lists every key in `required`, because `BrainAccessor`
     /// sends each tool with `strict:true` Structured Outputs, which requires both. An optional field
     /// is nullable instead, and an object with no properties is valid as it is.
     public let parametersJSON: String

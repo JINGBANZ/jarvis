@@ -143,7 +143,7 @@ extension LiveSessionEvidence {
     }
 
     /// `SessionAuditWorker.encodeTraffic`. `request` is either the Responses API body from
-    /// `OpenAIBrainClient.encodeBody` or the CLI record from `CLIBrainClient.prepareTurn`, which alone
+    /// `BrainAccessor.encodeBody` or the CLI record from `CLIBrainClient.prepareTurn`, which alone
     /// carries `provider`. A body that was not JSON is stored as a string and reads as empty here.
     static func parseTraffic(_ object: [String: Any], index: Int) -> TrafficRecord {
         let context = object["coach_attempt"] as? [String: Any]

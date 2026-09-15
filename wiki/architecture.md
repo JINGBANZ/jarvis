@@ -261,7 +261,7 @@ callable tool except `stay_silent` and `capture_screen`, since its screen is alr
 request, and the response at the cap is forced to `speak`. A press therefore always ends in a tip and
 never runs out of responses. When `speak` is the only tool left, the request is the plain forced
 `speak`, one round trip. On OpenAI the narrowing is an `allowed_tools` choice over the unchanged
-declared array, which keeps the cached prefix of automatic attempts (`OpenAIBrainClient.encodeBody`).
+declared array, which keeps the cached prefix of automatic attempts (`BrainAccessor.encodeBody`).
 A CLI target is told its set in the turn trailer while its baked instructions stay those of a required
 choice. The accepted cost is a round trip for each first load and each search, and
 the OpenAI client resends the whole input, screenshot included, on each one. One load followed by a

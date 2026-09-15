@@ -196,13 +196,13 @@ final class BrainComposition {
                                         runtime: runtimes.summarizer,
                                         prewarm: false)
         } else {
-            coachBase = OpenAIBrainClient(
+            coachBase = BrainAccessor(
                 apiKey: key, model: target.modelID,
                 reasoningEffort: effort.rawValue,
                 timeout: BrainWorkloadTimeout.liveCoaching,
                 maxOutputTokens: effort.maxOutputTokens,
                 traffic: host.liveSessionEvidence, trafficTag: "coach")
-            summarizer = OpenAIBrainClient(
+            summarizer = BrainAccessor(
                 apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
                 reasoningEffort: ReasoningEffort.low.rawValue,
                 timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,

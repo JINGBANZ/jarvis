@@ -181,7 +181,7 @@ and provider-retention paths described here.
 
 > **Server-side retention for debuggability (current behavior).** Session memory is client-managed
 > (`CoachHistory` — nothing at OpenAI is needed for continuity), but requests are still sent
-> `store:true` (`OpenAIBrainClient.swift`) so each request/response remains inspectable in the OpenAI
+> `store:true` (`BrainAccessor.swift`) so each request/response remains inspectable in the OpenAI
 > dashboard logs while the harness is being tuned. This **does** retain the transcript and the
 > screenshots sent to the model server-side at OpenAI (≈30-day TTL), so the no-local-retention
 > guarantee above does **not** extend to OpenAI's servers. This remains a deliberate

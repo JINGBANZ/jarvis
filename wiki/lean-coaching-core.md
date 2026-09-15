@@ -709,8 +709,8 @@ contracts before implementation.
   (`FoundationNetworking` on non-Darwin). The SwiftPM dependency graph is the enforcement, as
   with `JarvisEvaluation`; the coaching-kernel guard separately keeps `URLSession` out of Core's
   kernel paths.
-- `Sources/JarvisBrainProviders/OpenAI/` holds the OpenAI Responses adapter, moved unchanged
-  apart from `import JarvisCore`: `OpenAIBrainClient`.
+- `Sources/JarvisBrainProviders/Accessor/` holds the OpenAI Responses adapter, moved unchanged
+  apart from `import JarvisCore`: `BrainAccessor`.
 - Core keeps the provider-neutral brain domain: `BrainClient`/`BrainConversation`, `BrainTarget`,
   `BrainRoute`, `BrainProvider`, `BrainModelCatalog`, `ReasoningEffort`, `BrainWorkloadTimeout`,
   tool-invocation parsing, and the attempt/observer contracts. (The local-agent CLI subtree

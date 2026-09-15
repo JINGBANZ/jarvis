@@ -100,7 +100,7 @@ enum CoachingParityHarness {
             domain: "coaching-parity", code: 503,
             userInfo: [NSLocalizedDescriptionKey: "injected transport failure"])
 
-        let primary = OpenAIBrainClient(
+        let primary = BrainAccessor(
             apiKey: "parity-key",
             model: primaryTarget.modelID,
             traffic: observers.brainTraffic,
@@ -112,7 +112,7 @@ enum CoachingParityHarness {
         let speakResponse = Data(
             #"{"status":"completed","output":[{"type":"function_call","call_id":"s1","name":"speak","arguments":"{\"lines\":[\"same tip\"]}"}]}"#.utf8)
         let finalCalls = CallCounter()
-        let final = OpenAIBrainClient(
+        let final = BrainAccessor(
             apiKey: "parity-key",
             model: finalTarget.modelID,
             traffic: observers.brainTraffic,

@@ -306,7 +306,7 @@ the first entry in that provider's catalog is selected. The **Reasoning effort**
 provider is active; its default lives with the others in
 [`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). `CLIBrainClient` maps it onto Claude Code's `--effort` and Codex's
 per-thread `model_reasoning_effort`; both CLI scales start at `low`, so None clamps to Low while the
-three shared levels pass through. `OpenAIBrainClient` also clamps None to Low for GPT-6 Astra and
+three shared levels pass through. `BrainAccessor` also clamps None to Low for GPT-6 Astra and
 raises the output budget to at least the Low budget, because Astra requires reasoning. The stored
 effort remains unchanged, and other OpenAI models retain the selected effort.
 
