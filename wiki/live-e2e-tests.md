@@ -72,6 +72,7 @@ Set up once per machine:
 - **The Codex and Claude subscriptions**, signed in from Settings → Connections. The launcher's
   preflight checks the key and a saved sign-in for both subscriptions before the first launch, so a
   missing login stops the run in seconds instead of surfacing as a failed scenario.
+- **Claude Code**, installed and signed in, for `--evaluate` only.
 
 During a run:
 
@@ -97,7 +98,8 @@ with its scenario, waits for the app to exit, and asserts on the session folder.
 - `--keep-going` runs every chosen scenario. Without it the run stops after the first scenario that
   writes a `fail` line, since later scenarios spend model calls and a failure deserves a look first.
 - `--evaluate` runs [`scripts/eval-session.sh`](../scripts/eval-session.sh) on Scenario A's session
-  and adds a G09 line. It is off by default because evaluation is an agentic run of its own, not part
+  with `EVAL_AGENT=claude`, so the evaluation spends the Claude subscription rather than the ChatGPT
+  plan, and adds a G09 line. It is off by default because evaluation is an agentic run of its own, not part
   of coaching.
 
 Scenario A's one OpenAI turn holds the only metered coaching requests; every other brain response
@@ -141,10 +143,15 @@ layout in the Gate.
 | Scenario | Brain | What it drives |
 |---|---|---|
 | A | Claude subscription, then OpenAI, then Codex subscription | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
-| B | Codex subscription | Behavioral, system design, coding with AI, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
-| R | Codex subscription | The real capture device with no speech: Start, coaching ready, Stop. |
-| F01 | Codex subscription | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
-| F02 | Codex subscription | Transcription with a run-local invalid OpenAI key. |
+| B | Claude subscription | Behavioral, system design, coding with AI, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
+| R | Claude subscription | The real capture device with no speech: Start, coaching ready, Stop. |
+| F01 | Claude subscription | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
+| F02 | Claude subscription | Transcription with a run-local invalid OpenAI key. |
+
+Only Scenario A's second half runs on the Codex subscription; every other scenario and the
+evaluation run on Claude. The ChatGPT plan's usage limit is the one a day of runs exhausts, and A's
+Codex stretch (a behavioral search, a spoken screen question, two presses, and a design follow-up)
+is enough to keep that subscription covered.
 
 ## How a scenario runs
 
@@ -194,7 +201,7 @@ layout in the Gate.
 Some cases depend on what the model chose rather than on what the app did, and those write a `note`
 line instead of failing: C02 and G05 (staying silent on small talk), C03 (which skill the model
 picks), the second request in C11, the Codex diagram in C12, C13, how Scenario B's behavioral
-question ends in C16, C20, and C17 together with C01 and C09 on Scenario B's Codex press. Failing them would fail a correct app on a model's judgment call.
+question ends in C16, C20, and C17 together with C01 and C09 on Scenario B's press. Failing them would fail a correct app on a model's judgment call.
 
 An asserted case that fails because of a model choice gets one rerun of its scenario alone; a second
 failure is real. No assertion is loosened to make a run pass. A provider stall is neither a model
@@ -226,7 +233,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 
 | ID | Case | Where |
 |---|---|---|
-| C01 | A press loads what its screen needs and still ends in one clean tip | A: the Claude subscription press; B: the Codex subscription press |
+| C01 | A press loads what its screen needs and still ends in one clean tip | A: the Claude subscription press; B: its press |
 | C02 | Small talk loads nothing | A: the interviewer's logistics line |
 | C03 | The first behavioral question picks the behavioral skill | A: the first behavioral question |
 | C04 | An already-loaded kind never reloads | A: every turn on Codex |
@@ -234,7 +241,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
 | C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the OpenAI design question |
 | C08 | A second prepared question searches without loading, on another brain | A: the second behavioral question, on Codex |
-| C09 | The coding skill loads on the coding screen | A: the first press; B: the Codex press |
+| C09 | The coding skill loads on the coding screen | A: the first press; B: its press |
 | C10 | The whole session shows four load rows, each once | A, after Stop |
 | C11 | A press after the load is one round trip | A: the two Codex presses |
 | C12 | A diagram arrives at the architecture stage, on OpenAI and on a subscription | A: the OpenAI design question and the Codex follow-up |
@@ -242,9 +249,9 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C14 | A brain switch keeps loaded state, in both directions | A: Claude subscription to OpenAI, then OpenAI to Codex subscription |
 | C15 | Coaching continues after loads on both subscriptions | A |
 | C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question |
-| C17 | The remaining skill still loads when others are off | B: the Codex press |
-| C18 | Prep search off leaves no tool and no catalog line | B: the Codex instructions |
-| C19 | Switched-off capabilities apply as configured | B: the Codex instructions list only coding |
+| C17 | The remaining skill still loads when others are off | B: the press |
+| C18 | Prep search off leaves no tool and no catalog line | B: the Claude subscription instructions |
+| C19 | Switched-off capabilities apply as configured | B: the Claude subscription instructions list only coding |
 | C20 | A reply the runner answered instead of running is reported, never failed | A and B |
 | C21 | Loaded guidance survives compaction | Not scheduled; unit-tested |
 
@@ -260,7 +267,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | G06 | The hint shortcut works, and a second hint advances | A: the presses |
 | G07 | Overlays are excluded from screenshots | Offline, in the Gate |
 | G08 | Stop ends cleanly, the evidence seals, and no subscription helper outlives the app | Every scenario |
-| G09 | Evaluate works on the stopped session | `--evaluate`, on A's session |
+| G09 | Evaluate works on the stopped session | `--evaluate`, on A's session, with Claude Code |
 | G10 | The development menu has no update item | Dropped; `build-app.sh` strips the feed |
 
 ### Faults and change-triggered checks

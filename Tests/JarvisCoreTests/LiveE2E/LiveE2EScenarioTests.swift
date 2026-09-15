@@ -115,7 +115,7 @@ struct LiveE2EScenarioTests {
             from: Self.liveTests.appendingPathComponent("Scenarios/B.json"),
             fixturesDirectory: fixtures)
 
-        #expect(b.brain == .init(primary: .codexSubscription, fallbacks: []))
+        #expect(b.brain == .init(primary: .claudeSubscription, fallbacks: []))
         #expect(b.capabilities == .init(
             disabledTools: ["search_prep_notes"],
             disabledSkills: ["behavioral", "system-design", "coding-with-ai"]))

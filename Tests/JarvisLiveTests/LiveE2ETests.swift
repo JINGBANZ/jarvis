@@ -107,16 +107,15 @@ struct LiveE2ETests {
             let b1Loads = b1Rows.compactMap { $0.loadedCapability?.name }
             let b1Screens = b1Rows.filter { $0.kind == "screenViewed" }.count
             let b1Tip = b1Rows.contains { $0.kind == "tip" }
-            // The discriminating Codex press #318 asked for: whether Codex loads on a press with a
-            // real screenshot is recorded, not required.
-            let b1Summary = "B1 on Codex: \(b1Screens) screen view(s), loads \(b1Loads), "
+            // Whether a press with a real screenshot loads (#318) is recorded, not required.
+            let b1Summary = "B1 on the Claude subscription: \(b1Screens) screen view(s), loads \(b1Loads), "
                 + (b1Tip ? "a tip" : "no tip")
             results.note("C01", b1Summary)
             results.note("C09", b1Summary)
             results.note("C17", b1Summary)
             results.time("B1 press-to-tip", seconds: Self.pressToTip(evidence, b1))
 
-            let codex = Self.coachTraffic(evidence, on: .codexSubscription)
+            let claude = Self.coachTraffic(evidence, on: .claudeSubscription)
             results.check("C16", [
                 (!evidence.activity.contains {
                     ["behavioral", "system-design", "coding-with-ai"].contains($0.loadedCapability?.name ?? "")
@@ -127,13 +126,13 @@ struct LiveE2ETests {
             results.note("C16", "B2 ended \(b2.last?.terminal ?? "without an attempt"), diagram "
                 + Self.describe(Self.diagram(evidence, b2.last)))
             results.check("C18", [
-                (!codex.isEmpty, "Codex coach requests were recorded"),
-                (codex.allSatisfy { !($0.instructions ?? "").contains("search_prep_notes") },
+                (!claude.isEmpty, "Claude subscription coach requests were recorded"),
+                (claude.allSatisfy { !($0.instructions ?? "").contains("search_prep_notes") },
                  "instructions never name search_prep_notes"),
-                (codex.allSatisfy { !($0.instructions ?? "").contains("Tools you can load") },
+                (claude.allSatisfy { !($0.instructions ?? "").contains("Tools you can load") },
                  "instructions carry no tools catalog or load-tool clause"),
             ])
-            let catalogs = Set(codex.map { Self.skillCatalog(in: $0.instructions ?? "") })
+            let catalogs = Set(claude.map { Self.skillCatalog(in: $0.instructions ?? "") })
             results.check("C19", catalogs == [["coding"]],
                           "the skills catalog lists only coding (saw \(catalogs.sorted { $0.count < $1.count }))")
             Self.noteReplyRecoveries(evidence, &results)

@@ -125,7 +125,9 @@ if [[ "$EVALUATE" == 1 ]]; then
   done
   if [[ "$session_count" -ne 1 ]]; then
     echo "G09 fail Scenario A did not leave exactly one session" >> "$RUN_DIR/results.txt"
-  elif ./scripts/eval-session.sh "$evaluated_session" > "$RUN_DIR/evaluate.log" 2>&1 \
+  # Claude Code, not the default Codex-first choice: the evaluation is the run's largest agent spend,
+  # and the ChatGPT plan's usage limit is the one a day of runs exhausts.
+  elif EVAL_AGENT=claude ./scripts/eval-session.sh "$evaluated_session" > "$RUN_DIR/evaluate.log" 2>&1 \
       && grep -q '^## Summary' "${evaluated_session}eval-report.md" \
       && grep -q '^## Findings' "${evaluated_session}eval-report.md" \
       && grep -q '^## Evidence gaps' "${evaluated_session}eval-report.md" \
