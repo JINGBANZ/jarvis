@@ -738,7 +738,10 @@ rather than a per-turn screenshot.
   warmed with.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
-  `gpt-live-transcribe` are opt-in comparison choices. All use the GA Realtime API, but keep their
+  `gpt-live-transcribe` are opt-in comparison choices. GPT-4o stays the default because, in a
+  same-input macOS 26 system-audio comparison with GPT Live Transcribe and Apple Speech, it alone
+  preserved English, Mandarin, and within-sentence language switching; the evidence is directional,
+  since GPT Transcribe was not compared. All use the GA Realtime API, but keep their
   model-compatible turn contracts: GPT-4o uses tuned `server_vad`, while GPT Transcribe and GPT Live
   disable automatic turn detection, keep only bounded local pre-roll while idle, and explicitly
   commit endpoints from a local Silero VAD scoring each post-AEC stream at 16 kHz. Silero, not the

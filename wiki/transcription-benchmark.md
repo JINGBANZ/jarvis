@@ -172,5 +172,5 @@ The command exits nonzero when a platform-supported arm is unavailable or incomp
 continuity fails, or the strict reconnect acceptance criteria fail. On macOS 14.2–25, Apple Speech arms
 remain visible in `summary.json` as unavailable because that provider requires macOS 26, but they do
 not fail the runnable matrix. Inspect the summary to distinguish provider recognition/finalization
-behavior from capture or replay failure. Current live evidence and the next requested rerun belong in
-[status.md](./status.md), not on this operating-contract page.
+behavior from capture or replay failure. A run's results belong in the pull request that ran it, not
+on this operating-contract page.
