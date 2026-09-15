@@ -134,7 +134,7 @@ struct LiveE2EScenarioTests {
         let json = #"""
         {
           "id": "Mixed-1",
-          "audio": "fixture-no-microphone",
+          "audio": "fixture",
           "brain": { "primary": "claude-code", "fallbacks": ["openai", "codex-cli"] },
           "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": ["coding"] },
           "prepNotes": "prep-notes.md",
@@ -158,7 +158,7 @@ struct LiveE2EScenarioTests {
         let scenario = try LiveE2EScenario.decode(Data(json.utf8), fixturesDirectory: fixtures)
 
         #expect(scenario.id == "Mixed-1")
-        #expect(scenario.audio == .fixtureNoMicrophone)
+        #expect(scenario.audio == .fixture)
         #expect(scenario.brain == .init(primary: .claudeCode, fallbacks: [.openAI, .codexCLI]))
         #expect(scenario.capabilities == .init(
             disabledTools: ["search_prep_notes"], disabledSkills: ["coding"]))
@@ -297,6 +297,24 @@ struct LiveE2EScenarioTests {
             json: scenario(prepNotes: #""../prep-notes.md""#),
             fragment: "prepNotes must be a plain file name"),
         RejectedCase(
+            name: "a me line when the scenario plays no microphone",
+            json: scenario(
+                audio: "fixture-no-microphone",
+                steps: #"[{ "say": { "speaker": "me", "text": "Hi." } }, \#(stop)]"#),
+            fragment: #"steps[0]: "fixture-no-microphone" audio cannot speak as me"#),
+        RejectedCase(
+            name: "an overlap from them when the scenario plays no system audio",
+            json: scenario(
+                audio: "fixture-no-system",
+                steps: #"[{ "say": { "speaker": "me", "text": "Hi." }, "overlap": { "speaker": "them", "text": "Sure.", "afterSeconds": 1 } }, \#(stop)]"#),
+            fragment: #"steps[0]: "fixture-no-system" audio cannot speak as them"#),
+        RejectedCase(
+            name: "a line when the scenario hears the device",
+            json: scenario(
+                audio: "device",
+                steps: #"[{ "say": { "speaker": "them", "text": "Hi." } }, \#(stop)]"#),
+            fragment: #"steps[0]: "device" audio cannot speak as them"#),
+        RejectedCase(
             name: "prepNotes that does not exist",
             json: scenario(prepNotes: #""absent.md""#),
             fragment: "prepNotes names no file"),
@@ -345,6 +363,7 @@ struct LiveE2EScenarioTests {
     /// A valid scenario with one field overridable per rejecting case.
     private static func scenario(
         id: String = "T-1",
+        audio: String = "fixture",
         prepNotes: String = "null",
         key: String = "standard",
         cli: String? = nil,
@@ -354,7 +373,7 @@ struct LiveE2EScenarioTests {
         return #"""
         {
           "id": "\#(id)",
-          "audio": "fixture",
+          "audio": "\#(audio)",
           "brain": { "primary": "codex-cli", "fallbacks": [] },
           "capabilities": { "disabledTools": [], "disabledSkills": [] },
           "prepNotes": \#(prepNotes),

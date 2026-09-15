@@ -130,6 +130,24 @@ extension LiveE2EScenario {
         self.cli = cli
         steps = try Self.steps(
             from: raw.steps, primary: primary, cli: cli, fixturesDirectory: fixturesDirectory)
+
+        // A stream the audio setting does not play carries no synthesized speech, so a line on it
+        // would leave the runner waiting out an attempt that never starts.
+        func plays(_ speaker: Speaker) -> Bool {
+            switch audio {
+            case .fixture: true
+            case .fixtureNoSystem: speaker == .me
+            case .fixtureNoMicrophone: speaker == .them
+            case .device: false
+            }
+        }
+        for (index, step) in steps.enumerated() {
+            guard case .say(let line, let overlap, _) = step else { continue }
+            for speaker in [line.speaker] + [overlap?.speaker].compactMap({ $0 }) where !plays(speaker) {
+                throw Failure.invalid(
+                    "steps[\(index)]: \"\(audio.rawValue)\" audio cannot speak as \(speaker.rawValue)")
+            }
+        }
     }
 
     private static func steps(
