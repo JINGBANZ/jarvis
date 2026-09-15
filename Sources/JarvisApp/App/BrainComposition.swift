@@ -6,7 +6,8 @@ import JarvisCore
 ///
 /// Deliberately narrow and one-directional: composition asks which session is live and what it is
 /// coaching with, and reports through the runtime's existing error and Settings surfaces. It never
-/// starts, stops, or tears anything down.
+/// starts or stops a session; it only terminates the provider runtimes it built once told the
+/// session stopped.
 @MainActor
 protocol BrainCompositionHost: AnyObject {
     /// The running session's event loop, or nil when nothing is coaching.
@@ -65,16 +66,31 @@ final class BrainComposition {
         pendingBrainChangeFrom = nil
     }
 
-    /// Forget the session's route identity at teardown.
-    func sessionDidStop() {
+    /// Forget the session's route identity at teardown and terminate the local-agent runtimes built
+    /// for it. The task finishes once their processes have exited and their private files are gone,
+    /// which Stop's drain waits for; nil when the session built no runtime.
+    func sessionDidStop() -> Task<Void, Never>? {
         activeBrainTarget = nil
         pendingBrainChangeFrom = nil
+        let runtimes = sessionRuntimes
+        sessionRuntimes = []
+        guard !runtimes.isEmpty else { return nil }
+        return Task {
+            await withTaskGroup(of: Void.self) { group in
+                for runtime in runtimes {
+                    group.addTask { await runtime.terminate() }
+                }
+            }
+        }
     }
 
     /// Runtime route state for truthful Settings and Activity updates. A Settings edit is announced
     /// only when the replacement route actually selects its first target for a fresh attempt.
     private var activeBrainTarget: BrainTarget?
     private var pendingBrainChangeFrom: BrainTarget?
+    /// Every local-agent runtime built for the live session, replacements included. Releasing a
+    /// runtime's last client already signals its processes, but nothing would wait for them to exit.
+    private var sessionRuntimes: [CLIBrainRuntime] = []
 
     var explanationsEnabled = true
     var codeEnabled = false
@@ -145,6 +161,10 @@ final class BrainComposition {
                 provider: target.provider,
                 codexSupportedFeatures: cli.supportedFeatures,
                 sharedCoach: sharedCLIRuntime)
+            for runtime in [runtimes.coach, runtimes.summarizer]
+            where !sessionRuntimes.contains(where: { $0 === runtime }) {
+                sessionRuntimes.append(runtime)
+            }
             coachBase = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
                                        model: target.modelID,
                                        reasoningEffort: effort.rawValue,

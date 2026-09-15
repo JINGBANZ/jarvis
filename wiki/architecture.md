@@ -577,7 +577,9 @@ terminal paths add no live presentation.
 
 Provider clients remain owned until replacement or session teardown. Stop cancels pending/in-flight
 work and the recovery deadline. This policy is implemented by `BrainRouteSession`,
-`BrainCycleRecovery`, and `CoachDriver`; provider preferences remain unchanged.
+`BrainCycleRecovery`, and `CoachDriver`; provider preferences remain unchanged. Stop also
+terminates the session's local-agent runtimes, and its background drain waits for their processes
+to exit before the session's evidence seals.
 
 ```mermaid
 flowchart TD
@@ -807,14 +809,17 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   to one async closure and its teardown stops tracking a group when the leader is gone, so adopting
   it would retain these wrappers while adding a dependency.
 - **Codex keeps one app-server for the session.** Session Start launches a single `codex app-server`
-  under a private owner-only `CODEX_HOME` containing nothing but an `auth.json` symlink, then prepares
+  under a private owner-only `CODEX_HOME` created with nothing but an `auth.json` symlink, then prepares
   the first target-specific ephemeral thread while transcription connects. The first coaching
   attempt leases that verified thread; each later attempt opens a fresh one and closes it when the
   lease ends. Coach and summarizer can share one runtime because model, prompt, and effort travel per
   `thread/start`, not in the launch identity. A changed target configuration replaces any unused
   prepared thread before opening its own; a prewarm defers to an attempt that is opening and to
   any newer request, so two callers never trade evictions. Releasing the session or route runtime
-  terminates the app-server and every prepared, active, or preparing thread.
+  terminates the app-server and every prepared, active, or preparing thread. Codex writes its own
+  model cache and system skills into the home until it has exited, so the home is removed only after
+  the app-server has exited; removed at the signal, it came back with default permissions. Stop's drain waits for that removal, and a summary's `codex exec` home follows the
+  same rule.
   The isolation goal is to exclude user/project customization, constrain side effects, and reject
   provider-native actions outside Jarvis's coaching contract; the concrete launch and per-thread
   settings live in

@@ -249,7 +249,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | G05 | A deliberate no-op is visible | A: the interviewer's logistics line |
 | G06 | The hint shortcut works, and a second hint advances | A: the presses |
 | G07 | Overlays are excluded from screenshots | Offline, in the Gate |
-| G08 | Stop ends cleanly and leaves no CLI child | Every scenario |
+| G08 | Stop ends cleanly and leaves no CLI child or Codex home | Every scenario |
 | G09 | Evaluate works on the stopped session | `--evaluate`, on A's session |
 | G10 | The development menu has no update item | Dropped; `build-app.sh` strips the feed |
 

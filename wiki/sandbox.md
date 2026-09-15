@@ -112,7 +112,7 @@ Narrow and explicit. Data leaves the machine only via:
   audio follows the separately selected transcription provider.
 - **With Codex selected for coaching**, the payload goes to one session-scoped `codex app-server`
   under the user's own ChatGPT account and OpenAI's consumer retention terms. It runs under a private
-  owner-only `CODEX_HOME` whose only content is an `auth.json` symlink, so no user config, profile,
+  owner-only `CODEX_HOME` created with only an `auth.json` symlink, so no user config, profile,
   plugin, prompt, or execpolicy `.rules` file is loadable — structurally covering what
   `--ignore-user-config` and `--ignore-rules` did. Each attempt opens a fresh thread that is required
   to come back ephemeral, pathless, and free of instruction sources, so no rollout transcript reaches

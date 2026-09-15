@@ -767,6 +767,8 @@ private actor FakeLocalAgentRuntime: LocalAgentRuntimeBackend {
         configurations.append(configuration)
     }
 
+    func awaitTeardown() async {}
+
     func openConversation(
         for configuration: LocalAgentConversationConfiguration,
         deadline: Date

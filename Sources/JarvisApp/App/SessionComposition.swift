@@ -508,7 +508,9 @@ final class SessionComposition {
         // can still be writing when the audit seals.
         let compaction = coachDriver?.cancelBackgroundWork()
         coachDriver = nil
-        brain.sessionDidStop()
+        // Local-agent processes are signaled now; the drain waits for them to exit, because a Codex
+        // home can only be removed once its app-server has stopped writing it.
+        let brainTeardown = brain.sessionDidStop()
         // Mark both delivery endpoints stopped before draining the source. It hands chunks off
         // asynchronously, so callbacks already queued during teardown must see the transcribers'
         // stopped guards and become no-ops.
@@ -536,7 +538,7 @@ final class SessionComposition {
         var drain: Task<Void, Never>?
         if reason == .applicationQuit {
             audit?.abandon()
-        } else if audit != nil || !cancelled.isEmpty || compaction != nil {
+        } else if audit != nil || !cancelled.isEmpty || compaction != nil || brainTeardown != nil {
             let drainID = UUID()
             if !cancelled.isEmpty { pendingTurnDrainIDs.insert(drainID) }
             if let auditDirectory { artifacts.beginClosing(auditDirectory) }
@@ -545,6 +547,7 @@ final class SessionComposition {
                 await compaction?.value
                 self?.pendingTurnDrainIDs.remove(drainID)
                 self?.onCoachingStateChanged?()
+                await brainTeardown?.value
                 // Closing the handle is the barrier now: it waits for every accepted row, Activity
                 // included, so a just-recorded outcome cannot race the evaluator.
                 _ = await audit?.close()
