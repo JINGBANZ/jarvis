@@ -24,9 +24,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         case credentialUnavailable
         case defaultsSuiteUnavailable
         case notReadyToStart(String)
-        case brainUnavailable(BrainProvider)
         case startFailed
-        case stubUnavailable
         case noFixtureAudio(Int)
         case unexpectedSessionEnd(String)
         case timedOut(String)
@@ -38,9 +36,7 @@ final class LiveE2ERunner: BrainCompositionHost {
                 "OpenAI API key unavailable in the owner-only key file or OPENAI_API_KEY"
             case .defaultsSuiteUnavailable: "Could not open the live e2e defaults suite"
             case .notReadyToStart(let blocker): "Start is blocked: \(blocker)"
-            case .brainUnavailable(let provider): "\(provider.displayName) failed its Start preflight"
             case .startFailed: "The session composition could not start"
-            case .stubUnavailable: "The scenario needs a stub Claude Code executable, and none was passed"
             case .noFixtureAudio(let step): "Step \(step) speaks, but this scenario has no fixture audio"
             case .unexpectedSessionEnd(let reason): "The session ended unexpectedly: \(reason)"
             case .timedOut(let what): "Timed out waiting for \(what)"
@@ -76,7 +72,11 @@ final class LiveE2ERunner: BrainCompositionHost {
     private var brain: BrainComposition!
     private var composition: SessionComposition!
     private var fixtureSource: FixtureAudioSource?
-    private var detectedCLIs: [BrainProvider: DetectedAgentCLI] = [:]
+    /// The same helper a menu Start uses, with the developer's own sign-ins. The run stops it when
+    /// the scenario ends, so no launch leaves one behind.
+    private let supervisor = LocalProxySupervisor(
+        executable: LocalProxySupervisor.bundledExecutable(),
+        home: FileSecretStore().directoryURL.appendingPathComponent("proxy", isDirectory: true))
     private var prepSources: [PrepMaterialSource] = []
     private var sessionEnd: SessionEndReason?
     private var expectsSessionEnd = false
@@ -130,6 +130,11 @@ final class LiveE2ERunner: BrainCompositionHost {
         try speech.removeDirectory()
     }
 
+    /// Signals the subscription helper as the process exits, so no launch leaves one running.
+    func terminateProxyHelper() {
+        supervisor.terminateNow()
+    }
+
     // MARK: - Scenario
 
     private func runScenario() async throws {
@@ -139,8 +144,8 @@ final class LiveE2ERunner: BrainCompositionHost {
         let clips = try synthesizeLines(of: scenario)
         try removeGeneratedAudio()
         brain = BrainComposition(
-            secrets: secrets, host: self, preferences: try makePreferences(for: scenario))
-        detectedCLIs = try await detectCLIs(for: scenario)
+            secrets: secrets, host: self, supervisor: supervisor,
+            preferences: try makePreferences(for: scenario))
         prepSources = scenario.prepNotes.map {
             [PrepMaterialSource(
                 path: options.fixturesDirectory.appendingPathComponent($0).path,
@@ -196,12 +201,8 @@ final class LiveE2ERunner: BrainCompositionHost {
                     primary: Self.defaultTarget(for: provider), fallbackTargets: [])
                 // Applied the way a Settings topology edit is: on the next attempt, with the
                 // session's transcript, history, and loaded capabilities intact.
-                brain.applyBrainPreferencesToRunningSession(
-                    detectedCLIs: detectedCLIs, update: .topologyEdit)
-            case .restoreCLI:
-                // The stub checks for this marker on every launch and hands over to the real CLI.
-                try TranscriptionBenchmarkFiles.createMarker(
-                    named: "claude-restored", in: options.outputDirectory)
+                await brain.applyBrainPreferencesToRunningSession(
+                    update: .topologyEdit)
             case .stop:
                 drain = composition.stop(reason: .stoppedByUser)
                 await drain?.value
@@ -232,12 +233,10 @@ final class LiveE2ERunner: BrainCompositionHost {
         if case .blocked(let blocker) = readiness.status {
             throw Failure.notReadyToStart(String(describing: blocker))
         }
-        let primary = route.primary.provider
-        let preflight = brain.preflightBrainProvider(
-            primary, detectedCLI: detectedCLIs[primary], context: .runtime,
-            recordSettingsFailure: false)
-        guard preflight.isReady else { throw Failure.brainUnavailable(primary) }
-        if let cli = preflight.cli { detectedCLIs[primary] = cli }
+        let proxy = await brain.proxyReadiness(for: route)
+        if let failure = brain.routeUnavailability(route, proxy: proxy) {
+            throw Failure.notReadyToStart(failure.activitySentence)
+        }
 
         expectsSessionEnd = scenario.audio == .fixtureNoMicrophone
             || scenario.transcription.key == .invalid
@@ -257,7 +256,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             explanationsEnabled: Defaults.Explanations.enabled,
             codeEnabled: Defaults.Code.enabled)
         guard composition.start(
-            inputs, detectedCLIs: detectedCLIs, readinessSession: readinessSession,
+            inputs, proxy: proxy, readinessSession: readinessSession,
             reportContext: .runtime)
         else { throw Failure.startFailed }
 
@@ -339,24 +338,6 @@ final class LiveE2ERunner: BrainCompositionHost {
         preferences.disabledTools = Set(scenario.capabilities.disabledTools)
         preferences.disabledSkills = Set(scenario.capabilities.disabledSkills)
         return preferences
-    }
-
-    private func detectCLIs(
-        for scenario: LiveE2EScenario
-    ) async throws -> [BrainProvider: DetectedAgentCLI] {
-        let detected = await brain.detector.detectAllAsync()
-        var clis = Dictionary(uniqueKeysWithValues: detected.map { ($0.provider, $0) })
-        if scenario.cli[.claudeCode] == .stub {
-            guard let stub = options.claudeCLIOverride else { throw Failure.stubUnavailable }
-            // Presence and sign-in are all a Start checks. The stub then fails at the request stage,
-            // where every local-agent process failure is temporary, which is what F04 needs.
-            clis[.claudeCode] = DetectedAgentCLI(
-                provider: .claudeCode,
-                executableURL: stub,
-                authenticationStatus: .signedIn,
-                supportedFeatures: clis[.claudeCode]?.supportedFeatures ?? [])
-        }
-        return clis
     }
 
     private func synthesizeLines(of scenario: LiveE2EScenario) throws -> [Int: SpokenClips] {

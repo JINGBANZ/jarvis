@@ -10,6 +10,7 @@ public protocol BrainTrafficAuditing: Sendable {
 public extension BrainTrafficAuditing {
     func record(
         tag: String,
+        provider: BrainProvider? = nil,
         request: Data,
         response: Data?,
         status: Int?,
@@ -21,6 +22,7 @@ public extension BrainTrafficAuditing {
     ) {
         record(BrainTrafficAuditEvent(
             tag: tag,
+            provider: provider,
             request: request,
             response: response,
             status: status,

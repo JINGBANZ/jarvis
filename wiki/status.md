@@ -32,7 +32,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Tests/JarvisLiveTests/` + `scripts/run-live-tests.sh`: the live e2e checker, scenarios, fixtures, and command; the Gate compiles the target but never runs it.
 - `Sources/JarvisCore/Brain/`: the provider-neutral brain domain: client and attempt-scoped conversation contracts, route targets, and the model catalog.
 - `Sources/JarvisCore/Providers/`: provider failure classification, redaction, and credential checks shared by brain, transcription, and Settings.
-- `Sources/JarvisBrainProviders/`: the concrete brain adapters, OpenAI Responses plus the Claude Code and Codex runtimes ([architecture.md → Local CLI brain providers](./architecture.md#local-cli-brain-providers)).
+- `Sources/JarvisBrainProviders/`: the concrete brain adapters: the Responses client, the bundled subscription helper's supervisor and sign-in, and the CLI detector and runner the session evaluator uses ([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)).
 - `Sources/JarvisCore/Coach/`: the coaching loop, where `CoachDriver` schedules attempts and `CoachAttemptRunner` runs one, with route state, session memory, capabilities, and one file per coach tool ([architecture.md → Core Loop](./architecture.md#2-core-loop)).
 - `Sources/JarvisCore/Triggers/`: turn and silence triggers and silence backoff.
 - `Sources/JarvisCore/PrepMaterial/` + `Sources/JarvisApp/PrepMaterial/`: prep-material chunking, indexing, and search behind `search_prep_notes` ([architecture.md → Capabilities](./architecture.md#capabilities)).
@@ -55,7 +55,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/EvalPrep/main.swift` + `scripts/eval-session.sh`: the terminal entry point for the same evaluator.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a`: the prebuilt WebRTC AEC3 archive, rebuilt by `scripts/build-aec.sh`.
 - `Sources/JarvisApp/Resources/SileroVAD.mlmodelc`: the Silero VAD model, rebuilt by `scripts/build-vad.sh`.
-- `scripts/build-app.sh`: the local `Jarvis Dev.app` build ([build-and-run.md](./build-and-run.md)).
+- `scripts/build-app.sh` + `scripts/lib/cliproxyapi.sh`: the local `Jarvis Dev.app` build and the pinned subscription helper both app builds bundle ([build-and-run.md](./build-and-run.md)).
 - `.github/workflows/` + `scripts/package-app.sh`: CI, agent automation, and the signed, notarized release pipeline ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci), [sandbox.md → Repository automation](./sandbox.md#repository-automation)).
 - `AGENTS.md` + `.github/workflows/sync-shared-rules.yml`: agent guidance whose shared-rules block syncs weekly from `JINGBANZ/rules`.
 

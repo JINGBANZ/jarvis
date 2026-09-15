@@ -29,8 +29,11 @@ public final class CoachHistory: @unchecked Sendable {
     }
 
     /// Commit a finished turn's messages (the user delta, and any capture/speak calls with their
-    /// results). Callers must NOT pass `stay_silent` traces — silence needs no memory. Two kinds of
-    /// message are rewritten at commit:
+    /// results). A `stay_silent` call never enters memory, nor any result answering it: silence
+    /// needs no memory, and a turn can carry one it did not end on, refused on a press or answered
+    /// as not executed beside another call, whose refusal would otherwise replay to every later
+    /// request, including automatic turns where staying silent is right. Two kinds of message are
+    /// rewritten at commit:
     /// - **Screenshots** are replaced with a text stub (observation masking). The capture's text
     ///   evidence — what the model actually reads — rides in the tool-result message and stays
     ///   verbatim; the
@@ -56,7 +59,11 @@ public final class CoachHistory: @unchecked Sendable {
     public func commit(_ turn: [ChatMessage]) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        var turn = turn
+        // Raw passthrough items convert first, so a `stay_silent` call among them is found too.
+        var turn = Self.droppingSilence(turn.compactMap { m -> ChatMessage? in
+            guard let raw = m.rawItemsJSON else { return m }
+            return Self.convertRawItems(raw)
+        })
         let screenTextHeader = JarvisPrompts.Coach.screenTextHeader
         if let newest = turn.lastIndex(where: { $0.text?.contains(screenTextHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededScreenText)
@@ -66,12 +73,45 @@ public final class CoachHistory: @unchecked Sendable {
                 turn[i] = Self.collapsingSupersededScreenText(turn[i])
             }
         }
-        messages.append(contentsOf: turn.compactMap { m in
-            if let raw = m.rawItemsJSON { return Self.convertRawItems(raw) }
-            return m.imageBase64JPEG != nil
+        messages.append(contentsOf: turn.map { m in
+            m.imageBase64JPEG != nil
                 ? .user(JarvisPrompts.Coach.earlierImageStub)
-                : m
+                : Self.labelingScreenTextEarlier(m)
         })
+    }
+
+    /// Committed screen text keeps its words but no longer claims to be the current screen: by the
+    /// next request it describes an earlier capture, and the screen gate must be free to look again.
+    private static func labelingScreenTextEarlier(_ m: ChatMessage) -> ChatMessage {
+        guard let text = m.text, text.contains(JarvisPrompts.Coach.screenTextHeader) else { return m }
+        let relabeled = text
+            .replacingOccurrences(of: JarvisPrompts.Coach.currentOCRSource,
+                                  with: JarvisPrompts.Coach.earlierOCRSource)
+            .replacingOccurrences(of: JarvisPrompts.Coach.currentAccessibilitySource,
+                                  with: JarvisPrompts.Coach.earlierAccessibilitySource)
+        return ChatMessage(
+            role: m.role, text: relabeled, imageBase64JPEG: m.imageBase64JPEG,
+            toolCallId: m.toolCallId, toolCalls: m.toolCalls)
+    }
+
+    /// The turn without its `stay_silent` calls and the results answering them. A call message
+    /// keeps its other calls, so every call left in memory still has its result.
+    private static func droppingSilence(_ turn: [ChatMessage]) -> [ChatMessage] {
+        let silent = Set(turn.flatMap { $0.toolCalls ?? [] }
+            .filter { $0.name == staySilentTool.name }
+            .map(\.id))
+        guard !silent.isEmpty else { return turn }
+        return turn.compactMap { m in
+            if let id = m.toolCallId, silent.contains(id) { return nil }
+            guard let calls = m.toolCalls, calls.contains(where: { silent.contains($0.id) }) else {
+                return m
+            }
+            let kept = calls.filter { !silent.contains($0.id) }
+            guard !kept.isEmpty || m.text != nil else { return nil }
+            return ChatMessage(
+                role: m.role, text: m.text, imageBase64JPEG: m.imageBase64JPEG,
+                toolCallId: m.toolCallId, toolCalls: kept.isEmpty ? nil : kept)
+        }
     }
 
     /// Rewrite one committed message so its screen-text block becomes the superseded marker.

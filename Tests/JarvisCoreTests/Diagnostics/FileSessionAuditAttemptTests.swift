@@ -6,7 +6,7 @@ import Testing
     @Test func recordsOwnerOnlyAttemptStartAndTerminalEvents() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = await FileSessionAudit.readyForTesting(directory: dir)
-        let target = BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-codex")
+        let target = BrainTarget(provider: .codexSubscription, modelID: "gpt-5.6-codex")
         let transcript = [
             TranscriptLine(speaker: .them, text: "Uh. Hmm.", at: 1),
             TranscriptLine(speaker: .them, text: "Explain the tradeoff", at: 2),
@@ -40,7 +40,7 @@ import Testing
         #expect(events[0]["event"] as? String == "started")
         #expect(events[0]["trigger"] as? String == "silence")
         #expect(events[0]["seconds_quiet"] as? Double == 45)
-        #expect(events[0]["provider"] as? String == BrainProvider.codexCLI.rawValue)
+        #expect(events[0]["provider"] as? String == BrainProvider.codexSubscription.rawValue)
         let lines = try #require(events[0]["transcript"] as? [[String: Any]])
         #expect(lines.map { $0["index"] as? Int } == [8, 9])
         #expect(lines[0]["classification"] as? String == "composite_filler")

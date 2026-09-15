@@ -37,11 +37,38 @@ import Testing
                 == "OpenAI API didn't respond in time")
     }
 
-    @Test func localCLIsAreToldToSignInRatherThanRotateAKey() {
-        #expect(make(source: .brain(.claudeCode), category: .authentication).activitySentence
-                == "Claude Code isn't signed in; sign in to the CLI and press Start again")
+    @Test func anAPIKeyProviderIsToldToCheckItsKey() {
         #expect(make(source: .brain(.openAI), category: .authentication).activitySentence
                 == "OpenAI API rejected the API key; check Settings → Connections")
+    }
+
+    /// A subscription's sign-in, its helper, and its plan limit each say what to do in Jarvis.
+    @Test func subscriptionsNameTheirOwnNextStep() {
+        let signIn = "open Settings → Connections, press Sign in for it, then press Start"
+        #expect(make(source: .brain(.claudeSubscription), category: .authentication).activitySentence
+                == "Claude subscription isn't signed in; \(signIn)")
+        // The helper's reply for a signed-out vendor and for a model it does not serve alike.
+        #expect(make(source: .brain(.claudeSubscription), category: .configuration,
+                     identity: .init(httpStatus: 400, errorCode: "model_not_found"),
+                     message: "unknown provider for model claude-opus-5").activitySentence
+                == "Claude subscription rejected the coaching configuration (HTTP 400, model_not_found: unknown provider for model claude-opus-5); check Settings → Brain")
+        #expect(make(source: .brain(.codexSubscription), category: .unreachable,
+                     identity: .init(transportDomain: "NSURLErrorDomain", transportCode: -1004),
+                     message: "could not connect to the server").activitySentence
+                == "Codex subscription couldn't reach the sign-in service (network -1004: could not connect to the server); quit and reopen Jarvis")
+        let stopped = ProviderFailure(
+            source: .brain(.claudeSubscription), stage: .process, category: .unavailable,
+            disposition: .permanent, identity: .init(), message: "the sign-in service keeps stopping")
+        #expect(stopped.activitySentence
+                == "Claude subscription is unavailable (the sign-in service keeps stopping); quit and reopen Jarvis")
+        #expect(make(source: .brain(.codexSubscription), category: .rejected,
+                     identity: .init(httpStatus: 429),
+                     message: "All credentials for model gpt-5.6-sol are cooling down").activitySentence
+                == "Codex subscription reached its usage limit (HTTP 429: All credentials for model gpt-5.6-sol are cooling down); wait for the limit to reset, or add a fallback in Settings → Brain")
+        // An upstream outage behind the helper reads as any provider's does.
+        #expect(make(source: .brain(.claudeSubscription), category: .unavailable,
+                     identity: .init(httpStatus: 503)).activitySentence
+                == "Claude subscription is unavailable (HTTP 503)")
     }
 
     /// The four clauses no exact-string test pinned. A clause is copy: it changes only on purpose.

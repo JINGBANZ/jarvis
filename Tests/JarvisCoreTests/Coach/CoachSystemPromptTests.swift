@@ -1,8 +1,7 @@
 import Testing
 @testable import JarvisCore
 
-/// The one builder every assembly site calls: `CoachAttemptRunner` per turn, and `BrainComposition`
-/// once at Start for a CLI provider whose instructions are fixed after construction.
+/// The one builder of the coaching system prompt, which `CoachAttemptRunner` calls for every request.
 @Suite struct CoachSystemPromptTests {
     private let withCatalog = CoachCapabilities(
         tools: coachTools + [ToolDef(

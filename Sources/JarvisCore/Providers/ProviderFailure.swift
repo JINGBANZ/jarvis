@@ -57,7 +57,7 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
         case readiness
         /// A ping/pong liveness probe failed on a ready socket.
         case liveness
-        /// A local CLI process exited, timed out, or produced unusable output.
+        /// A local process Jarvis runs for the provider, the bundled sign-in helper, could not serve.
         case process
         /// The provider answered but the answer was unusable (incomplete, no tool call, tool loop).
         case response
@@ -78,7 +78,7 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
         case disconnected
         /// The provider refused for a reason outside the table; the message explains.
         case rejected
-        /// The provider or a local resource is unavailable (5xx, CLI missing, analyzer gone).
+        /// The provider or a local resource is unavailable (5xx, helper not running, analyzer gone).
         case unavailable
         case timeout
         /// The provider's response could not be used.
@@ -130,7 +130,7 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
 
         /// A number means nothing without saying which numbering it belongs to. Only URL loading
         /// codes are "network"; an errno and an adapter's own code are different scales entirely,
-        /// and calling all three "network" sent a person to check their Wi-Fi over a CLI that
+        /// and calling all three "network" sent a person to check their Wi-Fi over a process that
         /// exited badly.
         private static func scale(of domain: String?) -> String {
             switch domain {
@@ -177,7 +177,7 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
     }
 
     /// Every adapter's entry point for an error it has not proven anything about: a decoding fault,
-    /// a CLI exit, an unknown future error. Keeps the NSError identity, stays temporary, and routes
+    /// a process exit, an unknown future error. Keeps the NSError identity, stays temporary, and routes
     /// transport errors through the fixed-description table so a failing URL (which for Gemini
     /// carries the API key) never becomes the message.
     public init(unclassified error: any Error, source: Source, stage: Stage) {

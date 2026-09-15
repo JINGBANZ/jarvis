@@ -1,7 +1,7 @@
 {
   "id": "F01-system",
   "audio": "fixture-no-system",
-  "brain": { "primary": "codex-cli", "fallbacks": [] },
+  "brain": { "primary": "claude-subscription", "fallbacks": [] },
   "capabilities": { "disabledTools": [], "disabledSkills": [] },
   "prepNotes": null,
   "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },

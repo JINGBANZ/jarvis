@@ -106,6 +106,9 @@ import Testing
         #expect(rate.category == .rejected && rate.disposition == .temporary)
         let model = OpenAIFailureClassifier.classify(httpStatus: 404, body: body(code: "model_not_found"), source: brain, stage: .request)
         #expect(model.category == .configuration && model.disposition == .permanent)
+        // The bundled subscription helper, once every credential for the model's vendor is gone.
+        let signedOut = OpenAIFailureClassifier.classify(httpStatus: 503, body: body(code: "upstream_authentication_required"), source: brain, stage: .request)
+        #expect(signedOut.category == .authentication && signedOut.disposition == .permanent)
         let auth = OpenAIFailureClassifier.classify(httpStatus: 429, body: body(type: "authentication_error"), source: brain, stage: .request)
         #expect(auth.category == .authentication && auth.disposition == .permanent)
         let region = OpenAIFailureClassifier.classify(httpStatus: 403, body: body(code: "unsupported_country_region_territory", type: "request_forbidden"), source: transcription, stage: .handshake)

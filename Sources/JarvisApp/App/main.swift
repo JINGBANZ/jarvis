@@ -7,7 +7,7 @@ import JarvisCore
 private func liveE2EDelegate() -> (any NSApplicationDelegate)? {
     #if JARVIS_LIVE_E2E
     guard LiveE2EOptions.isRequested else { return nil }
-    // The mode coaches with the saved key and signed-in CLIs, under this app's screen grant, on
+    // The mode coaches with the saved key and signed-in subscriptions, under this app's screen grant, on
     // paths its caller names. Only the development app, which a developer built, accepts that.
     guard Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true else {
         fputs("Jarvis live e2e: only the development build runs live e2e scenarios\n", stderr)

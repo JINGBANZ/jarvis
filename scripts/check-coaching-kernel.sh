@@ -23,9 +23,9 @@ cd "$(dirname "$0")/.."
 #   Support/        Clock, retry schedule, and task plumbing the kernel depends on
 #   Config/ is NOT kernel: it is the control plane the kernel is handed a frozen snapshot of.
 #   Brain/          the BrainClient port and route/model types. Core describes brains and never
-#                   runs one: every concrete adapter — the OpenAI URLSession transport and the
-#                   local-agent CLI subtree with its Process plumbing — lives in
-#                   Sources/JarvisBrainProviders.
+#                   runs one: every concrete adapter — the URLSession transport every target uses
+#                   and the Process plumbing of the bundled helper and the evaluator's CLI — lives
+#                   in Sources/JarvisBrainProviders.
 #   Prompts/        predefined model-facing text for the kernel's own prompts. Provider-specific
 #                   prompt text moved out with its adapter, still under the JarvisPrompts name.
 #   Screen/         the ScreenCapturing port, snapshot model, and pure window-selection and

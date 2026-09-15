@@ -463,7 +463,7 @@ import Testing
 
         let evidence = try Self.evidence(traffic: [allowed, required])
         let first = evidence.traffic[0]
-        #expect(first.cliProvider == nil)
+        #expect(first.provider == nil)
         #expect(first.status == 200)
         #expect(first.error == nil)
         #expect(first.instructions == "You are Jarvis.")
@@ -484,7 +484,7 @@ import Testing
         #expect(second.speakDiagram == .noSpeakCall)
     }
 
-    @Test func cliRequestsExposeProviderAndInstructions() throws {
+    @Test func archivedCLIRequestsExposeProviderAndInstructions() throws {
         let turn = try Self.coachRecord(
             attempt: 5,
             request: [
@@ -504,18 +504,18 @@ import Testing
 
         let evidence = try Self.evidence(traffic: [turn, failedOpen])
         let first = evidence.traffic[0]
-        #expect(first.cliProvider == "codex-cli")
+        #expect(first.provider == "codex-cli")
         #expect(first.instructions == "## Tool protocol\nPick one tool.")
         #expect(first.declaredToolNames.isEmpty)
         #expect(first.toolChoiceType == nil)
         #expect(first.replayedFunctionCalls.isEmpty)
         #expect(first.replayedFunctionOutputCallIDs.isEmpty)
         #expect(first.speakDiagram == .noSpeakCall)
-        #expect(evidence.traffic[1].cliProvider == "claude-code")
+        #expect(evidence.traffic[1].provider == "claude-code")
         #expect(evidence.traffic[1].instructions == nil)
     }
 
-    @Test func speakDiagramReadsOpenAIAndCLIResponses() throws {
+    @Test func speakDiagramReadsTheResponsesOutput() throws {
         func diagram(_ response: [String: Any]) throws -> Evidence.SpeakDiagram {
             try Self.evidence(traffic: [Self.coachRecord(attempt: 1, response: response)])
                 .traffic[0].speakDiagram
@@ -539,19 +539,10 @@ import Testing
         ])) == .noSpeakCall)
         #expect(try diagram(["error": ["message": "Invalid request"] as [String: Any]]) == .noSpeakCall)
 
-        // CLI records keep the model's text under `reply`, with a runtime envelope beside it.
+        // An archived local CLI record keeps the model's text under `reply`, which no live session
+        // writes, so it holds no speak call to read.
         #expect(try diagram([
-            "reply": #"{"tool":"speak","arguments":{"lines":["Sketch it."],"mermaid":"graph LR\nA-->B","explanation":null,"codeSnippet":null}}"#,
-            "cli": ["total_cost_usd": 0.01] as [String: Any],
-        ]) == .present("graph LR\nA-->B"))
-        #expect(try diagram([
-            "reply": "I'll keep it short.\n```json\n{\"tool\":\"speak\",\"lines\":[\"Name the tradeoff.\"],\"mermaid\":null}\n```",
-            "runtime": ["status": "completed"],
-        ]) == .none)
-        #expect(try diagram(["reply": #"{"tool":"stay_silent","arguments":{}}"#]) == .noSpeakCall)
-        #expect(try diagram(["reply": "Name the tradeoff first."]) == .noSpeakCall)
-        #expect(try diagram([
-            "reply": "{\"tool\":\"speak\",\"arguments\":{\"mermaid\":\"graph TD\\nA-->B\"}}\n{\"tool\":\"stay_silent\",\"arguments\":{}}",
+            "reply": #"{"tool":"speak","arguments":{"lines":["Sketch it."],"mermaid":"graph LR\nA-->B"}}"#,
         ]) == .noSpeakCall)
     }
 

@@ -22,6 +22,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// Provider preflight, brain-client construction, route construction, and live reapply.
     /// See `BrainComposition` for the boundary; this delegate is its host.
     private var brain: BrainComposition!
+    /// The bundled helper serving the subscription targets: started when first needed, stopped at
+    /// Quit. Nil until the app starts past the permission gate.
+    private var proxySupervisor: LocalProxySupervisor?
     /// The session runtime: everything between an accepted Start and coaching ready, and Stop.
     /// Built once the app's surfaces exist; every Start and Stop runs on it.
     private var composition: SessionComposition!
@@ -39,7 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// Overall readiness is composed in Core. Its `activeSession` is the one token for the attempt
     /// being started or run; the App feeds it OS and provider observations.
     private let readiness = JarvisReadiness()
-    /// A Start that is still discovering local CLIs. Stop or a newer Start cancels it before the
+    /// A Start that is still preparing its session. Stop or a newer Start cancels it before the
     /// prepared runtime can be installed on the main actor.
     private var pendingStartTask: Task<Void, Never>?
     private var pendingStartRevision: UInt = 0
@@ -74,7 +77,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// gate closing, and never twice.
     private func startApp() {
         didStartApp = true
-        brain = BrainComposition(secrets: secrets, host: self)
+        let supervisor = LocalProxySupervisor(
+            executable: LocalProxySupervisor.bundledExecutable(),
+            home: secretFile.directoryURL.appendingPathComponent("proxy", isDirectory: true))
+        proxySupervisor = supervisor
+        brain = BrainComposition(secrets: secrets, host: self, supervisor: supervisor)
+        // A saved route that coaches on a subscription finds the helper answering by its first Start.
+        if brain.preferences.route.targets.contains(where: { $0.provider.servedByLocalProxy }) {
+            Task { await supervisor.ensureRunning() }
+        }
 
         // The activity viewer lives for the whole app run, but a *session* is one coaching run: each
         // Start opens a fresh session dir + logs (see `beginNewSession`). No session exists until the
@@ -102,12 +113,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             self?.activityViewer?.historyDidChange()
         }
         // The button launches the same sole agentic evaluator as scripts/eval-session.sh. Resolve the
-        // source at click time and read the current provider preference then, so Settings changes
-        // and a moved local app bundle are both reflected without rebuilding Activity.
+        // source at click time, so a moved local app bundle is reflected without rebuilding Activity.
         activityViewer.makeEvaluator = { [weak self] session in
             guard let self else { return nil }
-            return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session),
-                                    preferredProvider: self.brain.preferences.provider)
+            return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session))
         }
 
         overlayCaption = OverlayCaptionPanel()
@@ -184,16 +193,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // pipeline.
         brainSection = BrainSection(
             preferences: brain.preferences,
-            detector: brain.detector,
-            onPreferencesChanged: { [weak self] change, clis in
-                self?.brain.applyBrainPreferencesToRunningSession(
-                    detectedCLIs: clis,
-                    update: change == .topology ? .topologyEdit : .effortEdit)
+            supervisor: supervisor,
+            onPreferencesChanged: { [weak self] change in
+                Task {
+                    await self?.brain.applyBrainPreferencesToRunningSession(
+                        update: change == .topology ? .topologyEdit : .effortEdit)
+                }
             },
             transcriptionPreferences: transcriptionPreferences,
             prepMaterialPreferences: prepMaterialPreferences)
         let connectionsSection = ConnectionsSection(
-            detector: brain.detector,
+            supervisor: supervisor,
             keyStore: secretFile,
             onKeySaved: { [weak self] credential, key in
                 self?.composition.applySavedAPIKey(key, for: credential)
@@ -289,11 +299,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         guard didStartApp else { return .terminateNow }
         activityViewer?.cancelEvaluation()
         stop(reason: .applicationQuit)
+        proxySupervisor?.terminateNow()
         return .terminateNow
     }
 
-    /// Validate a Start immediately, then prove system audio and prepare any local-CLI targets and
-    /// on-device speech assets.
+    /// Validate a Start immediately, then prove system audio, read the subscription helper, and
+    /// prepare on-device speech assets.
     /// Returns `true` once startup is accepted; the menu remains in Starting until preparation and
     /// both transcription endpoints finish. Stop, a newer Start, or a relevant preference/credential
     /// edit makes the prepared result stale before it can install a pipeline.
@@ -364,8 +375,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let revision = pendingStartRevision
         pendingStartTask?.cancel()
         pendingStartTask = nil
-        let cliProviders = brainRoute.targets.map(\.provider).filter(\.usesLocalCLI)
-        let detector = AgentCLIDetector()
         pendingStartTask = Task { [weak self] in
             guard let self else { return }
 
@@ -428,7 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self.composition.observeReadiness(
                     .transcriptionPreparation(.ready), for: readinessSession)
             }
-            let detected = await detector.detectAllAsync(cliProviders)
+            let proxy = await self.brain.proxyReadiness(for: brainRoute)
             guard !Task.isCancelled,
                   self.pendingStartRevision == revision,
                   self.readiness.activeSession == readinessSession else {
@@ -449,8 +458,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 return
             }
             self.pendingStartTask = nil
-            let detectedCLIs = Dictionary(
-                uniqueKeysWithValues: detected.map { ($0.provider, $0) })
             _ = self.installPreparedStart(
                 apiKey: key,
                 transcriptionKey: transcriptionKey,
@@ -459,7 +466,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 codeEnabled: codeEnabled,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
-                detectedCLIs: detectedCLIs,
+                proxy: proxy,
                 wasRunning: wasRunning,
                 reportContext: reportContext,
                 readinessSession: readinessSession)
@@ -509,8 +516,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         errorReporter.reportImmediately(.permissionsMissing([.systemAudio]), context: context)
     }
 
-    /// Install a fully prepared route on the main actor. The primary preflight still happens before
-    /// tearing down a running pipeline, while unavailable fallback CLIs remain ordered skip targets.
+    /// Install a fully prepared route on the main actor. A route with no usable target is refused
+    /// before tearing down a running pipeline; an unusable subscription stays in it as a skip target.
     private func installPreparedStart(
         apiKey key: String,
         transcriptionKey: String,
@@ -519,26 +526,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         codeEnabled: Bool,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
-        detectedCLIs initialDetectedCLIs: [BrainProvider: DetectedAgentCLI],
+        proxy: LocalProxySupervisor.Readiness?,
         wasRunning: Bool,
         reportContext: UserFacingError.PresentationContext,
         readinessSession: JarvisReadiness.Session
     ) -> Bool {
         guard readiness.activeSession == readinessSession else { return false }
-        let brainProvider = brainRoute.primary.provider
-        var detectedCLIs = initialDetectedCLIs
-        let preflight = brain.preflightBrainProvider(
-            brainProvider, detectedCLI: detectedCLIs[brainProvider],
-                                               context: reportContext,
-                                               recordSettingsFailure: wasRunning)
-        guard preflight.isReady else {
+        // A signed-out or unserved subscription is skipped when the route reaches it, so a later
+        // target can still coach. Only a route with no target left is refused here.
+        if let failure = brain.routeUnavailability(brainRoute, proxy: proxy) {
+            jlog("Jarvis: can't start — no target in the route can coach: "
+                 + (failure.errorDescription ?? ""))
+            if wasRunning {
+                artifacts.sessionAudit?.record(.settingsChangeNotApplied)
+            }
+            errorReporter.reportImmediately(.brainRouteUnavailable(failure: failure), context: reportContext)
             composition.observeReadiness(
                 .brainPreparation(.blocked(.providerUnavailable)),
                 for: readinessSession)
             return false
-        }
-        if let primaryCLI = preflight.cli {
-            detectedCLIs[brainProvider] = primaryCLI
         }
         stop(reason: .replacedByNewSession, preserving: readinessSession)
         // The optional shortcuts follow the switches this session is frozen with.
@@ -564,7 +570,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 prepSources: prepMaterialPreferences.sources,
                 explanationsEnabled: explanationsEnabled,
                 codeEnabled: codeEnabled),
-            detectedCLIs: detectedCLIs,
+            proxy: proxy,
             readinessSession: readinessSession,
             reportContext: reportContext)
     }

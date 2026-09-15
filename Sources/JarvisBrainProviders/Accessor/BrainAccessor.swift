@@ -4,17 +4,23 @@ import JarvisCore
 import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (Core tests on Linux)
 #endif
 
-/// Brain client over the OpenAI **Responses API** (`POST /v1/responses`). System text is passed via
+/// Brain client over the OpenAI **Responses API** (`POST /v1/responses`), sent to OpenAI itself or to
+/// the bundled CLIProxyAPI helper that serves the subscription targets. System text is passed via
 /// `instructions`; the conversation is sent as typed `input` items; function calls are threaded with
 /// `function_call` / `function_call_output`. Every call is self-contained: session memory is
 /// client-managed
 /// (`CoachHistory`) and arrives in `messages`, built in stable append-only order so OpenAI's prompt
 /// cache keeps hitting. `store:true` keeps each request/response inspectable in the OpenAI dashboard
 /// logs for debugging (a documented retention tradeoff; see wiki/sandbox.md).
-public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
+public struct BrainAccessor: BrainClient, @unchecked Sendable {
     /// Injected transport; returns the body and the HTTP response (for status + headers).
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
 
+    /// OpenAI's own Responses endpoint, used by every target not served by the bundled helper.
+    public static let openAIEndpoint = URL(string: "https://api.openai.com/v1/responses")!
+
+    /// The target this client serves, which every failure it raises names.
+    private let provider: BrainProvider
     private let apiKey: String
     private let model: String
     private let reasoningEffort: String
@@ -22,6 +28,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     private let timeout: TimeInterval
     private let maxOutputTokens: Int
     private let promptCacheKey: String
+    private let toolChoicePolicy: ToolChoicePolicy
     private let send: Sender?
     /// When set, every round trip (request body, response body, status, latency — or the transport
     /// error) is recorded to the session's `brain-traffic.jsonl`, tagged with `trafficTag` so the
@@ -29,10 +36,11 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
     private let traffic: (any BrainTrafficAuditing)?
     private let trafficTag: String
 
-    public init(apiKey: String,
+    public init(provider: BrainProvider = .openAI,
+                apiKey: String,
                 model: String,
                 reasoningEffort: String = Defaults.Brain.effort.rawValue,
-                endpoint: URL = URL(string: "https://api.openai.com/v1/responses")!,
+                endpoint: URL = BrainAccessor.openAIEndpoint,
                 timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
                 // The cap MUST track the effort: it's a combined reasoning+output budget, so a value
                 // too small for the effort truncates the run (the high-effort bug). Callers pass the
@@ -40,20 +48,30 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
                 // default mirrors the default effort so there's one source of truth, never a magic number.
                 maxOutputTokens: Int = Defaults.Brain.effort.maxOutputTokens,
                 promptCacheKey: String = "jarvis-coach-v1",
+                toolChoicePolicy: ToolChoicePolicy = .providerEnforced,
+                minimumReasoningEffort: ReasoningEffort? = nil,
                 traffic: (any BrainTrafficAuditing)? = nil,
                 trafficTag: String = "coach",
                 send: Sender? = nil) {
+        self.provider = provider
         self.apiKey = apiKey
         self.model = model
-        // Astra requires at least low reasoning. Match its budget without rewriting the user's
-        // shared preference, which can still disable reasoning on the other OpenAI models.
-        let requiresReasoning = model == "gpt-6-astra" && reasoningEffort == "none"
-        self.reasoningEffort = requiresReasoning ? ReasoningEffort.low.rawValue : reasoningEffort
+        // The target's floor, and GPT-6 Astra's own of low. Raise the effort and its budget to the
+        // floor without rewriting the user's shared preference, which can still disable reasoning
+        // on other models.
+        let floor = [minimumReasoningEffort, model == "gpt-6-astra" ? ReasoningEffort.low : nil]
+            .compactMap { $0 }.max()
+        if let floor, let selected = ReasoningEffort(rawValue: reasoningEffort), selected < floor {
+            self.reasoningEffort = floor.rawValue
+            self.maxOutputTokens = max(maxOutputTokens, floor.maxOutputTokens)
+        } else {
+            self.reasoningEffort = reasoningEffort
+            self.maxOutputTokens = maxOutputTokens
+        }
         self.endpoint = endpoint
         self.timeout = timeout
-        self.maxOutputTokens = requiresReasoning
-            ? max(maxOutputTokens, ReasoningEffort.low.maxOutputTokens) : maxOutputTokens
         self.promptCacheKey = promptCacheKey
+        self.toolChoicePolicy = toolChoicePolicy
         self.traffic = traffic
         self.trafficTag = trafficTag
         self.send = send
@@ -69,7 +87,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             // A brain request is one round trip with nothing "ready" behind it, which is exactly
             // what this initializer's transport path assumes: a refused connection reads as
             // unreachable, and the failing URL never becomes the message.
-            throw ProviderFailure(unclassified: error, source: .brain(.openAI), stage: .request)
+            throw ProviderFailure(unclassified: error, source: .brain(provider), stage: .request)
         }
     }
 
@@ -100,17 +118,17 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         } catch {
             // Record the failed round trip too — a transport error (timeout, dropped connection) is
             // exactly the kind of issue the session evaluation should see.
-            traffic?.record(tag: trafficTag, request: body, response: nil, status: nil,
+            traffic?.record(tag: trafficTag, provider: provider, request: body, response: nil, status: nil,
                             latencyMs: Self.elapsedMs(since: started),
                             error: OpenAINetworkDiagnostics.errorSummary(error), phases: diagnostics.phases)
             throw error
         }
         let status = http?.statusCode ?? 0
-        traffic?.record(tag: trafficTag, request: body, response: data, status: status,
+        traffic?.record(tag: trafficTag, provider: provider, request: body, response: data, status: status,
                         latencyMs: Self.elapsedMs(since: started), phases: diagnostics.phases)
         guard (200..<300).contains(status) else {
             throw OpenAIFailureClassifier.classify(
-                httpStatus: status, body: data, source: .brain(.openAI), stage: .request)
+                httpStatus: status, body: data, source: .brain(provider), stage: .request)
         }
         return try decode(data)
     }
@@ -180,7 +198,17 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
             }
         }
 
-        let toolsJSON: [[String: Any]] = try tools.map { t in
+        // On a `filteredAuto` target the declared array itself carries the permitted set and the
+        // choice is always `auto`. A press then misses the prompt cache from the tools block onward,
+        // measured at about a second on OpenAI, accepted only where the provider can neither force
+        // nor narrow a call.
+        let declared: [ToolDef]
+        switch (toolChoicePolicy, toolChoice) {
+        case (.filteredAuto, .allowed(let names)): declared = tools.filter { names.contains($0.name) }
+        case (.filteredAuto, .force(let name)): declared = tools.filter { $0.name == name }
+        default: declared = tools
+        }
+        let toolsJSON: [[String: Any]] = try declared.map { t in
             let params = try JSONSerialization.jsonObject(with: Data(t.parametersJSON.utf8))
             // Responses API uses a FLAT function tool shape (no nested "function"). `strict:true`
             // turns on Structured Outputs for the call's arguments — the model is constrained to the
@@ -196,7 +224,7 @@ public struct OpenAIBrainClient: BrainClient, @unchecked Sendable {
         // subset narrows tool_choice rather than the declared `tools`, so the cached prefix is the
         // same one the automatic path sends.
         let toolChoiceJSON: Any
-        switch toolChoice {
+        switch toolChoicePolicy == .filteredAuto ? ToolChoice.auto : toolChoice {
         case .auto: toolChoiceJSON = "auto"
         case .required: toolChoiceJSON = "required"
         case .allowed(let names):

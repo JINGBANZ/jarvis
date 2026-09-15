@@ -76,6 +76,6 @@ import Testing
     @Test func transportDomainsAreRecognized() {
         #expect(TransportFailureClassifier.isTransportDomain(NSURLErrorDomain))
         #expect(TransportFailureClassifier.isTransportDomain(NSPOSIXErrorDomain))
-        #expect(!TransportFailureClassifier.isTransportDomain("CLIBrainClient"))
+        #expect(!TransportFailureClassifier.isTransportDomain("ExampleAdapter"))
     }
 }

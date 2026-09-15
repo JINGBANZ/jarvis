@@ -20,7 +20,7 @@ private func speakResponseBody(arguments: String) -> Data {
     return try! JSONSerialization.data(withJSONObject: ["output": [item]])
 }
 
-@Suite struct OpenAIBrainClientTests {
+@Suite struct BrainAccessorTests {
     /// The model returns the overlay lines already split, in a `lines` array — so a line that contains
     /// internal periods/code (e.g. `Array.from(...)`) survives intact as ONE element. This is the
     /// regression that motivated the schema change: client-side sentence splitting used to shatter it.
@@ -30,7 +30,7 @@ private func speakResponseBody(arguments: String) -> Data {
           {"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\\"lines\\":[\\"Try a hash map.\\",\\"Use `Array.from({length: n + 1}, () => [])` instead.\\"]}"}
         ]}
         """
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls == [.speak(callId: "call_1",
@@ -43,7 +43,7 @@ private func speakResponseBody(arguments: String) -> Data {
           {"type":"function_call","id":"fc_9","call_id":"call_9","name":"capture_screen","arguments":"{}"}
         ]}
         """
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls == [.captureScreen(callId: "call_9")])
@@ -60,7 +60,7 @@ private func speakResponseBody(arguments: String) -> Data {
           {"type":"function_call","id":"fc_9","call_id":"call_9","name":"capture_screen","arguments":"{}"}
         ]}
         """
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls == [.captureScreen(callId: "call_9")])
@@ -77,7 +77,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// function_call it belongs to, the call keeping its item id — the shape the API requires.
     @Test func encodesRawItemsVerbatimBeforeFunctionCallOutput() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         let convo: [ChatMessage] = [
             .user("transcript"),
@@ -102,7 +102,7 @@ private func speakResponseBody(arguments: String) -> Data {
           {"type":"function_call","id":"fc_2","call_id":"call_2","name":"stay_silent","arguments":"{}"}
         ]}
         """
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls == [.staySilent(callId: "call_2")])
@@ -110,7 +110,7 @@ private func speakResponseBody(arguments: String) -> Data {
 
     @Test func noToolCallsMeansSilent() async throws {
         let json = #"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"(thinking)"}]}]}"#
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls.isEmpty)
@@ -124,7 +124,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func speakDecodeDropsOffContractArgumentsAsSilence() async throws {
         for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, #"{"lines":["  "]}"#, "not json"] {
             let body = speakResponseBody(arguments: args)
-            let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+            let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                            send: { _ in (body, http(200)) })
             let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
             #expect(resp.toolCalls.isEmpty, "args=\(args)")
@@ -135,7 +135,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// so an empty tool-call list isn't mistaken for deliberate silence.
     @Test func decodeFlagsIncompleteResponse() async throws {
         let json = #"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}"#
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls.isEmpty)
@@ -145,7 +145,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// A normal completed response carries no incomplete reason.
     @Test func decodeCompletedResponseHasNoIncompleteReason() async throws {
         let json = #"{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}"#
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.incompleteReason == nil)
@@ -155,7 +155,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// call — and multiple text parts are joined.
     @Test func decodesOutputTextForToollessCalls() async throws {
         let json = #"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the "},{"type":"output_text","text":"summary"}]}]}"#
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.4-mini",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.4-mini",
                                        send: { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("condense this")], tools: [])
         #expect(resp.outputText == "the summary")
@@ -165,7 +165,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func openAIDefaultAndCompactionUseWorkloadDeadlines() async throws {
         let timeouts = CapturedTimeouts()
         let response = Data(#"{"output":[]}"#.utf8)
-        let summarizer = OpenAIBrainClient(
+        let summarizer = BrainAccessor(
             apiKey: "sk-x",
             model: "gpt-5.4-mini",
             timeout: BrainWorkloadTimeout.historyCompaction,
@@ -173,7 +173,7 @@ private func speakResponseBody(arguments: String) -> Data {
                 timeouts.append(request.timeoutInterval)
                 return (response, http(200))
             })
-        let defaultClient = OpenAIBrainClient(
+        let defaultClient = BrainAccessor(
             apiKey: "sk-x",
             model: "gpt-5.4-mini",
             send: { request in
@@ -197,7 +197,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// retrying a stale body in place.
     @Test func httpErrorThrowsWithoutRetry() async {
         let attempts = Counter()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { _ in _ = attempts.next(); return (Data("nope".utf8), http(400)) })
         await #expect(throws: (any Error).self) {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
@@ -206,7 +206,7 @@ private func speakResponseBody(arguments: String) -> Data {
     }
 
     @Test func httpErrorIsClassifiedAtProviderBoundary() async {
-        let client = OpenAIBrainClient(
+        let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-5.5",
             send: { _ in (Data("unauthorized".utf8), http(401)) })
         do {
@@ -223,7 +223,7 @@ private func speakResponseBody(arguments: String) -> Data {
 
     @Test func unknownRequestLocalHTTPErrorPreservesTheSession() async {
         let body = Data(#"{"error":{"code":"future_request_error","type":"future_type"}}"#.utf8)
-        let client = OpenAIBrainClient(
+        let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-5.5",
             send: { _ in (body, http(422)) })
         do {
@@ -243,7 +243,7 @@ private func speakResponseBody(arguments: String) -> Data {
              .permanent),
         ]
         for (body, expected) in cases {
-            let client = OpenAIBrainClient(
+            let client = BrainAccessor(
                 apiKey: "sk-x", model: "gpt-5.5",
                 send: { _ in (body, http(404)) })
             do {
@@ -259,7 +259,7 @@ private func speakResponseBody(arguments: String) -> Data {
 
     @Test func parsedPermanentProviderCodeStopsEvenOnRateLimitStatus() async {
         let body = Data(#"{"error":{"code":"insufficient_quota","type":"billing_error"}}"#.utf8)
-        let client = OpenAIBrainClient(
+        let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-5.5",
             send: { _ in (body, http(429)) })
         do {
@@ -275,7 +275,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// A transport error never reaches the message: `URLError.localizedDescription` embeds the
     /// failing URL, so the fixed table describes it and the identity keeps the code.
     @Test func transportFailuresCarryTheCodeAndNoURL() async {
-        let client = OpenAIBrainClient(
+        let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-5.5",
             send: { _ in throw URLError(.cannotConnectToHost) })
         do {
@@ -294,7 +294,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// Request body uses the Responses shape + hardening flags.
     @Test func encodesResponsesRequestShape() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", reasoningEffort: "low",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5", reasoningEffort: "low",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         let convo: [ChatMessage] = [
             .system("be a coach"),
@@ -321,7 +321,7 @@ private func speakResponseBody(arguments: String) -> Data {
         for model in BrainModelCatalog.models(for: .openAI) {
             for effort in ReasoningEffort.allCases {
                 let box = CapturedBody()
-                let client = OpenAIBrainClient(
+                let client = BrainAccessor(
                     apiKey: "sk-x",
                     model: model.id,
                     reasoningEffort: effort.rawValue,
@@ -347,7 +347,7 @@ private func speakResponseBody(arguments: String) -> Data {
 
     @Test func astraClampsNoneWithoutReducingALargerOutputBudget() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(
+        let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-6-astra", reasoningEffort: "none",
             maxOutputTokens: 25_000,
             send: { request in
@@ -366,7 +366,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// per-effort cap (high → 25k) so high-effort reasoning isn't truncated before the tip.
     @Test func encodesProvidedMaxOutputTokens() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5", maxOutputTokens: 25_000,
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5", maxOutputTokens: 25_000,
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
@@ -378,7 +378,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// default can't silently drift back to a hardcoded value.
     @Test func defaultMaxOutputTokensTracksDefaultEffort() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
@@ -390,7 +390,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// array instead of a free-form string the client has to split.
     @Test func encodesStrictToolsForStructuredOutput() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
@@ -403,7 +403,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let capabilities = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true)
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
 
         _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
@@ -428,7 +428,7 @@ private func speakResponseBody(arguments: String) -> Data {
             skills: [Skill(name: "behavioral", description: "d", body: "b"),
                      Skill(name: "system-design", description: "d", body: "b")])
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
 
         _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
@@ -447,7 +447,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let capabilities = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true)
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         let conversation = try await client.makeConversation()
 
@@ -468,7 +468,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// Default tool choice is "auto".
     @Test func defaultToolChoiceIsAuto() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
@@ -479,7 +479,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// tool call, the model's pick — so a stay-quiet decision must be the stay_silent tool, not text.
     @Test func requiredToolChoiceEncodesRequiredString() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .required)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
@@ -489,7 +489,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// Forcing a specific function encodes the Responses tool_choice object shape.
     @Test func forceToolChoiceEncodesFunctionObject() async throws {
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools, toolChoice: .force("speak"))
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
@@ -505,7 +505,7 @@ private func speakResponseBody(arguments: String) -> Data {
             disabledTools: [], prepSourcesConfigured: false,
             skills: [Skill(name: "behavioral", description: "d", body: "b")]).tools
         let box = CapturedBody()
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: tools, toolChoice: .required)
         let required = try #require(
@@ -525,12 +525,83 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(allowed["tools"] as? NSArray == required["tools"] as? NSArray)
     }
 
+    private func encodedBody(
+        policy: ToolChoicePolicy, tools: [ToolDef], choice: ToolChoice,
+        effort: String = "low", maxOutputTokens: Int = 2_048, floor: ReasoningEffort? = nil
+    ) async throws -> [String: Any] {
+        let box = CapturedBody()
+        let client = BrainAccessor(
+            apiKey: "sk-x", model: "claude-opus-5", reasoningEffort: effort,
+            maxOutputTokens: maxOutputTokens, toolChoicePolicy: policy,
+            minimumReasoningEffort: floor,
+            send: { request in
+                box.set(request.httpBody)
+                return (Data(#"{"output":[]}"#.utf8), http(200))
+            })
+        _ = try await client.respond(messages: [.user("hi")], tools: tools, toolChoice: choice)
+        return try #require(
+            try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
+    }
+
+    private var fiveTools: [ToolDef] {
+        CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true,
+            skills: [Skill(name: "behavioral", description: "d", body: "b")]).callable(loaded: [])
+    }
+
+    private func declaredNames(_ body: [String: Any]) -> [String]? {
+        (body["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
+    }
+
+    /// A `filteredAuto` target cannot narrow a call, so the permitted set is the declared array
+    /// itself, in catalog order whatever order the choice named, and the choice is `auto`. Strict
+    /// tools and one call per response still go out; the proxy strips what it cannot forward.
+    @Test func filteredAutoDeclaresOnlyTheAllowedToolsInCatalogOrder() async throws {
+        let tools = fiveTools
+        #expect(tools.count == 5)
+        let body = try await encodedBody(
+            policy: .filteredAuto, tools: tools, choice: .allowed(["load_tool", "speak"]))
+        #expect(declaredNames(body) == tools.map(\.name).filter { $0 == "speak" || $0 == "load_tool" })
+        #expect(body["tool_choice"] as? String == "auto")
+        #expect(body["parallel_tool_calls"] as? Bool == false)
+        #expect((body["tools"] as? [[String: Any]])?.allSatisfy { $0["strict"] as? Bool == true } == true)
+    }
+
+    @Test func filteredAutoForcesByDeclaringOnlyTheForcedTool() async throws {
+        let body = try await encodedBody(policy: .filteredAuto, tools: fiveTools, choice: .force("speak"))
+        #expect(declaredNames(body) == ["speak"])
+        #expect(body["tool_choice"] as? String == "auto")
+    }
+
+    @Test func filteredAutoRequiresByDeclaringEveryTool() async throws {
+        let tools = fiveTools
+        let body = try await encodedBody(policy: .filteredAuto, tools: tools, choice: .required)
+        #expect(declaredNames(body) == tools.map(\.name))
+        #expect(body["tool_choice"] as? String == "auto")
+    }
+
+    /// A target's effort floor raises the effort and its budget; a deeper selection passes through
+    /// with the caller's budget.
+    @Test func aReasoningFloorRaisesOnlyAShallowerEffort() async throws {
+        let raised = try await encodedBody(
+            policy: .filteredAuto, tools: fiveTools, choice: .required,
+            effort: "none", maxOutputTokens: 1_024, floor: .low)
+        #expect((raised["reasoning"] as? [String: Any])?["effort"] as? String == "low")
+        #expect(raised["max_output_tokens"] as? Int == 2_048)
+
+        let kept = try await encodedBody(
+            policy: .filteredAuto, tools: fiveTools, choice: .required,
+            effort: "medium", maxOutputTokens: 8_192, floor: .low)
+        #expect((kept["reasoning"] as? [String: Any])?["effort"] as? String == "medium")
+        #expect(kept["max_output_tokens"] as? Int == 8_192)
+    }
+
     /// With a traffic log wired, a successful round trip lands in `brain-traffic.jsonl` — the raw
     /// eval pipeline input — tagged, with the request body and response body both present.
     @Test func successfulRoundTripIsRecordedToTrafficLog() async throws {
         let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        traffic: traffic, trafficTag: "coach",
                                        send: { _ in (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
@@ -550,7 +621,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func transportErrorIsRecordedToTrafficLogAndRethrown() async throws {
         let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
-        let client = OpenAIBrainClient(apiKey: "sk-x", model: "gpt-5.5",
+        let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        traffic: traffic, trafficTag: "coach",
                                        send: { _ in throw URLError(.timedOut) })
         await #expect(throws: (any Error).self) {

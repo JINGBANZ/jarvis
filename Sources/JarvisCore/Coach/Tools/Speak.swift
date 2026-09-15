@@ -2,8 +2,7 @@ import Foundation
 
 /// One schema on every brain and in every session. `mermaid` is nullable rather than absent because
 /// that is what makes a field optional under strict Structured Outputs, and because a second speak
-/// variant is what let the tool array a local-agent process was warmed with drift from the one the
-/// coach loop later sent (#273). When a graph belongs on a tip is prompt text's decision, not the
+/// variant is what let one session describe one schema and send another (#273). When a graph belongs on a tip is prompt text's decision, not the
 /// runtime's: any graph the renderer can parse reaches the overlay.
 ///
 /// The guidance is the system prompt's tip style. It governs `speak` and nothing else, and `speak`

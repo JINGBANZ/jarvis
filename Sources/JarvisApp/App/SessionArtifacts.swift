@@ -30,8 +30,7 @@ final class SessionArtifacts {
     /// retain only its narrow observer ports, so late work remains attributed to the session that
     /// created it while Stop → Start can rotate immediately to a fresh handle.
     private(set) var sessionAudit: FileSessionAudit?
-    /// The current session's log directory (set by `beginNewSession`) — also where `CLIBrainClient`
-    /// materializes screenshots for a CLI brain, keeping all screen-derived bytes in one owner-only place.
+    /// The current session's log directory (set by `beginNewSession`).
     private(set) var currentSessionDir: URL?
     /// Normal Stop protects and gates only the directory whose immutable terminal marker is pending.
     /// The path leaves this set after `close()` returns; closed audits never become mutable again.

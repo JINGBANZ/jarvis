@@ -5,17 +5,13 @@ import JarvisBrainProviders
 /// Minimal Brain Settings surface: one provider route, one reasoning-effort row, and transcription.
 ///
 /// Provider/model ordering is edited by `ProviderRouteEditor`; shared authentication lives in the
-/// Connections tab. This section composes behavior controls, refreshes CLI availability, and applies
-/// completed preference edits at the running driver's between-attempt boundary.
+/// Connections tab. This section composes behavior controls, refreshes which subscriptions are signed
+/// in, and hands completed preference edits to the running session.
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
     enum PreferenceChange: Equatable {
         case topology
         case effort
-
-        func merged(with newer: PreferenceChange) -> PreferenceChange {
-            self == .topology || newer == .topology ? .topology : .effort
-        }
     }
 
     let title = "Brain"
@@ -25,9 +21,8 @@ final class BrainSection: NSObject, SettingsSection {
         SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
 
     private let preferences: BrainPreferences
-    private let detector: AgentCLIDetector
-    private let onPreferencesChanged:
-        (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void
+    private let supervisor: LocalProxySupervisor
+    private let onPreferencesChanged: (PreferenceChange) -> Void
     private let capabilities: CapabilitiesControls
     private let transcription: TranscriptionControls
 
@@ -37,25 +32,22 @@ final class BrainSection: NSObject, SettingsSection {
     private var providerEditor: ProviderRouteEditor?
     private var providerHeightConstraint: NSLayoutConstraint?
     private var transcriptionHeightConstraint: NSLayoutConstraint?
-    /// The latest completed probe remains usable while the next refresh runs in the background.
-    private var detectedCLIs: [BrainProvider: DetectedAgentCLI]?
-    /// Deliberately survives a Settings close so an edit made during the probe still reaches the
-    /// running coaching session when detection finishes.
-    private var detectionTask: Task<Void, Never>?
-    private var pendingPreferenceChange: PreferenceChange?
+    /// Subscriptions the helper proved signed in on the latest probe; a subscription can be chosen
+    /// only when it is here. Nil until the first probe answers.
+    private var signedInSubscriptions: Set<BrainProvider>?
+    private var signInTask: Task<Void, Never>?
     /// Session-local runtime state only. This marker never writes preferences or reorders the route.
     private var activeTarget: BrainTarget?
 
     init(
         preferences: BrainPreferences,
-        detector: AgentCLIDetector,
-        onPreferencesChanged:
-            @escaping (PreferenceChange, [BrainProvider: DetectedAgentCLI]?) -> Void,
+        supervisor: LocalProxySupervisor,
+        onPreferencesChanged: @escaping (PreferenceChange) -> Void,
         transcriptionPreferences: TranscriptionPreferences,
         prepMaterialPreferences: PrepMaterialPreferences
     ) {
         self.preferences = preferences
-        self.detector = detector
+        self.supervisor = supervisor
         self.onPreferencesChanged = onPreferencesChanged
         self.capabilities = CapabilitiesControls(
             preferences: preferences, prepMaterialPreferences: prepMaterialPreferences)
@@ -79,7 +71,7 @@ final class BrainSection: NSObject, SettingsSection {
 
         let providerEditor = ProviderRouteEditor(
             preferences: preferences,
-            onChange: { [weak self] in self?.preferencesDidChange(.topology) },
+            onChange: { [weak self] in self?.onPreferencesChanged(.topology) },
             onHeightChanged: { [weak self] height in
                 self?.providerHeightConstraint?.constant = height
                 self?.recalculateDocumentHeight()
@@ -130,7 +122,7 @@ final class BrainSection: NSObject, SettingsSection {
             self?.recalculateDocumentHeight()
             self?.revealTop()
         }
-        renderDetection()
+        renderRoute()
         recalculateDocumentHeight()
         revealTop()
         let page = SettingsPageView(
@@ -146,11 +138,11 @@ final class BrainSection: NSObject, SettingsSection {
     func setActiveTarget(_ target: BrainTarget?) {
         activeTarget = target
         pageView?.setStatus(target.map { "\($0.provider.displayName) in use" })
-        providerEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+        renderRoute()
     }
 
     func didBecomeActive() {
-        refreshDetection()
+        refreshSignIns()
     }
 
     private func makeReasoningCard() -> SettingsCardView {
@@ -184,24 +176,29 @@ final class BrainSection: NSObject, SettingsSection {
         return card
     }
 
-    private func refreshDetection() {
-        guard detectionTask == nil else { return }
-        let detector = detector
-        detectionTask = Task { [weak self] in
-            let values = await detector.detectAllAsync()
-            guard !Task.isCancelled, let self else { return }
-            detectionTask = nil
-            detectedCLIs = Dictionary(uniqueKeysWithValues: values.map { ($0.provider, $0) })
-            renderDetection()
-            if let change = pendingPreferenceChange {
-                pendingPreferenceChange = nil
-                onPreferencesChanged(change, detectedCLIs)
+    private func refreshSignIns() {
+        guard signInTask == nil else { return }
+        let supervisor = supervisor
+        signInTask = Task { [weak self] in
+            // Only a saved sign-in is worth starting the helper for; with none, no subscription can
+            // be chosen and the helper stays unstarted.
+            let hasAccount = SubscriptionControls.providers.contains {
+                !supervisor.accountFiles(for: $0).isEmpty
             }
+            let readiness = hasAccount ? await supervisor.readiness() : nil
+            guard !Task.isCancelled, let self else { return }
+            signInTask = nil
+            if case .ready(_, let signedIn) = readiness {
+                signedInSubscriptions = signedIn
+            } else {
+                signedInSubscriptions = []
+            }
+            renderRoute()
         }
     }
 
-    private func renderDetection() {
-        providerEditor?.render(detectedCLIs: detectedCLIs, activeTarget: activeTarget)
+    private func renderRoute() {
+        providerEditor?.render(signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
     }
 
     private func recalculateDocumentHeight() {
@@ -242,27 +239,6 @@ final class BrainSection: NSObject, SettingsSection {
         let row = sender.indexOfSelectedItem
         guard ReasoningEffort.allCases.indices.contains(row) else { return }
         preferences.effort = ReasoningEffort.allCases[row]
-        preferencesDidChange(.effort)
-    }
-
-    private func preferencesDidChange(_ change: PreferenceChange) {
-        let providers = preferences.route.targets.map(\.provider)
-        guard providers.contains(where: \.usesLocalCLI) else {
-            pendingPreferenceChange = nil
-            onPreferencesChanged(change, [:])
-            return
-        }
-        // Never apply a cached preflight while a fresher probe is running. The completion collapses
-        // any edits made during that probe into one application of the latest persisted preferences.
-        if detectionTask != nil {
-            pendingPreferenceChange = pendingPreferenceChange?.merged(with: change) ?? change
-            return
-        }
-        if let detectedCLIs {
-            onPreferencesChanged(change, detectedCLIs)
-        } else {
-            pendingPreferenceChange = pendingPreferenceChange?.merged(with: change) ?? change
-            refreshDetection()
-        }
+        onPreferencesChanged(.effort)
     }
 }

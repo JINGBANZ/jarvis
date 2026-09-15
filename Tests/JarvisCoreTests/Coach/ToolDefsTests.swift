@@ -199,7 +199,7 @@ import Testing
     @Test func parseRejectsUnknownToolsAndMalformedSpeak() {
         #expect(ToolInvocation.parse(callId: "c", name: "self_destruct", argumentsJSON: "{}") == nil)
         // speak without at least one non-blank line is a malformed call, not an empty spoken turn
-        // (the CLI protocol has no Structured Outputs guarantee).
+        // (a request without `strict` has no Structured Outputs guarantee).
         for args in [#"{}"#, #"{"lines":[]}"#, #"{"lines":["", "  "]}"#, #"{"text":"hi"}"#, "junk"] {
             #expect(ToolInvocation.parse(callId: "c", name: "speak", argumentsJSON: args) == nil,
                     "args=\(args)")
@@ -216,7 +216,7 @@ import Testing
     }
 
     @Test func parseSearchPrepNotesToleratesAnUnexpectedSiblingField() {
-        // The CLI protocol is free-form prompt text, not a Structured Outputs guarantee — a stray
+        // A request without `strict` has no Structured Outputs guarantee, so a stray
         // non-string sibling field must not make the whole call fail to parse.
         guard case .searchPrepNotes(_, let query)? = ToolInvocation.parse(
             callId: "c", name: "search_prep_notes",

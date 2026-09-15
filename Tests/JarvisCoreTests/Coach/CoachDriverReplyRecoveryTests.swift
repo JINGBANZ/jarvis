@@ -114,6 +114,24 @@ import Testing
         #expect(!followUp.contains { $0.toolCalls?.contains { $0.name == "stay_silent" } == true })
     }
 
+    /// A call the press was told it may not make is not memory: the next turn replays the hint, never
+    /// the `stay_silent` call or its refusal, so a later automatic turn is not told it may not stay
+    /// silent.
+    @Test func aRefusedStaySilentLeavesNoTraceInHistory() async throws {
+        let brain = ScriptedBrain(script: [reply(call("stay_silent", id: "q1")), speak, speak])
+        let (driver, transcript) = makeDriver(brain: brain)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        transcript.append(.init(speaker: .them, text: "Walk me through the complexity.", at: 101))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(brain.calls.count == 3)
+        let followUp = try #require(brain.calls.last)
+        #expect(followUp.contains { $0.toolCalls?.first?.name == "speak" })
+        #expect(!followUp.contains { $0.toolCalls?.contains { $0.name == "stay_silent" } == true })
+        #expect(toolResult("q1", in: followUp) == nil)
+    }
+
     @Test func aPressWhoseReplyIsOnlyProseSpeaksItsFirstThreeLines() async {
         let brain = ScriptedBrain(script: [
             reply(text: "Name the invariant.\n\n  Keep a running sum.  \nCheck the empty case.\nThen code it."),
@@ -187,6 +205,27 @@ import Testing
         let continuation = brain.calls[1]
         #expect(toolResult("c1", in: continuation) != nil)
         #expect(toolResult("s0", in: continuation)?.text == JarvisPrompts.Coach.extraCallNotExecuted)
+        #expect(overlay.rendered == [["Start from the read path."]])
+    }
+
+    /// The parsed list skips a call whose arguments did not parse, so a valid later call must not
+    /// stand in for the malformed first one: the first is answered with its schema and nothing runs.
+    @Test func aMalformedFirstCallIsJudgedBeforeAParsedLaterOne() async throws {
+        let brain = ScriptedBrain(script: [
+            reply(call("speak", id: "m1", arguments: #"{"lines":"[\"a\"]"}"#),
+                  call("stay_silent", id: "q2")),
+            speak,
+        ])
+        let overlay = FakeOverlay()
+        let (driver, transcript) = makeDriver(brain: brain, overlay: overlay)
+        transcript.append(.init(speaker: .them, text: "What does your code print?", at: 100))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(brain.calls.count == 2)
+        let continuation = brain.calls[1]
+        #expect(toolResult("m1", in: continuation)?.text?.contains("did not match its schema") == true)
+        #expect(toolResult("q2", in: continuation)?.text == JarvisPrompts.Coach.extraCallNotExecuted)
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 

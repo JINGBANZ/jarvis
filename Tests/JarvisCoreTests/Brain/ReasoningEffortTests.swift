@@ -13,6 +13,15 @@ import Testing
         #expect(ReasoningEffort.high.rawValue == "high")
     }
 
+    /// A provider floor is `max(selected, floor)`, so the order must be the declaration order.
+    @Test func ordersByDepth() {
+        #expect(ReasoningEffort.none < .low)
+        #expect(ReasoningEffort.low < .medium)
+        #expect(ReasoningEffort.medium < .high)
+        #expect(ReasoningEffort.allCases.sorted() == ReasoningEffort.allCases)
+        #expect(max(ReasoningEffort.none, .low) == .low)
+    }
+
     @Test func defaultIsLow() {
         #expect(Defaults.Brain.effort == .low)
     }

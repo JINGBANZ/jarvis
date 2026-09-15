@@ -26,7 +26,7 @@ import JarvisBrainProviders
 /// scripted transports, `ManualClock`, and a no-op attempt delay — never by wall-clock thresholds.
 enum CoachingParityHarness {
     static let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-    static let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+    static let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
     static let finalTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5-mini")
 
     /// The optional evidence wiring for one parity variant. Every field defaults to absent so a
@@ -100,7 +100,7 @@ enum CoachingParityHarness {
             domain: "coaching-parity", code: 503,
             userInfo: [NSLocalizedDescriptionKey: "injected transport failure"])
 
-        let primary = OpenAIBrainClient(
+        let primary = BrainAccessor(
             apiKey: "parity-key",
             model: primaryTarget.modelID,
             traffic: observers.brainTraffic,
@@ -112,7 +112,7 @@ enum CoachingParityHarness {
         let speakResponse = Data(
             #"{"status":"completed","output":[{"type":"function_call","call_id":"s1","name":"speak","arguments":"{\"lines\":[\"same tip\"]}"}]}"#.utf8)
         let finalCalls = CallCounter()
-        let final = OpenAIBrainClient(
+        let final = BrainAccessor(
             apiKey: "parity-key",
             model: finalTarget.modelID,
             traffic: observers.brainTraffic,
