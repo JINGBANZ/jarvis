@@ -2469,7 +2469,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func unavailableFallbackDoesNotEndRecoverableSession() async {
         let brain = ScriptedThrowBrain(script: [nil, nil, nil, nil,
-            .init(toolCalls: [.staySilent(callId: "recovered")])])
+            .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])])])
         let primary = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let unavailable = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
         let transcript = RollingTranscript()
@@ -2483,7 +2483,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(brain.calls.count == 3)
-        #expect(await driver.handleTrigger(.manualHint) == .silentByModel)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(brain.calls.count == 5)
     }
 
@@ -2561,18 +2561,18 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .manualCode])
     func manualHintCanRetryFailedCycleWithoutNewSpeech(reason: TriggerReason) async {
         let brain = ScriptedThrowBrain(script: [nil, nil, nil,
-            .init(toolCalls: [.staySilent(callId: "later")])])
+            .init(toolCalls: [.speak(callId: "later", lines: ["Use the latest question."])])])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
         transcript.append(.init(speaker: .them, text: "a question", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
-        #expect(await driver.handleTrigger(reason) == .silentByModel)
+        #expect(await driver.handleTrigger(reason) == .spoke)
         #expect(brain.calls.count == 4)
     }
 
     @Test func permanentTargetIsExcludedFromLaterCycles() async {
         let primary = ThrowingBrain(error: brainFailure(.permanent, "invalid key"))
         let fallback = ScriptedThrowBrain(script: [nil, nil, nil,
-            .init(toolCalls: [.staySilent(callId: "recovered")])])
+            .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])])])
         let (driver, transcript) = makeRouteDriver([
             (BrainTarget(provider: .openAI, modelID: "gpt-5.5"), primary),
             (BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5"), fallback),
@@ -2580,7 +2580,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         defer { driver.cancelBackgroundWork() }
         transcript.append(.init(speaker: .them, text: "first question", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
-        #expect(await driver.handleTrigger(.manualHint) == .silentByModel)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(primary.callCount == 1)
         #expect(fallback.calls.count == 4)
     }
@@ -2660,7 +2660,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let delays = RecoveryDelayProbe()
         let recorder = RouteFailureRecorder()
         let brain = ScriptedThrowBrain(script: [nil, nil, nil,
-            .init(toolCalls: [.staySilent(callId: "recovered")]), nil, nil, nil])
+            .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])]), nil, nil, nil])
         let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
             route: ConfiguredBrainRoute(targets: [ConfiguredBrainTarget(
                 target: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), brain: brain)],
@@ -2671,7 +2671,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.manualHint) == .brainError)
         #expect(await waitUntilAsync { await delays.durations == [600] })
         clock.set(100)
-        #expect(await driver.handleTrigger(.manualHint) == .silentByModel)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await waitUntilAsync { await delays.cancellations == 1 })
         clock.set(650)
         #expect(await driver.handleTrigger(.manualHint) == .brainError)
@@ -2683,7 +2683,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let clock = ManualClock()
         let cooldown = AsyncGate()
         let brain = ScriptedThrowBrain(script: [nil, nil, nil, nil, nil, nil,
-            .init(toolCalls: [.staySilent(callId: "recovered")])])
+            .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])])])
         let transcript = RollingTranscript()
         let driver = CoachDriver(config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: [ConfiguredBrainTarget(
@@ -2703,7 +2703,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: transcript.count) == .busy)
         clock.set(5)
         await cooldown.release()
-        #expect(await next.value == .silentByModel)
+        #expect(await next.value == .spoke)
         #expect(brain.calls.count == 7)
         #expect(brain.calls.last?.contains { ($0.text ?? "").contains("newest question during cooldown") } == true)
     }

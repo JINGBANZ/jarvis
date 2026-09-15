@@ -24,11 +24,11 @@ public extension ToolInvocation {
     }
 
     /// Map a wire-level tool call (name + JSON arguments) to a typed invocation — the one place the
-    /// coach tool names are interpreted, shared by every brain client. Unknown tool → nil (callers
-    /// log and skip). `speak` is nil unless `lines` decodes to at least one non-blank string: the
-    /// API path guarantees the shape via Structured Outputs, but the CLI protocol is prompt text,
-    /// and a malformed `speak` accepted with empty lines would render an empty overlay yet still
-    /// count as a spoken turn.
+    /// coach tool names are interpreted, shared by every brain client. Unknown tool → nil, and the
+    /// attempt runner answers the raw call. `speak` is nil unless `lines` decodes to at least one
+    /// non-blank string: the API path guarantees the shape via Structured Outputs, but the CLI
+    /// protocol is prompt text, and a malformed `speak` accepted with empty lines would render an
+    /// empty overlay yet still count as a spoken turn.
     static func parse(callId: String, name: String, argumentsJSON: String) -> ToolInvocation? {
         switch name {
         case captureScreenTool.name:

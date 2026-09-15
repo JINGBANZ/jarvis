@@ -245,11 +245,9 @@ the missing fact. A retrieval miss cannot establish that the candidate has never
 or authorize invention.
 
 A call to a tool the session does not offer, or a load naming something it does not have, is answered
-with a plain "no tool named X is available" rather than failing the attempt. Only a CLI target can
-reach the first branch, since it reconstructs calls from prompt text and can name anything; on the
-API path an undeclared tool is not callable at all. The per-attempt response cap is 7, leaving room
-for loading a skill and tool, an initial search and its permitted reference follow-up, a capture,
-and a terminal coaching action.
+with a plain "no tool named X is available" rather than failing the attempt. The per-attempt response
+cap is 7, leaving room for loading a skill and tool, an initial search and its permitted reference
+follow-up, a capture, and a terminal coaching action.
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
 capture, and a turn cannot end without one of the other two. Neither loader has one either, because
@@ -265,12 +263,25 @@ never runs out of responses. When `speak` is the only tool left, the request is 
 `speak`, one round trip. On OpenAI the narrowing is an `allowed_tools` choice over the unchanged
 declared array, which keeps the cached prefix of automatic attempts (`OpenAIBrainClient.encodeBody`).
 A CLI target is told its set in the turn trailer while its baked instructions stay those of a required
-choice, and the client enforces the set itself: on every response of a press, a reply that calls
-outside it or cannot be parsed has its prose spoken, because failing that response would leave the
-user waiting on a retry. The accepted cost is a round trip for each first load and each search, and
+choice. The accepted cost is a round trip for each first load and each search, and
 the OpenAI client resends the whole input, screenshot included, on each one. One load followed by a
 forced `speak` was rejected as too narrow: the shortcut is the fallback for a need the automatic path
 missed, so it should not be the less capable of the two.
+
+The runner checks every reply against the tool choice its own request sent instead of trusting the
+transport to enforce it, because a CLI target's set is only prompted and a provider can return more
+than one call. A call outside the permitted set is answered with a tool result saying it is not
+available on a press, and a call whose arguments fail its tool's schema is answered with that schema;
+either way the model is asked again in the same attempt. A press speaks its reply's prose instead,
+the first three lines recorded in history as a `speak` call: in place of that round trip when the
+reply calls outside its set or calls nothing, and on the response at the cap whatever it called.
+When a response carries several calls, the first runs and each other one is answered as not
+executed, so a replayed call never lacks a result. The forced response at the cap has no later
+response to answer into, so an unusable reply there with no prose fails the attempt and the
+[ordered route](#ordered-provider-route) retries. An automatic turn whose reply is prose alone fails
+the same way, since it must choose between `speak` and `stay_silent`. Answering instead of failing is
+deliberate: a failed attempt costs the route's retry delay, and on a press it leaves the user waiting
+for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/CoachAttemptRunner.swift)).
 
 ### Private architecture hints
 
@@ -577,8 +588,9 @@ attempt on an unaffected CLI retains normal success/failure accounting.
 A **coaching attempt** snapshots one target and the latest provider-neutral conversation, then keeps
 that target for the complete tool loop. Every provider request in that loop is made once. A complete,
 non-truncated terminal `speak` or `stay_silent` commits the attempt and clears that target's consecutive
-failure count. A provider error, malformed/incomplete terminal response, or failure after an
-intermediate `capture_screen` fails the attempt once; cancellation, filler suppression, and local
+failure count. A provider error, an incomplete response, a reply the runner cannot answer within the
+response cap ([Capabilities](#capabilities)), or failure after an intermediate `capture_screen` fails
+the attempt once; cancellation, filler suppression, and local
 screen-capture failure do not count as provider failures. The most recent completed screen observation
 remains provider-neutral input for the next attempt. When a newer capture is committed, older image
 and text evidence collapses to neutral stubs; raw reasoning, tool-call identifiers, and call/result
@@ -843,8 +855,10 @@ provider-route policy, and traffic recording are unchanged — only the transpor
   `CoachDriver` a provider-native continuation boundary. The first model turn receives the complete
   client-managed context; later `capture_screen` turns send only their new tool result and image over
   the same lease. A complete terminal action commits while the lease is still owned; the lease is
-  then explicitly finished before memory compaction starts. A malformed reply, runtime crash,
-  timeout, or cancellation ends the lease and fails that provider attempt.
+  then explicitly finished before memory compaction starts. A runtime crash, timeout, or
+  cancellation ends the lease and fails that provider attempt; a call the runner answers instead of
+  running, such as a malformed or disallowed one, continues on the same lease
+  ([Capabilities](#capabilities)).
   There is deliberately **no per-turn Claude process or `codex exec` coaching fallback**: the
   existing [ordered provider route](#ordered-provider-route) decides what a later fresh attempt may
   do.

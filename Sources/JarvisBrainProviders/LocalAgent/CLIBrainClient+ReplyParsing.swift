@@ -4,59 +4,26 @@ import JarvisCore
 /// Mapping a persistent runtime's completed reply into the brain contract.
 extension CLIBrainClient {
     /// Map the reply back into the brain contract. No tools → the text IS the payload (summarizer /
-    /// evaluator). Otherwise parse the protocol JSON. Unlike the Responses API, a narrowed tool
-    /// choice is only *prompted* here, so it's enforced client-side: a coaching shortcut's turn
-    /// (`allowed` or `force(speak)`) never accepts a tool outside its set, and degrades to speaking
-    /// the reply's prose. That holds on every response of the attempt, not only the forced last one:
-    /// an explicit keypress must produce a visible hint, not a failed attempt and a silent retry.
+    /// evaluator). Otherwise report the protocol object as the model wrote it: the parsed call when
+    /// `ToolInvocation.parse` accepts it, the raw call either way, and the prose before the object as
+    /// `outputText`. The attempt runner reads every reply against the turn's tool choice, so a call a
+    /// press may not make, a malformed call, and a press's prose are handled there, the same way on
+    /// every transport.
     func parse(reply: String, tools: [ToolDef], toolChoice: ToolChoice) -> BrainResponse {
         let text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !tools.isEmpty else {
+        guard !tools.isEmpty, let (name, argumentsJSON, jsonStart) = Self.extractToolCall(from: text) else {
             return BrainResponse(toolCalls: [], outputText: text.isEmpty ? nil : text)
         }
-        // Nil under `.required`, where an unknown name must still reach the runner so it can answer
-        // "not available" and let the turn continue.
-        let permitted: [String]? = switch toolChoice {
-        case .force(let name): [name]
-        case .allowed(let names): names
-        case .auto, .required: nil
+        let callId = "cli_\(UUID().uuidString.prefix(8))"
+        let invocation = ToolInvocation.parse(callId: callId, name: name, argumentsJSON: argumentsJSON)
+        if invocation == nil {
+            jlog("Jarvis coach: CLI tool call '\(name)' was unknown or malformed")
         }
-        let extracted = Self.extractToolCall(from: text)
-        if let (name, argumentsJSON, _) = extracted {
-            let callId = "cli_\(UUID().uuidString.prefix(8))"
-            if let permitted, !permitted.contains(name) {
-                jlog("Jarvis coach: CLI called '\(name)', which this turn does not permit; recovering")
-            } else if let invocation = ToolInvocation.parse(callId: callId, name: name,
-                                                            argumentsJSON: argumentsJSON) {
-                return BrainResponse(toolCalls: [invocation],
-                                     rawToolCalls: [RawToolCall(id: callId, name: name,
-                                                                argumentsJSON: argumentsJSON)])
-            } else {
-                jlog("Jarvis coach: CLI tool call '\(name)' was unknown or malformed")
-            }
-        }
-        if permitted?.contains(speakTool.name) == true {
-            // Speak the reply's prose — everything before the (wrong or malformed) protocol
-            // object, or the whole reply when there was none.
-            let prose = extracted.map { String(text[..<$0.jsonStart]) } ?? text
-            let lines = prose.split(separator: "\n").map(String.init)
-                .map { $0.trimmingCharacters(in: .whitespaces) }
-                .filter { !$0.isEmpty }.prefix(3)
-            if !lines.isEmpty {
-                let callId = "cli_\(UUID().uuidString.prefix(8))"
-                // The recorded call must carry the lines actually shown: rawToolCalls is committed
-                // to session history and replayed on later turns, so a `speak({})` there would
-                // misreport what the user saw (and violate the speak schema).
-                let argsJSON = (try? JSONSerialization.data(withJSONObject: ["lines": Array(lines)]))
-                    .flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
-                return BrainResponse(toolCalls: [.speak(callId: callId, lines: Array(lines))],
-                                     rawToolCalls: [RawToolCall(id: callId, name: speakTool.name,
-                                                                argumentsJSON: argsJSON)])
-            }
-        }
-        // No usable tool call: preserve the text for traffic/debugging. The attempt runner treats
-        // the missing required action as a failed attempt; deliberate silence is `stay_silent`.
-        return BrainResponse(toolCalls: [], outputText: text.isEmpty ? nil : text)
+        let prose = text[..<jsonStart].trimmingCharacters(in: .whitespacesAndNewlines)
+        return BrainResponse(
+            toolCalls: invocation.map { [$0] } ?? [],
+            rawToolCalls: [RawToolCall(id: callId, name: name, argumentsJSON: argumentsJSON)],
+            outputText: prose.isEmpty ? nil : prose)
     }
 
     /// Find the protocol object in the reply — the LAST parseable JSON object carrying a "tool" key,

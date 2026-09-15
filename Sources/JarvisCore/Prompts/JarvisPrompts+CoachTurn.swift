@@ -1,8 +1,8 @@
 import Foundation
 
 // The messages the harness adds to a coaching conversation as it goes: new speech, the trigger that
-// starts a turn, and the summary that replaces condensed history. Tool results live with their tool
-// in `Coach/Tools/`.
+// starts a turn, the summary that replaces condensed history, and the answers to a reply the runner
+// could not run as sent. Tool results live with their tool in `Coach/Tools/`.
 extension JarvisPrompts.Coach {
     static func newSpeech(_ text: String) -> String {
         "New since last turn:\n\(text)"
@@ -39,4 +39,16 @@ extension JarvisPrompts.Coach {
     static func condensedHistory(_ summary: String) -> String {
         "[session so far, condensed — earlier turns were summarized]\n\(summary)"
     }
+
+    static func notPermittedOnShortcut(_ name: String) -> String {
+        "\(name) is not available on a shortcut press. Give the hint with speak."
+    }
+
+    static func argumentsRejected(_ tool: ToolDef) -> String {
+        "The arguments for \(tool.name) did not match its schema and were not run. "
+            + "Call it again with arguments that match this JSON Schema: \(tool.parametersJSON)"
+    }
+
+    static let extraCallNotExecuted =
+        "Only one action runs per response. This call was not executed; call it again next turn if it is still needed."
 }
