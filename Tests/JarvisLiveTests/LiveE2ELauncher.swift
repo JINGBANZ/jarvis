@@ -262,6 +262,13 @@ struct LiveE2ELaunch {
         guard let step, let id = stepAttempts[step] else { return nil }
         return evidence?.attempt(id: id)
     }
+
+    /// The step's attempt followed by the retries its provider stalls caused; empty when the step
+    /// matched no attempt. A step's cases are judged on this chain and its last attempt.
+    func attemptChain(forStep step: Int?) -> [LiveSessionEvidence.Attempt] {
+        guard let first = attempt(forStep: step), let evidence else { return [] }
+        return evidence.retryChain(from: first)
+    }
 }
 
 /// The run's one preflight: the OpenAI key resolves and both CLI brains are signed in. Run once and

@@ -35,16 +35,21 @@ import Testing
         return try line(object)
     }
 
+    /// `trigger` defaults to `sourceTrigger`; a `pending_work` trigger is a retry and wakes as one.
     static func started(
         _ id: Int,
         at t: String,
         sourceTrigger: String = "turn_end",
+        trigger: String? = nil,
+        provider: String = "openai",
         transcript: [[String: Any]] = []
     ) throws -> String {
-        try line([
+        let trigger = trigger ?? sourceTrigger
+        return try line([
             "audit_version": 1, "event": "started", "attempt": id, "t": t,
-            "wake": "trigger", "trigger": sourceTrigger, "source_trigger": sourceTrigger,
-            "provider": "openai", "model": "gpt-5.5", "transcript": transcript,
+            "wake": trigger == "pending_work" ? "pending_work" : "trigger",
+            "trigger": trigger, "source_trigger": sourceTrigger,
+            "provider": provider, "model": "gpt-5.5", "transcript": transcript,
         ])
     }
 
@@ -81,9 +86,11 @@ import Testing
         attempt id: Int?,
         request: [String: Any] = [:],
         response: [String: Any]? = nil,
+        error: String? = nil,
         tag: String = "coach"
     ) throws -> String {
         var object: [String: Any] = ["tag": tag, "t": "10:00:00", "ms": 800, "request": request]
+        if let error { object["error"] = error }
         if let id {
             object["coach_attempt"] = [
                 "id": id, "trigger": "turn_end", "source_trigger": "turn_end",
@@ -300,6 +307,93 @@ import Testing
             Evidence.LoadedCapability(name: "coding", kind: "skill"),
             Evidence.LoadedCapability(name: "search_prep_notes", kind: "tool"),
         ])
+    }
+
+    // MARK: - Retry chains
+
+    /// Scenario A's first press in live run 2026-09-15_11-49-46: Claude Code stalled on the request
+    /// after loading the coding skill, and the pending-work retry reloaded it and spoke.
+    @Test func aStalledAttemptIsJudgedThroughTheRetryThatAnswered() throws {
+        let base = try Self.unix(11, 50, 0)
+        let evidence = try Self.evidence(
+            activity: [
+                Self.row("manualHint", "⌨️ hint shortcut — help", at: base + 0.9),
+                Self.row("screenViewed", "👁 looking at your screen", at: base + 1.4),
+                Self.row("capabilityLoaded", "📎 loaded the coding skill", at: base + 4.1),
+                Self.row("capabilityLoaded", "📎 loaded the coding skill", at: base + 22.6),
+                Self.row("tip", "💬 Sort intervals by start first.", at: base + 25.6),
+                Self.row("heard", "🗣 heard (them): \"Great, thanks for joining.\"", at: base + 26),
+                Self.row("stayedSilent", "🤫 stayed silent — nothing useful to add", at: base + 33),
+            ],
+            attempts: [
+                Self.started(1, at: "11:50:00", sourceTrigger: "manual_hint", provider: "claude-code"),
+                Self.finished(1, at: "11:50:19", terminal: "failure", outcome: "brain_error"),
+                Self.started(
+                    2, at: "11:50:19", sourceTrigger: "manual_hint", trigger: "pending_work",
+                    provider: "claude-code"),
+                Self.finished(2, at: "11:50:25"),
+                Self.started(3, at: "11:50:31", provider: "claude-code"),
+                Self.finished(3, at: "11:50:33", terminal: "stay_silent", outcome: "silent_by_model"),
+            ],
+            traffic: [
+                Self.coachRecord(attempt: 1, response: ["reply": "{}"]),
+                Self.coachRecord(
+                    attempt: 1,
+                    error: "Claude did not finish the turn within 15s (elapsed 15004ms; system/init×1) "
+                        + "— local agent runtime timed out after 14s"),
+                Self.coachRecord(attempt: 2, response: ["reply": "{}"]),
+            ])
+        let pressed = try #require(evidence.attempt(id: 1))
+        let next = try #require(evidence.attempt(id: 3))
+        let chain = evidence.retryChain(from: pressed)
+
+        #expect(evidence.failedOnProviderStall(pressed))
+        #expect(chain.map(\.id) == [1, 2])
+        // The screen view carries into the retry; the failed attempt's load does not.
+        #expect(evidence.rows(inChain: chain).map(\.index) == [0, 1, 3, 4])
+        #expect(evidence.retryChain(from: next).map(\.id) == [3])
+    }
+
+    @Test func aChainFollowsOnlyStallsAndStopsAtTheTurnThatCommits() throws {
+        let evidence = try Self.evidence(
+            attempts: [
+                // 1, 2: a CLI that exits at once, as F04's stub does; not a stall, so no retry joins.
+                Self.started(1, at: "11:32:32", provider: "claude-code"),
+                Self.finished(1, at: "11:32:32", terminal: "failure", outcome: "brain_error"),
+                Self.started(2, at: "11:32:32", trigger: "pending_work", provider: "claude-code"),
+                Self.finished(2, at: "11:32:32", terminal: "failure", outcome: "brain_error"),
+                // 3, 4, 5: an OpenAI request times out three times and exhausts the target.
+                Self.started(3, at: "11:40:00"),
+                Self.finished(3, at: "11:40:15", terminal: "failure", outcome: "brain_error"),
+                Self.started(4, at: "11:40:15", trigger: "pending_work"),
+                Self.finished(4, at: "11:40:30", terminal: "failure", outcome: "brain_error"),
+                Self.started(5, at: "11:40:30", trigger: "pending_work"),
+                Self.finished(5, at: "11:40:45", terminal: "exhaustion", outcome: "brain_error"),
+                // 6, 7: a committed turn, then pending work batched from later speech.
+                Self.started(6, at: "11:50:00"),
+                Self.finished(6, at: "11:50:05"),
+                Self.started(7, at: "11:50:05", trigger: "pending_work"),
+                Self.finished(7, at: "11:50:09"),
+            ],
+            traffic: [
+                Self.coachRecord(attempt: 1, error: "local agent runtime stopped (exit 1)"),
+                Self.coachRecord(attempt: 2, error: "local agent runtime stopped (exit 1)"),
+                Self.coachRecord(attempt: 3, error: "error_domain=NSURLErrorDomain error_code=-1001"),
+                Self.coachRecord(attempt: 4, error: "error_domain=NSURLErrorDomain error_code=-1001"),
+                Self.coachRecord(attempt: 5, error: "error_domain=NSURLErrorDomain error_code=-1001"),
+                Self.coachRecord(attempt: 6, response: ["reply": "{}"]),
+                Self.coachRecord(attempt: 7, response: ["reply": "{}"]),
+            ])
+        let exited = try #require(evidence.attempt(id: 1))
+        let timedOut = try #require(evidence.attempt(id: 3))
+        let committed = try #require(evidence.attempt(id: 6))
+
+        #expect(!evidence.failedOnProviderStall(exited))
+        #expect(evidence.retryChain(from: exited).map(\.id) == [1])
+        #expect(evidence.failedOnProviderStall(timedOut))
+        #expect(evidence.retryChain(from: timedOut).map(\.id) == [3, 4, 5])
+        #expect(!evidence.failedOnProviderStall(committed))
+        #expect(evidence.retryChain(from: committed).map(\.id) == [6])
     }
 
     // MARK: - Traffic

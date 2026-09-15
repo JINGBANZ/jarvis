@@ -202,6 +202,47 @@ public struct LiveSessionEvidence: Sendable {
         traffic.filter { $0.tag == "coach" && $0.attemptID == attempt.id }
     }
 
+    /// Whether a provider request timed out and failed the attempt. The CLI runtimes report a
+    /// timeout in words; the OpenAI client records only error codes, and a URL timeout is -1001.
+    public func failedOnProviderStall(_ attempt: Attempt) -> Bool {
+        guard attempt.outcome == "brain_error",
+              let error = traffic(for: attempt).last(where: { $0.error != nil })?.error else {
+            return false
+        }
+        return error.localizedCaseInsensitiveContains("timed out")
+            || error.contains("error_code=\(NSURLErrorTimedOut)")
+    }
+
+    /// The attempt, followed by the retries its provider stalls caused.
+    ///
+    /// The app retries failed work on the same target as a `pending_work` attempt. While the chain's
+    /// last attempt failed on a provider stall, the attempt right after it joins when it is that
+    /// retry. Any other failure ends the chain, so only a stall is judged through its retry, and so
+    /// does a committed attempt, so `pending_work` that batches later speech is never absorbed.
+    public func retryChain(from attempt: Attempt) -> [Attempt] {
+        guard var position = attempts.firstIndex(where: {
+            $0.startedRecordIndex == attempt.startedRecordIndex
+        }) else { return [attempt] }
+        var chain = [attempts[position]]
+        while let last = chain.last, failedOnProviderStall(last), position + 1 < attempts.count {
+            let next = attempts[position + 1]
+            guard next.trigger == "pending_work", next.sourceTrigger == last.sourceTrigger,
+                  next.provider == last.provider else { break }
+            chain.append(next)
+            position += 1
+        }
+        return chain
+    }
+
+    /// Activity rows of a retry chain, in file order. A failed attempt's screen and prep-notes
+    /// observations carry into its retry, so their rows belong to the chain; its capability loads
+    /// are discarded with it (see `committedLoads`), so those rows do not.
+    public func rows(inChain chain: [Attempt]) -> [ActivityRow] {
+        chain.flatMap { attempt in
+            rows(in: attempt).filter { attempt.isCommitted || $0.loadedCapability == nil }
+        }
+    }
+
     public func debugLines(containing needle: String) -> [String] {
         debugLines.filter { $0.contains(needle) }
     }

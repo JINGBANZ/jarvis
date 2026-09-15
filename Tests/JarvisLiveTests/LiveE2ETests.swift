@@ -151,9 +151,10 @@ struct LiveE2ETests {
         let launch = try await launcher.launch()
         var results = LiveE2EResults(scenario: "B")
         if let evidence = Self.requireEvidence(launch, &results) {
-            let b1 = launch.attempt(forStep: launch.stepIndices(Self.isPress).first)
-            let b2 = launch.attempt(forStep: launch.stepIndices(Self.isSay).first)
-            let b1Rows = b1.map(evidence.rows(in:)) ?? []
+            let b1 = launch.attemptChain(forStep: launch.stepIndices(Self.isPress).first)
+            let b2 = launch.attemptChain(forStep: launch.stepIndices(Self.isSay).first)
+            Self.noteStalls([("B1", b1), ("B2", b2)], evidence, &results)
+            let b1Rows = evidence.rows(inChain: b1)
             let b1Loads = b1Rows.compactMap { $0.loadedCapability?.name }
             let b1Screens = b1Rows.filter { $0.kind == "screenViewed" }.count
             let b1Tip = b1Rows.contains { $0.kind == "tip" }
@@ -172,10 +173,10 @@ struct LiveE2ETests {
                     ["behavioral", "system-design"].contains($0.loadedCapability?.name ?? "")
                 }, "switched-off skills never load"),
                 (!evidence.activity.contains { $0.kind == "prepNotesSearched" }, "no prep search"),
-                (b2 != nil, "B2 ran an attempt"),
+                (!b2.isEmpty, "B2 ran an attempt"),
             ])
-            results.note("C16", "B2 ended \(b2?.terminal ?? "without an attempt"), diagram "
-                + Self.describe(Self.diagram(evidence, b2)))
+            results.note("C16", "B2 ended \(b2.last?.terminal ?? "without an attempt"), diagram "
+                + Self.describe(Self.diagram(evidence, b2.last)))
             results.check("C18", [
                 (!codex.isEmpty, "Codex coach requests were recorded"),
                 (codex.allSatisfy { !($0.instructions ?? "").contains("search_prep_notes") },
@@ -207,23 +208,29 @@ struct LiveE2ETests {
             try launcher.finish(results)
             return
         }
-        let a1 = launch.attempt(forStep: presses[0])
-        let a7 = [launch.attempt(forStep: presses[1]), launch.attempt(forStep: presses[2])]
-        let a2 = launch.attempt(forStep: says[0])
-        let a3 = launch.attempt(forStep: says[1])
-        let a4 = launch.attempt(forStep: says[2])
-        let a5 = launch.attempt(forStep: says[3])
-        let a6 = launch.attempt(forStep: says[4])
-        let a8 = launch.attempt(forStep: says[5])
-        let a9 = launch.attempt(forStep: says[6])
+        // Each step is its attempt chain: the attempt it started plus any retries a provider stall
+        // caused. Rows come from the whole chain, and the last attempt is the one that answered.
+        let a1 = launch.attemptChain(forStep: presses[0])
+        let a7 = [launch.attemptChain(forStep: presses[1]), launch.attemptChain(forStep: presses[2])]
+        let a2 = launch.attemptChain(forStep: says[0])
+        let a3 = launch.attemptChain(forStep: says[1])
+        let a4 = launch.attemptChain(forStep: says[2])
+        let a5 = launch.attemptChain(forStep: says[3])
+        let a6 = launch.attemptChain(forStep: says[4])
+        let a8 = launch.attemptChain(forStep: says[5])
+        let a9 = launch.attemptChain(forStep: says[6])
+        Self.noteStalls(
+            [("A1", a1), ("A2", a2), ("A3", a3), ("A4", a4), ("A5", a5), ("A6", a6),
+             ("A7", a7[0]), ("A7", a7[1]), ("A8", a8), ("A9", a9)],
+            evidence, &results)
 
-        func rows(_ attempt: Attempt?) -> [Row] { attempt.map(evidence.rows(in:)) ?? [] }
-        func loads(_ attempt: Attempt?) -> [String] { rows(attempt).compactMap { $0.loadedCapability?.name } }
-        func count(_ kind: String, in attempt: Attempt?) -> Int { rows(attempt).filter { $0.kind == kind }.count }
-        func tip(_ attempt: Attempt?) -> Row? { rows(attempt).last { $0.kind == "tip" } }
+        func rows(_ chain: [Attempt]) -> [Row] { evidence.rows(inChain: chain) }
+        func loads(_ chain: [Attempt]) -> [String] { rows(chain).compactMap { $0.loadedCapability?.name } }
+        func count(_ kind: String, in chain: [Attempt]) -> Int { rows(chain).filter { $0.kind == kind }.count }
+        func tip(_ chain: [Attempt]) -> Row? { rows(chain).last { $0.kind == "tip" } }
         /// The rows a case reasons about, in order: loads by name, searches, screen views, endings.
-        func sequence(_ attempt: Attempt?) -> [String] {
-            rows(attempt).compactMap { row -> String? in
+        func sequence(_ chain: [Attempt]) -> [String] {
+            rows(chain).compactMap { row -> String? in
                 switch row.kind {
                 case "capabilityLoaded": return row.loadedCapability.map { "load \($0.name)" }
                 case "prepNotesSearched": return "search"
@@ -236,14 +243,14 @@ struct LiveE2ETests {
         }
 
         // C01: a press loads what its screen needs and still ends in one clean tip.
-        func pressChecks(_ attempt: Attempt?, _ label: String) -> [LiveE2EResults.Check] {
-            let loadRows = rows(attempt).filter { $0.kind == "capabilityLoaded" }
-            let tipRow = tip(attempt)
+        func pressChecks(_ chain: [Attempt], _ label: String) -> [LiveE2EResults.Check] {
+            let loadRows = rows(chain).filter { $0.kind == "capabilityLoaded" }
+            let tipRow = tip(chain)
             return [
-                (attempt != nil, "\(label) ran an attempt"),
-                (count("screenViewed", in: attempt) == 1,
-                 "\(label) viewed the screen once (saw \(count("screenViewed", in: attempt)))"),
-                (loadRows.count == 1, "\(label) loaded one capability (saw \(loads(attempt)))"),
+                (!chain.isEmpty, "\(label) ran an attempt"),
+                (count("screenViewed", in: chain) == 1,
+                 "\(label) viewed the screen once (saw \(count("screenViewed", in: chain)))"),
+                (loadRows.count == 1, "\(label) loaded one capability (saw \(loads(chain)))"),
                 (Self.precedes(loadRows.first?.index, tipRow?.index), "\(label) loaded before its tip"),
                 (tipRow.map { !Self.carriesProtocolText($0.message) } ?? false,
                  "\(label) tip carries no protocol text"),
@@ -254,7 +261,7 @@ struct LiveE2ETests {
         results.time("A7 first press-to-tip", seconds: Self.pressToTip(evidence, a7[0]))
         results.time("A7 second press-to-tip", seconds: Self.pressToTip(evidence, a7[1]))
 
-        let a2Summary = "A2 ended \(a2?.terminal ?? "without an attempt"), loads \(loads(a2))"
+        let a2Summary = "A2 ended \(a2.last?.terminal ?? "without an attempt"), loads \(loads(a2))"
         results.note("C02", a2Summary)
         results.note("G05", a2Summary)
         results.note("C03", "A3 loaded \(loads(a3))")
@@ -267,9 +274,7 @@ struct LiveE2ETests {
 
         let a3Sequence = sequence(a3)
         let a4Sequence = sequence(a4)
-        let firstOpenAI = a4.flatMap { attempt in
-            evidence.traffic(for: attempt).first { $0.cliProvider == nil }
-        }
+        let firstOpenAI = a4.flatMap { evidence.traffic(for: $0) }.first { $0.cliProvider == nil }
         results.check("C05", [
             (Self.precedes(a3Sequence.firstIndex(of: "load search_prep_notes"),
                            a3Sequence.firstIndex(of: "search")),
@@ -293,7 +298,7 @@ struct LiveE2ETests {
         results.check("C08", [
             (sequence(a5).contains("search"), "A5 searched prep notes (saw \(sequence(a5)))"),
             (loads(a5).isEmpty, "A5 loaded nothing"),
-            (a5.map { evidence.traffic(for: $0).contains { $0.cliProvider == "codex-cli" } } ?? false,
+            (a5.contains { evidence.traffic(for: $0).contains { $0.cliProvider == "codex-cli" } },
              "A5 ran on Codex"),
         ])
         results.time("A5 question-to-tip", seconds: Self.questionToTip(evidence, a5))
@@ -302,28 +307,28 @@ struct LiveE2ETests {
                       "four loads, each once, in order (saw \(committed))")
 
         results.check("C11", [
-            (a7.allSatisfy { $0 != nil }, "both A7 presses ran an attempt"),
+            (a7.allSatisfy { !$0.isEmpty }, "both A7 presses ran an attempt"),
             (loads(a7[0]).isEmpty && loads(a7[1]).isEmpty, "neither A7 press loads anything"),
         ])
-        let requestsPerPress = a7.map { attempt in attempt.map { evidence.traffic(for: $0).count } ?? 0 }
+        let requestsPerPress = a7.map { chain in chain.last.map { evidence.traffic(for: $0).count } ?? 0 }
         if requestsPerPress != [1, 1] {
             results.note("C11", "A7 requests per press: \(requestsPerPress)")
         }
 
-        results.check("C12", Self.hasDiagram(evidence, a4),
-                      "A4's speak call carries a diagram (saw \(Self.describe(Self.diagram(evidence, a4))))")
-        results.note("C12", "A8 on Codex: \(Self.describe(Self.diagram(evidence, a8)))")
+        results.check("C12", Self.hasDiagram(evidence, a4.last),
+                      "A4's speak call carries a diagram (saw \(Self.describe(Self.diagram(evidence, a4.last))))")
+        results.note("C12", "A8 on Codex: \(Self.describe(Self.diagram(evidence, a8.last)))")
         let unexpectedDiagrams = [("A1", a1), ("A3", a3), ("A5", a5), ("A6", a6),
                                   ("A7", a7[0]), ("A7", a7[1]), ("A9", a9)]
-            .filter { Self.hasDiagram(evidence, $0.1) }.map(\.0)
+            .filter { Self.hasDiagram(evidence, $0.1.last) }.map(\.0)
         results.note("C13", unexpectedDiagrams.isEmpty
             ? "no diagram outside the architecture stage" : "diagram at \(unexpectedDiagrams)")
 
         // C14: loaded state survives both switches. OpenAI replays the load pairs Claude Code minted.
-        let loadsBeforeSwitch = a4.map { switchAttempt in
+        let loadsBeforeSwitch = a4.first.map { switchAttempt in
             evidence.attempts
                 .filter { $0.id < switchAttempt.id && $0.isCommitted }
-                .flatMap { rows($0).compactMap(\.loadedCapability) }
+                .flatMap { evidence.rows(in: $0).compactMap(\.loadedCapability) }
         } ?? []
         let replayedCalls = firstOpenAI?.replayedFunctionCalls ?? []
         let replayedOutputs = Set(firstOpenAI?.replayedFunctionOutputCallIDs ?? [])
@@ -387,7 +392,7 @@ struct LiveE2ETests {
                     && replyTime > questionTime
             }
         }
-        let transcript = a8?.transcript ?? []
+        let transcript = a8.last?.transcript ?? []
         let questionEntry = transcript.lastIndex {
             $0.speaker == "them" && Self.normalized($0.text).contains("endpoint")
         }
@@ -407,9 +412,10 @@ struct LiveE2ETests {
                 + "\(transcript.map { "\($0.speaker)@\(Int(($0.at ?? -1).rounded()))s" }))"),
         ])
         results.check("G03", [
-            (a8 != nil && a9 != nil, "A8 and A9 each ran an attempt"),
-            ((a9?.id ?? Int.min) > (a8?.id ?? Int.max), "A9's attempt follows A8's"),
-            (Self.precedes(a8?.finishedRecordIndex, a9?.startedRecordIndex), "A9 started only after A8 finished"),
+            (!a8.isEmpty && !a9.isEmpty, "A8 and A9 each ran an attempt"),
+            ((a9.first?.id ?? Int.min) > (a8.last?.id ?? Int.max), "A9's attempt follows A8's"),
+            (Self.precedes(a8.last?.finishedRecordIndex, a9.first?.startedRecordIndex),
+             "A9 started only after A8 finished"),
         ])
 
         let screenViews = evidence.activity.filter { $0.kind == "screenViewed" }.count
@@ -480,17 +486,31 @@ struct LiveE2ETests {
         results.note("C20", sightings.isEmpty ? "no text-protocol fallback lines" : sightings.joined(separator: ", "))
     }
 
-    static func pressToTip(_ evidence: Evidence, _ attempt: Attempt?) -> TimeInterval? {
-        guard let attempt, let tip = evidence.rows(in: attempt).last(where: { $0.kind == "tip" }),
+    /// A step whose provider stalled is judged through its retry (see `retryChain`); each stall is
+    /// recorded so it stays visible beside the slower time it causes.
+    static func noteStalls(
+        _ steps: [(label: String, chain: [Attempt])], _ evidence: Evidence,
+        _ results: inout LiveE2EResults
+    ) {
+        for (label, chain) in steps {
+            let stalls = chain.filter(evidence.failedOnProviderStall)
+            guard let first = stalls.first else { continue }
+            let error = evidence.traffic(for: first).last { $0.error != nil }?.error ?? "no error recorded"
+            let ending = chain.last?.isCommitted == true ? "the retry answered" : "no attempt answered"
+            results.note(results.scenario, "\(label) stalled \(stalls.count)x on \(first.provider), \(ending): \(error)")
+        }
+    }
+
+    static func pressToTip(_ evidence: Evidence, _ chain: [Attempt]) -> TimeInterval? {
+        guard let tip = evidence.rows(inChain: chain).last(where: { $0.kind == "tip" }),
               let tipAt = tip.occurredAt,
               let press = evidence.activity.last(where: { $0.kind == "manualHint" && $0.index < tip.index }),
               let pressAt = press.occurredAt else { return nil }
         return tipAt - pressAt
     }
 
-    static func questionToTip(_ evidence: Evidence, _ attempt: Attempt?) -> TimeInterval? {
-        guard let attempt else { return nil }
-        let rows = evidence.rows(in: attempt)
+    static func questionToTip(_ evidence: Evidence, _ chain: [Attempt]) -> TimeInterval? {
+        let rows = evidence.rows(inChain: chain)
         guard let first = rows.first, let tip = rows.last(where: { $0.kind == "tip" }),
               let tipAt = tip.occurredAt,
               let heard = evidence.activity.last(where: { $0.kind == "heard" && $0.index < first.index }),

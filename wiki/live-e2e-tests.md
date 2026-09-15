@@ -169,6 +169,14 @@ in the Gate.
 - **Steps map to attempts through `steps.jsonl`.** The automatic silence check is armed at Start and
   can add attempts between steps, so the Nth attempt is not the Nth step. The runner records which
   attempt each step waited on, and the checker reads that map instead of counting.
+- **A provider stall is judged through its retry.** When a provider request times out, the app
+  retries the same work on the same target as a `pending_work` attempt, carrying the screen and
+  prep-notes observations but not the loads. A step's cases read that whole chain and its last
+  attempt, the one that answered, and the stall shows as a slower time and a note. The run cares
+  about the model's response, and a retried timeout is the design working. Only timeouts count:
+  any other failure, or a chain that times out until the target's failure budget is spent, still
+  fails the step's cases. `LiveSessionEvidence.retryChain` implements the rule; F04 reads first
+  attempts, because its failures are the point.
 
 ## Notes and the rerun rule
 
@@ -178,7 +186,8 @@ picks), the second request in C11, the Codex diagram in C12, C13, how Scenario B
 question ends in C16, C20, and C17 together with C01 and C09 on Scenario B's Codex press. Failing them would fail a correct app on a model's judgment call.
 
 An asserted case that fails because of a model choice gets one rerun of its scenario alone; a second
-failure is real. No assertion is loosened to make a run pass.
+failure is real. No assertion is loosened to make a run pass. A provider stall is neither a model
+choice nor a failure: it is judged through its retry, as the evidence rules above describe.
 
 ## Three accepted constraints
 
