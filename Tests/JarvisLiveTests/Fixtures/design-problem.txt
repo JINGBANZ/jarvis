@@ -1,1 +1,9 @@
-Design question. Our /search endpoint's p99 latency is four seconds at two hundred requests per second. Walk through how you would find the bottleneck, then redesign the service for a hundred times the traffic.
+Design question: redesign the /search service for a hundred times today's traffic.
+
+Agreed so far
+- Functional requirements: users search the product catalog by keyword; results are ranked and paginated.
+- Non-functional requirements: 20,000 searches per second at peak, p99 under 300 ms, 99.9% availability, results may be up to one minute stale.
+- Core entities: Product, SearchIndex, Query.
+- API: GET /search?q=...&page=... returns ranked product IDs with title snippets.
+
+Next step: sketch the high-level architecture. Which components would you put in, and what is the read path for one request?

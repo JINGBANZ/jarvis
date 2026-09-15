@@ -125,7 +125,7 @@ screenshot `coding-problem.jpg`, the design prompt `design-problem.txt`, and fic
 
 | Scenario | Brain | What it drives |
 |---|---|---|
-| A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is one press on the design prompt, so the switch runs in both directions and the metered requests stay on the one turn that exercises OpenAI's tool choice. |
+| A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is one press on the design prompt, which shows agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on the one turn that exercises OpenAI's tool choice. |
 | B | Codex | Behavioral, system design, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
 | R | Codex | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Codex | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
