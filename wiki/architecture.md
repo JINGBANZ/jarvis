@@ -209,13 +209,16 @@ on the question and retrieved evidence.
 
 Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
 handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
-literal hash or pipe characters. Markdown headings at paragraph starts begin fresh chunks so short
-story sections retain their accuracy notes. Fenced code blocks stay intact, including blank lines;
-indented code is not interpreted as headings or tables. Recognized leading/trailing-pipe tables with
-an explicit delimiter row split between rows and repeat their column headers, so comparison rows
-remain interpretable and a question map does not become one oversized search result. Unsupported
-Markdown constructs retain paragraph behavior. Long prose paragraphs, fenced code, and individual
-rows with their headers can exceed the target; long sections can still span chunks
+literal hash or pipe characters. Markdown section boundaries keep short stories with their accuracy
+notes. Consecutive headings stay with their first content block, including the first group of an
+oversized table; trailing headings without content are omitted from the search index because they
+supply no evidence. The source file is unchanged. Fenced code blocks stay intact, including blank
+lines; indented code is not interpreted as headings or tables. Recognized leading/trailing-pipe
+tables with an explicit delimiter row split between rows and repeat their column headers, including
+when a table immediately follows a heading without a blank line. Comparison rows remain
+interpretable and a question map does not become one oversized search result. Unsupported Markdown
+constructs retain paragraph behavior. Long prose paragraphs, fenced code, individual rows with their
+headers, and a heading plus its first content block can exceed the target; long sections can still span chunks
 (see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
 
 Search guidance normally calls for one query per topic. When the results only point to a named

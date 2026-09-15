@@ -51,7 +51,11 @@ extension PrepMaterialChunker {
         // Short tables share their surrounding prose's budget, preserving the section's context
         // and caveats. Only an oversized table needs independent chunks with repeated headers.
         guard paragraph.split(whereSeparator: \.isWhitespace).count > targetWordCount else { return nil }
-        let lines = paragraph.components(separatedBy: "\n")
+        let paragraphLines = paragraph.components(separatedBy: "\n")
+        // A heading can introduce a table without a blank line. Keep only that recognized
+        // prefix with its first rows; arbitrary prose must not be skipped or reinterpreted.
+        let headings = paragraphLines.prefix(while: isMarkdownHeading)
+        let lines = Array(paragraphLines.dropFirst(headings.count))
         guard lines.count >= 3,
               lines.allSatisfy({ line in
                   guard let content = markdownLine(line) else { return false }
@@ -84,6 +88,9 @@ extension PrepMaterialChunker {
             words += count
         }
         if !rows.isEmpty { groups.append((header + rows).joined(separator: "\n")) }
+        if !headings.isEmpty, !groups.isEmpty {
+            groups[0] = headings.joined(separator: "\n") + "\n" + groups[0]
+        }
         return groups
     }
 

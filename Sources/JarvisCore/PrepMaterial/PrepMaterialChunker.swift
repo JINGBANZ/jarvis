@@ -6,6 +6,7 @@ public enum PrepMaterialChunker {
     /// and recognized pipe tables split between rows with their column headers repeated.
     /// Oversized paragraphs, code blocks, and individual table rows can exceed the target.
     /// Pending headings stay with their following content even when that exceeds the target.
+    /// Trailing headings without supporting content are omitted from the search index.
     public static func chunk(
         text: String,
         sourceDisplayName: String,
@@ -52,7 +53,7 @@ public enum PrepMaterialChunker {
             currentHasContent = currentHasContent || !isMarkdown
                 || !paragraph.components(separatedBy: "\n").allSatisfy(isMarkdownHeading)
         }
-        flush()
+        if currentHasContent { flush() }
         return chunks
     }
 }

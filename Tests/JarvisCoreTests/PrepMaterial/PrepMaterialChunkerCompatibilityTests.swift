@@ -40,11 +40,40 @@ import Testing
         #expect(!result.text.contains("Use a queue."))
     }
 
-    @Test func indentedCodeDoesNotBecomeAHeadingOrTable() {
+    @Test func indentedHeadingDoesNotStartASection() {
         let text = "Example:\n\n    # comment\n    | literal | data |\n    | more | data |"
         let chunks = PrepMaterialChunker.chunk(text: text, sourceDisplayName: "coding.md")
         #expect(chunks.count == 1)
         #expect(chunks[0].text.contains("    # comment\n    | literal | data |"))
+    }
+
+    @Test(arguments: ["    ", "\t"])
+    func indentedTableSyntaxRemainsCode(_ indent: String) {
+        let lines = ["| Key | Value |", "| --- | --- |", "| first | one value |", "| second | another value |"]
+        let code = lines.map { indent + $0 }.joined(separator: "\n")
+        let chunks = PrepMaterialChunker.chunk(
+            text: code, sourceDisplayName: "coding.md", targetWordCount: 12)
+        #expect(chunks.map(\.text) == [code])
+    }
+
+    @Test(arguments: ["# Empty", "# Empty\n\n## Still empty"])
+    func trailingHeadingsDoNotCreateEvidence(_ headings: String) {
+        #expect(PrepMaterialChunker.chunk(text: headings, sourceDisplayName: "notes.md").isEmpty)
+        let evidence = "## Delivery\n\nWe shipped the release."
+        let chunks = PrepMaterialChunker.chunk(
+            text: evidence + "\n\n" + headings, sourceDisplayName: "notes.md")
+        #expect(chunks.map(\.text) == [evidence])
+        #expect(PrepMaterialIndex(chunks: chunks).search(query: "Empty").isEmpty)
+    }
+
+    @Test func headingImmediatelyBeforeTableKeepsFirstRows() {
+        let headings = "# Storage\n## Latency"
+        let header = "| Strategy | Benefit |\n|---|---|"
+        let rows = ["| Cache | fast reads |", "| Replica | stale reads |"]
+        let chunks = PrepMaterialChunker.chunk(
+            text: headings + "\n" + header + "\n" + rows.joined(separator: "\n"),
+            sourceDisplayName: "design.md", targetWordCount: 12)
+        #expect(chunks.map(\.text) == [headings + "\n" + header + "\n" + rows[0], header + "\n" + rows[1]])
     }
 
     @Test func pipeLinesWithoutTableDelimiterRemainAParagraph() {
