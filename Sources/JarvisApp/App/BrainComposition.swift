@@ -75,6 +75,9 @@ final class BrainComposition {
         let runtimes = sessionRuntimes
         sessionRuntimes = []
         guard !runtimes.isEmpty else { return nil }
+        // Signal before returning: Quit terminates the app without awaiting the task below, which
+        // might never run.
+        for runtime in runtimes { runtime.terminateNow() }
         return Task {
             await withTaskGroup(of: Void.self) { group in
                 for runtime in runtimes {

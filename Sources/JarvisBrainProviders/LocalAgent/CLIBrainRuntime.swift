@@ -179,7 +179,9 @@ public final class CLIBrainRuntime: @unchecked Sendable {
         await backend.awaitTeardown()
     }
 
-    func terminateNow() {
+    /// Signal every child process to terminate without waiting for it, for a caller that may not
+    /// live to await `terminate()`. Idempotent.
+    public func terminateNow() {
         ownerLock.lock()
         let shouldTerminate = !isTerminated
         isTerminated = true
