@@ -681,9 +681,23 @@ final class AgentRuntimeProcess: @unchecked Sendable {
 
         let groupResult = posix_spawnattr_setpgroup(&attributes, 0)
         guard groupResult == 0 else { throw posixError(groupResult) }
+        // Swift concurrency and GCD threads block SIGTERM, and the child inherits the spawning
+        // thread's mask, so without this reset the CLI never sees graceful termination and only the
+        // SIGKILL escalation stops it. Default every disposition as well, so an ignored signal in
+        // Jarvis cannot leak into the CLI. This matches what Foundation's `Process` and Swift
+        // Subprocess give their children.
+        var unblockedSignals = sigset_t()
+        sigemptyset(&unblockedSignals)
+        let maskResult = posix_spawnattr_setsigmask(&attributes, &unblockedSignals)
+        guard maskResult == 0 else { throw posixError(maskResult) }
+        var defaultedSignals = sigset_t()
+        sigfillset(&defaultedSignals)
+        let defaultsResult = posix_spawnattr_setsigdefault(&attributes, &defaultedSignals)
+        guard defaultsResult == 0 else { throw posixError(defaultsResult) }
         let flagsResult = posix_spawnattr_setflags(
             &attributes,
-            Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
+            Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT
+                | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
         guard flagsResult == 0 else { throw posixError(flagsResult) }
 
         let argumentStrings = [executable.path] + arguments

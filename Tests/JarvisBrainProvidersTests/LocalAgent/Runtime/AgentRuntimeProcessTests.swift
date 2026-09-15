@@ -192,6 +192,39 @@ import JarvisCore
         #expect(processState(child) != "running")
     }
 
+    /// Swift concurrency and GCD threads block SIGTERM, and a spawned child inherits that mask. The
+    /// trap's marker proves the CLI received the graceful signal: while TERM is blocked it stays
+    /// pending until the SIGKILL escalation, which never runs a trap.
+    @Test func terminationDeliversSIGTERMToARuntimeSpawnedFromASwiftTask() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AgentRuntimeProcessTests-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let marker = directory.appendingPathComponent("received-term")
+        let process = try AgentRuntimeProcess(
+            executable: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c",
+                """
+                trap ': > "$0"; exit 0' TERM
+                printf 'ready\\n'
+                while :; do sleep 0.05; done
+                """,
+                marker.path,
+            ],
+            workingDirectory: directory)
+        defer { process.terminateNow() }
+        // Signal only once the trap is installed, so a missing marker means the signal never arrived.
+        _ = try await process.nextLine(timeout: 2)
+
+        process.terminateNow()
+        let deadline = Date().addingTimeInterval(4)
+        while !FileManager.default.fileExists(atPath: marker.path), Date() < deadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        #expect(FileManager.default.fileExists(atPath: marker.path))
+    }
+
     @Test func terminationReachesDescendantHelpersInTheSpawnedProcessGroup() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("AgentRuntimeProcessTests-\(UUID().uuidString)")
@@ -263,14 +296,14 @@ import JarvisCore
             .appendingPathComponent("AgentRuntimeProcessTests-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
+        // The helper reports its PID only once its trap is installed; an earlier signal would kill it
+        // before escalation is needed.
         let process = try AgentRuntimeProcess(
             executable: URL(fileURLWithPath: "/bin/sh"),
             arguments: [
                 "-c",
                 """
-                sh -c 'trap "" TERM; while :; do sleep 1; done' &
-                child="$!"
-                printf '%s\\n' "$child"
+                sh -c 'trap "" TERM; printf "%s\\n" "$$"; while :; do sleep 1; done' &
                 wait
                 """,
             ],
@@ -307,15 +340,16 @@ import JarvisCore
                 """
                 (
                   trap '' TERM
+                  printf 'ready\\n'
                   sleep 0.2
                   \(ignoresTermination.path) &
                   printf '%s\\n' "$!" > '\(childFile.path)'
                 ) &
-                printf 'ready\\n'
                 wait
                 """,
             ],
             workingDirectory: directory)
+        // Signal only once the forking subshell ignores TERM, or it dies before forking the helper.
         _ = try await process.nextLine(timeout: 2)
 
         process.terminateNow()
