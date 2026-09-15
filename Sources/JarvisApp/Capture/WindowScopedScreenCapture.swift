@@ -4,7 +4,7 @@ import JarvisCore
 import JarvisScreenCapture
 
 /// Captures just the frontmost app window (`screencapture -l`) when the capture scope is
-/// `.activeWindow`, with an on-device OCR of the shot riding along as `recognizedText`. Falls back
+/// `.activeWindow`, with on-device OCR and optional browser Accessibility text. Falls back
 /// to a full-display capture (`ScreenCaptureCLI` — the plan's chosen display in `.entireDisplay`
 /// scope, the main display otherwise) when no eligible window is on screen or the window capture
 /// command fails. A cleanup-integrity failure returns without fallback. Full-display captures skip
@@ -19,7 +19,9 @@ import JarvisScreenCapture
 struct WindowScopedScreenCapture: ScreenCapturing {
     private let runner: ScreenCaptureRunner
     private let fallback: ScreenCaptureCLI
-    private let recognizer = ScreenTextRecognizer()
+    private let textResolver = ScreenTextResolver(
+        browser: BrowserAccessibilityReader(),
+        ocr: ScreenTextRecognizer())
 
     init(captureDirectory: URL) {
         let runner = ScreenCaptureRunner(captureDirectory: captureDirectory)
@@ -29,14 +31,24 @@ struct WindowScopedScreenCapture: ScreenCapturing {
 
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
         if selection.scope == .activeWindow,   // frozen with the attempt, like the display index
-           let windowID = Self.frontWindowID() {
+           let window = Self.frontWindow() {
+            // Read the page identity around the JPEG operation. The resolver accepts browser text
+            // only while this exact document remains active, so a tab switch cannot pair text from
+            // a new page with pixels from the old one.
+            let browserDocumentIdentity = selection.browserTextEnabled
+                ? textResolver.browserDocumentIdentity(for: window)
+                : nil
+            guard !Task.isCancelled else { return nil }
             let outcome = runner.capture(
-                arguments: ["-x", "-o", "-t", "jpg", "-l", "\(windowID)"])
+                arguments: ["-x", "-o", "-t", "jpg", "-l", "\(window.windowID)"])
             switch outcome {
             case let .captured(jpeg):
                 return ScreenSnapshot(
                     imageBase64: jpeg.base64EncodedString(),
-                    recognizedText: recognizer.recognizedText(inJPEG: jpeg))
+                    textEvidence: textResolver.resolve(
+                        jpeg: jpeg,
+                        window: window,
+                        browserDocumentIdentity: browserDocumentIdentity))
             case .cleanupFailed, .cancelled:
                 return nil
             case .failed:
@@ -51,7 +63,7 @@ struct WindowScopedScreenCapture: ScreenCapturing {
     }
 
     /// Dumps the on-screen window list (front-to-back, all displays) into Core's selector.
-    private static func frontWindowID() -> Int? {
+    private static func frontWindow() -> WindowCandidate? {
         guard let entries = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                        kCGNullWindowID) as? [[String: Any]]
         else { return nil }
@@ -61,10 +73,17 @@ struct WindowScopedScreenCapture: ScreenCapturing {
                   let layer = entry[kCGWindowLayer as String] as? Int
             else { return nil }
             let bounds = entry[kCGWindowBounds as String] as? [String: Double]
-            return WindowCandidate(windowID: id, ownerPID: pid, layer: layer,
-                                   width: bounds?["Width"] ?? 0, height: bounds?["Height"] ?? 0)
+            return WindowCandidate(
+                windowID: id,
+                ownerPID: pid,
+                layer: layer,
+                x: bounds?["X"] ?? 0,
+                y: bounds?["Y"] ?? 0,
+                width: bounds?["Width"] ?? 0,
+                height: bounds?["Height"] ?? 0)
         }
-        return FrontWindowSelector.frontWindowID(in: candidates,
-                                                 ownPID: Int(ProcessInfo.processInfo.processIdentifier))
+        return FrontWindowSelector.frontWindow(
+            in: candidates,
+            ownPID: Int(ProcessInfo.processInfo.processIdentifier))
     }
 }

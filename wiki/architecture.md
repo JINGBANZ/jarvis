@@ -102,7 +102,10 @@ moments the model judges worthwhile.
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
    visible context missing from the conversation — including unresolved references such as “this”
    or “here” — and no fresh capture is already available for that request. It may also capture when
-   a silence trigger leaves progress unclear. The harness returns a silent screenshot plus OCR; that
+   a silence trigger leaves progress unclear. The harness returns a silent screenshot plus typed
+   text evidence. Active-window captures always run on-device OCR over the viewport. With the optional
+   Chrome text setting and Accessibility permission, bounded text from the active tab's accessibility
+   tree is added as a complementary source. That
    fresh result satisfies the screen gate, so the next model response must speak or stay silent
    rather than capture the same request again. Fully stated questions do not require a reflexive
    capture.
@@ -371,7 +374,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
 | **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
-| **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach an **on-device OCR** of the shot to the tool result so the model reads exact text instead of pixels. Falls back to a full-display capture (no OCR) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Apple Vision (`VNRecognizeTextRequest`). |
+| **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). System-design diagrams remain pinned below the scrolling history in this same box; the caption remains text-only. See [Private architecture hints](#private-architecture-hints). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
@@ -412,6 +415,13 @@ until it holds them. One button walks the dialogs, strictly one at a time becaus
 The window's close button quits: grant or quit is the whole choice. Nothing records that the gate has
 run, because it is shown exactly when the grants are incomplete, which is also the only way back in
 after a refusal. There is no Permissions tab in Settings: the hard gate makes one unreachable.
+
+Chrome semantic text has a fourth, optional Accessibility grant. **Read Chrome page text** is off by
+default and can request this grant only from Settings while Jarvis is stopped. The setting remains
+off unless the grant is live. Turning it off during a session takes effect at the next attempt. It is
+deliberately outside `PermissionGate`: denial or revocation leaves current-viewport OCR available and
+never blocks coaching. Capture itself never prompts, and the setting is frozen into each attempt's
+session-plan revision so live teardown cannot produce privacy UI.
 
 The reason it happens at launch rather than at Start is the coaching context. A TCC dialog is system
 UI that no capture-exclusion trick can hide, so one arriving mid-interview is visible to whoever the
@@ -529,8 +539,9 @@ non-truncated terminal `speak` or `stay_silent` commits the attempt and clears t
 failure count. A provider error, malformed/incomplete terminal response, or failure after an
 intermediate `capture_screen` fails the attempt once; cancellation, filler suppression, and local
 screen-capture failure do not count as provider failures. The most recent completed screen observation
-remains provider-neutral input for the next attempt, but older captures, raw reasoning, tool-call
-identifiers, and call/result pairing never cross an attempt or provider boundary.
+remains provider-neutral input for the next attempt. When a newer capture is committed, older image
+and text evidence collapses to neutral stubs; raw reasoning, tool-call identifiers, and call/result
+pairing from failed attempts never cross that boundary.
 
 Failed conversation work remains pending within the cycle's retry budget and schedules another
 coaching attempt after a short fixed delay. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
@@ -618,8 +629,8 @@ The implementation keeps orchestration, route policy, and OS edges separate:
   with a bounded, mostly-cached working set. Clear non-semantic hesitation sounds are removed before
   brain input, and turn-ends containing only those sounds (from either speaker) are skipped
   client-side — free. No image unless the model asks.
-- **On-demand (expensive):** a screenshot + vision tokens, only when the model calls
-  `capture_screen`. A coaching response, only when the model calls `speak`.
+- **On-demand (expensive):** a screenshot + vision tokens and available bounded screen text, only
+  when the model calls `capture_screen`. A coaching response, only when the model calls `speak`.
 
 The model is the cost governor: it spends vision tokens and screen real estate only when it
 judges them worthwhile. That is the whole point of making screen capture a model-invoked tool
@@ -636,10 +647,10 @@ rather than a per-turn screenshot.
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
   keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
-  cache keeps hitting at ~90% discount); `stay_silent` turns leave no trace; screenshots and reasoning
-  items live only inside the turn that produced them — at commit, the pixels become a one-line stub
-  and the capture's OCR text (in the tool result) is what persists, and reasoning items are dropped;
-  and past a token threshold (see
+  cache can reuse stable prefixes); the `stay_silent` action itself leaves no trace, while useful
+  speech and the newest screen observation survive. At conversation commit, pixels become neutral
+  stubs; a newer capture supersedes older screen text, and reasoning items are dropped. Past a token
+  threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
   briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
   treats non-ASCII scripts conservatively; the exact retention and topic-retirement policy lives in
