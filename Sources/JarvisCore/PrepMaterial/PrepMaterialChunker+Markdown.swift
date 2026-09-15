@@ -30,6 +30,11 @@ extension PrepMaterialChunker {
             } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
                 flush()
             } else {
+                // ATX headings interrupt prose even without a blank line. Keep consecutive
+                // heading prefixes together so they stay attached to their first evidence.
+                if isMarkdownHeading(line), lines.contains(where: { !isMarkdownHeading($0) }) {
+                    flush()
+                }
                 lines.append(line)
             }
         }

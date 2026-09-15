@@ -76,6 +76,15 @@ import Testing
         #expect(chunks.map(\.text) == [headings + "\n" + header + "\n" + rows[0], header + "\n" + rows[1]])
     }
 
+    @Test(arguments: ["md", "txt", "pdf", "docx"])
+    func headingsAfterProseSeparateOnlyMarkdownSections(_ ext: String) {
+        let first = "### Story A\nI led a migration and cut latency by half."
+        let second = "### Story B\nI mentored an apprentice into an engineer."
+        let text = first + "\n" + second
+        let chunks = PrepMaterialChunker.chunk(text: text, sourceDisplayName: "notes.\(ext)")
+        #expect(chunks.map(\.text) == (ext == "md" ? [first, second] : [text]))
+    }
+
     @Test func pipeLinesWithoutTableDelimiterRemainAParagraph() {
         let text = "| first literal line |\n| second literal line |"
         let chunks = PrepMaterialChunker.chunk(
