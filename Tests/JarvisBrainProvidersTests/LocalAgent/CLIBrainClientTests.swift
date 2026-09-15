@@ -430,7 +430,9 @@ import JarvisCore
         #expect(configurations.first?.instructions.contains("You MUST call the `speak`") == false)
     }
 
-    @Test func forcedSpeakRejectsAnotherToolAndSpeaksProse() async throws {
+    /// A forced turn's reply arrives as the model wrote it; the attempt runner decides what a call
+    /// outside the turn's set means, and speaks the prose before it.
+    @Test func forcedSpeakSurfacesAnotherToolWithTheProseBeforeIt() async throws {
         let (client, _) = client(
             workDir: try makeWorkDir(),
             replies: ["""
@@ -441,12 +443,12 @@ import JarvisCore
             messages: [.system("coach prompt"), .user("help")],
             tools: coachTools,
             toolChoice: .force(speakTool.name))
-        guard case .speak(_, let lines, nil, nil, nil) = response.toolCalls.first else {
-            Issue.record("expected forced speak")
+        guard case .staySilent(let callId) = response.toolCalls.first else {
+            Issue.record("expected the stay_silent call")
             return
         }
-        #expect(lines == ["Try a hash map here."])
-        #expect(response.rawToolCalls.first?.argumentsJSON.contains("Try a hash map here.") == true)
+        #expect(response.rawToolCalls.map(\.id) == [callId])
+        #expect(response.outputText == "Try a hash map here.")
     }
 
     /// A coaching shortcut's session with a skill left to load, and the choice its press sends.
@@ -483,28 +485,33 @@ import JarvisCore
         #expect(!turn.text.contains("MUST call"))
     }
 
-    /// Every response of a press, not only the forced last one, turns a reply it cannot accept into
-    /// its spoken prose: a failed attempt there would leave the user waiting on a retry.
-    @Test func allowedChoiceSpeaksTheProseOfAReplyItCannotAccept() throws {
+    /// A press's reply reaches the attempt runner as the model wrote it, prose included: a call the
+    /// press may not make still parses, and an unknown or malformed call arrives raw only. The runner
+    /// answers or speaks each exactly as it does for every other transport.
+    @Test func allowedChoiceSurfacesEveryCallWithItsProse() throws {
         let (client, _) = client(
             workDir: try makeWorkDir(), replies: [], tools: shortcutCapabilities.tools)
-        for call in [
-            #"{"tool":"stay_silent","arguments":{}}"#,
-            #"{"tool":"capture_screen","arguments":{}}"#,
-            #"{"tool":"read_my_email","arguments":{}}"#,
-            #"{"tool":"speak","arguments":{}}"#,
-            "",
+        for (call, name, parses) in [
+            (#"{"tool":"stay_silent","arguments":{}}"#, "stay_silent", true),
+            (#"{"tool":"capture_screen","arguments":{}}"#, "capture_screen", true),
+            (#"{"tool":"read_my_email","arguments":{}}"#, "read_my_email", false),
+            (#"{"tool":"speak","arguments":{}}"#, "speak", false),
         ] {
             let response = client.parse(
                 reply: "Lead with the conflict.\n\(call)",
                 tools: shortcutCapabilities.callable(loaded: []),
                 toolChoice: shortcutChoice)
-            guard case .speak(_, let lines, nil, nil, nil) = response.toolCalls.first else {
-                Issue.record("expected the prose to be spoken for \(call)")
-                continue
-            }
-            #expect(lines == ["Lead with the conflict."])
+            #expect(response.rawToolCalls.map(\.name) == [name])
+            #expect(response.toolCalls.map(\.toolName) == (parses ? [name] : []))
+            #expect(response.outputText == "Lead with the conflict.")
         }
+        let prose = client.parse(
+            reply: "Lead with the conflict.\n",
+            tools: shortcutCapabilities.callable(loaded: []),
+            toolChoice: shortcutChoice)
+        #expect(prose.toolCalls.isEmpty)
+        #expect(prose.rawToolCalls.isEmpty)
+        #expect(prose.outputText == "Lead with the conflict.")
     }
 
     @Test func allowedChoiceAcceptsACallItPermits() throws {
@@ -527,6 +534,7 @@ import JarvisCore
             tools: coachTools,
             toolChoice: .required)
         #expect(response.toolCalls.isEmpty)
+        #expect(response.rawToolCalls.map(\.name) == ["speak"])
     }
 
     @Test func speakArgumentsParseNestedAndFlattenedShapes() throws {

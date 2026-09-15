@@ -122,8 +122,9 @@ public struct BrainResponse: Sendable {
     /// even if it includes a usable tool call. With no tool call it is *truncation*, not a deliberate
     /// decision to stay silent — the coach loop distinguishes them.
     public let incompleteReason: String?
-    /// The response's plain text output, if any. Coaching turns never use it (tool_choice is
-    /// required there); it exists for tool-less calls like the history summarizer.
+    /// The response's plain text output, if any. The whole payload of a tool-less call like the
+    /// history summarizer; on a coaching shortcut press the attempt runner speaks it when the reply
+    /// carries no call the press can use.
     public let outputText: String?
     public init(toolCalls: [ToolInvocation], rawToolCalls: [RawToolCall] = [],
                 incompleteReason: String? = nil, outputText: String? = nil,
