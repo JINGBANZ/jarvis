@@ -706,7 +706,8 @@ rather than a per-turn screenshot.
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
   keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
-  cache can reuse stable prefixes); the `stay_silent` action itself leaves no trace, while useful
+  cache can reuse stable prefixes); a `stay_silent` call leaves no trace, even one a turn was refused
+  or went past, so its refusal never tells a later turn that silence is off-limits, while useful
   speech and the newest screen observation survive. At conversation commit, pixels become neutral
   stubs; a newer capture supersedes older screen text, and reasoning items are dropped. Past a token
   threshold (see

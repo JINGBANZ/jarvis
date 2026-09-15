@@ -94,6 +94,32 @@ import Testing
 
     /// The compaction prefix always leaves the newest message verbatim and hands out at least one —
     /// a single oversized message must still be compactable once a second one exists.
+    /// Silence needs no memory, even a `stay_silent` call the turn went past: every such call leaves
+    /// with the results answering it, from plain call lists and passthrough items alike, while a
+    /// call beside it keeps its own result.
+    @Test func staySilentCallsAndTheirResultsNeverEnterMemory() {
+        let h = CoachHistory()
+        h.commit([
+            .user("a"),
+            .assistantToolCalls([
+                RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}"),
+                RawToolCall(id: "l1", name: "load_skill", argumentsJSON: #"{"name":"coding"}"#),
+            ]),
+            .init(role: .tool, text: "not on a shortcut press", toolCallId: "q1"),
+            .init(role: .tool, text: "Loaded coding.", toolCallId: "l1"),
+            .rawItems([#"{"type":"function_call","call_id":"q2","name":"stay_silent","arguments":"{}"}"#]),
+            .init(role: .tool, text: "not executed", toolCallId: "q2"),
+            .assistantToolCalls([RawToolCall(id: "s1", name: "speak", argumentsJSON: #"{"lines":["Hi."]}"#)]),
+            .init(role: .tool, text: "shown", toolCallId: "s1"),
+        ])
+
+        let snap = h.snapshot()
+        #expect(snap.count == 5)
+        #expect(snap.first?.text == "a")
+        #expect(snap.flatMap { $0.toolCalls ?? [] }.map(\.name) == ["load_skill", "speak"])
+        #expect(snap.compactMap(\.toolCallId) == ["l1", "s1"])
+    }
+
     @Test func compactionPrefixBoundsRespectTheTail() {
         let h = CoachHistory()
         #expect(h.compactionPrefix() == nil)                       // empty: nothing to split

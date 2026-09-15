@@ -114,6 +114,24 @@ import Testing
         #expect(!followUp.contains { $0.toolCalls?.contains { $0.name == "stay_silent" } == true })
     }
 
+    /// A call the press was told it may not make is not memory: the next turn replays the hint, never
+    /// the `stay_silent` call or its refusal, so a later automatic turn is not told it may not stay
+    /// silent.
+    @Test func aRefusedStaySilentLeavesNoTraceInHistory() async throws {
+        let brain = ScriptedBrain(script: [reply(call("stay_silent", id: "q1")), speak, speak])
+        let (driver, transcript) = makeDriver(brain: brain)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        transcript.append(.init(speaker: .them, text: "Walk me through the complexity.", at: 101))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(brain.calls.count == 3)
+        let followUp = try #require(brain.calls.last)
+        #expect(followUp.contains { $0.toolCalls?.first?.name == "speak" })
+        #expect(!followUp.contains { $0.toolCalls?.contains { $0.name == "stay_silent" } == true })
+        #expect(toolResult("q1", in: followUp) == nil)
+    }
+
     @Test func aPressWhoseReplyIsOnlyProseSpeaksItsFirstThreeLines() async {
         let brain = ScriptedBrain(script: [
             reply(text: "Name the invariant.\n\n  Keep a running sum.  \nCheck the empty case.\nThen code it."),
