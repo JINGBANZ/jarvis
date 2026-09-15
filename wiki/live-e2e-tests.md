@@ -306,7 +306,7 @@ what to confirm; the ones still pending are also tracked in [status.md → Next 
 - **Standard transcription benchmark,** after changing transcription models, capture delivery, or
   finalization. Run `./scripts/transcription-benchmark.sh standard` and read the summary as
   [transcription-benchmark.md](./transcription-benchmark.md) describes.
-- **Provider failure with Wi-Fi off,** because the run never touches host networking. With a valid key
+- **Provider failure with Wi-Fi off,** because the run never takes the network away. With a valid key
   and Wi-Fi off, confirm Start ends the session within about fifteen seconds naming the network cause,
   with no system-audio degradation row before it.
 - **Gemini,** because it needs a second provider key. Confirm that selecting Gemini with no Gemini key

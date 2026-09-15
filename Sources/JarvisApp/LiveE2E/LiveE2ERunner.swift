@@ -106,7 +106,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         runDeadline = Date().addingTimeInterval(Self.scenarioTimeout)
         do {
             try await runScenario()
-            removeGeneratedAudio()
+            try removeGeneratedAudio()
             try TranscriptionBenchmarkFiles.createMarker(
                 named: "live-e2e-finished", in: options.outputDirectory)
         } catch {
@@ -115,13 +115,18 @@ final class LiveE2ERunner: BrainCompositionHost {
                 drain = composition.stop(reason: .stoppedByUser)
             }
             await drain?.value
-            removeGeneratedAudio()
-            writeFailure(String(describing: error))
+            var failure = String(describing: error)
+            do {
+                try removeGeneratedAudio()
+            } catch {
+                failure += "; removing synthesized speech also failed: \(error)"
+            }
+            writeFailure(failure)
         }
     }
 
-    func removeGeneratedAudio() {
-        speech.removeDirectory()
+    func removeGeneratedAudio() throws {
+        try speech.removeDirectory()
     }
 
     // MARK: - Scenario
@@ -131,7 +136,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             from: options.scenarioURL, fixturesDirectory: options.fixturesDirectory)
         try speech.prepareDirectory()
         let clips = try synthesizeLines(of: scenario)
-        removeGeneratedAudio()
+        try removeGeneratedAudio()
         brain = BrainComposition(
             secrets: secrets, host: self, preferences: try makePreferences(for: scenario))
         detectedCLIs = try await detectCLIs(for: scenario)

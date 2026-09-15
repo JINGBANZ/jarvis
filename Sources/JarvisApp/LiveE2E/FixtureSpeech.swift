@@ -64,7 +64,9 @@ struct FixtureSpeech {
         return Array(UnsafeBufferPointer(start: channel[0], count: Int(buffer.frameLength)))
     }
 
-    func removeDirectory() {
-        try? FileManager.default.removeItem(at: directory)
+    /// Throws when synthesized speech could not be removed, so the run cannot finish with audio kept.
+    func removeDirectory() throws {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return }
+        try FileManager.default.removeItem(at: directory)
     }
 }

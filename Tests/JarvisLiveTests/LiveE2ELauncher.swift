@@ -29,8 +29,9 @@ struct LiveE2ELauncher {
     /// Written by `finish` when a scenario failed, so later scenarios skip unless `--keep-going`.
     private static let stopMarker = "stop-after-failure"
     private static let appProcessPattern = "/Jarvis Dev[.]app/Contents/MacOS/JarvisApp"
-    /// The Codex app-server and the Claude warm query, the two CLI children a session may start.
-    private static let cliChildPattern = "app-server|--output-format stream-json"
+    /// The Codex app-server, the Claude warm query, and the Codex exec worker that compacts history:
+    /// the CLI children a session may start.
+    private static let cliChildPattern = "app-server|--output-format stream-json|exec --json"
     private static let launchTimeout: TimeInterval = 22 * 60
 
     /// Everything a scenario test needs before launching, or nil when it must not launch: the
@@ -65,8 +66,32 @@ struct LiveE2ELauncher {
     }
 
     /// Launch the app on this scenario and wait for it to exit. On timeout the app is asked to abort,
-    /// then killed.
+    /// then killed. A launch that throws never reaches `finish`, so it kills the app and stops later
+    /// scenarios itself before rethrowing.
     func launch(secretsDirectory: URL? = nil, claudeCLI: URL? = nil) async throws -> LiveE2ELaunch {
+        do {
+            return try await launchAndWait(secretsDirectory: secretsDirectory, claudeCLI: claudeCLI)
+        } catch {
+            Self.run("/usr/bin/pkill", ["-f", Self.appProcessPattern])
+            stopLaterScenarios()
+            throw error
+        }
+    }
+
+    /// Write this scenario's results lines, and stop later scenarios after a failure unless the run
+    /// keeps going.
+    func finish(_ results: LiveE2EResults) throws {
+        if results.hasFailure { stopLaterScenarios() }
+        try Self.write(results, to: directory)
+    }
+
+    private func stopLaterScenarios() {
+        guard !keepGoing else { return }
+        FileManager.default.createFile(
+            atPath: runDirectory.appendingPathComponent(Self.stopMarker).path, contents: nil)
+    }
+
+    private func launchAndWait(secretsDirectory: URL?, claudeCLI: URL?) async throws -> LiveE2ELaunch {
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -133,16 +158,6 @@ struct LiveE2ELauncher {
             stepAttempts: Self.stepAttempts(in: directory),
             leftoverProcessIDs: leftovers.sorted(),
             leftoverRuntimeHomes: Self.codexRuntimeHomes().subtracting(runtimeHomesBefore).sorted())
-    }
-
-    /// Write this scenario's results lines, and stop later scenarios after a failure unless the run
-    /// keeps going.
-    func finish(_ results: LiveE2EResults) throws {
-        try Self.write(results, to: directory)
-        if results.hasFailure, !keepGoing {
-            FileManager.default.createFile(
-                atPath: runDirectory.appendingPathComponent(Self.stopMarker).path, contents: nil)
-        }
     }
 
     /// A run-local secrets directory holding an obviously invalid OpenAI key, for F02.

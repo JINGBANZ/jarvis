@@ -24,7 +24,12 @@ final class LiveE2EAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         runTask?.cancel()
-        // A crash-free abort still leaves no synthesized speech behind.
-        runner.removeGeneratedAudio()
+        // A crash-free abort still leaves no synthesized speech behind. Nothing reads the run after
+        // this, and a finished marker was never written for it, so the log is the only place left.
+        do {
+            try runner.removeGeneratedAudio()
+        } catch {
+            jlog("Jarvis live e2e: could not remove synthesized speech: \(error)")
+        }
     }
 }

@@ -21,9 +21,15 @@ for arg in "$@"; do
     *) usage; exit 2 ;;
   esac
 done
+# Evaluation reads Scenario A's session, so a run without A could only report G09 as failed.
+if [[ "$EVALUATE" == 1 && "$SCENARIO" != A && "$SCENARIO" != all ]]; then
+  echo "--evaluate needs Scenario A: run A or all." >&2
+  exit 2
+fi
 
 # Two live instances would contend for the capture device and the session folder.
-if /usr/bin/pgrep -f "/Jarvis Dev[.]app/Contents/MacOS/JarvisApp" >/dev/null; then
+APP_PROCESS_PATTERN="/Jarvis Dev[.]app/Contents/MacOS/JarvisApp"
+if /usr/bin/pgrep -f "$APP_PROCESS_PATTERN" >/dev/null; then
   echo "Quit the running Jarvis Dev.app before a live e2e run." >&2
   exit 1
 fi
@@ -31,7 +37,8 @@ fi
 # A full run takes about half an hour; keep the Mac from sleeping through it.
 if [[ -z "${JARVIS_LIVE_E2E_CAFFEINATED:-}" ]]; then
   export JARVIS_LIVE_E2E_CAFFEINATED=1
-  exec /usr/bin/caffeinate -d -i "$0" "$@"
+  # Not "$0": the cd above moved to the repository root, where a relative $0 no longer resolves.
+  exec /usr/bin/caffeinate -d -i ./scripts/run-live-tests.sh "$@"
 fi
 
 echo "▶ building the signed development app"
@@ -73,6 +80,13 @@ abort_run() {
       touch "$scenario_dir/abort"
     fi
   done
+  # LaunchServices started the app outside this process group, so the signal never reached it. Give
+  # it the launcher's ten seconds to seal its session, then kill it so capture cannot outlive the run.
+  for _ in {1..50}; do
+    /usr/bin/pgrep -f "$APP_PROCESS_PATTERN" >/dev/null || break
+    sleep 0.2
+  done
+  /usr/bin/pkill -f "$APP_PROCESS_PATTERN" || true
   echo "Live e2e run aborted; partial results are in $RUN_DIR." >&2
   exit 130
 }

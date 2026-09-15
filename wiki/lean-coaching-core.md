@@ -1073,8 +1073,9 @@ Composition never starts, stops, or tears anything down, and the runtime never b
 - Three owners with documented boundaries, and no behavior change in Start, Stop, teardown,
   readiness, capture continuity, or error reporting.
 - `scripts/check-ghost-mode.sh` passes with no new exceptions.
-- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus the live smoke checklist for Start,
-  Stop, Settings reapply, and session rotation — `JarvisApp` is verified by live smoke, not units.
+- The Gate passes: `swift build && ./scripts/run-tests.sh`, plus a live check of Start, Stop,
+  Settings reapply, and session rotation. `JarvisApp` is verified by the
+  [live e2e tests](./live-e2e-tests.md), not units.
 
 ## Source Handoff
 
