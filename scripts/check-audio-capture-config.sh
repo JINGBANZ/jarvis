@@ -89,7 +89,7 @@ while IFS= read -r reference; do
     exit 1
 done <<< "$live_e2e_references"
 fixture_status=0
-fixture_references="$(/usr/bin/grep -RIl 'FixtureAudioSource' Sources)" || fixture_status=$?
+fixture_references="$(/usr/bin/grep -RIlE 'FixtureAudioSource|FixtureScreenCapture' Sources)" || fixture_status=$?
 if [ "$fixture_status" -gt 1 ]; then
     echo "Audio capture guard: fixture source scan failed; refusing to pass." >&2
     exit 1
@@ -98,7 +98,7 @@ while IFS= read -r reference; do
     case "$reference" in
         ""|Sources/JarvisApp/LiveE2E/*) ;;
         *)
-            echo "FixtureAudioSource belongs to the live e2e mode only: $reference" >&2
+            echo "Fixture audio and screen sources belong to the live e2e mode only: $reference" >&2
             exit 1
             ;;
     esac

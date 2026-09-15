@@ -28,7 +28,7 @@ if /usr/bin/pgrep -f "/Jarvis Dev[.]app/Contents/MacOS/JarvisApp" >/dev/null; th
   exit 1
 fi
 
-# Front-window capture needs an awake, unlocked display for the whole run.
+# A full run takes about half an hour; keep the Mac from sleeping through it.
 if [[ -z "${JARVIS_LIVE_E2E_CAFFEINATED:-}" ]]; then
   export JARVIS_LIVE_E2E_CAFFEINATED=1
   exec /usr/bin/caffeinate -d -i "$0" "$@"

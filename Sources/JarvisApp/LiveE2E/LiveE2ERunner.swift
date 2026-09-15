@@ -15,8 +15,8 @@ import JarvisOverlay
 /// in-flight cases run against real state. A spoken step matches the next `turn_end` attempt and a
 /// press matches its manual attempt; the automatic silence check can start attempts of its own in
 /// between, so each match is written to `steps.jsonl` for the checker instead of being inferred from
-/// order. Fixture windows are opened by the test process on a file handshake, because this process
-/// may not open apps.
+/// order. The screen is the scenario's fixture image, handed to the composition's screen capture in
+/// place of the Mac's front window, so a developer can keep using the Mac during a run.
 @MainActor
 final class LiveE2ERunner: BrainCompositionHost {
     enum Failure: Error, CustomStringConvertible {
@@ -71,6 +71,7 @@ final class LiveE2ERunner: BrainCompositionHost {
     private let errorReporter = ErrorReporter()
     private let artifacts: SessionArtifacts
     private let speech: FixtureSpeech
+    private let screen = FixtureScreenCapture()
     private var brain: BrainComposition!
     private var composition: SessionComposition!
     private var fixtureSource: FixtureAudioSource?
@@ -143,12 +144,6 @@ final class LiveE2ERunner: BrainCompositionHost {
 
         let steps = scenario.steps
         var index = 0
-        // Leading screen steps run before Start so the fixture window is already in front.
-        while index < steps.count, case .screen(let fixture) = steps[index] {
-            currentStep = index
-            try await showFixture(fixture)
-            index += 1
-        }
         try await startSession(scenario)
         guard !expectsSessionEnd else { return }
 
@@ -157,7 +152,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             try checkAbort()
             switch steps[index] {
             case .screen(let fixture):
-                try await showFixture(fixture)
+                screen.show(try Data(contentsOf: options.fixturesDirectory.appendingPathComponent(fixture)))
             case .press(let shortcut):
                 let mark = attemptEvents.count
                 composition.requestShortcut(shortcut)
@@ -250,7 +245,8 @@ final class LiveE2ERunner: BrainCompositionHost {
             brainAPIKey: key,
             brainRoute: route,
             appleSpeechLocale: nil,
-            screen: ScreenCaptureSelection(scope: scenario.screenScope, explicitDisplay: nil),
+            // The fixture capture shows the scenario's image whatever the selection names.
+            screen: ScreenCaptureSelection(scope: Defaults.Screen.scope, explicitDisplay: nil),
             prepSources: prepSources,
             explanationsEnabled: Defaults.Explanations.enabled,
             codeEnabled: Defaults.Code.enabled)
@@ -295,6 +291,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             makeAttemptAuditing: { evidence in
                 LiveE2EAttemptObserver(evidence: evidence, observe: { continuation.yield($0) })
             },
+            makeScreenCapture: { [screen] _ in screen },
             makeAudioSource: { [weak self] audioFormat, silenceDuration, delivery in
                 let liveStreams: Set<AudioTimeline.Stream>
                 switch audio {
@@ -412,22 +409,6 @@ final class LiveE2ERunner: BrainCompositionHost {
         try await wait(until: limit, for: "queued coaching attempts to finish") {
             self.startedAttemptIDs.isSubset(of: self.finishedAttemptIDs)
         }
-    }
-
-    private func showFixture(_ fixture: String) async throws {
-        let request = options.outputDirectory.appendingPathComponent("screen-request.json")
-        let ready = options.outputDirectory.appendingPathComponent("screen-ready")
-        let data = try JSONSerialization.data(
-            withJSONObject: ["fixture": fixture], options: [.sortedKeys])
-        try TranscriptionBenchmarkFiles.write(
-            data, named: "screen-request.json", to: options.outputDirectory)
-        try await wait(
-            until: Date().addingTimeInterval(Self.stepTimeout), for: "the test to show \(fixture)"
-        ) {
-            FileManager.default.fileExists(atPath: ready.path)
-        }
-        try FileManager.default.removeItem(at: request)
-        try FileManager.default.removeItem(at: ready)
     }
 
     private func wait(

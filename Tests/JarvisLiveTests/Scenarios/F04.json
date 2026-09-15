@@ -4,7 +4,6 @@
   "brain": { "primary": "claude-code", "fallbacks": [] },
   "capabilities": { "disabledTools": [], "disabledSkills": [] },
   "prepNotes": null,
-  "screen": { "scope": "activeWindow" },
   "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
   "voices": { "them": "Samantha", "me": "Daniel" },
   "cli": { "claude-code": "stub" },

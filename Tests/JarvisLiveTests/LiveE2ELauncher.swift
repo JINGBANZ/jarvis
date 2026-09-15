@@ -4,8 +4,8 @@ import JarvisCore
 import JarvisEvaluation
 import Testing
 
-/// Launches the signed development app in its live e2e mode for one scenario file, serves the
-/// app's screen requests, and hands back what the session left.
+/// Launches the signed development app in its live e2e mode for one scenario file and hands back
+/// what the session left.
 ///
 /// Only `scripts/run-live-tests.sh` supplies the handshake variables: the run directory it created
 /// and the app it just built. Without them nothing launches, so the target cannot reach a provider
@@ -64,8 +64,8 @@ struct LiveE2ELauncher {
         }
     }
 
-    /// Launch the app on this scenario and wait for it to exit, opening fixture windows whenever the
-    /// app asks. On timeout the app is asked to abort, then killed.
+    /// Launch the app on this scenario and wait for it to exit. On timeout the app is asked to abort,
+    /// then killed.
     func launch(secretsDirectory: URL? = nil, claudeCLI: URL? = nil) async throws -> LiveE2ELaunch {
         let fileManager = FileManager.default
         try fileManager.createDirectory(
@@ -96,7 +96,6 @@ struct LiveE2ELauncher {
         var abortDeadline: Date?
         var timedOut = false
         while opener.isRunning {
-            try await serveScreenRequest()
             if abortDeadline == nil, Date() > deadline {
                 timedOut = true
                 fileManager.createFile(
@@ -180,33 +179,6 @@ struct LiveE2ELauncher {
     }
 
     // MARK: - Helpers
-
-    /// The app may not open apps, so it asks on a file and this process opens the fixture: Preview
-    /// for images, TextEdit for text. The pause lets the new window reach the front before answering.
-    ///
-    /// It opens a copy inside this launch's directory, never the fixture itself: `open` brings an
-    /// already-open document to the front as it was first loaded, so an edited fixture was captured
-    /// stale.
-    private func serveScreenRequest() async throws {
-        let request = directory.appendingPathComponent("screen-request.json")
-        let ready = directory.appendingPathComponent("screen-ready")
-        let fileManager = FileManager.default
-        guard fileManager.fileExists(atPath: request.path), !fileManager.fileExists(atPath: ready.path),
-              let data = try? Data(contentsOf: request),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let fixture = object["fixture"] as? String else { return }
-        let screens = directory.appendingPathComponent("screens", isDirectory: true)
-        try fileManager.createDirectory(
-            at: screens, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let url = screens.appendingPathComponent(fixture)
-        if !fileManager.fileExists(atPath: url.path) {
-            try fileManager.copyItem(at: Self.fixturesDirectory.appendingPathComponent(fixture), to: url)
-        }
-        let application = url.pathExtension == "txt" ? "TextEdit" : "Preview"
-        Self.run("/usr/bin/open", ["-a", application, url.path])
-        try await Task.sleep(for: .seconds(2))
-        fileManager.createFile(atPath: ready.path, contents: nil, attributes: [.posixPermissions: 0o600])
-    }
 
     private static func write(_ results: LiveE2EResults, to directory: URL) throws {
         try FileManager.default.createDirectory(

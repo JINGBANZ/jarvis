@@ -1,7 +1,7 @@
 # Live E2E Tests
 
-> One command drives the real signed app through scripted interview scenarios with nobody at the
-> Mac, then asserts every case on the session folders the app leaves behind. This page holds the why
+> One command drives the real signed app through scripted interview scenarios while the developer
+> keeps using the Mac, then asserts every case on the session folders the app leaves behind. This page holds the why
 > and the case index; the steps live in the scenario files and the predicates in the checker.
 
 ## What the run is and is not
@@ -9,8 +9,8 @@
 `./scripts/run-live-tests.sh` launches `Jarvis Dev.app` once per scenario in an explicit live e2e
 mode. Interviewer and candidate lines are synthesized at run time and fed as audio into real OpenAI
 transcription. The real coach loads skills and tools on demand, switches between all three brains,
-captures the real front window, delivers to the real overlay panels, and writes a normal session
-directory. A test target then reads that directory and records one result per case ID.
+views a fixture screenshot when it asks for the screen, delivers to the real overlay panels, and
+writes a normal session directory. A test target then reads that directory and records one result per case ID.
 
 The mode is a sibling of the [transcription benchmark](./transcription-benchmark.md) and follows its
 conventions: `--live-e2e` in `Sources/JarvisApp/App/main.swift` selects `LiveE2EAppDelegate`
@@ -20,10 +20,12 @@ app's TCC identity, capture edge, and composition, which only the bundle has.
 
 `LiveE2ERunner` hosts the brain composition and drives one scenario through `SessionComposition`,
 the object a production Start uses ([architecture.md → Components](./architecture.md#3-components)).
-The only substitution is the audio source: `FixtureAudioSource` in place of `AggregateEchoCapture`.
-The composition takes an optional attempt-auditing factory; production records straight into the
-session evidence, and the runner wraps it to watch attempts start and finish. The Foundation-only
-scenario model, launch options, and audio timeline live in `Sources/JarvisCore/LiveE2E/`.
+Two ports are substituted: the audio source, `FixtureAudioSource` in place of
+`AggregateEchoCapture`, and the screen capture, `FixtureScreenCapture` in place of
+`WindowScopedScreenCapture`. The composition also takes an optional attempt-auditing factory;
+production records straight into the session evidence, and the runner wraps it to watch attempts
+start and finish. The Foundation-only scenario model, launch options, and audio timeline live in
+`Sources/JarvisCore/LiveE2E/`.
 
 The run is not:
 
@@ -50,8 +52,8 @@ Set up once per machine:
 - **Microphone, System Audio Recording, and Screen Recording**, granted to the development identity.
   The grants survive rebuilds because `build-app.sh` signs with a stable identity
   ([build-and-run.md → Packaging & signing](./build-and-run.md#packaging--signing--why-permission-grants-persist)).
-  Nothing needs Accessibility or Automation: the runner requests shortcuts through the composition,
-  and fixture windows are opened with `open`, not scripted.
+  Screen Recording is part of the readiness a Start checks, though no scenario shoots the screen.
+  Nothing needs Accessibility or Automation: the runner requests shortcuts through the composition.
 - **An OpenAI key** saved in Settings, which writes the owner-only secrets file. Every scenario
   transcribes through OpenAI. `OPENAI_API_KEY` does not serve the run: the app is launched through
   `open`, and LaunchServices does not pass the shell's environment.
@@ -61,11 +63,10 @@ Set up once per machine:
 
 During a run:
 
-- **The display stays awake and unlocked.** The script keeps the display awake but cannot unlock it,
-  and capture needs the fixture window on screen.
-- **Nobody clicks or types on that Mac.** The front window is what gets captured, so a click elsewhere
-  changes what the model sees. The checker catches a display-sized fallback shot, but it cannot tell a
-  wrong window from the fixture.
+- **The Mac stays usable.** Nothing reads the screen and no window opens, so the developer keeps
+  working. The overlay panels do appear over that work while a scenario coaches.
+- **Scenario R hears the room.** It records the real microphone and system audio for the few seconds
+  from Start to coaching ready, so keep calls and media off while it runs.
 - **No other Jarvis Dev.app runs.** Two instances would contend for the capture device and the session
   base, so the script refuses to start beside one.
 
@@ -78,9 +79,8 @@ During a run:
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
 with `./scripts/build-app.sh debug`, creates the run directory, and runs the `JarvisLiveTests` target
 filtered to the chosen scenarios. `F01` selects both F01 scenario files. Each test launches the app
-with its scenario, opens each fixture window the app asks for, waits for the app to exit, and asserts
-on the session folder. `Tests/JarvisLiveTests/LiveE2ELauncher.swift` holds the preflight,
-the launch, and the screen handshake.
+with its scenario, waits for the app to exit, and asserts on the session folder.
+`Tests/JarvisLiveTests/LiveE2ELauncher.swift` holds the preflight and the launch.
 
 - `--keep-going` runs every chosen scenario. Without it the run stops after the first scenario that
   writes a `fail` line, since later scenarios spend model calls and a failure deserves a look first.
@@ -88,7 +88,7 @@ the launch, and the screen handshake.
   and adds a G09 line. It is off by default because evaluation is an agentic run of its own, not part
   of coaching.
 
-Scenario A's one OpenAI press holds the only metered coaching requests; every other brain response
+Scenario A's one OpenAI turn holds the only metered coaching requests; every other brain response
 runs on a CLI subscription.
 
 ## Run directory and results
@@ -120,12 +120,11 @@ after decoding, and no audio is archived.
 Capabilities are fixed at Start, so each switch configuration is its own scenario; brain switches
 happen inside a scenario, applied the way a Settings edit applies them. Steps live in
 `Tests/JarvisLiveTests/Scenarios/`; fixtures in `Tests/JarvisLiveTests/Fixtures/` are the coding
-screenshot `coding-problem.jpg`, the design prompt `design-problem.txt`, and fictional
-`prep-notes.md`.
+screenshot `coding-problem.jpg` and fictional `prep-notes.md`.
 
 | Scenario | Brain | What it drives |
 |---|---|---|
-| A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is one press on the design prompt, which shows agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on the one turn that exercises OpenAI's tool choice. |
+| A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
 | B | Codex | Behavioral, system design, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
 | R | Codex | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Codex | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
@@ -144,16 +143,10 @@ screenshot `coding-problem.jpg`, the design prompt `design-problem.txt`, and fic
 - **Waits on attempts, never timers.** A spoken step waits for the next `turn_end` attempt to finish,
   a press for its manual attempt. Pacing follows the app's own state, which is what lets the
   chronology and in-flight cases land where they are meant to whatever the provider latency.
-- **Screen before Start.** Leading `screen` steps run before Start, so the fixture window is already
-  front when the first press captures.
-- **Screen swaps by handshake.** The app writes `screen-request.json` into the scenario directory;
-  the test process copies the fixture into that directory and opens the copy with `open -a Preview`
-  for images or `open -a TextEdit` for text, then writes `screen-ready`. It opens a copy because
-  `open` fronts an already-open document as first loaded, so an edited fixture would be captured
-  stale. The test opens the window, not the app, because ghost mode
-  forbids the app from opening apps. Capture stays in the production active-window scope with no
-  AppleScript, so no Automation or Accessibility grant is involved, and as long as nobody clicks
-  elsewhere only the fixture window reaches a provider.
+- **An injected screen.** A `screen` step hands a JPEG fixture to `FixtureScreenCapture`, and every
+  later capture returns that image with its on-device recognized text, the snapshot shape the window
+  path produces. Only coding needs one: an interviewer states behavioral and design questions aloud,
+  so Scenario A speaks its design question rather than showing it.
 
 ## Evidence rules
 
@@ -184,7 +177,7 @@ question ends in C16, C20, and C17 together with C01 and C09 on Scenario B's Cod
 An asserted case that fails because of a model choice gets one rerun of its scenario alone; a second
 failure is real. No assertion is loosened to make a run pass.
 
-## Two accepted constraints
+## Three accepted constraints
 
 - **Both speech streams are injected.** `FixtureAudioSource` hands frames straight to the two real
   transcription sessions, so the run is silent. Everything downstream of the audio source is
@@ -195,6 +188,11 @@ failure is real. No assertion is loosened to make a run pass.
   echo cancellation, and the system-wide tap run only in R, which starts the production capture and
   waits for readiness on real frames. The [transcription benchmark](./transcription-benchmark.md)
   covers the tap with known audio, and the permission gate walk stays manual.
+- **The screen is injected.** No scenario shoots the Mac's screen, so the front-window pick, the
+  `screencapture` helper, and its cleanup run only in their Gate tests (`FrontWindowSelectorTests`,
+  `ScreenCaptureRunnerTests`) and in everyday use. A real front window would need an idle, unlocked
+  Mac for the whole run, and a click during it would send whatever window came forward to a
+  provider, where the checker cannot tell it from the fixture.
 
 ## F04 and the stub
 
@@ -222,18 +220,18 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 
 | ID | Case | Where |
 |---|---|---|
-| C01 | A press loads what its screen needs and still ends in one clean tip | A: the Claude Code and OpenAI presses; B: the Codex press |
+| C01 | A press loads what its screen needs and still ends in one clean tip | A: the Claude Code press; B: the Codex press |
 | C02 | Small talk loads nothing | A: the interviewer's logistics line |
 | C03 | The first behavioral question picks the behavioral skill | A: the first behavioral question |
 | C04 | An already-loaded kind never reloads | A: every turn on Codex |
-| C05 | Prep search loads on demand and stays callable on every brain | A: the first behavioral question and the OpenAI press |
+| C05 | Prep search loads on demand and stays callable on every brain | A: the first behavioral question and the OpenAI design question |
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
-| C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the OpenAI press |
+| C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the OpenAI design question |
 | C08 | A second prepared question searches without loading, on another brain | A: the second behavioral question, on Codex |
 | C09 | The coding skill loads on the coding screen | A: the first press; B: the Codex press |
 | C10 | The whole session shows four load rows, each once | A, after Stop |
 | C11 | A press after the load is one round trip | A: the two Codex presses |
-| C12 | A diagram arrives at the architecture stage, on OpenAI and on a CLI brain | A: the OpenAI press and the Codex design question |
+| C12 | A diagram arrives at the architecture stage, on OpenAI and on a CLI brain | A: the OpenAI design question and the Codex follow-up |
 | C13 | No diagram outside that stage | A: the coding and behavioral turns |
 | C14 | A brain switch keeps loaded state, in both directions | A: Claude Code to OpenAI, then OpenAI to Codex |
 | C15 | Coaching continues after loads on Claude Code and on Codex | A |
@@ -251,7 +249,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | G01 | Start reaches coaching ready on real frames, and both sides are heard | R; A: the first "them" and "me" lines |
 | G02 | Overlapping speech keeps chronology | A: the reply that starts inside the design question |
 | G03 | Speech during an in-flight attempt waits its turn | A: the cache question |
-| G04 | The screen gate captures once, only when needed, and shoots the window | A: two presses and the "solve this in one pass" line; none on stated questions |
+| G04 | The screen gate captures once, only when needed, and passes the recognized text | A: the first press and the "solve this in one pass" line; none on stated questions |
 | G05 | A deliberate no-op is visible | A: the interviewer's logistics line |
 | G06 | The hint shortcut works, and a second hint advances | A: the presses |
 | G07 | Overlays are excluded from screenshots | Offline, in the Gate |

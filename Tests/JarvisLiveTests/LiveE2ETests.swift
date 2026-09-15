@@ -202,20 +202,20 @@ struct LiveE2ETests {
         }
         let presses = launch.stepIndices(Self.isPress)
         let says = launch.stepIndices(Self.isSay)
-        guard presses.count == 4, says.count == 6 else {
-            results.check("A", false, "A has 4 presses and 6 spoken steps (saw \(presses.count), \(says.count))")
+        guard presses.count == 3, says.count == 7 else {
+            results.check("A", false, "A has 3 presses and 7 spoken steps (saw \(presses.count), \(says.count))")
             try launcher.finish(results)
             return
         }
         let a1 = launch.attempt(forStep: presses[0])
-        let a4 = launch.attempt(forStep: presses[1])
-        let a7 = [launch.attempt(forStep: presses[2]), launch.attempt(forStep: presses[3])]
+        let a7 = [launch.attempt(forStep: presses[1]), launch.attempt(forStep: presses[2])]
         let a2 = launch.attempt(forStep: says[0])
         let a3 = launch.attempt(forStep: says[1])
-        let a5 = launch.attempt(forStep: says[2])
-        let a6 = launch.attempt(forStep: says[3])
-        let a8 = launch.attempt(forStep: says[4])
-        let a9 = launch.attempt(forStep: says[5])
+        let a4 = launch.attempt(forStep: says[2])
+        let a5 = launch.attempt(forStep: says[3])
+        let a6 = launch.attempt(forStep: says[4])
+        let a8 = launch.attempt(forStep: says[5])
+        let a9 = launch.attempt(forStep: says[6])
 
         func rows(_ attempt: Attempt?) -> [Row] { attempt.map(evidence.rows(in:)) ?? [] }
         func loads(_ attempt: Attempt?) -> [String] { rows(attempt).compactMap { $0.loadedCapability?.name } }
@@ -249,9 +249,8 @@ struct LiveE2ETests {
                  "\(label) tip carries no protocol text"),
             ]
         }
-        results.check("C01", pressChecks(a1, "A1") + pressChecks(a4, "A4"))
+        results.check("C01", pressChecks(a1, "A1"))
         results.time("A1 press-to-tip", seconds: Self.pressToTip(evidence, a1))
-        results.time("A4 press-to-tip", seconds: Self.pressToTip(evidence, a4))
         results.time("A7 first press-to-tip", seconds: Self.pressToTip(evidence, a7[0]))
         results.time("A7 second press-to-tip", seconds: Self.pressToTip(evidence, a7[1]))
 
@@ -277,8 +276,6 @@ struct LiveE2ETests {
              "A3 loads search_prep_notes before searching (saw \(a3Sequence))"),
             (firstOpenAI?.declaredToolNames.contains("search_prep_notes") == true,
              "A4's first OpenAI request declares search_prep_notes"),
-            (firstOpenAI?.toolChoiceType == "allowed_tools",
-             "A4's first OpenAI request uses the allowed tool choice (saw \(firstOpenAI?.toolChoiceType ?? "no request"))"),
         ])
         results.check("C06", Self.precedes(a3Sequence.firstIndex(of: "load behavioral"),
                                            a3Sequence.lastIndex(of: "tip")),
@@ -286,11 +283,12 @@ struct LiveE2ETests {
         results.check("C07", [
             (a3Sequence == ["load behavioral", "load search_prep_notes", "search", "tip"],
              "A3's chain stays in one attempt (saw \(a3Sequence))"),
-            (a4Sequence == ["screen", "load system-design", "tip"],
+            (a4Sequence == ["load system-design", "tip"],
              "A4's chain stays in one attempt (saw \(a4Sequence))"),
             (evidence.debugLines(containing: "tool loop exhausted").isEmpty, "no tool loop exhausted"),
         ])
         results.time("A3 question-to-tip", seconds: Self.questionToTip(evidence, a3))
+        results.time("A4 question-to-tip", seconds: Self.questionToTip(evidence, a4))
 
         results.check("C08", [
             (sequence(a5).contains("search"), "A5 searched prep notes (saw \(sequence(a5)))"),
@@ -390,7 +388,7 @@ struct LiveE2ETests {
             }
         }
         let transcript = a8?.transcript ?? []
-        let questionEntry = transcript.firstIndex {
+        let questionEntry = transcript.lastIndex {
             $0.speaker == "them" && Self.normalized($0.text).contains("endpoint")
         }
         let invertedReplyEntry = questionEntry.flatMap { questionIndex in
@@ -415,19 +413,19 @@ struct LiveE2ETests {
         ])
 
         let screenViews = evidence.activity.filter { $0.kind == "screenViewed" }.count
-        let windowShots = evidence.debugLines(containing: "lines of on-screen text").count
+        let textReads = evidence.debugLines(containing: "lines of on-screen text").count
         results.check("G04", [
             (count("screenViewed", in: a1) == 1, "A1 viewed the screen once"),
-            (count("screenViewed", in: a4) == 1, "A4 viewed the screen once"),
             (count("screenViewed", in: a6) == 1, "A6 viewed the screen once"),
             (count("screenViewed", in: a3) == 0, "A3 did not view the screen"),
+            (count("screenViewed", in: a4) == 0, "A4 did not view the screen"),
             (count("screenViewed", in: a5) == 0, "A5 did not view the screen"),
-            (screenViews > 0 && windowShots == screenViews,
-             "every shot took the window path (\(windowShots) text reads for \(screenViews) views)"),
+            (screenViews > 0 && textReads == screenViews,
+             "every screen view carried its recognized text (\(textReads) text reads for \(screenViews) views)"),
         ])
-        let pressAttempts = [a1, a4] + a7
+        let pressAttempts = [a1] + a7
         results.check("G06", [
-            (evidence.activity.filter { $0.kind == "manualHint" }.count == 4, "four shortcut rows"),
+            (evidence.activity.filter { $0.kind == "manualHint" }.count == 3, "three shortcut rows"),
             (pressAttempts.allSatisfy { count("screenViewed", in: $0) == 1 && tip($0) != nil },
              "each press viewed the screen once and ended in a tip"),
             (tip(a7[0]) != nil && tip(a7[0])?.message != tip(a7[1])?.message,

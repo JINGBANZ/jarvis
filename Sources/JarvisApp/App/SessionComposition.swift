@@ -8,8 +8,9 @@ import JarvisOverlay
 /// The caller validates a Start (permissions, credentials, provider preflight) and hands the frozen
 /// result to `start`. Everything after that lives here: the fresh transcript and session directory,
 /// the capability set and route, the coach driver, both transcription endpoints, the audio source,
-/// capture readiness, and the matching teardown. The audio source is the one piece a caller chooses,
-/// through `makeAudioSource`; every other object is built here the same way for every caller.
+/// capture readiness, and the matching teardown. The audio source is the one piece a caller must
+/// choose, through `makeAudioSource`. Screen capture and attempt auditing default to production and
+/// may be replaced; every other object is built here the same way for every caller.
 ///
 /// It presents nothing. Readiness status, shortcut registration, and the Settings and Activity
 /// surfaces stay with the caller, fed by `onReadinessStatusChanged` and `onCoachingStateChanged`.
@@ -48,6 +49,7 @@ final class SessionComposition {
     private let readiness: JarvisReadiness
     private let errorReporter: ErrorReporter
     private let makeAttemptAuditing: (FileSessionAudit) -> any CoachingAttemptAuditing
+    private let makeScreenCapture: (URL) -> any ScreenCapturing
     private let makeAudioSource: MakeAudioSource
 
     /// Recreated on every `start`: the transcript must live and die with the driver/transcriber
@@ -103,6 +105,11 @@ final class SessionComposition {
         // handle once Start has created it. Production records straight into that handle; a caller
         // that must watch attempts start and finish wraps it.
         makeAttemptAuditing: @escaping (FileSessionAudit) -> any CoachingAttemptAuditing = { $0 },
+        // The session's screen capture, built with the session directory its transient shots use.
+        // Production shoots the front window; a caller that must control what is on screen injects it.
+        makeScreenCapture: @escaping (URL) -> any ScreenCapturing = {
+            WindowScopedScreenCapture(captureDirectory: $0)
+        },
         makeAudioSource: @escaping MakeAudioSource
     ) {
         self.brain = brain
@@ -112,6 +119,7 @@ final class SessionComposition {
         self.readiness = readiness
         self.errorReporter = errorReporter
         self.makeAttemptAuditing = makeAttemptAuditing
+        self.makeScreenCapture = makeScreenCapture
         self.makeAudioSource = makeAudioSource
         networkDiagnostics.start()
     }
@@ -234,7 +242,7 @@ final class SessionComposition {
             config: config,
             transcript: transcript,
             route: configuredRoute,
-            screen: WindowScopedScreenCapture(captureDirectory: sessionDirectory),
+            screen: makeScreenCapture(sessionDirectory),
             overlay: overlaySink,
             clock: clock,
             sessionStart: conversationStart,

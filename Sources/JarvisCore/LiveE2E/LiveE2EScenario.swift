@@ -78,7 +78,6 @@ public struct LiveE2EScenario: Sendable, Equatable {
     public let capabilities: Capabilities
     /// A file name inside the fixtures directory, or nil.
     public let prepNotes: String?
-    public let screenScope: ScreenCaptureScope
     public let transcription: Transcription
     public let voices: Voices
     public let cli: [BrainProvider: CLIOverride]
@@ -110,11 +109,6 @@ extension LiveE2EScenario {
         if let prepNotes = raw.prepNotes {
             try Self.requireFixture(prepNotes, in: fixturesDirectory, field: "prepNotes")
         }
-        let scope = try Self.parse(ScreenCaptureScope.self, raw.screen.scope, "screen.scope")
-        // The entire-display path skips the OCR sidecar the checker uses to prove the window path.
-        guard scope == .activeWindow else {
-            throw Failure.invalid("screen.scope must be activeWindow, got \"\(raw.screen.scope)\"")
-        }
         let model = try Self.parse(
             OpenAITranscriptionModel.self, raw.transcription.model, "transcription.model")
         let key = try Self.parse(TranscriptionKey.self, raw.transcription.key, "transcription.key")
@@ -131,7 +125,6 @@ extension LiveE2EScenario {
             disabledTools: raw.capabilities.disabledTools,
             disabledSkills: raw.capabilities.disabledSkills)
         prepNotes = raw.prepNotes
-        screenScope = scope
         transcription = Transcription(model: model, key: key)
         voices = Voices(them: raw.voices.them, me: raw.voices.me)
         self.cli = cli
@@ -172,6 +165,10 @@ extension LiveE2EScenario {
             case "screen":
                 let fixture = raw.screen ?? ""
                 try requireFixture(fixture, in: fixturesDirectory, field: "\(label).screen")
+                // The image goes to the coach as the captured screen, so it must be what a capture makes.
+                guard ["jpg", "jpeg"].contains(URL(fileURLWithPath: fixture).pathExtension.lowercased()) else {
+                    throw Failure.invalid("\(label).screen must be a JPEG image, got \"\(fixture)\"")
+                }
                 step = .screen(fixture: fixture)
             case "press":
                 step = .press(try shortcut(raw.press ?? "", label: label))
@@ -278,10 +275,6 @@ private struct RawScenario: Decodable {
         let disabledSkills: [String]
     }
 
-    struct Screen: Decodable {
-        let scope: String
-    }
-
     struct Transcription: Decodable {
         let model: String
         let key: String
@@ -297,7 +290,6 @@ private struct RawScenario: Decodable {
     let brain: Brain
     let capabilities: Capabilities
     let prepNotes: String?
-    let screen: Screen
     let transcription: Transcription
     let voices: Voices
     let cli: [String: String]?

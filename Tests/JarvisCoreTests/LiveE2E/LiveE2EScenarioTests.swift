@@ -35,7 +35,6 @@ struct LiveE2EScenarioTests {
         #expect(scenario.brain == .init(primary: .claudeCode, fallbacks: []))
         #expect(scenario.capabilities == .init(disabledTools: [], disabledSkills: []))
         #expect(scenario.prepNotes == "prep-notes.md")
-        #expect(scenario.screenScope == .activeWindow)
         #expect(scenario.transcription == .init(model: .gpt4oTranscribe, key: .standard))
         #expect(scenario.voices == .init(them: "Samantha", me: "Daniel"))
         #expect(scenario.cli.isEmpty)
@@ -44,10 +43,8 @@ struct LiveE2EScenarioTests {
             .press(.hint),
             them("Great, thanks for joining. We'll get started in just a minute."),
             them("Tell me about a time you disagreed with a teammate."),
-            .screen(fixture: "design-problem.txt"),
             .switchBrain(.openAI),
-            .press(.hint),
-            .screen(fixture: "coding-problem.jpg"),
+            them("Let's move on to design: our product search is slow, and we are redesigning it. We agreed on twenty thousand searches per second, p99 under three hundred milliseconds, and results up to a minute stale, behind one search API. Now sketch the high-level architecture: which components would you put in, and what is the read path for one request?"),
             .switchBrain(.codexCLI),
             them("Tell me about a time you pushed back on a decision from your manager."),
             .say(.init(speaker: .me, text: "Jarvis, how can I solve this in one pass?"),
@@ -97,7 +94,6 @@ struct LiveE2EScenarioTests {
           "brain": { "primary": "claude-code", "fallbacks": ["openai", "codex-cli"] },
           "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": ["coding"] },
           "prepNotes": "prep-notes.md",
-          "screen": { "scope": "activeWindow" },
           "transcription": { "model": "gpt-transcribe", "key": "invalid" },
           "voices": { "them": "Samantha", "me": "Daniel" },
           "cli": { "claude-code": "stub" },
@@ -239,9 +235,9 @@ struct LiveE2EScenarioTests {
             json: scenario(steps: #"[{ "screen": "folder" }, \#(stop)]"#),
             fragment: "steps[0].screen names no file"),
         RejectedCase(
-            name: "the entire-display scope",
-            json: scenario(scope: "entireDisplay"),
-            fragment: "screen.scope must be activeWindow"),
+            name: "a screen fixture that is not a JPEG",
+            json: scenario(steps: #"[{ "screen": "prep-notes.md" }, \#(stop)]"#),
+            fragment: "steps[0].screen must be a JPEG image"),
         RejectedCase(
             name: "restoreCLI without any cli override",
             json: scenario(steps: #"[{ "restoreCLI": "claude-code" }, \#(stop)]"#),
@@ -306,7 +302,6 @@ struct LiveE2EScenarioTests {
     private static func scenario(
         id: String = "T-1",
         prepNotes: String = "null",
-        scope: String = "activeWindow",
         key: String = "standard",
         cli: String? = nil,
         steps: String = "[\(stop)]"
@@ -319,7 +314,6 @@ struct LiveE2EScenarioTests {
           "brain": { "primary": "codex-cli", "fallbacks": [] },
           "capabilities": { "disabledTools": [], "disabledSkills": [] },
           "prepNotes": \#(prepNotes),
-          "screen": { "scope": "\#(scope)" },
           "transcription": { "model": "gpt-4o-transcribe", "key": "\#(key)" },
           "voices": { "them": "Samantha", "me": "Daniel" },
           \#(cliField)
