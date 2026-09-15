@@ -120,10 +120,11 @@ after decoding, and no audio is archived.
 Capabilities are fixed at Start, so each switch configuration is its own scenario; brain switches
 happen inside a scenario, applied the way a Settings edit applies them. Steps live in
 `Tests/JarvisLiveTests/Scenarios/`; fixtures in `Tests/JarvisLiveTests/Fixtures/` are the coding
-screenshot `coding-problem.jpg` and fictional `prep-notes.md`. The notes put the manager story in a
-different search chunk from everything a teammate query matches, so the first behavioral search
-never already answers the second and C08 stays a real check; `LiveE2EScenarioTests` pins that layout
-in the Gate.
+screenshot `coding-problem.jpg` and fictional `prep-notes.md`. Each story is one section with no
+sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
+again. The manager story stays out of everything a teammate query returns, so the first behavioral
+search never already answers the second and C08 stays a real check; `LiveE2EScenarioTests` pins that
+layout in the Gate.
 
 | Scenario | Brain | What it drives |
 |---|---|---|
