@@ -514,7 +514,7 @@ import JarvisCore
             provider: .codexCLI,
             codexRuntimeBaseDirectory: directory.appendingPathComponent("agent-runtimes"),
             // "unified_exec" is advertised; "goals" is not, and must never be passed.
-            codexSupportedFeatures: ["shell_tool", "unified_exec", "browser_use"])
+            codexSupportedFeatures: ["shell_tool", "shell_snapshot", "unified_exec", "browser_use"])
         let client = makeClient(
             provider: .codexCLI,
             executable: executable,
@@ -534,7 +534,7 @@ import JarvisCore
         #expect(containsPair("-c", "mcp_servers={}", in: arguments))
         #expect(containsPair("-c", "project_root_markers=[]", in: arguments))
         #expect(containsPair("-c", "project_doc_max_bytes=0", in: arguments))
-        for feature in ["shell_tool", "unified_exec", "browser_use"] {
+        for feature in ["shell_tool", "shell_snapshot", "unified_exec", "browser_use"] {
             #expect(containsPair("--disable", feature, in: arguments))
         }
         #expect(!arguments.contains("goals"))
@@ -552,7 +552,9 @@ import JarvisCore
         #expect((config["project_root_markers"] as? [Any])?.isEmpty == true)
         #expect(config["project_doc_max_bytes"] as? Int == 0)
         let features = try #require(config["features"] as? [String: Bool])
-        #expect(features == ["shell_tool": false, "unified_exec": false, "browser_use": false])
+        #expect(features == [
+            "shell_tool": false, "shell_snapshot": false, "unified_exec": false, "browser_use": false,
+        ])
     }
 
     @Test func codexRejectsANonEphemeralThread() async throws {

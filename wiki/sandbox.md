@@ -118,7 +118,8 @@ Narrow and explicit. Data leaves the machine only via:
   to come back ephemeral, pathless, and free of instruction sources, so no rollout transcript reaches
   `~/.codex`. The thread runs read-only with approvals never, empty MCP config, no project-root
   markers, and zero project-doc bytes; the advertised agentic features are disabled on both the
-  launch argv and the per-thread config; and a prompt forbids built-in tool use. Codex publishes no
+  launch argv and the per-thread config, shell snapshots included, so Codex never writes a copy of
+  the login shell's exported environment into its home; and a prompt forbids built-in tool use. Codex publishes no
   control that removes built-in tools, so this envelope is layered rather than a proof of absence —
   an accepted residual risk, backed by a runtime allowlist that aborts the turn on any server request
   or item event outside agent messages and reasoning. The acceptance is measured, not assumed: on
