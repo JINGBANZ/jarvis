@@ -65,6 +65,37 @@ struct LiveE2EScenarioTests {
         ])
     }
 
+    /// C08 asserts that scenario A's manager question searches the notes. The earlier teammate search
+    /// must not already return that story, or the model can answer from the earlier result instead.
+    @Test("scenario A's prep notes keep the manager story out of a teammate search")
+    func prepNotesKeepTheManagerStoryOutOfATeammateSearch() throws {
+        let notes = try String(
+            contentsOf: Self.liveTests.appendingPathComponent("Fixtures/prep-notes.md"), encoding: .utf8)
+        let chunks = PrepMaterialChunker.chunk(text: notes, sourceDisplayName: "prep-notes.md")
+        let index = PrepMaterialIndex(chunks: chunks)
+        let layout = chunks.map { "\($0.text.split(separator: " ").count) words: \($0.text.prefix(30))" }
+        func carriesManagerStory(_ result: PrepMaterialSearchResult) -> Bool {
+            result.text.contains("Marcus") || result.text.contains("feature flag")
+        }
+
+        #expect(chunks.count >= 4, "\(layout)")
+        for query in [
+            "disagreed with a teammate conflict story", "disagreed with a teammate conflict",
+            "teammate disagreement", "conflict with a teammate",
+        ] {
+            #expect(!index.search(query: query).contains(where: carriesManagerStory),
+                    "\"\(query)\" returned the manager story; chunks: \(layout)")
+        }
+        for query in [
+            "pushed back on manager decision story",
+            "pushed back on manager decision evidence alternative outcome",
+            "pushed back on manager decision launch data loss bugs staged rollout",
+        ] {
+            #expect(index.search(query: query).first.map(carriesManagerStory) == true,
+                    "\"\(query)\" did not rank the manager story first; chunks: \(layout)")
+        }
+    }
+
     @Test("scenarios B and F04 ship their capability switches and CLI stub")
     func scenariosBAndF04MatchTheirSpecification() throws {
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
