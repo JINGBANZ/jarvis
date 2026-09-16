@@ -69,6 +69,11 @@ import Testing
             // Without this the helper writes a failed call's body, transcript and screen text
             // included, to its own logs directory, outside the session that owns that data.
             #expect(config.contains("commercial-mode: true"))
+            // A pin bump must not quietly turn these back on: nothing reports usage, nothing listens
+            // off this Mac, and the helper's own error logs stay bounded.
+            #expect(config.contains("usage-statistics-enabled: false"))
+            #expect(config.contains("allow-remote: false"))
+            #expect(config.contains("error-logs-max-files: 2"))
             let manager = FileManager.default
             #expect(try manager.attributesOfItem(atPath: supervisor.configURL.path)[.posixPermissions]
                 as? Int == 0o600)
