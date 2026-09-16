@@ -60,10 +60,10 @@ public final class CoachHistory: @unchecked Sendable {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
         // Raw passthrough items convert first, so a `stay_silent` call among them is found too.
-        var turn = Self.droppingSilence(turn.compactMap { m -> ChatMessage? in
+        var turn = Self.droppingRefusedProse(Self.droppingSilence(turn.compactMap { m -> ChatMessage? in
             guard let raw = m.rawItemsJSON else { return m }
             return Self.convertRawItems(raw)
-        })
+        }))
         let screenTextHeader = JarvisPrompts.Coach.screenTextHeader
         if let newest = turn.lastIndex(where: { $0.text?.contains(screenTextHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededScreenText)
@@ -98,6 +98,27 @@ public final class CoachHistory: @unchecked Sendable {
                 role: m.role, text: m.text, imageBase64JPEG: m.imageBase64JPEG,
                 toolCallId: m.toolCallId, toolCalls: kept.isEmpty ? nil : kept)
         }
+    }
+
+    /// The turn without a plain-text reply the runner refused, and the nudge answering it. Like a
+    /// refused `stay_silent`, the pair belongs to the attempt that spent it: kept in memory the
+    /// nudge would replay on every later request, including automatic turns, and reach the
+    /// summarizer as if the model had been told something about this session.
+    private static func droppingRefusedProse(_ turn: [ChatMessage]) -> [ChatMessage] {
+        let nudges = Set([true, false].map { JarvisPrompts.Coach.replyMustCallSpeak(detailEnabled: $0) })
+        guard turn.contains(where: { $0.role == .user && $0.text.map(nudges.contains) == true })
+        else { return turn }
+        var kept: [ChatMessage] = []
+        for m in turn {
+            if m.role == .user, let text = m.text, nudges.contains(text) {
+                if let last = kept.last, last.role == .assistant, last.toolCalls == nil {
+                    kept.removeLast()
+                }
+                continue
+            }
+            kept.append(m)
+        }
+        return kept
     }
 
     /// Rewrite one committed message so its screen-text block becomes the superseded marker.

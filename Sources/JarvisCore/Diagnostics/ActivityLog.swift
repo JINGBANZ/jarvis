@@ -520,6 +520,10 @@ public final class ActivityLog: @unchecked Sendable {
             if(response.lines && response.lines.length){
               responseText(responseSection(parent,'Hint'),response.lines.join('\\n'));
             }
+            if(response.detail && response.detail.trim()){
+              responseText(responseSection(parent,'Detail'),response.detail);
+            }
+            /* Explanation and Code appear only in rows written before the detail box existed. */
             if(response.explanation && response.explanation.trim()){
               responseText(responseSection(parent,'Explanation'),response.explanation);
             }

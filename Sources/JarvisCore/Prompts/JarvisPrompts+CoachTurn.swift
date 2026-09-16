@@ -18,22 +18,28 @@ extension JarvisPrompts.Coach {
             + "and the recent transcript."
     }
 
+    // Each press says what the user wants, once. How to answer it is the speak guidance's job, and
+    // the domain rules are the loaded skill's, so a trigger that restated them would be a third
+    // copy to keep in step.
     static func manualExplanationTrigger(timestamp: String) -> String {
-        "[\(timestamp)] The user pressed Explain more. They do not understand the question, "
-            + "an earlier hint, or the overall approach. Use the available session history, "
-            + "newest speech, and attached screen to identify the gap. Explain why it works in "
-            + "plain language with a small example and a concrete starting point. Put the fuller "
-            + "explanation in explanation and a short standalone summary in lines. If already "
-            + "explained, change the framing or simplify; do not just repeat the last hint."
+        "[\(timestamp)] The user pressed Explain more. They don't follow the question, an earlier "
+            + "hint, or the approach. Explain that gap in detail, with a short summary in lines."
     }
 
+    /// The skill a Show code press preloads. Its body carries the code-block rules, so the press
+    /// still answers in one round trip.
+    static let showCodeSkillName = "coding"
+
     static func manualCodeTrigger(timestamp: String) -> String {
-        "[\(timestamp)] The user pressed the Show code shortcut for THIS request. Show the next small "
-            + "logical snippet for their current sticking point, aligned with their existing code. "
-            + "Use codeSnippet with language, placement, raw code, and highlightedLines for local corrections. "
-            + "Keep lines as a short placement or correction hint. Do not show the full solution. "
-            + "If no current code is visible, provide the first component using known problem context. "
-            + "If the overall approach is invalid, give its corrective hint and leave codeSnippet null."
+        "[\(timestamp)] The user pressed Show code. Add the next small code block for their current "
+            + "sticking point to detail, at most \(CodeBlock.lineLimit) lines."
+    }
+
+    /// The answer to a press that replied in plain text. It names `detail` only where the session
+    /// declared one, so a boxless session is never told about a field it does not have.
+    static func replyMustCallSpeak(detailEnabled: Bool) -> String {
+        "Plain text is not an answer here. Call the speak tool: the short lines are shown to the "
+            + (detailEnabled ? "user, and anything longer goes in detail." : "user.")
     }
 
     static func condensedHistory(_ summary: String) -> String {

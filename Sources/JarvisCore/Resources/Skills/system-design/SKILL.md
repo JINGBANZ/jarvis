@@ -1,6 +1,6 @@
 ---
 name: system-design
-description: Coaching for system-design questions ("design a URL shortener", "how would you scale this"): the stages of a design round, what belongs in each, and when to attach a private architecture sketch to a tip.
+description: Use when the question is a system design ("design a URL shortener", "how would you scale this"): the stages of a design round, what belongs in each, and when to add a diagram.
 ---
 # System-design questions
 
@@ -17,21 +17,26 @@ on screen, and keep your tip scoped to that stage — a caching tip is unhelpful
 are still naming entities, and a repeated requirements question once requirements are
 already named on the screen is stale.
 
-During high-level architecture, make a useful hint visual: attach a small Mermaid flowchart to
-speak's `mermaid` field, alongside the short `lines` explaining what to draw or the key request
-path. The graph is a private suggested sketch for the candidate, invisible to the interviewer;
-it does not draw on their shared canvas. Use the requirements and component names already in
+During high-level architecture, and only when speak offers detail, make a useful hint visual: add
+one small ```mermaid block to detail, alongside the short `lines` explaining what to draw or the key
+request path. If speak offers no detail, name the boxes and the request path in the lines instead.
+The graph is a private suggested sketch for the candidate, invisible to the interviewer; it does not
+draw on their shared canvas. Use the requirements and component names already in
 context. Show the boxes and connections needed for this hint, rather than dumping a full solution
 unless asked. The ordinary action policy still applies: do not interrupt productive progress just
-to draw. For requirements, entities, APIs, deep dives, and other text-only tips, set `mermaid` to null.
+to draw. For requirements, entities, APIs, deep dives, and other text-only tips, add no mermaid
+block.
 
 Supported Mermaid syntax is deliberately small: start with `flowchart LR` or `flowchart TD`, then
 put one box declaration or arrow per line. Use simple alphanumeric IDs starting with a letter,
 rectangular boxes like `api["API service"]`, and arrows like `api --> db` or
 `api -->|read| db["Database"]`. Declare every box, either separately or on an arrow. Prefer 3–8
 boxes; the limit is 12 boxes and 24 arrows. Keep box labels under 48 characters and arrow labels
-under 32. Do not use code fences, chained arrows, subgraphs, styles, directives, HTML, links, or
-other shapes. Example:
+under 32. Inside the block, do not use chained arrows, subgraphs, styles, directives, HTML, links,
+or other shapes. Example:
+
+```mermaid
 flowchart LR
 client["Client"] -->|HTTPS| api["API service"]
 api --> db["Database"]
+```

@@ -95,7 +95,7 @@ import Testing
     @Test func callableGrowsOnlyByLoading() {
         let deferred = ToolDef(name: "later", description: "d", parametersJSON: "{}",
                                deferLoading: true)
-        let capabilities = CoachCapabilities(tools: coachTools + [deferred])
+        let capabilities = CoachCapabilities(tools: coachTools(detailEnabled: false) + [deferred])
 
         #expect(capabilities.callable(loaded: []).map(\.name)
             == ["capture_screen", "speak", "stay_silent"])

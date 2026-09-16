@@ -54,7 +54,7 @@ public enum ActivityEvent: Sendable {
     /// guidance while raw failure detail stays in debug.
     case screenViewFailed
     /// Jarvis displayed these coaching lines to the user.
-    case tip(lines: [String], explanation: String? = nil, codeSnippet: CodeSnippet? = nil)
+    case tip(lines: [String], detail: String? = nil)
     /// The brain explicitly chose `stay_silent` for this turn.
     case stayedSilent
     /// The single terminal lifecycle event for a live coaching session. The reason is a closed set,
@@ -92,8 +92,8 @@ public enum ActivityEvent: Sendable {
     case prepNotesUnavailable
 
     var response: ActivityResponse? {
-        guard case .tip(let lines, let explanation, let code) = self else { return nil }
-        return ActivityResponse(lines: lines, explanation: explanation, codeSnippet: code)
+        guard case .tip(let lines, let detail) = self else { return nil }
+        return ActivityResponse(lines: lines, detail: detail)
     }
 
     /// Keep persisted identity, human copy, and the optional screenshot payload in one exhaustive
@@ -116,8 +116,8 @@ public enum ActivityEvent: Sendable {
                 "👁 couldn't view your screen — screen capture failed; check Screen Recording permission",
                 nil
             )
-        case .tip(let lines, let explanation, let code):
-            return (.tip, ActivityResponse(lines: lines, explanation: explanation, codeSnippet: code).message, nil)
+        case .tip(let lines, let detail):
+            return (.tip, ActivityResponse(lines: lines, detail: detail).message, nil)
         case .stayedSilent:
             return (.stayedSilent, "🤫 stayed silent — nothing useful to add", nil)
         case .sessionEnded(let reason):

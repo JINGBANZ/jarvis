@@ -100,20 +100,65 @@ struct LiveE2ETests {
         let launch = try await launcher.launch()
         var results = LiveE2EResults(scenario: "B")
         if let evidence = Self.requireEvidence(launch, &results) {
-            let b1 = launch.attemptChain(forStep: launch.stepIndices(Self.isPress).first)
-            let b2 = launch.attemptChain(forStep: launch.stepIndices(Self.isSay).first)
-            Self.noteStalls([("B1", b1), ("B2", b2)], evidence, &results)
+            let presses = launch.stepIndices(Self.isPress)
+            let says = launch.stepIndices(Self.isSay)
+            guard presses.count == 2, says.count == 1 else {
+                results.check("B", false,
+                              "B has 2 presses and 1 spoken step (saw \(presses.count), \(says.count))")
+                try launcher.finish(results)
+                return
+            }
+            let b1 = launch.attemptChain(forStep: presses[0])      // Show code, on a cold session
+            let b3 = launch.attemptChain(forStep: presses[1])      // Explain more
+            let b2 = launch.attemptChain(forStep: says[0])
+            Self.noteStalls([("B1", b1), ("B3", b3), ("B2", b2)], evidence, &results)
             let b1Rows = evidence.rows(inChain: b1)
-            let b1Loads = b1Rows.compactMap { $0.loadedCapability?.name }
+            // Committed loads only: a retried press preloads again, exactly as a model load behaves,
+            // so a provider stall must not read as two loads (the rule C10 counts by).
+            let b1Loads = b1.filter(\.isCommitted)
+                .flatMap { evidence.rows(in: $0).compactMap { $0.loadedCapability?.name } }
             let b1Screens = b1Rows.filter { $0.kind == "screenViewed" }.count
             let b1Tip = b1Rows.contains { $0.kind == "tip" }
-            // Whether a press with a real screenshot loads (#318) is recorded, not required.
-            let b1Summary = "B1 on Claude Code: \(b1Screens) screen view(s), loads \(b1Loads), "
-                + (b1Tip ? "a tip" : "no tip")
+            let b1Summary = "B1 Show code on Claude Code: \(b1Screens) screen view(s), "
+                + "loads \(b1Loads), " + (b1Tip ? "a tip" : "no tip")
             results.note("C01", b1Summary)
-            results.note("C09", b1Summary)
-            results.note("C17", b1Summary)
+            // The preload puts `coding` in the press's own request, so these are checks now.
+            results.check("C09", b1Loads == ["coding"], "B1 loads exactly coding (saw \(b1Loads))")
+            results.check("C17", b1Loads == ["coding"], "B1's chain loads nothing else (saw \(b1Loads))")
             results.time("B1 press-to-tip", seconds: Self.pressToTip(evidence, b1))
+            results.time("B3 press-to-tip", seconds: Self.pressToTip(evidence, b3))
+
+            // C22: the preload is a replayed `load_skill` call the runner wrote, ahead of the
+            // press's own user messages, and it costs no round trip. Read from the attempt that
+            // answered: a stalled attempt's retry preloads again by design, and `noteStalls` already
+            // records the stall, so the chain as a whole would count it twice.
+            let answeredRequests = b1.filter(\.isCommitted)
+                .flatMap { evidence.traffic(for: $0) }
+                .filter { $0.tag == "coach" }
+            // Distinct call ids: an attempt that needed a second request replays the same preload.
+            let preloads = Set(answeredRequests.flatMap(\.replayedFunctionCalls)
+                .filter { $0.callID.hasPrefix("runner_") && $0.name == "load_skill"
+                    && $0.arguments.contains("coding") }
+                .map(\.callID))
+            let loadRow = b1Rows.firstIndex { $0.kind == "capabilityLoaded" }
+            let tipRow = b1Rows.lastIndex { $0.kind == "tip" }
+            results.check("C22", [
+                (preloads.count == 1,
+                 "B1's answering attempt replays one runner-written load_skill for coding "
+                    + "(saw \(preloads.count))"),
+                (Self.precedes(loadRow, tipRow), "B1's load row precedes its tip"),
+                // Only speak remains permitted on a press once the skill is in hand.
+                (answeredRequests.count == 1,
+                 "B1's answering attempt made one request (saw \(answeredRequests.count))"),
+            ])
+
+            // C24: the Show code reply's own block. The coding skill may legitimately answer with
+            // no code when the approach itself is wrong, so this is recorded, not required.
+            results.note("C24", "B1 delivered \(Self.describeDetail(evidence, b1))")
+            // C25: Explain more always has something to say, and Activity is where it is read from.
+            let b3Detail = Self.deliveredDetail(evidence, b3)
+            results.check("C25", b3Detail?.isEmpty == false,
+                          "B3's Explain more delivered a detail (saw \(Self.describeDetail(evidence, b3)))")
 
             let claude = Self.coachTraffic(evidence, on: .claudeSubscription)
             results.check("C16", [
@@ -123,8 +168,8 @@ struct LiveE2ETests {
                 (!evidence.activity.contains { $0.kind == "prepNotesSearched" }, "no prep search"),
                 (!b2.isEmpty, "B2 ran an attempt"),
             ])
-            results.note("C16", "B2 ended \(b2.last?.terminal ?? "without an attempt"), diagram "
-                + Self.describe(Self.diagram(evidence, b2.last)))
+            results.note("C16", "B2 ended \(b2.last?.terminal ?? "without an attempt"), "
+                + Self.describeDetail(evidence, b2))
             results.check("C18", [
                 (!claude.isEmpty, "Claude Code coach requests were recorded"),
                 (claude.allSatisfy { !($0.instructions ?? "").contains("search_prep_notes") },
@@ -259,19 +304,20 @@ struct LiveE2ETests {
 
         results.check("C11", [
             (a7.allSatisfy { !$0.isEmpty }, "both A7 presses ran an attempt"),
-            (loads(a7[0]).isEmpty && loads(a7[1]).isEmpty, "neither A7 press loads anything"),
+            (loads(a7[0]).isEmpty && loads(a7[1]).isEmpty,
+             "neither A7 press loads anything: coding is already in the session"),
         ])
         let requestsPerPress = a7.map { chain in chain.last.map { evidence.traffic(for: $0).count } ?? 0 }
         if requestsPerPress != [1, 1] {
             results.note("C11", "A7 requests per press: \(requestsPerPress)")
         }
 
-        results.check("C12", Self.hasDiagram(evidence, a4.last),
-                      "A4's speak call carries a diagram (saw \(Self.describe(Self.diagram(evidence, a4.last))))")
-        results.note("C12", "A8 on Codex: \(Self.describe(Self.diagram(evidence, a8.last)))")
+        results.check("C12", Self.hasDiagram(evidence, a4),
+                      "A4's detail carries a mermaid block (saw \(Self.describeDetail(evidence, a4)))")
+        results.note("C12", "A8 on Codex: \(Self.describeDetail(evidence, a8))")
         let unexpectedDiagrams = [("A1", a1), ("A3", a3), ("A5", a5), ("A6", a6),
                                   ("A7", a7[0]), ("A7", a7[1]), ("A9", a9)]
-            .filter { Self.hasDiagram(evidence, $0.1.last) }.map(\.0)
+            .filter { Self.hasDiagram(evidence, $0.1) }.map(\.0)
         results.note("C13", unexpectedDiagrams.isEmpty
             ? "no diagram outside the architecture stage" : "diagram at \(unexpectedDiagrams)")
 
@@ -378,13 +424,36 @@ struct LiveE2ETests {
         ])
         let pressAttempts = [a1] + a7
         results.check("G06", [
-            (evidence.activity.filter { $0.kind == "manualHint" }.count == 3, "three shortcut rows"),
+            (evidence.activity.filter { $0.kind == "manualHint" }.count == 2, "two hint shortcut rows"),
+            (evidence.activity.filter { $0.kind == "manualCode" }.count == 1, "one Show code row"),
             (pressAttempts.allSatisfy { count("screenViewed", in: $0) == 1 && tip($0) != nil },
              "each press viewed the screen once and ended in a tip"),
             (tip(a7[0]) != nil && tip(a7[0])?.message != tip(a7[1])?.message,
-             "the second A7 hint differs from the first"),
+             "the second A7 reply differs from the first"),
             (tip(a1) != nil && tip(a1)?.message != tip(a7[0])?.message, "A7's first hint differs from A1's"),
         ])
+
+        // C22: a press made after `coding` is already loaded preloads nothing.
+        let warmPreloads = a7[1].flatMap { evidence.traffic(for: $0) }
+            .flatMap { $0.replayedFunctionCalls }
+            .filter { $0.callID.hasPrefix("runner_") && $0.name == "load_skill" }
+        results.check("C22", [
+            (warmPreloads.isEmpty, "A7's Show code press replays no runner-written load"),
+            (loads(a7[1]).isEmpty, "A7's Show code press records no load row"),
+        ])
+
+        // C23: every coach request in this scenario declares the session's one composed schema.
+        let coachRequests = evidence.traffic.filter { $0.tag == "coach" }
+        let schemas = Set(coachRequests.compactMap(\.speakParameters))
+        results.check("C23", [
+            (schemas == [["detail", "lines"]],
+             "speak is declared with exactly lines and detail (saw \(schemas.sorted { $0.count < $1.count }))"),
+            (coachRequests.allSatisfy { ($0.instructions ?? "").contains("# Detail") },
+             "every coach request's instructions carry the Detail section"),
+        ])
+
+        // C24: the Show code press's own block, recorded rather than required.
+        results.note("C24", "A7's Show code press delivered \(Self.describeDetail(evidence, a7[1]))")
         Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         try launcher.finish(results)
     }
@@ -451,7 +520,10 @@ struct LiveE2ETests {
     static func pressToTip(_ evidence: Evidence, _ chain: [Attempt]) -> TimeInterval? {
         guard let tip = evidence.rows(inChain: chain).last(where: { $0.kind == "tip" }),
               let tipAt = tip.occurredAt,
-              let press = evidence.activity.last(where: { $0.kind == "manualHint" && $0.index < tip.index }),
+              let press = evidence.activity.last(where: {
+                  ["manualHint", "manualCode", "manualExplanation"].contains($0.kind ?? "")
+                      && $0.index < tip.index
+              }),
               let pressAt = press.occurredAt else { return nil }
         return tipAt - pressAt
     }
@@ -465,23 +537,32 @@ struct LiveE2ETests {
         return tipAt - heardAt
     }
 
-    static func diagram(_ evidence: Evidence, _ attempt: Attempt?) -> LiveSessionEvidence.SpeakDiagram {
+    /// The `detail` of the speak call the attempt's last answering request carried.
+    static func detail(_ evidence: Evidence, _ attempt: Attempt?) -> LiveSessionEvidence.SpeakDetail {
         guard let attempt else { return .noSpeakCall }
-        return evidence.traffic(for: attempt).last { $0.speakDiagram != .noSpeakCall }?.speakDiagram
+        return evidence.traffic(for: attempt).last { $0.speakDetail != .noSpeakCall }?.speakDetail
             ?? .noSpeakCall
     }
 
-    static func hasDiagram(_ evidence: Evidence, _ attempt: Attempt?) -> Bool {
-        if case .present = diagram(evidence, attempt) { return true }
-        return false
+    /// What the overlay actually delivered, read from Activity rather than the response body: a
+    /// refused-then-recovered reply on a `filteredAuto` target may carry no speak call at all.
+    static func deliveredDetail(_ evidence: Evidence, _ chain: [Attempt]) -> String? {
+        evidence.rows(inChain: chain).last { $0.kind == "tip" }?.response?.detail
     }
 
-    static func describe(_ diagram: LiveSessionEvidence.SpeakDiagram) -> String {
-        switch diagram {
-        case .noSpeakCall: "no speak call"
-        case .none: "none"
-        case .present: "present"
-        }
+    /// Whether the delivered detail carries a fence of this kind, using the app's own parser.
+    static func deliveredFences(_ evidence: Evidence, _ chain: [Attempt]) -> [String] {
+        deliveredDetail(evidence, chain).map { ReplyDetail.fences(in: $0).map(\.language) } ?? []
+    }
+
+    static func hasDiagram(_ evidence: Evidence, _ chain: [Attempt]) -> Bool {
+        deliveredFences(evidence, chain).contains("mermaid")
+    }
+
+    static func describeDetail(_ evidence: Evidence, _ chain: [Attempt]) -> String {
+        guard let detail = deliveredDetail(evidence, chain) else { return "no detail delivered" }
+        let fences = ReplyDetail.fences(in: detail).map { $0.language.isEmpty ? "text" : $0.language }
+        return fences.isEmpty ? "prose only" : "fences \(fences)"
     }
 
     /// Skill names listed under the catalog heading of a system prompt.

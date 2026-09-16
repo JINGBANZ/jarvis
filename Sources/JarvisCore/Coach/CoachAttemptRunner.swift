@@ -170,16 +170,21 @@ final class CoachAttemptRunner: @unchecked Sendable {
             disposition: .temporary, identity: .init(), message: message)
     }
 
-    /// A press's prose as its hint: the first three non-empty lines as a `speak` call. Nil unless this
-    /// response may speak and has prose to say.
-    private static func spokenProse(_ text: String?, permitted: [String]?) -> ToolInvocation? {
-        guard permitted?.contains(speakTool.name) == true, let text else { return nil }
-        let lines = Array(text.split(whereSeparator: \.isNewline)
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }
-            .prefix(3))
-        guard !lines.isEmpty else { return nil }
-        return .speak(callId: "runner_" + UUID().uuidString.prefix(8).lowercased(), lines: lines)
+    /// A press's prose as its reply, once asking again has been spent: the first non-empty line is
+    /// the hint and everything after it is the detail, so a press that answered in prose still
+    /// delivers the code block or explanation it wrote. The remainder keeps its Markdown verbatim,
+    /// because that is what the detail box renders. Nil unless this response may speak and has prose
+    /// to say — an automatic turn sends `required`, so `permitted` is nil there and the attempt
+    /// fails instead, leaving the route's retry to cover it.
+    private static func spokenProse(_ text: String?, permitted: [String]?,
+                                    detailEnabled: Bool) -> ToolInvocation? {
+        guard permitted?.contains(speakToolName) == true, let text,
+              let first = text.range(of: #"\S.*"#, options: .regularExpression) else { return nil }
+        let rest = text[first.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
+        return .speak(
+            callId: "runner_" + UUID().uuidString.prefix(8).lowercased(),
+            lines: [text[first].trimmingCharacters(in: .whitespaces)],
+            detail: detailEnabled && !rest.isEmpty ? rest : nil)
     }
 
     /// Run one attempt on one immutable target snapshot.
@@ -244,12 +249,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
             ledger.commit(through: delta.upTo)
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
-        let codeAllowed = attempt.plan.codeEnabled
         // One value describes the tools and offers them, so the prompt cannot name a tool the
         // request does not carry — the state that invited a hallucinated call.
-        let systemPrompt = JarvisPrompts.Coach.system(
-            capabilities: capabilities,
-            explanationsEnabled: attempt.plan.explanationsEnabled, codeEnabled: codeAllowed)
+        let systemPrompt = JarvisPrompts.Coach.system(capabilities: capabilities)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
         if reason.isManual && work.preparedManualReason != reason {
             if let prompt = context.promptLine {
@@ -327,7 +329,31 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // cancellation path discards them, so the next attempt simply loads again — one round trip,
         // and no "already loaded" answer pointing at a conversation that never happened.
         var loadedThisAttempt: Set<String> = []
+        /// Whether this attempt has already spent its one refusal of a plain-text reply.
+        var refusedProse = false
         let alreadyLoaded = runnerLock.withLock { loadedCapabilities }
+
+        // A Show code press preloads the `coding` skill, so moving the code rules into that skill
+        // does not cost the press a round trip: the runner writes the call and result a model load
+        // would have produced, and the model answers with the rules already in hand. It commits,
+        // replays, and survives compaction the same way; a failed attempt discards it with the rest
+        // of its loads, and the retry preloads again. The pair goes BEFORE the press's user messages
+        // so the request still ends in plain user text.
+        if reason == .manualCode,
+           let coding = capabilities.skill(named: JarvisPrompts.Coach.showCodeSkillName),
+           !alreadyLoaded.contains(CoachCapabilities.loadedKey(forSkill: coding.name)) {
+            let callID = "runner_" + UUID().uuidString.prefix(8).lowercased()
+            turnMessages.insert(contentsOf: [
+                .assistantToolCalls([RawToolCall(
+                    id: callID, name: CoachCapabilities.loadSkillName,
+                    argumentsJSON: #"{"name":"\#(coding.name)"}"#)]),
+                .init(role: .tool, text: JarvisPrompts.Coach.loadSkillResult(coding),
+                      toolCallId: callID),
+            ], at: 0)
+            loadedThisAttempt.insert(CoachCapabilities.loadedKey(forSkill: coding.name))
+            jlog("📎 preloaded the \(coding.name) skill for the Show code press")
+            activity?.record(.capabilityLoaded(kind: .skill, name: coding.name))
+        }
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
@@ -346,8 +372,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     let permitted = tools.map(\.name).filter {
                         $0 != staySilentTool.name && $0 != captureScreenTool.name
                     }
-                    toolChoice = iterations == maxToolIterations || permitted == [speakTool.name]
-                        ? .force(speakTool.name)
+                    toolChoice = iterations == maxToolIterations || permitted == [speakToolName]
+                        ? .force(speakToolName)
                         : .allowed(permitted)
                 } else {
                     toolChoice = .required
@@ -437,9 +463,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // Resolve the reply to the one call this iteration runs. A call outside the permitted
                 // set, or one whose arguments did not parse, is answered and the model asked again,
                 // bounded by the cap: a bad reply costs one round trip instead of a failed attempt and
-                // the route's retry delay. A press's prose is its hint instead of that round trip when
-                // the reply calls outside its set or calls nothing, and on the response at the cap
-                // whatever it called, since no later response can recover.
+                // the route's retry delay. A press answered in prose is refused the same way, once
+                // per attempt, since a refusal re-sends the whole request including the screenshot.
+                // Once that round trip is spent, or on the response at the cap, the prose becomes the
+                // reply itself, because no later response can recover.
                 // The response's first call decides, whether or not it parsed: `toolCalls` omits a
                 // call whose arguments did not parse, so its first entry can be a later call than
                 // the one the model made first.
@@ -452,8 +479,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 if let parsed = firstParsed {
                     if permitted?.contains(parsed.toolName) ?? true {
                         call = parsed
-                    } else if let spoken = Self.spokenProse(response.outputText, permitted: permitted) {
-                        jlog("⚠️ \(parsed.toolName) isn't allowed on a shortcut — speaking the reply's text")
+                    } else if atCap, let spoken = Self.spokenProse(
+                        response.outputText, permitted: permitted,
+                        detailEnabled: capabilities.detailEnabled) {
+                        jlog("⚠️ \(parsed.toolName) isn't allowed on a shortcut's last response — "
+                             + "speaking the reply's text")
                         call = spoken
                     } else if atCap {
                         jlog("⚠️ \(parsed.toolName) isn't allowed on a shortcut's last response — "
@@ -473,7 +503,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         continue
                     }
                 } else if let raw = response.rawToolCalls.first {
-                    if atCap, let spoken = Self.spokenProse(response.outputText, permitted: permitted) {
+                    if atCap, let spoken = Self.spokenProse(
+                        response.outputText, permitted: permitted,
+                        detailEnabled: capabilities.detailEnabled) {
                         jlog("⚠️ \(raw.name) couldn't run on the last response — speaking the reply's text")
                         call = spoken
                     } else if let tool = capabilities.tool(named: raw.name) {
@@ -501,8 +533,25 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: requestPhase)
                         continue
                     }
-                } else if let spoken = Self.spokenProse(response.outputText, permitted: permitted) {
-                    jlog("⚠️ reply had no tool call — speaking its text as the hint")
+                } else if !atCap, !refusedProse,
+                          permitted?.contains(speakToolName) == true,
+                          let prose = response.outputText,
+                          !prose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    // Prose is not an action. Answer it and ask again, exactly once: the refusal
+                    // re-sends the whole uncached request, screenshot included, so it is worth one
+                    // round trip and no more. `CoachHistory.commit` drops both messages, or the
+                    // nudge would replay on every later request and reach the summarizer.
+                    jlog("⚠️ reply had no tool call — asking for the speak call again")
+                    refusedProse = true
+                    turnMessages.append(.init(role: .assistant, text: prose))
+                    turnMessages.append(.user(JarvisPrompts.Coach.replyMustCallSpeak(
+                        detailEnabled: capabilities.detailEnabled)))
+                    requestSequence += 1
+                    continue
+                } else if let spoken = Self.spokenProse(
+                    response.outputText, permitted: permitted,
+                    detailEnabled: capabilities.detailEnabled) {
+                    jlog("⚠️ reply still had no tool call — speaking its text as the reply")
                     call = spoken
                 } else {
                     jlog("⚠️ required coaching action missing — scheduling fresh attempt")
@@ -572,53 +621,43 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines, let mermaid, let requestedExplanation, let requestedCode):
+                case .speak(let callID, let lines, let requestedDetail):
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before speaking")
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    let diagram = mermaid.flatMap(DiagramHint.init)
-                    if mermaid != nil && diagram == nil {
-                        jlog("Diagram hint omitted: unsupported graph")
-                    }
-                    let delivery = await MainActor.run { () -> (accepted: Bool, explanation: String?, code: CodeSnippet?) in
-                        guard !Task.isCancelled else { return (false, nil, nil) }
-                        let code = self.overlay.deliverCodeSnippet(codeAllowed ? requestedCode : nil)
-                        let detail = self.overlay.deliver(lines, perLineSeconds: lines.map {
+                    // A session without the box never declared `detail`, so anything under that name
+                    // is scrubbed before it can reach the overlay, history, or Activity.
+                    let parsedDetail = capabilities.detailEnabled
+                        ? requestedDetail.flatMap(ReplyDetail.init(markdown:))
+                        : nil
+                    for reason in parsedDetail?.dropped ?? [] { jlog("Detail: \(reason)") }
+                    let delivery = await MainActor.run { () -> (accepted: Bool, detail: ReplyDetail?) in
+                        guard !Task.isCancelled else { return (false, nil) }
+                        return (true, self.overlay.deliver(lines, perLineSeconds: lines.map {
                             OverlayTiming.displaySeconds(for: $0, config: self.config)
-                        }, diagram: diagram, explanation: attempt.plan.explanationsEnabled ? requestedExplanation : nil)
-                        return (true, detail, code)
+                        }, detail: parsedDetail))
                     }
                     guard delivery.accepted else { return .cancelled }
-                    let explanation = delivery.explanation
-                    let code = delivery.code
-                    activity?.record(.tip(lines: lines, explanation: explanation, codeSnippet: code))
+                    let delivered = delivery.detail
+                    activity?.record(.tip(lines: lines, detail: delivered?.deliveredMarkdown))
                     // Only the selected call executes; extra provider calls were never delivered.
-                    // History describes delivered optional content, including independently enabled code.
-                    // Parsed values contain only JSON primitives, so encoding cannot fail.
-                    let codeArguments: [String: Any]? = code.map {
-                        ["language": $0.language, "placement": $0.placement, "code": $0.code,
-                         "highlightedLines": $0.highlightedLines]
+                    // History describes the detail the box actually showed, so a block the runtime
+                    // dropped is not read back as if the user saw it.
+                    var arguments: [String: Any] = ["lines": lines]
+                    if capabilities.detailEnabled {
+                        arguments["detail"] = delivered?.deliveredMarkdown ?? NSNull()
                     }
-                    // `mermaid` is always present because one speak schema declares it on every
-                    // brain; null records that no diagram was delivered, which is what the model
-                    // should read back when the runtime dropped or never rendered one.
-                    let arguments: [String: Any] = [
-                        "lines": lines,
-                        "mermaid": diagram == nil ? NSNull() : mermaid as Any,
-                        "explanation": explanation as Any? ?? NSNull(),
-                        "codeSnippet": codeArguments as Any? ?? NSNull(),
-                    ]
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
                     // Built from the delivered call rather than copied from the response, so a hint
                     // spoken from prose commits a call its result answers.
                     turnMessages.append(.assistantToolCalls([RawToolCall(
-                        id: callID, name: speakTool.name,
+                        id: callID, name: speakToolName,
                         argumentsJSON: String(decoding: data, as: UTF8.self))]))
                     turnMessages.append(.init(
                         role: .tool,
-                        text: JarvisPrompts.Coach.tipShown,
+                        text: JarvisPrompts.Coach.tipShown(dropped: parsedDetail?.dropped ?? []),
                         toolCallId: callID))
                     history.commit(turnMessages)
                     commitLoads(loadedThisAttempt)

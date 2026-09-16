@@ -2,23 +2,23 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-@Suite struct ExplainMoreTests {
-    @Test func parserKeepsExplanationAndIgnoresMalformedOptionalDetail() throws {
+@Suite struct ExplainMoreAndDetailTests {
+    @Test func parserKeepsDetailAndIgnoresAMalformedOne() throws {
         let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
-            #"{"lines":["Keep a moving range."],"explanation":"  Grow the right edge.\n\nMove the left edge past a repeat.  "}"#)
-        guard case .speak(_, let lines, _, let explanation, _) = call else {
+            #"{"lines":["Keep a moving range."],"detail":"  Grow the right edge.\n\nMove the left edge past a repeat.  "}"#)
+        guard case .speak(_, let lines, let detail) = call else {
             Issue.record("Expected a speak call"); return
         }
         #expect(lines == ["Keep a moving range."])
-        #expect(explanation == "Grow the right edge.\n\nMove the left edge past a repeat.")
-        for detail in ["null", "42", "\"   \""] {
+        #expect(detail == "Grow the right edge.\n\nMove the left edge past a repeat.")
+        for value in ["null", "42", "\"   \""] {
             let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
-                "{\"lines\":[\"Still useful\"],\"explanation\":\(detail)}")
-            guard case .speak(_, let lines, _, let explanation, _) = call else {
-                Issue.record("Optional detail must not discard a valid hint"); continue
+                "{\"lines\":[\"Still useful\"],\"detail\":\(value)}")
+            guard case .speak(_, let lines, let detail) = call else {
+                Issue.record("A malformed detail must not discard a valid hint"); continue
             }
             #expect(lines == ["Still useful"])
-            #expect(explanation == nil)
+            #expect(detail == nil)
         }
     }
 
@@ -38,14 +38,14 @@ import Testing
     }
 
     @Test(arguments: [TriggerReason.manualExplanation, .turnEnd])
-    func explanationFlowsThroughHistoryAndOverlayForBothTriggers(_ reason: TriggerReason) async throws {
-        let args = #"{"lines":["Track the current range."],"explanation":"A window is the range you are checking.\n\nFor abca, drop the first a when the second a arrives."}"#
+    func detailFlowsThroughHistoryAndOverlayForBothTriggers(_ reason: TriggerReason) async throws {
+        let args = #"{"lines":["Track the current range."],"detail":"A window is the range you are checking.\n\nFor abca, drop the first a when the second a arrives."}"#
         let response = BrainResponse(
             toolCalls: [try #require(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: args))],
             rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
         let brain = ScriptedBrain(script: [response])
         let transcript = RollingTranscript()
-        let box = ExplanationSink()
+        let box = DetailSink()
         let caption = FakeOverlay()
         let screen = FakeScreen()
         let driver = makeDriver(brain: brain, transcript: transcript, screen: screen,
@@ -60,7 +60,7 @@ import Testing
         #expect(messages.contains { $0.text?.contains("left edge") == true })
         #expect(messages.contains { $0.toolCalls?.contains { $0.argumentsJSON.contains("For abca") } == true })
         #expect(caption.rendered.last == ["Track the current range."])
-        #expect(box.explanation?.contains("For abca") == true)
+        #expect(box.detailText?.contains("For abca") == true)
         if reason == .manualExplanation {
             #expect(screen.captureCount == 2)
             #expect(brain.toolChoices.last == .force("speak"))
@@ -85,7 +85,7 @@ import Testing
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "Let's work through this problem", at: 0))
         let screen = FakeScreen()
-        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: FakeOverlay(), codeEnabled: true)
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: FakeOverlay())
         let task = Task { await driver.handleTrigger(.turnEnd) }
         await gate.waitUntilEntered()
         let first: TriggerReason = latest == .manualHint ? .manualExplanation : .manualHint
@@ -95,7 +95,7 @@ import Testing
         await gate.release()
         #expect(await task.value == .spoke)
         try #require(brain.calls.count == 2)
-        #expect(brain.calls.last?.first?.text?.contains("# Code accompanies") == true)
+        #expect(brain.calls.last?.first?.text?.contains("# Detail") == true)
         let userText = brain.calls[1].filter { $0.role == .user }.compactMap(\.text).joined(separator: " ")
         let expected = latest == .manualCode ? "Show code" : (latest == .manualHint ? "hint shortcut" : "Explain more")
         #expect(userText.contains(expected))
@@ -103,71 +103,57 @@ import Testing
         #expect(screen.captureCount == 1)
     }
 
-    @Test func disablingExplanationsPreservesBindingAndPersistsAcrossLaunches() {
-        let suite = "ExplanationToggle.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let preferences = ExplanationPreferences(defaults: defaults)
-        let shortcut = HotkeyPreferences(defaults: defaults, shortcut: .explainMore)
-        let chosen = HotkeyCombination(keyCode: 5, modifiers: [.command, .shift])
-        shortcut.combination = chosen
-        preferences.isEnabled = false
-        #expect(!ExplanationPreferences(defaults: defaults).isEnabled)
-        #expect(shortcut.combination == chosen)
-        preferences.isEnabled = true
-        #expect(ExplanationPreferences(defaults: defaults).isEnabled)
-        #expect(shortcut.combination == chosen)
-    }
-
+    /// A session without the box keeps its hints and never delivers a detail; only a new Start can
+    /// change that, because the capability set is fixed at Start (#273).
     @Test(arguments: [TriggerReason.manualHint, .turnEnd])
-    func disabledSessionKeepsHintsAndRequiresNewStartToEnable(_ hintReason: TriggerReason) async {
+    func aBoxlessSessionKeepsHintsAndRequiresANewStartToEnableDetail(_ hintReason: TriggerReason) async {
         let brain = ScriptedBrain(script: [.init(toolCalls: [
-            .speak(callId: "s", lines: ["Track the range."], explanation: "Move its left edge.")])])
-        let box = ExplanationSink()
+            .speak(callId: "s", lines: ["Track the range."], detail: "Move its left edge.")])])
+        let box = DetailSink()
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "I do not understand the sliding window", at: 0))
         let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box,
-                                explanationsEnabled: false)
+                                detailEnabled: false)
         #expect(await driver.handleTrigger(hintReason) == .spoke)
         #expect(box.lines == ["Track the range."])
-        #expect(box.explanation == nil)
-        driver.updatePlan(SessionPlan(revision: 2, screen: SessionPlan.default.screen, explanationsEnabled: true))
+        #expect(box.detailText == nil)
+        driver.updatePlan(SessionPlan(revision: 2, screen: SessionPlan.default.screen))
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(box.explanation == nil)
+        #expect(box.detailText == nil)
         #expect(brain.calls[0].first?.text == brain.calls[1].first?.text)
-        #expect(brain.calls[0].first?.text?.contains("# Explain when understanding is missing") == false)
+        #expect(brain.calls[0].first?.text?.contains("# Detail") == false)
         let restarted = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box)
         #expect(await restarted.handleTrigger(.manualExplanation) == .spoke)
-        #expect(box.explanation == "Move its left edge.")
-        #expect(brain.calls.last?.first?.text?.contains("# Explain when understanding is missing") == true)
+        #expect(box.detailText == "Move its left edge.")
+        #expect(brain.calls.last?.first?.text?.contains("# Detail") == true)
     }
 
-    @Test func explanationCapabilitySurvivesPlanEdits() async {
+    @Test func theDetailCapabilitySurvivesPlanEdits() async {
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [
-            .speak(callId: "s", lines: ["Track the range."], explanation: "Move its left edge.")]))
-        let box = ExplanationSink()
+            .speak(callId: "s", lines: ["Track the range."], detail: "Move its left edge.")]))
+        let box = DetailSink()
         let driver = makeDriver(brain: brain, transcript: RollingTranscript(), screen: FakeScreen(), overlay: box)
         let task = Task { await driver.handleTrigger(.manualExplanation) }
         await gate.waitUntilEntered()
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen))
         await gate.release()
         #expect(await task.value == .spoke)
-        #expect(box.explanation == "Move its left edge.")
+        #expect(box.detailText == "Move its left edge.")
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(box.explanation == "Move its left edge.")
+        #expect(box.detailText == "Move its left edge.")
     }
 
-    @Test func disabledSessionPreservesConversationPrefixAcrossToolContinuation() async {
+    @Test func aBoxlessSessionPreservesTheConversationPrefixAcrossAToolContinuation() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "capture")],
                   rawToolCalls: [.init(id: "capture", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s", lines: ["Check the loop bound."], explanation: "Fuller detail.")])
+            .init(toolCalls: [.speak(callId: "s", lines: ["Check the loop bound."], detail: "Fuller detail.")])
         ])
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "Can you check the loop on my screen?", at: 0))
-        let box = ExplanationSink()
-        let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box, explanationsEnabled: false)
+        let box = DetailSink()
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box, detailEnabled: false)
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 2)
         guard brain.calls.count == 2 else { return }
@@ -176,7 +162,7 @@ import Testing
         let continuedPrefix = brain.calls[1].prefix(first.count).map { $0.role.rawValue + ":" + ($0.text ?? "") }
         #expect(continuedPrefix == first)
         #expect(box.lines == ["Check the loop bound."])
-        #expect(box.explanation == nil)
+        #expect(box.detailText == nil)
     }
 
     @Test @MainActor func queuedExplanationDoesNotStrandNextHint() async {
@@ -200,24 +186,27 @@ import Testing
     }
 
     private func makeDriver(brain: BrainClient, transcript: RollingTranscript,
-                            screen: ScreenCapturing, overlay: OverlayRendering, explanationsEnabled: Bool = true, codeEnabled: Bool = false) -> CoachDriver {
+                            screen: ScreenCapturing, overlay: OverlayRendering,
+                            detailEnabled: Bool = true) -> CoachDriver {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return CoachDriver(config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: screen, overlay: overlay, clock: ManualClock(now: 100),
-            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled))
+            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen),
+            capabilities: CoachCapabilities.compose(
+                disabledTools: [], prepSourcesConfigured: false, detailEnabled: detailEnabled))
     }
 }
 
 // Read only after the awaited driver finishes delivery, with no concurrent mutations.
-private final class ExplanationSink: OverlayRendering {
+private final class DetailSink: OverlayRendering, @unchecked Sendable {
     @MainActor var acceptsDetail: Bool { true }
-    var explanation: String?
+    var detailText: String?
     var lines: [String] = []
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}
-    func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
+    func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?) {
         self.lines = lines
-        self.explanation = explanation
+        self.detailText = detail.map { String($0.prose.characters) }
     }
 }
 private final class MissingExplanationScreen: ScreenCapturing, Sendable {

@@ -9,9 +9,6 @@ final class OverlaySection: NSObject, SettingsSection {
     let fillsTab = true
 
     private let onBoxEnabledChanged: (Bool) -> Void
-    private let codePreferences: CodePreferences
-    private let onCodeChanged: () -> Void
-    private var codeView: OverlaySurfaceSettingsView?
     private let appearance: OverlayAppearance
     private let caption: OverlayCaptionApplying
     private let box: OverlayBoxApplying
@@ -22,10 +19,7 @@ final class OverlaySection: NSObject, SettingsSection {
     private var boxView: OverlaySurfaceSettingsView?
 
     init(appearance: OverlayAppearance, caption: OverlayCaptionApplying, box: OverlayBoxApplying,
-         codePreferences: CodePreferences, onCodeChanged: @escaping () -> Void,
          onBoxEnabledChanged: @escaping (Bool) -> Void = { _ in }) {
-        self.codePreferences = codePreferences
-        self.onCodeChanged = onCodeChanged
         self.onBoxEnabledChanged = onBoxEnabledChanged
         self.appearance = appearance
         self.caption = caption
@@ -60,13 +54,6 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityAction: #selector(captionOpacityChanged),
             opacityAccessibilityLabel: "Overlay caption background opacity")
 
-        let diagramToggle = NSSwitch()
-        diagramToggle.state = appearance.boxDiagramsEnabled ? .on : .off
-        diagramToggle.target = self
-        diagramToggle.action = #selector(diagramsEnabledChanged)
-        diagramToggle.setAccessibilityLabel("Show diagrams")
-        diagramToggle.sizeToFit()
-
         boxView = makeSurface(
             title: "Overlay Box",
             description: "A persistent history of recent Jarvis messages.",
@@ -83,25 +70,20 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityRange: Defaults.Overlay.Box.opacityRange,
             opacityAction: #selector(boxOpacityChanged),
             opacityAccessibilityLabel: "Overlay box opacity",
-            diagramToggle: diagramToggle)
-
-        codeView = makeSurface(
-            title: "Show code with hints",
-            description: "Automatic coding snippets · takes effect next Start",
-            symbolName: "chevron.left.forwardslash.chevron.right",
-            tint: .systemOrange,
-            enabled: codePreferences.isEnabled,
-            enableAction: #selector(codeEnabledChanged),
-            sizeValue: appearance.codeFontSize,
-            sizeRange: Defaults.Overlay.Code.fontSizeRange,
-            sizeAction: #selector(codeSizeChanged),
-            sizeAccessibilityLabel: "Code text size",
-            opacityTitle: "Background opacity",
-            opacityValue: appearance.codeBackgroundOpacity,
-            opacityRange: Defaults.Overlay.Code.opacityRange,
-            opacityAction: #selector(codeOpacityChanged),
-            opacityAccessibilityLabel: "Code background opacity")
-        if let codeView { boxView?.addSubview(codeView) }
+            // The detail box has no switch of its own: whether a reply may carry one at all is the
+            // Overlay Box switch's decision, and the model judges when a detail helps.
+            subordinate: .init(
+                title: "Code, diagrams, and explanations",
+                sizeTitle: "Detail text size",
+                sizeValue: appearance.detailFontSize,
+                sizeRange: Defaults.Overlay.Detail.fontSizeRange,
+                sizeAction: #selector(detailSizeChanged),
+                sizeAccessibilityLabel: "Detail text size",
+                opacityTitle: "Detail background opacity",
+                opacityValue: appearance.detailBackgroundOpacity,
+                opacityRange: Defaults.Overlay.Detail.opacityRange,
+                opacityAction: #selector(detailOpacityChanged),
+                opacityAccessibilityLabel: "Detail background opacity"))
 
         if let captionView { document.addSubview(captionView) }
         if let boxView { document.addSubview(boxView) }
@@ -132,7 +114,7 @@ final class OverlaySection: NSObject, SettingsSection {
         opacityRange: ClosedRange<Double>,
         opacityAction: Selector,
         opacityAccessibilityLabel: String,
-        diagramToggle: NSSwitch? = nil
+        subordinate: OverlaySurfaceSettingsView.SubordinateSliders? = nil
     ) -> OverlaySurfaceSettingsView {
         OverlaySurfaceSettingsView(
             title: title,
@@ -151,16 +133,15 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityRange: opacityRange,
             opacityAction: opacityAction,
             opacityAccessibilityLabel: opacityAccessibilityLabel,
-            diagramToggle: diagramToggle)
+            subordinate: subordinate)
     }
 
     private func relayout() {
-        guard let scrollView, let documentView, let captionView, let boxView, let codeView else { return }
+        guard let scrollView, let documentView, let captionView, let boxView else { return }
 
         let viewport = scrollView.contentView.bounds.size
         let width = max(320, viewport.width)
-        let codeHeight = appearance.boxEnabled ? codeView.preferredHeight : 0
-        let boxHeight = boxView.preferredHeight + codeHeight
+        let boxHeight = boxView.preferredHeight
         let contentHeight =
             captionView.preferredHeight + SettingsStyle.sectionSpacing + boxHeight
         let documentHeight = max(viewport.height, contentHeight)
@@ -178,9 +159,6 @@ final class OverlaySection: NSObject, SettingsSection {
             y: top - boxHeight,
             width: width,
             height: boxHeight)
-        // Code remains subordinate to Box; the section owns the composition and visibility.
-        codeView.isHidden = !appearance.boxEnabled
-        codeView.frame = NSRect(x: 0, y: 0, width: width, height: codeHeight)
         revealTop()
     }
 
@@ -193,8 +171,6 @@ final class OverlaySection: NSObject, SettingsSection {
     }
 
     func didBecomeActive() {
-        codeView?.updateEnabledState(codePreferences.isEnabled)
-        box.setCodePreviewEnabled(codePreferences.isEnabled)
         relayout()
         caption.showAppearancePreview(appearance.captionEnabled)
         box.showAppearancePreview(appearance.boxEnabled)
@@ -214,19 +190,12 @@ final class OverlaySection: NSObject, SettingsSection {
         relayout()
     }
 
-    @objc private func diagramsEnabledChanged(_ sender: NSSwitch) {
-        appearance.boxDiagramsEnabled = sender.state == .on
-        box.setDiagramsEnabled(appearance.boxDiagramsEnabled)
-    }
-
     @objc private func boxEnabledChanged(_ sender: NSSwitch) {
         let enabled = sender.state == .on
         appearance.boxEnabled = enabled
         onBoxEnabledChanged(enabled)
         box.setEnabled(enabled)
         box.showAppearancePreview(enabled)
-        codeView?.updateEnabledState(codePreferences.isEnabled)
-        box.setCodePreviewEnabled(codePreferences.isEnabled)
         boxView?.updateEnabledState(enabled)
         relayout()
     }
@@ -259,34 +228,27 @@ final class OverlaySection: NSObject, SettingsSection {
         updateReadouts()
     }
 
-    @objc private func codeEnabledChanged(_ sender: NSSwitch) {
-        codePreferences.isEnabled = sender.state == .on
-        onCodeChanged()
-        codeView?.updateEnabledState(codePreferences.isEnabled)
-        box.setCodePreviewEnabled(codePreferences.isEnabled)
-        relayout()
-    }
-
-    @objc private func codeSizeChanged(_ sender: NSSlider) {
-        appearance.codeFontSize = sender.doubleValue.rounded()
-        sender.doubleValue = appearance.codeFontSize
-        box.setCodeFontSize(appearance.codeFontSize)
+    @objc private func detailSizeChanged(_ sender: NSSlider) {
+        appearance.detailFontSize = sender.doubleValue.rounded()
+        sender.doubleValue = appearance.detailFontSize
+        box.setDetailFontSize(appearance.detailFontSize)
         updateReadouts()
     }
 
-    @objc private func codeOpacityChanged(_ sender: NSSlider) {
-        appearance.codeBackgroundOpacity = (sender.doubleValue * 100).rounded() / 100
-        sender.doubleValue = appearance.codeBackgroundOpacity
-        box.setCodeBackgroundOpacity(appearance.codeBackgroundOpacity)
+    @objc private func detailOpacityChanged(_ sender: NSSlider) {
+        appearance.detailBackgroundOpacity = (sender.doubleValue * 100).rounded() / 100
+        sender.doubleValue = appearance.detailBackgroundOpacity
+        box.setDetailBackgroundOpacity(appearance.detailBackgroundOpacity)
         updateReadouts()
     }
 
     private func updateReadouts() {
-        let codePoints = Int(appearance.codeFontSize.rounded())
-        let codePercent = Int((appearance.codeBackgroundOpacity * 100).rounded())
-        codeView?.updateReadouts(size: "\(codePoints) pt", opacity: "\(codePercent)%")
-        codeView?.sizeSlider.setAccessibilityValueDescription("\(codePoints) points")
-        codeView?.opacitySlider.setAccessibilityValueDescription("\(codePercent) percent")
+        let detailPoints = Int(appearance.detailFontSize.rounded())
+        let detailPercent = Int((appearance.detailBackgroundOpacity * 100).rounded())
+        boxView?.updateSubordinateReadouts(size: "\(detailPoints) pt", opacity: "\(detailPercent)%")
+        boxView?.subordinateSizeSlider?.setAccessibilityValueDescription("\(detailPoints) points")
+        boxView?.subordinateOpacitySlider?
+            .setAccessibilityValueDescription("\(detailPercent) percent")
         let captionPoints = Int(appearance.captionFontSize.rounded())
         let captionPercent = Int((appearance.captionBackgroundOpacity * 100).rounded())
         captionView?.updateReadouts(

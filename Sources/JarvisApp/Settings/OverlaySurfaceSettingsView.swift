@@ -41,9 +41,28 @@ final class OverlaySurfaceSettingsView: NSView {
         }
     }
 
+    /// The size and opacity of a second, subordinate surface shown in the same card. The Overlay
+    /// Box uses it for the detail box, which has no switch of its own: the box's switch is the one
+    /// that decides whether a reply may carry a detail at all.
+    struct SubordinateSliders {
+        let title: String
+        let sizeTitle: String
+        let sizeValue: Double
+        let sizeRange: ClosedRange<Double>
+        let sizeAction: Selector
+        let sizeAccessibilityLabel: String
+        let opacityTitle: String
+        let opacityValue: Double
+        let opacityRange: ClosedRange<Double>
+        let opacityAction: Selector
+        let opacityAccessibilityLabel: String
+    }
+
     let toggle = NSSwitch()
     let sizeSlider: NSSlider
     let opacitySlider: NSSlider
+    private(set) var subordinateSizeSlider: NSSlider?
+    private(set) var subordinateOpacitySlider: NSSlider?
 
     private let card = SettingsCardView(frame: .zero)
     private let icon = NSImageView()
@@ -54,11 +73,13 @@ final class OverlaySurfaceSettingsView: NSView {
     private let opacityControl: SliderControlView
     private let sizeRow: SettingsRowView
     private let opacityRow: SettingsRowView
-    private let diagramRow: SettingsRowView?
+    private var subordinateSizeControl: SliderControlView?
+    private var subordinateOpacityControl: SliderControlView?
+    private var subordinateRows: [SettingsRowView] = []
 
     var preferredHeight: CGFloat {
         guard toggle.state == .on else { return Self.headerHeight }
-        return Self.headerHeight + SettingsStyle.rowHeight * (diagramRow == nil ? 2 : 3)
+        return Self.headerHeight + SettingsStyle.rowHeight * CGFloat(2 + subordinateRows.count)
     }
 
     init(
@@ -78,7 +99,7 @@ final class OverlaySurfaceSettingsView: NSView {
         opacityRange: ClosedRange<Double>,
         opacityAction: Selector,
         opacityAccessibilityLabel: String,
-        diagramToggle: NSSwitch? = nil
+        subordinate: SubordinateSliders? = nil
     ) {
         sizeSlider = NSSlider(
             value: sizeValue,
@@ -103,10 +124,6 @@ final class OverlaySurfaceSettingsView: NSView {
             controlView: opacityControl,
             controlSize: NSSize(width: 310, height: 32))
 
-        diagramRow = diagramToggle.map {
-            SettingsRowView(title: "Show diagrams", detail: "Private system-design sketches",
-                            controlView: $0, controlSize: $0.frame.size)
-        }
         super.init(frame: NSRect(x: 0, y: 0, width: 712, height: 174))
         autoresizingMask = [.width]
 
@@ -133,6 +150,31 @@ final class OverlaySurfaceSettingsView: NSView {
 
         sizeSlider.setAccessibilityLabel(sizeAccessibilityLabel)
         opacitySlider.setAccessibilityLabel(opacityAccessibilityLabel)
+        if let subordinate {
+            let size = NSSlider(value: subordinate.sizeValue,
+                                minValue: subordinate.sizeRange.lowerBound,
+                                maxValue: subordinate.sizeRange.upperBound,
+                                target: target, action: subordinate.sizeAction)
+            size.setAccessibilityLabel(subordinate.sizeAccessibilityLabel)
+            let opacity = NSSlider(value: subordinate.opacityValue,
+                                   minValue: subordinate.opacityRange.lowerBound,
+                                   maxValue: subordinate.opacityRange.upperBound,
+                                   target: target, action: subordinate.opacityAction)
+            opacity.setAccessibilityLabel(subordinate.opacityAccessibilityLabel)
+            let sizeControl = SliderControlView(slider: size)
+            let opacityControl = SliderControlView(slider: opacity)
+            subordinateSizeSlider = size
+            subordinateOpacitySlider = opacity
+            subordinateSizeControl = sizeControl
+            subordinateOpacityControl = opacityControl
+            subordinateRows = [
+                SettingsRowView(title: subordinate.sizeTitle, detail: subordinate.title,
+                                controlView: sizeControl,
+                                controlSize: NSSize(width: 310, height: 32)),
+                SettingsRowView(title: subordinate.opacityTitle, controlView: opacityControl,
+                                controlSize: NSSize(width: 310, height: 32)),
+            ]
+        }
         updateEnabledState(enabled)
 
         guard let content = card.contentView else { return }
@@ -141,7 +183,7 @@ final class OverlaySurfaceSettingsView: NSView {
         ] {
             content.addSubview(view)
         }
-        if let diagramRow { content.addSubview(diagramRow) }
+        for row in subordinateRows { content.addSubview(row) }
         addSubview(card)
         card.onLayout = { [weak self] in self?.layoutContent() }
     }
@@ -156,13 +198,18 @@ final class OverlaySurfaceSettingsView: NSView {
         stateLabel.stringValue = enabled ? "On" : "Off"
         sizeRow.isHidden = !enabled
         opacityRow.isHidden = !enabled
-        diagramRow?.isHidden = !enabled
+        for row in subordinateRows { row.isHidden = !enabled }
         needsLayout = true
     }
 
     func updateReadouts(size: String, opacity: String) {
         sizeControl.readout.stringValue = size
         opacityControl.readout.stringValue = opacity
+    }
+
+    func updateSubordinateReadouts(size: String, opacity: String) {
+        subordinateSizeControl?.readout.stringValue = size
+        subordinateOpacityControl?.readout.stringValue = opacity
     }
 
     override func layout() {
@@ -207,11 +254,13 @@ final class OverlaySurfaceSettingsView: NSView {
                 y: headerY - SettingsStyle.rowHeight * 2,
                 width: content.bounds.width,
                 height: SettingsStyle.rowHeight)
-            diagramRow?.frame = NSRect(
-                x: 0,
-                y: headerY - SettingsStyle.rowHeight * 3,
-                width: content.bounds.width,
-                height: SettingsStyle.rowHeight)
+            for (index, row) in subordinateRows.enumerated() {
+                row.frame = NSRect(
+                    x: 0,
+                    y: headerY - SettingsStyle.rowHeight * CGFloat(3 + index),
+                    width: content.bounds.width,
+                    height: SettingsStyle.rowHeight)
+            }
         }
     }
 }

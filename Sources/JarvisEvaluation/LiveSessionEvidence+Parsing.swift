@@ -19,7 +19,8 @@ extension LiveSessionEvidence {
                 occurredAt: (object["o"] as? NSNumber)?.doubleValue,
                 loadedCapability: kind == ActivityEvent.Kind.capabilityLoaded.rawValue
                     ? loadedCapability(fromMessage: message)
-                    : nil)
+                    : nil,
+                response: (object["response"] as? [String: Any]).flatMap(activityResponse))
         }
     }
 
@@ -174,23 +175,40 @@ extension LiveSessionEvidence {
                 guard item["type"] as? String == "function_call_output" else { return nil }
                 return item["call_id"] as? String ?? ""
             },
-            speakDiagram: speakDiagram(inResponse: object["response"]))
+            speakParameters: speakParameters(in: tools),
+            speakDetail: speakDetail(inResponse: object["response"]))
     }
 
-    /// The speak call's `mermaid` argument. The response is the raw Responses body, whose `output`
+    /// The property names of the declared `speak` tool, sorted, so a checker can assert the schema
+    /// a session composed rather than the one it hoped for.
+    static func speakParameters(in tools: [[String: Any]]) -> [String]? {
+        guard let speak = tools.first(where: { $0["name"] as? String == speakToolName }),
+              let parameters = speak["parameters"] as? [String: Any],
+              let properties = parameters["properties"] as? [String: Any]
+        else { return nil }
+        return properties.keys.sorted()
+    }
+
+    /// The speak call's `detail` argument. The response is the raw Responses body, whose `output`
     /// lists calls as `function_call` items with JSON-string `arguments`. A null and an absent
-    /// `mermaid` both read as `.none`, as `ToolInvocation.parse` reads them. A speak call the runner
+    /// `detail` both read as `.none`, as `ToolInvocation.parse` reads them. A speak call the runner
     /// made from a press's prose holds no call in the response, so it reads as `.noSpeakCall`: this
     /// reports what the model wrote.
-    static func speakDiagram(inResponse response: Any?) -> SpeakDiagram {
+    static func speakDetail(inResponse response: Any?) -> SpeakDetail {
         guard let output = (response as? [String: Any])?["output"] as? [[String: Any]],
               let call = output.first(where: {
-                  $0["type"] as? String == "function_call" && $0["name"] as? String == speakTool.name
+                  $0["type"] as? String == "function_call" && $0["name"] as? String == speakToolName
               })
         else { return .noSpeakCall }
         let arguments = (call["arguments"] as? String).flatMap(jsonObject)
-        guard let mermaid = arguments?["mermaid"] as? String else { return .none }
-        return .present(mermaid)
+        guard let detail = arguments?["detail"] as? String else { return .none }
+        return .present(detail)
+    }
+
+    /// The persisted `ActivityResponse` of a `tip` row, decoded back through its own `Codable`.
+    static func activityResponse(_ object: [String: Any]) -> ActivityResponse? {
+        guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
+        return try? JSONDecoder().decode(ActivityResponse.self, from: data)
     }
 
     private static func jsonObject(_ text: String) -> [String: Any]? {

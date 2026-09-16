@@ -11,36 +11,26 @@ import Foundation
         return d
     }
 
-    @Test func diagramsDefaultOnAndPersistAnExplicitOff() {
+    @Test func detailAppearancePersistsIndependentlyAndRejectsNonfiniteValues() {
         let defaults = freshDefaults()
         let appearance = OverlayAppearance(defaults: defaults)
-        #expect(appearance.boxDiagramsEnabled)
-        appearance.boxDiagramsEnabled = false
-        #expect(!OverlayAppearance(defaults: defaults).boxDiagramsEnabled)
-        appearance.boxDiagramsEnabled = true
-        #expect(OverlayAppearance(defaults: defaults).boxDiagramsEnabled)
-    }
-
-    @Test func codeAppearancePersistsIndependentlyAndRejectsNonfiniteValues() {
-        let defaults = freshDefaults()
-        let appearance = OverlayAppearance(defaults: defaults)
-        #expect(appearance.codeFontSize == Defaults.Overlay.Code.fontSize)
-        #expect(appearance.codeBackgroundOpacity == Defaults.Overlay.Code.opacity)
-        appearance.codeFontSize = 14
-        appearance.codeBackgroundOpacity = 0.2
+        #expect(appearance.detailFontSize == Defaults.Overlay.Detail.fontSize)
+        #expect(appearance.detailBackgroundOpacity == Defaults.Overlay.Detail.opacity)
+        appearance.detailFontSize = 14
+        appearance.detailBackgroundOpacity = 0.2
         appearance.boxFontSize = 30
         appearance.boxOpacity = 0.9
         let restored = OverlayAppearance(defaults: defaults)
-        #expect(restored.codeFontSize == 14)
-        #expect(restored.codeBackgroundOpacity == 0.2)
-        restored.codeFontSize = .nan
-        restored.codeBackgroundOpacity = .infinity
-        #expect(restored.codeFontSize == Defaults.Overlay.Code.fontSize)
-        #expect(restored.codeBackgroundOpacity == Defaults.Overlay.Code.opacity)
-        restored.codeFontSize = 0
-        restored.codeBackgroundOpacity = -1
-        #expect(restored.codeFontSize == Defaults.Overlay.Code.fontSizeRange.lowerBound)
-        #expect(restored.codeBackgroundOpacity == Defaults.Overlay.Code.opacityRange.lowerBound)
+        #expect(restored.detailFontSize == 14)
+        #expect(restored.detailBackgroundOpacity == 0.2)
+        restored.detailFontSize = .nan
+        restored.detailBackgroundOpacity = .infinity
+        #expect(restored.detailFontSize == Defaults.Overlay.Detail.fontSize)
+        #expect(restored.detailBackgroundOpacity == Defaults.Overlay.Detail.opacity)
+        restored.detailFontSize = 0
+        restored.detailBackgroundOpacity = -1
+        #expect(restored.detailFontSize == Defaults.Overlay.Detail.fontSizeRange.lowerBound)
+        #expect(restored.detailBackgroundOpacity == Defaults.Overlay.Detail.opacityRange.lowerBound)
     }
 
     @Test func defaultsWhenUnset() {

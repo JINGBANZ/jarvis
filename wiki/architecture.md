@@ -277,9 +277,13 @@ than one call. A call outside the permitted set is answered with a tool result s
 available on a press, and a call whose arguments the typed parser (`ToolInvocation.parse`) cannot use
 is answered with its tool's schema; either way the model is asked again in the same attempt. The
 parser is deliberately more lenient than the schema, so a call the schema would reject but the parser
-can use still runs. The response's first call is the one judged, whether or not it parsed. A press speaks its reply's prose instead,
-the first three lines recorded in history as a `speak` call: in place of that round trip when the
-reply calls outside its set or calls nothing, and on the response at the cap whatever it called.
+can use still runs. The response's first call is the one judged, whether or not it parsed. A press
+answered in plain text is refused the same way, once per attempt, with a message telling the model to
+call `speak`. The refusal re-sends the whole request, screenshot included, so it is worth one round
+trip and no more, and `CoachHistory.commit` drops the prose and the refusal so neither replays on a
+later request or reaches the summarizer. Prose becomes the reply itself only once that refusal is
+spent, or on the response at the cap whatever it called: its first line is the hint and the rest,
+Markdown intact, is the detail when the session has one, recorded in history as a `speak` call.
 When a response carries several calls, the first runs and each other one is answered as not
 executed, so a replayed call never lacks a result. The forced response at the cap has no later
 response to answer into, so an unusable reply there with no prose fails the attempt and the
@@ -288,127 +292,111 @@ the same way, since it must choose between `speak` and `stay_silent`. Answering 
 deliberate: a failed attempt costs the route's retry delay, and on a press it leaves the user waiting
 for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/CoachAttemptRunner.swift)).
 
-### Private architecture hints
+### The detail box
 
-The model can attach a visual sketch to `speak` during the high-level-architecture stage of a design
-discussion. The nullable diagram field is part of the one `speak` schema on every brain and in every
-session, so a route that moves between brains never meets a `speak` it cannot parse. Prompt text
-alone governs it: the tip style says to leave it null unless a loaded skill
-asks for a graph, the field's own description says the same, and the system-design skill is what
-asks. The runtime renders any graph it can parse and classifies nothing — a gate on a session type
-is exactly what the capability model removed, and a stray diagram in a session that loaded no skill
-is a prompt fix. Keeping it on `speak` also means a diagram arrives with its tip and never costs a
-response of its own.
+A reply is short lines plus one optional Markdown `detail`. The lines are the coaching; `detail` is
+for what a line cannot hold: a code block, a diagram, or the paragraphs an explanation needs.
+`CoachCapabilities.compose` builds the `speak` definition once per session and declares `detail` only
+when the Overlay Box can show one, so no session promises a field the box would throw away. `detail`
+is nullable rather than absent, which is what makes a field optional under strict Structured Outputs.
 
-[`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift) accepts a bounded Mermaid subset:
-rectangular labeled boxes and directed connections. The parser owns the precise grammar and limits;
-the model-facing usage guidance lives in the system-design skill. Native
+Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
+all, and the skill that owns a domain says what its blocks are: the `coding` skill carries the code
+block rules and the `diff` correction shape, the `system-design` skill the mermaid block. That is why
+the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
+a session that never loads the skill never pays for it in its cached prefix.
+
+[`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into what the box
+shows: the prose, the first fenced block the code bounds accept, and the first `mermaid` fence the
+renderer accepts. A candidate the box rejects on the way to that one is removed from the prose, from
+the replayed arguments, and from Activity, and the tool result names it, so the model reads back what
+the user actually saw rather than assuming its block landed; the search then goes on, so a valid block
+written after a broken one still reaches the box. Everything else stays in the prose and renders
+inline, including a fence written after the shown one of its kind.
+[`CodeBlock`](../Sources/JarvisCore/Overlay/CodeBlock.swift) rejects oversized code rather than
+cutting it into an invalid fragment. [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift)
+accepts a bounded Mermaid subset of rectangular labeled boxes and directed connections; the parser
+owns the grammar and limits, and the system-design skill owns the model-facing usage guidance. Native
 [`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) draws that inert graph into a
-memory-only image inside [`DiagramHintView`](../Sources/JarvisOverlay/DiagramHintView.swift), a pinned
-bottom area of the Overlay Box. This limited renderer needs no JavaScript, browser, remote assets,
-or extra window. The area appears only after a valid diagram arrives and remains outside the
-scrolling hint history for the rest of the session. Ordinary hints and clearing history preserve it;
-a valid revision replaces it, while missing or invalid graph output leaves the previous design intact.
-Stop discards the reference and a fresh Start has no reserved diagram space. An enabled but empty
-code area yields its space to the diagram. This keeps the design available during later tradeoff
-discussions without requiring repeated model output.
+memory-only image, needing no JavaScript, browser, remote assets, or extra window. Nothing is drawn on
+the interviewer's shared canvas.
 
-Graphs retain their layout and scale uniformly within the pinned area's width and height, reserving
-room for the text history. They resize during a window drag. The Overlay Box settings include a
-persisted **Show diagrams** switch, enabled by default, that hides or restores the latest graph
-without discarding it. Collapsing the box hides the area and expanding restores it. Settings preview
-never restores a graph from an ended session.
-The existing nonactivating panel, capture exclusion, visibility toggle, and Start/Stop rules apply.
-Nothing is drawn on the interviewer's shared canvas.
+[`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) is two stacked sections of the one
+capture-excluded panel: the hint box on top, the detail box below. The hint box holds hints only; a
+hint whose reply carried a detail ends with a dim marker in the same text, not a control
+([#336](https://github.com/JINGBANZ/jarvis/issues/336) makes it clickable later). The detail box
+renders the whole document in [`DetailView`](../Sources/JarvisOverlay/DetailView.swift): paragraphs,
+lists, and inline code as attributed text, a code block in monospace with `diff` lines tinted and
+struck, and a mermaid block drawn in place.
 
-Invalid or unsupported graph syntax degrades to the same text hint, with diagnostic detail only in
-`jlog`. Activity records the text tip; graph source follows the existing brain-history and wire-audit
-path, and rendered images are never archived. The pinned graph is the latest suggested sketch,
-not a continuously synchronized model of the discussion.
+There is one detail box, so a later reply replaces what is in it. Its title strip names the hint the
+detail came from and carries the recovery: back and forward arrows step through the session's details
+and hold the box wherever they stop, stepping forward onto the newest resumes following, Pin holds the
+newest, and Dismiss rolls the box down to the strip so the arrows and Pin stay reachable.
+[`DetailSlot`](../Sources/JarvisCore/Overlay/DetailSlot.swift) owns that rule, which is why it is
+Foundation-only and unit-tested without a window. Clear empties both boxes unless the box is held,
+since the user asked for that reference to stay, and Stop resets both. Eviction is the cost of one
+box; [#336](https://github.com/JINGBANZ/jarvis/issues/336) is the follow-up if a live run shows the
+arrows are not enough.
+
+The detail box's title strip is the panel's second piece of chrome, built from the same
+`OverlayBoxChrome` as the header: one geometry gives both strips their height, icon size, button
+square, edge inset, and title size, so they read as one surface and both follow the box the user
+dragged. Fixed sizes in one of them is how they drift apart.
+
+The horizontal divider adjusts the detail box's height by dragging or through VoiceOver
+increment/decrement actions, without activating Jarvis or taking keyboard focus. The chosen proportion
+survives new replies, clear, collapse/expand, and panel resizing for the current session; a new
+session restores automatic content sizing. Its dark background defaults to opaque and has its own
+opacity, independent of the history fill (see
+[Overlay appearance](./settings-window.md#overlay-appearance)). Long lines wrap without changing the
+source text; the content uses its configured compact size and shrinks only as needed to fit, down to a
+readable minimum. Very small panels scroll rather than clipping or shrinking indefinitely. Collapsing
+the box hides both sections and expanding restores them.
+
+Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
+reports back what reached the screen. A detail the box could not accept, because it is hidden or
+collapsed or has nothing left to draw, is dropped whole from Activity and from committed history, so the
+model's memory and the user's screen agree. Invalid or unsupported block syntax degrades to the rest
+of the reply, with diagnostic detail only in `jlog`. Rendered images are never archived; the detail's
+Markdown, diagram source included, is persisted with the tip in the owner-only session directory.
 
 ### On-demand coaching shortcuts
 
-Hints and explanations are proactive. The shared coach prompt distinguishes needing a next step
-from not understanding the question, earlier guidance, or the overall approach using the available
-session history, newest speech, and current screen. Clear confusion warrants an explanation; silence
-or unchanged code alone does not. Repeated confusion calls for simpler framing or a smaller example,
-while productive progress calls for silence. This policy applies to every kind of question without
-a separate classifier, timer, or model request.
+Hints, explanations, code, and diagrams are all proactive. The shared coach prompt distinguishes
+needing a next step from not understanding the question, earlier guidance, or the overall approach
+using the available session history, newest speech, and current screen. Clear confusion warrants an
+explanation; silence or unchanged code alone does not. Repeated confusion calls for simpler framing or
+a smaller example, while productive progress calls for silence. This policy applies to every kind of
+question without a separate classifier, timer, or model request.
 
 Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
 **⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
 clarification of the relevant gap, which may span several earlier hints; **Show code** (default
-**⌥⌘K**) requests the next small coding component. All snapshot a fresh screen into the first
-request, include the available conversation, and always end in a tip: a press may load a skill or
-tool and search prep notes first, but never stays silent or captures again (see
-[Capabilities](#capabilities)). If capture fails, the
-request identifies the missing screen and uses available context without inventing visible details.
-They share the ordinary single-flight coach loop and provider route. Natural wakes preserve pending
-manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass unsettled
-transcription, while an automatic retry waits for settlement. Stop cancels any request; while stopped,
-an explicit shortcut only beeps. Activity records which shortcut was pressed.
+**⌥⌘K**) requests the next small code block. Each trigger says what the user wants in one line and
+nothing about how to answer it: how is the speak guidance's job and the loaded skill's, so a trigger
+is not a third copy to keep in step. All three snapshot a fresh screen into the first request, include
+the available conversation, and always end in a tip: a press may load a skill or tool and search prep
+notes first, but never stays silent or captures again (see [Capabilities](#capabilities)). If capture
+fails, the request identifies the missing screen and uses available context without inventing visible
+details. They share the ordinary single-flight coach loop and provider route. Natural wakes preserve
+pending manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass
+unsettled transcription, while an automatic retry waits for settlement. Stop cancels any request;
+while stopped, an explicit shortcut only beeps. Activity records which shortcut was pressed.
 
-The `speak` action keeps short `lines` for captions and an optional plain-text `explanation` for fuller
-clarification in the persistent box. The prompt targets roughly 60–120 words in short paragraphs,
-with a simple rationale, a concrete example when useful, and one starting action. The box scrolls to
-the beginning of that entry and preserves its paragraphs. Hints use semibold text; fuller detail uses
-regular text at the same configured size under an **Explanation** label, separated by whitespace.
-Captions retain only the standalone summary.
-[Enable explanations](./settings-window.md#shortcuts) controls both automatic detail and the manual
-fallback. `SessionPlan.explanationsEnabled` is fixed at Start and preserved across screen-plan
-revisions. Only enabled sessions receive explanation guidance in the system prompt; saved edits take
-effect on the next Start, keeping one session's instructions stable. The nullable tool field remains until
-[#273](https://github.com/JINGBANZ/jarvis/issues/273) establishes session-composed tools.
-At delivery, the runner checks whether the persistent box can show detail. Hidden explanations are
-omitted from both Activity and committed tool-call history. This live visibility check also covers a
-box hidden while the request was running. Disabling the box turns off the saved explanation setting
-and releases its shortcut; enabling the box does not implicitly enable explanations.
+Explain more and Show code answer into the detail box, so the Overlay Box switch is the one thing that
+decides whether they exist: with the box off they are not registered, and `SessionComposition.allows`
+refuses them even when a runner calls `requestShortcut` directly. There is no separate switch for
+either, because the model judges when an explanation or a code block helps.
 
-Explanation text follows the existing coaching history and Activity paths. It opens no extra window,
-never activates Jarvis, and respects the box's enabled/session visibility. Disabling the box leaves
-only the brief caption if that surface is enabled; it does not force a hidden surface on.
-
-**Show code with hints** enables matching snippets, defaulting off. `SessionPlan.codeEnabled` is
-frozen at Start, preserved across screen revisions, and is the whole gate: only an enabled session
-reserves the code area and receives the shortened code guidance in its fixed system prompt. Nothing
-in the runtime asks what kind of question this is — that guidance is what keeps a snippet off a
-conceptual hint, by telling the model to leave `codeSnippet` null when no implementation would
-help. The Show code shortcut
-requests the next snippet; it never edits the preference or enables code during a disabled session.
-Saved settings take effect on the next Start. Tool-field removal is deferred with explanations to #273.
-The fixed `speak.codeSnippet` schema carries language, placement, code, and corrected-line indices;
-[`CodeSnippet`](../Sources/JarvisCore/Overlay/CodeSnippet.swift) bounds and validates it without
-truncating code. Highlight arrays are bounded before normalization, and trimming leading blank lines
-rebases correction indices. Invalid attachments retain the useful text hint. The prompt requests one logical
-component matching visible names, language, and structure. Its guidance favors straightforward syntax,
-explicit control flow, and intermediate variables that candidates can follow under interview pressure.
-Readable expansion is allowed within the snippet bounds; panel space is handled by font fitting and
-scrolling rather than dense expressions. Local mistakes include a highlighted
-correction and relevant next lines; an invalid overall approach receives a corrective hint instead.
-Without visible code, known problem context supports a first component without inventing unseen names.
-
-[`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) pins the snippet in a separate
-bottom scroll area inside the existing capture-excluded panel. The horizontal divider adjusts
-its height by dragging or through VoiceOver increment/decrement actions. The chosen proportion
-survives new hints, clear, collapse/expand, and panel resizing for the current session; a new session
-restores automatic content sizing. Adjustment preserves space for hints and uses the same bounds
-for pointer and accessibility input, without activating Jarvis or taking keyboard focus. Its dark background defaults to opaque
-and has its own opacity, independent of the history fill (see [Overlay appearance](./settings-window.md#overlay-appearance)). Long code lines wrap within the dock without changing
-source text or correction highlights. The dock measures wrapped content to use available space;
-code uses its configured compact monospace size and shrinks only as needed to fit, down to a readable minimum
-(see `CodeSnippetView`). Very small panels retain vertical scrolling rather than clipping code or
-shrinking it indefinitely. A new code snippet replaces the pinned snippet. Hints without code
-leave it in place so the user can keep reading while the conversation continues; those hints
-record no new code in Activity or committed tool history.
-Dismiss, session clear, and Stop remove the snippet. While enabled, an empty code area remains reserved;
-a session started with code off has no dock. The dock collapses
-with the header and restores its snippet on expansion. Settings preview
-follows saved code enablement while stopped and restores the real snippet on close. The caption carries
-only the short hint; Activity includes the accepted placement and code. Explanation preferences do
-not govern code. Box visibility and code acceptance are checked together on the main actor at delivery;
-a hidden snippet is also removed from committed tool history and Activity. Disabling the master box
-releases the shortcut, disables the saved code setting, and clears/disables the current code dock.
-Re-enabling the box alone does not restore the dock; code must be enabled before a new Start.
+A Show code press preloads the `coding` skill. Moving the code rules into that skill would otherwise
+cost the press two round trips: one for the model to call `load_skill`, one to answer. Instead the
+runner writes the same call and result a model load produces, ahead of the press's own user messages
+so the request still ends in plain user text, and the model answers with the rules already in hand.
+The pair commits, replays, and survives compaction like any load; a failed attempt discards it and the
+retry preloads again. It is skipped when `coding` is switched off or already loaded, and on every
+other trigger. An automatic turn loads `coding` only when the model chooses to, so proactive code
+depends on that choice, while a Show code press never does.
 
 Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
@@ -433,7 +421,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
-| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). System-design diagrams remain pinned below the scrolling history in this same box; the caption remains text-only. See [Private architecture hints](#private-architecture-hints). | AppKit NSPanel; `OverlayBoxPanel`. |
+| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box; the caption remains text-only. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the independent hint, explanation, and code shortcuts and route each press to its manual coaching request while a session runs (beep otherwise). See [§2 On-demand coaching shortcuts](#on-demand-coaching-shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 | **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |

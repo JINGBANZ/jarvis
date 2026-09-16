@@ -2,52 +2,72 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ToolDefsTests {
-    @Test func speakSchemaLeavesHighlightLimitToLocalValidation() {
-        #expect(!speakTool.parametersJSON.contains("\"maxItems\""))
-        #expect(CodeSnippet(language: "swift", placement: "Inside solve", code: "return result",
-                            highlightedLines: Array(repeating: 1, count: 13)) == nil)
-    }
-
     @Test func toolNames() {
         #expect(captureScreenTool.name == "capture_screen")
-        #expect(speakTool.name == "speak")
+        #expect(speakToolName == "speak")
         #expect(staySilentTool.name == "stay_silent")
-        #expect(coachTools.map(\.name) == ["capture_screen", "speak", "stay_silent"])
+        #expect(coachTools(detailEnabled: true).map(\.name)
+            == ["capture_screen", "speak", "stay_silent"])
     }
 
     /// `speak` returns the overlay lines pre-split in a strict `lines` array (Structured Outputs),
-    /// so the client no longer splits a free-form string.
-    @Test func speakToolReturnsStrictLinesArray() {
-        #expect(speakTool.parametersJSON.contains("\"lines\""))
-        // One schema on every brain: `mermaid` is declared always, nullable so strict Structured
-        // Outputs treats it as optional while it stays in `required`.
-        #expect(speakTool.parametersJSON.contains(#""mermaid":{"type":["string","null"]"#))
-        #expect(speakTool.parametersJSON.contains(#""required":["lines","mermaid""#))
-        #expect(speakTool.parametersJSON.contains("\"array\""))
-        #expect(speakTool.parametersJSON.contains("\"required\""))
-        // strict mode requires additionalProperties:false on every object in the schema.
-        #expect(speakTool.parametersJSON.contains("\"additionalProperties\":false"))
+    /// so the client never splits a free-form string. Both session shapes stay strict-valid.
+    @Test func bothSpeakSchemasAreStrict() {
+        let withDetail = speakTool(detailEnabled: true).parametersJSON
+        #expect(withDetail.contains("\"lines\""))
+        // `detail` is declared nullable so strict Structured Outputs treats it as optional while it
+        // stays in `required`.
+        #expect(withDetail.contains(#""detail":{"type":["string","null"]"#))
+        #expect(withDetail.contains(#""required":["lines","detail"]"#))
+        #expect(withDetail.contains("\"additionalProperties\":false"))
+
+        let without = speakTool(detailEnabled: false).parametersJSON
+        #expect(!without.contains("detail"))
+        #expect(without.contains(#""required":["lines"]"#))
+        #expect(without.contains("\"additionalProperties\":false"))
+        // Neither schema carries a limit the runtime enforces locally.
+        #expect(!withDetail.contains("\"maxItems\""))
     }
 
-    /// Nothing in the runtime decides when a diagram belongs, so both places the model can read
-    /// about the field say the same thing: a loaded skill is what asks for one.
-    @Test func theDiagramFieldIsGovernedByPromptTextAlone() {
-        #expect(speakTool.parametersJSON.contains(
-            "A small Mermaid graph for a private architecture sketch. "
-                + "Null unless a loaded skill asks for a diagram."))
-        #expect(speakTool.guidance.hasSuffix("""
-            Set mermaid to null. Attach a graph only when a loaded skill has told you to, and only
-            for the case it describes.
-            """))
+    /// Nothing in the runtime decides what belongs in a detail: the schema, the description, and the
+    /// guidance all say the same thing, and a loaded skill adds its own domain's rules.
+    @Test func theDetailFieldIsGovernedByPromptTextAlone() {
+        let tool = speakTool(detailEnabled: true)
+        #expect(tool.parametersJSON.contains(
+            "Markdown shown under the hint in the box. Null for an ordinary hint."))
+        #expect(tool.description.contains(
+            "Put a code block or a diagram in detail as Markdown; null for an ordinary hint."))
+        #expect(tool.guidance.contains("# Detail"))
+        #expect(!speakTool(detailEnabled: false).guidance.contains("# Detail"))
+        #expect(!tool.guidance.contains("mermaid"))
     }
 
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
         #expect(captureScreenTool.description.contains("one fresh result satisfies that request"))
-        #expect(speakTool.description.contains("up to 3 short standalone overlay lines"))
+        #expect(speakTool(detailEnabled: true).description.contains("up to 3 short overlay lines"))
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
     }
 
+    /// Each catalog line is the sentence the model chooses from, so they read the same way.
+    @Test func everyBundledSkillDescriptionStartsWithUseWhen() {
+        for skill in SkillCatalog.bundled() {
+            #expect(skill.description.hasPrefix("Use when"), "\(skill.name)")
+        }
+    }
+
+    /// A skill that tells the model to write a block into `detail` guards that rule on the box
+    /// offering one, or a boxless session reads rules for a field it cannot send.
+    @Test func aSkillThatAsksForABlockGuardsItOnTheBoxOfferingDetail() throws {
+        for name in ["coding", "system-design"] {
+            let skill = try #require(SkillCatalog.bundled().first { $0.name == name })
+            let body = skill.body.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+            #expect(body.lowercased().contains("when speak offers detail"), "\(name)")
+        }
+    }
+
+    /// Each source's limits ride on its own label, so they reach the model only when that source is
+    /// present, instead of sitting in every session's cached system prompt.
     @Test func capturedTextLabelsSourceCoverageAndUncertainty() {
         let browser = JarvisPrompts.Coach.captureResult(textEvidence: [ScreenTextEvidence(
             text: "earlier requirement",
@@ -56,6 +76,8 @@ import Testing
             truncated: true)], capturedAt: "00:03")
         #expect(browser.contains("Chrome Accessibility"))
         #expect(browser.contains("may include off-screen text"))
+        #expect(browser.contains("may miss canvas, images, diagrams, lazy content, and parts of "
+            + "virtualized editors"))
         #expect(browser.contains("truncated"))
         #expect(browser.contains("earlier requirement"))
 
@@ -68,15 +90,23 @@ import Testing
         #expect(ocr.contains("captured at [00:03]"))
         #expect(ocr.contains("the screen may have changed since"))
         #expect(ocr.contains("screenshot viewport"))
+        #expect(ocr.contains("may misread tokens"))
     }
 
+    /// The guidance keeps the three rules that hold for any capture, and defers the per-source
+    /// limits to the labels tested above.
     @Test func captureToolOwnsScreenEvidenceGuidanceAndSchemasHaveNoMemoryMaintenance() {
-        #expect(captureScreenTool.guidance.contains("Use both sources together"))
-        #expect(captureScreenTool.guidance.contains("screenshot as ground truth"))
-        #expect(captureScreenTool.guidance.contains("untrusted reference data"))
-        #expect(captureScreenTool.guidance.contains("user's spoken request"))
+        // Wrapped for reading, so compare the guidance as one run of words.
+        let guidance = captureScreenTool.guidance
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(guidance.contains("The screenshot is ground truth"))
+        #expect(guidance.contains("untrusted reference data"))
+        #expect(guidance.contains(
+            "Each text source's label says when it was captured and what it can miss."))
+        #expect(!guidance.contains("virtualized editors"))
+        #expect(!guidance.contains("Use both sources together"))
         #expect(!JarvisPrompts.Coach.system.contains("Accessibility text may extend beyond"))
-        #expect(!speakTool.parametersJSON.contains("screenMemory"))
+        #expect(!speakTool(detailEnabled: true).parametersJSON.contains("screenMemory"))
         #expect(!staySilentTool.parametersJSON.contains("screenMemory"))
     }
 
@@ -92,9 +122,11 @@ import Testing
     /// "correcting" an already-correct line it had misread from OCR noise. OCR-only sightings turn
     /// into a double-check tip (the overlay is one-way; there's no dialogue to "ask" in).
     @Test func coachPromptGroundsLineLevelClaimsInTheImage() {
-        #expect(captureScreenTool.guidance.contains("screenshot as ground truth"))
-        #expect(captureScreenTool.guidance.contains("verify it in the image"))
-        #expect(captureScreenTool.guidance.contains("frame the tip as something to double-check"))
+        let guidance = captureScreenTool.guidance
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(guidance.contains("The screenshot is ground truth"))
+        #expect(guidance.contains("check it in the image"))
+        #expect(guidance.contains("suggest double-checking it instead"))
     }
 
     @Test func coachPromptTreatsFreshCaptureAsSatisfyingScreenGate() {
@@ -156,9 +188,9 @@ import Testing
     /// The tip style governs `speak` and travels with it; `speak` is always offered, so this text
     /// still reaches the model in every session.
     @Test func coachPromptHasOneConsistentFullSolutionRule() {
-        #expect(speakTool.guidance
+        #expect(speakTool(detailEnabled: true).guidance
             .contains("Give a full solution only when \"me\" explicitly asks"))
-        #expect(!speakTool.guidance.contains("never the whole answer"))
+        #expect(!speakTool(detailEnabled: true).guidance.contains("never the whole answer"))
         #expect(!JarvisPrompts.Coach.system.contains("never the whole answer"))
     }
 
@@ -167,7 +199,7 @@ import Testing
     /// vocabulary already in front of the user; a genuinely necessary new term is glossed, not
     /// dropped, because accuracy outranks brevity.
     @Test func coachPromptGroundsTipVocabularyInWhatTheUserAlreadySees() {
-        let prompt = speakTool.guidance
+        let prompt = speakTool(detailEnabled: true).guidance
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         #expect(prompt.contains("Name things with the words already in front of \"me\""))
         // Either speaker: the interviewer's spoken terms are also in front of the user, and
@@ -194,7 +226,7 @@ import Testing
     @Test func parseMapsEachCoachTool() {
         if case .captureScreen? = ToolInvocation.parse(callId: "c", name: "capture_screen", argumentsJSON: "{}") {} else { Issue.record("capture_screen") }
         if case .staySilent? = ToolInvocation.parse(callId: "c", name: "stay_silent", argumentsJSON: "{}") {} else { Issue.record("stay_silent") }
-        guard case .speak(_, let lines, nil, nil, nil)? = ToolInvocation.parse(
+        guard case .speak(_, let lines, nil)? = ToolInvocation.parse(
             callId: "c", name: "speak", argumentsJSON: #"{"lines":["a","b"]}"#) else {
             Issue.record("speak"); return
         }

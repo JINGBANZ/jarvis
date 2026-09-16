@@ -9,8 +9,8 @@ unused AI button do not establish that workflow. When the task changes, stop app
 unless AI collaboration is still relevant. If `coding` is listed under "Skills you can load" and is
 not loaded, load it too; its approach, implementation, and testing guidance still applies.
 
-Help the candidate direct and evaluate the other AI's work. Keep the base action policy, short tip
-style, and code/explanation rules. Infer what help matters from the current task; do not require a
+Help the candidate direct and evaluate the other AI's work. Keep the base action policy, the short
+tip style, and the detail rules. Infer what help matters from the current task; do not require a
 round selector, seniority label, or company-specific ritual. Early brainstorming with AI and later
 implementation assistance are both valid. Do not impose a fixed sequence or maximize AI usage.
 

@@ -66,7 +66,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 |---|---|---|---|
 | `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, the coach's switchable capabilities, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; capability and transcription changes take effect on the next Start. |
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Subscriptions (`SubscriptionControls`) signs Codex and Claude Code in and out through the bundled helper. Saving a key checks it with one models-list request and shows the vendor's verdict under the row. Saving never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
-| `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also has **Show diagrams**, enabled by default, and **Show code with hints** with its own appearance controls. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
+| `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also carries the detail box's own Text size and Background opacity rows, with no switch of their own. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
 | `HotkeySection` | "Shortcuts" | yes | Independent **Give me a hint**, **Explain more**, and **Show code** recorders, with per-binding failure feedback and persisted combinations. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
@@ -108,19 +108,14 @@ for the box the end of a session as well. Both share one range because the tab p
 sliders identically. A corrupted non-finite stored value restores the setting's own default rather
 than the range floor, which at 0% would read as breakage.
 
-The box's **Show diagrams** switch controls [private architecture hints](./architecture.md#private-architecture-hints).
-It defaults on, persists across launches, and immediately hides or restores the session's pinned
-design while keeping the text history. Before the first valid diagram arrives, no diagram area is
-reserved. Graphs scale proportionally within that area, leaving room for text; resizing updates the
-image during the drag without writing preferences until the drag ends.
-
-Enabling **Show code with hints** reveals separate code **Text size** and **Background opacity**
-sliders inside the Overlay Box card. They persist through `OverlayAppearance` independently of the
-history controls and apply live. Code defaults to its existing compact size and opaque backdrop;
-the selected size is the preferred size, with the dock's existing fit-to-space reduction retained.
-Separate background regions let code opacity reach zero without revealing the history fill beneath
-it. While stopped, the preview follows the saved code switch; during a session it preserves that
-session's code availability and content. Enablement still takes effect on the next Start.
+The Overlay Box card carries **Detail text size** and **Detail background opacity** sliders for the
+[detail box](./architecture.md#the-detail-box), under the box's own Text size and Opacity rows. They
+persist through `OverlayAppearance` independently of the history controls and apply live. The detail
+box defaults to a compact size and an opaque backdrop; the selected size is the preferred size, with
+its fit-to-space reduction retained. Separate background regions let its opacity reach zero without
+revealing the history fill beneath it. There is no switch of its own: the Overlay Box switch decides
+whether a reply may carry a detail at all, and the model judges when one helps. Before the first
+reply with a detail arrives, no detail area is reserved.
 
 The box is the one surface the user sizes directly, by dragging its edges. `OverlayBoxPanel` reports a
 finished drag through `onSizeChanged` and takes the restored size as an `init` parameter, so the panel
@@ -177,57 +172,43 @@ preview is running. The plain setters
 ## Shortcuts
 
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
-They work during a session; code is available in a session that started with it enabled. Hints and
-explanations are fallbacks for proactive coaching; the code hotkey requests a snippet only when the session started with code enabled; [architecture.md](./architecture.md#on-demand-coaching-shortcuts)
-defines their context, output, and scheduling behavior. Each card uses `HotkeyBindingView` and the
+They work during a session. All three are fallbacks for proactive coaching;
+[architecture.md](./architecture.md#on-demand-coaching-shortcuts) defines their context, output, and
+scheduling behavior. Each card uses `HotkeyBindingView` and the
 existing recorder, requiring Command or Option. A successful rebind takes effect immediately and
 persists only that shortcut through `HotkeyPreferences`; defaults and storage keys live in
 `Defaults.Hotkey`. Escape cancels recording.
 
-The **Explain more** card includes **Enable explanations**, on by default. Switching it off hides
-its shortcut recorder and releases the global key while preserving the chosen combination.
-Switching it on shows the recorder and saves the combination for the next Start. During a session
-that started without explanations, neither enabling the setting nor rebinding registers a usable
-explanation shortcut. Automatic explanations remain available for an enabled session even if its
-shortcut cannot register. `ExplanationPreferences` persists the switch; the capability is frozen at
-Start. The row says “Takes effect the next time you start.” Disabling Overlay Box also disables the
-saved explanation setting and its switch remains unavailable until the box is enabled again.
-Ordinary hints remain available. Enabling explanations makes them available for explicit requests
-or clear gaps in understanding; routine next steps, local corrections, and code snippets default to
-no explanation. The explanation length guidance applies only after that need is established.
+**Explain more** and **Show code** both answer into the detail box, so the Overlay Box switch is the
+only thing that decides whether they can be bound: with the box off, their recorders are disabled and
+their rows read "Requires Overlay Box · enable it in Overlay settings". Neither has a switch of its
+own, and the **Give me a hint** shortcut is unconditional. Whether a session can use them is fixed at
+Start: a session that started with the box off never registers them, even if the box is switched on
+mid-session, while a session that started with it on releases them when the box is switched off and
+registers them again when it is switched back on.
 
 A collision with another application or another Jarvis shortcut leaves the old working binding
 active and displays feedback for that card. If no binding could be registered at launch, its warning
 persists across tab visits. The three cards scroll at small window sizes, including when registration warnings
 are visible. Resizing or changing a binding card preserves the reading offset, clamped to the available
-content. The Overlay Box distinguishes semibold hints from regular explanation paragraphs with an
-**Explanation** label and spacing. Both bodies use the configured text size; the appearance preview
-shows an example. Neither surface's visibility preference changes.
-
-The **Overlay → Overlay Box** card includes **Show code with hints**, off by default, persisted by
-`CodePreferences`. It is captured at Start: an enabled session reserves the
-[dedicated code area](./architecture.md#on-demand-coaching-shortcuts) and requests matching snippets
-alongside hints, and the prompt's code guidance is what keeps one off a hint that needs no code.
-Saved changes affect the next Start; they do not alter the active dock or prompt.
-The hotkey requests the next snippet only for a session that started with code enabled. Turning the
-setting off releases the binding. The **Shortcuts → Show code** recorder stays visible and editable;
-when disabled it points to Overlay settings. Rebinding still reports conflicts, but leaves the binding
-unregistered while code is off or deferred until Start for a disabled session. Code remains independent of **Enable explanations**.
-Both features require Overlay Box; switching the box off also disables their saved settings,
-releases their shortcuts, and clears/disables the live code dock. Re-enabling the box alone does not
-restore code; enable code before the next Start. The rows show the dependency. No shortcut enables the master box.
+content. The Overlay Box shows semibold hints in its upper section and the reply's detail in the
+lower one; a hint whose reply carried a detail ends with a dim marker. Both use the configured text
+size, and the appearance preview shows an example. Neither surface's visibility preference changes.
+No shortcut enables the master box.
 
 ## Activity response sections
 
-Each new coaching response retains its delivered **Hint**, optional **Explanation**, and optional
-**Code** as separate fields through `ActivityResponse`. The Activity feed labels each present part;
-code keeps its indentation in a monospace block with language and placement guidance. The same
-sections survive live replay, reopening a saved session, and Markdown, plain-text, or HTML export.
-The recorder includes only explanation and code actually accepted by the overlay.
+Each coaching response retains its delivered **Hint** and optional **Detail** as separate fields
+through `ActivityResponse`. The Activity feed labels each present part, and the detail is written out
+as the Markdown the model sent, fences and indentation intact. The same sections survive live replay,
+reopening a saved session, and Markdown, plain-text, or HTML export. The recorder includes only the
+detail the overlay actually accepted.
 
-Existing sessions without structured response fields display their original messages. Activity does
-not guess boundaries from old flattened prose. New records also retain a readable text message for
-older readers and the session evaluator; structured fields drive the sectioned viewer.
+A session whose responses carry **Explanation** and **Code** fields opens and exports with those
+sections: `ActivityResponse` decodes both fields and never writes them. Older sessions with no structured response fields at all display their original
+messages; Activity does not guess boundaries from flattened prose. Every record also retains a
+readable text message for older readers and the session evaluator; structured fields drive the
+sectioned viewer.
 
 ## Brain
 

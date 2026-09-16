@@ -144,7 +144,7 @@ layout in the Gate.
 | Scenario | Brain | What it drives |
 |---|---|---|
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
-| B | Claude Code | Behavioral, system design, coding with AI, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
+| B | Claude Code | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen, an Explain more press after it, then a behavioral question. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
@@ -202,7 +202,9 @@ is enough to keep that subscription covered.
 Some cases depend on what the model chose rather than on what the app did, and those write a `note`
 line instead of failing: C02 and G05 (staying silent on small talk), C03 (which skill the model
 picks), the second request in C11, the Codex diagram in C12, C13, how Scenario B's behavioral
-question ends in C16, C20, and C17 together with C01 and C09 on Scenario B's press. Failing them would fail a correct app on a model's judgment call.
+question ends in C16, C20, C24 on both scenarios, and C01 on Scenario B's press. C09 and C17 are
+checks on Scenario B, because the preload puts `coding` in the press's own request rather than leaving
+the load to the model. Failing a note would fail a correct app on a model's judgment call.
 
 An asserted case that fails because of a model choice gets one rerun of its scenario alone; a second
 failure is real. No assertion is loosened to make a run pass. A provider stall is neither a model
@@ -242,7 +244,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
 | C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the OpenAI design question |
 | C08 | A second prepared question searches without loading, on another brain | A: the second behavioral question, on Codex |
-| C09 | The coding skill loads on the coding screen | A: the first press; B: its press |
+| C09 | The coding skill loads on the coding screen | A: the first press; B: the Show code press, through the preload |
 | C10 | The whole session shows four load rows, each once | A, after Stop |
 | C11 | A press after the load is one round trip | A: the two Codex presses |
 | C12 | A diagram arrives at the architecture stage, on OpenAI and on a subscription | A: the OpenAI design question and the Codex follow-up |
@@ -250,11 +252,15 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C14 | A brain switch keeps loaded state, in both directions | A: Claude Code to OpenAI, then OpenAI to Codex |
 | C15 | Coaching continues after loads on both subscriptions | A |
 | C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question |
-| C17 | The remaining skill still loads when others are off | B: the press |
+| C17 | The remaining skill still loads when others are off | B: the Show code press |
 | C18 | Prep search off leaves no tool and no catalog line | B: Claude Code instructions |
 | C19 | Switched-off capabilities apply as configured | B: Claude Code instructions list only coding |
 | C20 | A reply the runner answered instead of running is reported, never failed | A and B |
 | C21 | Loaded guidance survives compaction | Not scheduled; unit-tested |
+| C22 | A Show code press preloads `coding` in its own request, and preloads nothing once it is loaded | B: the Show code press; A: the Codex Show code press |
+| C23 | Every coach request declares the session's one composed `speak` schema | A: every coach request |
+| C24 | A Show code reply delivers a code block in its detail | A and B: their Show code presses |
+| C25 | Explain more delivers a detail, even when the model first answers in prose | B: the Explain more press |
 
 ### General coaching flow
 
@@ -265,7 +271,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | G03 | Speech during an in-flight attempt waits its turn | A: the cache question |
 | G04 | The screen gate captures once, only when needed, and passes the recognized text | A: the first press and the "solve this in one pass" line; none on stated questions |
 | G05 | A deliberate no-op is visible | A: the interviewer's logistics line |
-| G06 | The hint shortcut works, and a second hint advances | A: the presses |
+| G06 | Each shortcut works, and a second press advances | A: the two hint presses and the Show code press |
 | G07 | Overlays are excluded from screenshots | Offline, in the Gate |
 | G08 | Stop ends cleanly, the evidence seals, and no subscription helper outlives the app | Every scenario |
 | G09 | Evaluate works on the stopped session | `--evaluate`, on A's session, with Claude Code |
@@ -320,10 +326,12 @@ it as unverified in its description.
   subscription-only brain route starts without an API key while any OpenAI transcription or brain target still requires
   one, a transcription setting changed mid-session leaves the running snapshot active until the next
   Start, and a forced Apple analyzer failure never sends audio to OpenAI as a fallback.
-- **Explain more and shortcut bindings,** because the run requests shortcuts without the global
-  hotkeys. Press both shortcuts from another app and confirm distinct requests, rebind them
-  independently and try a collision, and confirm an explanation after clear confusion and silence
-  during healthy progress.
+- **Shortcut bindings and the detail box's controls,** because the run requests shortcuts without
+  the global hotkeys and never clicks the box. Press all three shortcuts from another app and confirm
+  distinct requests, rebind them independently and try a collision, confirm they are unbindable while
+  the Overlay Box is off, and confirm an explanation after clear confusion and silence during healthy
+  progress. Then step the detail box's back and forward arrows, Pin, Unpin, and Dismiss and confirm
+  each takes the click without moving focus off the editor.
 - **Mixed practice,** because it judges coaching on a screen a person changes. With the OpenAI brain,
   work through demonstrated understanding, a local block, a visible bug, completion without tests, and
   valid progress; confirm the overlay stays at most three short lines and healthy progress stays

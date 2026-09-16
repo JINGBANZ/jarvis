@@ -93,7 +93,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(brain.calls[0].contains { $0.imageBase64JPEG != nil })
         let userText = brain.calls[0].compactMap { $0.text }.joined(separator: "\n")
         #expect(userText.contains("ListNode next = groupEnd.next;"))
-        #expect(userText.contains("may contain errors"))
+        #expect(userText.contains("may misread tokens"))
     }
 
     /// If the screenshot fails, the hint is still forced from transcript/conversation context — one

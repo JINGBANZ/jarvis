@@ -43,10 +43,12 @@ final class CapabilitiesControls: NSObject {
         guard let content = card.contentView else { return card }
 
         rows = []
-        for tool in [captureScreenTool, speakTool, staySilentTool] {
+        // Names only: `speak` is composed per session, and this card lists what is always on, not
+        // what any one session's schema looks like.
+        for toolName in [captureScreenTool.name, speakToolName, staySilentTool.name] {
             // A control-less row still needs a control view; the shared row type owns the rhythm.
             let row = SettingsRowView(
-                title: Self.title(for: tool.name),
+                title: Self.title(for: toolName),
                 detail: "Always on",
                 controlView: NSView())
             content.addSubview(row)
@@ -109,7 +111,7 @@ final class CapabilitiesControls: NSObject {
     private static func title(for toolName: String) -> String {
         switch toolName {
         case captureScreenTool.name: "Screen capture"
-        case speakTool.name: "Speak"
+        case speakToolName: "Speak"
         case staySilentTool.name: "Stay silent"
         case searchPrepNotesTool.name: "Prep notes search"
         default: toolName

@@ -13,20 +13,15 @@ import JarvisCore
 final class HotkeyBindingView: NSObject {
 
     private let preferences: HotkeyPreferences
-    private let codePreferences: CodePreferences?
     private let boxEnabled: () -> Bool
-    private var explanationRow: SettingsRowView?
-    private let explanationPreferences: ExplanationPreferences?
-    private let onExplanationsChanged: () -> Void
-    private var explanationSwitch: NSSwitch?
     private var shortcutRow: SettingsRowView?
     private var cardHeightConstraint: NSLayoutConstraint?
 
-    private var isEnabled: Bool { explanationPreferences?.isEnabled ?? true }
+    /// Show code and Explain more both answer into the detail box, so the Overlay Box switch is the
+    /// one thing that decides whether they can be bound at all. The hint shortcut is unconditional.
+    private var isEnabled: Bool { preferences.shortcut == .hint || boxEnabled() }
     private var cardHeight: CGFloat {
-        SettingsStyle.cardHeaderHeight
-            + (explanationPreferences == nil ? 0 : SettingsStyle.rowHeight)
-            + (isEnabled ? SettingsStyle.rowHeight : 0)
+        SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
     }
     /// Whether the controller currently has *any* combination registered. This is the only thing
     /// that must persist across Settings visits: a rejected rebind always leaves the previous,
@@ -53,18 +48,12 @@ final class HotkeyBindingView: NSObject {
 
     init(
         preferences: HotkeyPreferences,
-        explanationPreferences: ExplanationPreferences? = nil,
-        codePreferences: CodePreferences? = nil,
         boxEnabled: @escaping () -> Bool = { true },
-        onExplanationsChanged: @escaping () -> Void = {},
         hasActiveHotkey: @escaping () -> Bool,
         applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
     ) {
-        self.codePreferences = codePreferences
         self.boxEnabled = boxEnabled
         self.preferences = preferences
-        self.explanationPreferences = explanationPreferences
-        self.onExplanationsChanged = onExplanationsChanged
         self.hasActiveHotkey = hasActiveHotkey
         self.applyCombination = applyCombination
     }
@@ -81,8 +70,8 @@ final class HotkeyBindingView: NSObject {
 
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.setHeader(title: preferences.shortcut.title, detail: preferences.shortcut == .showCode
-            ? "Coding · snippets follow your hints" : "Works only while a session is running")
+        card.setHeader(title: preferences.shortcut.title,
+                       detail: "Works only while a session is running")
         let row = SettingsRowView(
             title: "Shortcut",
             detail: "Requires ⌘ or ⌥",
@@ -92,32 +81,9 @@ final class HotkeyBindingView: NSObject {
             showsSeparator: false)
         shortcutRow = row
         card.contentView?.addSubview(row)
-        var toggleRow: SettingsRowView?
-        if explanationPreferences != nil {
-            let toggle = NSSwitch()
-            toggle.target = self
-            toggle.action = #selector(explanationsChanged)
-            toggle.setAccessibilityLabel("Enable explanations")
-            explanationSwitch = toggle
-            let settingsRow = SettingsRowView(
-                title: "Enable explanations",
-                detail: "Takes effect the next time you start",
-                controlView: toggle,
-                controlSize: NSSize(width: 44, height: 26))
-            card.contentView?.addSubview(settingsRow)
-            toggleRow = settingsRow
-            explanationRow = settingsRow
-        }
-        card.onLayout = { [weak card, weak row, weak toggleRow] in
+        card.onLayout = { [weak card, weak row] in
             guard let card, let row else { return }
-            let bounds = card.bodyFrame
-            if let toggleRow {
-                toggleRow.frame = NSRect(x: 0, y: max(0, bounds.height - SettingsStyle.rowHeight),
-                    width: bounds.width, height: SettingsStyle.rowHeight)
-                row.frame = NSRect(x: 0, y: 0, width: bounds.width, height: SettingsStyle.rowHeight)
-            } else {
-                row.frame = bounds
-            }
+            row.frame = card.bodyFrame
         }
 
         let callout = makeCallout()
@@ -153,16 +119,6 @@ final class HotkeyBindingView: NSObject {
         renderOutcome()
     }
 
-    @objc private func explanationsChanged() {
-        guard let explanationSwitch else { return }
-        if let explanationPreferences {
-            explanationPreferences.isEnabled = explanationSwitch.state == .on
-            onExplanationsChanged()
-        }
-        recorder?.setCombination(preferences.combination)
-        renderOutcome()
-    }
-
     private func recorded(_ combination: HotkeyCombination) {
         guard isEnabled else { return }
         let outcome = applyCombination(combination)
@@ -185,23 +141,16 @@ final class HotkeyBindingView: NSObject {
     /// the callout shows only for the one state that *is* persistent — nothing registered at all.
     private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
         defer { onHeightChanged?() }
-        explanationSwitch?.isEnabled = boxEnabled()
-        explanationRow?.setDetail(boxEnabled() ? "Takes effect the next time you start" : "Requires Overlay Box · enable it in Overlay settings")
-        explanationSwitch?.state = isEnabled ? .on : .off
-        shortcutRow?.isHidden = !isEnabled
         recorder?.isEnabled = isEnabled
         cardHeightConstraint?.constant = cardHeight
+        shortcutRow?.setDetail(isEnabled
+            ? "Requires ⌘ or ⌥"
+            : "Requires Overlay Box · enable it in Overlay settings")
         let showsFailure: Bool
         switch outcome {
         case .registered: showsFailure = false
         case .failed: showsFailure = true
-        case nil: showsFailure = (codePreferences?.isEnabled ?? true) && !hasActiveHotkey()
-        }
-        if preferences.shortcut == .showCode {
-            shortcutRow?.setDetail(!boxEnabled()
-                ? "Requires Overlay Box · enable it in Overlay settings"
-                : codePreferences?.isEnabled == true
-                    ? "Requires ⌘ or ⌥" : "Enable Show code with hints in Overlay settings")
+        case nil: showsFailure = !hasActiveHotkey()
         }
         guard isEnabled && showsFailure else {
             calloutHeightConstraint?.constant = 0
