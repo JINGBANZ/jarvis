@@ -70,18 +70,24 @@ extension ProviderFailure {
         let name = source.displayName
         let signIn = (clause: "\(name) isn't signed in",
                       advice: "open Settings → Connections, press Sign in for it, then press Start")
-        // The helper answers `unknown provider for model` both for a signed-out vendor and for a model
-        // it does not serve, so that stays a configuration failure; Start's model-list probe is what
-        // names a signed-out subscription.
         switch category {
         case .authentication:
             return signIn
+        // The sign-in service restarts on its own after a crash, so the first thing to do is wait;
+        // Connections is where a helper that stayed down is retried by hand.
         case .unreachable:
-            return ("\(name) couldn't reach the sign-in service", "quit and reopen Jarvis")
+            return ("\(name) couldn't reach the sign-in service",
+                    "wait a moment, then press Try again in Settings → Connections")
         // Raised by the supervisor, whose message names what the sign-in service did; an upstream
         // 5xx arrives at another stage and reads as any provider's outage.
         case .unavailable where stage == .process:
-            return ("\(name) is unavailable", "quit and reopen Jarvis")
+            return ("\(name) is unavailable", "press Try again in Settings → Connections")
+        // The helper answers `unknown provider for model` both for a signed-out vendor and for a
+        // model it does not serve. Start's probe names a subscription that was signed out before the
+        // session, but one whose token lapses mid-session arrives here, so the advice names both.
+        case .configuration:
+            return ("\(name) rejected the \(source.surfaceNoun) configuration",
+                    "check Settings → Brain, or sign in again in Settings → Connections")
         case .rejected where identity.httpStatus == 429:
             return ("\(name) reached its usage limit",
                     "wait for the limit to reset, or add a fallback in Settings → Brain")

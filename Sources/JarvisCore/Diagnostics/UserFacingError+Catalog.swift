@@ -83,7 +83,7 @@ public extension UserFacingError {
         failure: ProviderFailure
     ) -> UserFacingError {
         .init(title: "Brain fallback route exhausted",
-              message: "\(failure.activitySentence)\n\nCoaching stopped after every configured target was exhausted. The last target was \(target.provider.displayName). Check Settings → Brain, then Start again.",
+              message: "\(failure.activitySentenceWithoutAdvice)\n\nCoaching stopped after every configured target was exhausted. The last target was \(target.provider.displayName). Check Settings → Brain, then Start again.",
               severity: .terminal,
               sessionEndReason: .brainRouteExhausted(last: failure))
     }
@@ -92,7 +92,7 @@ public extension UserFacingError {
     /// quietly as route exhaustion; Activity carries the most recent failure as the explanation.
     static func brainRecoveryExpired(failure: ProviderFailure) -> UserFacingError {
         .init(title: "Coaching stopped",
-              message: "\(failure.activitySentence)\n\nCoaching kept failing for \(Int(BrainCycleRecovery.ceiling / 60)) minutes, so the session ended. Check Settings → Brain, then Start again.",
+              message: "\(failure.activitySentenceWithoutAdvice)\n\nCoaching kept failing for \(Int(BrainCycleRecovery.ceiling / 60)) minutes, so the session ended. Check Settings → Brain, then Start again.",
               severity: .terminal,
               sessionEndReason: .brainRecoveryExpired(last: failure))
     }

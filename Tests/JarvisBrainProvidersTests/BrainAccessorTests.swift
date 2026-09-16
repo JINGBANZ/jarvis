@@ -317,6 +317,19 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"name\":\"capture_screen\""))
     }
 
+    /// A subscription runs on the user's own consumer plan, where no dashboard exists to inspect
+    /// what was retained, so nothing asks the vendor to keep it.
+    @Test func aSubscriptionTargetAsksForNoRetention() async throws {
+        let box = CapturedBody()
+        let client = BrainAccessor(
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
+            reasoningEffort: "low",
+            send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("transcript")], tools: coachTools)
+        let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(body.contains("\"store\":false"))
+    }
+
     @Test func everySelectableOpenAIModelRespectsItsEffortFloor() async throws {
         for model in BrainModelCatalog.models(for: .openAI) {
             for effort in ReasoningEffort.allCases {

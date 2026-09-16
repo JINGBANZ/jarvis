@@ -102,8 +102,9 @@ The subscription sign-ins are the same class of secret and live beside the key u
 `~/Library/Application Support/Jarvis/proxy/`, all `0700` directories: `auth/` holds the OAuth token
 files the bundled helper writes, which Jarvis narrows to `0600` after each sign-in, and `run/` holds
 the launch's `0600` helper configuration, whose loopback key exists only for that launch. The helper
-also writes its own capped logs under `auth/logs/`; a failed request is logged in full, transcript
-included, and at most two such files are kept. Sign out in Connections deletes that subscription's
+also writes its own capped logs under `auth/logs/`, which hold no request or response bodies (see
+[Data Egress](#data-egress) for the setting that keeps them out); each start narrows that directory to
+owner-only and removes dumps an older build left. Sign out in Connections deletes that subscription's
 token files.
 
 ## Data Egress
@@ -131,9 +132,12 @@ Narrow and explicit. Data leaves the machine only via:
   `chatgpt.com` and `api.anthropic.com` for coaching, and `auth.openai.com` and `claude.ai` only
   during a sign-in the user started from Connections. That sign-in also asks public IP lookup
   services (`api.ipify.org`, falling back to `ifconfig.me`, `icanhazip.com`, and `ipinfo.io`) for the
-  Mac's address, because the helper's login prints SSH tunnel hints; Jarvis ignores them. Nothing
-  else: the generated configuration keeps the embedded model catalog instead of fetching one, turns
-  off the management API and its downloadable panel, and disables usage statistics. It also runs the
+  Mac's address, because the helper's login prints SSH tunnel hints; Jarvis ignores them. One
+  connection is the helper's own: every launch opens TLS to its upstream project's
+  `antigravity-hub-auto-updater-*.us-central1.run.app` endpoint, before any credential is loaded and
+  with no account configured, and the generated configuration has no setting that stops it. What that
+  configuration does stop: it keeps the embedded model catalog instead of fetching one, turns off the
+  management API and its downloadable panel, and disables usage statistics. It also runs the
   helper in `commercial-mode`, so no request or response body is written to disk: the helper would
   otherwise dump a failed call, transcript and captured screen text included, into its own log
   directory, which no session owns and Clear history never reaches. Each start narrows that directory

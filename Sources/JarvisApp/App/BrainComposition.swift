@@ -265,12 +265,17 @@ final class BrainComposition {
             return
         }
         let provider = route.primary.provider
-        // An effort or key edit keeps the route it has. If the helper's probe happened to fail just
-        // now, rebuilding would replace working subscription clients with permanently unavailable
-        // targets and could end a subscription-only session; the running clients keep the same
-        // endpoint, so leaving them alone costs only the edit.
-        if update != .topologyEdit, route.targets.contains(where: { $0.provider.servedByLocalProxy }),
-           proxy?.endpoint == nil {
+        // An effort or key edit keeps the route it has. Rebuilding it against a probe that just
+        // failed would replace working subscription clients with permanently unavailable targets,
+        // and an unavailable target at the active cursor exhausts the route, which ends a
+        // subscription-only session. The running clients hold the same endpoint either way.
+        //
+        // A probe that answers without naming the vendor counts as failing here too: the helper
+        // lists a vendor's models only once it has loaded that credential, so a restart or a token
+        // refresh can answer for a moment without it. The live client keeps working, and a
+        // credential that really is gone surfaces as the helper's own 503 on the next request.
+        let servesSubscription = route.targets.contains { $0.provider.servedByLocalProxy }
+        if update != .topologyEdit, servesSubscription, proxy?.endpoint == nil {
             jlog("Jarvis: skipped a brain refresh — the sign-in service didn't answer; "
                  + "the running route keeps its clients.")
             host.liveSessionEvidence?.record(.settingsChangeNotApplied)
@@ -283,9 +288,22 @@ final class BrainComposition {
             host.reportBrainError(.brainRouteUnavailable(failure: failure), context: .runtime)
             return
         }
+        // A reapply rebuilds clients for a route the session is already running. The helper answered,
+        // so every subscription in it keeps a usable endpoint; whether this moment's model list named
+        // the vendor decides nothing here, and treating it as authoritative would retire a working
+        // target permanently. Only a topology edit, which installs targets the user just chose, reads
+        // the probe as it came.
+        let availability: LocalProxySupervisor.Readiness?
+        if update == .topologyEdit {
+            availability = proxy
+        } else if let endpoint = proxy?.endpoint {
+            availability = .ready(endpoint, signedIn: Set(BrainProvider.allCases))
+        } else {
+            availability = proxy
+        }
         let configuredRoute = makeConfiguredRoute(
             route,
-            proxy: proxy,
+            proxy: availability,
             apiKey: key,
             effort: preferences.effort,
             sessionDirectory: sessionDirectory)

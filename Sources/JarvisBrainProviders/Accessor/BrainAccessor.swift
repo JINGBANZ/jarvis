@@ -246,8 +246,11 @@ public struct BrainAccessor: BrainClient, Sendable {
             "max_output_tokens": maxOutputTokens,
             // store:true keeps each request/response inspectable in the OpenAI dashboard logs for
             // debugging. This DOES retain transcripts/screenshots server-side — a deliberate
-            // debuggability-over-retention choice; see wiki/sandbox.md.
-            "store": true,
+            // debuggability-over-retention choice; see wiki/sandbox.md. A subscription target sends
+            // false: that traffic runs on the user's own consumer plan, where nothing offers a
+            // dashboard to inspect. The bundled helper forces the same value on the Codex path, and
+            // saying it here means a pin bump cannot quietly turn retention back on.
+            "store": !provider.servedByLocalProxy,
             "prompt_cache_key": promptCacheKey, // stable system prompt → better cache routing
         ]
         if !instructions.isEmpty {

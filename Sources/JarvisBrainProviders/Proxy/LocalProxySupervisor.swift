@@ -146,9 +146,14 @@ public actor LocalProxySupervisor {
                 // The helper is alive but no longer answering. Left `.running`, `ensureRunning`
                 // would accept it forever and no retry could replace it, so end it here: the next
                 // explicit call starts a fresh one.
+                //
+                // `stopping` first, because `terminateHelper` suspends: without it the exit reaches
+                // `helperExited` while the state still reads `.running`, which counts a crash and
+                // arms a restart this method then strands by publishing `.failed`. The port stays,
+                // so that next start reuses the endpoint a live session was composed against.
                 jlog("Jarvis proxy: the helper stopped answering — \(error.localizedDescription)")
+                stopping = true
                 if let pid = helperPID.withLock({ $0 }) { await terminateHelper(pid) }
-                port = nil
                 publish(.failed(reason: "stopped answering"))
                 return .unavailable(reason: "stopped answering")
             }
@@ -189,6 +194,19 @@ public actor LocalProxySupervisor {
         try? FileManager.default.removeItem(at: configURL)
         try? FileManager.default.removeItem(at: pidURL)
         publish(.stopped)
+    }
+
+    /// What the helper and its logins run with: an allowlist, not Jarvis's environment minus a few
+    /// names. The pinned binary reads `PGSTORE_DSN`, `OBJECTSTORE_*` and `MANAGEMENT_STATIC_PATH`,
+    /// any of which would move the OAuth credentials off this Mac, and Go reads `HTTPS_PROXY` and
+    /// friends, which would reroute traffic the configuration pins to the vendors. None of that is
+    /// Jarvis's to inherit, and no API key is either: the helper authenticates with the per-launch
+    /// key in its own configuration.
+    static func helperEnvironment() -> [String: String] {
+        let inherited = ProcessInfo.processInfo.environment
+        return ["HOME", "PATH", "TMPDIR", "LANG"].reduce(into: [:]) { environment, name in
+            environment[name] = inherited[name]
+        }
     }
 
     /// Ends one helper: a signal, a bounded wait for its exit, then a kill. Every path that gives up
@@ -260,12 +278,7 @@ public actor LocalProxySupervisor {
         process.executableURL = executable
         // `-local-model` keeps the model catalog embedded instead of fetched at every start.
         process.arguments = ["-config", configURL.path, "-local-model"]
-        // A third-party binary inherits none of Jarvis's credentials, the rule both agent CLI
-        // launchers follow. The helper authenticates with the per-launch key in its configuration.
-        var environment = ProcessInfo.processInfo.environment
-        environment.removeValue(forKey: "OPENAI_API_KEY")
-        environment.removeValue(forKey: "GEMINI_API_KEY")
-        process.environment = environment
+        process.environment = Self.helperEnvironment()
         // The helper writes its own rotating logs under its home; nothing reads its console.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice

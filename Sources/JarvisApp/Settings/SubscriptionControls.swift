@@ -113,7 +113,9 @@ final class SubscriptionControls: NSObject {
     func windowWillClose() {
         refreshTask?.cancel()
         refreshTask = nil
-        for task in signIns.values { task.cancel() }
+        // A sign-in outlives this window. Cancelling it here would signal the login holding the
+        // OAuth callback port, so the browser's redirect would land on nothing and the row would
+        // read "Signed out" for a sign-in the user never cancelled. Cancel ends it, and so does Quit.
     }
 
     @objc private func buttonPressed(_ sender: NSButton) {
@@ -203,7 +205,7 @@ final class SubscriptionControls: NSObject {
             return ("Signing in…", .secondaryLabelColor, "Finish in your browser", "Cancel", true)
         }
         guard let readiness else {
-            return ("Checking…", .secondaryLabelColor, nil, "Sign in", false)
+            return ("Checking…", .secondaryLabelColor, Self.accountHint(provider), "Sign in", false)
         }
         let account = supervisor.accountFiles(for: provider).first
         let who = account.map { file in
@@ -219,7 +221,15 @@ final class SubscriptionControls: NSObject {
                     "\(who.map { "\($0) is" } ?? "The account is") saved but not usable right now; sign in again",
                     "Sign in", true)
         case .ready:
-            return ("Signed out", .secondaryLabelColor, nil, "Sign in", true)
+            return ("Signed out", .secondaryLabelColor, Self.accountHint(provider), "Sign in", true)
         }
+    }
+
+    /// A row's title names the coding tool; the sign-in asks for the consumer account that pays for
+    /// it, and the two names differ. A signed-in row says who is signed in instead.
+    private static func accountHint(_ provider: BrainProvider) -> String {
+        provider == .codexSubscription
+            ? "Signs in with your ChatGPT account"
+            : "Signs in with your Claude account"
     }
 }

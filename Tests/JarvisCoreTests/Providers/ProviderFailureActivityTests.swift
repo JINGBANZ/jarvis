@@ -51,16 +51,16 @@ import Testing
         #expect(make(source: .brain(.claudeSubscription), category: .configuration,
                      identity: .init(httpStatus: 400, errorCode: "model_not_found"),
                      message: "unknown provider for model claude-opus-5").activitySentence
-                == "Claude Code rejected the coaching configuration (HTTP 400, model_not_found: unknown provider for model claude-opus-5); check Settings → Brain")
+                == "Claude Code rejected the coaching configuration (HTTP 400, model_not_found: unknown provider for model claude-opus-5); check Settings → Brain, or sign in again in Settings → Connections")
         #expect(make(source: .brain(.codexSubscription), category: .unreachable,
                      identity: .init(transportDomain: "NSURLErrorDomain", transportCode: -1004),
                      message: "could not connect to the server").activitySentence
-                == "Codex couldn't reach the sign-in service (network -1004: could not connect to the server); quit and reopen Jarvis")
+                == "Codex couldn't reach the sign-in service (network -1004: could not connect to the server); wait a moment, then press Try again in Settings → Connections")
         let stopped = ProviderFailure(
             source: .brain(.claudeSubscription), stage: .process, category: .unavailable,
             disposition: .permanent, identity: .init(), message: "the sign-in service keeps stopping")
         #expect(stopped.activitySentence
-                == "Claude Code is unavailable (the sign-in service keeps stopping); quit and reopen Jarvis")
+                == "Claude Code is unavailable (the sign-in service keeps stopping); press Try again in Settings → Connections")
         #expect(make(source: .brain(.codexSubscription), category: .rejected,
                      identity: .init(httpStatus: 429),
                      message: "All credentials for model gpt-5.6-sol are cooling down").activitySentence

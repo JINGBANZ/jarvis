@@ -362,7 +362,7 @@ import Foundation
         #expect(persisted.map(\.message) == [
             "⚠️ OpenAI API couldn't respond (HTTP 429, rate_limit_exceeded: Rate limit reached) — continuing on Claude Code",
             "⚠️ OpenAI API target couldn't respond (HTTP 429, rate_limit_exceeded: Rate limit reached) — continuing with the next OpenAI API model",
-            "⚠️ Claude Code is unavailable (the sign-in service isn't running) — skipping it; quit and reopen Jarvis",
+            "⚠️ Claude Code is unavailable (the sign-in service isn't running) — skipping it; press Try again in Settings → Connections",
         ])
         #expect(persisted.map(\.kind) == [
             ActivityEvent.Kind.brainRouteAdvanced.rawValue,

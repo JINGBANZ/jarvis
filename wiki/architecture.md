@@ -873,10 +873,15 @@ is about 60 MB on disk and 20 MB per update.
   otherwise a failed call writes its body, a coaching request carrying the transcript and the captured
   screen text, into the helper's own log directory, which no session owns and Clear history never
   reaches. Each start also narrows that directory to owner-only and deletes dumps an older build
-  left. It is ready when its model list answers, within ten seconds.
+  left. The helper and its logins inherit only `HOME`, `PATH`, `TMPDIR`, and `LANG`: the binary reads
+  database, object-store, and proxy variables that would move a credential off this Mac or reroute
+  traffic the configuration pins to the vendors. It is ready when its model list answers, within ten
+  seconds.
 - **Crashes keep the endpoint.** A helper that exits after it answered restarts on the same port
   with the same key after 1, 5, then 15 seconds, so a session composed against it keeps working; a
-  fourth exit within ten minutes gives up until the next explicit start. A helper that exits before
+  fourth exit within ten minutes gives up until the next explicit start. A helper that is still up but
+  has stopped answering its model list is ended and replaced the same way, so a process that survives
+  its own service cannot hold the endpoint. A helper that exits before
   it answers is a failed start and is not retried until asked. A Jarvis that ended without Quit leaves
   its helper and configuration behind; the next launch stops that helper, once its process is proven
   to be this executable, and removes the files.
@@ -886,7 +891,11 @@ is about 60 MB on disk and 20 MB per update.
   target carrying a permanent failure, authentication when signed out and unavailable with the
   helper's own reason when it would not start, and the route skips it when the cursor reaches it, so
   a fallback still coaches. A Start or route edit is refused only when no target in the route can
-  coach (`UserFacingError.brainRouteUnavailable`).
+  coach (`UserFacingError.brainRouteUnavailable`). A reapply that is not a topology edit never retires
+  a target on the probe's word: if the helper does not answer, the running route keeps the clients it
+  has and the edit is recorded as not applied, and if it answers without naming a vendor the
+  subscription stays available, because the helper lists a vendor's models only once it has loaded that
+  credential and a restart or a token refresh can answer for a moment without it.
 - **Tool policy per target** ([`ToolChoicePolicy`](../Sources/JarvisCore/Brain/ToolChoicePolicy.swift)).
   The OpenAI API and Codex are `providerEnforced`: `required`, `allowed_tools`, a
   forced function, strict tools, and verbatim reasoning replay all pass through the Codex path intact.
@@ -898,8 +907,9 @@ is about 60 MB on disk and 20 MB per update.
   policy is trusted on its own: the runner checks every reply against the choice it asked for
   ([Capabilities](#capabilities)).
 - **What the helper changes on the wire.** On the Codex path it deletes `max_output_tokens`, so the
-  workload timeout is the output bound; forces `store: false`, so the dashboard retention described in
-  [sandbox.md](./sandbox.md#data-egress) does not apply there; forces `parallel_tool_calls: true`,
+  workload timeout is the output bound; forces `store: false`, which Jarvis also sends for every
+  subscription target, so the dashboard retention described in
+  [sandbox.md](./sandbox.md#data-egress) never covers plan traffic; forces `parallel_tool_calls: true`,
   which the runner answers by running the first call; and reuses `prompt_cache_key` as the upstream
   session id, which is why Jarvis keeps that key stable. On the Claude path it drops `strict`,
   `parallel_tool_calls`, `store`, and `prompt_cache_key`, turns the effort into adaptive thinking,
@@ -923,33 +933,22 @@ is about 60 MB on disk and 20 MB per update.
   `Retry-After`, a temporary rejection. A helper that stopped mid-session refuses the connection, an
   unreachable failure that is temporary, so the cycle fails, listening continues, and the restart on
   the same endpoint serves the next attempt. Activity gives each its own next step: sign in from
-  Connections, reopen Jarvis for the sign-in service, or wait for the plan's limit
+  Connections, press Try again there when the sign-in service is down, or wait for the plan's limit
   ([`ProviderFailure+Activity`](../Sources/JarvisCore/Providers/ProviderFailure+Activity.swift)).
 - **Sign-in happens only on the user's click** ([`LocalProxySignIn`](../Sources/JarvisBrainProviders/Proxy/LocalProxySignIn.swift)).
   Connections runs the helper's own `-codex-login` or `-claude-login` with `-no-browser` against this
   launch's configuration, opens the OAuth page it prints (the one browser open in this design, behind
-  the Sign in click), and waits up to ten minutes for the provider to redirect to the helper's fixed
+  the Sign in click) once the line names one of the vendors' authorize hosts, and waits up to ten
+  minutes for the provider to redirect to the helper's fixed
   callback port, 1455 for Codex and 54545 for Claude. A busy port ends the login with the helper's
   message. The credential lands in the auth directory the running helper watches, so no restart is
-  needed, and Jarvis narrows it to owner-only. Cancel ends the login; Sign out deletes that
-  subscription's credential files.
-- **Measured before adoption.** A spike on 2026-09-15 drove the production client through the helper
-  with the real coach prompt and tools at low effort, three repeats per scenario, and a 1280 px
-  screenshot on presses. Medians in milliseconds:
-
-  | Target | Automatic question | Capture turn 1 / 2 | Press | Outcome |
-  |---|---:|---:|---:|---|
-  | Codex, `gpt-5.6-sol`, provider-enforced choices | 4,813 | 2,431 / 5,120 | 6,293 | 24 of 24 calls in the permitted set, replay intact |
-  | OpenAI API, `gpt-5.6-sol` | 4,982 | 1,358 / 4,075 | 5,504 | 15 of 15 |
-  | Claude Code, Opus 5, filtered auto | 2,597 | 1,542 / 3,082 | 7,370 | 48 of 48 calls in the permitted set |
-  | Claude Code, Fable 5.1, filtered auto | 3,440 | 2,099 / 4,404 | 9,865 | 48 of 48 |
-
-  Coaching through the vendors' own CLIs measured 5,898 ms for a Codex text turn and 2,654 ms for a
-  Claude Code text turn on the same machine, so the proxy's Codex path is faster and a Claude press
-  is slower, bounded by the same fifteen-second workload deadline. End to end the
-  [live e2e run](./live-e2e-tests.md) shows the same shape: a Codex press reaches its tip in about 6
-  to 9 s through the proxy against 10 to 14 s through the app-server, while Claude's press and
-  question times sit inside run-to-run noise.
+  needed, and Jarvis narrows it to owner-only. Cancel ends the login and closing Settings does not,
+  because the browser still has to redirect; Sign out deletes that subscription's credential files.
+- **Latency sits in the vendors' own band.** Through the helper a Codex turn beats the Codex CLI on the
+  same machine and a Claude press trails the Claude CLI, both inside the same fifteen-second workload
+  deadline, and the [live e2e run](./live-e2e-tests.md) shows that shape end to end. Coaching through
+  the proxy therefore costs no round trip the CLIs would have saved, which is what made it worth
+  adopting over driving those CLIs.
 - **Terms risk is accepted, not hidden.** Anthropic's terms prohibit intermediating Claude session
   tokens. The owner accepts that on his own account; a Claude target that stops working fails
   permanently and the route falls forward.

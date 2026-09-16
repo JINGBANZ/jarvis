@@ -23,6 +23,13 @@ public struct LocalProxySignIn: Sendable {
 
     private static let deadline: Duration = .seconds(10 * 60)
 
+    /// Hosts Jarvis will open a login page on. The helper prints the URL on its stdout and Jarvis
+    /// opens it, so without this any line the pinned binary printed could send the user's browser
+    /// anywhere. These are the authorize hosts that binary builds its login URLs from.
+    private static let signInHosts: Set<String> = [
+        "auth.openai.com", "claude.ai", "console.anthropic.com",
+    ]
+
     private let executable: URL
     private let configURL: URL
     private let authDirectory: URL
@@ -64,11 +71,9 @@ public struct LocalProxySignIn: Sendable {
         // After 15 seconds the command offers to read a pasted callback URL. End of input keeps it
         // waiting for the browser's redirect, which is the only path Jarvis uses.
         process.standardInput = FileHandle.nullDevice
-        // The login inherits none of Jarvis's credentials, the rule every launcher here follows.
-        var environment = ProcessInfo.processInfo.environment
-        environment.removeValue(forKey: "OPENAI_API_KEY")
-        environment.removeValue(forKey: "GEMINI_API_KEY")
-        process.environment = environment
+        // The same allowlist the helper runs with: this login writes the credential, so an inherited
+        // `PGSTORE_DSN` or `OBJECTSTORE_*` would decide where it lands.
+        process.environment = LocalProxySupervisor.helperEnvironment()
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
@@ -103,7 +108,8 @@ public struct LocalProxySignIn: Sendable {
             do {
                 for try await line in output.fileHandleForReading.bytes.lines {
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    if !opened, trimmed.hasPrefix("https://"), let url = URL(string: trimmed) {
+                    if !opened, trimmed.hasPrefix("https://"), let url = URL(string: trimmed),
+                       Self.signInHosts.contains(url.host()?.lowercased() ?? "") {
                         opened = true
                         events.yield(.openURL(url))
                     } else if !trimmed.isEmpty {

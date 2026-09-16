@@ -190,6 +190,89 @@ import Testing
         }
     }
 
+    /// Quit has to reach every login, not only the last one started: both subscriptions can be
+    /// signing in at once, each holding its own callback port and its own browser tab.
+    @Test func terminateNowEndsEveryRunningSignIn() async throws {
+        try await withSupervisor(script: """
+            case "$1" in
+            -codex-login|-claude-login)
+                echo $$ > "$(dirname "$0")/login$1.partial"
+                mv "$(dirname "$0")/login$1.partial" "$(dirname "$0")/login$1"
+                exec /bin/sleep 600
+                ;;
+            esac
+            exec /bin/sleep 600
+            """) { supervisor, state, home in
+            guard case .running = state else {
+                Issue.record("expected the helper to be running, got \(state)")
+                return
+            }
+            let signIn = try #require(await supervisor.makeSignIn())
+            let codex = Task { for await _ in signIn.run(.codexSubscription) {} }
+            let claude = Task { for await _ in signIn.run(.claudeSubscription) {} }
+            defer {
+                codex.cancel()
+                claude.cancel()
+            }
+            var running: [Int32] = []
+            for name in ["login-codex-login", "login-claude-login"] {
+                let text = await contents(of: home.appendingPathComponent(name)) ?? ""
+                running.append(try #require(Int32(text.trimmingCharacters(in: .whitespacesAndNewlines))))
+            }
+            let logins = running
+            #expect(logins.count == 2)
+
+            supervisor.terminateNow()
+
+            #expect(await eventually { logins.allSatisfy { !processExists($0) } })
+        }
+    }
+
+    /// A helper can stay up and stop serving. The readiness that finds it silent ends it, and the
+    /// next one gets a replacement on the same port and key, so the session composed against that
+    /// endpoint keeps working.
+    @Test func aSilentHelperIsReplacedOnTheSameEndpoint() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let supervisor = LocalProxySupervisor(
+            executable: try proxyStubExecutable(in: home, script: """
+                echo $$ > "$(dirname "$0")/pid.partial"
+                mv "$(dirname "$0")/pid.partial" "$(dirname "$0")/pid"
+                exec /bin/sleep 600
+                """),
+            home: home, clock: ImmediateClock())
+        let starting = Task { await supervisor.ensureRunning() }
+        let port = try await configuredPort(supervisor)
+        var stub: ModelListStub? = try ModelListStub(port: port, body: Self.openAIModels)
+        guard case .running(let endpoint) = await starting.value else {
+            Issue.record("expected the helper to answer its first probe")
+            return
+        }
+        let text = await contents(of: home.appendingPathComponent("pid")) ?? ""
+        let silentPID = try #require(Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+
+        // The process stays up; only its answers stop.
+        stub?.stop()
+        let silent = await supervisor.readiness()
+        guard case .unavailable(let reason) = silent else {
+            Issue.record("expected a silent helper to be unavailable, got \(silent)")
+            return
+        }
+        #expect(reason == "stopped answering")
+        #expect(await eventually { !processExists(silentPID) })
+
+        stub = try ModelListStub(port: port, body: Self.openAIModels)
+        let recovered = await supervisor.readiness()
+        guard case .ready(let replacement, _) = recovered else {
+            Issue.record("expected a replacement helper, got \(recovered)")
+            return
+        }
+        #expect(replacement.baseURL == endpoint.baseURL)
+        #expect(replacement.key == endpoint.key)
+        await supervisor.stop()
+        stub?.stop()
+    }
+
     @Test func signOutRemovesOnlyThatSubscriptionsCredentials() throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
