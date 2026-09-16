@@ -49,7 +49,7 @@ struct LiveE2EScenarioTests {
             .say(.init(speaker: .me, text: "Jarvis, how can I solve this in one pass?"),
                  overlap: nil, whileAttemptRunning: false),
             .press(.hint),
-            .press(.hint),
+            .press(.showCode),
             .say(
                 .init(
                     speaker: .them,

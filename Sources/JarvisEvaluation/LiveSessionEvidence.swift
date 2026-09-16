@@ -37,6 +37,10 @@ public struct LiveSessionEvidence: Sendable {
         public let occurredAt: TimeInterval?
         /// Parsed from a `capabilityLoaded` row's message, the only place the row names what it loaded.
         public let loadedCapability: LoadedCapability?
+        /// The structured tip a `tip` row carries: what the overlay actually delivered, which is
+        /// where a checker reads the detail from. Nil on every other row, and on rows written
+        /// before responses were persisted structurally.
+        public let response: ActivityResponse?
     }
 
     public struct TranscriptEntry: Sendable, Equatable {
@@ -80,13 +84,19 @@ public struct LiveSessionEvidence: Sendable {
         }
     }
 
-    /// The `mermaid` argument of the speak call in a brain response.
-    public enum SpeakDiagram: Sendable, Equatable {
+    /// The `detail` argument of the speak call in a brain response.
+    public enum SpeakDetail: Sendable, Equatable {
         /// The response holds no speak call.
         case noSpeakCall
-        /// The speak call's `mermaid` is null or absent.
+        /// The speak call's `detail` is null or absent.
         case none
         case present(String)
+
+        /// The fenced blocks of the detail the model sent, using the parser the app itself uses.
+        public var fences: [ReplyDetail.Fence] {
+            guard case .present(let markdown) = self else { return [] }
+            return ReplyDetail.fences(in: markdown)
+        }
     }
 
     public struct FunctionCall: Sendable, Equatable {
@@ -125,7 +135,10 @@ public struct LiveSessionEvidence: Sendable {
         public let replayedFunctionCalls: [FunctionCall]
         /// OpenAI `request.input` items of type `function_call_output`, by `call_id`, in order.
         public let replayedFunctionOutputCallIDs: [String]
-        public let speakDiagram: SpeakDiagram
+        /// The property names of the `speak` tool this request declared, sorted. Nil when the
+        /// request declared no `speak` tool at all.
+        public let speakParameters: [String]?
+        public let speakDetail: SpeakDetail
     }
 
     public let activity: [ActivityRow]

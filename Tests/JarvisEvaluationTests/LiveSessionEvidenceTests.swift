@@ -481,7 +481,8 @@ import Testing
         #expect(second.error == "The request timed out.")
         #expect(second.instructions == nil)
         #expect(second.replayedFunctionCalls.isEmpty)
-        #expect(second.speakDiagram == .noSpeakCall)
+        #expect(second.speakDetail == .noSpeakCall)
+        #expect(second.speakParameters == nil)
     }
 
     @Test func archivedCLIRequestsExposeProviderAndInstructions() throws {
@@ -510,40 +511,56 @@ import Testing
         #expect(first.toolChoiceType == nil)
         #expect(first.replayedFunctionCalls.isEmpty)
         #expect(first.replayedFunctionOutputCallIDs.isEmpty)
-        #expect(first.speakDiagram == .noSpeakCall)
+        #expect(first.speakDetail == .noSpeakCall)
         #expect(evidence.traffic[1].provider == "claude-code")
         #expect(evidence.traffic[1].instructions == nil)
     }
 
-    @Test func speakDiagramReadsTheResponsesOutput() throws {
-        func diagram(_ response: [String: Any]) throws -> Evidence.SpeakDiagram {
+    @Test func speakDetailReadsTheResponsesOutput() throws {
+        func detail(_ response: [String: Any]) throws -> Evidence.SpeakDetail {
             try Self.evidence(traffic: [Self.coachRecord(attempt: 1, response: response)])
-                .traffic[0].speakDiagram
+                .traffic[0].speakDetail
         }
         func openAI(_ items: [[String: Any]]) -> [String: Any] {
             ["id": "resp_1", "status": "completed", "output": items]
         }
         let reasoning: [String: Any] = ["type": "reasoning", "id": "rs_1", "summary": [String]()]
 
-        #expect(try diagram(openAI([
+        let graph = try detail(openAI([
             reasoning,
             ["type": "function_call", "call_id": "call_1", "name": "speak",
-             "arguments": #"{"lines":["Sketch the write path."],"mermaid":"graph TD\nA-->B","explanation":null,"codeSnippet":null}"#],
-        ])) == .present("graph TD\nA-->B"))
-        #expect(try diagram(openAI([
+             "arguments": #"{"lines":["Sketch the write path."],"detail":"```mermaid\ngraph TD\nA-->B\n```"}"#],
+        ]))
+        #expect(graph == .present("```mermaid\ngraph TD\nA-->B\n```"))
+        // The fences come from the parser the app itself uses.
+        #expect(graph.fences.map(\.language) == ["mermaid"])
+        #expect(graph.fences.first?.body == "graph TD\nA-->B")
+
+        #expect(try detail(openAI([
             ["type": "function_call", "call_id": "call_2", "name": "speak",
-             "arguments": #"{"lines":["Name the tradeoff."],"mermaid":null,"explanation":null,"codeSnippet":null}"#],
+             "arguments": #"{"lines":["Name the tradeoff."],"detail":null}"#],
         ])) == .none)
-        #expect(try diagram(openAI([
+        #expect(try detail(openAI([
             ["type": "function_call", "call_id": "call_3", "name": "stay_silent", "arguments": "{}"],
         ])) == .noSpeakCall)
-        #expect(try diagram(["error": ["message": "Invalid request"] as [String: Any]]) == .noSpeakCall)
+        #expect(try detail(["error": ["message": "Invalid request"] as [String: Any]]) == .noSpeakCall)
+        #expect(Evidence.SpeakDetail.noSpeakCall.fences.isEmpty)
+    }
 
-        // An archived local CLI record keeps the model's text under `reply`, which no live session
-        // writes, so it holds no speak call to read.
-        #expect(try diagram([
-            "reply": #"{"tool":"speak","arguments":{"lines":["Sketch it."],"mermaid":"graph LR\nA-->B"}}"#,
-        ]) == .noSpeakCall)
+    /// The declared schema a request sent, so a checker asserts what the session composed.
+    @Test func speakParametersReadTheDeclaredSchema() throws {
+        let record = try Self.coachRecord(attempt: 1, request: [
+            "model": "gpt-5.6-sol",
+            "tools": [
+                ["type": "function", "name": "speak",
+                 "parameters": ["type": "object",
+                                "properties": ["lines": ["type": "array"],
+                                               "detail": ["type": ["string", "null"]]]]],
+                ["type": "function", "name": "stay_silent", "parameters": ["type": "object"]],
+            ],
+        ], response: ["id": "resp_1", "status": "completed", "output": [[String: Any]]()])
+        let evidence = try Self.evidence(traffic: [record])
+        #expect(evidence.traffic[0].speakParameters == ["detail", "lines"])
     }
 
     // MARK: - Debug log, health, and malformed records

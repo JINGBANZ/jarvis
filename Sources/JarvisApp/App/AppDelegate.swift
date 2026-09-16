@@ -224,11 +224,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             brainSection,
             connectionsSection,
             OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
-                onBoxEnabledChanged: { [weak self] enabled in
+                // Both optional shortcuts answer into the detail box, so the box switch is what
+                // binds or releases them.
+                onBoxEnabledChanged: { [weak self] _ in
                     guard let self else { return }
                     self.refreshOptionalShortcut(.explainMore)
                     self.refreshOptionalShortcut(.showCode)
-                    _ = enabled
                 }),
             DisplaySection(
                 preferences: screenPreferences,
