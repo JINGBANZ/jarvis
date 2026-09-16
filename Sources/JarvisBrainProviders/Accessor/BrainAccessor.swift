@@ -12,7 +12,7 @@ import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (
 /// (`CoachHistory`) and arrives in `messages`, built in stable append-only order so OpenAI's prompt
 /// cache keeps hitting. `store:true` keeps each request/response inspectable in the OpenAI dashboard
 /// logs for debugging (a documented retention tradeoff; see wiki/sandbox.md).
-public struct BrainAccessor: BrainClient, @unchecked Sendable {
+public struct BrainAccessor: BrainClient, Sendable {
     /// Injected transport; returns the body and the HTTP response (for status + headers).
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
 

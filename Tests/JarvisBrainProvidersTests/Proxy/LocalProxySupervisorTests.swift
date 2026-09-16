@@ -66,6 +66,9 @@ import Testing
             #expect(config.contains("auth-dir: \"\(supervisor.authDirectory.path)\""))
             #expect(config.contains("disable-image-generation: true"))
             #expect(config.contains("disable-control-panel: true"))
+            // Without this the helper writes a failed call's body, transcript and screen text
+            // included, to its own logs directory, outside the session that owns that data.
+            #expect(config.contains("commercial-mode: true"))
             let manager = FileManager.default
             #expect(try manager.attributesOfItem(atPath: supervisor.configURL.path)[.posixPermissions]
                 as? Int == 0o600)
@@ -74,6 +77,39 @@ import Testing
             #expect(await contents(of: home.appendingPathComponent("arguments"))
                 == "-config\n\(supervisor.configURL.path)\n-local-model\n")
         }
+    }
+
+    /// A build before `commercial-mode` let the helper dump a failed call's body, transcript and
+    /// captured screen text included, into its own world-readable logs directory. Upgrading clears
+    /// what that build wrote and narrows the directory; the helper's own log survives.
+    @Test func startPrunesAndNarrowsTheHelperLogDirectory() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let manager = FileManager.default
+        let logs = home.appendingPathComponent("auth/logs", isDirectory: true)
+        try manager.createDirectory(at: logs, withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o755])
+        let dump = logs.appendingPathComponent("error-v1-responses-old.log")
+        try Data("Captured screen text evidence".utf8).write(to: dump)
+        let spool = logs.appendingPathComponent("request-body-old.tmp")
+        try Data("New since last turn".utf8).write(to: spool)
+        let ownLog = logs.appendingPathComponent("main.log")
+        try Data("started".utf8).write(to: ownLog)
+
+        let supervisor = LocalProxySupervisor(
+            executable: try proxyStubExecutable(in: home, script: "exec /bin/sleep 600"),
+            home: home, clock: ContinuousClock())
+        let starting = Task { await supervisor.ensureRunning() }
+        let stub = try ModelListStub(
+            port: try await configuredPort(supervisor), body: Self.openAIModels)
+        _ = await starting.value
+
+        #expect(!manager.fileExists(atPath: dump.path))
+        #expect(!manager.fileExists(atPath: spool.path))
+        #expect(manager.fileExists(atPath: ownLog.path))
+        #expect(try manager.attributesOfItem(atPath: logs.path)[.posixPermissions] as? Int == 0o700)
+        await supervisor.stop()
+        stub.stop()
     }
 
     @Test func readinessNamesTheSubscriptionsTheHelperServes() async throws {

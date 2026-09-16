@@ -26,11 +26,15 @@ public struct LocalProxySignIn: Sendable {
     private let executable: URL
     private let configURL: URL
     private let authDirectory: URL
+    /// Where the running login's process id is published, so Quit can end it from outside.
+    private let signInPID: OSAllocatedUnfairLock<Int32?>
 
-    public init(executable: URL, configURL: URL, authDirectory: URL) {
+    public init(executable: URL, configURL: URL, authDirectory: URL,
+                signInPID: OSAllocatedUnfairLock<Int32?> = .init(initialState: nil)) {
         self.executable = executable
         self.configURL = configURL
         self.authDirectory = authDirectory
+        self.signInPID = signInPID
     }
 
     /// Runs the login for `provider`. Cancelling the consuming task, or dropping the stream,
@@ -59,6 +63,11 @@ public struct LocalProxySignIn: Sendable {
         // After 15 seconds the command offers to read a pasted callback URL. End of input keeps it
         // waiting for the browser's redirect, which is the only path Jarvis uses.
         process.standardInput = FileHandle.nullDevice
+        // The login inherits none of Jarvis's credentials, the rule every launcher here follows.
+        var environment = ProcessInfo.processInfo.environment
+        environment.removeValue(forKey: "OPENAI_API_KEY")
+        environment.removeValue(forKey: "GEMINI_API_KEY")
+        process.environment = environment
         let output = Pipe()
         process.standardOutput = output
         process.standardError = output
@@ -76,6 +85,8 @@ public struct LocalProxySignIn: Sendable {
         // The child holds its own copy; closing ours is what lets the read below end at its exit.
         try? output.fileHandleForWriting.close()
         let pid = process.processIdentifier
+        signInPID.withLock { $0 = pid }
+        defer { signInPID.withLock { $0 = nil } }
         let timedOut = OSAllocatedUnfairLock(initialState: false)
         let watchdog = Task {
             try? await Task.sleep(for: Self.deadline)

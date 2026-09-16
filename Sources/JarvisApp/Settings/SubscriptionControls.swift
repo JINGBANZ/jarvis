@@ -101,7 +101,9 @@ final class SubscriptionControls: NSObject {
         guard refreshTask == nil else { return }
         refreshTask = Task { [weak self, supervisor] in
             let readiness = await supervisor.readiness()
-            guard let self else { return }
+            // A sign-out or a sign-in that finished while this probe was in flight already cleared
+            // the state and started its own; a stale answer would paint over it.
+            guard !Task.isCancelled, let self, refreshTask != nil else { return }
             self.readiness = readiness
             refreshTask = nil
             render()

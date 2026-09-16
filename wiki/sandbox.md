@@ -133,7 +133,11 @@ Narrow and explicit. Data leaves the machine only via:
   services (`api.ipify.org`, falling back to `ifconfig.me`, `icanhazip.com`, and `ipinfo.io`) for the
   Mac's address, because the helper's login prints SSH tunnel hints; Jarvis ignores them. Nothing
   else: the generated configuration keeps the embedded model catalog instead of fetching one, turns
-  off the management API and its downloadable panel, and disables usage statistics. On the Codex
+  off the management API and its downloadable panel, and disables usage statistics. It also runs the
+  helper in `commercial-mode`, so no request or response body is written to disk: the helper would
+  otherwise dump a failed call, transcript and captured screen text included, into its own log
+  directory, which no session owns and Clear history never reaches. Each start narrows that directory
+  to owner-only and removes dumps an older build left; the helper's own `main.log` holds no bodies. On the Codex
   path the helper forces `store: false`; on the Claude path it presents the traffic as Anthropic's own
   Claude Code client, so Jarvis's system prompt reaches Anthropic behind that client's identity block. Anthropic's terms
   prohibit intermediating Claude session tokens; the owner accepts that risk on his own account.

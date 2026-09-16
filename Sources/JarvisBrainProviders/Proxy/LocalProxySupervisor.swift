@@ -87,6 +87,9 @@ public actor LocalProxySupervisor {
     private var clearedLeftovers = false
     /// Read by `terminateNow()`, which Quit calls from outside the actor.
     private nonisolated let helperPID = OSAllocatedUnfairLock<Int32?>(initialState: nil)
+    /// A sign-in the user started and has not finished. It is a child of Jarvis like the helper, so
+    /// Quit ends it too rather than leaving a login waiting on a redirect that can no longer arrive.
+    private nonisolated let signInPID = OSAllocatedUnfairLock<Int32?>(initialState: nil)
 
     /// The helper's credential files, owner-only like the API key file.
     public nonisolated var authDirectory: URL { home.appendingPathComponent("auth", isDirectory: true) }
@@ -165,7 +168,8 @@ public actor LocalProxySupervisor {
     /// helper looks. Nil when the helper cannot start.
     public func makeSignIn() async -> LocalProxySignIn? {
         guard case .running = await ensureRunning(), let executable else { return nil }
-        return LocalProxySignIn(executable: executable, configURL: configURL, authDirectory: authDirectory)
+        return LocalProxySignIn(executable: executable, configURL: configURL,
+                                authDirectory: authDirectory, signInPID: signInPID)
     }
 
     public nonisolated func accountFiles(for provider: BrainProvider) -> [LocalProxyAccountFile] {
@@ -201,6 +205,7 @@ public actor LocalProxySupervisor {
     /// removes the configuration this leaves.
     public nonisolated func terminateNow() {
         if let pid = helperPID.withLock({ $0 }) { kill(pid, SIGTERM) }
+        if let pid = signInPID.withLock({ $0 }) { kill(pid, SIGTERM) }
     }
 
     // MARK: - Lifecycle
@@ -225,6 +230,7 @@ public actor LocalProxySupervisor {
             try Self.makeOwnerOnlyDirectory(home)
             try Self.makeOwnerOnlyDirectory(authDirectory)
             try Self.makeOwnerOnlyDirectory(runDirectory)
+            Self.lockHelperLogs(in: authDirectory)
             if !clearedLeftovers {
                 clearedLeftovers = true
                 clearLeftovers(of: executable)
@@ -235,7 +241,9 @@ public actor LocalProxySupervisor {
             try launch(executable)
             endpoint = Endpoint(baseURL: URL(string: "http://127.0.0.1:\(port)")!, key: key)
         } catch {
-            publish(.failed(reason: "couldn't start: \(error.localizedDescription)"))
+            jlog("Jarvis proxy: couldn't start the helper — \(error.localizedDescription)")
+            port = nil
+            publish(.failed(reason: "couldn't start"))
             return state
         }
         return await awaitReady(endpoint)
@@ -248,6 +256,12 @@ public actor LocalProxySupervisor {
         process.executableURL = executable
         // `-local-model` keeps the model catalog embedded instead of fetched at every start.
         process.arguments = ["-config", configURL.path, "-local-model"]
+        // A third-party binary inherits none of Jarvis's credentials, the rule both agent CLI
+        // launchers follow. The helper authenticates with the per-launch key in its configuration.
+        var environment = ProcessInfo.processInfo.environment
+        environment.removeValue(forKey: "OPENAI_API_KEY")
+        environment.removeValue(forKey: "GEMINI_API_KEY")
+        process.environment = environment
         // The helper writes its own rotating logs under its home; nothing reads its console.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
@@ -275,11 +289,18 @@ public actor LocalProxySupervisor {
             guard launched == generation, !stopping else { return state }
             guard helperRunning else {
                 let status = lastExitStatus.map { " with status \($0)" } ?? ""
+                // A start that never bound the port may have lost it to another process; the next
+                // attempt picks a fresh one rather than failing the same way forever.
+                port = nil
                 publish(.failed(reason: "stopped\(status) while starting"))
                 return state
             }
             do {
                 _ = try await Self.modelOwners(at: endpoint)
+                // The helper can exit while this probe is in flight, and `helperExited` leaves a
+                // start in progress alone. Publishing without re-reading it would latch `.running`
+                // on a dead helper, which `ensureRunning` then short-circuits on for the app's life.
+                guard launched == generation, !stopping, helperRunning else { return state }
                 publish(.running(endpoint))
                 return state
             } catch {
@@ -288,7 +309,10 @@ public actor LocalProxySupervisor {
             try? await Task.sleep(for: .milliseconds(250))
         }
         if let pid = helperPID.withLock({ $0 }) { kill(pid, SIGTERM) }
-        publish(.failed(reason: "didn't start in time (\(problem))"))
+        // Transport detail belongs in the debug log; Activity gets the fixed reason.
+        jlog("Jarvis proxy: the helper didn't answer in time — \(problem)")
+        port = nil
+        publish(.failed(reason: "didn't start in time"))
         return state
     }
 
@@ -334,6 +358,22 @@ public actor LocalProxySupervisor {
 
     // MARK: - Files
 
+    /// The helper creates its own logs directory world-readable, and a build before `commercial-mode`
+    /// left a failed call's body there: the transcript and the captured screen text, outside the
+    /// session that owns them. Every start narrows the directory and removes those dumps, so
+    /// upgrading clears what an older Jarvis wrote.
+    private static func lockHelperLogs(in authDirectory: URL) {
+        let logs = authDirectory.appendingPathComponent("logs", isDirectory: true)
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: logs.path) else { return }
+        try? manager.setAttributes([.posixPermissions: 0o700], ofItemAtPath: logs.path)
+        let files = (try? manager.contentsOfDirectory(at: logs, includingPropertiesForKeys: nil)) ?? []
+        for file in files where file.lastPathComponent.hasPrefix("error-")
+            || file.pathExtension == "tmp" {
+            try? manager.removeItem(at: file)
+        }
+    }
+
     /// Rewritten at every start. Every value Jarvis depends on is set here rather than left to the
     /// helper's defaults; see wiki/architecture.md for why each is what it is.
     private func writeConfiguration(port: Int) throws {
@@ -344,6 +384,11 @@ public actor LocalProxySupervisor {
         api-keys:
           - "\(key)"
         debug: false
+        # No request or response body ever reaches disk. A coaching request carries the transcript
+        # and the captured screen text, and the helper writes a failed call's body to its own logs
+        # directory, outside the session that owns that data. This flag is what keeps its
+        # request-logging middleware from being installed at all (CLIProxyAPI `server.go`).
+        commercial-mode: true
         logging-to-file: true
         logs-max-total-size-mb: 20
         error-logs-max-files: 2

@@ -713,7 +713,7 @@ rather than a per-turn screenshot.
   carries the `[mm:ss]` session time it was captured, the transcript's own clock, and says the screen
   may have changed since, so a later turn reads it as evidence from then: text that still called
   itself the current viewport let a "how do I solve this" minutes later skip the fresh look the
-  screen gate asks for, and the stamp without the clause still lost that look in one live run of two. Past a token
+  screen gate asks for. Past a token
   threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
   briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
@@ -868,8 +868,12 @@ is about 60 MB on disk and 20 MB per update.
   process id, holding a free loopback port and a key that exists only for that launch; a development
   build and a release running side by side therefore never rewrite each other's file, which the helper
   would hot-reload. The helper starts with `-local-model`, so it never fetches a model catalog, and
-  the configuration switches off its management panel and its injected image tool. It is ready when
-  its model list answers, within ten seconds.
+  the configuration switches off its management panel and its injected image tool. It also sets
+  `commercial-mode`, which keeps the helper's request-logging middleware from being installed at all:
+  otherwise a failed call writes its body, a coaching request carrying the transcript and the captured
+  screen text, into the helper's own log directory, which no session owns and Clear history never
+  reaches. Each start also narrows that directory to owner-only and deletes dumps an older build
+  left. It is ready when its model list answers, within ten seconds.
 - **Crashes keep the endpoint.** A helper that exits after it answered restarts on the same port
   with the same key after 1, 5, then 15 seconds, so a session composed against it keeps working; a
   fourth exit within ten minutes gives up until the next explicit start. A helper that exits before
