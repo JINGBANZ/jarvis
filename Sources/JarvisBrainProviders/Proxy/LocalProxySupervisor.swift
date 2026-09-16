@@ -141,7 +141,14 @@ public actor LocalProxySupervisor {
                     $0.proxyModelOwner.map(owners.contains) ?? false
                 }))
             } catch {
-                return .unavailable(reason: "didn't answer: \(error.localizedDescription)")
+                // The helper is alive but no longer answering. Left `.running`, `ensureRunning`
+                // would accept it forever and no retry could replace it, so end it here: the next
+                // explicit call starts a fresh one.
+                jlog("Jarvis proxy: the helper stopped answering — \(error.localizedDescription)")
+                if let pid = helperPID.withLock({ $0 }) { await terminateHelper(pid) }
+                port = nil
+                publish(.failed(reason: "stopped answering"))
+                return .unavailable(reason: "stopped answering")
             }
         case .failed(let reason):
             return .unavailable(reason: reason)
