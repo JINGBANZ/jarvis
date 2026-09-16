@@ -880,8 +880,11 @@ is about 60 MB on disk and 20 MB per update.
 - **Crashes keep the endpoint.** A helper that exits after it answered restarts on the same port
   with the same key after 1, 5, then 15 seconds, so a session composed against it keeps working; a
   fourth exit within ten minutes gives up until the next explicit start. A helper that is still up but
-  has stopped answering its model list is ended and replaced the same way, so a process that survives
-  its own service cannot hold the endpoint. A helper that exits before
+  has stopped answering its model list is ended by the probe that found it silent, so a process that
+  survives its own service cannot hold the endpoint; the crash timer does not cover that case, so the
+  replacement waits for the next explicit start, which reuses the port and key. A probe whose caller
+  was cancelled, by Stop, a newer Start, or a closing Settings window, proves nothing about the helper
+  and leaves it alone. A helper that exits before
   it answers is a failed start and is not retried until asked. A Jarvis that ended without Quit leaves
   its helper and configuration behind; the next launch stops that helper, once its process is proven
   to be this executable, and removes the files.
@@ -966,7 +969,8 @@ session; Codex's comes from its auth file. See
 
 Target for the direct API path: **turn-end → first overlay line < 2s.** Transcription is continuous
 (no STT latency at trigger time) and most turns are text-only. Subscription latency depends on the
-vendor, model, and network behind one loopback hop through the helper; the measured medians are in
+vendor, model, and network behind one loopback hop through the helper; how that compares with the
+vendors' own CLIs is in
 [Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy),
 and neither subscription promises the direct API target. The overlay reveals the already-returned
 lines one at a time (paced by `Config`); the brain response itself is not streamed to the overlay.

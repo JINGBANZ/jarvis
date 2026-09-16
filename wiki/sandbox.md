@@ -129,14 +129,16 @@ Narrow and explicit. Data leaves the machine only via:
   the same brain payload goes to the CLIProxyAPI helper bundled in the app, listening on 127.0.0.1
   behind a key that exists only for the running launch, which forwards it under the user's own
   signed-in account and that vendor's consumer retention terms. The helper's egress is
-  `chatgpt.com` and `api.anthropic.com` for coaching, and `auth.openai.com` and `claude.ai` only
+  `chatgpt.com` and `api.anthropic.com` for coaching, and `auth.openai.com`, `claude.ai`, or
+  `console.anthropic.com`, the three authorize hosts Jarvis will open a login page on, only
   during a sign-in the user started from Connections. That sign-in also asks public IP lookup
   services (`api.ipify.org`, falling back to `ifconfig.me`, `icanhazip.com`, and `ipinfo.io`) for the
   Mac's address, because the helper's login prints SSH tunnel hints; Jarvis ignores them. One
-  connection is the helper's own: every launch opens TLS to its upstream project's
-  `antigravity-hub-auto-updater-*.us-central1.run.app` endpoint, before any credential is loaded and
-  with no account configured, and with the configuration's own update switches already off
-  (`disable-control-panel` and `disable-auto-update-panel`). What that
+  connection is the helper's own: it fetches its upstream project's Antigravity version manifest from
+  `antigravity-hub-auto-updater-*.us-central1.run.app` a second after it loads credentials, and again
+  every three hours for as long as it runs, which is until Quit. The request carries no credential and
+  happens with no account configured at all, and the configuration's own update switches
+  (`disable-control-panel`, `disable-auto-update-panel`) do not govern it. What that
   configuration does stop: it keeps the embedded model catalog instead of fetching one, turns off the
   management API and its downloadable panel, and disables usage statistics. It also runs the
   helper in `commercial-mode`, so no request or response body is written to disk: the helper would
