@@ -11,6 +11,13 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
     private var _events: [ActivityEvent] = []
     var events: [ActivityEvent] { lock.withLock { _events } }
     var kinds: [ActivityEvent.Kind] { events.map(\.rendered.kind) }
+    /// The skills Activity was told were loaded, in order — what a live run counts.
+    var loadedSkillNames: [String] {
+        events.compactMap {
+            guard case .capabilityLoaded(let kind, let name) = $0, kind == .skill else { return nil }
+            return name
+        }
+    }
     func record(_ event: ActivityEvent, at date: Date) {
         lock.withLock { _events.append(event) }
     }

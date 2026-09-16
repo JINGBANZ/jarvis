@@ -110,18 +110,6 @@ public enum Defaults {
 
     // MARK: - Hotkey
 
-    /// Availability of code snippets beside the hint, and their manual shortcut.
-    public enum Code {
-        public static let enabledKey = "coaching.codeEnabled"
-        public static let enabled = false
-    }
-
-    /// Availability of fuller explanations and their manual fallback.
-    public enum Explanations {
-        public static let enabledKey = "coaching.explanationsEnabled"
-        public static let enabled = true
-    }
-
     /// Independent shortcuts for an immediate hint or explanation mid-session.
     public enum Hotkey {
         public static let codeKeyCodeKey = "hotkey.code.keyCode"
@@ -183,8 +171,9 @@ public enum Defaults {
     /// durable history rather than a flashing caption. The box is a session surface: switched on, it
     /// appears on Start and goes away on Stop.
     public enum Overlay {
-        /// Appearance of the code area within the persistent box.
-        public enum Code {
+        /// Appearance of the detail box within the persistent box. The stored keys keep their
+        /// `overlayCode` spelling so a saved size and opacity survive the rename.
+        public enum Detail {
             public static let fontSizeKey = "overlayCode.fontSize"
             public static let fontSize: Double = 18
             public static let fontSizeRange: ClosedRange<Double> = 12...18
@@ -210,9 +199,6 @@ public enum Defaults {
 
         /// The persistent, movable history of recent responses.
         public enum Box {
-            public static let diagramsEnabledKey = "overlayBox.diagramsEnabled"
-            public static let diagramsEnabled = true
-
             public static let enabledKey = "overlayBox.enabled"
             public static let enabled = true
 

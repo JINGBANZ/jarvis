@@ -4,19 +4,20 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct DiagramHintRenderingTests {
-    @MainActor @Test func asyncDiagramDeliveryPinsInsideThePrivatePanel() async throws {
+    @MainActor @Test func asyncDiagramDeliveryDrawsInsideThePrivatePanel() async throws {
         let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel()
         let window = try #require(NSApplication.shared.windows.first { !windows.contains($0.windowNumber) })
         panel.setEnabled(true)
         panel.setSessionLive(true)
-        let graph = try #require(DiagramHint(mermaid: "flowchart LR\nA[Client] --> B[API]"))
-        panel.render(["Sketch the request path."], perLineSeconds: [2], diagram: graph)
+        let detail = try #require(ReplyDetail(markdown:
+            "A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"))
+        panel.render(["Sketch the request path."], perLineSeconds: [2], detail: detail)
         for _ in 0..<100 where panel.entryCount == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(panel.currentText.contains("Sketch the request path."))
-        #expect(!panel.currentText.contains("\u{FFFC}"))
+        #expect(!panel.currentText.contains("\u{FFFC}"), "the graph is drawn in the detail box, not in the hints")
         let content = try #require(window.contentView)
         let drawing = try #require(findImage(content))
         #expect(drawing.image != nil)
@@ -25,11 +26,7 @@ import Testing
         // The Settings sample only stands in while stopped: during a session the box is already on
         // screen carrying the real log, which is a better preview than sample text.
         panel.setSessionLive(false)
-        panel.showAppearancePreview(true)
-        #expect(drawing.image == nil, "Stop removes the session reference before preview")
-        panel.showAppearancePreview(false)
-        #expect(drawing.image == nil, "closing preview cannot restore an ended session graph")
-
+        #expect(panel.currentDetail == nil, "Stop resets the detail box")
         panel.clear()
         #expect(panel.currentText.isEmpty)
         #expect(!panel.isPanelVisible)
@@ -49,31 +46,24 @@ import Testing
         #expect(abs(short.size.width / short.size.height - large.size.width / large.size.height) < 0.01)
     }
 
-    @MainActor @Test func togglingDiagramsPreservesTextAndRestoresHiddenGraphs() async throws {
-        let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
+    /// A graph the renderer refuses leaves the hint and the rest of the document intact.
+    @MainActor @Test func anUnsupportedGraphKeepsTheRestOfTheDocument() async throws {
         let panel = OverlayBoxPanel()
-        let window = try #require(NSApplication.shared.windows.first { !windows.contains($0.windowNumber) })
-        let graph = try #require(DiagramHint(mermaid: "flowchart LR\nA[Client] --> B[API]"))
         panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
-        panel.setDiagramsEnabled(false)
-        panel.render(["Keep the text hint."], perLineSeconds: [2], diagram: graph)
+        let detail = try #require(ReplyDetail(markdown:
+            "Keep the text hint.\n\n```mermaid\nsequenceDiagram\nA->>B: write\n```"))
+        #expect(detail.diagram == nil)
+        #expect(detail.dropped.count == 1)
+        panel.render(["Keep the text hint."], perLineSeconds: [2], detail: detail)
         for _ in 0..<100 where panel.entryCount == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
         #expect(panel.currentText.contains("Keep the text hint."))
-        #expect(!panel.currentText.contains("\u{FFFC}"))
-        let content = try #require(window.contentView)
-        let drawing = try #require(findImage(content))
-        #expect(drawing.isHiddenOrHasHiddenAncestor)
-        panel.setDiagramsEnabled(true)
-        #expect(drawing.image != nil)
-        #expect(!drawing.isHiddenOrHasHiddenAncestor)
-        panel.setDiagramsEnabled(false)
-        #expect(drawing.isHiddenOrHasHiddenAncestor)
+        #expect(!panel.showsDiagram)
+        #expect(panel.currentDetailProseText.contains("Keep the text hint."))
         #expect(panel.entryCount == 1)
-        #expect(panel.currentText.contains("Keep the text hint."))
     }
 
     @MainActor @Test func resizingPanelImmediatelyResizesItsPinnedDiagram() async throws {
@@ -83,8 +73,9 @@ import Testing
         panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
-        let graph = try #require(DiagramHint(mermaid: "flowchart TD\nA[Client] --> B[API]\nB --> C[Database]"))
-        panel.render(["Sketch this path."], perLineSeconds: [2], diagram: graph)
+        let detail = try #require(ReplyDetail(markdown:
+            "```mermaid\nflowchart TD\nA[Client] --> B[API]\nB --> C[Database]\n```"))
+        panel.render(["Sketch this path."], perLineSeconds: [2], detail: detail)
         for _ in 0..<100 where panel.entryCount == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -94,7 +85,7 @@ import Testing
         let before = try imageSize()
         panel.setContentSize(NSSize(width: 260, height: 220))
         let after = try imageSize()
-        #expect(after.height <= drawing.bounds.height, "graph fits within its pinned area")
+        #expect(after.height <= drawing.bounds.height, "the graph fits inside the detail box")
         #expect(after.width < before.width && after.height < before.height)
         #expect(abs(after.width / after.height - before.width / before.height) < 0.01)
     }

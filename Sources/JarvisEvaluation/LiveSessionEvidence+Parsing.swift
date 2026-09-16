@@ -185,7 +185,7 @@ extension LiveSessionEvidence {
     static func speakDiagram(inResponse response: Any?) -> SpeakDiagram {
         guard let output = (response as? [String: Any])?["output"] as? [[String: Any]],
               let call = output.first(where: {
-                  $0["type"] as? String == "function_call" && $0["name"] as? String == speakTool.name
+                  $0["type"] as? String == "function_call" && $0["name"] as? String == speakToolName
               })
         else { return .noSpeakCall }
         let arguments = (call["arguments"] as? String).flatMap(jsonObject)

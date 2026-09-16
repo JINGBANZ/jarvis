@@ -8,10 +8,8 @@ import Testing
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
-        let snippet = try #require(CodeSnippet(language: "python", placement: "After the loop",
-            code: "if ready:\n    return values"))
-        evidence.record(.tip(lines: ["Return the values."], explanation: "The caller needs a result.",
-                             codeSnippet: snippet))
+        let detail = "The caller needs a result.\n\n```python\nif ready:\n    return values\n```"
+        evidence.record(.tip(lines: ["Return the values."], detail: detail))
         _ = await evidence.close()
         let live = log.attach { _ in }
         let script = try #require(live.rows.first)
@@ -19,17 +17,16 @@ import Testing
             with: Data(script.dropFirst("appendRow(".count).dropLast(2).utf8)) as? [String: Any])
         let response = try #require(object["response"] as? [String: Any])
         #expect(response["lines"] as? [String] == ["Return the values."])
-        #expect(response["explanation"] as? String == "The caller needs a result.")
-        #expect((response["code"] as? [String: Any])?["code"] as? String == "if ready:\n    return values")
+        #expect(response["detail"] as? String == detail)
 
         let session = SessionStore.Session(id: "2026-09-10_00-00-00_abcd", label: "test", url: dir,
                                            isCurrent: false, evidenceIsComplete: true)
         let store = SessionStore(base: dir.deletingLastPathComponent(), current: nil)
         let reloaded = try #require(store.entries(for: session).first?.0)
-        #expect(reloaded.response?.explanation == "The caller needs a result.")
-        #expect(reloaded.response?.code?.placement == "After the loop")
-        #expect(reloaded.response?.code?.code == "if ready:\n    return values")
-        #expect(reloaded.message.contains("\n\nExplanation\n"))
+        #expect(reloaded.response?.detail == detail)
+        #expect(reloaded.response?.explanation == nil)
+        #expect(reloaded.response?.code == nil)
+        #expect(reloaded.message.contains("\n\nDetail\n"))
 
         // Mixed sessions take a separate path that strips incomplete chronology metadata.
         let file = dir.appendingPathComponent(ActivityLog.filename)
@@ -45,10 +42,9 @@ import Testing
     }
 
     @Test func exportsKeepSectionsIndentationAndLiteralMarkup() throws {
-        let snippet = try #require(CodeSnippet(language: "html", placement: "Inside the example",
-            code: "  <script>literal()</script>\n  ```"))
-        let response = ActivityResponse(lines: ["Inspect <input>."], explanation: "Keep <tags> literal.",
-                                        codeSnippet: snippet)
+        let response = ActivityResponse(
+            lines: ["Inspect <input>."],
+            detail: "Keep <tags> literal.\n\n```html\n  <script>literal()</script>\n```")
         let entry = ActivityLog.Entry(time: "00:00", message: response.message, imageFile: nil,
                                       response: response)
         let session = SessionStore.Session(id: "test", label: "test", url: URL(fileURLWithPath: "/tmp/test"),
@@ -59,15 +55,37 @@ import Testing
         }
         let markdown = export(.markdown)
         #expect(markdown.contains("### Hint\n"))
+        #expect(markdown.contains("### Detail\n"))
+        #expect(!markdown.contains("### Explanation\n"))
+        // Markdown passes the detail through verbatim; its fence is already a code block.
+        #expect(markdown.contains("```html\n  <script>literal()</script>\n```"))
+        let text = export(.plainText)
+        #expect(text.contains("\n\nDetail\n"))
+        #expect(text.contains("  <script>literal()</script>"))
+        let html = export(.html)
+        #expect(html.contains("<h3>Detail</h3>"))
+        #expect(html.contains("&lt;script&gt;literal()&lt;/script&gt;"))
+        #expect(!html.contains("<script>"))
+    }
+
+    /// A row written before the detail box still decodes and still exports both of its sections.
+    @Test func aRowWrittenBeforeTheDetailBoxStillExportsItsOwnSections() throws {
+        let legacy = try JSONDecoder().decode(ActivityResponse.self, from: Data("""
+            {"lines":["Return the values."],
+             "explanation":"The caller needs a result.",
+             "code":{"language":"python","placement":"After the loop","code":"return best"}}
+            """.utf8))
+        #expect(legacy.detail == nil)
+        #expect(legacy.message.contains("\n\nExplanation\n"))
+        let entry = ActivityLog.Entry(time: "00:00", message: legacy.message, imageFile: nil,
+                                      response: legacy)
+        let session = SessionStore.Session(id: "test", label: "test", url: URL(fileURLWithPath: "/tmp/test"),
+                                           isCurrent: false, evidenceIsComplete: true)
+        let markdown = ActivityHistoryExporter.export(
+            session: session, entries: [(entry, nil)], format: .markdown,
+            includeScreenshots: false, jarvisResponsesOnly: true).text
         #expect(markdown.contains("### Explanation\n"))
         #expect(markdown.contains("### Code\n"))
-        #expect(markdown.contains("````\n  <script>literal()</script>\n  ```\n````"))
-        let text = export(.plainText)
-        #expect(text.contains("\n\nExplanation\n"))
-        #expect(text.contains("  <script>literal()</script>\n  ```"))
-        let html = export(.html)
-        #expect(html.contains("<h3>Code</h3>"))
-        #expect(html.contains("<pre><code>  &lt;script&gt;literal()&lt;/script&gt;\n  ```</code></pre>"))
-        #expect(!html.contains("<script>"))
+        #expect(!markdown.contains("### Detail\n"))
     }
 }

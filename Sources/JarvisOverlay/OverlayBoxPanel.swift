@@ -1,11 +1,16 @@
 import AppKit
 import JarvisCore
 
-/// The Overlay Box: a persistent, borderless box that logs every coaching response in full — the
-/// running history of what the caption flashed one line at a time, each line timestamped. It conforms
-/// to the same `OverlayRendering` seam as `OverlayCaptionPanel`, so `CoachDriver` feeds both through
-/// one `render` call (fanned out by `BroadcastOverlay`); this panel simply appends each tip instead of
-/// timing it out.
+/// The Overlay Box: a persistent, borderless box in two stacked sections. The hint box on top logs
+/// every coaching response in full — the running history of what the caption flashed one line at a
+/// time, each line timestamped. The detail box below shows one reply's `detail` as a document: its
+/// text, its code block, its diagram. It conforms to the same `OverlayRendering` seam as
+/// `OverlayCaptionPanel`, so `CoachDriver` feeds both through one `deliver` call (fanned out by
+/// `BroadcastOverlay`); this panel simply appends each tip instead of timing it out.
+///
+/// There is one detail box, so a later reply replaces what is in it. The arrows step back through
+/// the session's details and hold the box where they stop, and Pin holds the newest; `DetailSlot`
+/// owns that rule, which is why it is Foundation-only and lives in Core.
 ///
 /// Like the caption it is excluded from all screen capture (so it stays invisible in a screen share
 /// and the brain never reads it back) and carries no window-server chrome. Unlike the caption it
@@ -23,25 +28,27 @@ import JarvisCore
 @MainActor
 public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplying {
     private let panel: NSPanel
-    /// The rounded container clips the independently adjustable history and code fills.
+    /// The rounded container clips the independently adjustable hint and detail fills.
     private let box: ResizeReportingView
     private let textView: NSTextView
     private let historyBackground = NSView(frame: .zero)
-    private var codeFontSize = CGFloat(Defaults.Overlay.Code.fontSize)
-    private var codePreviewEnabled: Bool?
-    private let codeView = CodeSnippetView(frame: .zero)
-    private let codeDivider = OverlayCodeDividerView(frame: .zero)
+    private var detailFontSize = CGFloat(Defaults.Overlay.Detail.fontSize)
+    private let detailView = DetailView(frame: .zero)
+    private let detailDivider = OverlayDetailDividerView(frame: .zero)
     /// A user-selected proportion takes precedence over content sizing for this session.
-    private var codeHeightFraction: CGFloat?
-    private var codeSnippet: CodeSnippet?
-    private let diagramView = DiagramHintView(frame: .zero)
-    private var pinnedDiagram: DiagramHint?
-    private var codeEnabled = Defaults.Code.enabled
-    private var displayedCodeEnabled: Bool {
-        display == .sample ? (codePreviewEnabled ?? codeEnabled) : codeEnabled
-    }
-    private static let sampleCode = CodeSnippet(language: "swift", placement: "At the start of solve",
-        code: "guard !items.isEmpty else { return nil }\nlet first = items[0]")
+    private var detailHeightFraction: CGFloat?
+    /// The session's delivered details, oldest first, so the arrows have somewhere to step.
+    private var details: [(stamp: String, detail: ReplyDetail)] = []
+    /// Which one is on screen, and whether it is being held there.
+    private var slot = DetailSlot()
+    private static let sampleDetail = ReplyDetail(markdown: """
+        An empty list has no first item. Handle that case before indexing into it.
+
+        ```swift
+        guard !items.isEmpty else { return nil }
+        let first = items[0]
+        ```
+        """)
     /// The chrome strip across the top: collapse, the name, clear.
     private let header: OverlayBoxHeaderView
     /// The scrolling log under the header. Held so the header's height can be taken off it on every
@@ -89,16 +96,14 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Reports the box's new content size once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
     /// Stand-in responses shown during the Settings preview.
-    private static let sampleEntries: [(stamp: String, text: String, explanation: String?)] = [
-        ("10:30:00", "Ask about the time complexity of that loop.", nil),
-        ("10:30:08", "Check the empty list before reading its first item.",
-         "An empty list has no first item. Handle that case before indexing into it, then continue with the normal path."),
+    private static let sampleEntries: [(stamp: String, text: String, hasDetail: Bool)] = [
+        ("10:30:00", "Ask about the time complexity of that loop.", false),
+        ("10:30:08", "Check the empty list before reading its first item.", true),
     ]
     /// Each spoken tip with the time it arrived, newest last. Held as structured entries (not the
     /// rendered string) so `clear()` and the test hooks don't have to parse the text back out.
-    private var diagramsEnabled = Defaults.Overlay.Box.diagramsEnabled
     private var latestEntryStart = 0
-    private var entries: [(stamp: String, text: String, explanation: String?)] = []
+    private var entries: [(stamp: String, text: String, hasDetail: Bool)] = []
     /// Test hook (internal): counts how many times the panel has re-asserted capture exclusion.
     private(set) var captureExclusionReassertCount = 0
 
@@ -191,30 +196,35 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         resizeAffordance = affordance
 
         box.addSubview(scroll)
-        box.addSubview(codeView)
-        box.addSubview(diagramView)
-        box.addSubview(codeDivider)
-        codeView.isHidden = true
+        box.addSubview(detailView)
+        box.addSubview(detailDivider)
+        detailView.isHidden = true
         box.addSubview(header)
         box.addSubview(affordance)   // topmost, so its tracking area sees the whole box
         panel.contentView = box
         super.init()
-        codeDivider.onHeightChanged = { [weak self] height in
-            guard let self, !self.codeDivider.isHidden else { return }
+        detailDivider.onHeightChanged = { [weak self] height in
+            guard let self, !self.detailDivider.isHidden else { return }
             let available = max(0, self.box.bounds.height - self.chrome.height)
             guard available > 0 else { return }
-            self.codeHeightFraction = self.boundedCodeHeight(height, available: available) / available
+            self.detailHeightFraction = self.boundedDetailHeight(height, available: available) / available
             self.layoutDetails()
         }
-        codeView.onDismiss = { [weak self] in
+        detailView.onPrevious = { [weak self] in self?.step(by: -1) }
+        detailView.onNext = { [weak self] in self?.step(by: 1) }
+        detailView.onTogglePin = { [weak self] in
             guard let self else { return }
-            if self.display == .log {
-                self.codeSnippet = nil
-                self.refreshDetails()
+            if self.slot.isHeld {
+                self.slot.unpin(newest: self.shownDetails.isEmpty ? nil : self.shownDetails.count - 1)
             } else {
-                self.codeView.show(nil, fontSize: self.codeFontSize, enabled: self.displayedCodeEnabled && !self.isCollapsed)
-                self.layoutDetails()
+                self.slot.pin()
             }
+            self.refreshDetails()
+        }
+        detailView.onToggleRolled = { [weak self] in
+            guard let self else { return }
+            self.slot.roll(!self.slot.isRolled)
+            self.refreshDetails()
         }
         header.collapseButton.target = self
         header.collapseButton.action = #selector(toggleCollapsed)
@@ -295,105 +305,113 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// to satisfy the protocol; hops to the main actor. Empty/whitespace-only lines are dropped,
     /// matching the overlay, so a no-text tip never adds a blank entry.
     public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
-        render(lines, perLineSeconds: perLineSeconds, diagram: nil)
+        render(lines, perLineSeconds: perLineSeconds, detail: nil)
     }
 
-    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?) {
-        render(lines, perLineSeconds: perLineSeconds, diagram: diagram, explanation: nil)
-    }
-
-    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
+    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval],
+                                   detail: ReplyDetail?) {
         let summary = lines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
         guard !summary.isEmpty else { return }
-        let detail = explanation?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         Task { @MainActor in
-            self.append(summary, explanation: detail.isEmpty ? nil : detail, diagram: diagram)
+            self.append(summary, detail: detail)
         }
     }
 
-    public func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? {
-        // A hint without code must not interrupt reading or report the pinned snippet as new output.
-        guard let snippet else { return nil }
-        codeSnippet = acceptsDetail && codeEnabled ? snippet : nil
-        refreshDetails()
-        if panel.isVisible { reassertCaptureExclusion() }
-        return codeSnippet
+    /// The details on screen right now: the session's, or the sample standing in for them.
+    private var shownDetails: [(stamp: String, detail: ReplyDetail)] {
+        guard display == .sample else { return details }
+        return Self.sampleDetail.map { [(stamp: Self.sampleEntries[1].stamp, detail: $0)] } ?? []
     }
 
-    public func setCodeEnabled(_ enabled: Bool) {
-        codeEnabled = enabled
-        if !enabled { codeSnippet = nil }
+    private func step(by offset: Int) {
+        let available = shownDetails
+        guard !available.isEmpty else { return }
+        let from = slot.shownIndex ?? available.count - 1
+        let target = min(max(0, from + offset), available.count - 1)
+        slot.step(to: target, isNewest: target == available.count - 1)
         refreshDetails()
     }
 
     private func refreshDetails() {
-        diagramView.show(pinnedDiagram, enabled: diagramsEnabled && isSessionLive && display == .log && !isCollapsed)
-        let enabled = displayedCodeEnabled
-        let displayedCode = enabled ? (display == .sample ? Self.sampleCode : codeSnippet) : nil
-        // An empty coding placeholder must not consume the system-design reference's space.
-        codeView.show(displayedCode, fontSize: codeFontSize,
-                      enabled: enabled && !isCollapsed && (displayedCode != nil || diagramView.isHidden))
+        let available = shownDetails
+        // The sample follows its own detail so the Settings sliders always have one to act on.
+        let index = display == .sample
+            ? (available.isEmpty ? nil : available.count - 1)
+            : slot.shownIndex.map { min($0, max(0, available.count - 1)) }
+        let entry = index.flatMap { available.indices.contains($0) ? available[$0] : nil }
+        detailView.show(entry?.detail, stamp: entry?.stamp ?? "",
+                        position: index.map { ($0, available.count) },
+                        isHeld: slot.isHeld, isRolled: slot.isRolled,
+                        fontSize: detailFontSize,
+                        enabled: entry != nil && !isCollapsed)
         layoutDetails()
     }
 
-    private func boundedCodeHeight(_ proposed: CGFloat, available: CGFloat) -> CGFloat {
-        // At the minimum panel size, preserving a hint line takes priority over the code floor.
+    private func boundedDetailHeight(_ proposed: CGFloat, available: CGFloat) -> CGFloat {
+        // At the minimum panel size, preserving a hint line takes priority over the detail floor.
         min(max(0, available - 44), max(96, proposed))
     }
 
     private func layoutDetails() {
         let available = max(0, box.bounds.height - chrome.height)
-        codeDivider.isHidden = codeView.isHidden
-        let preferred = codeHeightFraction.map { $0 * available }
-            ?? min(box.bounds.height * 0.45,
-                   codeView.preferredHeight(viewportWidth: box.bounds.width))
-        let height = codeView.isHidden ? 0 : boundedCodeHeight(preferred, available: available)
+        detailDivider.isHidden = detailView.isHidden
+        // A rolled box is exactly its title strip: the arrows and Pin stay reachable, and every
+        // other point goes back to the hints.
+        let height: CGFloat
+        if detailView.isHidden {
+            height = 0
+        } else if slot.isRolled {
+            height = min(available, DetailView.stripHeight)
+        } else {
+            let preferred = detailHeightFraction.map { $0 * available }
+                ?? min(box.bounds.height * 0.45,
+                       detailView.preferredHeight(viewportWidth: box.bounds.width))
+            height = boundedDetailHeight(preferred, available: available)
+        }
         historyBackground.frame = NSRect(x: 0, y: height, width: box.bounds.width,
                                          height: max(0, box.bounds.height - height))
-        codeView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
-        codeView.needsLayout = true
-        codeView.layoutSubtreeIfNeeded()
-        let proposedDiagramHeight = diagramView.isHidden ? 0
-            : min(box.bounds.height * 0.45, max(0, available - 44 - height))
-        // Give history the space back when the diagram's 40-point chrome leaves no drawing area.
-        let diagramHeight = proposedDiagramHeight > 40 ? proposedDiagramHeight : 0
-        diagramView.frame = NSRect(x: 0, y: height, width: box.bounds.width, height: diagramHeight)
-        diagramView.needsLayout = true
-        diagramView.layoutSubtreeIfNeeded()
+        detailView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
+        detailView.needsLayout = true
+        detailView.layoutSubtreeIfNeeded()
         // Overlay the boundary so the grab target does not consume the small panel's content budget.
-        let dividerHeight = OverlayCodeDividerView.thickness
-        codeDivider.frame = NSRect(x: 0, y: height - dividerHeight / 2,
-                                   width: box.bounds.width, height: dividerHeight)
-        let detailHeight = height + diagramHeight
-        scroll.frame = NSRect(x: 0, y: detailHeight, width: box.bounds.width,
-                              height: max(0, available - detailHeight))
+        let dividerHeight = OverlayDetailDividerView.thickness
+        detailDivider.frame = NSRect(x: 0, y: height - dividerHeight / 2,
+                                     width: box.bounds.width, height: dividerHeight)
+        scroll.frame = NSRect(x: 0, y: height, width: box.bounds.width,
+                              height: max(0, available - height))
     }
 
     public func deliver(_ lines: [String], perLineSeconds: [TimeInterval],
-                        diagram: DiagramHint?, explanation: String?) -> String? {
+                        detail: ReplyDetail?) -> ReplyDetail? {
         let summary = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }.joined(separator: " ")
         guard !summary.isEmpty else { return nil }
-        let detail = acceptsDetail ? explanation : nil
-        append(summary, explanation: detail, diagram: diagram)
-        return detail
+        // The box can be hidden or rolled up during a request, and a detail it cannot show must not
+        // be recorded as delivered or replayed to the model as if the user had seen it.
+        let shown = acceptsDetail ? detail.flatMap { $0.hasContent ? $0 : nil } : nil
+        append(summary, detail: shown)
+        return shown
     }
 
-    private func append(_ text: String, explanation: String?, diagram: DiagramHint?) {
-        entries.append((stamp: timeFormatter.string(from: Date()), text: text, explanation: explanation))
-        // Missing or invalid graph output leaves the session reference intact, even while hidden.
-        if isSessionLive, let diagram { pinnedDiagram = diagram }
+    private func append(_ text: String, detail: ReplyDetail?) {
+        entries.append((stamp: timeFormatter.string(from: Date()),
+                        text: text, hasDetail: detail != nil))
+        if let detail, detail.hasContent {
+            details.append((stamp: entries[entries.count - 1].stamp, detail: detail))
+            slot.received(details.count - 1)
+        }
         // No preview can be running: one only opens while stopped, and Start ends it.
         // Re-assert capture exclusion on every render that reaches the screen — same defense-in-depth as
         // OverlayCaptionPanel.show, since this box can be visible (full of responses) while Settings flips the
         // activation policy and WindowServer drops `sharingType` on vulnerable macOS builds.
         if panel.isVisible { reassertCaptureExclusion() }
         renderDisplay()
-        if explanation != nil {
-            // A long explanation may exceed the viewport. Start at its hint, not its last row.
+        if detail != nil {
+            // The newest hint carries a marker pointing at the detail box. Start at that hint, not
+            // at the last row of a long one.
             if let layout = textView.layoutManager, let container = textView.textContainer {
                 layout.ensureLayout(for: container)
                 let glyphs = layout.glyphRange(
@@ -406,7 +424,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         }
     }
 
-    /// Build the scrolling hint history; session references stay in their pinned areas.
+    /// Build the scrolling hint history. The detail box holds the documents; a hint whose reply
+    /// carried one ends with a dim marker in the same attributed string, so it stays a readout
+    /// rather than becoming a control (#336 makes it clickable later).
     private func renderDisplay() {
         let items = display == .sample ? Self.sampleEntries : entries
         let result = NSMutableAttributedString()
@@ -414,26 +434,21 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             .foregroundColor: NSColor(white: 1, alpha: 0.5),
             .font: NSFont.monospacedDigitSystemFont(ofSize: max(8, fontSize - 2), weight: .regular),
         ]
-        let textAttrs: [NSAttributedString.Key: Any] = [
-            .foregroundColor: NSColor.white,
-            .font: NSFont.systemFont(ofSize: fontSize),
-        ]
         let hintAttrs: [NSAttributedString.Key: Any] = [
             .foregroundColor: NSColor.white,
             .font: NSFont.systemFont(ofSize: fontSize, weight: .semibold),
         ]
-        let explanationLabelAttrs: [NSAttributedString.Key: Any] = [
-            .foregroundColor: NSColor(white: 1, alpha: 0.75),
-            .font: NSFont.systemFont(ofSize: max(8, fontSize - 2), weight: .medium),
+        let markerAttrs: [NSAttributedString.Key: Any] = [
+            .foregroundColor: NSColor(white: 1, alpha: 0.5),
+            .font: NSFont.systemFont(ofSize: max(8, fontSize - 2), weight: .regular),
         ]
         for (i, entry) in items.enumerated() {
             if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
             latestEntryStart = result.length
             result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
             result.append(NSAttributedString(string: entry.text, attributes: hintAttrs))
-            if let explanation = entry.explanation {
-                result.append(NSAttributedString(string: "\n\nExplanation\n", attributes: explanationLabelAttrs))
-                result.append(NSAttributedString(string: explanation, attributes: textAttrs))
+            if entry.hasDetail {
+                result.append(NSAttributedString(string: "  detail below", attributes: markerAttrs))
             }
         }
         textView.textStorage?.setAttributedString(result)
@@ -445,10 +460,14 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     // MARK: - Visibility (the Settings toggle, gated on a live session)
 
-    /// Wipe hint history and code. The design remains a reference until the session ends.
+    /// Wipe both boxes. A held detail survives: the user asked for it to stay, and Clear is about
+    /// the history they are reading, not the reference they parked.
     public func clear() {
-        codeSnippet = nil
         entries.removeAll()
+        if !slot.isHeld {
+            details.removeAll()
+            slot.reset()
+        }
         renderDisplay()
     }
 
@@ -475,10 +494,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Start also rolls a collapsed box back open, because collapse belongs to the conversation the
     /// user collapsed it during, not to the next one.
     public func setSessionLive(_ live: Bool) {
-        if live && !isSessionLive { codeHeightFraction = nil }
-        if !live || !isSessionLive { pinnedDiagram = nil }
+        if live && !isSessionLive { detailHeightFraction = nil }
         isSessionLive = live
-        if !live { codeSnippet = nil }
+        if !live {
+            details.removeAll()
+            slot.reset()
+        }
         // Start takes the sample down and Stop can put it back, both without Settings saying anything:
         // whether the preview stands in is derived, not commanded.
         applyDisplay()
@@ -489,23 +510,14 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     // MARK: - OverlayBoxApplying
 
-    public func setCodeFontSize(_ points: Double) {
-        codeFontSize = CGFloat(points)
+    public func setDetailFontSize(_ points: Double) {
+        detailFontSize = CGFloat(points)
         refreshDetails()
     }
 
-    public func setCodeBackgroundOpacity(_ opacity: Double) {
-        codeView.layer?.backgroundColor = CodeSnippetView.background.withAlphaComponent(CGFloat(opacity)).cgColor
-    }
-
-    public func setCodePreviewEnabled(_ enabled: Bool) {
-        codePreviewEnabled = enabled
-        refreshDetails()
-    }
-
-    public func setDiagramsEnabled(_ enabled: Bool) {
-        diagramsEnabled = enabled
-        renderDisplay()
+    public func setDetailBackgroundOpacity(_ opacity: Double) {
+        detailView.layer?.backgroundColor =
+            DetailView.background.withAlphaComponent(CGFloat(opacity)).cgColor
     }
 
     /// Set the box's background-fill opacity (0–1), live. Only the alpha varies; the fill colour stays
@@ -587,8 +599,33 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     // MARK: - Test hooks (internal; reached via `@testable import JarvisOverlay`)
 
     /// The panel's current capture-sharing type. `.none` means excluded from screen capture.
-    var currentCodeSnippet: CodeSnippet? { codeView.snippet }
-    var currentCodeHeight: CGFloat { codeView.frame.height }
+    var currentDetail: ReplyDetail? { detailView.detail }
+    var currentDetailHeight: CGFloat { detailView.frame.height }
+    var currentDetailTitle: String { detailView.titleText }
+    var currentDetailPosition: String { detailView.positionText }
+    var currentDetailCodeText: NSAttributedString { detailView.codeText }
+    var currentDetailProseText: String { detailView.proseText }
+    var showsDiagram: Bool { !detailView.isHidden && detailView.showsDiagram }
+    var isDetailRolled: Bool { detailView.isRolled }
+    var isDetailHeld: Bool { slot.isHeld }
+    var detailCount: Int { details.count }
+
+    /// Drive the detail box's own controls, so tests take the path the user takes.
+    func clickDetailPrevious() { detailView.previousButton.performClick(nil) }
+    func clickDetailNext() { detailView.nextButton.performClick(nil) }
+    func clickDetailPin() { detailView.pinButton.performClick(nil) }
+    func clickDetailDismiss() { detailView.dismissButton.performClick(nil) }
+
+    /// The detail box's controls must carry no tooltip, for the same reason the header's must not.
+    var detailButtonTooltips: [String?] {
+        [detailView.previousButton.toolTip, detailView.nextButton.toolTip,
+         detailView.pinButton.toolTip, detailView.dismissButton.toolTip]
+    }
+
+    var detailButtonLabels: [String?] {
+        [detailView.previousButton.accessibilityLabel(), detailView.nextButton.accessibilityLabel(),
+         detailView.pinButton.accessibilityLabel(), detailView.dismissButton.accessibilityLabel()]
+    }
 
     var currentSharingType: NSWindow.SharingType { panel.sharingType }
 
@@ -603,7 +640,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// The box fill's current alpha (the opacity the user picked).
     var currentBoxOpacity: CGFloat { historyBackground.layer?.backgroundColor?.alpha ?? 0 }
-    var currentCodeBackgroundOpacity: CGFloat { codeView.layer?.backgroundColor?.alpha ?? 0 }
+    var currentDetailBackgroundOpacity: CGFloat { detailView.layer?.backgroundColor?.alpha ?? 0 }
 
     /// The response text's current point size (the size the user picked).
     var currentFontPointSize: CGFloat { fontSize }

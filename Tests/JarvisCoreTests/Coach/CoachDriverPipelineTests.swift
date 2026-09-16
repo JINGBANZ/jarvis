@@ -245,7 +245,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                             screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
                             clock: Clock, config: Config = .default,
-                            codeEnabled: Bool = false,
+                            capabilities: CoachCapabilities = .default,
                             coachingAttempts: (any CoachingAttemptAuditing)? = nil,
                             automaticAttemptDelay: @escaping CoachDriver.AutomaticAttemptDelay = { _ in },
                             onRouteFailure: (@MainActor @Sendable (ProviderFailure) -> Void)? = nil,
@@ -266,9 +266,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             config: config, transcript: transcript,
             route: route, screen: screen, overlay: overlay, clock: clock,
             coachingAttempts: coachingAttempts,
-            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, codeEnabled: codeEnabled),
+            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen),
             automaticAttemptDelay: automaticAttemptDelay,
             activity: activity,
+            capabilities: capabilities,
             prepMaterial: prepMaterial
         )
         return (driver, transcript)
@@ -381,7 +382,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let toolResult = brain.calls[1].first { $0.role == .tool && $0.toolCallId == "c1" }?.text ?? ""
         #expect(toolResult.contains("screenshot captured"))
         #expect(toolResult.contains("while(true){ cnt--; }"))     // the OCR text, verbatim
-        #expect(toolResult.contains("may contain errors"))        // …flagged as fallible
+        #expect(toolResult.contains("may misread tokens"))         // …flagged as fallible
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })   // image still ground truth
     }
 
@@ -1991,7 +1992,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let (driver, transcript) = makeDriver(
             brain: brain,
-            clock: ManualClock(), codeEnabled: true)
+            clock: ManualClock(),
+            capabilities: CoachCapabilities.compose(
+                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true))
         transcript.append(.init(speaker: .me, text: "first attempt", at: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
@@ -2002,7 +2005,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         #expect(await outcome == .spoke)
         #expect(brain.calls.count == 2)
-        #expect(brain.calls.last?.first?.text?.contains("# Code accompanies") == true)
+        #expect(brain.calls.last?.first?.text?.contains("# Detail") == true)
         driver.updateTranscriptionWork(false, for: .them)
     }
 
@@ -2013,7 +2016,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
         let (driver, _) = makeDriver(
             brain: brain,
-            clock: ManualClock(), codeEnabled: true,
+            clock: ManualClock(),
+            capabilities: CoachCapabilities.compose(
+                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true),
             automaticAttemptDelay: { _ in await delayGate.enter() })
         driver.updateTranscriptionWork(true, for: .them)
 
@@ -2040,7 +2045,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateTranscriptionWork(false, for: .them)
         #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
-        #expect(brain.calls.last?.first?.text?.contains("# Code accompanies") == true)
+        #expect(brain.calls.last?.first?.text?.contains("# Detail") == true)
     }
 
     @Test func automaticManualHintAttemptDoesNotRecapture() async {

@@ -37,17 +37,14 @@ public struct SessionPlan: Sendable, Equatable {
     /// log without comparing every field; nothing branches on its value.
     public let revision: UInt
     public let screen: ScreenCaptureSelection
-    public let codeEnabled: Bool
-    /// Fixed at Start; screen revisions preserve this session capability.
-    public let explanationsEnabled: Bool
 
-    public init(revision: UInt, screen: ScreenCaptureSelection,
-                explanationsEnabled: Bool = Defaults.Explanations.enabled,
-                codeEnabled: Bool = Defaults.Code.enabled) {
+    // Whether a reply may carry a `detail` is NOT here: it lives on `CoachCapabilities`, the one
+    // value the prompt, the declared schema, and delivery all read. A second copy on the plan is
+    // how a session came to describe one tool set and send another (#273).
+
+    public init(revision: UInt, screen: ScreenCaptureSelection) {
         self.revision = revision
         self.screen = screen
-        self.explanationsEnabled = explanationsEnabled
-        self.codeEnabled = codeEnabled
     }
 
     /// The plan a session with no configured control plane runs against: active-window capture on

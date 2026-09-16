@@ -43,11 +43,15 @@ import Testing
         #expect(DiagramHint(mermaid: "flowchart LR\nA[" + String(repeating: "x", count: 9000) + "]") == nil)
     }
 
-    @Test func parsesOptionalDiagramWithoutLosingTextOnMalformedField() {
+    /// A graph now travels as a fenced block inside `detail`, and a field no session declares is
+    /// ignored rather than allowed to cost the hint.
+    @Test func aDiagramTravelsInDetailAndAnUndeclaredFieldIsIgnored() {
         let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
-            #"{"lines":["Sketch the request path."],"mermaid":"flowchart LR\nA[API]"}"#)
-        #expect(call == .speak(callId: "s", lines: ["Sketch the request path."], mermaid: "flowchart LR\nA[API]"))
+            #"{"lines":["Sketch the request path."],"detail":"```mermaid\nflowchart LR\nA[API]\n```"}"#)
+        #expect(call == .speak(callId: "s", lines: ["Sketch the request path."],
+                               detail: "```mermaid\nflowchart LR\nA[API]\n```"))
         #expect(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
-            #"{"lines":["Keep this hint."],"mermaid":42}"#) == .speak(callId: "s", lines: ["Keep this hint."]))
+            #"{"lines":["Keep this hint."],"mermaid":"flowchart LR\nA[API]"}"#)
+            == .speak(callId: "s", lines: ["Keep this hint."]))
     }
 }

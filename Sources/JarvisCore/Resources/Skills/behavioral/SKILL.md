@@ -1,6 +1,6 @@
 ---
 name: behavioral
-description: Use for behavioral interview questions, including past experiences, strengths, motivation, career goals, and hypothetical workplace situations.
+description: Use when the question is behavioral: past experiences, strengths, motivation, career goals, and hypothetical workplace situations.
 ---
 # Behavioral questions
 

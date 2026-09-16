@@ -2,7 +2,7 @@ import AppKit
 
 /// A narrow drag target keeps window movement available everywhere outside the divider.
 @MainActor
-final class OverlayCodeDividerView: NSView {
+final class OverlayDetailDividerView: NSView {
     static let thickness: CGFloat = 8
     var onHeightChanged: ((CGFloat) -> Void)?
     private var dragStart: (pointerY: CGFloat, height: CGFloat)?
@@ -14,7 +14,7 @@ final class OverlayCodeDividerView: NSView {
         setAccessibilityElement(true)
         setAccessibilityRole(.splitter)
         setAccessibilityOrientation(.horizontal)
-        setAccessibilityLabel("Resize code and hints")
+        setAccessibilityLabel("Resize hints and detail")
     }
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
@@ -28,7 +28,7 @@ final class OverlayCodeDividerView: NSView {
 
     override func accessibilityValue() -> Any? { NSNumber(value: Double(frame.midY)) }
     override func accessibilityValueDescription() -> String? {
-        "Code area height: \(Int(frame.midY.rounded())) points"
+        "Detail box height: \(Int(frame.midY.rounded())) points"
     }
 
     /// Reuse the panel's bounds and report whether an accessible adjustment actually moved it.

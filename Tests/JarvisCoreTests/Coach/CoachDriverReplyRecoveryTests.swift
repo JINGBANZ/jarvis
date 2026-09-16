@@ -9,7 +9,8 @@ import Testing
 /// the forced response at the cap still fails the attempt, and the route retries.
 @Suite struct CoachDriverReplyRecoveryTests {
     private func makeDriver(brain: BrainClient, screen: ScreenCapturing = FakeScreen(),
-                            overlay: OverlayRendering = FakeOverlay())
+                            overlay: OverlayRendering = FakeOverlay(),
+                            capabilities: CoachCapabilities = .default)
         -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let target = BrainTarget(
@@ -21,7 +22,8 @@ import Testing
                 ConfiguredBrainTarget(target: target, brain: brain),
             ]),
             screen: screen, overlay: overlay, clock: ManualClock(now: 100),
-            automaticAttemptDelay: { _ in })
+            automaticAttemptDelay: { _ in },
+            capabilities: capabilities)
         return (driver, transcript)
     }
 
@@ -87,9 +89,9 @@ import Testing
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 
-    /// Prose beside a call the press may not make is the hint: spoken with no extra round trip, and
-    /// committed as a `speak` call with its own result so the next request replays a linked pair.
-    @Test func aPressSpeaksTheProseBesideACallItMayNotMake() async throws {
+    /// Prose beside a call the press may not make is not a shortcut past the round trip: the call is
+    /// answered and the model asked again, and the hint it then gives is what commits.
+    @Test func aPressWithProseBesideACallItMayNotMakeIsStillAskedAgain() async throws {
         let brain = ScriptedBrain(script: [
             reply(call("stay_silent", id: "q1"), text: "Try a hash map.\n"),
             speak,
@@ -98,19 +100,19 @@ import Testing
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(brain.calls.count == 1)
-        #expect(overlay.rendered == [["Try a hash map."]])
+        #expect(brain.calls.count == 2)
+        #expect(overlay.rendered == [["Start from the read path."]])
 
         transcript.append(.init(speaker: .them, text: "Walk me through the complexity.", at: 101))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
-        let followUp = brain.calls[1]
+        let followUp = brain.calls[2]
         let replayed = try #require(followUp.first { $0.toolCalls?.first?.name == "speak" })
         let delivered = try #require(replayed.toolCalls?.first)
         let arguments = try #require(
             JSONSerialization.jsonObject(with: Data(delivered.argumentsJSON.utf8)) as? [String: Any])
-        #expect(arguments["lines"] as? [String] == ["Try a hash map."])
-        #expect(toolResult(delivered.id, in: followUp)?.text == JarvisPrompts.Coach.tipShown)
+        #expect(arguments["lines"] as? [String] == ["Start from the read path."])
+        #expect(toolResult(delivered.id, in: followUp)?.text == JarvisPrompts.Coach.tipShown())
         #expect(!followUp.contains { $0.toolCalls?.contains { $0.name == "stay_silent" } == true })
     }
 
@@ -132,17 +134,55 @@ import Testing
         #expect(toolResult("q1", in: followUp) == nil)
     }
 
-    @Test func aPressWhoseReplyIsOnlyProseSpeaksItsFirstThreeLines() async {
-        let brain = ScriptedBrain(script: [
-            reply(text: "Name the invariant.\n\n  Keep a running sum.  \nCheck the empty case.\nThen code it."),
-        ])
+    /// Plain text is not an action: the press is told so once, and the call the model then makes is
+    /// what coaches.
+    @Test func aPressWhoseReplyIsOnlyProseIsRefusedOnceAndAsksAgain() async throws {
+        let brain = ScriptedBrain(script: [reply(text: "Name the invariant."), speak])
         let overlay = FakeOverlay()
         let (driver, _) = makeDriver(brain: brain, overlay: overlay)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
-        #expect(brain.calls.count == 1)
-        #expect(overlay.rendered == [["Name the invariant.", "Keep a running sum.", "Check the empty case."]])
+        #expect(brain.calls.count == 2)
+        let second = try #require(brain.calls.last)
+        #expect(second.contains { $0.role == .assistant && $0.text == "Name the invariant." })
+        #expect(second.contains {
+            $0.role == .user && $0.text == JarvisPrompts.Coach.replyMustCallSpeak(detailEnabled: false)
+        })
+        #expect(overlay.rendered == [["Start from the read path."]])
+    }
+
+    /// The refusal belongs to the attempt that spent it: kept in memory, the nudge would replay on
+    /// every later request and reach the summarizer.
+    @Test func aRefusedProseReplyLeavesNoTraceInHistory() async throws {
+        let brain = ScriptedBrain(script: [reply(text: "Name the invariant."), speak, speak])
+        let (driver, transcript) = makeDriver(brain: brain)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        transcript.append(.init(speaker: .them, text: "Walk me through the complexity.", at: 101))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        let followUp = try #require(brain.calls.last)
+        #expect(!followUp.contains { $0.text == "Name the invariant." })
+        #expect(!followUp.contains {
+            $0.text == JarvisPrompts.Coach.replyMustCallSpeak(detailEnabled: false)
+        })
+    }
+
+    /// One refusal per attempt: a second prose reply becomes the coaching itself, its first line the
+    /// hint and the rest the detail, so a press that answered in prose still delivers what it wrote.
+    @Test func aSecondProseReplyBecomesTheHintAndItsDetail() async throws {
+        let prose = "Name the invariant.\n\nKeep a running sum.\n\n```python\ntotal = 0\n```"
+        let brain = ScriptedBrain(script: [reply(text: prose), reply(text: prose)])
+        let overlay = FakeOverlay()
+        let (driver, _) = makeDriver(brain: brain, overlay: overlay,
+                                     capabilities: CoachCapabilities.compose(
+                                        disabledTools: [], prepSourcesConfigured: false,
+                                        detailEnabled: true))
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(brain.calls.count == 2)
+        #expect(overlay.rendered == [["Name the invariant."]])
     }
 
     /// Only a press speaks prose: an automatic turn must choose to speak or stay silent.
@@ -171,7 +211,7 @@ import Testing
         #expect(brain.calls.count == 2)
         let answer = try #require(toolResult("m1", in: brain.calls[1]))
         #expect(answer.text?.contains("did not match its schema") == true)
-        #expect(answer.text?.contains(speakTool.parametersJSON) == true)
+        #expect(answer.text?.contains(speakTool(detailEnabled: false).parametersJSON) == true)
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 

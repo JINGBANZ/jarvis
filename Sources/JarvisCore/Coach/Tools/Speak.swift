@@ -1,63 +1,91 @@
 import Foundation
 
-/// One schema on every brain and in every session. `mermaid` is nullable rather than absent because
-/// that is what makes a field optional under strict Structured Outputs, and because a second speak
-/// variant is what let one session describe one schema and send another (#273). When a graph belongs on a tip is prompt text's decision, not the
-/// runtime's: any graph the renderer can parse reaches the overlay.
+/// The one name every surface matches a `speak` call by. The definition is built per session, so
+/// nothing outside `CoachCapabilities` may reach for a global to learn what the tool is called.
+public let speakToolName = "speak"
+
+/// Built once per session by `CoachCapabilities.compose`.
 ///
-/// The guidance is the system prompt's tip style. It governs `speak` and nothing else, and `speak`
-/// is always on, so the action policy's cross-reference to it can never dangle.
-public let speakTool = ToolDef(
-    name: "speak",
-    description: "Show a coaching reply as up to 3 short standalone overlay lines. "
-        + "Use one idea per line, aim under 12 words, and keep code on one line. Call only "
-        + "when a reply or tip is useful. Put fuller plain-language clarification in explanation; "
-        + "use null for ordinary hints. The explanation appears only in the persistent box. "
-        + "Where your instructions call for code, put the component implementing this hint "
-        + "in codeSnippet; otherwise, and for conceptual guidance, use null.",
-    // Laid out one field per line for reading. Line breaks and the indentation after them are
-    // stripped, so every brain receives the compact form; no JSON string here contains a line break.
-    parametersJSON: #"""
-        {"type":"object","properties":{
-            "lines":{"type":"array","items":{"type":"string"}},
-            "mermaid":{"type":["string","null"],"description":"A small Mermaid graph for a private architecture sketch. Null unless a loaded skill asks for a diagram."},
-            "explanation":{"type":["string","null"]},
-            "codeSnippet":{"type":["object","null"],"properties":{
-                "language":{"type":"string"},
-                "placement":{"type":"string"},
-                "code":{"type":"string"},
-                "highlightedLines":{"type":"array","items":{"type":"integer"}}
-            },"required":["language","placement","code","highlightedLines"],"additionalProperties":false}
-        },"required":["lines","mermaid","explanation","codeSnippet"],"additionalProperties":false}
-        """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
-    guidance: """
-        # Tip style
-        Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
-        understand under pressure.
+/// `detail` exists only when the Overlay Box can show it, so no session declares a field the box
+/// would throw away. The session's one capability set both describes the tool in the prompt and
+/// declares it on every request, so a session can never describe one schema and send another
+/// (#273). `detail` is nullable rather than absent because that is what makes a field optional
+/// under strict Structured Outputs.
+///
+/// What belongs in `detail` is prompt text's decision, not the runtime's: the guidance here says
+/// when to write one at all, and a loaded skill says what its own domain puts there.
+public func speakTool(detailEnabled: Bool) -> ToolDef {
+    ToolDef(
+        name: speakToolName,
+        description: "Show a coaching reply: up to 3 short overlay lines, one idea each, under 12 "
+            + "words. Call only when a reply is useful."
+            + (detailEnabled
+                ? " Put a code block or a diagram in detail as Markdown; null for an ordinary hint."
+                : ""),
+        // Laid out one field per line for reading. Line breaks and the indentation after them are
+        // stripped, so every brain receives the compact form; no JSON string here contains a line
+        // break.
+        parametersJSON: (detailEnabled
+            ? #"""
+            {"type":"object","properties":{
+                "lines":{"type":"array","items":{"type":"string"}},
+                "detail":{"type":["string","null"],"description":"Markdown shown under the hint in the box. Null for an ordinary hint."}
+            },"required":["lines","detail"],"additionalProperties":false}
+            """#
+            : #"""
+            {"type":"object","properties":{
+                "lines":{"type":"array","items":{"type":"string"}}
+            },"required":["lines"],"additionalProperties":false}
+            """#).replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
+        guidance: tipStyle + (detailEnabled ? "\n\n" + detailGuidance : ""))
+}
 
-        If "me" has not yet engaged with an approach — no attempt visible in the code, speech, or
-        notes — lead with orientation, not a step. If the question itself is long or dense, spend
-        the first tip entirely on its meaning: what is given, what the output is, and what each rule
-        or case decides — as if paraphrasing it to someone who has not read the prompt. Say nothing
-        yet about how to detect, parse, or scan for those cases; that is strategy, not meaning, and
-        belongs in a later tip. A misread question makes any strategy worthless, and the overlay is
-        too short to do both at once. Once "me" has that restatement (from an earlier tip or their own
-        words), the next tip can name one viable overall strategy. A "next step" means nothing without
-        a plan to hang it on. Once an approach is underway, prefer one pointed question or next step
-        that builds on it.
-        Give a full solution only when "me" explicitly asks for it.
+/// The system prompt's tip style. It governs `speak` and nothing else, and `speak` is always on, so
+/// the action policy's cross-reference to it can never dangle.
+private let tipStyle = """
+    # Tip style
+    Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
+    understand under pressure.
 
-        Name things with the words already in front of "me" — on the captured screen, or in what
-        either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
-        symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
-        accuracy outranks brevity.
+    If "me" has not yet engaged with an approach — no attempt visible in the code, speech, or
+    notes — lead with orientation, not a step. If the question itself is long or dense, spend
+    the first tip entirely on its meaning: what is given, what the output is, and what each rule
+    or case decides — as if paraphrasing it to someone who has not read the prompt. Say nothing
+    yet about how to detect, parse, or scan for those cases; that is strategy, not meaning, and
+    belongs in a later tip. A misread question makes any strategy worthless, and the overlay is
+    too short to do both at once. Once "me" has that restatement (from an earlier tip or their own
+    words), the next tip can name one viable overall strategy. A "next step" means nothing without
+    a plan to hang it on. Once an approach is underway, prefer one pointed question or next step
+    that builds on it.
+    Give a full solution only when "me" explicitly asks for it.
 
-        Set mermaid to null. Attach a graph only when a loaded skill has told you to, and only
-        for the case it describes.
-        """
-)
+    Name things with the words already in front of "me" — on the captured screen, or in what
+    either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
+    symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
+    accuracy outranks brevity.
+    """
 
-// The tool result the harness sends once a tip is on screen.
+/// Present only when the Overlay Box can show a detail. It says what `detail` is for and what keeps
+/// it null; a loaded skill adds the rules for its own domain's blocks.
+private let detailGuidance = """
+    # Detail
+    The lines are the coaching. Say what the user needs there, including a short explanation, and
+    leave detail null.
+    detail is Markdown shown under the hint in the persistent box. Use it for what a line cannot
+    hold: a code block or a diagram a loaded skill asked for. Write paragraphs there only when the
+    user asks you to explain, or is clearly lost: they ask why, they restate something wrongly, or
+    they say they can't follow earlier advice. Silence or unchanged work is not confusion, and you
+    hear transcripts, not tone.
+    When you do explain, keep it to what the gap needs: why it works, a tiny example when it helps,
+    and one next action. If an earlier explanation didn't land, simplify or use a smaller example
+    instead of repeating it.
+    Never invent personal experience or screen details you haven't seen.
+    """
+
+// The tool result the harness sends once a tip is on screen. It names anything the box could not
+// show, so the model treats a dropped block as a fact rather than assuming it landed.
 extension JarvisPrompts.Coach {
-    static let tipShown = "shown to the user"
+    static func tipShown(dropped: [String] = []) -> String {
+        dropped.isEmpty ? "shown to the user" : "shown to the user; " + dropped.joined(separator: "; ")
+    }
 }

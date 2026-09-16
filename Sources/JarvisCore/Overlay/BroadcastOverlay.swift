@@ -6,22 +6,14 @@ import Foundation
 public final class BroadcastOverlay: OverlayRendering {
     private let sinks: [OverlayRendering]
 
-    @MainActor public func deliverCodeSnippet(_ snippet: CodeSnippet?) -> CodeSnippet? {
-        var delivered: CodeSnippet?
-        for sink in sinks {
-            if let code = sink.deliverCodeSnippet(snippet) { delivered = code }
-        }
-        return delivered
-    }
-
     @MainActor public var acceptsDetail: Bool { sinks.contains { $0.acceptsDetail } }
 
     @MainActor public func deliver(_ lines: [String], perLineSeconds: [TimeInterval],
-                                  diagram: DiagramHint?, explanation: String?) -> String? {
-        var delivered: String?
+                                   detail: ReplyDetail?) -> ReplyDetail? {
+        var delivered: ReplyDetail?
         for sink in sinks {
-            if let detail = sink.deliver(lines, perLineSeconds: perLineSeconds, diagram: diagram, explanation: explanation) {
-                delivered = detail
+            if let shown = sink.deliver(lines, perLineSeconds: perLineSeconds, detail: detail) {
+                delivered = shown
             }
         }
         return delivered
@@ -31,15 +23,10 @@ public final class BroadcastOverlay: OverlayRendering {
         self.sinks = sinks
     }
 
-    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
+    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval],
+                                   detail: ReplyDetail?) {
         for sink in sinks {
-            sink.render(lines, perLineSeconds: perLineSeconds, diagram: diagram, explanation: explanation)
-        }
-    }
-
-    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?) {
-        for sink in sinks {
-            sink.render(lines, perLineSeconds: perLineSeconds, diagram: diagram)
+            sink.render(lines, perLineSeconds: perLineSeconds, detail: detail)
         }
     }
 

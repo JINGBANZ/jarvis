@@ -253,8 +253,8 @@ final class LiveE2ERunner: BrainCompositionHost {
             // The fixture capture shows the scenario's image whatever the selection names.
             screen: SessionPlan.default.screen,
             prepSources: prepSources,
-            explanationsEnabled: Defaults.Explanations.enabled,
-            codeEnabled: Defaults.Code.enabled)
+            // The scenarios press Show code and Explain more, which both answer into the box.
+            detailEnabled: true)
         guard composition.start(
             inputs, proxy: proxy, readinessSession: readinessSession,
             reportContext: .runtime)
@@ -278,7 +278,6 @@ final class LiveE2ERunner: BrainCompositionHost {
         caption.setEnabled(true)
         let box = OverlayBoxPanel()
         box.setEnabled(true)
-        box.setDiagramsEnabled(true)
 
         let (events, continuation) = AsyncStream.makeStream(of: CoachingAttemptAuditEvent.self)
         Task { @MainActor [weak self] in

@@ -1,8 +1,12 @@
 import Foundation
 
 /// The three coaching actions every session offers. `CoachCapabilities.compose` builds the session's
-/// full set from these plus whatever the user's configuration adds.
-public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool]
+/// full set from these plus whatever the user's configuration adds. `speak` is composed here rather
+/// than declared once for the process: its `detail` field exists only where the Overlay Box can show
+/// one.
+public func coachTools(detailEnabled: Bool) -> [ToolDef] {
+    [captureScreenTool, speakTool(detailEnabled: detailEnabled), staySilentTool]
+}
 
 /// What one coaching session can do: the tools it offers, hot or deferred, and the skills it can
 /// load — resolved once at Start.
@@ -23,9 +27,15 @@ public struct CoachCapabilities: Sendable, Equatable {
     /// reaches the model only as a `load_skill` result.
     public let skills: [Skill]
 
-    public init(tools: [ToolDef], skills: [Skill] = []) {
+    /// Whether `speak` offers a `detail`, which is whether the Overlay Box is on. The one source:
+    /// the prompt, the declared schema, and delivery all read this, so a session cannot promise a
+    /// field the box would throw away (#273).
+    public let detailEnabled: Bool
+
+    public init(tools: [ToolDef], skills: [Skill] = [], detailEnabled: Bool = false) {
         self.tools = tools
         self.skills = skills
+        self.detailEnabled = detailEnabled
     }
 
     /// Offered with full schema and guidance from the first request.
@@ -39,7 +49,7 @@ public struct CoachCapabilities: Sendable, Equatable {
     /// remove one while its catalog still has entries. A loader needs no switch of its own: it
     /// disappears when nothing is left for it to load.
     public static let fixedToolNames: Set<String> =
-        [captureScreenTool.name, speakTool.name, staySilentTool.name, loadToolName, loadSkillName]
+        [captureScreenTool.name, speakToolName, staySilentTool.name, loadToolName, loadSkillName]
 
     /// Order: capture_screen, speak, stay_silent, load_tool, load_skill, then the deferred tools.
     /// `search_prep_notes` is present only when `prepSourcesConfigured` and the user has not
@@ -48,7 +58,8 @@ public struct CoachCapabilities: Sendable, Equatable {
     public static func compose(disabledTools: Set<String>,
                                disabledSkills: Set<String> = [],
                                prepSourcesConfigured: Bool,
-                               skills: [Skill] = []) -> CoachCapabilities {
+                               skills: [Skill] = [],
+                               detailEnabled: Bool = false) -> CoachCapabilities {
         let disabled = disabledTools.subtracting(fixedToolNames)
         let extras = (prepSourcesConfigured ? [searchPrepNotesTool] : [])
             .filter { !disabled.contains($0.name) }
@@ -57,11 +68,12 @@ public struct CoachCapabilities: Sendable, Equatable {
             .filter { !disabledSkills.contains($0.name) }
             .sorted { $0.name < $1.name }
         return CoachCapabilities(
-            tools: coachTools
+            tools: coachTools(detailEnabled: detailEnabled)
                 + (deferred.isEmpty ? [] : [loadTool(catalogNames: deferred.map(\.name))])
                 + (offeredSkills.isEmpty ? [] : [loadSkill(catalogNames: offeredSkills.map(\.name))])
                 + extras,
-            skills: offeredSkills)
+            skills: offeredSkills,
+            detailEnabled: detailEnabled)
     }
 
     /// The schema both loaders share. They are built per Start rather than as globals: the `name`

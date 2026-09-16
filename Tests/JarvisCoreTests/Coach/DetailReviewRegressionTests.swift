@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-@Suite struct ExplanationReviewRegressionTests {
+@Suite struct DetailReviewRegressionTests {
     @Test(arguments: [true, false])
     func changedManualIntentReplacesCarriedScreenWhileKeepingPrep(_ captureSucceeds: Bool) async throws {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Continue."])])])
@@ -26,8 +26,8 @@ import Testing
     }
 
     @Test func unexecutedSpeakIsNotReplayedAsDelivered() async throws {
-        let shown = #"{"lines":["Shown hint."],"explanation":"Hidden detail."}"#
-        let unexecuted = #"{"lines":["Unexecuted hint."],"explanation":"Unexecuted detail."}"#
+        let shown = #"{"lines":["Shown hint."],"detail":"Shown detail."}"#
+        let unexecuted = #"{"lines":["Unexecuted hint."],"detail":"Unexecuted detail."}"#
         let calls = [RawToolCall(id: "shown", name: "speak", argumentsJSON: shown),
                      RawToolCall(id: "extra", name: "speak", argumentsJSON: unexecuted)]
         let response = BrainResponse(toolCalls: calls.compactMap {
@@ -37,20 +37,20 @@ import Testing
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
-            screen: ReviewScreen(succeeds: true), overlay: FakeOverlay(), clock: ManualClock(now: 100),
-            plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen, explanationsEnabled: false))
+            screen: ReviewScreen(succeeds: true), overlay: FakeOverlay(), clock: ManualClock(now: 100))
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         let history = try #require(brain.calls.last).flatMap { $0.toolCalls ?? [] }
         #expect(history.map(\.id) == ["shown"])
         let call = try #require(history.first)
         let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
-        #expect(object["explanation"] is NSNull)
+        // A capability set without the box declares no `detail`, so none is replayed either.
+        #expect(object["detail"] == nil)
         #expect(object["lines"] as? [String] == ["Shown hint."])
     }
 
     @Test @MainActor func hidingBoxDuringRequestScrubsDeliveredHistory() async throws {
-        let args = #"{"lines":["Keep this hint."],"explanation":"Hidden explanation."}"#
+        let args = #"{"lines":["Keep this hint."],"detail":"Hidden explanation."}"#
         let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(
             callId: "s", name: "speak", argumentsJSON: args))],
             rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
@@ -60,38 +60,44 @@ import Testing
         let box = ReviewDetailSink()
         let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
-            screen: ReviewScreen(succeeds: true), overlay: box, clock: ManualClock(now: 100))
+            screen: ReviewScreen(succeeds: true), overlay: box, clock: ManualClock(now: 100),
+            capabilities: CoachCapabilities.compose(
+                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true))
         let task = Task { await driver.handleTrigger(.manualExplanation) }
         await gate.waitUntilEntered()
         box.acceptsDetail = false
         await gate.release()
         #expect(await task.value == .spoke)
-        #expect(box.explanation == nil)
+        #expect(box.detail == nil)
         box.acceptsDetail = true
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(box.explanation == "Hidden explanation.")
+        #expect(String(box.detail?.prose.characters ?? .init()) == "Hidden explanation.")
         let prior = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
         let object = try #require(JSONSerialization.jsonObject(with: Data(prior.argumentsJSON.utf8)) as? [String: Any])
-        #expect(object["explanation"] is NSNull)
+        #expect(object["detail"] is NSNull)
     }
 
-    @Test func suppressedExplanationIsNotReplayedAsDelivered() async throws {
-        let args = #"{"lines":["Keep this hint."],"explanation":"Hidden explanation."}"#
+    /// A detail the box never showed is not replayed as delivered.
+    @Test func aSuppressedDetailIsNotReplayedAsDelivered() async throws {
+        let args = #"{"lines":["Keep this hint."],"detail":"Hidden explanation."}"#
         let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(
             callId: "s", name: "speak", argumentsJSON: args))],
             rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
-        let brain = ScriptedBrain(script: [response])
+        let brain = ScriptedBrain(script: [response, response])
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
-            screen: ReviewScreen(succeeds: true), overlay: FakeOverlay(), clock: ManualClock(now: 100))
-        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen, explanationsEnabled: false))
+            screen: ReviewScreen(succeeds: true), overlay: ReviewDetailSink(), clock: ManualClock(now: 100),
+            capabilities: CoachCapabilities.compose(
+                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true))
+        // A plan edit cannot change what the session offers (#273): the box is fixed at Start.
+        driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen))
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         let messages = try #require(brain.calls.last)
         let call = try #require(messages.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
         let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
-        #expect(object["explanation"] is NSNull)
+        #expect(object["detail"] as? String == "Hidden explanation.")
         #expect(object["lines"] as? [String] == ["Keep this hint."])
     }
 }
@@ -107,11 +113,11 @@ private struct ReviewScreen: ScreenCapturing {
     func cancelCapture() {}
 }
 
-private final class ReviewDetailSink: OverlayRendering {
+private final class ReviewDetailSink: OverlayRendering, @unchecked Sendable {
     @MainActor var acceptsDetail = true
-    var explanation: String?
+    var detail: ReplyDetail?
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}
-    func render(_ lines: [String], perLineSeconds: [TimeInterval], diagram: DiagramHint?, explanation: String?) {
-        self.explanation = explanation
+    func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?) {
+        self.detail = detail
     }
 }

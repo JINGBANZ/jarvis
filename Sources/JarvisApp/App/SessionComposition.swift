@@ -30,8 +30,7 @@ final class SessionComposition {
         /// Configured prep sources, not a finished index: the index lands later and must not change
         /// what the session offers (#273).
         let prepSources: [PrepMaterialSource]
-        let explanationsEnabled: Bool
-        let codeEnabled: Bool
+        let detailEnabled: Bool
     }
 
     /// Every readiness status the session's observations produce, for the caller to render.
@@ -88,8 +87,10 @@ final class SessionComposition {
     /// Only cancelled coaching work extends the global ghost lifecycle. Audit persistence is scoped
     /// to its own session: Activity can use closed history while an unrelated audit drains.
     private var pendingTurnDrainIDs: Set<UUID> = []
-    private var sessionExplanationsEnabled = false
-    private var sessionCodeEnabled = false
+    /// Whether this session's replies may carry a `detail`, which is whether the Overlay Box is on.
+    /// Both optional shortcuts answer into the detail box, so it is also what decides whether they
+    /// may fire — `requestShortcut` bypasses the hotkeys, and the live runner calls it directly.
+    private var sessionDetailEnabled = false
     /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
     /// explicit Settings edit installs a fresh plan; never by runtime health.
     private var planRevision: UInt = 0
@@ -135,8 +136,7 @@ final class SessionComposition {
     func allows(_ shortcut: CoachingShortcut) -> Bool {
         switch shortcut {
         case .hint: true
-        case .explainMore: sessionExplanationsEnabled
-        case .showCode: sessionCodeEnabled
+        case .explainMore, .showCode: sessionDetailEnabled
         }
     }
 
@@ -188,9 +188,7 @@ final class SessionComposition {
         // distinct audit-visible request; no transport wrapper replays a failed request.
         let sessionDirectory = artifacts.currentSessionDir!
         // Fixed for the whole session.
-        sessionCodeEnabled = inputs.codeEnabled
-        overlayBox.setCodeEnabled(inputs.codeEnabled)
-        sessionExplanationsEnabled = inputs.explanationsEnabled
+        sessionDetailEnabled = inputs.detailEnabled
         // One capability set for the session, handed to the driver that sends it. Prep material
         // counts as configured sources, not a finished index: the index lands later and must not
         // change what the session offers (#273).
@@ -200,13 +198,14 @@ final class SessionComposition {
             disabledTools: brain.preferences.disabledTools,
             disabledSkills: brain.preferences.disabledSkills,
             prepSourcesConfigured: !prepMaterialSources.isEmpty,
-            skills: bundledSkills)
+            skills: bundledSkills,
+            detailEnabled: inputs.detailEnabled)
         // The one place a switched-off capability is visible: Activity never mentions what was not
         // offered. Read from the persisted names, so a name that matched nothing is reported as
         // nothing and a loader — which is synthesized, not switchable — is never named here.
         let everything = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty,
-            skills: bundledSkills)
+            skills: bundledSkills, detailEnabled: inputs.detailEnabled)
         let honoredDisabled = brain.preferences.disabledTools
             .subtracting(CoachCapabilities.fixedToolNames)
             .filter { everything.tool(named: $0) != nil }
@@ -502,7 +501,7 @@ final class SessionComposition {
         sessionIsLive = false
         overlayBox.setSessionLive(false)     // the history box goes away with the session
         requestManualHint = nil              // shortcuts stop reaching a session
-        overlayBox.setCodeEnabled(false)
+        sessionDetailEnabled = false
         // Capture and clear this session handle before a quick Start installs another. The cancelled
         // tasks retain only its observer ports and can finish enqueueing into the old session.
         let (audit, auditDirectory) = artifacts.takeCurrentSession()
@@ -772,7 +771,6 @@ final class SessionComposition {
     /// (wiki/lean-coaching-core.md, Phase 4).
     private func freshSessionPlan(screen: ScreenCaptureSelection) -> SessionPlan {
         planRevision &+= 1
-        return SessionPlan(revision: planRevision, screen: screen,
-                           explanationsEnabled: sessionExplanationsEnabled, codeEnabled: sessionCodeEnabled)
+        return SessionPlan(revision: planRevision, screen: screen)
     }
 }

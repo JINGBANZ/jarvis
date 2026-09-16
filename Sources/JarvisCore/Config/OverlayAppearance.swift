@@ -65,46 +65,46 @@ public final class OverlayAppearance {
         set { defaults.set(newValue, forKey: Defaults.Overlay.Caption.enabledKey) }
     }
 
-    // MARK: - Code area
+    // MARK: - Detail box
 
-    public var codeFontSize: Double {
+    public var detailFontSize: Double {
         get {
-            guard defaults.object(forKey: Defaults.Overlay.Code.fontSizeKey) != nil else {
-                return Defaults.Overlay.Code.fontSize
+            guard defaults.object(forKey: Defaults.Overlay.Detail.fontSizeKey) != nil else {
+                return Defaults.Overlay.Detail.fontSize
             }
             return Self.clamp(
-                defaults.double(forKey: Defaults.Overlay.Code.fontSizeKey),
-                to: Defaults.Overlay.Code.fontSizeRange,
-                fallback: Defaults.Overlay.Code.fontSize)
+                defaults.double(forKey: Defaults.Overlay.Detail.fontSizeKey),
+                to: Defaults.Overlay.Detail.fontSizeRange,
+                fallback: Defaults.Overlay.Detail.fontSize)
         }
         set {
             defaults.set(
                 Self.clamp(
                     newValue,
-                    to: Defaults.Overlay.Code.fontSizeRange,
-                    fallback: Defaults.Overlay.Code.fontSize),
-                forKey: Defaults.Overlay.Code.fontSizeKey)
+                    to: Defaults.Overlay.Detail.fontSizeRange,
+                    fallback: Defaults.Overlay.Detail.fontSize),
+                forKey: Defaults.Overlay.Detail.fontSizeKey)
         }
     }
 
-    /// Opacity (0–1) of the code area's background fill.
-    public var codeBackgroundOpacity: Double {
+    /// Opacity (0–1) of the detail box's background fill.
+    public var detailBackgroundOpacity: Double {
         get {
-            guard defaults.object(forKey: Defaults.Overlay.Code.opacityKey) != nil else {
-                return Defaults.Overlay.Code.opacity
+            guard defaults.object(forKey: Defaults.Overlay.Detail.opacityKey) != nil else {
+                return Defaults.Overlay.Detail.opacity
             }
             return Self.clamp(
-                defaults.double(forKey: Defaults.Overlay.Code.opacityKey),
-                to: Defaults.Overlay.Code.opacityRange,
-                fallback: Defaults.Overlay.Code.opacity)
+                defaults.double(forKey: Defaults.Overlay.Detail.opacityKey),
+                to: Defaults.Overlay.Detail.opacityRange,
+                fallback: Defaults.Overlay.Detail.opacity)
         }
         set {
             defaults.set(
                 Self.clamp(
                     newValue,
-                    to: Defaults.Overlay.Code.opacityRange,
-                    fallback: Defaults.Overlay.Code.opacity),
-                forKey: Defaults.Overlay.Code.opacityKey)
+                    to: Defaults.Overlay.Detail.opacityRange,
+                    fallback: Defaults.Overlay.Detail.opacity),
+                forKey: Defaults.Overlay.Detail.opacityKey)
         }
     }
 
@@ -194,17 +194,6 @@ public final class OverlayAppearance {
         }
     }
 
-    /// Show system-design graph attachments alongside their text hints. On by default.
-    public var boxDiagramsEnabled: Bool {
-        get {
-            guard defaults.object(forKey: Defaults.Overlay.Box.diagramsEnabledKey) != nil else {
-                return Defaults.Overlay.Box.diagramsEnabled
-            }
-            return defaults.bool(forKey: Defaults.Overlay.Box.diagramsEnabledKey)
-        }
-        set { defaults.set(newValue, forKey: Defaults.Overlay.Box.diagramsEnabledKey) }
-    }
-
     /// Whether the persistent box is shown. On by default.
     public var boxEnabled: Bool {
         get {
@@ -248,17 +237,13 @@ public protocol OverlayCaptionApplying: AnyObject {
 /// `OverlayBoxPanel` (in the overlay target) conforms; tests can supply a fake.
 @MainActor
 public protocol OverlayBoxApplying: AnyObject {
-    func setCodeFontSize(_ points: Double)
-    func setCodeBackgroundOpacity(_ opacity: Double)
-    /// Preview the saved setting without changing the active session's code availability.
-    func setCodePreviewEnabled(_ enabled: Bool)
+    func setDetailFontSize(_ points: Double)
+    func setDetailBackgroundOpacity(_ opacity: Double)
     func setOpacity(_ opacity: Double)
     func setFontSize(_ points: Double)
     /// Called once per finished resize drag with the box's new content size, so the app can persist
     /// it. The restored size is supplied at construction instead, so it never fires for one.
     var onSizeChanged: ((Double, Double) -> Void)? { get set }
-    /// Hide or restore graph attachments without removing the accompanying text or history.
-    func setDiagramsEnabled(_ enabled: Bool)
     /// Show or hide the box live, mirroring the persisted setting.
     func setEnabled(_ enabled: Bool)
     /// Show the box with sample text (on) or restore the real log and prior visibility (off) so size
