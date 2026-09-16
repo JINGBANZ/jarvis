@@ -204,9 +204,8 @@ as the Markdown the model sent, fences and indentation intact. The same sections
 reopening a saved session, and Markdown, plain-text, or HTML export. The recorder includes only the
 detail the overlay actually accepted.
 
-A session recorded before the detail box existed still opens and exports with the **Explanation** and
-**Code** sections it was written with: `ActivityResponse` decodes those fields without offering them
-to new rows. Older sessions with no structured response fields at all display their original
+A session whose responses carry **Explanation** and **Code** fields opens and exports with those
+sections: `ActivityResponse` decodes both fields and never writes them. Older sessions with no structured response fields at all display their original
 messages; Activity does not guess boundaries from flattened prose. Every record also retains a
 readable text message for older readers and the session evaluator; structured fields drive the
 sectioned viewer.

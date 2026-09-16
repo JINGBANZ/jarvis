@@ -277,9 +277,13 @@ than one call. A call outside the permitted set is answered with a tool result s
 available on a press, and a call whose arguments the typed parser (`ToolInvocation.parse`) cannot use
 is answered with its tool's schema; either way the model is asked again in the same attempt. The
 parser is deliberately more lenient than the schema, so a call the schema would reject but the parser
-can use still runs. The response's first call is the one judged, whether or not it parsed. A press speaks its reply's prose instead,
-the first three lines recorded in history as a `speak` call: in place of that round trip when the
-reply calls outside its set or calls nothing, and on the response at the cap whatever it called.
+can use still runs. The response's first call is the one judged, whether or not it parsed. A press
+answered in plain text is refused the same way, once per attempt, with a message telling the model to
+call `speak`. The refusal re-sends the whole request, screenshot included, so it is worth one round
+trip and no more, and `CoachHistory.commit` drops the prose and the refusal so neither replays on a
+later request or reaches the summarizer. Prose becomes the reply itself only once that refusal is
+spent, or on the response at the cap whatever it called: its first line is the hint and the rest,
+Markdown intact, is the detail when the session has one, recorded in history as a `speak` call.
 When a response carries several calls, the first runs and each other one is answered as not
 executed, so a replayed call never lacks a result. The forced response at the cap has no later
 response to answer into, so an unusable reply there with no prose fails the attempt and the
@@ -383,8 +387,7 @@ while stopped, an explicit shortcut only beeps. Activity records which shortcut 
 Explain more and Show code answer into the detail box, so the Overlay Box switch is the one thing that
 decides whether they exist: with the box off they are not registered, and `SessionComposition.allows`
 refuses them even when a runner calls `requestShortcut` directly. There is no separate switch for
-either, because the model judges when an explanation or a code block helps, which is what the
-switches were guessing at.
+either, because the model judges when an explanation or a code block helps.
 
 A Show code press preloads the `coding` skill. Moving the code rules into that skill would otherwise
 cost the press two round trips: one for the model to call `load_skill`, one to answer. Instead the
@@ -392,8 +395,8 @@ runner writes the same call and result a model load produces, ahead of the press
 so the request still ends in plain user text, and the model answers with the rules already in hand.
 The pair commits, replays, and survives compaction like any load; a failed attempt discards it and the
 retry preloads again. It is skipped when `coding` is switched off or already loaded, and on every
-other trigger, since an automatic turn still chooses for itself. That is the cost of the move:
-proactive code now depends on the model loading `coding`, while a press never does.
+other trigger. An automatic turn loads `coding` only when the model chooses to, so proactive code
+depends on that choice, while a Show code press never does.
 
 Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;

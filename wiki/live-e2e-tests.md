@@ -203,8 +203,8 @@ Some cases depend on what the model chose rather than on what the app did, and t
 line instead of failing: C02 and G05 (staying silent on small talk), C03 (which skill the model
 picks), the second request in C11, the Codex diagram in C12, C13, how Scenario B's behavioral
 question ends in C16, C20, C24 on both scenarios, and C01 on Scenario B's press. C09 and C17 are
-checks on Scenario B now: the preload puts `coding` in the press's own request, so the load no longer
-depends on the model choosing it. Failing a note would fail a correct app on a model's judgment call.
+checks on Scenario B, because the preload puts `coding` in the press's own request rather than leaving
+the load to the model. Failing a note would fail a correct app on a model's judgment call.
 
 An asserted case that fails because of a model choice gets one rerun of its scenario alone; a second
 failure is real. No assertion is loosened to make a run pass. A provider stall is neither a model
