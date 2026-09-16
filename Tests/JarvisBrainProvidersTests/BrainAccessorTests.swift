@@ -325,7 +325,7 @@ private func speakResponseBody(arguments: String) -> Data {
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
             reasoningEffort: "low",
             send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
-        _ = try await client.respond(messages: [.user("transcript")], tools: coachTools)
+        _ = try await client.respond(messages: [.user("transcript")], tools: coachTools(detailEnabled: true))
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"store\":false"))
     }
@@ -340,7 +340,7 @@ private func speakResponseBody(arguments: String) -> Data {
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
             endpoint: endpoint,
             send: { request in box.set(request); return (Data(#"{"output":[]}"#.utf8), http(200)) })
-        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         #expect(box.get()?.url == endpoint)
         #expect(box.get()?.value(forHTTPHeaderField: "Authorization") == "Bearer proxy-key")
     }
@@ -352,7 +352,7 @@ private func speakResponseBody(arguments: String) -> Data {
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
             send: { _ in (Data(#"{"error":{"message":"nope"}}"#.utf8), http(500)) })
         do {
-            _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
             Issue.record("expected the request to fail")
         } catch let failure as ProviderFailure {
             #expect(failure.source == .brain(.claudeSubscription))
