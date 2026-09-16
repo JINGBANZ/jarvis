@@ -14,6 +14,9 @@ final class OverlayBoxHeaderView: NSView {
     private var chrome: OverlayBoxChrome
     /// Hidden while collapsed: with no log under it, the rule would underline nothing.
     private var showsSeparator = true
+    /// Read back by the panel test that pins this strip and the detail strip to one geometry.
+    var iconPointSize: CGFloat { chrome.iconPointSize }
+    var titlePointSize: CGFloat { chrome.titlePointSize }
 
     init(chrome: OverlayBoxChrome) {
         self.chrome = chrome

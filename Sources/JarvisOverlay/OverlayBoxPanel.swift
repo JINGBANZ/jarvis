@@ -33,7 +33,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private let textView: NSTextView
     private let historyBackground = NSView(frame: .zero)
     private var detailFontSize = CGFloat(Defaults.Overlay.Detail.fontSize)
-    private let detailView = DetailView(frame: .zero)
+    private let detailView: DetailView
     private let detailDivider = OverlayDetailDividerView(frame: .zero)
     /// A user-selected proportion takes precedence over content sizing for this session.
     private var detailHeightFraction: CGFloat?
@@ -189,8 +189,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         textView = tv
         self.scroll = scroll
 
-        let header = OverlayBoxHeaderView(chrome: OverlayBoxChrome(contentHeight: contentSize.height))
+        let chrome = OverlayBoxChrome(contentHeight: contentSize.height)
+        let header = OverlayBoxHeaderView(chrome: chrome)
         self.header = header
+        // The detail strip is the panel's second piece of chrome, so it is built from the same
+        // geometry as the header and re-applied beside it on every resize.
+        detailView = DetailView(frame: .zero, chrome: chrome)
         expandedContentHeight = contentSize.height
         let affordance = OverlayBoxResizeAffordanceView(frame: box.bounds)
         resizeAffordance = affordance
@@ -248,6 +252,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         let bounds = box.bounds
         if !isCollapsed { expandedContentHeight = bounds.height }
         header.apply(chrome)
+        detailView.apply(chrome)
         header.frame = NSRect(x: 0, y: bounds.height - chrome.height,
                               width: bounds.width, height: chrome.height)
         scroll.frame = NSRect(x: 0, y: 0,
@@ -364,7 +369,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         if detailView.isHidden {
             height = 0
         } else if slot.isRolled {
-            height = min(available, DetailView.stripHeight)
+            height = min(available, detailView.stripHeight)
         } else {
             let preferred = detailHeightFraction.map { $0 * available }
                 ?? min(box.bounds.height * 0.45,
@@ -607,6 +612,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     var currentDetailProseText: String { detailView.proseText }
     var showsDiagram: Bool { !detailView.isHidden && detailView.showsDiagram }
     var isDetailRolled: Bool { detailView.isRolled }
+    /// The detail strip's height, which is the header's: one chrome, two strips.
+    var detailStripHeight: CGFloat { detailView.stripHeight }
+    var detailIconPointSize: CGFloat { detailView.iconPointSize }
+    var detailTitlePointSize: CGFloat { detailView.titlePointSize }
+    var headerIconPointSize: CGFloat { header.iconPointSize }
+    var headerTitlePointSize: CGFloat { header.titlePointSize }
     var isDetailHeld: Bool { slot.isHeld }
     var detailCount: Int { details.count }
 

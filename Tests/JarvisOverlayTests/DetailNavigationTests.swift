@@ -66,11 +66,11 @@ import Testing
         defer { box.setSessionLive(false) }
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         let open = box.currentDetailHeight
-        #expect(open > DetailView.stripHeight)
+        #expect(open > box.detailStripHeight)
 
         box.clickDetailDismiss()
         #expect(box.isDetailRolled)
-        #expect(box.currentDetailHeight == DetailView.stripHeight)
+        #expect(box.currentDetailHeight == box.detailStripHeight)
         #expect(!box.showsDiagram)
         // The arrows and Pin stay reachable, so nothing is stranded behind a dismissed box.
         #expect(box.currentDetailPosition == "1 of 1")
@@ -118,6 +118,25 @@ import Testing
         #expect(box.detailButtonTooltips.allSatisfy { $0 == nil })
         #expect(box.detailButtonLabels.allSatisfy { $0?.isEmpty == false })
         #expect(box.currentSharingType == .none)
+    }
+
+    /// The hint box's header and the detail box's strip are two pieces of one panel's chrome, so
+    /// they share one geometry and both follow the box the user dragged. Fixed sizes in the detail
+    /// strip made its controls visibly smaller than the header's and left them there as the box grew.
+    @MainActor @Test func bothStripsShareOneChromeAndFollowTheBoxSize() throws {
+        let box = try makeBox()
+        defer { box.setSessionLive(false) }
+        try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
+        #expect(box.detailIconPointSize == box.headerIconPointSize)
+        #expect(box.detailTitlePointSize == box.headerTitlePointSize)
+        #expect(box.detailStripHeight == box.currentHeaderHeight)
+
+        let small = box.detailIconPointSize
+        box.setContentSize(NSSize(width: 520, height: 900))
+        #expect(box.detailIconPointSize > small, "the strip grows with the box")
+        #expect(box.detailIconPointSize == box.headerIconPointSize)
+        #expect(box.detailTitlePointSize == box.headerTitlePointSize)
+        #expect(box.detailStripHeight == box.currentHeaderHeight)
     }
 
     @MainActor private func makeBox() throws -> OverlayBoxPanel {

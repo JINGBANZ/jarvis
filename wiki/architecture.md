@@ -333,6 +333,11 @@ since the user asked for that reference to stay, and Stop resets both. Eviction 
 box; [#336](https://github.com/JINGBANZ/jarvis/issues/336) is the follow-up if a live run shows the
 arrows are not enough.
 
+The detail box's title strip is the panel's second piece of chrome, built from the same
+`OverlayBoxChrome` as the header: one geometry gives both strips their height, icon size, button
+square, edge inset, and title size, so they read as one surface and both follow the box the user
+dragged. Fixed sizes in one of them is how they drift apart.
+
 The horizontal divider adjusts the detail box's height by dragging or through VoiceOver
 increment/decrement actions, without activating Jarvis or taking keyboard focus. The chosen proportion
 survives new replies, clear, collapse/expand, and panel resizing for the current session; a new

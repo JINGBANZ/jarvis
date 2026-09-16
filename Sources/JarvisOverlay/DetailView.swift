@@ -32,8 +32,16 @@ final class DetailView: NSView {
     private var preferredFontSize: CGFloat = 18
     private(set) var detail: ReplyDetail?
     private(set) var isRolled = false
+    /// The same geometry the header strip uses, so the two strips of one panel read as one surface:
+    /// same icon size, same button square, same edge inset, same title size, all scaling with the box
+    /// the user dragged. Fixed sizes here made the detail strip's controls noticeably smaller than
+    /// the header's and left them unchanged as the box grew.
+    private var chrome: OverlayBoxChrome
     /// The strip's height: the title, the position, and the four controls sit in it.
-    static let stripHeight: CGFloat = 28
+    var stripHeight: CGFloat { chrome.height }
+    /// Read back by the panel test that pins the two strips to one geometry.
+    var iconPointSize: CGFloat { chrome.iconPointSize }
+    var titlePointSize: CGFloat { chrome.titlePointSize }
 
     var codeText: NSAttributedString { document.codeText }
     var proseText: String { document.proseText }
@@ -41,20 +49,23 @@ final class DetailView: NSView {
     var titleText: String { title.stringValue }
     var positionText: String { position.stringValue }
 
-    override init(frame: NSRect) {
+    /// - Parameter chrome: the panel's own header geometry. It defaults to the box's default height
+    ///   for callers that stand a detail box up on its own; the panel passes its live chrome and
+    ///   re-applies it on every resize.
+    init(frame: NSRect,
+         chrome: OverlayBoxChrome = OverlayBoxChrome(contentHeight: CGFloat(Defaults.Overlay.Box.height))) {
+        self.chrome = chrome
         super.init(frame: frame)
         wantsLayer = true
         // The detail backdrop has its own opacity, independent of the history fill.
         layer?.backgroundColor = Self.background.cgColor
         title.textColor = NSColor(white: 0.86, alpha: 1)
-        title.font = .systemFont(ofSize: 11, weight: .semibold)
         title.lineBreakMode = .byTruncatingTail
         position.textColor = NSColor(white: 1, alpha: 0.5)
-        position.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
         for button in [previousButton, nextButton, pinButton, dismissButton] {
-            button.apply(iconPointSize: 11, cornerRadius: 4)
             button.target = self
         }
+        applyChrome()
         previousButton.action = #selector(stepBack)
         nextButton.action = #selector(stepForward)
         pinButton.action = #selector(togglePin)
@@ -75,22 +86,48 @@ final class DetailView: NSView {
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
 
+    /// Rebuilding both fonts and four symbol images on every frame of a resize drag would be work for
+    /// nothing: the chrome only steps when the box crosses a rounding boundary. Mirrors
+    /// `OverlayBoxHeaderView.apply`.
+    func apply(_ chrome: OverlayBoxChrome) {
+        guard chrome != self.chrome else { return }
+        self.chrome = chrome
+        applyChrome()
+        needsLayout = true
+    }
+
+    private func applyChrome() {
+        title.font = .systemFont(ofSize: chrome.titlePointSize, weight: .semibold)
+        position.font = .monospacedDigitSystemFont(ofSize: chrome.titlePointSize, weight: .regular)
+        let radius = (chrome.button * 0.22).rounded()
+        for button in [previousButton, nextButton, pinButton, dismissButton] {
+            button.apply(iconPointSize: chrome.iconPointSize, cornerRadius: radius)
+        }
+    }
+
     override func layout() {
         super.layout()
-        let top = bounds.height - Self.stripHeight
-        var x = bounds.width - 10
+        let top = bounds.height - stripHeight
+        let buttonY = top + ((stripHeight - chrome.button) / 2).rounded()
+        var x = bounds.width - chrome.inset
         for button in [dismissButton, pinButton, nextButton, previousButton] {
-            x -= 22
-            button.frame = NSRect(x: x, y: top + 4, width: 20, height: 20)
+            x -= chrome.button
+            button.frame = NSRect(x: x, y: buttonY, width: chrome.button, height: chrome.button)
             x -= 2
         }
-        let positionWidth: CGFloat = position.stringValue.isEmpty ? 0 : 48
-        position.frame = NSRect(x: max(0, x - positionWidth - 6), y: top + 5,
-                                width: positionWidth, height: 18)
-        title.frame = NSRect(x: 14, y: top + 5,
-                             width: max(0, position.frame.minX - 20), height: 18)
+        let labelHeight = title.intrinsicContentSize.height.rounded(.up)
+        let labelY = top + ((stripHeight - labelHeight) / 2).rounded()
+        let positionWidth = position.stringValue.isEmpty
+            ? 0
+            : position.intrinsicContentSize.width.rounded(.up)
+        position.frame = NSRect(x: max(0, x - positionWidth - chrome.inset), y: labelY,
+                                width: positionWidth, height: labelHeight)
+        title.frame = NSRect(x: chrome.inset, y: labelY,
+                             width: max(0, position.frame.minX - chrome.inset * 2),
+                             height: labelHeight)
         scroll.frame = NSRect(x: 0, y: 0, width: bounds.width, height: max(0, top))
-        emptyLabel.frame = NSRect(x: 14, y: 12, width: max(0, bounds.width - 28),
+        emptyLabel.frame = NSRect(x: chrome.inset, y: 12,
+                                  width: max(0, bounds.width - chrome.inset * 2),
                                   height: max(0, top - 16))
         guard let detail, !isRolled else { return }
         // Keep the largest readable size that fits; a small box can still scroll vertically.
@@ -137,10 +174,10 @@ final class DetailView: NSView {
 
     /// Measure wrapped content at the preferred size before allocating the box's bounded height.
     func preferredHeight(viewportWidth: CGFloat) -> CGFloat {
-        guard let detail, !isRolled else { return Self.stripHeight }
+        guard let detail, !isRolled else { return stripHeight }
         document.show(detail, fontSize: preferredFontSize)
         document.fit(viewportWidth: viewportWidth)
-        return Self.stripHeight + document.frame.height
+        return stripHeight + document.frame.height
     }
 
     @objc private func stepBack() { onPrevious?() }
