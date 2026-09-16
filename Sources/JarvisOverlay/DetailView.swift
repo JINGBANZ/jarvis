@@ -134,7 +134,8 @@ final class DetailView: NSView {
         var size = preferredFontSize
         while true {
             document.show(detail, fontSize: size)
-            document.fit(viewportWidth: scroll.contentSize.width)
+            document.fit(viewportWidth: scroll.contentSize.width,
+                         viewportHeight: scroll.contentSize.height)
             if document.frame.height <= scroll.contentSize.height || size <= 12 { break }
             size = max(12, size - 1)
         }
@@ -168,15 +169,20 @@ final class DetailView: NSView {
         needsLayout = true
         guard let detail, !isRolled else { return }
         document.show(detail, fontSize: preferredFontSize)
-        document.fit(viewportWidth: max(1, bounds.width))
+        document.fit(viewportWidth: max(1, bounds.width),
+                     viewportHeight: max(1, bounds.height - stripHeight))
         if changed { scroll.contentView.scroll(to: .zero) }
     }
 
     /// Measure wrapped content at the preferred size before allocating the box's bounded height.
-    func preferredHeight(viewportWidth: CGFloat) -> CGFloat {
+    ///
+    /// - Parameter viewportHeight: the tallest body the panel would grant. A diagram scales into
+    ///   what the text leaves inside it, so the panel has to say how much that is before it can ask
+    ///   how tall the box wants to be.
+    func preferredHeight(viewportWidth: CGFloat, viewportHeight: CGFloat) -> CGFloat {
         guard let detail, !isRolled else { return stripHeight }
         document.show(detail, fontSize: preferredFontSize)
-        document.fit(viewportWidth: viewportWidth)
+        document.fit(viewportWidth: viewportWidth, viewportHeight: viewportHeight)
         return stripHeight + document.frame.height
     }
 

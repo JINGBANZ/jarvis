@@ -19,7 +19,11 @@ import Testing
         view.layoutSubtreeIfNeeded()
         let scroll = try #require(view.subviews.compactMap { $0 as? NSScrollView }.first)
         let document = try #require(scroll.documentView)
-        let text = try #require(document.subviews.compactMap { $0 as? NSTextView }.first)
+        // The code block, by name: this detail is a fence alone, so the prose view above it is
+        // empty and hidden, and measuring it would report no wrapping at all.
+        let views = document.subviews.compactMap { $0 as? NSTextView }
+        let text = try #require(views.first { $0.accessibilityLabel() == "Code block" })
+        #expect(views.first { $0.accessibilityLabel() == "Detail" }?.isHidden == true)
         #expect(document.frame.width <= scroll.contentSize.width)
         #expect(document.frame.height <= scroll.contentSize.height)
         #expect(view.codeText.string == detail.code?.code)

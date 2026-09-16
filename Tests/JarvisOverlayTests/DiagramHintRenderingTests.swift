@@ -90,6 +90,54 @@ import Testing
         #expect(abs(after.width / after.height - before.width / before.height) < 0.01)
     }
 
+    /// The graph scales into the space the box gives it, so a drag on whichever edge is binding
+    /// grows it. Sizing it from the width alone left a tall graph fixed however tall the box was
+    /// dragged, which is not what the pinned diagram area did.
+    @MainActor @Test func aVerticalDragGrowsATallGraph() throws {
+        let (panel, drawing) = try makeDiagramPanel(
+            "flowchart TD\nA[Client] --> B[API]\nB --> C[Database]",
+            size: NSSize(width: 420, height: 380))
+        defer { panel.setSessionLive(false) }
+        let start = try #require(drawing.image).size
+
+        panel.setContentSize(NSSize(width: 420, height: 900))
+        let taller = try #require(drawing.image).size
+        #expect(taller.height > start.height)
+        #expect(abs(taller.width / taller.height - start.width / start.height) < 0.01)
+    }
+
+    /// A wide graph in a narrow box is bound by width, so the horizontal drag is the one that moves
+    /// it. That is the proportional fit working, not the sizing bug above.
+    @MainActor @Test func aHorizontalDragGrowsAWideGraph() throws {
+        let (panel, drawing) = try makeDiagramPanel(
+            "flowchart LR\nA[Client] --> B[API]\nB --> C[Database]",
+            size: NSSize(width: 420, height: 380))
+        defer { panel.setSessionLive(false) }
+        let start = try #require(drawing.image).size
+
+        panel.setContentSize(NSSize(width: 900, height: 380))
+        let wider = try #require(drawing.image).size
+        #expect(wider.width > start.width)
+        #expect(abs(wider.width / wider.height - start.width / start.height) < 0.01)
+    }
+
+    /// A panel showing one diagram, and the image view drawing it.
+    @MainActor private func makeDiagramPanel(
+        _ source: String, size: NSSize
+    ) throws -> (OverlayBoxPanel, NSImageView) {
+        let previousWindows = Set(NSApplication.shared.windows.map(\.windowNumber))
+        let panel = OverlayBoxPanel(contentSize: size)
+        let window = try #require(NSApplication.shared.windows.first {
+            !previousWindows.contains($0.windowNumber)
+        })
+        panel.setEnabled(true)
+        panel.setSessionLive(true)
+        let detail = try #require(ReplyDetail(markdown: "```mermaid\n\(source)\n```"))
+        _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
+        let content = try #require(window.contentView)
+        return (panel, try #require(findImage(content)))
+    }
+
     @MainActor private func findImage(_ view: NSView) -> NSImageView? {
         (view as? NSImageView) ?? view.subviews.lazy.compactMap { findImage($0) }.first
     }

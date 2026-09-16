@@ -371,9 +371,13 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         } else if slot.isRolled {
             height = min(available, detailView.stripHeight)
         } else {
+            // The ceiling the panel would grant, passed in so a diagram can scale into it before
+            // the box's own height is settled.
+            let ceiling = box.bounds.height * 0.45
             let preferred = detailHeightFraction.map { $0 * available }
-                ?? min(box.bounds.height * 0.45,
-                       detailView.preferredHeight(viewportWidth: box.bounds.width))
+                ?? min(ceiling, detailView.preferredHeight(
+                    viewportWidth: box.bounds.width,
+                    viewportHeight: max(1, ceiling - detailView.stripHeight)))
             height = boundedDetailHeight(preferred, available: available)
         }
         historyBackground.frame = NSRect(x: 0, y: height, width: box.bounds.width,
