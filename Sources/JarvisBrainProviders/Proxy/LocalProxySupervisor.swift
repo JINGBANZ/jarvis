@@ -83,7 +83,6 @@ public actor LocalProxySupervisor {
     private var crashes: [Date] = []
     private var startTask: Task<State, Never>?
     private var restartTask: Task<Void, Never>?
-    private var observers: [UUID: AsyncStream<State>.Continuation] = [:]
     private var clearedLeftovers = false
     /// Read by `terminateNow()`, which Quit calls from outside the actor.
     private nonisolated let helperPID = OSAllocatedUnfairLock<Int32?>(initialState: nil)
@@ -117,19 +116,6 @@ public actor LocalProxySupervisor {
         self.executable = executable
         self.home = home
         self.clock = clock
-    }
-
-    /// Every state from now on, starting with the current one. Settings observes this.
-    public func states() -> AsyncStream<State> {
-        let (stream, continuation) = AsyncStream.makeStream(
-            of: State.self, bufferingPolicy: .bufferingNewest(1))
-        let id = UUID()
-        observers[id] = continuation
-        continuation.yield(state)
-        continuation.onTermination = { [weak self] _ in
-            Task { await self?.removeObserver(id) }
-        }
-        return stream
     }
 
     /// Starts the helper unless it runs, and returns once it answers or has failed. Idempotent: a
@@ -189,16 +175,22 @@ public actor LocalProxySupervisor {
         restartTask?.cancel()
         restartTask = nil
         if helperRunning, let pid = helperPID.withLock({ $0 }) {
-            kill(pid, SIGTERM)
-            let deadline = ContinuousClock.now + Self.stopGrace
-            while helperRunning, ContinuousClock.now < deadline {
-                try? await Task.sleep(for: .milliseconds(50))
-            }
-            if helperRunning { kill(pid, SIGKILL) }
+            await terminateHelper(pid)
         }
         try? FileManager.default.removeItem(at: configURL)
         try? FileManager.default.removeItem(at: pidURL)
         publish(.stopped)
+    }
+
+    /// Ends one helper: a signal, a bounded wait for its exit, then a kill. Every path that gives up
+    /// on a helper goes through here, so none leaves a process holding this launch's port.
+    private func terminateHelper(_ pid: Int32) async {
+        kill(pid, SIGTERM)
+        let deadline = ContinuousClock.now + Self.stopGrace
+        while helperRunning, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        if helperRunning { kill(pid, SIGKILL) }
     }
 
     /// Signals the helper without waiting, for Quit, after which nothing else runs. The next launch
@@ -308,7 +300,9 @@ public actor LocalProxySupervisor {
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        if let pid = helperPID.withLock({ $0 }) { kill(pid, SIGTERM) }
+        // A helper that never answered may also ignore the signal; waiting it out here is what keeps
+        // it from holding the port while the next launch tries to bind the same one.
+        if let pid = helperPID.withLock({ $0 }) { await terminateHelper(pid) }
         // Transport detail belongs in the debug log; Activity gets the fixed reason.
         jlog("Jarvis proxy: the helper didn't answer in time — \(problem)")
         port = nil
@@ -349,11 +343,6 @@ public actor LocalProxySupervisor {
 
     private func publish(_ new: State) {
         state = new
-        for continuation in observers.values { continuation.yield(new) }
-    }
-
-    private func removeObserver(_ id: UUID) {
-        observers[id] = nil
     }
 
     // MARK: - Files
@@ -416,17 +405,30 @@ public actor LocalProxySupervisor {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: runDirectory, includingPropertiesForKeys: nil)) ?? []
         let ownPID = ProcessInfo.processInfo.processIdentifier
-        for file in files {
+        func owner(of file: URL) -> Int32? {
             let stem = file.deletingPathExtension().lastPathComponent
             guard let separator = stem.lastIndex(of: "-"),
                   let owner = Int32(stem[stem.index(after: separator)...]),
-                  owner != ownPID, kill(owner, 0) != 0, errno == ESRCH else { continue }
-            if file.pathExtension == "pid",
-               let text = try? String(contentsOf: file, encoding: .utf8),
-               let helper = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
-               Self.executablePath(of: helper) == executable.resolvingSymlinksInPath().path {
+                  owner != ownPID, kill(owner, 0) != 0, errno == ESRCH else { return nil }
+            return owner
+        }
+        // A development build and a release share this directory. A helper started by the other one
+        // is not ours to signal, and its owner's files are how that build finds it again, so both
+        // survive; only a helper this executable started is ended and its files removed.
+        var keep: Set<Int32> = []
+        for file in files where file.pathExtension == "pid" {
+            guard let owner = owner(of: file),
+                  let text = try? String(contentsOf: file, encoding: .utf8),
+                  let helper = Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)),
+                  kill(helper, 0) == 0 || errno != ESRCH else { continue }
+            if Self.executablePath(of: helper) == executable.resolvingSymlinksInPath().path {
                 kill(helper, SIGTERM)
+            } else {
+                keep.insert(owner)
             }
+        }
+        for file in files {
+            guard let owner = owner(of: file), !keep.contains(owner) else { continue }
             try? FileManager.default.removeItem(at: file)
         }
     }

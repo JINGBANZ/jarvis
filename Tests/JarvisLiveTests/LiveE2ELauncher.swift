@@ -138,6 +138,12 @@ struct LiveE2ELauncher {
             try await Task.sleep(for: .milliseconds(200))
             leftovers = Self.processIDs(matching: helperProcessPattern).subtracting(processesBefore)
         }
+        // A forced teardown killed the app before it could signal its helper, so this run owns what
+        // survives. G08 still reports the leftover and still fails, but the process does not outlive
+        // the run, and `--keep-going` cannot hide it inside the next scenario's baseline.
+        if timedOut, !leftovers.isEmpty {
+            Self.run("/bin/kill", leftovers.sorted().map(String.init))
+        }
 
         let sessionRoot = directory.appendingPathComponent("session", isDirectory: true)
         let sessions = ((try? fileManager.contentsOfDirectory(

@@ -558,7 +558,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         } else {
             hotkeys?.unregister(.explainMore)
         }
-        brainSection.setActiveTarget(brainRoute.primary)
+        // A signed-out or unserved primary is skipped when the route reaches it, so naming it in use
+        // would be a claim no request backs. The route's first selection fills this in instead.
+        brainSection.setActiveTarget(
+            brain.unavailability(for: brainRoute.primary, proxy: proxy) == nil ? brainRoute.primary : nil)
         return composition.start(
             SessionComposition.Inputs(
                 transcription: transcriptionConfiguration,

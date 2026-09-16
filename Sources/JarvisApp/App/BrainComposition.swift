@@ -77,6 +77,8 @@ final class BrainComposition {
     /// only when the replacement route actually selects its first target for a fresh attempt.
     private var activeBrainTarget: BrainTarget?
     private var pendingBrainChangeFrom: BrainTarget?
+    /// Bumped by every reapply, so one that resumes after a newer one installs nothing.
+    private var brainUpdateRevision = 0
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -243,10 +245,15 @@ final class BrainComposition {
         guard host.liveCoachDriver != nil, host.isTranscriptionLive,
               let sessionDirectory = host.liveSessionDirectory
         else { return }
+        // Two saves in a row both wait on the helper here and can resume out of order; the older one
+        // would then install its own snapshot, an API key the user has already replaced.
+        brainUpdateRevision += 1
+        let revision = brainUpdateRevision
         let proxy = await proxyReadiness(for: preferences.route)
         guard let coachDriver = host.liveCoachDriver,
               host.isTranscriptionLive,
-              host.liveSessionDirectory == sessionDirectory
+              host.liveSessionDirectory == sessionDirectory,
+              revision == brainUpdateRevision
         else { return }
         let route = preferences.route
         let key = apiKeyOverride ?? secrets.apiKey(for: .openAIAPIKey) ?? ""
@@ -256,6 +263,17 @@ final class BrainComposition {
             return
         }
         let provider = route.primary.provider
+        // An effort or key edit keeps the route it has. If the helper's probe happened to fail just
+        // now, rebuilding would replace working subscription clients with permanently unavailable
+        // targets and could end a subscription-only session; the running clients keep the same
+        // endpoint, so leaving them alone costs only the edit.
+        if update != .topologyEdit, route.targets.contains(where: { $0.provider.servedByLocalProxy }),
+           proxy?.endpoint == nil {
+            jlog("Jarvis: skipped a brain refresh — the sign-in service didn't answer; "
+                 + "the running route keeps its clients.")
+            host.liveSessionEvidence?.record(.settingsChangeNotApplied)
+            return
+        }
         if update == .topologyEdit, let failure = routeUnavailability(route, proxy: proxy) {
             jlog("Jarvis: can't apply brain settings — no target in the route can coach: "
                  + (failure.errorDescription ?? ""))
