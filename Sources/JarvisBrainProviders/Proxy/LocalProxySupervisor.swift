@@ -143,6 +143,13 @@ public actor LocalProxySupervisor {
                     $0.proxyModelOwner.map(owners.contains) ?? false
                 }))
             } catch {
+                // A cancelled caller is not a silent helper. The probe throws the moment its task is
+                // cancelled, which Stop, a newer Start, closing Settings, and Sign out all do, and
+                // treating that as silence would kill a helper that is answering fine. The caller
+                // discards this answer anyway.
+                guard !Task.isCancelled, !(error is CancellationError) else {
+                    return .unavailable(reason: "isn't running")
+                }
                 // The helper is alive but no longer answering. Left `.running`, `ensureRunning`
                 // would accept it forever and no retry could replace it, so end it here: the next
                 // explicit call starts a fresh one.

@@ -278,6 +278,59 @@ import Testing
         stub?.stop()
     }
 
+    /// The helper is a third-party binary that reads database, object-store and proxy variables, any
+    /// of which would move a credential off this Mac or reroute pinned traffic. It gets an allowlist,
+    /// so a variable Jarvis holds must not reach it.
+    @Test func theHelperInheritsOnlyTheAllowlistedEnvironment() async throws {
+        setenv("JARVIS_PROXY_ENV_PROBE", "leaked", 1)
+        defer { unsetenv("JARVIS_PROXY_ENV_PROBE") }
+        try await withSupervisor(script: """
+            /usr/bin/env > "$(dirname "$0")/environment.partial"
+            mv "$(dirname "$0")/environment.partial" "$(dirname "$0")/environment"
+            exec /bin/sleep 600
+            """) { supervisor, state, home in
+            guard case .running = state else {
+                Issue.record("expected the helper to be running, got \(state)")
+                return
+            }
+            let dump = await contents(of: home.appendingPathComponent("environment")) ?? ""
+            let names = Set(dump.split(separator: "\n").compactMap {
+                $0.split(separator: "=").first.map(String.init)
+            })
+            #expect(!names.contains("JARVIS_PROXY_ENV_PROBE"))
+            #expect(names.contains("PATH"))
+            #expect(names.contains("HOME"))
+        }
+    }
+
+    /// A cancelled probe says nothing about the helper. Reading it as silence ended a helper that was
+    /// answering fine, and because the stop was Jarvis's own no restart was armed to replace it.
+    @Test func aCancelledProbeLeavesTheHelperRunning() async throws {
+        try await withSupervisor(script: """
+            echo $$ > "$(dirname "$0")/pid.partial"
+            mv "$(dirname "$0")/pid.partial" "$(dirname "$0")/pid"
+            exec /bin/sleep 600
+            """) { supervisor, state, home in
+            guard case .running = state else {
+                Issue.record("expected the helper to be running, got \(state)")
+                return
+            }
+            let text = await contents(of: home.appendingPathComponent("pid")) ?? ""
+            let pid = try #require(Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)))
+
+            let probe = Task { await supervisor.readiness() }
+            probe.cancel()
+            _ = await probe.value
+
+            #expect(processExists(pid))
+            let after = await supervisor.state
+            guard case .running = after else {
+                Issue.record("expected the helper to stay running, got \(after)")
+                return
+            }
+        }
+    }
+
     @Test func signOutRemovesOnlyThatSubscriptionsCredentials() throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }

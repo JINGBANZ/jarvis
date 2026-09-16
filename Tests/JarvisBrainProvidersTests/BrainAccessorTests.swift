@@ -330,6 +330,37 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"store\":false"))
     }
 
+    /// A subscription reaches the model only through the helper on loopback, carrying that launch's
+    /// key. Nothing else in this suite reads the URL or the header, so a hardcoded endpoint would
+    /// pass every other test and only fail against a real provider.
+    @Test func aTargetSendsToItsOwnEndpointWithItsOwnKey() async throws {
+        let box = CapturedRequest()
+        let endpoint = URL(string: "http://127.0.0.1:52001/v1/responses")!
+        let client = BrainAccessor(
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
+            endpoint: endpoint,
+            send: { request in box.set(request); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(box.get()?.url == endpoint)
+        #expect(box.get()?.value(forHTTPHeaderField: "Authorization") == "Bearer proxy-key")
+    }
+
+    /// Activity names the target that failed, so a subscription's failure must not arrive wearing
+    /// the default provider's name.
+    @Test func aSubscriptionFailureNamesItsOwnProvider() async {
+        let client = BrainAccessor(
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
+            send: { _ in (Data(#"{"error":{"message":"nope"}}"#.utf8), http(500)) })
+        do {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools)
+            Issue.record("expected the request to fail")
+        } catch let failure as ProviderFailure {
+            #expect(failure.source == .brain(.claudeSubscription))
+        } catch {
+            Issue.record("expected a ProviderFailure, got \(error)")
+        }
+    }
+
     @Test func everySelectableOpenAIModelRespectsItsEffortFloor() async throws {
         for model in BrainModelCatalog.models(for: .openAI) {
             for effort in ReasoningEffort.allCases {
@@ -649,6 +680,14 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(entry["response"] == nil)
         #expect((entry["request"] as? [String: Any])?["model"] as? String == "gpt-5.5")
     }
+}
+
+/// Thread-safe capture box for inspecting the whole request from a @Sendable send closure.
+final class CapturedRequest: @unchecked Sendable {
+    private var request: URLRequest?
+    private let lock = NSLock()
+    func set(_ r: URLRequest) { lock.lock(); request = r; lock.unlock() }
+    func get() -> URLRequest? { lock.lock(); defer { lock.unlock() }; return request }
 }
 
 /// Thread-safe capture box for inspecting the request body from a @Sendable send closure.

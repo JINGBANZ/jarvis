@@ -274,8 +274,12 @@ final class BrainComposition {
         // lists a vendor's models only once it has loaded that credential, so a restart or a token
         // refresh can answer for a moment without it. The live client keeps working, and a
         // credential that really is gone surfaces as the helper's own 503 on the next request.
+        // Only an effort edit is refused. A credential refresh replaces the clients of the providers
+        // it names and keeps every other target's running client, so the subscription entry built
+        // here is discarded whatever the probe said; refusing would drop a new API key over a helper
+        // the refresh never touches.
         let servesSubscription = route.targets.contains { $0.provider.servedByLocalProxy }
-        if update != .topologyEdit, servesSubscription, proxy?.endpoint == nil {
+        if update == .effortEdit, servesSubscription, proxy?.endpoint == nil {
             jlog("Jarvis: skipped a brain refresh — the sign-in service didn't answer; "
                  + "the running route keeps its clients.")
             host.liveSessionEvidence?.record(.settingsChangeNotApplied)
