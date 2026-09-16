@@ -139,6 +139,29 @@ import Testing
         #expect(box.detailStripHeight == box.currentHeaderHeight)
     }
 
+    /// The Settings preview stands a sample detail up while stopped, with its Pin and Dismiss live.
+    /// A click there must not reach the session's slot: a pin carried into Start left the slot
+    /// ignoring every reply, hid the box and its controls with nothing to unpin, and still let each
+    /// detail be recorded as shown.
+    @MainActor @Test func aClickOnTheSettingsSampleDoesNotReachTheNextSession() throws {
+        let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        box.setEnabled(true)
+        box.showAppearancePreview(true)
+        #expect(box.currentDetail != nil, "the preview shows a sample detail")
+        box.clickDetailPin()
+        box.clickDetailDismiss()
+        #expect(!box.isDetailHeld)
+        #expect(!box.isDetailRolled)
+        box.showAppearancePreview(false)
+
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
+        try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
+        #expect(box.currentDetailPosition == "1 of 1")
+        #expect(box.currentDetailProseText.contains("First sketch."))
+        #expect(!box.isDetailHeld)
+    }
+
     @MainActor private func makeBox() throws -> OverlayBoxPanel {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
         box.setEnabled(true)

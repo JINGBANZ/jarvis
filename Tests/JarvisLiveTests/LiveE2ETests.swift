@@ -129,19 +129,27 @@ struct LiveE2ETests {
             results.time("B3 press-to-tip", seconds: Self.pressToTip(evidence, b3))
 
             // C22: the preload is a replayed `load_skill` call the runner wrote, ahead of the
-            // press's own user messages, and it costs no round trip.
-            let b1Requests = b1.flatMap { evidence.traffic(for: $0) }.filter { $0.tag == "coach" }
-            let preloads = b1Requests.flatMap { $0.replayedFunctionCalls }.filter {
-                $0.callID.hasPrefix("runner_") && $0.name == "load_skill"
-            }
+            // press's own user messages, and it costs no round trip. Read from the attempt that
+            // answered: a stalled attempt's retry preloads again by design, and `noteStalls` already
+            // records the stall, so the chain as a whole would count it twice.
+            let answeredRequests = b1.filter(\.isCommitted)
+                .flatMap { evidence.traffic(for: $0) }
+                .filter { $0.tag == "coach" }
+            // Distinct call ids: an attempt that needed a second request replays the same preload.
+            let preloads = Set(answeredRequests.flatMap(\.replayedFunctionCalls)
+                .filter { $0.callID.hasPrefix("runner_") && $0.name == "load_skill"
+                    && $0.arguments.contains("coding") }
+                .map(\.callID))
             let loadRow = b1Rows.firstIndex { $0.kind == "capabilityLoaded" }
             let tipRow = b1Rows.lastIndex { $0.kind == "tip" }
             results.check("C22", [
-                (preloads.count == 1 && preloads.first?.arguments.contains("coding") == true,
-                 "B1 replays one runner-written load_skill for coding (saw \(preloads.count))"),
+                (preloads.count == 1,
+                 "B1's answering attempt replays one runner-written load_skill for coding "
+                    + "(saw \(preloads.count))"),
                 (Self.precedes(loadRow, tipRow), "B1's load row precedes its tip"),
                 // Only speak remains permitted on a press once the skill is in hand.
-                (b1Requests.count == 1, "B1 answered in one request (saw \(b1Requests.count))"),
+                (answeredRequests.count == 1,
+                 "B1's answering attempt made one request (saw \(answeredRequests.count))"),
             ])
 
             // C24: the Show code reply's own block. The coding skill may legitimately answer with

@@ -113,7 +113,7 @@ private struct ReviewScreen: ScreenCapturing {
     func cancelCapture() {}
 }
 
-private final class ReviewDetailSink: OverlayRendering, @unchecked Sendable {
+private final class ReviewDetailSink: OverlayRendering {
     @MainActor var acceptsDetail = true
     var detail: ReplyDetail?
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}

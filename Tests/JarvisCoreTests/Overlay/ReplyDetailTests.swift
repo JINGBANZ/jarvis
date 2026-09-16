@@ -131,6 +131,46 @@ import Testing
         }
     }
 
+    /// The box shows the first diagram that parses, not merely the first one written: a rejected
+    /// candidate is dropped and reported, and the search goes on.
+    @Test func aDiagramThatParsesAfterOneThatDoesNotStillRenders() {
+        let d = detail("""
+            ```mermaid
+            sequenceDiagram
+            A->>B: write
+            ```
+
+            ```mermaid
+            flowchart LR
+            a[Client] --> b[API]
+            ```
+            """)
+        #expect(d.diagram?.nodes.map(\.label) == ["Client", "API"])
+        #expect(d.dropped.count == 1)
+        #expect(!d.deliveredMarkdown.contains("sequenceDiagram"))
+        #expect(d.deliveredMarkdown.contains("flowchart LR"))
+        #expect(!String(d.prose.characters).contains("flowchart LR"))
+    }
+
+    /// The same for code: the first block within bounds is the one the box shows.
+    @Test func aCodeBlockWithinBoundsAfterAnOversizedOneStillRenders() {
+        let body = (1...30).map { "line \($0)" }.joined(separator: "\n")
+        let d = detail("```python\n\(body)\n```\n\n```python\ntotal = 0\n```")
+        #expect(d.code?.code == "total = 0")
+        #expect(d.dropped.count == 1)
+        #expect(!d.deliveredMarkdown.contains("line 30"))
+        #expect(d.deliveredMarkdown.contains("total = 0"))
+    }
+
+    /// Once a kind has been shown, a later fence of that kind stays in the prose whatever its size.
+    @Test func aFenceAfterTheShownOneOfItsKindStaysInTheProse() {
+        let body = (1...30).map { "line \($0)" }.joined(separator: "\n")
+        let d = detail("```python\ntotal = 0\n```\n\n```python\n\(body)\n```")
+        #expect(d.code?.code == "total = 0")
+        #expect(d.dropped.isEmpty)
+        #expect(String(d.prose.characters).contains("line 30"))
+    }
+
     /// A tilde fence closes only on tildes, and a longer opener needs an equally long closer.
     @Test func fencesFollowCommonMarkDelimiters() {
         let tildes = ReplyDetail.fences(in: "~~~js\nlet a = 1\n~~~")

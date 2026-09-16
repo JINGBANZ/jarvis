@@ -214,10 +214,14 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             self.detailHeightFraction = self.boundedDetailHeight(height, available: available) / available
             self.layoutDetails()
         }
+        // The detail controls act on the session's slot, so they decline while the sample stands in,
+        // the way `clearLog` does. A pin clicked on the Settings sample otherwise reached Start: the
+        // slot ignored every reply, the box stayed hidden with nothing left to unpin, and each detail
+        // was still reported as shown.
         detailView.onPrevious = { [weak self] in self?.step(by: -1) }
         detailView.onNext = { [weak self] in self?.step(by: 1) }
         detailView.onTogglePin = { [weak self] in
-            guard let self else { return }
+            guard let self, self.display == .log else { return }
             if self.slot.isHeld {
                 self.slot.unpin(newest: self.shownDetails.isEmpty ? nil : self.shownDetails.count - 1)
             } else {
@@ -226,7 +230,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             self.refreshDetails()
         }
         detailView.onToggleRolled = { [weak self] in
-            guard let self else { return }
+            guard let self, self.display == .log else { return }
             self.slot.roll(!self.slot.isRolled)
             self.refreshDetails()
         }
@@ -332,6 +336,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     private func step(by offset: Int) {
+        guard display == .log else { return }
         let available = shownDetails
         guard !available.isEmpty else { return }
         let from = slot.shownIndex ?? available.count - 1

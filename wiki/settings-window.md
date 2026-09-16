@@ -182,8 +182,10 @@ persists only that shortcut through `HotkeyPreferences`; defaults and storage ke
 **Explain more** and **Show code** both answer into the detail box, so the Overlay Box switch is the
 only thing that decides whether they can be bound: with the box off, their recorders are disabled and
 their rows read "Requires Overlay Box · enable it in Overlay settings". Neither has a switch of its
-own, and the **Give me a hint** shortcut is unconditional. The capability is frozen at Start, so
-enabling the box mid-session does not register either shortcut until the next one.
+own, and the **Give me a hint** shortcut is unconditional. Whether a session can use them is fixed at
+Start: a session that started with the box off never registers them, even if the box is switched on
+mid-session, while a session that started with it on releases them when the box is switched off and
+registers them again when it is switched back on.
 
 A collision with another application or another Jarvis shortcut leaves the old working binding
 active and displays feedback for that card. If no binding could be registered at launch, its warning

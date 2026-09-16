@@ -304,9 +304,11 @@ a session that never loads the skill never pays for it in its cached prefix.
 
 [`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into what the box
 shows: the prose, the first fenced block the code bounds accept, and the first `mermaid` fence the
-renderer accepts. Anything else stays in the prose and renders inline. A block the box could not show
-is removed from the prose, from the replayed arguments, and from Activity, and the tool result names
-it, so the model reads back what the user actually saw rather than assuming its block landed.
+renderer accepts. A candidate the box rejects on the way to that one is removed from the prose, from
+the replayed arguments, and from Activity, and the tool result names it, so the model reads back what
+the user actually saw rather than assuming its block landed; the search then goes on, so a valid block
+written after a broken one still reaches the box. Everything else stays in the prose and renders
+inline, including a fence written after the shown one of its kind.
 [`CodeBlock`](../Sources/JarvisCore/Overlay/CodeBlock.swift) rejects oversized code rather than
 cutting it into an invalid fragment. [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift)
 accepts a bounded Mermaid subset of rectangular labeled boxes and directed connections; the parser

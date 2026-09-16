@@ -5,9 +5,10 @@ import Foundation
 ///
 /// A detail is one Markdown document. Most of it is prose, and at most one fenced block of each
 /// routed kind is lifted out of that prose and drawn as its own block: the first `mermaid` fence the
-/// diagram renderer accepts, and the first other fence that fits the code bounds. A fence the box
-/// cannot show is removed from both the prose and `deliveredMarkdown`, and `dropped` says why, so
-/// the model reads back what the user actually saw instead of assuming its block landed.
+/// diagram renderer accepts, and the first other fence that fits the code bounds. A candidate the
+/// box rejects on the way to that one is removed from both the prose and `deliveredMarkdown`, and
+/// `dropped` says why, so the model reads back what the user actually saw instead of assuming its
+/// block landed. Fences after the shown one of their kind stay in the prose.
 public struct ReplyDetail: Sendable, Equatable {
     /// One fenced block, as CommonMark delimits it.
     public struct Fence: Sendable, Equatable {
@@ -47,24 +48,27 @@ public struct ReplyDetail: Sendable, Equatable {
         var liftedFromProse: [Range<String.Index>] = []
         var removedFromReplay: [Range<String.Index>] = []
 
+        // Each kind shows the first candidate the box can draw. A candidate rejected before that is
+        // dropped and reported, and the search goes on, so a valid block written after a broken one
+        // still reaches the box. Once a kind is shown, later fences of it stay in the prose.
         let fences = Self.fences(in: markdown)
-        if let mermaid = fences.first(where: { $0.language == "mermaid" }) {
-            liftedFromProse.append(mermaid.range)
-            if let parsed = DiagramHint(mermaid: mermaid.body) {
+        for fence in fences where fence.language == "mermaid" {
+            liftedFromProse.append(fence.range)
+            if let parsed = DiagramHint(mermaid: fence.body) {
                 diagram = parsed
-            } else {
-                removedFromReplay.append(mermaid.range)
-                dropped.append(Self.diagramDropped)
+                break
             }
+            removedFromReplay.append(fence.range)
+            dropped.append(Self.diagramDropped)
         }
-        if let block = fences.first(where: { $0.language != "mermaid" }) {
-            liftedFromProse.append(block.range)
-            if let parsed = CodeBlock(language: block.language, code: block.body) {
+        for fence in fences where fence.language != "mermaid" {
+            liftedFromProse.append(fence.range)
+            if let parsed = CodeBlock(language: fence.language, code: fence.body) {
                 code = parsed
-            } else {
-                removedFromReplay.append(block.range)
-                dropped.append(Self.codeDropped)
+                break
             }
+            removedFromReplay.append(fence.range)
+            dropped.append(Self.codeDropped)
         }
 
         self.code = code
