@@ -63,8 +63,10 @@ import Testing
             text: "visible code", source: .onDeviceOCR, coverage: .currentViewport)],
             capturedAt: "00:03")
         #expect(ocr.contains("On-device OCR"))
-        // The stamp is the whole point: the same text sits in memory long after this turn.
+        // The stamp and the clause are the whole point: the same text sits in memory long after this
+        // turn, and the stamp alone let one live run answer a later question from it.
         #expect(ocr.contains("captured at [00:03]"))
+        #expect(ocr.contains("the screen may have changed since"))
         #expect(ocr.contains("screenshot viewport"))
     }
 

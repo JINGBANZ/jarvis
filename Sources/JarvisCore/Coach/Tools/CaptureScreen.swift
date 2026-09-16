@@ -36,17 +36,19 @@ extension JarvisPrompts.Coach {
 
     static let screenTextHeader = "Captured screen text evidence"
 
-    /// Each block says when it was captured, in the transcript's own `[mm:ss]` session clock. The
-    /// text stays in memory after its turn, and a capture from minutes ago that still called itself
-    /// the current viewport answered the screen gate for a later "how do I solve this": the model
-    /// skipped the fresh look. The stamp is the same evidence the transcript gives, so the model can
-    /// tell a capture from this turn from one long past.
+    /// Each block says when it was captured, in the transcript's own `[mm:ss]` session clock, and
+    /// that the screen may have changed since. The text stays in memory after its turn, and a
+    /// capture from minutes ago that still called itself the current viewport answered the screen
+    /// gate for a later "how do I solve this": the model skipped the fresh look. The stamp alone
+    /// still lost that look in one live run of two, so the clause says plainly what the stamp
+    /// implies, while the stamp keeps a capture from this turn distinguishable from one long past.
     static func screenText(_ evidence: [ScreenTextEvidence], capturedAt: String) -> String {
         evidence.map { item in
             let source = item.source == .browserAccessibility
-                ? "Chrome Accessibility (captured at [\(capturedAt)], active-tab tree, "
-                    + "may include off-screen text)"
-                : "On-device OCR (captured at [\(capturedAt)], screenshot viewport, may contain errors)"
+                ? "Chrome Accessibility (captured at [\(capturedAt)], active-tab tree; the screen "
+                    + "may have changed since, may include off-screen text)"
+                : "On-device OCR (captured at [\(capturedAt)], screenshot viewport; the screen may "
+                    + "have changed since, may contain errors)"
             let omission = item.truncated ? " — truncated" : ""
             return "\(screenTextHeader) — \(source)\(omission):\n\(item.text)"
         }.joined(separator: "\n\n")
