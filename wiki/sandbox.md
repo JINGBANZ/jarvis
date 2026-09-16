@@ -164,8 +164,11 @@ recording of what it sees or hears. The **raw captured streams stay transient**:
 streamed to OpenAI and dropped or analyzed on-device by Apple Speech, the live transcript lives in
 memory, and the transient file `screencapture` writes a frame into is created inside the owner-only
 session directory (never `/tmp`) and deleted —
-with its absence verified — before the capture returns. The one thing persisted *on this machine* is
-the **per-session log directory** — owner-only and bounded; see below.
+with its absence verified — before the capture returns. Session-derived data persists *on this
+machine* in one place, the **per-session log directory** — owner-only and bounded; see below. The
+bundled helper keeps its own rotating log beside its credentials, owner-only and size-capped, which
+records what it served and never a request or response body
+([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)).
 
 Jarvis keeps no separate browser-text cache or archive. Accessibility text and OCR accompany their
 current capture; older screenshots are not replayed, and older text evidence collapses when a newer
@@ -184,7 +187,9 @@ and provider-retention paths described here.
 > to the OpenAI API target only.
 
 **The per-session log directory is the bounded session-data persistence, hardened to stay
-owner-only.** It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
+owner-only.** Nothing else on this machine holds session-derived data: the helper runs in
+`commercial-mode`, so no request or response body reaches its own log directory, and each start
+narrows that directory to owner-only and deletes dumps an older build left there. It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
 the screenshots the model looked at, alongside `jarvis-debug.log`) — the model's spoken tips and the
 transcribed "heard:" lines so a session can be reviewed afterward — plus the **coaching-attempt
 provenance** (`coaching-attempts.jsonl`: finalized transcript lines at the decision boundary,

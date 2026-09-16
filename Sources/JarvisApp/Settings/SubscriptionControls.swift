@@ -157,6 +157,10 @@ final class SubscriptionControls: NSObject {
                 signInFailures[provider] = ProviderMessageRedaction.redact(failure)
             }
             readiness = nil
+            // A probe started before this sign-in describes the state it replaced, and `refresh()`
+            // would otherwise decline to start a new one while that stale task still holds the gate.
+            refreshTask?.cancel()
+            refreshTask = nil
             render()
             refresh()
         }
@@ -170,6 +174,9 @@ final class SubscriptionControls: NSObject {
             signInFailures[provider] = "I couldn't remove the saved sign-in: \(error.localizedDescription)"
         }
         readiness = nil
+        // The credential is gone; a probe still in flight answers for the account that had it.
+        refreshTask?.cancel()
+        refreshTask = nil
         render()
         refresh()
     }
