@@ -53,16 +53,19 @@ import Testing
             text: "earlier requirement",
             source: .browserAccessibility,
             coverage: .activeTabAccessibilityTree,
-            truncated: true)])
+            truncated: true)], capturedAt: "00:03")
         #expect(browser.contains("Chrome Accessibility"))
         #expect(browser.contains("may include off-screen text"))
         #expect(browser.contains("truncated"))
         #expect(browser.contains("earlier requirement"))
 
         let ocr = JarvisPrompts.Coach.captureResult(textEvidence: [ScreenTextEvidence(
-            text: "visible code", source: .onDeviceOCR, coverage: .currentViewport)])
+            text: "visible code", source: .onDeviceOCR, coverage: .currentViewport)],
+            capturedAt: "00:03")
         #expect(ocr.contains("On-device OCR"))
-        #expect(ocr.contains("current screenshot viewport"))
+        // The stamp is the whole point: the same text sits in memory long after this turn.
+        #expect(ocr.contains("captured at [00:03]"))
+        #expect(ocr.contains("screenshot viewport"))
     }
 
     @Test func captureToolOwnsScreenEvidenceGuidanceAndSchemasHaveNoMemoryMaintenance() {

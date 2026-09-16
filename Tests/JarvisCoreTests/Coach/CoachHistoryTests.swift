@@ -65,26 +65,24 @@ import Testing
         #expect(h.snapshot().contains { $0.toolCallId == "c1" })     // pairing intact, text collapsed
     }
 
-    /// Committed screen text keeps its words but stops claiming to be the current screen, so a later
-    /// request that needs the screen is free to look again. The capture's own attempt read it as
-    /// current; only memory relabels it.
-    @Test func committedScreenTextIsLabeledAsAnEarlierCapture() throws {
-        let current = JarvisPrompts.Coach.screenText([
+    /// Screen text says when it was captured, in the transcript's own clock, and memory keeps it word
+    /// for word. A later turn therefore sees evidence older than the newest speech instead of text
+    /// that calls itself the current screen.
+    @Test func committedScreenTextKeepsItsCaptureTime() throws {
+        let captured = JarvisPrompts.Coach.screenText([
             ScreenTextEvidence(text: "intervals.sort()", source: .onDeviceOCR, coverage: .currentViewport),
             ScreenTextEvidence(text: "Merge Intervals", source: .browserAccessibility,
                                coverage: .activeTabAccessibilityTree),
-        ])
-        #expect(current.contains(JarvisPrompts.Coach.currentOCRSource))
+        ], capturedAt: "01:29")
+        #expect(captured.contains("On-device OCR (captured at [01:29]"))
+        #expect(captured.contains("Chrome Accessibility (captured at [01:29]"))
+
         let h = CoachHistory()
         h.commit([.user("turn"),
-                  .init(role: .tool, text: "screenshot captured\n\n\(current)", toolCallId: "c1")])
+                  .init(role: .tool, text: "screenshot captured\n\n\(captured)", toolCallId: "c1")])
 
         let committed = try #require(h.snapshot().first { $0.toolCallId == "c1" }?.text)
-        #expect(committed.contains("intervals.sort()") && committed.contains("Merge Intervals"))
-        #expect(committed.contains(JarvisPrompts.Coach.earlierOCRSource))
-        #expect(committed.contains(JarvisPrompts.Coach.earlierAccessibilitySource))
-        #expect(!committed.contains(JarvisPrompts.Coach.currentOCRSource))
-        #expect(!committed.contains(JarvisPrompts.Coach.currentAccessibilitySource))
+        #expect(committed == "screenshot captured\n\n\(captured)")
     }
 
     /// Raw passthrough items live only inside their turn's tool loop — commit converts them: the
@@ -263,13 +261,14 @@ import Testing
         let ocr = JarvisPrompts.Coach.screenText([ScreenTextEvidence(
             text: "int hl = countHeight(root.left);",
             source: .onDeviceOCR,
-            coverage: .currentViewport)])
+            coverage: .currentViewport)], capturedAt: "00:10")
         h.commit([.init(role: .tool, text: ocr, toolCallId: "c1"), .user("first")])
         let stale = h.compactionPrefix()!
 
         // A newer capture lands while the summary is still being written.
         h.commit([.init(role: .tool, text: JarvisPrompts.Coach.screenText([ScreenTextEvidence(
-            text: "fixed line", source: .onDeviceOCR, coverage: .currentViewport)]),
+            text: "fixed line", source: .onDeviceOCR, coverage: .currentViewport)],
+            capturedAt: "00:42"),
                         toolCallId: "c2")])
 
         #expect(!h.compact(prefixCount: stale.count, summary: "old screen said hl", revision: stale.revision))

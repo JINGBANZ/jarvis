@@ -709,10 +709,10 @@ rather than a per-turn screenshot.
   cache can reuse stable prefixes); a `stay_silent` call leaves no trace, even one a turn was refused
   or went past, so its refusal never tells a later turn that silence is off-limits, while useful
   speech and the newest screen observation survive. At conversation commit, pixels become neutral
-  stubs; a newer capture supersedes older screen text, and reasoning items are dropped. Committed
-  screen text keeps its words but is relabeled as coming from an earlier capture, because left
-  claiming the current viewport it let a later "how do I solve this" skip the fresh look the screen
-  gate asks for. Past a token
+  stubs; a newer capture supersedes older screen text, and reasoning items are dropped. Screen text
+  carries the `[mm:ss]` session time it was captured, the transcript's own clock, so a later turn
+  reads it as evidence from then: text that still called itself the current viewport let a "how do I
+  solve this" minutes later skip the fresh look the screen gate asks for. Past a token
   threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
   briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate

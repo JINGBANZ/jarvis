@@ -275,7 +275,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         $0 + $1.text.count(where: { $0 == "\n" }) + 1
                     }
                     jlog("🔤 read \(lines) lines of on-screen text")
-                    observations.append(.user(JarvisPrompts.Coach.screenText(shot.textEvidence)))
+                    observations.append(.user(JarvisPrompts.Coach.screenText(
+                        shot.textEvidence,
+                        capturedAt: RollingTranscript.stamp(clock.now() - sessionStart))))
                 }
                 work.screenObservation = observations
             } else {
@@ -546,14 +548,16 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             }
                             jlog("🔤 read \(lines) lines of on-screen text")
                         }
+                        let capturedAt = RollingTranscript.stamp(clock.now() - sessionStart)
                         work.screenObservation = [
-                            .user(JarvisPrompts.Coach.captureResult(textEvidence: shot.textEvidence)),
+                            .user(JarvisPrompts.Coach.captureResult(
+                                textEvidence: shot.textEvidence, capturedAt: capturedAt)),
                             .userImage(shot.imageBase64),
                         ]
                         appendToolContinuation(
                             toolCallId: callID,
                             resultText: JarvisPrompts.Coach.captureResult(
-                                textEvidence: shot.textEvidence),
+                                textEvidence: shot.textEvidence, capturedAt: capturedAt),
                             extraMessages: [.userImage(shot.imageBase64)],
                             newPhase: .captureScreenContinuation)
                     } else {
