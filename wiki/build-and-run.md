@@ -15,7 +15,7 @@ The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Lin
 what CI runs; no Xcode project exists. Developer desktops also have full Xcode and the Xcode MCP,
 whose macOS workflow builds, launches, stops, and reads logs, so an agent may drive the app that way;
 the scripts use `open`. The live e2e tests assume the three TCC grants, an OpenAI key saved in the
-secrets file, and the Codex and Claude subscriptions signed in from Settings → Connections.
+secrets file, and Codex and Claude Code signed in from Settings → Connections.
 
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested

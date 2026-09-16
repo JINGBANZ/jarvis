@@ -4,7 +4,7 @@ import Foundation
 /// the Settings model dropdown and the defaults. Bump a list when a provider ships a new model — a
 /// one-line edit. (Transcription models are a separate concern and are NOT listed here.)
 public enum BrainModelCatalog {
-    /// The curated OpenAI model ids shared by the OpenAI API and Codex subscription pickers,
+    /// The curated OpenAI model ids shared by the OpenAI API and Codex pickers,
     /// confirmed against OpenAI's official model docs (September 2026).
     public static let all: [BrainModel] = [
         BrainModel(id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol"),
@@ -31,7 +31,7 @@ public enum BrainModelCatalog {
 
     /// Concrete models per provider. Every OpenAI-family provider intentionally shares one list, and
     /// every Claude provider the other. Older concrete releases remain selectable so catalog
-    /// additions do not invalidate saved routes; one the Codex subscription does not serve fails at
+    /// additions do not invalidate saved routes; one Codex does not serve fails at
     /// request time with the helper's `model_not_found`. Invitation-only Mythos releases and rolling
     /// aliases are excluded.
     public static func models(for provider: BrainProvider) -> [BrainModel] {
@@ -53,7 +53,7 @@ public enum BrainModelCatalog {
     }
 
     /// The cheap verified model each provider uses for history-compaction summaries. Empty means
-    /// the target's own model: the Codex subscription serves neither mini model.
+    /// the target's own model: Codex serves neither mini model.
     public static func summarizerModelID(for provider: BrainProvider) -> String {
         switch provider {
         case .openAI: return "gpt-5.4-mini"

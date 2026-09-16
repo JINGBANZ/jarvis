@@ -260,9 +260,9 @@ when it speaks, like any attempt's. What a press may call is narrowed on each re
 callable tool except `stay_silent` and `capture_screen`, since its screen is already in the first
 request, and the response at the cap is forced to `speak`. A press therefore always ends in a tip and
 never runs out of responses. When `speak` is the only tool left, the request is the plain forced
-`speak`, one round trip. On the OpenAI API and the Codex subscription the narrowing is an
+`speak`, one round trip. On the OpenAI API and Codex the narrowing is an
 `allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
-attempts (`BrainAccessor.encodeBody`). The Claude subscription can neither force nor narrow a call, so
+attempts (`BrainAccessor.encodeBody`). Claude Code can neither force nor narrow a call, so
 its request declares only the permitted tools under `tool_choice: auto`
 ([Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy)).
 The accepted cost is a round trip for each first load and each search, and the client resends the
@@ -271,8 +271,8 @@ forced `speak` was rejected as too narrow: the shortcut is the fallback for a ne
 missed, so it should not be the less capable of the two.
 
 The runner checks every reply against the tool choice its own request sent instead of trusting the
-transport to enforce it, because the Claude subscription's set is only the tools it declares and the
-Codex subscription's path forces parallel calls, so a reply can call outside the set or carry more
+transport to enforce it, because Claude Code's set is only the tools it declares and the
+Codex's path forces parallel calls, so a reply can call outside the set or carry more
 than one call. A call outside the permitted set is answered with a tool result saying it is not
 available on a press, and a call whose arguments the typed parser (`ToolInvocation.parse`) cannot use
 is answered with its tool's schema; either way the model is asked again in the same attempt. The
@@ -710,9 +710,10 @@ rather than a per-turn screenshot.
   or went past, so its refusal never tells a later turn that silence is off-limits, while useful
   speech and the newest screen observation survive. At conversation commit, pixels become neutral
   stubs; a newer capture supersedes older screen text, and reasoning items are dropped. Screen text
-  carries the `[mm:ss]` session time it was captured, the transcript's own clock, so a later turn
-  reads it as evidence from then: text that still called itself the current viewport let a "how do I
-  solve this" minutes later skip the fresh look the screen gate asks for. Past a token
+  carries the `[mm:ss]` session time it was captured, the transcript's own clock, and says the screen
+  may have changed since, so a later turn reads it as evidence from then: text that still called
+  itself the current viewport let a "how do I solve this" minutes later skip the fresh look the
+  screen gate asks for, and the stamp without the clause still lost that look in one live run of two. Past a token
   threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
   briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
@@ -842,7 +843,7 @@ rather than a per-turn screenshot.
 
 ### Subscription targets through the bundled proxy
 
-The **Codex subscription** and **Claude subscription** targets (`BrainProvider.codexSubscription`,
+The **Codex** and **Claude Code** targets (`BrainProvider.codexSubscription`,
 `.claudeSubscription`, selected in [Settings → Brain](./settings-window.md#brain)) let the user's
 ChatGPT or Claude plan pay for coaching instead of a metered API key. Both are served by
 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT, Go), shipped inside the app at
@@ -883,9 +884,9 @@ is about 60 MB on disk and 20 MB per update.
   a fallback still coaches. A Start or route edit is refused only when no target in the route can
   coach (`UserFacingError.brainRouteUnavailable`).
 - **Tool policy per target** ([`ToolChoicePolicy`](../Sources/JarvisCore/Brain/ToolChoicePolicy.swift)).
-  The OpenAI API and the Codex subscription are `providerEnforced`: `required`, `allowed_tools`, a
+  The OpenAI API and Codex are `providerEnforced`: `required`, `allowed_tools`, a
   forced function, strict tools, and verbatim reasoning replay all pass through the Codex path intact.
-  The Claude subscription is `filteredAuto`: through the helper a forced tool is a 400 on Claude Fable
+  Claude Code is `filteredAuto`: through the helper a forced tool is a 400 on Claude Fable
   5.1 and strips thinking on Opus 5, and `allowed_tools` is dropped, so Opus called `capture_screen`
   on a press six times in six. Every Claude request therefore sends `tool_choice: auto` with only the
   permitted tools declared, which costs a press the prompt cache from the tools block onward. Its
@@ -900,9 +901,10 @@ is about 60 MB on disk and 20 MB per update.
   `parallel_tool_calls`, `store`, and `prompt_cache_key`, turns the effort into adaptive thinking,
   and replays reasoning items as signed thinking blocks. Without `strict`, about one Opus 5 `speak`
   in ten arrives with `lines` double-encoded as a string, which the runner answers with the schema in
-  the same attempt. The helper's default cloak stays on: it presents Claude traffic as Claude Code so
-  usage stays on plan limits, which moves Jarvis's system prompt behind a Claude Code identity block.
-- **Models.** The Codex subscription shares the OpenAI list; an id the Codex backend does not serve
+  the same attempt. The helper's default cloak stays on: it presents Claude traffic as Anthropic's own
+  Claude Code client so usage stays on plan limits, which moves Jarvis's system prompt behind that
+  client's identity block.
+- **Models.** The Codex shares the OpenAI list; an id the Codex backend does not serve
   fails at request time with the helper's `model_not_found`. The Claude list names releases the helper
   routes, which is why Haiku is the dated `claude-haiku-4-5-20251001`: the helper reads the undated
   alias as an unknown model. The Claude summarizer is Haiku; the Codex summarizer is the target model,
@@ -933,10 +935,10 @@ is about 60 MB on disk and 20 MB per update.
 
   | Target | Automatic question | Capture turn 1 / 2 | Press | Outcome |
   |---|---:|---:|---:|---|
-  | Codex subscription, `gpt-5.6-sol`, provider-enforced choices | 4,813 | 2,431 / 5,120 | 6,293 | 24 of 24 calls in the permitted set, replay intact |
+  | Codex, `gpt-5.6-sol`, provider-enforced choices | 4,813 | 2,431 / 5,120 | 6,293 | 24 of 24 calls in the permitted set, replay intact |
   | OpenAI API, `gpt-5.6-sol` | 4,982 | 1,358 / 4,075 | 5,504 | 15 of 15 |
-  | Claude subscription, Opus 5, filtered auto | 2,597 | 1,542 / 3,082 | 7,370 | 48 of 48 calls in the permitted set |
-  | Claude subscription, Fable 5.1, filtered auto | 3,440 | 2,099 / 4,404 | 9,865 | 48 of 48 |
+  | Claude Code, Opus 5, filtered auto | 2,597 | 1,542 / 3,082 | 7,370 | 48 of 48 calls in the permitted set |
+  | Claude Code, Fable 5.1, filtered auto | 3,440 | 2,099 / 4,404 | 9,865 | 48 of 48 |
 
   Coaching through the vendors' own CLIs measured 5,898 ms for a Codex text turn and 2,654 ms for a
   Claude Code text turn on the same machine, so the proxy's Codex path is faster and a Claude press

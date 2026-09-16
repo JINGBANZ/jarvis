@@ -2,7 +2,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct BrainProviderTests {
-    /// Only the Claude subscription can neither force nor narrow a call, and rejects disabled
+    /// Only Claude Code can neither force nor narrow a call, and rejects disabled
     /// reasoning; every other provider's request bodies keep provider-enforced choices.
     @Test func onlyTheClaudeSubscriptionFiltersToolsAndFloorsReasoning() {
         for provider in BrainProvider.allCases {
@@ -20,7 +20,7 @@ import Testing
         #expect(BrainProvider.claudeSubscription.proxyModelOwner == "anthropic")
         #expect(BrainProvider.codexSubscription.rawValue == "codex-subscription")
         #expect(BrainProvider.claudeSubscription.rawValue == "claude-subscription")
-        #expect(BrainProvider.codexSubscription.displayName == "Codex subscription")
-        #expect(BrainProvider.claudeSubscription.displayName == "Claude subscription")
+        #expect(BrainProvider.codexSubscription.displayName == "Codex")
+        #expect(BrainProvider.claudeSubscription.displayName == "Claude Code")
     }
 }

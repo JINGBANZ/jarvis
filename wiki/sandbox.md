@@ -123,7 +123,7 @@ Narrow and explicit. Data leaves the machine only via:
   explicitly enables **Read Chrome page text** and grants Accessibility, it also contains bounded
   semantic text from the exact foreground Chrome tab. No screen content leaves the
   machine on idle turns.
-- **With a Codex or Claude subscription selected for coaching**
+- **With Codex or Claude Code selected for coaching**
   ([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)),
   the same brain payload goes to the CLIProxyAPI helper bundled in the app, listening on 127.0.0.1
   behind a key that exists only for the running launch, which forwards it under the user's own
@@ -134,8 +134,8 @@ Narrow and explicit. Data leaves the machine only via:
   Mac's address, because the helper's login prints SSH tunnel hints; Jarvis ignores them. Nothing
   else: the generated configuration keeps the embedded model catalog instead of fetching one, turns
   off the management API and its downloadable panel, and disables usage statistics. On the Codex
-  path the helper forces `store: false`; on the Claude path it presents the traffic as Claude Code,
-  so Jarvis's system prompt reaches Anthropic behind a Claude Code identity block. Anthropic's terms
+  path the helper forces `store: false`; on the Claude path it presents the traffic as Anthropic's own
+  Claude Code client, so Jarvis's system prompt reaches Anthropic behind that client's identity block. Anthropic's terms
   prohibit intermediating Claude session tokens; the owner accepts that risk on his own account.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent

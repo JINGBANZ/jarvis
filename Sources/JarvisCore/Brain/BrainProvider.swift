@@ -14,8 +14,10 @@ public enum BrainProvider: String, CaseIterable, Sendable {
     public var displayName: String {
         switch self {
         case .openAI: return "OpenAI API"
-        case .codexSubscription: return "Codex subscription"
-        case .claudeSubscription: return "Claude subscription"
+        // The names the user knows these plans by. The raw values keep the `-subscription` spelling:
+        // they are persisted route ids, and renaming them would drop saved routes.
+        case .codexSubscription: return "Codex"
+        case .claudeSubscription: return "Claude Code"
         }
     }
 

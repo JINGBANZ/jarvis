@@ -69,10 +69,11 @@ Set up once per machine:
 - **An OpenAI key** saved in Settings, which writes the owner-only secrets file. Every scenario
   transcribes through OpenAI. `OPENAI_API_KEY` does not serve the run: the app is launched through
   `open`, and LaunchServices does not pass the shell's environment.
-- **The Codex and Claude subscriptions**, signed in from Settings → Connections. The launcher's
+- **Codex and Claude Code**, the coaching targets, signed in from Settings → Connections. The launcher's
   preflight checks the key and a saved sign-in for both subscriptions before the first launch, so a
   missing login stops the run in seconds instead of surfacing as a failed scenario.
-- **Claude Code**, installed and signed in, for `--evaluate` only.
+- **The `claude` CLI**, installed and signed in, for `--evaluate` only. It writes the report; it is
+  not the coaching target of the same name, which the bundled helper serves.
 
 During a run:
 
@@ -98,7 +99,7 @@ with its scenario, waits for the app to exit, and asserts on the session folder.
 - `--keep-going` runs every chosen scenario. Without it the run stops after the first scenario that
   writes a `fail` line, since later scenarios spend model calls and a failure deserves a look first.
 - `--evaluate` runs [`scripts/eval-session.sh`](../scripts/eval-session.sh) on Scenario A's session
-  with `EVAL_AGENT=claude`, so the evaluation spends the Claude subscription rather than the ChatGPT
+  with `EVAL_AGENT=claude`, so the evaluation spends the Claude plan rather than the ChatGPT
   plan, and adds a G09 line. It is off by default because evaluation is an agentic run of its own, not part
   of coaching.
 
@@ -142,13 +143,13 @@ layout in the Gate.
 
 | Scenario | Brain | What it drives |
 |---|---|---|
-| A | Claude subscription, then OpenAI, then Codex subscription | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
-| B | Claude subscription | Behavioral, system design, coding with AI, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
-| R | Claude subscription | The real capture device with no speech: Start, coaching ready, Stop. |
-| F01 | Claude subscription | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
-| F02 | Claude subscription | Transcription with a run-local invalid OpenAI key. |
+| A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
+| B | Claude Code | Behavioral, system design, coding with AI, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
+| R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
+| F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
+| F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
 
-Only Scenario A's second half runs on the Codex subscription; every other scenario and the
+Only Scenario A's second half runs on Codex; every other scenario and the
 evaluation run on Claude. The ChatGPT plan's usage limit is the one a day of runs exhausts, and A's
 Codex stretch (a behavioral search, a spoken screen question, two presses, and a design follow-up)
 is enough to keep that subscription covered.
@@ -233,7 +234,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 
 | ID | Case | Where |
 |---|---|---|
-| C01 | A press loads what its screen needs and still ends in one clean tip | A: the Claude subscription press; B: its press |
+| C01 | A press loads what its screen needs and still ends in one clean tip | A: Claude Code press; B: its press |
 | C02 | Small talk loads nothing | A: the interviewer's logistics line |
 | C03 | The first behavioral question picks the behavioral skill | A: the first behavioral question |
 | C04 | An already-loaded kind never reloads | A: every turn on Codex |
@@ -246,12 +247,12 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C11 | A press after the load is one round trip | A: the two Codex presses |
 | C12 | A diagram arrives at the architecture stage, on OpenAI and on a subscription | A: the OpenAI design question and the Codex follow-up |
 | C13 | No diagram outside that stage | A: the coding and behavioral turns |
-| C14 | A brain switch keeps loaded state, in both directions | A: Claude subscription to OpenAI, then OpenAI to Codex subscription |
+| C14 | A brain switch keeps loaded state, in both directions | A: Claude Code to OpenAI, then OpenAI to Codex |
 | C15 | Coaching continues after loads on both subscriptions | A |
 | C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question |
 | C17 | The remaining skill still loads when others are off | B: the press |
-| C18 | Prep search off leaves no tool and no catalog line | B: the Claude subscription instructions |
-| C19 | Switched-off capabilities apply as configured | B: the Claude subscription instructions list only coding |
+| C18 | Prep search off leaves no tool and no catalog line | B: Claude Code instructions |
+| C19 | Switched-off capabilities apply as configured | B: Claude Code instructions list only coding |
 | C20 | A reply the runner answered instead of running is reported, never failed | A and B |
 | C21 | Loaded guidance survives compaction | Not scheduled; unit-tested |
 

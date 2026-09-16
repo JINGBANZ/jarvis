@@ -132,9 +132,9 @@ import Testing
         #expect(e.severity == .warning)
         #expect(e.severity.showsAlert)
         #expect(!e.severity.stopsSession)
-        #expect(e.title == "Claude subscription isn't ready")
+        #expect(e.title == "Claude Code isn't ready")
         #expect(e.message
-            == "Claude subscription isn't signed in; open Settings → Connections, press Sign in for it, then press Start.")
+            == "Claude Code isn't signed in; open Settings → Connections, press Sign in for it, then press Start.")
     }
 
     @Test func exhaustedBrainRouteStopsQuietlyAndKeepsDiagnosticDetail() {
@@ -151,7 +151,7 @@ import Testing
         #expect(e.severity.stopsSession)
         #expect(e.title.contains("route exhausted"))
         #expect(e.message.contains("OAuth session expired"))
-        #expect(e.message.contains("Claude subscription"))
+        #expect(e.message.contains("Claude Code"))
         #expect(e.sessionEndReason == .brainRouteExhausted(last: failure))
     }
 

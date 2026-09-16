@@ -65,7 +65,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 | Section class | Tab title | Always present | Description |
 |---|---|---|---|
 | `BrainSection` | "Brain" | yes | Behavior that decides who answers and what Jarvis hears, in one scrolling stack: the primary provider/model, an ordered editable fallback list, reasoning effort, the coach's switchable capabilities, and transcription provider/model/expected-languages-or-locale controls. A live status badge mirrors the active brain provider without moving the saved route. Valid Brain-route changes take effect between coaching attempts while running; capability and transcription changes take effect on the next Start. |
-| `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Subscriptions (`SubscriptionControls`) signs the Codex and Claude subscriptions in and out through the bundled helper. Saving a key checks it with one models-list request and shows the vendor's verdict under the row. Saving never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
+| `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Subscriptions (`SubscriptionControls`) signs Codex and Claude Code in and out through the bundled helper. Saving a key checks it with one models-list request and shows the vendor's verdict under the row. Saving never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also has **Show diagrams**, enabled by default, and **Show code with hints** with its own appearance controls. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
 | `HotkeySection` | "Shortcuts" | yes | Independent **Give me a hint**, **Explain more**, and **Show code** recorders, with per-binding failure feedback and persisted combinations. |
@@ -242,7 +242,7 @@ outer document instead of hiding inside a second scroll area. While coaching run
 use** marker exposes the runtime cursor without moving or rewriting any saved target.
 
 **Primary.** The first row selects a provider and model: the **OpenAI API** (metered by the key), the
-**Codex subscription** (the user's ChatGPT plan), or the **Claude subscription** (the user's Claude
+**Codex** (the user's ChatGPT plan), or **Claude Code** (the user's Claude
 plan). Both subscriptions are served by the helper bundled in the app and signed in from
 [Connections](#connections); see
 [architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy).
@@ -289,9 +289,9 @@ route with one usable target can still coach. Runtime movement through the route
 saved list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
-The OpenAI API and the Codex subscription share one concrete model list; the Claude subscription
+The OpenAI API and Codex share one concrete model list; Claude Code
 exposes the current concrete Claude releases, including the latest in each supported family and
-older choices needed to preserve saved routes. A listed model the Codex subscription does not serve
+older choices needed to preserve saved routes. A listed model Codex does not serve
 fails at request time with the helper's `model_not_found`, which reads as a configuration failure.
 Adding a model keeps provider defaults and existing selections stable. Concrete releases, never
 rolling aliases such as `sonnet` or `opus`: a saved route must keep naming the release the user
@@ -301,7 +301,7 @@ its own model; without a valid preference, the first entry in that provider's ca
 The **Reasoning effort** picker (`ReasoningEffort`: None / Low / Medium / High) is stored once and
 applies uniformly to whichever provider is active; its default lives with the others in
 [`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). `BrainAccessor` raises None to Low,
-and the output budget to at least the Low budget, for the Claude subscription, because None disables
+and the output budget to at least the Low budget, for Claude Code, because None disables
 thinking on that path and Claude Fable 5.1 rejects it, and for GPT-6 Astra, because Astra requires
 reasoning. The stored effort remains unchanged, and every other target keeps the selected effort.
 
@@ -436,8 +436,8 @@ costs nothing and still proves the key, the network path, and the region; it doe
 which OpenAI only reports on a real request, which is why the wording is "accepted" rather than a
 claim that the account is healthy.
 
-The **Subscriptions** card (`SubscriptionControls`) has one row each for the **Codex subscription**
-and the **Claude subscription**. Opening Connections probes the bundled helper, starting it if it is
+The **Subscriptions** card (`SubscriptionControls`) has one row each for **Codex**
+and **Claude Code**. Opening Connections probes the bundled helper, starting it if it is
 not running, and reads its credential files, so each row says what a Start would find:
 
 - **Checking…** until the probe answers.

@@ -1,4 +1,4 @@
-# CLIProxyAPI, the helper that serves the Codex and Claude subscription targets. Sourced by
+# CLIProxyAPI, the helper that serves the Codex and Claude Code targets. Sourced by
 # scripts/build-app.sh and scripts/package-app.sh, so the development and the release app bundle
 # the same pinned, checksum-verified release.
 #

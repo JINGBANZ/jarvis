@@ -108,7 +108,7 @@ struct LiveE2ETests {
             let b1Screens = b1Rows.filter { $0.kind == "screenViewed" }.count
             let b1Tip = b1Rows.contains { $0.kind == "tip" }
             // Whether a press with a real screenshot loads (#318) is recorded, not required.
-            let b1Summary = "B1 on the Claude subscription: \(b1Screens) screen view(s), loads \(b1Loads), "
+            let b1Summary = "B1 on Claude Code: \(b1Screens) screen view(s), loads \(b1Loads), "
                 + (b1Tip ? "a tip" : "no tip")
             results.note("C01", b1Summary)
             results.note("C09", b1Summary)
@@ -126,7 +126,7 @@ struct LiveE2ETests {
             results.note("C16", "B2 ended \(b2.last?.terminal ?? "without an attempt"), diagram "
                 + Self.describe(Self.diagram(evidence, b2.last)))
             results.check("C18", [
-                (!claude.isEmpty, "Claude subscription coach requests were recorded"),
+                (!claude.isEmpty, "Claude Code coach requests were recorded"),
                 (claude.allSatisfy { !($0.instructions ?? "").contains("search_prep_notes") },
                  "instructions never name search_prep_notes"),
                 (claude.allSatisfy { !($0.instructions ?? "").contains("Tools you can load") },

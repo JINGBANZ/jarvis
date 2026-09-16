@@ -11,7 +11,7 @@ import Foundation
         #expect(ActivityLog.cssClass(for: "🤫 stayed silent — nothing useful to add") == "think")
         #expect(ActivityLog.cssClass(for: "💭 thinking…") == "think")
         #expect(ActivityLog.cssClass(for: "… nothing useful to add, staying silent") == "think")
-        #expect(ActivityLog.cssClass(for: "🧠 brain switch applied — OpenAI API → Claude subscription") == "think")
+        #expect(ActivityLog.cssClass(for: "🧠 brain switch applied — OpenAI API → Claude Code") == "think")
         #expect(ActivityLog.cssClass(for: "⏹ session ended by user") == "think")
         #expect(ActivityLog.cssClass(
             for: "⏹ session ended by error — check jarvis-debug.log") == "err")
@@ -272,7 +272,7 @@ import Foundation
         #expect(snapshot.rows.count == 1)
         let persisted = try Self.persistedRows(in: dir)
         #expect(persisted.count == 1)
-        #expect(persisted[0].message == "⚠️ Codex subscription didn't respond in time "
+        #expect(persisted[0].message == "⚠️ Codex didn't respond in time "
             + "(no response within 60s) — coaching failed; listening continues")
         #expect(persisted[0].kind == ActivityEvent.Kind.coachingCycleFailed.rawValue)
         #expect(ActivityLog.isHumanFacing(message: persisted[0].message, imageFile: nil))
@@ -311,7 +311,7 @@ import Foundation
             + "(network -1009: the internet connection appears to be offline) "
             + "\u{2014} coaching failed; listening continues; check your network or VPN")
         #expect(persisted[1].message
-            == "\u{26A0}\u{FE0F} Claude subscription isn't signed in \u{2014} skipping it; "
+            == "\u{26A0}\u{FE0F} Claude Code isn't signed in \u{2014} skipping it; "
             + "open Settings \u{2192} Connections, press Sign in for it, then press Start")
         for row in persisted {
             #expect(ActivityLog.isHumanFacing(
@@ -330,11 +330,11 @@ import Foundation
         let row = try #require(snapshot.rows.first)
         #expect(row.contains("brain switch applied"))
         #expect(row.contains("OpenAI API"))
-        #expect(row.contains("Claude subscription"))
+        #expect(row.contains("Claude Code"))
         #expect(!row.contains("OAuth"))
         #expect(!row.contains("token"))
         #expect(ActivityLog.isHumanFacing(
-            message: "🧠 brain switch applied — OpenAI API → Claude subscription",
+            message: "🧠 brain switch applied — OpenAI API → Claude Code",
             imageFile: nil
         ))
     }
@@ -360,9 +360,9 @@ import Foundation
         #expect(snapshot.rows.count == 3)
         let persisted = try Self.persistedRows(in: dir)
         #expect(persisted.map(\.message) == [
-            "⚠️ OpenAI API couldn't respond (HTTP 429, rate_limit_exceeded: Rate limit reached) — continuing on Claude subscription",
+            "⚠️ OpenAI API couldn't respond (HTTP 429, rate_limit_exceeded: Rate limit reached) — continuing on Claude Code",
             "⚠️ OpenAI API target couldn't respond (HTTP 429, rate_limit_exceeded: Rate limit reached) — continuing with the next OpenAI API model",
-            "⚠️ Claude subscription is unavailable (the sign-in service isn't running) — skipping it; quit and reopen Jarvis",
+            "⚠️ Claude Code is unavailable (the sign-in service isn't running) — skipping it; quit and reopen Jarvis",
         ])
         #expect(persisted.map(\.kind) == [
             ActivityEvent.Kind.brainRouteAdvanced.rawValue,
@@ -403,10 +403,10 @@ import Foundation
         #expect(messages.count == 6)
         #expect(messages[0] == "⏹ session ended by error — OpenAI denied access (HTTP 403, unsupported_country_region_territory: Country, region, or territory not supported); check your region, VPN, or API project")
         #expect(ActivityLog.cssClass(for: messages[0]) == "err")
-        #expect(messages[1] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex subscription failed (exit 1: OAuth token expired; Authorization: Bearer …)")
+        #expect(messages[1] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex failed (exit 1: OAuth token expired; Authorization: Bearer …)")
         #expect(ActivityLog.cssClass(for: messages[1]) == "err")
         #expect(messages[2] == "⏹ session ended by error — audio capture became unavailable (no input device)")
-        #expect(messages[3] == "⚠️ Codex subscription failed (exit 1: OAuth token expired; Authorization: Bearer …) — coaching failed; listening continues")
+        #expect(messages[3] == "⚠️ Codex failed (exit 1: OAuth token expired; Authorization: Bearer …) — coaching failed; listening continues")
         #expect(messages[4] == "⚠️ system audio stopped — the transcription connection to OpenAI was lost (close 1006); microphone coaching continues")
         #expect(messages[5].contains("current coaching session continues"))
         // Provider text reaches a row only after redaction, so a quoted message can never carry a
@@ -464,12 +464,12 @@ import Foundation
         #expect(messages[3].contains("API key is missing"))
         #expect(messages[3].contains("Settings → Connections"))
         #expect(messages[4].contains("required permission is missing"))
-        #expect(messages[5] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex subscription failed (exit 1: OAuth token expired; Authorization: Bearer …)")
+        #expect(messages[5] == "⏹ session ended by error — all configured provider targets were exhausted; last target: Codex failed (exit 1: OAuth token expired; Authorization: Bearer …)")
         #expect(messages[6] == "⏹ session ended by error — OpenAI denied access (HTTP 403, unsupported_country_region_territory: Country, region, or territory not supported); check your region, VPN, or API project")
         #expect(ActivityLog.cssClass(for: messages[6]) == "err")
         #expect(messages[7] == "⏹ session ended by error — audio capture became unavailable (no input device)")
         #expect(messages[8] == "⏹ session ended by error — Couldn't prepare Apple Speech")
-        #expect(messages[9] == "⏹ session ended by error — coaching kept failing for 10 minutes; last error: Codex subscription failed (exit 1: OAuth token expired; Authorization: Bearer …)")
+        #expect(messages[9] == "⏹ session ended by error — coaching kept failing for 10 minutes; last error: Codex failed (exit 1: OAuth token expired; Authorization: Bearer …)")
         #expect(ActivityLog.cssClass(for: messages[9]) == "err")
         #expect(messages.allSatisfy { !$0.contains("abc123token") })
         #expect(rendered.map { $0.kind } == Array(

@@ -26,7 +26,7 @@ public extension ToolInvocation {
     /// Map a wire-level tool call (name + JSON arguments) to a typed invocation — the one place the
     /// coach tool names are interpreted, shared by every brain client. Unknown tool → nil, and the
     /// attempt runner answers the raw call. `speak` is nil unless `lines` decodes to at least one
-    /// non-blank string: a strict schema guarantees the shape, but the Claude subscription's requests
+    /// non-blank string: a strict schema guarantees the shape, but Claude Code's requests
     /// drop `strict`, and a malformed `speak` accepted with empty lines would render an empty overlay
     /// yet still count as a spoken turn.
     static func parse(callId: String, name: String, argumentsJSON: String) -> ToolInvocation? {
@@ -70,7 +70,7 @@ public extension ToolInvocation {
         }
     }
 
-    /// Only a strict schema forces `highlightedLines` into every call; the Claude subscription's
+    /// Only a strict schema forces `highlightedLines` into every call; Claude Code's
     /// requests drop `strict`, so its models naturally omit an empty array when the snippet
     /// corrects nothing. Absent or null therefore means "no highlights", and binding it like the
     /// other members would discard a snippet the model did produce. A present value of the wrong
