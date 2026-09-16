@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.3.0](https://github.com/JINGBANZ/jarvis/compare/v0.2.4...v0.3.0) (2026-09-16)
+
+
+### ⚠ BREAKING CHANGES
+
+* **coach:** `speak.mermaid`, `speak.explanation`, and `speak.codeSnippet` are gone, and the three switches with them. Activity rows written before this change still decode and still render their own sections.
+* **brain:** saved brain routes that name claude-code or codex-cli fall back to the default primary and drop those fallback rows; pick the subscription targets in Settings → Brain.
+
+### Features
+
+* **brain:** serve Codex and Claude subscriptions through a bundled CLIProxyAPI and remove the CLI coaching providers ([#335](https://github.com/JINGBANZ/jarvis/issues/335)) ([a913f6d](https://github.com/JINGBANZ/jarvis/commit/a913f6de7614ace6a7b9520f65408a06f6a32039))
+* **coach:** redesign the coaching prompt around a generic core and a two-box overlay ([#338](https://github.com/JINGBANZ/jarvis/issues/338)) ([926d752](https://github.com/JINGBANZ/jarvis/commit/926d752b2cf09dbe789172cf2f47885205c20f38))
+
 ## [0.2.4](https://github.com/JINGBANZ/jarvis/compare/v0.2.3...v0.2.4) (2026-09-15)
 
 
