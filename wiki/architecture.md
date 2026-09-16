@@ -940,7 +940,10 @@ is about 60 MB on disk and 20 MB per update.
 
   Coaching through the vendors' own CLIs measured 5,898 ms for a Codex text turn and 2,654 ms for a
   Claude Code text turn on the same machine, so the proxy's Codex path is faster and a Claude press
-  is slower, bounded by the same fifteen-second workload deadline.
+  is slower, bounded by the same fifteen-second workload deadline. End to end the
+  [live e2e run](./live-e2e-tests.md) shows the same shape: a Codex press reaches its tip in about 6
+  to 9 s through the proxy against 10 to 14 s through the app-server, while Claude's press and
+  question times sit inside run-to-run noise.
 - **Terms risk is accepted, not hidden.** Anthropic's terms prohibit intermediating Claude session
   tokens. The owner accepts that on his own account; a Claude target that stops working fails
   permanently and the route falls forward.
