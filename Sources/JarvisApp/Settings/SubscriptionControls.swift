@@ -23,7 +23,9 @@ final class SubscriptionControls: NSObject {
     private var readiness: LocalProxySupervisor.Readiness?
     private var refreshTask: Task<Void, Never>?
     private var signIns: [BrainProvider: Task<Void, Never>] = [:]
-    private var signInFailures: [BrainProvider: String] = [:]
+    /// The last failed action's row detail, in that action's own words. Pressing either button
+    /// clears it, so a message never outlives the state it described.
+    private var actionFailures: [BrainProvider: String] = [:]
     /// Called whenever a row changes, so the page badge can recount.
     var onStatusChanged: (() -> Void)?
 
@@ -136,7 +138,7 @@ final class SubscriptionControls: NSObject {
     }
 
     private func signIn(_ provider: BrainProvider) {
-        signInFailures[provider] = nil
+        actionFailures[provider] = nil
         signIns[provider] = Task { [weak self, supervisor] in
             var failure: String?
             if let signIn = await supervisor.makeSignIn() {
@@ -156,7 +158,7 @@ final class SubscriptionControls: NSObject {
             guard let self else { return }
             signIns[provider] = nil
             if let failure, !Task.isCancelled {
-                signInFailures[provider] = ProviderMessageRedaction.redact(failure)
+                actionFailures[provider] = "Sign-in failed: \(ProviderMessageRedaction.redact(failure))"
             }
             readiness = nil
             // A probe started before this sign-in describes the state it replaced, and `refresh()`
@@ -170,10 +172,15 @@ final class SubscriptionControls: NSObject {
     }
 
     private func signOut(_ provider: BrainProvider) {
+        actionFailures[provider] = nil
         do {
             try supervisor.signOut(provider)
         } catch {
-            signInFailures[provider] = "I couldn't remove the saved sign-in: \(error.localizedDescription)"
+            // Its own verb: this read "Sign-in failed" for a sign-out. The message quotes the
+            // credential's path, which carries the account's address, so it takes the same
+            // redaction the sign-in message does.
+            actionFailures[provider] = "Sign-out failed: "
+                + ProviderMessageRedaction.redact(error.localizedDescription)
         }
         readiness = nil
         // The credential is gone; a probe still in flight answers for the account that had it.
@@ -193,7 +200,7 @@ final class SubscriptionControls: NSObject {
             row.button.title = presentation.button
             row.button.isEnabled = presentation.buttonEnabled
             row.button.setAccessibilityLabel("\(presentation.button) \(provider.displayName)")
-            row.view.setDetail(signInFailures[provider].map { "Sign-in failed: \($0)" } ?? presentation.detail)
+            row.view.setDetail(actionFailures[provider] ?? presentation.detail)
         }
         onStatusChanged?()
     }
