@@ -108,8 +108,15 @@ public struct LocalProxySignIn: Sendable {
             do {
                 for try await line in output.fileHandleForReading.bytes.lines {
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
-                    if !opened, trimmed.hasPrefix("https://"), let url = URL(string: trimmed),
-                       Self.signInHosts.contains(url.host()?.lowercased() ?? "") {
+                    if !opened, trimmed.hasPrefix("https://"), let url = URL(string: trimmed) {
+                        guard Self.signInHosts.contains(url.host()?.lowercased() ?? "") else {
+                            // Letting it run would end in the ten-minute timeout, which says nothing
+                            // about why no page ever opened.
+                            kill(pid, SIGTERM)
+                            events.yield(.failed(
+                                message: "the sign-in service printed an address Jarvis won't open"))
+                            return
+                        }
                         opened = true
                         events.yield(.openURL(url))
                     } else if !trimmed.isEmpty {

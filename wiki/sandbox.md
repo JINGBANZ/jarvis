@@ -135,7 +135,8 @@ Narrow and explicit. Data leaves the machine only via:
   Mac's address, because the helper's login prints SSH tunnel hints; Jarvis ignores them. One
   connection is the helper's own: every launch opens TLS to its upstream project's
   `antigravity-hub-auto-updater-*.us-central1.run.app` endpoint, before any credential is loaded and
-  with no account configured, and the generated configuration has no setting that stops it. What that
+  with no account configured, and with the configuration's own update switches already off
+  (`disable-control-panel` and `disable-auto-update-panel`). What that
   configuration does stop: it keeps the embedded model catalog instead of fetching one, turns off the
   management API and its downloadable panel, and disables usage statistics. It also runs the
   helper in `commercial-mode`, so no request or response body is written to disk: the helper would

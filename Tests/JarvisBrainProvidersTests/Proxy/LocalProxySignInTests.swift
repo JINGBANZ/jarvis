@@ -69,6 +69,32 @@ import Testing
         #expect(seen.last == .failed(message: "claude authentication failed: state mismatch"))
     }
 
+    /// Jarvis opens whatever address the login prints, so one that is not a vendor's authorize host
+    /// ends the login with a message. Waiting it out would spend the ten-minute deadline and then
+    /// report a timeout, which says nothing about why no page ever opened.
+    @Test func anAddressJarvisWontOpenEndsTheLogin() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let login = try proxyStubExecutable(in: home, script: """
+            echo 'Visit the following URL to continue authentication:'
+            echo 'https://claude.ai.evil.example/oauth/authorize?code=true&state=abc'
+            exec /bin/sleep 600
+            """)
+        let signIn = LocalProxySignIn(
+            executable: login, configURL: home.appendingPathComponent("config.yaml"),
+            authDirectory: home)
+
+        let seen = await events(signIn.run(.claudeSubscription))
+
+        let opened = seen.contains { event in
+            if case .openURL = event { return true }
+            return false
+        }
+        #expect(!opened)
+        #expect(seen.last
+            == .failed(message: "the sign-in service printed an address Jarvis won't open"))
+    }
+
     @Test func cancellingTheSignInEndsTheLogin() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
