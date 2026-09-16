@@ -5,9 +5,9 @@ import Testing
     @Test func preservesOrderedSameProviderDifferentModelTargets() {
         let primary = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let fallbacks = [
-            BrainTarget(provider: .claudeCode, modelID: "claude-opus-5"),
-            BrainTarget(provider: .claudeCode, modelID: "claude-haiku-4-5"),
-            BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-sol"),
+            BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
+            BrainTarget(provider: .claudeSubscription, modelID: "claude-haiku-4-5-20251001"),
+            BrainTarget(provider: .codexSubscription, modelID: "gpt-5.6-sol"),
         ]
 
         let route = BrainRoute(primary: primary, fallbackTargets: fallbacks)
@@ -19,11 +19,11 @@ import Testing
 
     @Test func removesUnknownAndExactDuplicateFallbackTargets() {
         let primary = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let valid = BrainTarget(provider: .claudeCode, modelID: "claude-opus-5")
+        let valid = BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5")
 
         let route = BrainRoute(primary: primary, fallbackTargets: [
             primary,
-            BrainTarget(provider: .claudeCode, modelID: "retired-model"),
+            BrainTarget(provider: .claudeSubscription, modelID: "retired-model"),
             valid,
             valid,
             BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini"),
@@ -37,11 +37,11 @@ import Testing
 
     @Test func unknownPrimaryModelUsesThatProvidersDefault() {
         let route = BrainRoute(
-            primary: BrainTarget(provider: .claudeCode, modelID: "retired-model"),
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "retired-model"),
             fallbackTargets: [])
 
         #expect(route.primary == BrainTarget(
-            provider: .claudeCode,
-            modelID: BrainModelCatalog.defaultModel(for: .claudeCode).id))
+            provider: .claudeSubscription,
+            modelID: BrainModelCatalog.defaultModel(for: .claudeSubscription).id))
     }
 }

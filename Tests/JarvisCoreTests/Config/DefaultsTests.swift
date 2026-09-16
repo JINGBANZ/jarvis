@@ -39,8 +39,8 @@ import Testing
     /// OpenAI keeps the pre-provider key so existing installs keep their model selection.
     @Test func brainModelKeysAreProviderScoped() {
         #expect(Defaults.Brain.modelKey(for: .openAI) == "brain.model")
-        #expect(Defaults.Brain.modelKey(for: .claudeCode) == "brain.model.claude-code")
-        #expect(Defaults.Brain.modelKey(for: .codexCLI) == "brain.model.codex-cli")
+        #expect(Defaults.Brain.modelKey(for: .claudeSubscription) == "brain.model.claude-subscription")
+        #expect(Defaults.Brain.modelKey(for: .codexSubscription) == "brain.model.codex-subscription")
     }
 
     // MARK: - Values

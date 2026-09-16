@@ -6,14 +6,12 @@ import JarvisCore
 ///
 /// Deliberately narrow and one-directional: composition asks which session is live and what it is
 /// coaching with, and reports through the runtime's existing error and Settings surfaces. It never
-/// starts or stops a session; it only terminates the provider runtimes it built once told the
-/// session stopped.
+/// starts or stops a session.
 @MainActor
 protocol BrainCompositionHost: AnyObject {
     /// The running session's event loop, or nil when nothing is coaching.
     var liveCoachDriver: CoachDriver? { get }
-    /// The live session's directory, used both to tag CLI work and to reject a callback that
-    /// belongs to a superseded session.
+    /// The live session's directory, used to reject a callback that belongs to a superseded session.
     var liveSessionDirectory: URL? { get }
     /// The live session's evidence handle: brain-traffic tagging and the fixed Activity notices.
     var liveSessionEvidence: FileSessionAudit? { get }
@@ -33,79 +31,56 @@ protocol BrainCompositionHost: AnyObject {
 /// One of the three owners the app delegate was split into (wiki/lean-coaching-core.md, Phase 5).
 /// The boundary: **the session runtime** starts, stops, and tears down a session and applies
 /// readiness and capture-health effects; **session artifacts** own what a session leaves on disk;
-/// and **this type** owns provider preflight, brain-client construction, route construction, and
-/// the live reapply of brain preferences and credentials.
+/// and **this type** owns route readiness, brain-client construction, route construction, and the
+/// live reapply of brain preferences and credentials.
 ///
-/// It changes no lifecycle: a reapply installs a fresh route for the next attempt and returns.
-/// Preflight failure leaves the current brain intact and reports the fixed *settings change not
+/// It changes no lifecycle: a reapply installs a fresh route for the next attempt and returns. A
+/// refused reapply leaves the current brain intact and reports the fixed *settings change not
 /// applied* notice while the existing session continues.
 @MainActor
 final class BrainComposition {
     /// The route, effort, and capability switches a Start and every live reapply read. Normal launches
     /// use the standard defaults; a caller with its own isolated suite passes that instead.
     let preferences: BrainPreferences
-    /// Shared with the Settings sections so a detection performed there is the one this uses.
-    let detector = AgentCLIDetector()
+    /// The bundled helper serving the subscription targets, shared with Settings.
+    let supervisor: LocalProxySupervisor
     private let secrets: any SecretStore
     private unowned let host: BrainCompositionHost
 
     init(
         secrets: any SecretStore,
         host: BrainCompositionHost,
+        supervisor: LocalProxySupervisor,
         preferences: BrainPreferences = BrainPreferences()
     ) {
         self.secrets = secrets
         self.host = host
+        self.supervisor = supervisor
         self.preferences = preferences
     }
 
-    /// The target a fresh session starts on, recorded so the first selection is not announced as a
-    /// change.
-    func sessionWillStart(on target: BrainTarget) {
-        activeBrainTarget = target
+    /// A fresh session has no active target until the route selects one. Naming the primary here
+    /// claimed a provider that may never serve: an unavailable one is skipped, and a topology edit
+    /// made before the first attempt then recorded a change away from a provider that never ran.
+    /// `onSelected` fills this in, and finds no pending change, so a first selection stays silent.
+    func sessionWillStart() {
+        activeBrainTarget = nil
         pendingBrainChangeFrom = nil
     }
 
-    /// Forget the session's route identity at teardown and terminate the local-agent runtimes built
-    /// for it. The task finishes once their processes have exited and their private files are gone,
-    /// which Stop's drain waits for; nil when the session built no runtime.
-    func sessionDidStop() -> Task<Void, Never>? {
+    /// Forget the session's route identity at teardown. The helper is not the session's to stop: it
+    /// serves Settings and the next Start too.
+    func sessionDidStop() {
         activeBrainTarget = nil
         pendingBrainChangeFrom = nil
-        let runtimes = sessionRuntimes
-        sessionRuntimes = []
-        guard !runtimes.isEmpty else { return nil }
-        // Signal before returning: Quit terminates the app without awaiting the task below, which
-        // might never run.
-        for runtime in runtimes { runtime.terminateNow() }
-        return Task {
-            await withTaskGroup(of: Void.self) { group in
-                for runtime in runtimes {
-                    group.addTask { await runtime.terminate() }
-                }
-            }
-        }
     }
 
     /// Runtime route state for truthful Settings and Activity updates. A Settings edit is announced
     /// only when the replacement route actually selects its first target for a fresh attempt.
     private var activeBrainTarget: BrainTarget?
     private var pendingBrainChangeFrom: BrainTarget?
-    /// Every local-agent runtime built for the live session, replacements included. Releasing a
-    /// runtime's last client already signals its processes, but nothing would wait for them to exit.
-    private var sessionRuntimes: [CLIBrainRuntime] = []
-
-    var explanationsEnabled = true
-    var codeEnabled = false
-
-    /// The current session's capability set, fixed once at Start (set directly by the App before
-    /// the first `makeConfiguredRoute` call) and reused by every later hot reapply, so a Settings
-    /// edit mid-session cannot retroactively change a value meant to be fixed for the whole
-    /// session. A local-agent target bakes these schemas and this prompt into its process
-    /// instructions and rejects any later turn that no longer composes to them, so this must be
-    /// the same value the session's `CoachDriver` was given (#273). Baked in through the same
-    /// `JarvisPrompts.Coach.system(capabilities:)` builder `CoachAttemptRunner` calls per turn.
-    var capabilities: CoachCapabilities = .default
+    /// Bumped by every reapply, so one that resumes after a newer one installs nothing.
+    private var brainUpdateRevision = 0
 
     /// The two clients that move together with one provider/model route target.
     private struct BrainRuntime {
@@ -113,151 +88,83 @@ final class BrainComposition {
         let summarizer: BrainClient
     }
 
-    /// Check the selected local provider before disturbing a live session. OpenAI needs no provider
-    /// preflight; a missing/signed-out CLI leaves the current brain intact and reports fixed Activity
-    /// copy while raw detection detail stays in the debug log.
-    func preflightBrainProvider(_ provider: BrainProvider,
-                                        detectedCLI: DetectedAgentCLI?,
-                                        context: UserFacingError.PresentationContext,
-                                        recordSettingsFailure: Bool)
-        -> (isReady: Bool, cli: DetectedAgentCLI?) {
-        guard provider.usesLocalCLI else { return (true, nil) }
-        let action = recordSettingsFailure ? "apply brain settings" : "start"
-        guard let cli = detectedCLI else {
-            jlog("Jarvis: can't \(action) — \(provider.displayName) CLI not found.")
-            if recordSettingsFailure { host.liveSessionEvidence?.record(.settingsChangeNotApplied) }
-            host.reportBrainError(
-                .brainCLIMissing(provider: provider.displayName), context: context)
-            return (false, nil)
-        }
-        switch cli.authenticationStatus {
-        case .signedIn:
-            break
-        case .signedOut:
-            jlog("Jarvis: can't \(action) — \(provider.displayName) isn't signed in.")
-            if recordSettingsFailure { host.liveSessionEvidence?.record(.settingsChangeNotApplied) }
-            host.reportBrainError(
-                .brainCLINotSignedIn(provider: provider.displayName), context: context)
-            return (false, nil)
-        case .unknown:
-            host.reportBrainError(
-                .brainCLISignInUnconfirmed(provider: provider.displayName), context: context)
-        }
-        return (true, cli)
+    /// The helper's state for a route, read once per Start or reapply; nil when no target in the
+    /// route is a subscription, so a route without one never starts the helper.
+    func proxyReadiness(for route: BrainRoute) async -> LocalProxySupervisor.Readiness? {
+        guard route.targets.contains(where: { $0.provider.servedByLocalProxy }) else { return nil }
+        return await supervisor.readiness()
     }
 
     /// Construct the coach + compaction clients for one preferences snapshot. Both keep writing to
     /// the current session's traffic recorder, so a hot switch remains one auditable conversation.
+    /// One HTTP client serves OpenAI and both subscriptions; only the endpoint, the key, and the
+    /// target's tool policy and reasoning floor differ.
     private func makeBrainRuntime(
         apiKey key: String,
         target: BrainTarget,
         effort: ReasoningEffort,
-        cli: DetectedAgentCLI?,
-        sharedCLIRuntime: CLIBrainRuntime? = nil,
-        prewarm: Bool = true
+        proxyEndpoint: LocalProxySupervisor.Endpoint?
     ) -> BrainRuntime {
-        let coachBase: BrainClient
-        let summarizer: BrainClient
-        if let cli {
-            let sessionDir = host.liveSessionDirectory ?? sessionDirectoryFallback()
-            let runtimes = LocalAgentRuntimeSet(
-                provider: target.provider,
-                codexSupportedFeatures: cli.supportedFeatures,
-                sharedCoach: sharedCLIRuntime)
-            for runtime in [runtimes.coach, runtimes.summarizer]
-            where !sessionRuntimes.contains(where: { $0 === runtime }) {
-                sessionRuntimes.append(runtime)
-            }
-            coachBase = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
-                                       model: target.modelID,
-                                       reasoningEffort: effort.rawValue,
-                                       workDirectory: sessionDir,
-                                       timeout: BrainWorkloadTimeout.liveCoaching,
-                                       traffic: host.liveSessionEvidence, trafficTag: "coach",
-                                       // Prompt and tool list come from the one value resolved at
-                                       // Start, which is what keeps these baked instructions valid
-                                       // for the whole session (#273).
-                                       systemPrompt: JarvisPrompts.Coach.system(
-                                           capabilities: capabilities,
-                                           explanationsEnabled: explanationsEnabled, codeEnabled: codeEnabled),
-                                       tools: capabilities.tools,
-                                       toolChoice: .required,
-                                       runtime: runtimes.coach,
-                                       prewarm: prewarm)
-            summarizer = CLIBrainClient(provider: target.provider, executable: cli.executableURL,
-                                        model: BrainModelCatalog.summarizerModelID(for: target.provider),
-                                        reasoningEffort: ReasoningEffort.low.rawValue,
-                                        workDirectory: sessionDir,
-                                        timeout: BrainWorkloadTimeout.historyCompaction,
-                                        traffic: host.liveSessionEvidence, trafficTag: "summarizer",
-                                        systemPrompt: JarvisPrompts.HistorySummary.system,
-                                        tools: [],
-                                        toolChoice: .auto,
-                                        runtime: runtimes.summarizer,
-                                        prewarm: false)
-        } else {
-            coachBase = OpenAIBrainClient(
-                apiKey: key, model: target.modelID,
-                reasoningEffort: effort.rawValue,
-                timeout: BrainWorkloadTimeout.liveCoaching,
-                maxOutputTokens: effort.maxOutputTokens,
-                traffic: host.liveSessionEvidence, trafficTag: "coach")
-            summarizer = OpenAIBrainClient(
-                apiKey: key, model: BrainModelCatalog.summarizerModelID(for: .openAI),
-                reasoningEffort: ReasoningEffort.low.rawValue,
-                timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
-                traffic: host.liveSessionEvidence, trafficTag: "summarizer")
-        }
-        return BrainRuntime(coach: coachBase, summarizer: summarizer)
+        let endpoint = target.provider.servedByLocalProxy ? proxyEndpoint : nil
+        let summaryModel = BrainModelCatalog.summarizerModelID(for: target.provider)
+        let coach = BrainAccessor(
+            provider: target.provider,
+            apiKey: endpoint?.key ?? key, model: target.modelID,
+            reasoningEffort: effort.rawValue,
+            endpoint: endpoint?.responsesURL ?? BrainAccessor.openAIEndpoint,
+            timeout: BrainWorkloadTimeout.liveCoaching,
+            maxOutputTokens: effort.maxOutputTokens,
+            toolChoicePolicy: target.provider.toolChoicePolicy,
+            minimumReasoningEffort: target.provider.reasoningEffortFloor,
+            traffic: host.liveSessionEvidence, trafficTag: "coach")
+        let summarizer = BrainAccessor(
+            provider: target.provider,
+            apiKey: endpoint?.key ?? key,
+            model: summaryModel.isEmpty ? target.modelID : summaryModel,
+            reasoningEffort: ReasoningEffort.low.rawValue,
+            endpoint: endpoint?.responsesURL ?? BrainAccessor.openAIEndpoint,
+            timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
+            toolChoicePolicy: target.provider.toolChoicePolicy,
+            minimumReasoningEffort: target.provider.reasoningEffortFloor,
+            traffic: host.liveSessionEvidence, trafficTag: "summarizer")
+        return BrainRuntime(coach: coach, summarizer: summarizer)
     }
 
-    /// Missing or definitively signed-out fallback CLIs remain in the runtime route as unavailable
-    /// entries. The driver skips them only if the session cursor reaches them.
-    func fallbackUnavailability(
+    /// Why a route target cannot serve this session, or nil when it can: a subscription the helper
+    /// cannot serve. Such a target stays in the runtime route as an unavailable entry, which the
+    /// driver skips only if the session cursor reaches it.
+    func unavailability(
         for target: BrainTarget,
-        detectedCLI: DetectedAgentCLI?
+        proxy: LocalProxySupervisor.Readiness?
     ) -> ProviderFailure? {
-        guard target.provider.usesLocalCLI else { return nil }
-        let source = ProviderFailure.Source.brain(target.provider)
-        guard let detectedCLI else {
-            return ProviderFailure(
-                source: source, stage: .process, category: .unavailable, disposition: .permanent,
-                identity: .init(), message: "\(target.provider.displayName) CLI was not found")
-        }
-        if detectedCLI.authenticationStatus == .signedOut {
-            return ProviderFailure(
-                source: source, stage: .process, category: .authentication,
-                disposition: .permanent, identity: .init(),
-                message: "\(target.provider.displayName) is signed out")
-        }
-        return nil
+        guard target.provider.servedByLocalProxy else { return nil }
+        return (proxy ?? .unavailable(reason: "isn't running")).unavailability(for: target.provider)
+    }
+
+    /// The first target's failure when no target in the route can serve, so a Start or a route edit
+    /// is refused instead of installing a route that could never coach. Nil when one target can.
+    func routeUnavailability(
+        _ route: BrainRoute,
+        proxy: LocalProxySupervisor.Readiness?
+    ) -> ProviderFailure? {
+        let failures = route.targets.map { unavailability(for: $0, proxy: proxy) }
+        guard failures.allSatisfy({ $0 != nil }) else { return nil }
+        return failures.first.flatMap { $0 }
     }
 
     func makeConfiguredRoute(
         _ route: BrainRoute,
-        detectedCLIs: [BrainProvider: DetectedAgentCLI],
+        proxy: LocalProxySupervisor.Readiness?,
         apiKey key: String,
         effort: ReasoningEffort,
-        sessionDirectory: URL,
-        prewarmPrimary: Bool = true
+        sessionDirectory: URL
     ) -> ConfiguredBrainRoute {
-        let sharedCodexRuntime = route.targets.contains {
-            $0.provider == .codexCLI && detectedCLIs[$0.provider] != nil
-        } ? CLIBrainRuntime(
-            provider: .codexCLI,
-            codexSupportedFeatures: detectedCLIs[.codexCLI]?.supportedFeatures ?? []) : nil
-        let targets = route.targets.enumerated().map { index, target -> ConfiguredBrainTarget in
-            let cli = detectedCLIs[target.provider]
-            if let failure = fallbackUnavailability(for: target, detectedCLI: cli) {
+        let targets = route.targets.map { target -> ConfiguredBrainTarget in
+            if let failure = unavailability(for: target, proxy: proxy) {
                 return ConfiguredBrainTarget(unavailable: target, failure: failure)
             }
             let runtime = makeBrainRuntime(
-                apiKey: key,
-                target: target,
-                effort: effort,
-                cli: cli,
-                sharedCLIRuntime: target.provider == .codexCLI ? sharedCodexRuntime : nil,
-                prewarm: prewarmPrimary && index == 0)
+                apiKey: key, target: target, effort: effort, proxyEndpoint: proxy?.endpoint)
             return ConfiguredBrainTarget(
                 target: target, brain: runtime.coach, summarizer: runtime.summarizer)
         }
@@ -331,14 +238,24 @@ final class BrainComposition {
 
     /// Apply provider/model topology or effort changes without touching capture, transcription,
     /// history, or the session directory. An in-flight turn finishes on its old client snapshot.
+    /// Returns once the change is installed or refused; a route with a subscription target reads
+    /// the helper first, so the edit meets the sign-ins Settings showed.
     func applyBrainPreferencesToRunningSession(
-        detectedCLIs: [BrainProvider: DetectedAgentCLI]?,
         apiKeyOverride: String? = nil,
         update: RunningBrainUpdate
-    ) {
+    ) async {
+        guard host.liveCoachDriver != nil, host.isTranscriptionLive,
+              let sessionDirectory = host.liveSessionDirectory
+        else { return }
+        // Two saves in a row both wait on the helper here and can resume out of order; the older one
+        // would then install its own snapshot, an API key the user has already replaced.
+        brainUpdateRevision += 1
+        let revision = brainUpdateRevision
+        let proxy = await proxyReadiness(for: preferences.route)
         guard let coachDriver = host.liveCoachDriver,
               host.isTranscriptionLive,
-              let sessionDirectory = host.liveSessionDirectory
+              host.liveSessionDirectory == sessionDirectory,
+              revision == brainUpdateRevision
         else { return }
         let route = preferences.route
         let key = apiKeyOverride ?? secrets.apiKey(for: .openAIAPIKey) ?? ""
@@ -348,25 +265,52 @@ final class BrainComposition {
             return
         }
         let provider = route.primary.provider
-        var readyCLIs = detectedCLIs ?? [:]
+        // An effort or key edit keeps the route it has. Rebuilding it against a probe that just
+        // failed would replace working subscription clients with permanently unavailable targets,
+        // and an unavailable target at the active cursor exhausts the route, which ends a
+        // subscription-only session. The running clients hold the same endpoint either way.
+        //
+        // A probe that answers without naming the vendor counts as failing here too: the helper
+        // lists a vendor's models only once it has loaded that credential, so a restart or a token
+        // refresh can answer for a moment without it. The live client keeps working, and a
+        // credential that really is gone surfaces as the helper's own 503 on the next request.
+        // Only an effort edit is refused. A credential refresh replaces the clients of the providers
+        // it names and keeps every other target's running client, so the subscription entry built
+        // here is discarded whatever the probe said; refusing would drop a new API key over a helper
+        // the refresh never touches.
+        let servesSubscription = route.targets.contains { $0.provider.servedByLocalProxy }
+        if update == .effortEdit, servesSubscription, proxy?.endpoint == nil {
+            jlog("Jarvis: skipped a brain refresh — the sign-in service didn't answer; "
+                 + "the running route keeps its clients.")
+            host.liveSessionEvidence?.record(.settingsChangeNotApplied)
+            return
+        }
+        if update == .topologyEdit, let failure = routeUnavailability(route, proxy: proxy) {
+            jlog("Jarvis: can't apply brain settings — no target in the route can coach: "
+                 + (failure.errorDescription ?? ""))
+            host.liveSessionEvidence?.record(.settingsChangeNotApplied)
+            host.reportBrainError(.brainRouteUnavailable(failure: failure), context: .runtime)
+            return
+        }
+        // A reapply rebuilds clients for a route the session is already running. The helper answered,
+        // so every subscription in it keeps a usable endpoint; whether this moment's model list named
+        // the vendor decides nothing here, and treating it as authoritative would retire a working
+        // target permanently. Only a topology edit, which installs targets the user just chose, reads
+        // the probe as it came.
+        let availability: LocalProxySupervisor.Readiness?
         if update == .topologyEdit {
-            let preflight = preflightBrainProvider(
-                provider,
-                detectedCLI: detectedCLIs?[provider],
-                context: .runtime,
-                recordSettingsFailure: true)
-            guard preflight.isReady else { return }
-            if let cli = preflight.cli {
-                readyCLIs[provider] = cli
-            }
+            availability = proxy
+        } else if let endpoint = proxy?.endpoint {
+            availability = .ready(endpoint, signedIn: Set(BrainProvider.allCases))
+        } else {
+            availability = proxy
         }
         let configuredRoute = makeConfiguredRoute(
             route,
-            detectedCLIs: readyCLIs,
+            proxy: availability,
             apiKey: key,
             effort: preferences.effort,
-            sessionDirectory: sessionDirectory,
-            prewarmPrimary: update == .topologyEdit)
+            sessionDirectory: sessionDirectory)
         switch update {
         case .topologyEdit:
             if pendingBrainChangeFrom == nil {
@@ -392,22 +336,15 @@ final class BrainComposition {
     }
 
     /// Keep a healthy live conversation intact when the credential file changes: install fresh
-    /// OpenAI target clients between coaching attempts without probing or replacing CLI clients,
+    /// OpenAI target clients between coaching attempts without replacing subscription clients,
     /// changing route policy, or restarting transcription.
     func applySavedAPIKey(_ key: String) {
         guard preferences.route.targets.contains(where: { $0.provider == .openAI }) else {
             jlog("Jarvis: saved API key will apply to future OpenAI transcription connections.")
             return
         }
-        applyBrainPreferencesToRunningSession(
-            detectedCLIs: nil,
-            apiKeyOverride: key,
-            update: .credentialRefresh)
-    }
-
-    /// Where a CLI brain materializes screenshots before a session exists. Only reached when no
-    /// session is live, which cannot happen on the coaching path.
-    private func sessionDirectoryFallback() -> URL {
-        FileSecretStore().directoryURL.appendingPathComponent("sessions")
+        Task {
+            await applyBrainPreferencesToRunningSession(apiKeyOverride: key, update: .credentialRefresh)
+        }
     }
 }

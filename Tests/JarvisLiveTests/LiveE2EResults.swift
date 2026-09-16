@@ -53,9 +53,4 @@ struct LiveE2EResults {
         let value = seconds.map { String(format: "%.1fs", $0) } ?? "unavailable"
         lines.append("time \(scenario) \(label) \(value)")
     }
-
-    /// A timing the app logged itself, such as a CLI runtime's ready line, recorded verbatim.
-    mutating func timeDetail(_ detail: String) {
-        lines.append("time \(scenario) \(detail)")
-    }
 }

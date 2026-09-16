@@ -16,7 +16,6 @@ struct LiveE2ELauncher {
     let runDirectory: URL
     let app: URL
     let keepGoing: Bool
-    let clis: [BrainProvider: DetectedAgentCLI]
 
     var directory: URL { runDirectory.appendingPathComponent(scenarioID, isDirectory: true) }
 
@@ -29,10 +28,13 @@ struct LiveE2ELauncher {
     /// Written by `finish` when a scenario failed, so later scenarios skip unless `--keep-going`.
     private static let stopMarker = "stop-after-failure"
     private static let appProcessPattern = "/Jarvis Dev[.]app/Contents/MacOS/JarvisApp"
-    /// The Codex app-server, the Claude warm query, and the Codex exec worker that compacts history:
-    /// the CLI children a session may start.
-    private static let cliChildPattern = "app-server|--output-format stream-json|exec --json"
     private static let launchTimeout: TimeInterval = 22 * 60
+
+    /// The subscription helper bundled in this app, the one child a session may leave running.
+    private var helperProcessPattern: String {
+        NSRegularExpression.escapedPattern(
+            for: app.appendingPathComponent("Contents/MacOS/cliproxyapi").path)
+    }
 
     /// Everything a scenario test needs before launching, or nil when it must not launch: the
     /// script's handshake or the preflight is missing (an issue is recorded), or an earlier scenario
@@ -53,24 +55,22 @@ struct LiveE2ELauncher {
             try? write(results, to: runDirectory.appendingPathComponent(scenarioID, isDirectory: true))
             return nil
         }
-        switch await LiveE2EPreflight.shared.result() {
-        case .failure(let failure):
-            Issue.record(Comment(rawValue: failure.message))
+        if let failure = LiveE2EPreflight.failure {
+            Issue.record(Comment(rawValue: failure))
             return nil
-        case .success(let clis):
-            return LiveE2ELauncher(
-                scenarioID: scenarioID, scenarioFile: file ?? scenarioID,
-                runDirectory: runDirectory, app: URL(fileURLWithPath: app, isDirectory: true),
-                keepGoing: keepGoing, clis: clis)
         }
+        return LiveE2ELauncher(
+            scenarioID: scenarioID, scenarioFile: file ?? scenarioID,
+            runDirectory: runDirectory, app: URL(fileURLWithPath: app, isDirectory: true),
+            keepGoing: keepGoing)
     }
 
     /// Launch the app on this scenario and wait for it to exit. On timeout the app is asked to abort,
     /// then killed. A launch that throws never reaches `finish`, so it kills the app and stops later
     /// scenarios itself before rethrowing.
-    func launch(secretsDirectory: URL? = nil, claudeCLI: URL? = nil) async throws -> LiveE2ELaunch {
+    func launch(secretsDirectory: URL? = nil) async throws -> LiveE2ELaunch {
         do {
-            return try await launchAndWait(secretsDirectory: secretsDirectory, claudeCLI: claudeCLI)
+            return try await launchAndWait(secretsDirectory: secretsDirectory)
         } catch {
             Self.run("/usr/bin/pkill", ["-f", Self.appProcessPattern])
             stopLaterScenarios()
@@ -91,7 +91,7 @@ struct LiveE2ELauncher {
             atPath: runDirectory.appendingPathComponent(Self.stopMarker).path, contents: nil)
     }
 
-    private func launchAndWait(secretsDirectory: URL?, claudeCLI: URL?) async throws -> LiveE2ELaunch {
+    private func launchAndWait(secretsDirectory: URL?) async throws -> LiveE2ELaunch {
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
@@ -100,8 +100,7 @@ struct LiveE2ELauncher {
         let scenarioCopy = directory.appendingPathComponent("scenario.json")
         try fileManager.copyItem(at: source, to: scenarioCopy)
 
-        let processesBefore = Self.processIDs(matching: Self.cliChildPattern)
-        let runtimeHomesBefore = Self.codexRuntimeHomes()
+        let processesBefore = Self.processIDs(matching: helperProcessPattern)
         var arguments = [
             "-W", "-n", app.path, "--args",
             "--live-e2e",
@@ -111,7 +110,6 @@ struct LiveE2ELauncher {
             "--live-e2e-fixtures-dir", Self.fixturesDirectory.path,
         ]
         if let secretsDirectory { arguments += ["--live-e2e-secrets-dir", secretsDirectory.path] }
-        if let claudeCLI { arguments += ["--live-e2e-cli-claude", claudeCLI.path] }
         let opener = Process()
         opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         opener.arguments = arguments
@@ -134,11 +132,17 @@ struct LiveE2ELauncher {
             try await Task.sleep(for: .milliseconds(200))
         }
 
-        // CLI children exit once their parent is gone; give them a moment before calling one leftover.
-        var leftovers = Self.processIDs(matching: Self.cliChildPattern).subtracting(processesBefore)
+        // The app signals its helper as it exits; give the helper a moment before calling it leftover.
+        var leftovers = Self.processIDs(matching: helperProcessPattern).subtracting(processesBefore)
         for _ in 0..<25 where !leftovers.isEmpty {
             try await Task.sleep(for: .milliseconds(200))
-            leftovers = Self.processIDs(matching: Self.cliChildPattern).subtracting(processesBefore)
+            leftovers = Self.processIDs(matching: helperProcessPattern).subtracting(processesBefore)
+        }
+        // A forced teardown killed the app before it could signal its helper, so this run owns what
+        // survives. G08 still reports the leftover and still fails, but the process does not outlive
+        // the run, and `--keep-going` cannot hide it inside the next scenario's baseline.
+        if timedOut, !leftovers.isEmpty {
+            Self.run("/bin/kill", leftovers.sorted().map(String.init))
         }
 
         let sessionRoot = directory.appendingPathComponent("session", isDirectory: true)
@@ -156,8 +160,7 @@ struct LiveE2ELauncher {
             sessionDirectory: sessionDirectory,
             evidence: try sessionDirectory.map { try LiveSessionEvidence(sessionDirectory: $0) },
             stepAttempts: Self.stepAttempts(in: directory),
-            leftoverProcessIDs: leftovers.sorted(),
-            leftoverRuntimeHomes: Self.codexRuntimeHomes().subtracting(runtimeHomesBefore).sorted())
+            leftoverHelperIDs: leftovers.sorted())
     }
 
     /// A run-local secrets directory holding an obviously invalid OpenAI key, for F02.
@@ -170,27 +173,6 @@ struct LiveE2ELauncher {
             throw CocoaError(.fileWriteUnknown)
         }
         return secrets
-    }
-
-    /// A Claude Code stand-in that exits at once until the runner's `claude-restored` marker exists,
-    /// then hands every launch to the real CLI. The app treats every local-agent process failure as
-    /// temporary, which is the failure F04 needs; an invalid key would be permanent.
-    func makeClaudeStub() throws -> URL {
-        guard let real = clis[.claudeCode]?.executableURL else {
-            throw CocoaError(.fileNoSuchFile)
-        }
-        let stub = runDirectory.appendingPathComponent("\(scenarioID)-claude-stub")
-        let marker = directory.appendingPathComponent("claude-restored")
-        let script = """
-        #!/bin/sh
-        [ -f '\(marker.path)' ] && exec '\(real.path)' "$@"
-        exit 1
-
-        """
-        guard FileManager.default.createFile(
-            atPath: stub.path, contents: Data(script.utf8), attributes: [.posixPermissions: 0o700])
-        else { throw CocoaError(.fileWriteUnknown) }
-        return stub
     }
 
     // MARK: - Helpers
@@ -232,14 +214,6 @@ struct LiveE2ELauncher {
         return Set(output.split(separator: "\n").compactMap { Int32($0) })
     }
 
-    /// Session-scoped Codex homes the app creates under Application Support and removes on Stop.
-    private static func codexRuntimeHomes() -> Set<String> {
-        let base = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Jarvis/agent-runtimes", isDirectory: true)
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
-        return Set(names.filter { $0.hasPrefix("codex-runtime-") })
-    }
-
     @discardableResult
     private static func run(_ executable: String, _ arguments: [String]) -> String {
         let process = Process()
@@ -266,8 +240,8 @@ struct LiveE2ELaunch {
     let evidence: LiveSessionEvidence?
     /// Step index to attempt id, from the runner's `steps.jsonl`.
     let stepAttempts: [Int: Int]
-    let leftoverProcessIDs: [Int32]
-    let leftoverRuntimeHomes: [String]
+    /// Subscription helpers from this app still running after it exited.
+    let leftoverHelperIDs: [Int32]
 
     func stepIndices(_ isIncluded: (LiveE2EScenario.Step) -> Bool) -> [Int] {
         scenario.steps.indices.filter { isIncluded(scenario.steps[$0]) }
@@ -286,52 +260,22 @@ struct LiveE2ELaunch {
     }
 }
 
-/// The run's one preflight: the OpenAI key resolves and both CLI brains are signed in. Run once and
-/// remembered, so seven launches do not repeat CLI detection.
-actor LiveE2EPreflight {
-    struct Failure: Error {
-        let message: String
-    }
-
-    static let shared = LiveE2EPreflight()
-    private var cached: Result<[BrainProvider: DetectedAgentCLI], Failure>?
-
-    func result() async -> Result<[BrainProvider: DetectedAgentCLI], Failure> {
-        if let cached { return cached }
-        let computed = await compute()
-        cached = computed
-        return computed
-    }
-
-    private func compute() async -> Result<[BrainProvider: DetectedAgentCLI], Failure> {
+/// The run's one preflight: the OpenAI key resolves and both subscriptions hold a saved sign-in.
+/// It reads files only, so it never starts a second helper beside the one the app runs.
+enum LiveE2EPreflight {
+    static let failure: String? = {
         // The app is launched through LaunchServices, which does not hand it this shell's
         // environment, so only the owner-only key file can serve the run.
         guard FileSecretStore().apiKey(for: .openAIAPIKey)?.isEmpty == false else {
-            return .failure(Failure(message:
-                "No OpenAI API key in Jarvis's key file: save one in Jarvis Settings → Connections. "
-                    + "OPENAI_API_KEY does not reach an app launched with open."))
+            return "No OpenAI API key in Jarvis's key file: save one in Jarvis Settings → Connections. "
+                + "OPENAI_API_KEY does not reach an app launched with open."
         }
-        // A cold first CLI start can outlast the detector's short status probe, which then reports
-        // unknown rather than signed out. Probe once more before stopping the run over it.
-        var detected = await AgentCLIDetector().detectAllAsync([.claudeCode, .codexCLI])
-        if detected.contains(where: { $0.authenticationStatus == .unknown }) {
-            detected = await AgentCLIDetector().detectAllAsync([.claudeCode, .codexCLI])
+        let auth = FileSecretStore().directoryURL
+            .appendingPathComponent("proxy/auth", isDirectory: true)
+        for provider in [BrainProvider.codexSubscription, .claudeSubscription]
+        where LocalProxyAccountFile.all(in: auth, for: provider).isEmpty {
+            return "\(provider.displayName) is not signed in: sign in from Jarvis Dev Settings → Connections."
         }
-        let clis = Dictionary(uniqueKeysWithValues: detected.map { ($0.provider, $0) })
-        for provider in [BrainProvider.claudeCode, .codexCLI] {
-            guard let cli = clis[provider] else {
-                return .failure(Failure(message: "\(provider.displayName) CLI was not found."))
-            }
-            switch cli.authenticationStatus {
-            case .signedIn:
-                continue
-            case .signedOut:
-                return .failure(Failure(message: "\(provider.displayName) is not signed in."))
-            case .unknown:
-                return .failure(Failure(message:
-                    "\(provider.displayName) sign-in could not be confirmed: its status probe did not answer."))
-            }
-        }
-        return .success(clis)
-    }
+        return nil
+    }()
 }

@@ -106,15 +106,20 @@ ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisCore.bundle" \
 # framework exposes each versioned directory through a top-level alias, so the alias goes too —
 # leaving it behind would ship a symlink pointing at something no longer there.
 rm -rf "$SPARKLE/Versions/Current/XPCServices" "$SPARKLE/XPCServices"
+# The helper that serves the subscription targets, from the pinned, checksum-verified release.
+source scripts/lib/cliproxyapi.sh
+bundle_cliproxyapi "$APP"
 
 echo "▶ signing (hardened runtime + timestamp)"
-# Sparkle brings the bundle's only nested code, and codesign seals inner code before outer: the
-# update helpers, then the framework, then the app. Not --deep, which Apple documents as unsuitable
-# for signing distributed code because it cannot apply the right entitlements per nested binary.
+# Sparkle and the subscription helper bring the bundle's nested code, and codesign seals inner code
+# before outer: the update helpers, then the framework, then the helper, then the app. Not --deep,
+# which Apple documents as unsuitable for signing distributed code because it cannot apply the right
+# entitlements per nested binary.
 for nested in Versions/Current/Autoupdate Versions/Current/Updater.app; do
   codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE/$nested"
 done
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/cliproxyapi"
 codesign --force --options runtime --timestamp \
   --entitlements Resources/Jarvis.entitlements \
   --sign "$IDENTITY" "$APP"

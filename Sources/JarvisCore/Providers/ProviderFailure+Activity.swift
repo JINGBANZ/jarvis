@@ -24,19 +24,15 @@ extension ProviderFailure {
     }
 
     private var clauseAndAdvice: (clause: String, advice: String?) {
+        if let subscription = subscriptionClauseAndAdvice { return subscription }
         let name = source.displayName
         let surface = source.surfaceNoun
         let clause: String
         var advice: String?
         switch category {
         case .authentication:
-            if case .brain(let provider) = source, provider.usesLocalCLI {
-                clause = "\(name) isn't signed in"
-                advice = "sign in to the CLI and press Start again"
-            } else {
-                clause = "\(name) rejected the API key"
-                advice = "check Settings → Connections"
-            }
+            clause = "\(name) rejected the API key"
+            advice = "check Settings → Connections"
         case .quota:
             clause = "\(name) reported an exhausted quota"
             advice = "check billing"
@@ -64,6 +60,40 @@ extension ProviderFailure {
         }
 
         return (clause, advice)
+    }
+
+    /// A subscription target's failures that have a next step of their own: a signed-out account,
+    /// the bundled sign-in service not answering, and a plan's usage limit. Nil for every other
+    /// failure, which reads as any provider's does.
+    private var subscriptionClauseAndAdvice: (clause: String, advice: String?)? {
+        guard case .brain(let provider) = source, provider.servedByLocalProxy else { return nil }
+        let name = source.displayName
+        let signIn = (clause: "\(name) isn't signed in",
+                      advice: "open Settings → Connections, press Sign in for it, then press Start")
+        switch category {
+        case .authentication:
+            return signIn
+        // The sign-in service restarts on its own after a crash, so the first thing to do is wait;
+        // Connections is where a helper that stayed down is retried by hand.
+        case .unreachable:
+            return ("\(name) couldn't reach the sign-in service",
+                    "wait a moment, then press Try again in Settings → Connections")
+        // Raised by the supervisor, whose message names what the sign-in service did; an upstream
+        // 5xx arrives at another stage and reads as any provider's outage.
+        case .unavailable where stage == .process:
+            return ("\(name) is unavailable", "press Try again in Settings → Connections")
+        // The helper answers `unknown provider for model` both for a signed-out vendor and for a
+        // model it does not serve. Start's probe names a subscription that was signed out before the
+        // session, but one whose token lapses mid-session arrives here, so the advice names both.
+        case .configuration:
+            return ("\(name) rejected the \(source.surfaceNoun) configuration",
+                    "check Settings → Brain, or sign in again in Settings → Connections")
+        case .rejected where identity.httpStatus == 429:
+            return ("\(name) reached its usage limit",
+                    "wait for the limit to reset, or add a fallback in Settings → Brain")
+        default:
+            return nil
+        }
     }
 
     /// The quoted evidence alone, with a leading space, or "" when nothing is known. Frames that

@@ -12,6 +12,9 @@ public struct BrainTrafficAuditEvent: Sendable {
     }
 
     public let tag: String
+    /// The route target that made the request, so a reader of the record never infers it from the
+    /// body: OpenAI and Codex send the same request shape.
+    public var provider: BrainProvider? = nil
     public let request: Data
     public let response: Data?
     public let status: Int?

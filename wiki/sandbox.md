@@ -47,7 +47,7 @@ credential, so the Git history is kept rather than rewritten.
 
 > **Current build:** App Sandbox is **off**; the app is signed with a stable self-signed identity
 > (`Jarvis Dev`) and relies on TCC prompts. The description below is a future target, not a claim
-> about the downloadable or locally built app. It requires explicit design work for CLI providers,
+> about the downloadable or locally built app. It requires explicit design work for the bundled subscription helper,
 > session storage, and the `screencapture` helper before it can be enabled.
 
 The app ships with the macOS App Sandbox enabled and requests **only** the entitlements it needs:
@@ -98,6 +98,15 @@ real Developer ID, revisit this and move the key back into the Keychain.
 Upgrading from an older Keychain build: the key isn't migrated — re-paste it once (the file starts
 empty), and optionally delete the now-orphaned item with `security delete-generic-password -s com.jarvis.coach`.
 
+The subscription sign-ins are the same class of secret and live beside the key under
+`~/Library/Application Support/Jarvis/proxy/`, all `0700` directories: `auth/` holds the OAuth token
+files the bundled helper writes, which Jarvis narrows to `0600` after each sign-in, and `run/` holds
+the launch's `0600` helper configuration, whose loopback key exists only for that launch. The helper
+also writes its own capped logs under `auth/logs/`, which hold no request or response bodies (see
+[Data Egress](#data-egress) for the setting that keeps them out); each start narrows that directory to
+owner-only and removes dumps an older build left. Sign out in Connections deletes that subscription's
+token files.
+
 ## Data Egress
 
 Narrow and explicit. Data leaves the machine only via:
@@ -115,39 +124,30 @@ Narrow and explicit. Data leaves the machine only via:
   explicitly enables **Read Chrome page text** and grants Accessibility, it also contains bounded
   semantic text from the exact foreground Chrome tab. No screen content leaves the
   machine on idle turns.
-- **With Claude Code selected for coaching**
-  ([architecture.md §4](./architecture.md#local-cli-brain-providers)), the same brain payload instead
-  goes to the `claude` subprocess, which sends it to Anthropic under the *user's own signed-in
-  account* and Anthropic's consumer retention terms. Claude runs one non-persisted stream-json query
-  per coaching-attempt lease. `--safe-mode` excludes CLAUDE.md, skills, plugins, hooks, MCP, agents,
-  and other customizations while preserving OAuth; an explicit empty built-in tool set, no settings
-  sources, and strict explicit empty MCP config narrow the surface further. Images remain inline.
-  There is no one-shot coaching fallback. Runtime failure remains inside the existing fresh-attempt
-  provider-route policy, and Stop kills every ready, leased, or preparing process. This trusts a CLI
-  the user already runs on this machine without widening what Jarvis itself may touch. Transcription
-  audio follows the separately selected transcription provider.
-- **With Codex selected for coaching**, the payload goes to one session-scoped `codex app-server`
-  under the user's own ChatGPT account and OpenAI's consumer retention terms. It runs under a private
-  owner-only `CODEX_HOME` created with only an `auth.json` symlink, so no user config, profile,
-  plugin, prompt, or execpolicy `.rules` file is loadable — structurally covering what
-  `--ignore-user-config` and `--ignore-rules` did. Each attempt opens a fresh thread that is required
-  to come back ephemeral, pathless, and free of instruction sources, so no rollout transcript reaches
-  `~/.codex`. The thread runs read-only with approvals never, empty MCP config, no project-root
-  markers, and zero project-doc bytes; the advertised agentic features are disabled on both the
-  launch argv and the per-thread config, shell snapshots included, so Codex never writes a copy of
-  the login shell's exported environment into its home; and a prompt forbids built-in tool use. Codex publishes no
-  control that removes built-in tools, so this envelope is layered rather than a proof of absence —
-  an accepted residual risk, backed by a runtime allowlist that aborts the turn on any server request
-  or item event outside agent messages and reasoning. The acceptance is measured, not assumed: on
-  codex-cli 0.145.0 a captured outgoing request shows `codex exec` and the app-server offering the
-  model the same four built-in tools (`exec`, `wait`, `request_user_input`, `collaboration`) whether
-  the feature-disable set is applied or absent, because they arrive as an `additional_tools` input
-  item rather than through the `tools` array a `features.<name>` gate controls
-  (openai/codex#21952). The deny list therefore narrows nothing today; the event allowlist is the
-  control that bites. Revisit when Codex publishes a real disable-all-tools control, or when that
-  issue is fixed so the disable set provably reaches the tool builder. The separate
-  completed-session evaluator remains intentionally agentic under the explicit Evaluate boundary
-  below.
+- **With Codex or Claude Code selected for coaching**
+  ([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)),
+  the same brain payload goes to the CLIProxyAPI helper bundled in the app, listening on 127.0.0.1
+  behind a key that exists only for the running launch, which forwards it under the user's own
+  signed-in account and that vendor's consumer retention terms. The helper's egress is
+  `chatgpt.com` and `api.anthropic.com` for coaching, and `auth.openai.com`, `claude.ai`, or
+  `console.anthropic.com`, the three authorize hosts Jarvis will open a login page on, only
+  during a sign-in the user started from Connections. That sign-in also asks public IP lookup
+  services (`api.ipify.org`, falling back to `ifconfig.me`, `icanhazip.com`, and `ipinfo.io`) for the
+  Mac's address, because the helper's login prints SSH tunnel hints; Jarvis ignores them. One
+  connection is the helper's own: it fetches its upstream project's Antigravity version manifest from
+  `antigravity-hub-auto-updater-*.us-central1.run.app` a second after it loads credentials, and again
+  every three hours for as long as it runs, which is until Quit. The request carries no credential and
+  happens with no account configured at all, and the configuration's own update switches
+  (`disable-control-panel`, `disable-auto-update-panel`) do not govern it. What that
+  configuration does stop: it keeps the embedded model catalog instead of fetching one, turns off the
+  management API and its downloadable panel, and disables usage statistics. It also runs the
+  helper in `commercial-mode`, so no request or response body is written to disk: the helper would
+  otherwise dump a failed call, transcript and captured screen text included, into its own log
+  directory, which no session owns and Clear history never reaches. Each start narrows that directory
+  to owner-only and removes dumps an older build left; the helper's own `main.log` holds no bodies. On the Codex
+  path the helper forces `store: false`; on the Claude path it presents the traffic as Anthropic's own
+  Claude Code client, so Jarvis's system prompt reaches Anthropic behind that client's identity block. Anthropic's terms
+  prohibit intermediating Claude session tokens; the owner accepts that risk on his own account.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, coaching-attempt provenance, brain traffic,
@@ -171,8 +171,11 @@ recording of what it sees or hears. The **raw captured streams stay transient**:
 streamed to OpenAI and dropped or analyzed on-device by Apple Speech, the live transcript lives in
 memory, and the transient file `screencapture` writes a frame into is created inside the owner-only
 session directory (never `/tmp`) and deleted —
-with its absence verified — before the capture returns. The one thing persisted *on this machine* is
-the **per-session log directory** — owner-only and bounded; see below.
+with its absence verified — before the capture returns. Session-derived data persists *on this
+machine* in one place, the **per-session log directory** — owner-only and bounded; see below. The
+bundled helper keeps its own rotating log beside its credentials, owner-only and size-capped, which
+records what it served and never a request or response body
+([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)).
 
 Jarvis keeps no separate browser-text cache or archive. Accessibility text and OCR accompany their
 current capture; older screenshots are not replayed, and older text evidence collapses when a newer
@@ -181,15 +184,19 @@ and provider-retention paths described here.
 
 > **Server-side retention for debuggability (current behavior).** Session memory is client-managed
 > (`CoachHistory` — nothing at OpenAI is needed for continuity), but requests are still sent
-> `store:true` (`OpenAIBrainClient.swift`) so each request/response remains inspectable in the OpenAI
+> `store:true` (`BrainAccessor.swift`) so each request/response remains inspectable in the OpenAI
 > dashboard logs while the harness is being tuned. This **does** retain the transcript and the
 > screenshots sent to the model server-side at OpenAI (≈30-day TTL), so the no-local-retention
 > guarantee above does **not** extend to OpenAI's servers. This remains a deliberate
 > *debuggability-over-retention* choice. A future `store:false` change must also preserve stateless
-> tool-loop reasoning continuity; it is not part of the public-launch hardening.
+> tool-loop reasoning continuity; it is not part of the public-launch hardening. Requests to the Codex
+> subscription pass through the bundled helper, which forces `store:false`, so this retention applies
+> to the OpenAI API target only.
 
 **The per-session log directory is the bounded session-data persistence, hardened to stay
-owner-only.** It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
+owner-only.** Nothing else on this machine holds session-derived data: the helper runs in
+`commercial-mode`, so no request or response body reaches its own log directory, and each start
+narrows that directory to owner-only and deletes dumps an older build left there. It holds the **activity log** (the in-app `WKWebView` viewer's `jarvis-activity.jsonl` +
 the screenshots the model looked at, alongside `jarvis-debug.log`) — the model's spoken tips and the
 transcribed "heard:" lines so a session can be reviewed afterward — plus the **coaching-attempt
 provenance** (`coaching-attempts.jsonl`: finalized transcript lines at the decision boundary,

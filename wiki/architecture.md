@@ -156,11 +156,11 @@ path still works for testing/practice; it is simply not latency-critical there.)
 ### Capabilities
 
 What a session can do is one value, `CoachCapabilities`, composed at Start from the user's switches,
-the bundled skills, and whether prep-material sources are configured, then read by everything: the
-prompt the coach loop builds per turn, and the prompt and tool list `BrainComposition` bakes into a
-CLI provider's persistent process. One value is the whole point. `CLIBrainClient` renders each tool's
-`parametersJSON` verbatim into the instructions its process is warmed with, so a set derived twice
-could disagree and fail every remaining attempt on that target until the route exhausted.
+the bundled skills, and whether prep-material sources are configured, then read by the coach loop,
+which builds every request's prompt and tool list from it. One value fixed at Start is the whole
+point: a set that grew or changed shape mid-session would change what a brain was told it could call
+between two requests of the same conversation, and a route can move between brains over one shared
+history.
 
 A tool carries its own usage guidance (`ToolDef.guidance`) and a deferred flag. A **hot** tool is
 declared with its schema and its guidance from the first request: the tip style is `speak`'s
@@ -260,19 +260,24 @@ when it speaks, like any attempt's. What a press may call is narrowed on each re
 callable tool except `stay_silent` and `capture_screen`, since its screen is already in the first
 request, and the response at the cap is forced to `speak`. A press therefore always ends in a tip and
 never runs out of responses. When `speak` is the only tool left, the request is the plain forced
-`speak`, one round trip. On OpenAI the narrowing is an `allowed_tools` choice over the unchanged
-declared array, which keeps the cached prefix of automatic attempts (`OpenAIBrainClient.encodeBody`).
-A CLI target is told its set in the turn trailer while its baked instructions stay those of a required
-choice. The accepted cost is a round trip for each first load and each search, and
-the OpenAI client resends the whole input, screenshot included, on each one. One load followed by a
+`speak`, one round trip. On the OpenAI API and Codex the narrowing is an
+`allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
+attempts (`BrainAccessor.encodeBody`). Claude Code can neither force nor narrow a call, so
+its request declares only the permitted tools under `tool_choice: auto`
+([Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy)).
+The accepted cost is a round trip for each first load and each search, and the client resends the
+whole input, screenshot included, on each one. One load followed by a
 forced `speak` was rejected as too narrow: the shortcut is the fallback for a need the automatic path
 missed, so it should not be the less capable of the two.
 
 The runner checks every reply against the tool choice its own request sent instead of trusting the
-transport to enforce it, because a CLI target's set is only prompted and a provider can return more
+transport to enforce it, because Claude Code's set is only the tools it declares and the
+Codex's path forces parallel calls, so a reply can call outside the set or carry more
 than one call. A call outside the permitted set is answered with a tool result saying it is not
-available on a press, and a call whose arguments fail its tool's schema is answered with that schema;
-either way the model is asked again in the same attempt. A press speaks its reply's prose instead,
+available on a press, and a call whose arguments the typed parser (`ToolInvocation.parse`) cannot use
+is answered with its tool's schema; either way the model is asked again in the same attempt. The
+parser is deliberately more lenient than the schema, so a call the schema would reject but the parser
+can use still runs. The response's first call is the one judged, whether or not it parsed. A press speaks its reply's prose instead,
 the first three lines recorded in history as a `speak` call: in place of that round trip when the
 reply calls outside its set or calls nothing, and on the response at the cap whatever it called.
 When a response carries several calls, the first runs and each other one is answered as not
@@ -287,8 +292,8 @@ for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/Co
 
 The model can attach a visual sketch to `speak` during the high-level-architecture stage of a design
 discussion. The nullable diagram field is part of the one `speak` schema on every brain and in every
-session, one schema being what keeps the tool list a CLI process is warmed with equal to the one the
-loop sends. Prompt text alone governs it: the tip style says to leave it null unless a loaded skill
+session, so a route that moves between brains never meets a `speak` it cannot parse. Prompt text
+alone governs it: the tip style says to leave it null unless a loaded skill
 asks for a graph, the field's own description says the same, and the system-design skill is what
 asks. The runtime renders any graph it can parse and classifies nothing — a gate on a session type
 is exactly what the capability model removed, and a stray diagram in a session that loaded no skill
@@ -352,7 +357,7 @@ Captions retain only the standalone summary.
 [Enable explanations](./settings-window.md#shortcuts) controls both automatic detail and the manual
 fallback. `SessionPlan.explanationsEnabled` is fixed at Start and preserved across screen-plan
 revisions. Only enabled sessions receive explanation guidance in the system prompt; saved edits take
-effect on the next Start, keeping CLI instructions stable. The nullable tool field remains until
+effect on the next Start, keeping one session's instructions stable. The nullable tool field remains until
 [#273](https://github.com/JINGBANZ/jarvis/issues/273) establishes session-composed tools.
 At delivery, the runner checks whether the persistent box can show detail. Hidden explanations are
 omitted from both Activity and committed tool-call history. This live visibility check also covers a
@@ -423,9 +428,9 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected OpenAI Responses API, Claude Code, or Codex route target; See [§4 Local CLI brain providers](#local-cli-brain-providers). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API, or a subscription through the bundled helper, all on the OpenAI Responses wire shape; see [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
-| **Local agent runtime** | Keep provider startup outside the coaching latency path while preserving the attempt boundary: a `BrainConversation` lease owns every model turn in one attempt, including a `capture_screen` continuation, then is explicitly finished. Claude leases one initialized safe-mode query; Codex prepares the first target-specific ephemeral thread at Session Start and opens a fresh thread for each later attempt on one session-scoped app-server. A runtime failure fails the attempt; it never switches to a one-shot transport. | Claude Code stream-json control protocol; Codex app-server JSON-RPC over stdio. |
+| **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). System-design diagrams remain pinned below the scrolling history in this same box; the caption remains text-only. See [Private architecture hints](#private-architecture-hints). | AppKit NSPanel; `OverlayBoxPanel`. |
@@ -581,9 +586,9 @@ failure counts; the already-running attempt remains valid, so its success or fai
 health normally.
 
 Saving the OpenAI API key refreshes only OpenAI clients and OpenAI transcription reconnect
-credentials; it never probes or replaces CLI clients. It preserves the route cursor and counts. An
+credentials; it never replaces subscription clients. It preserves the route cursor and counts. An
 in-flight OpenAI failure belongs to the superseded credential and is ignored, while an in-flight
-attempt on an unaffected CLI retains normal success/failure accounting.
+attempt on an unaffected subscription retains normal success/failure accounting.
 
 A **coaching attempt** snapshots one target and the latest provider-neutral conversation, then keeps
 that target for the complete tool loop. Every provider request in that loop is made once. A complete,
@@ -640,9 +645,8 @@ terminal paths add no live presentation.
 
 Provider clients remain owned until replacement or session teardown. Stop cancels pending/in-flight
 work and the recovery deadline. This policy is implemented by `BrainRouteSession`,
-`BrainCycleRecovery`, and `CoachDriver`; provider preferences remain unchanged. Stop also
-terminates the session's local-agent runtimes, and its background drain waits for their processes
-to exit before the session's evidence seals.
+`BrainCycleRecovery`, and `CoachDriver`; provider preferences remain unchanged. Stop leaves the
+bundled helper running, because it serves Settings and the next Start.
 
 ```mermaid
 flowchart TD
@@ -702,9 +706,14 @@ rather than a per-turn screenshot.
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
   keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
-  cache can reuse stable prefixes); the `stay_silent` action itself leaves no trace, while useful
+  cache can reuse stable prefixes); a `stay_silent` call leaves no trace, even one a turn was refused
+  or went past, so its refusal never tells a later turn that silence is off-limits, while useful
   speech and the newest screen observation survive. At conversation commit, pixels become neutral
-  stubs; a newer capture supersedes older screen text, and reasoning items are dropped. Past a token
+  stubs; a newer capture supersedes older screen text, and reasoning items are dropped. Screen text
+  carries the `[mm:ss]` session time it was captured, the transcript's own clock, and says the screen
+  may have changed since, so a later turn reads it as evidence from then: text that still called
+  itself the current viewport let a "how do I solve this" minutes later skip the fresh look the
+  screen gate asks for. Past a token
   threshold (see
   `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
   briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
@@ -743,11 +752,11 @@ rather than a per-turn screenshot.
   SwiftPM, and test layouts, since packaging copies `Jarvis_JarvisCore.bundle` into
   `Contents/Resources` and `swift test` has neither.
 
-  The composed set is frozen at Start (`BrainComposition.capabilities`) and reused during provider
-  reapply; both OpenAI and CLI construction call `JarvisPrompts.Coach.system(capabilities:)`, which
-  keeps file I/O off coaching turns. CLI instructions stay fixed for the session: a skill's body
-  reaches those models inside the turn, as a tool result, never by rewriting what the process was
-  warmed with.
+  The composed set is frozen at Start (`SessionComposition`) and handed to the coach loop, whose
+  attempt runner builds every request's instructions with `JarvisPrompts.Coach.system(capabilities:)`,
+  which keeps file I/O off coaching turns. A skill's body reaches the model inside the turn, as a
+  tool result, never by rewriting the system prompt, so every request in a session opens with the
+  same instructions and a route switch changes none of them.
 - **Transcription has its own provider, model, and language settings.** OpenAI remains the provider
   default and `gpt-4o-transcribe` remains its model default; `gpt-transcribe` and
   `gpt-live-transcribe` are opt-in comparison choices. GPT-4o stays the default because, in a
@@ -832,145 +841,138 @@ rather than a per-turn screenshot.
   and keeps a "shared" constant that actually encodes one provider's requirement. Capturing at 16 kHz
   for every provider — the simplest option — is not available, since OpenAI Realtime requires 24 kHz.
 
-### Local CLI brain providers
+### Subscription targets through the bundled proxy
 
-The brain can alternatively run through a locally installed **Claude Code** CLI (`BrainProvider`,
-selected in [Settings → Brain](./settings-window.md#brain)), so coaching turns are billed to the
-user's existing Claude **subscription** instead of the metered API key, or a locally installed
-**Codex** CLI billed to the user's ChatGPT subscription. Both coach through a persistent runtime;
-Codex additionally remains available to the explicit completed-session evaluator.
+The **Codex** and **Claude Code** targets (`BrainProvider.codexSubscription`,
+`.claudeSubscription`, selected in [Settings → Brain](./settings-window.md#brain)) let the user's
+ChatGPT or Claude plan pay for coaching instead of a metered API key. Both are served by
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT, Go), shipped inside the app at
+`Contents/MacOS/cliproxyapi` from the pinned, checksum-verified release in
+[`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh). The helper holds the OAuth sign-ins
+and serves them as an OpenAI Responses endpoint on 127.0.0.1, so every target goes through the one
+[`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) and the attempt runner
+reads one wire shape. Only the endpoint, the key, and the target's tool policy differ.
 
-`BrainClient` is the provider port. The OpenAI Responses adapter lives in the
-`JarvisBrainProviders` target, which depends inward on Core and is composed by `JarvisApp` at
-Start ([lean-coaching-core.md → Phase 4
-contract](./lean-coaching-core.md#phase-4-implementation-contract--openai-provider-extraction));
-the local-agent adapter — shared CLI discovery and process infrastructure plus distinct Claude
-Code and Codex sub-adapters — remains under Core's `Brain/Adapters` until its own slice
-([#206](https://github.com/JINGBANZ/jarvis/issues/206)).
-`CLIBrainClient` implements the same port, so `CoachDriver`, the client-managed memory,
-provider-route policy, and traffic recording are unchanged — only the transport differs.
-`LocalAgentRuntimeSet` owns provider-specific coach/summarizer runtime ownership.
+A proxy rather than the vendors' own CLIs: driving `claude` and `codex` as coaching processes meant
+imitating native function calls with a text protocol the model had to follow and Jarvis had to parse
+back, several thousand lines of process ownership, and a prompted tool choice a shortcut press could
+not rely on. Bundled rather than installed: users install nothing, and when a vendor changes its wire
+format the fix is a Jarvis release with a bumped pin, not an upgrade the user has to find. The cost
+is about 60 MB on disk and 20 MB per update.
 
-- **One conversation lease per coaching attempt.** `BrainClient.makeConversation()` gives
-  `CoachDriver` a provider-native continuation boundary. The first model turn receives the complete
-  client-managed context; later `capture_screen` turns send only their new tool result and image over
-  the same lease. A complete terminal action commits while the lease is still owned; the lease is
-  then explicitly finished before memory compaction starts. A runtime crash, timeout, or
-  cancellation ends the lease and fails that provider attempt; a call the runner answers instead of
-  running, such as a malformed or disallowed one, continues on the same lease
+- **One helper per app launch** ([`LocalProxySupervisor`](../Sources/JarvisBrainProviders/Proxy/LocalProxySupervisor.swift)).
+  It starts when the saved route names a subscription at launch, when Connections appears, when the
+  Brain tab needs sign-in state and a sign-in is saved, and at a Start or route edit that routes to a
+  subscription. It stays up between sessions, because it is idle then and a sign-in made in Settings
+  must reach it, and stops at Quit. Each launch writes an owner-only configuration named by Jarvis's
+  process id, holding a free loopback port and a key that exists only for that launch; a development
+  build and a release running side by side therefore never rewrite each other's file, which the helper
+  would hot-reload. The helper starts with `-local-model`, so it never fetches a model catalog, and
+  the configuration switches off its management panel and its injected image tool. It also sets
+  `commercial-mode`, which keeps the helper's request-logging middleware from being installed at all:
+  otherwise a failed call writes its body, a coaching request carrying the transcript and the captured
+  screen text, into the helper's own log directory, which no session owns and Clear history never
+  reaches. Each start also narrows that directory to owner-only and deletes dumps an older build
+  left. The helper and its logins inherit only `HOME`, `PATH`, `TMPDIR`, and `LANG`: the binary reads
+  database, object-store, and proxy variables that would move a credential off this Mac or reroute
+  traffic the configuration pins to the vendors. It is ready when its model list answers, within ten
+  seconds.
+- **Crashes keep the endpoint.** A helper that exits after it answered restarts on the same port
+  with the same key after 1, 5, then 15 seconds, so a session composed against it keeps working; a
+  fourth exit within ten minutes gives up until the next explicit start. A helper that is still up but
+  has stopped answering its model list is ended by the probe that found it silent, so a process that
+  survives its own service cannot hold the endpoint; the crash timer does not cover that case, so the
+  replacement waits for the next explicit start, which reuses the port and key. A probe whose caller
+  was cancelled, by Stop, a newer Start, or a closing Settings window, proves nothing about the helper
+  and leaves it alone. A helper that exits before
+  it answers is a failed start and is not retried until asked. A Jarvis that ended without Quit leaves
+  its helper and configuration behind; the next launch stops that helper, once its process is proven
+  to be this executable, and removes the files.
+- **Readiness is the model list.** One probe per Start or reapply: the helper lists a vendor's models
+  only while it holds a credential for that vendor, so an `owned_by` of `openai` or `anthropic` proves
+  the Codex or Claude sign-in. A subscription the probe cannot serve becomes an unavailable route
+  target carrying a permanent failure, authentication when signed out and unavailable with the
+  helper's own reason when it would not start, and the route skips it when the cursor reaches it, so
+  a fallback still coaches. A Start or route edit is refused only when no target in the route can
+  coach (`UserFacingError.brainRouteUnavailable`). A reapply that is not a topology edit never retires
+  a target on the probe's word: if the helper does not answer, the running route keeps the clients it
+  has and the edit is recorded as not applied, and if it answers without naming a vendor the
+  subscription stays available, because the helper lists a vendor's models only once it has loaded that
+  credential and a restart or a token refresh can answer for a moment without it.
+- **Tool policy per target** ([`ToolChoicePolicy`](../Sources/JarvisCore/Brain/ToolChoicePolicy.swift)).
+  The OpenAI API and Codex are `providerEnforced`: `required`, `allowed_tools`, a
+  forced function, strict tools, and verbatim reasoning replay all pass through the Codex path intact.
+  Claude Code is `filteredAuto`: through the helper a forced tool is a 400 on Claude Fable
+  5.1 and strips thinking on Opus 5, and `allowed_tools` is dropped, so Opus called `capture_screen`
+  on a press six times in six. Every Claude request therefore sends `tool_choice: auto` with only the
+  permitted tools declared, which costs a press the prompt cache from the tools block onward. Its
+  reasoning floors at `low`, because `none` disables thinking and Fable 5.1 rejects that. Neither
+  policy is trusted on its own: the runner checks every reply against the choice it asked for
   ([Capabilities](#capabilities)).
-  There is deliberately **no per-turn Claude process or `codex exec` coaching fallback**: the
-  existing [ordered provider route](#ordered-provider-route) decides what a later fresh attempt may
-  do.
-- **Claude Code keeps one initialized query ready.** Session Start preinitializes the active Claude
-  coach with the stream-json control handshake. Taking that single-use lease immediately starts its
-  replacement, overlapping initialization with remote inference; the leased process stays alive for
-  every turn in that attempt. Coach and summarizer use separate runtimes because Claude fixes model
-  and system prompt at query startup. Input images remain inline base64 blocks. The query uses
-  `--safe-mode` to exclude CLAUDE.md, skills, plugins, hooks, MCP, agents, and other customizations
-  without disabling OAuth; it also uses no session persistence, no settings sources, an explicitly
-  empty built-in tool set, and strict explicit empty MCP config. Stop synchronously terminates ready,
-  leased, and preparing process trees.
-- **The process edge is deliberately narrow and local.** `AgentRuntimeProcess` owns the long-lived
-  newline channel, bounded buffering, process-group creation, and launch-proven PID/start-time
-  membership. Its launch clears the signal mask and resets signal dispositions, because Swift
-  concurrency and GCD threads block SIGTERM and a spawned child inherits that mask; without the reset
-  a CLI never sees graceful termination and only the escalation stops it. Foundation's `Process`
-  already resets both, so the one-shot CLI runs need nothing extra. Its exit monitor observes the
-  exact leader without reaping it, snapshots descendant identities while the original group is
-  still provable, and only then reaps the leader. Teardown
-  sends graceful termination to the whole group only while a launch-observed identity proves
-  ownership. It retains an exited launch leader as the ownership proof until group-wide escalation,
-  reaching helpers forked during teardown; without that proof, escalation stays limited to current
-  launch-observed PID/start-time identities rather than trusting a potentially recycled group.
-  `AgentRuntimeLifetime` is only the lock-guarded synchronous ownership seam needed
-  because actor `deinit` cannot await. The stable Swift Subprocess API's execution handle is scoped
-  to one async closure and its teardown stops tracking a group when the leader is gone, so adopting
-  it would retain these wrappers while adding a dependency.
-- **Codex keeps one app-server for the session.** Session Start launches a single `codex app-server`
-  under a private owner-only `CODEX_HOME` created with nothing but an `auth.json` symlink, then prepares
-  the first target-specific ephemeral thread while transcription connects. The first coaching
-  attempt leases that verified thread; each later attempt opens a fresh one and closes it when the
-  lease ends. Coach and summarizer can share one runtime because model, prompt, and effort travel per
-  `thread/start`, not in the launch identity. A changed target configuration replaces any unused
-  prepared thread before opening its own; a prewarm defers to an attempt that is opening and to
-  any newer request, so two callers never trade evictions. Releasing the session or route runtime
-  terminates the app-server and every prepared, active, or preparing thread. Codex writes its own
-  model cache and system skills into the home until it has exited, so the home is removed only after
-  the app-server has exited; removed at the signal, it came back with default permissions. Stop's drain waits for that removal, and a summary's `codex exec` home follows the
-  same rule.
-  The isolation goal is to exclude user/project customization, constrain side effects, and reject
-  provider-native actions outside Jarvis's coaching contract; the concrete launch and per-thread
-  settings live in
-  [`CodexAppServerRuntime.swift`](../Sources/JarvisBrainProviders/LocalAgent/Codex/CodexAppServerRuntime.swift).
-  Codex publishes no control that removes built-in tools, so the runtime also verifies the thread
-  boundary and aborts on server requests or item events outside the message/reasoning contract. The
-  completed-session evaluator remains separate and intentionally agentic. If inference reaches its
-  workload deadline, Jarvis interrupts that turn and waits for its matching terminal event before
-  retiring the thread; the shared app-server stays available. Failure to confirm that scoped cleanup
-  instead invalidates the server because its event stream is no longer known to be synchronized.
-- **The JSON action contract remains provider-neutral.** The CLIs do not expose Jarvis's native
-  function calls, so the same `ToolDef`s are rendered as a JSON output protocol and parsed back into
-  `ToolInvocation`; wiring the CLIs' MCP interfaces instead would mean a protocol server and a
-  handshake per turn for three tools. `BrainConversation` changes transport ownership, not `CoachHistory`: completed
-  memory remains client-managed, provider-neutral, compact, and portable to the next attempt.
-- **Installed CLIs are auto-detected.** `AgentCLIDetector` discovers binaries through file probes
-  over stable $PATH entries + known install dirs. Inherited $PATH entries under the system temporary
-  directory are ignored for both selection and the child environment: terminal launchers may put
-  short-lived wrappers there, but a long-running app must resolve the durable user/system install
-  instead. Claude's actual sign-in state comes from its non-billing `auth status --json` command under
-  a short timeout, because stale account metadata can survive an expired OAuth session; Codex uses
-  its auth-file marker and a bounded, non-model `features list` capability probe. Settings
-  distinguishes signed in, signed out, and an unavailable auth probe, and Start refuses a confirmed
-  logout. An empty, failed, or drifted feature catalog only narrows the disable set that is passed —
-  it never widens what a Codex thread may do, which the sandbox and event allowlist bound. Settings availability
-  discovery probes every supported CLI; Start probes only the CLI providers present in the
-  configured route. Saving the OpenAI API key probes no CLI.
-- **The OpenAI key is conditional**: it is required when OpenAI supplies transcription or appears
-  anywhere in the configured brain route. Apple Speech plus a CLI-only route starts without it. The
-  session evaluator independently runs through a separate, explicit one-shot agentic audit over the
-  completed session directory.
-  A controlled signed-in benchmark through each revision's production `CLIBrainClient` measured the
-  complete model portion of a coaching attempt:
+- **What the helper changes on the wire.** On the Codex path it deletes `max_output_tokens`, so the
+  workload timeout is the output bound; forces `store: false`, which Jarvis also sends for every
+  subscription target, so the dashboard retention described in
+  [sandbox.md](./sandbox.md#data-egress) never covers plan traffic; forces `parallel_tool_calls: true`,
+  which the runner answers by running the first call; and reuses `prompt_cache_key` as the upstream
+  session id, which is why Jarvis keeps that key stable. On the Claude path it drops `strict`,
+  `parallel_tool_calls`, `store`, and `prompt_cache_key`, turns the effort into adaptive thinking,
+  and replays reasoning items as signed thinking blocks. Without `strict`, about one Opus 5 `speak`
+  in ten arrives with `lines` double-encoded as a string, which the runner answers with the schema in
+  the same attempt. The helper's default cloak stays on: it presents Claude traffic as Anthropic's own
+  Claude Code client so usage stays on plan limits, which moves Jarvis's system prompt behind that
+  client's identity block.
+- **Models.** The Codex shares the OpenAI list; an id the Codex backend does not serve
+  fails at request time with the helper's `model_not_found`. The Claude list names releases the helper
+  routes, which is why Haiku is the dated `claude-haiku-4-5-20251001`: the helper reads the undated
+  alias as an unknown model. The Claude summarizer is Haiku; the Codex summarizer is the target model,
+  since the Codex backend serves neither mini model.
+- **Failures read as the vendor wrote them.** The helper returns the vendor's own error body, which
+  [`OpenAIFailureClassifier`](../Sources/JarvisCore/Providers/OpenAI/OpenAIFailureClassifier.swift)
+  reads for both vendors. With every credential for a vendor gone it answers 503
+  `upstream_authentication_required`, a permanent authentication failure. A model it cannot route
+  answers 400 `unknown provider for model`, which stays a configuration failure: the helper sends the
+  same reply for a signed-out vendor and for a model it does not serve, so the Start probe is what
+  names a signed-out subscription. When every credential is cooling down it answers 429 with its own
+  `Retry-After`, a temporary rejection. A helper that stopped mid-session refuses the connection, an
+  unreachable failure that is temporary, so the cycle fails, listening continues, and the restart on
+  the same endpoint serves the next attempt. Activity gives each its own next step: sign in from
+  Connections, press Try again there when the sign-in service is down, or wait for the plan's limit
+  ([`ProviderFailure+Activity`](../Sources/JarvisCore/Providers/ProviderFailure+Activity.swift)).
+- **Sign-in happens only on the user's click** ([`LocalProxySignIn`](../Sources/JarvisBrainProviders/Proxy/LocalProxySignIn.swift)).
+  Connections runs the helper's own `-codex-login` or `-claude-login` with `-no-browser` against this
+  launch's configuration, opens the OAuth page it prints (the one browser open in this design, behind
+  the Sign in click) once the line names one of the vendors' authorize hosts, and waits up to ten
+  minutes for the provider to redirect to the helper's fixed
+  callback port, 1455 for Codex and 54545 for Claude. A busy port ends the login with the helper's
+  message. The credential lands in the auth directory the running helper watches, so no restart is
+  needed, and Jarvis narrows it to owner-only. Cancel ends the login and closing Settings does not,
+  because the browser still has to redirect; Sign out deletes that subscription's credential files.
+- **Latency sits in the vendors' own band.** Through the helper a Codex turn beats the Codex CLI on the
+  same machine and a Claude press trails the Claude CLI, both inside the same fifteen-second workload
+  deadline, and the [live e2e run](./live-e2e-tests.md) shows that shape end to end. Coaching through
+  the proxy therefore costs no round trip the CLIs would have saved, which is what made it worth
+  adopting over driving those CLIs.
+- **Terms risk is accepted, not hidden.** Anthropic's terms prohibit intermediating Claude session
+  tokens. The owner accepts that on his own account; a Claude target that stops working fails
+  permanently and the route falls forward.
 
-  | Provider | Attempt | `main` p50 | Persistent runtime p50 | Saved | Improvement |
-  |---|---|---:|---:|---:|---:|
-  | Claude Code | text-only, one turn (`n=5`) | 4,617 ms | 2,654 ms | 1,963 ms | 42.5% |
-  | Claude Code | capture continuation, two turns (`n=3`) | 9,316 ms | 4,785 ms | 4,531 ms | 48.6% |
-  | Codex | text-only, one turn (`n=5`) | 8,097 ms | 5,898 ms | 2,199 ms | 27.2% |
-  | Codex | capture continuation, two turns (`n=3`) | 18,880 ms | 7,380 ms | 11,500 ms | 60.9% |
-
-  These are real Claude Code 2.1.220 (`claude-opus-5`) and Codex 0.145.0
-  (`gpt-5.6-sol`) invocations at low effort, with identical deterministic instructions and Jarvis's
-  real coaching tool protocol. The capture case makes two real model calls but substitutes a
-  successful capture result, so screen-capture I/O and image inference are outside the timing.
-  Provider/model/network variance remains substantial—especially the overlapping Codex text-only
-  samples—so the measurements demonstrate the end-to-end behavior on this machine, not a latency
-  guarantee. The durable invariant is that provider startup is removed from the attempt path and a
-  capture continuation does not replay the full client-managed history.
-
-  A target-thread-prewarm A/B against the merged persistent-runtime implementation used the same
-  production `CLIBrainClient`, real signed-in Codex model, deterministic instructions, low effort,
-  and a 1.5-second Session Start prewarm window. All 16 attempts (22 model turns) completed with the
-  expected action:
-
-  | Codex attempt | App-server-only p50 (range) | Target-thread prewarm p50 (range) | p50 saved | Improvement |
-  |---|---:|---:|---:|---:|
-  | Text-only, one turn (`n=5`) | 7,970 ms (7,225–9,091) | 7,121 ms (5,527–10,275) | 849 ms | 10.7% |
-  | Capture continuation, two turns (`n=3`) | 11,148 ms (9,946–13,190) | 7,382 ms (7,071–9,837) | 3,766 ms | 33.8% |
-
-  Across all eight attempts per revision, median conversation-open latency fell from 2,269 ms to
-  713 ms (68.6%). The first target-thread preparation itself varied from 1,950–5,070 ms, so a trigger
-  after the controlled 1.5-second window sometimes still waited for completion; the overlapping
-  text-only ranges remain the appropriate caution against treating the p50 as a guarantee.
+The session evaluator is the one place a vendor CLI still runs, as a one-shot read-only agent, not a
+coaching target. `AgentCLIDetector` finds `claude` and `codex` with file probes over stable `$PATH`
+entries and known install directories (nvm's versioned installs newest first, and for Codex the Codex
+and ChatGPT app bundles), ignoring inherited `$PATH` entries under the system temporary directory,
+where terminal launchers leave short-lived wrappers. Claude's sign-in comes from its non-billing
+`auth status --json` under a short timeout, because account metadata can outlive an expired OAuth
+session; Codex's comes from its auth file. See
+[build-and-run.md → The live activity viewer](./build-and-run.md#the-live-activity-viewer).
 
 ### Latency
 
 Target for the direct API path: **turn-end → first overlay line < 2s.** Transcription is continuous
-(no STT latency at trigger time) and most turns are text-only. Local subscription latency depends on
-the provider, model, and network. Claude keeps query startup off the attempt path; Codex begins both
-app-server and first target-thread preparation at Session Start. Both make a capture follow-up
-incremental, but neither promises the direct API target. The overlay reveals the already-returned
+(no STT latency at trigger time) and most turns are text-only. Subscription latency depends on the
+vendor, model, and network behind one loopback hop through the helper; how that compares with the
+vendors' own CLIs is in
+[Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy),
+and neither subscription promises the direct API target. The overlay reveals the already-returned
 lines one at a time (paced by `Config`); the brain response itself is not streamed to the overlay.
 Session auditing adds only best-effort typed-event admission to the live path. Parsing, redaction,
 serialization, file I/O, bounded retention, and close behavior belong to the
@@ -1103,23 +1105,14 @@ The always-on legs are built to survive transient failure rather than die on it:
   progress agree. An analyzer, result-stream, conversion, or input-stream failure stays inside the Apple
   boundary and follows the terminal/degraded lifecycle above—never an implicit OpenAI fallback.
 - **The brain call** is single-flighted (a turn can't double-speak) and runs under a Core-owned
-  workload deadline shared by the API, Claude, and Codex transports. A one-shot local auxiliary
-  response uses one absolute budget across provider setup and inference rather than restarting the
-  full deadline for each phase.
-  Stop terminates every ready, leased, and preparing local process. Termination and escalation
-  target only process identities observed while the original group was proven alive, including
-  descendants snapshotted before an immediately exited leader is reaped, and persistent stdout
-  buffering is bounded while no turn is consuming it.
-  A persistent-runtime failure has no one-shot fallback and is never replayed inside its coaching
-  attempt. The attempt ends, sent-state and provider-neutral work remain uncommitted, and the
+  workload deadline shared by every target, since each is one HTTP request to the same client.
+  A failed request is never replayed inside its coaching attempt. The attempt ends, sent-state and provider-neutral work remain uncommitted, and the
   scheduler makes a new attempt within its retry budget after a short delay or earlier coalesced trigger. That
   new attempt rebuilds its input from the latest committed history, the failed conversation, and
   every newer finalized transcript item; with no new speech, it simply re-attempts the pending work.
   The [ordered route](#ordered-provider-route) defines finite retries, fallback transitions, and
   bounded cycle failure. No provider is probed concurrently. Cancellation remains
-  quiet. A timed-out Codex inference first interrupts and drains only that turn, preserving the
-  session-scoped app-server when the matching terminal state confirms the stream is healthy;
-  uncertain protocol cleanup still invalidates the server. Memory **compaction** fails soft outside
+  quiet. Memory **compaction** fails soft outside
   this route: a failed summary simply leaves the full history for the next attempt.
 - **The audit edge** is isolated, bounded, and completeness-aware. Regular Stop drains and closes its
   old audit in a background task while a replacement Start proceeds independently. Quit seals the

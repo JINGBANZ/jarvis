@@ -4,12 +4,10 @@ import Darwin
 #else
 import Glibc
 #endif
-import JarvisCore
 
-/// Finds installed `claude` / `codex` CLIs and checks the local facts Jarvis needs before invoking
-/// them. Binary discovery stays a pure filesystem probe. Bounded, non-billing local commands read
-/// Claude's authoritative auth status and Codex's advertised feature names; Codex's auth file marker
-/// remains authoritative.
+/// Finds installed `claude` / `codex` CLIs for the session evaluator and checks whether each is
+/// signed in. Binary discovery stays a pure filesystem probe. Claude's sign-in state comes from its
+/// bounded, non-billing status command; Codex's auth file marker remains authoritative.
 public struct AgentCLIDetector: Sendable {
     private let home: URL
     private let pathVariable: String?
@@ -31,65 +29,33 @@ public struct AgentCLIDetector: Sendable {
         self.temporaryDirectory = temporaryDirectory
     }
 
-    /// All CLI providers found on this machine, in `BrainProvider` declaration order.
-    public func detectAll() -> [DetectedAgentCLI] {
-        detectAll(BrainProvider.allCases)
-    }
-
-    /// Only the requested CLI providers, in first-occurrence order. Duplicate providers are probed
-    /// once, and direct API providers are ignored because they have no local executable.
-    public func detectAll(_ providers: [BrainProvider]) -> [DetectedAgentCLI] {
-        var seen = Set<BrainProvider>()
-        return providers
-            .filter { seen.insert($0).inserted }
-            .compactMap { detect($0) }
-    }
-
-    /// Run the blocking subprocess probes away from the caller's executor. Settings uses this path
-    /// so a slow CLI cannot hold the main actor and delay or freeze its window.
-    public func detectAllAsync() async -> [DetectedAgentCLI] {
-        await detectAllAsync(BrainProvider.allCases)
-    }
-
-    /// Probe only the requested providers away from the caller's executor. Startup uses this path
-    /// so an unrelated installed CLI cannot delay a route that will never invoke it.
-    public func detectAllAsync(_ providers: [BrainProvider]) async -> [DetectedAgentCLI] {
+    /// The requested CLIs that are installed, in first-occurrence order, probed away from the
+    /// caller's executor so a slow status command cannot hold it. A CLI named twice is probed once.
+    public func detectAllAsync(_ clis: [AgentCLI]) async -> [DetectedAgentCLI] {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: detectAll(providers))
+                var seen = Set<AgentCLI>()
+                continuation.resume(returning: clis
+                    .filter { seen.insert($0).inserted }
+                    .compactMap { detect($0) })
             }
         }
     }
 
-    /// Find only the first usable provider in the supplied order, off the caller's executor. Agentic
-    /// evaluation uses this instead of probing a second CLI that it will not invoke.
-    public func detectFirstAsync(_ providers: [BrainProvider]) async -> DetectedAgentCLI? {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                continuation.resume(returning: providers.lazy.compactMap(detect).first)
-            }
-        }
-    }
-
-    /// The given provider's CLI, or nil when its binary isn't installed (or the provider is the
-    /// direct API, which has nothing to detect).
-    public func detect(_ provider: BrainProvider) -> DetectedAgentCLI? {
-        guard let name = provider.cliExecutableName else { return nil }
-        guard let url = firstExecutable(named: name, provider: provider) else { return nil }
+    /// The given CLI, or nil when its binary isn't installed.
+    public func detect(_ cli: AgentCLI) -> DetectedAgentCLI? {
+        guard let url = firstExecutable(for: cli) else { return nil }
         return DetectedAgentCLI(
-            provider: provider,
+            cli: cli,
             executableURL: url,
-            authenticationStatus: authenticationStatus(provider, executable: url),
-            supportedFeatures: provider == .codexCLI ? codexSupportedFeatures(executable: url) : []
-        )
+            authenticationStatus: authenticationStatus(cli, executable: url))
     }
 
     /// The common install locations consulted after $PATH — the single source of truth, also used
-    /// by the coaching runtimes and `AgentCLIProcessRunner` to seed the subprocess PATH: a CLI
-    /// *found* in one of these dirs
+    /// by `AgentCLIProcessRunner` to seed the subprocess PATH: a CLI *found* in one of these dirs
     /// may need its interpreter or helpers from another (an npm-shim `claude` whose
     /// `/usr/bin/env node` lives in `/opt/homebrew/bin`), so detection and execution must see the
-    /// same directories or Settings says "detected" while every runtime launch fails.
+    /// same directories or detection succeeds while every launch fails.
     static func fallbackDirectories(home: URL) -> [String] {
         [
             home.appendingPathComponent(".claude/local").path,   // claude's self-managed install
@@ -105,19 +71,19 @@ public struct AgentCLIDetector: Sendable {
     /// Stable $PATH entries first, then common install locations. Apps opened from a terminal inherit
     /// that terminal's PATH, which can contain short-lived launcher wrappers under the system temp
     /// directory. A long-running app must not retain one of those paths after its owner exits.
-    private func firstExecutable(named name: String, provider: BrainProvider) -> URL? {
+    private func firstExecutable(for cli: AgentCLI) -> URL? {
         let dirs = Self.stableSearchDirectories(
             pathVariable: pathVariable,
             home: home,
             temporaryDirectory: temporaryDirectory
         )
-        let bundled = provider == .codexCLI ? applicationDirectories.flatMap { directory in
+        let bundled = cli == .codex ? applicationDirectories.flatMap { directory in
             ["Codex.app", "ChatGPT.app"].map {
                 directory.appendingPathComponent("\($0)/Contents/Resources").path
             }
         } : []
         for dir in dirs + bundled where !dir.isEmpty {
-            let candidate = URL(fileURLWithPath: dir).appendingPathComponent(name)
+            let candidate = URL(fileURLWithPath: dir).appendingPathComponent(cli.executableName)
             if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
         }
         return nil
@@ -142,14 +108,12 @@ public struct AgentCLIDetector: Sendable {
         return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
     }
 
-    private func authenticationStatus(_ provider: BrainProvider, executable: URL)
+    private func authenticationStatus(_ cli: AgentCLI, executable: URL)
         -> AgentCLIAuthenticationStatus {
-        switch provider {
-        case .openAI:
-            return .unknown
-        case .claudeCode:
+        switch cli {
+        case .claude:
             return claudeAuthenticationStatus(executable: executable)
-        case .codexCLI:
+        case .codex:
             return FileManager.default.fileExists(
                 atPath: home.appendingPathComponent(".codex/auth.json").path
             ) ? .signedIn : .signedOut
@@ -160,8 +124,8 @@ public struct AgentCLIDetector: Sendable {
         let loggedIn: Bool
     }
 
-    /// Both probe documents are tiny. This is only a runaway-output backstop for a broken wrapper,
-    /// and keeps the post-timeout pipe drain bounded in both time and memory.
+    /// The status document is tiny. This is only a runaway-output backstop for a broken wrapper, and
+    /// keeps the post-timeout pipe drain bounded in both time and memory.
     private static let maxProbeOutputBytes = 64 * 1_024
 
     /// Claude's own status command reads whichever credential store that installation uses and does
@@ -169,33 +133,14 @@ public struct AgentCLIDetector: Sendable {
     private func claudeAuthenticationStatus(executable: URL) -> AgentCLIAuthenticationStatus {
         guard let output = runProbe(executable: executable,
                                     arguments: ["auth", "status", "--json"]),
-              let status = try? JSONDecoder().decode(ClaudeAuthStatus.self, from: output.data)
+              let status = try? JSONDecoder().decode(ClaudeAuthStatus.self, from: output)
         else { return .unknown }
         return status.loggedIn ? .signedIn : .signedOut
     }
 
-    /// `--disable <feature>` rejects unknown names. Probe the installed binary's compiled feature
-    /// registry so Jarvis passes only names that installation advertises. Failure falls back to no
-    /// feature flags; the direct-response prompt, isolated project root, read-only sandbox, and short
-    /// timeout still bound the call without making an older or renamed CLI unusable.
-    private func codexSupportedFeatures(executable: URL) -> Set<String> {
-        guard let output = runProbe(executable: executable, arguments: ["features", "list"]),
-              output.status == 0,
-              let text = String(data: output.data, encoding: .utf8)
-        else { return [] }
-        return Set(text.split(separator: "\n").compactMap { line in
-            line.split(whereSeparator: \.isWhitespace).first.map(String.init)
-        })
-    }
-
-    private struct ProbeOutput {
-        let data: Data
-        let status: Int32
-    }
-
-    /// Run one local, non-model status/capability command under the same bounded process policy for
-    /// both CLIs. No API key is inherited, and stderr is irrelevant to the machine-readable probe.
-    private func runProbe(executable: URL, arguments: [String]) -> ProbeOutput? {
+    /// Run one local, non-model status command under a bounded process policy. No API key is
+    /// inherited, and stderr is irrelevant to the machine-readable probe.
+    private func runProbe(executable: URL, arguments: [String]) -> Data? {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
@@ -234,9 +179,7 @@ public struct AgentCLIDetector: Sendable {
         process.waitUntilExit()
         terminator.cancel()
         killer.cancel()
-        let data = Self.readAvailableOutput(stdout.fileHandleForReading,
-                                            maxBytes: Self.maxProbeOutputBytes)
-        return ProbeOutput(data: data, status: process.terminationStatus)
+        return Self.readAvailableOutput(stdout.fileHandleForReading, maxBytes: Self.maxProbeOutputBytes)
     }
 
     /// Drain only bytes already available after the wrapper exits. A wrapper may leave a child

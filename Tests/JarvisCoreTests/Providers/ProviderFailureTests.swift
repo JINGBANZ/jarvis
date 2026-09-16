@@ -11,7 +11,7 @@ import Testing
                 .summary == "network -1009")
         #expect(ProviderFailure.Identity(transportDomain: NSPOSIXErrorDomain, transportCode: 84)
                 .summary == "errno 84")
-        #expect(ProviderFailure.Identity(transportDomain: "CLIBrainClient", transportCode: 500)
+        #expect(ProviderFailure.Identity(transportDomain: "ExampleAdapter", transportCode: 500)
                 .summary == "code 500")
         #expect(ProviderFailure.Identity(transportCode: 7).summary == "code 7")
     }
@@ -50,14 +50,14 @@ import Testing
     /// Adapters hand errors nothing has classified through this initializer. It keeps the NSError
     /// identity, never trusts the description with a URL, and stays temporary.
     @Test func unclassifiedErrorsKeepDomainAndCodeAndStayTemporary() {
-        let error = NSError(domain: "CLIBrainClient", code: 1,
-                            userInfo: [NSLocalizedDescriptionKey: "app-server unavailable"])
-        let failure = ProviderFailure(unclassified: error, source: .brain(.codexCLI), stage: .request)
+        let error = NSError(domain: "ExampleAdapter", code: 1,
+                            userInfo: [NSLocalizedDescriptionKey: "adapter unavailable"])
+        let failure = ProviderFailure(unclassified: error, source: .brain(.codexSubscription), stage: .request)
         #expect(failure.disposition == .temporary)
         #expect(failure.category == .unknown)
-        #expect(failure.identity.transportDomain == "CLIBrainClient")
+        #expect(failure.identity.transportDomain == "ExampleAdapter")
         #expect(failure.identity.transportCode == 1)
-        #expect(failure.message == "app-server unavailable")
+        #expect(failure.message == "adapter unavailable")
 
         let url = URLError(.cannotConnectToHost, userInfo: [
             NSURLErrorFailingURLStringErrorKey: "wss://example.test/ws?key=AIzaSecret12345",

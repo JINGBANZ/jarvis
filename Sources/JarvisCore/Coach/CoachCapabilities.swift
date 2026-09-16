@@ -7,12 +7,10 @@ public let coachTools: [ToolDef] = [captureScreenTool, speakTool, staySilentTool
 /// What one coaching session can do: the tools it offers, hot or deferred, and the skills it can
 /// load — resolved once at Start.
 ///
-/// One value, read by everything. A local-agent target bakes each tool's `parametersJSON` and the
-/// system prompt describing it into the instructions its process is warmed with, and re-checks the
-/// composed string on every turn (`CLIBrainClient.prepareTurn`). A set that grew or changed shape
-/// mid-session was rejected there, failing every remaining attempt on that target until the route
-/// exhausted — see #273. So the app's brain composition and the coach loop resolve from this one
-/// value, computed at Start from inputs known then.
+/// One value, read by everything. The system prompt describing each tool and the schemas every
+/// request declares both come from it, so a session can never describe one tool set and send
+/// another, which two separately derived sets did (#273). It is computed at Start from inputs known
+/// then.
 ///
 /// `prepSourcesConfigured` is therefore "prep sources are configured", not "the index has finished
 /// building": indexing runs off the Start path deliberately, so the port arrives after the first
@@ -68,8 +66,8 @@ public struct CoachCapabilities: Sendable, Equatable {
 
     /// The schema both loaders share. They are built per Start rather than as globals: the `name`
     /// schema is an enum of the catalog names actually present, so on a schema-enforcing provider a
-    /// misspelled name cannot be emitted at all. Each list is fixed at Start, which keeps a CLI
-    /// target's baked instructions constant.
+    /// misspelled name cannot be emitted at all. Each list is fixed at Start, which keeps the
+    /// session's instructions constant.
     static func loaderParametersJSON(catalogNames: [String]) -> String {
         let names = catalogNames
             .map { "\"\($0.replacingOccurrences(of: "\"", with: "\\\""))\"" }

@@ -33,7 +33,8 @@ enum EvaluationTranscript {
             let tag = entry["tag"] as? String ?? "?"
             let request = entry["request"] as? [String: Any]
             let response = entry["response"] as? [String: Any]
-            let provider = SessionMetrics.providerName(request: request, response: response)
+            let provider = SessionMetrics.providerName(
+                provider: entry["provider"] as? String, request: request, response: response)
             let isPreRequestFailure = entry["record_kind"] as? String
                 == BrainTrafficAuditEvent.Kind.preRequestFailure.rawValue
             // A session can fail over while keeping the same logical client tag. Prefix-elision state
@@ -173,7 +174,7 @@ enum EvaluationTranscript {
             // The tool loop replays reasoning items verbatim (opaque ids, possibly a large
             // `encrypted_content` blob) — no audit signal in the bytes, so stub them like images.
             return "assistant reasoning (replayed verbatim — \(compact(dict).count) chars)"
-        // CLI-provider records (`CLIBrainClient`): plain content blocks, images already stubbed.
+        // Local CLI coaching records, which sessions recorded before the subscription targets hold: plain content blocks, images already stubbed.
         case "text":
             let text = dict["text"] as? String ?? ""
             return "text: " + renderCLITextDelta(text, previous: previousCLIText, tag: tag)

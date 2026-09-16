@@ -581,6 +581,7 @@ final class SessionAuditWorker: @unchecked Sendable {
             "ms": event.latencyMs,
             "record_kind": event.kind.rawValue,
         ]
+        line["provider"] = event.provider?.rawValue
         line["status"] = event.status
         line["error"] = event.error
         if let phases = event.phases, !phases.isEmpty { line["phases"] = phases }

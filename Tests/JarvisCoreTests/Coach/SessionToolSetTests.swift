@@ -4,10 +4,9 @@ import Testing
 
 /// The session's coach tool set is fixed for the session's whole life.
 ///
-/// This is not a preference: a local-agent target bakes each tool's `parametersJSON` into the
-/// instructions its process is warmed with, and re-checks the composed string on every turn
-/// (`CLIBrainClient.prepareTurn`). A set that grows or changes shape mid-session is rejected there,
-/// failing every remaining attempt on that target. See #273.
+/// This is not a preference: the system prompt describing each tool and the schemas every request
+/// declares come from one set resolved at Start, and a set that grew or changed shape mid-session
+/// would let them disagree. See #273.
 @Suite(.serialized) struct SessionToolSetTests {
     private func makeDriver(
         brain: BrainClient,
@@ -59,7 +58,7 @@ import Testing
     }
 
     /// The inverse of the case above: a session composed without prep material keeps the tool absent
-    /// even after a port is installed, because its target was never warmed with that schema.
+    /// even after a port is installed, because its instructions never described that schema.
     @Test func aSessionComposedWithoutPrepMaterialNeverGainsTheTool() async {
         let brain = ScriptedBrain(script: [staySilent, staySilent])
         let (driver, transcript) = makeDriver(brain: brain, prepMaterial: nil)

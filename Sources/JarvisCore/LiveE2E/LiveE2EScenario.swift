@@ -49,10 +49,6 @@ public struct LiveE2EScenario: Sendable, Equatable {
         public let me: String
     }
 
-    public enum CLIOverride: String, Sendable {
-        case stub
-    }
-
     public struct Line: Sendable, Equatable {
         public let speaker: Speaker
         public let text: String
@@ -69,7 +65,6 @@ public struct LiveE2EScenario: Sendable, Equatable {
         case press(CoachingShortcut)
         case say(Line, overlap: Overlap?, whileAttemptRunning: Bool)
         case switchBrain(BrainProvider)
-        case restoreCLI(BrainProvider)
         case stop
     }
 
@@ -81,7 +76,6 @@ public struct LiveE2EScenario: Sendable, Equatable {
     public let prepNotes: String?
     public let transcription: Transcription
     public let voices: Voices
-    public let cli: [BrainProvider: CLIOverride]
     public let steps: [Step]
 
     /// Decode and validate. Throws a descriptive error naming the step index when a rule fails.
@@ -113,11 +107,6 @@ extension LiveE2EScenario {
         let model = try Self.parse(
             OpenAITranscriptionModel.self, raw.transcription.model, "transcription.model")
         let key = try Self.parse(TranscriptionKey.self, raw.transcription.key, "transcription.key")
-        var cli: [BrainProvider: CLIOverride] = [:]
-        for (rawProvider, rawOverride) in raw.cli ?? [:] {
-            let provider = try Self.parse(BrainProvider.self, rawProvider, "cli key")
-            cli[provider] = try Self.parse(CLIOverride.self, rawOverride, "cli.\(rawProvider)")
-        }
 
         id = raw.id
         self.audio = audio
@@ -128,9 +117,7 @@ extension LiveE2EScenario {
         prepNotes = raw.prepNotes
         transcription = Transcription(model: model, key: key)
         voices = Voices(them: raw.voices.them, me: raw.voices.me)
-        self.cli = cli
-        steps = try Self.steps(
-            from: raw.steps, primary: primary, cli: cli, fixturesDirectory: fixturesDirectory)
+        steps = try Self.steps(from: raw.steps, primary: primary, fixturesDirectory: fixturesDirectory)
 
         // A stream the audio setting does not play carries no synthesized speech, so a line on it
         // would leave the runner waiting out an attempt that never starts.
@@ -154,7 +141,6 @@ extension LiveE2EScenario {
     private static func steps(
         from rawSteps: [RawStep],
         primary: BrainProvider,
-        cli: [BrainProvider: CLIOverride],
         fixturesDirectory: URL
     ) throws -> [Step] {
         guard !rawSteps.isEmpty else {
@@ -222,12 +208,6 @@ extension LiveE2EScenario {
                 }
                 currentBrain = provider
                 step = .switchBrain(provider)
-            case "restoreCLI":
-                let provider = try parse(BrainProvider.self, raw.restoreCLI ?? "", "\(label).restoreCLI")
-                guard cli[provider] == .stub else {
-                    throw invalid("restoreCLI \"\(provider.rawValue)\" has no \"stub\" in cli")
-                }
-                step = .restoreCLI(provider)
             default:
                 guard raw.stop == true else {
                     throw invalid("stop must be true")
@@ -311,7 +291,6 @@ private struct RawScenario: Decodable {
     let prepNotes: String?
     let transcription: Transcription
     let voices: Voices
-    let cli: [String: String]?
     let steps: [RawStep]
 }
 
@@ -329,7 +308,7 @@ private struct RawOverlap: Decodable {
 /// A step object as written: every recognized key decoded if present, and every other key kept by
 /// name so validation can reject it with the step's index.
 private struct RawStep: Decodable {
-    static let primaryKeyNames = ["screen", "press", "say", "switchBrain", "restoreCLI", "stop"]
+    static let primaryKeyNames = ["screen", "press", "say", "switchBrain", "stop"]
     static let modifierKeyNames = ["overlap", "whileAttemptRunning"]
 
     private struct Key: CodingKey {
@@ -346,7 +325,6 @@ private struct RawStep: Decodable {
     let press: String?
     let say: RawLine?
     let switchBrain: String?
-    let restoreCLI: String?
     let stop: Bool?
     let overlap: RawOverlap?
     let whileAttemptRunning: Bool?
@@ -362,7 +340,6 @@ private struct RawStep: Decodable {
         press = try container.decodeIfPresent(String.self, forKey: Key("press"))
         say = try container.decodeIfPresent(RawLine.self, forKey: Key("say"))
         switchBrain = try container.decodeIfPresent(String.self, forKey: Key("switchBrain"))
-        restoreCLI = try container.decodeIfPresent(String.self, forKey: Key("restoreCLI"))
         stop = try container.decodeIfPresent(Bool.self, forKey: Key("stop"))
         overlap = try container.decodeIfPresent(RawOverlap.self, forKey: Key("overlap"))
         whileAttemptRunning = try container.decodeIfPresent(Bool.self, forKey: Key("whileAttemptRunning"))

@@ -1,4 +1,5 @@
 import Foundation
+import JarvisBrainProviders
 import JarvisCore
 import JarvisEvaluation
 
@@ -43,21 +44,17 @@ do {
     case (4...5, "--evaluate"):
         let repository = URL(fileURLWithPath: args[2], isDirectory: true)
         let sessionDir = URL(fileURLWithPath: args[3], isDirectory: true)
-        let preferredProvider: BrainProvider?
+        var preferredCLI: AgentCLI?
         if args.count == 5 {
-            switch args[4] {
-            case "claude": preferredProvider = .claudeCode
-            case "codex": preferredProvider = .codexCLI
-            default:
+            guard let requested = AgentCLI(rawValue: args[4]) else {
                 FileHandle.standardError.write(
                     Data("eval-prep: expected evaluator 'claude' or 'codex'\n".utf8))
                 exit(2)
             }
-        } else {
-            preferredProvider = nil
+            preferredCLI = requested
         }
         let evaluator = AgenticEvaluator(source: .localCheckout(repository),
-                                         preferredProvider: preferredProvider)
+                                         preferredCLI: preferredCLI)
         let markdown = try await evaluator.evaluate(sessionDirectory: sessionDir)
         let page = try EvalReportPage.write(
             markdown: markdown, in: sessionDir,

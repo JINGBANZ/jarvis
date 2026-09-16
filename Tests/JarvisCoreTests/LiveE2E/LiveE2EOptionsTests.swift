@@ -37,7 +37,6 @@ struct LiveE2EOptionsTests {
             scenario: URL? = nil,
             fixtures: URL? = nil,
             secrets: URL? = nil,
-            claude: URL? = nil,
             omitting omitted: String? = nil
         ) -> [String] {
             var pairs: [(String, String)] = [
@@ -47,7 +46,6 @@ struct LiveE2EOptionsTests {
                 ("--live-e2e-fixtures-dir", (fixtures ?? self.fixtures).path),
             ]
             if let secrets { pairs.append(("--live-e2e-secrets-dir", secrets.path)) }
-            if let claude { pairs.append(("--live-e2e-cli-claude", claude.path)) }
             return ["JarvisApp", "--live-e2e"]
                 + pairs.filter { $0.0 != omitted }.flatMap { [$0.0, $0.1] }
         }
@@ -59,19 +57,15 @@ struct LiveE2EOptionsTests {
         defer { layout.remove() }
         let secrets = layout.root.appendingPathComponent("secrets", isDirectory: true)
         try FileManager.default.createDirectory(at: secrets, withIntermediateDirectories: true)
-        let claude = layout.root.appendingPathComponent("claude-stub")
-        try Data("#!/bin/sh\nexit 1\n".utf8).write(to: claude)
-        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: claude.path)
 
         let options = try LiveE2EOptions(
-            arguments: layout.arguments(secrets: secrets, claude: claude))
+            arguments: layout.arguments(secrets: secrets))
 
         #expect(options.scenarioURL.path == layout.scenario.standardizedFileURL.path)
         #expect(options.outputDirectory.path == resolved(layout.output).path)
         #expect(options.repositoryDirectory.path == resolved(layout.repository).path)
         #expect(options.fixturesDirectory.path == layout.fixtures.standardizedFileURL.path)
         #expect(options.secretsDirectory?.path == secrets.standardizedFileURL.path)
-        #expect(options.claudeCLIOverride?.path == claude.standardizedFileURL.path)
     }
 
     @Test("the optional flags default to nil")
@@ -82,7 +76,6 @@ struct LiveE2EOptionsTests {
         let options = try LiveE2EOptions(arguments: layout.arguments())
 
         #expect(options.secretsDirectory == nil)
-        #expect(options.claudeCLIOverride == nil)
     }
 
     @Test(
@@ -146,24 +139,6 @@ struct LiveE2EOptionsTests {
             secrets: layout.root.appendingPathComponent("absent", isDirectory: true)))
 
         #expect(invalidDetail(failure)?.contains("--live-e2e-secrets-dir") == true)
-    }
-
-    @Test("a given Claude CLI override must be an existing executable file")
-    func rejectsNonExecutableClaude() throws {
-        let layout = try Layout.make()
-        defer { layout.remove() }
-        let plain = layout.root.appendingPathComponent("claude-plain")
-        try Data("#!/bin/sh\n".utf8).write(to: plain)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: plain.path)
-
-        let notExecutable = failure(layout.arguments(claude: plain))
-        let absent = failure(layout.arguments(
-            claude: layout.root.appendingPathComponent("absent-claude")))
-        let directory = failure(layout.arguments(claude: layout.outside))
-
-        #expect(invalidDetail(notExecutable)?.contains("--live-e2e-cli-claude") == true)
-        #expect(invalidDetail(absent)?.contains("--live-e2e-cli-claude") == true)
-        #expect(invalidDetail(directory)?.contains("--live-e2e-cli-claude") == true)
     }
 
     @Test(

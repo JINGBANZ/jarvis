@@ -58,7 +58,7 @@ import JarvisBrainProviders
             temporaryDirectory: root.appendingPathComponent("unrelated-system-temp"))
         let evaluator = AgenticEvaluator(
             source: source,
-            preferredProvider: .claudeCode,
+            preferredCLI: .claude,
             detector: detector,
             sourceStore: ReleaseSourceStore(root: sourceRoot) { url, destination in
                 guard let archive else { Issue.record("Development source was fetched"); return }
@@ -89,30 +89,45 @@ import JarvisBrainProviders
             atPath: session.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
     }
 
-    @Test func preferredProviderDoesNotSilentlyFallBack() {
-        let codex = DetectedAgentCLI(
-            provider: .codexCLI,
-            executableURL: URL(fileURLWithPath: "/usr/local/bin/codex"),
-            authenticationStatus: .signedIn)
+    private func detected(_ cli: AgentCLI, _ status: AgentCLIAuthenticationStatus) -> DetectedAgentCLI {
+        DetectedAgentCLI(
+            cli: cli, executableURL: URL(fileURLWithPath: "/usr/local/bin/\(cli.executableName)"),
+            authenticationStatus: status)
+    }
+
+    @Test func aRequestedCLIDoesNotSilentlyFallBack() {
         #expect(throws: AgenticEvaluator.EvaluationError.preferredAgentUnavailable(
-            BrainProvider.claudeCode.displayName
+            AgentCLI.claude.displayName
         )) {
             _ = try AgenticEvaluator.selectCLI(
-                from: [codex], preferredProvider: .claudeCode)
+                from: [detected(.codex, .signedIn)], preferredCLI: .claude)
+        }
+        #expect(throws: AgenticEvaluator.EvaluationError.agentSignedOut(AgentCLI.codex.displayName)) {
+            _ = try AgenticEvaluator.selectCLI(
+                from: [detected(.codex, .signedOut)], preferredCLI: .codex)
+        }
+    }
+
+    /// Without a request the first CLI not proven signed out runs, Codex before Claude Code.
+    @Test func withoutARequestTheFirstUsableCLIRuns() throws {
+        #expect(AgenticEvaluator.searchOrder == [.codex, .claude])
+        #expect(try AgenticEvaluator.selectCLI(
+            from: [detected(.codex, .signedOut), detected(.claude, .unknown)], preferredCLI: nil).cli
+            == .claude)
+        #expect(throws: AgenticEvaluator.EvaluationError.agentSignedOut(AgentCLI.codex.displayName)) {
+            _ = try AgenticEvaluator.selectCLI(
+                from: [detected(.codex, .signedOut), detected(.claude, .signedOut)], preferredCLI: nil)
+        }
+        #expect(throws: AgenticEvaluator.EvaluationError.noAgentCLI) {
+            _ = try AgenticEvaluator.selectCLI(from: [], preferredCLI: nil)
         }
     }
 
     @Test func invocationsAreReadOnlyAndStateless() {
         let repository = URL(fileURLWithPath: "/repo")
         let session = URL(fileURLWithPath: "/repo/.jarvis/session")
-        let claude = DetectedAgentCLI(
-            provider: .claudeCode,
-            executableURL: URL(fileURLWithPath: "/usr/local/bin/claude"),
-            authenticationStatus: .signedIn)
-        let codex = DetectedAgentCLI(
-            provider: .codexCLI,
-            executableURL: URL(fileURLWithPath: "/usr/local/bin/codex"),
-            authenticationStatus: .signedIn)
+        let claude = detected(.claude, .signedIn)
+        let codex = detected(.codex, .signedIn)
 
         let claudeRun = AgenticEvaluator.invocation(
             for: claude, prompt: "audit", repositoryDirectory: repository,

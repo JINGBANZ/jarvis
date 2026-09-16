@@ -37,7 +37,8 @@ start and finish. The Foundation-only scenario model, launch options, and audio 
 
 The run is not:
 
-- **Part of the Gate or CI.** It reaches real providers and needs TCC grants and signed-in CLIs. The
+- **Part of the Gate or CI.** It reaches real providers and needs TCC grants and signed-in
+  subscriptions. The
   Gate compiles the `JarvisLiveTests` target but never runs it
   ([build-and-run.md → Toolchain](./build-and-run.md#toolchain)). Unit targets never reach a
   provider; anything that does lives under `Tests/JarvisLiveTests/`, so there is one mechanism for
@@ -51,6 +52,9 @@ The run is not:
 - **A way to force rare paths.** A real model cannot be made to hit the response cap, load inside a
   failed attempt, trigger compaction, or call an unknown name on purpose, and the recovery cooldown
   and ceiling need a clock the run does not control. Those stay in scripted-brain tests in the Gate.
+  So does a failed coaching cycle that keeps listening: the subscription path has no temporary fault
+  a scenario can inject and then lift, since a stopped helper restarts by itself and a bad
+  credential is permanent, which ends a lone target's session instead of leaving a cycle to recover.
 
 ## Prerequisites and standing conditions
 
@@ -65,9 +69,11 @@ Set up once per machine:
 - **An OpenAI key** saved in Settings, which writes the owner-only secrets file. Every scenario
   transcribes through OpenAI. `OPENAI_API_KEY` does not serve the run: the app is launched through
   `open`, and LaunchServices does not pass the shell's environment.
-- **Claude Code and Codex CLIs**, installed and signed in. The launcher's preflight checks the key and
-  both CLIs before the first launch, so a missing login stops the run in seconds instead of surfacing
-  as a failed scenario.
+- **Codex and Claude Code**, the coaching targets, signed in from Settings → Connections. The launcher's
+  preflight checks the key and a saved sign-in for both subscriptions before the first launch, so a
+  missing login stops the run in seconds instead of surfacing as a failed scenario.
+- **The `claude` CLI**, installed and signed in, for `--evaluate` only. It writes the report; it is
+  not the coaching target of the same name, which the bundled helper serves.
 
 During a run:
 
@@ -81,7 +87,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|R|F01|F02|F04|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|R|F01|F02|all] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -93,11 +99,12 @@ with its scenario, waits for the app to exit, and asserts on the session folder.
 - `--keep-going` runs every chosen scenario. Without it the run stops after the first scenario that
   writes a `fail` line, since later scenarios spend model calls and a failure deserves a look first.
 - `--evaluate` runs [`scripts/eval-session.sh`](../scripts/eval-session.sh) on Scenario A's session
-  and adds a G09 line. It is off by default because evaluation is an agentic run of its own, not part
+  with `EVAL_AGENT=claude`, so the evaluation spends the Claude plan rather than the ChatGPT
+  plan, and adds a G09 line. It is off by default because evaluation is an agentic run of its own, not part
   of coaching.
 
 Scenario A's one OpenAI turn holds the only metered coaching requests; every other brain response
-runs on a CLI subscription.
+runs on a subscription.
 
 ## Run directory and results
 
@@ -137,11 +144,15 @@ layout in the Gate.
 | Scenario | Brain | What it drives |
 |---|---|---|
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
-| B | Codex | Behavioral, system design, coding with AI, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
-| R | Codex | The real capture device with no speech: Start, coaching ready, Stop. |
-| F01 | Codex | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
-| F02 | Codex | Transcription with a run-local invalid OpenAI key. |
-| F04 | Claude Code alone | A stub executable in place of the CLI; see [F04 and the stub](#f04-and-the-stub). |
+| B | Claude Code | Behavioral, system design, coding with AI, and prep search off. A fresh-session press on the coding screen, then a behavioral question. |
+| R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
+| F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
+| F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
+
+Only Scenario A's second half runs on Codex; every other scenario and the
+evaluation run on Claude. The ChatGPT plan's usage limit is the one a day of runs exhausts, and A's
+Codex stretch (a behavioral search, a spoken screen question, two presses, and a design follow-up)
+is enough to keep that subscription covered.
 
 ## How a scenario runs
 
@@ -184,15 +195,14 @@ layout in the Gate.
   attempt, the one that answered, and the stall shows as a slower time and a note. The run cares
   about the model's response, and a retried timeout is the design working. Only timeouts count:
   any other failure, or a chain that times out until the target's failure budget is spent, still
-  fails the step's cases. `LiveSessionEvidence.retryChain` implements the rule; F04 reads first
-  attempts, because its failures are the point.
+  fails the step's cases. `LiveSessionEvidence.retryChain` implements the rule.
 
 ## Notes and the rerun rule
 
 Some cases depend on what the model chose rather than on what the app did, and those write a `note`
 line instead of failing: C02 and G05 (staying silent on small talk), C03 (which skill the model
 picks), the second request in C11, the Codex diagram in C12, C13, how Scenario B's behavioral
-question ends in C16, C20, and C17 together with C01 and C09 on Scenario B's Codex press. Failing them would fail a correct app on a model's judgment call.
+question ends in C16, C20, and C17 together with C01 and C09 on Scenario B's press. Failing them would fail a correct app on a model's judgment call.
 
 An asserted case that fails because of a model choice gets one rerun of its scenario alone; a second
 failure is real. No assertion is loosened to make a run pass. A provider stall is neither a model
@@ -215,23 +225,6 @@ choice nor a failure: it is judged through its retry, as the evidence rules abov
   Mac for the whole run, and a click during it would send whatever window came forward to a
   provider, where the checker cannot tell it from the fixture.
 
-## F04 and the stub
-
-F04 proves that a failed coaching cycle keeps listening and that new speech opens a fresh budget on
-the same target without Start ([architecture.md → Ordered provider route](./architecture.md#ordered-provider-route)).
-Claude Code is the only brain, pointed at a stub executable that exits at once. Every local-agent
-process failure is temporary by design
-([`LocalAgentFailureClassifier`](../Sources/JarvisCore/Providers/LocalAgent/LocalAgentFailureClassifier.swift)),
-so each of three questions is its own cycle: its turn-end attempt and two pending-work retries fail
-on the same target, one "coaching failed; listening continues" row follows, and no request is made
-until the next question opens a fresh budget. A marker file then makes the stub hand over to the real CLI,
-and the next question gets a tip on the same target.
-
-An invalid key cannot stand in for the stub. A 401 is a permanent failure: it exhausts a lone target
-on the first attempt, excludes it for the rest of the session, and ends the session, so there is no
-cycle left to recover. The recovery cooldown and the ten-minute ceiling stay unit-tested, since the
-first failed cycle's cooldown is zero and the run has no clock to advance.
-
 ## Case index
 
 Where names the scenario and, when it helps, the moment in it. The steps are in the scenario files;
@@ -241,7 +234,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 
 | ID | Case | Where |
 |---|---|---|
-| C01 | A press loads what its screen needs and still ends in one clean tip | A: the Claude Code press; B: the Codex press |
+| C01 | A press loads what its screen needs and still ends in one clean tip | A: Claude Code press; B: its press |
 | C02 | Small talk loads nothing | A: the interviewer's logistics line |
 | C03 | The first behavioral question picks the behavioral skill | A: the first behavioral question |
 | C04 | An already-loaded kind never reloads | A: every turn on Codex |
@@ -249,18 +242,18 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
 | C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the OpenAI design question |
 | C08 | A second prepared question searches without loading, on another brain | A: the second behavioral question, on Codex |
-| C09 | The coding skill loads on the coding screen | A: the first press; B: the Codex press |
+| C09 | The coding skill loads on the coding screen | A: the first press; B: its press |
 | C10 | The whole session shows four load rows, each once | A, after Stop |
 | C11 | A press after the load is one round trip | A: the two Codex presses |
-| C12 | A diagram arrives at the architecture stage, on OpenAI and on a CLI brain | A: the OpenAI design question and the Codex follow-up |
+| C12 | A diagram arrives at the architecture stage, on OpenAI and on a subscription | A: the OpenAI design question and the Codex follow-up |
 | C13 | No diagram outside that stage | A: the coding and behavioral turns |
 | C14 | A brain switch keeps loaded state, in both directions | A: Claude Code to OpenAI, then OpenAI to Codex |
-| C15 | Coaching continues after loads on Claude Code and on Codex | A |
+| C15 | Coaching continues after loads on both subscriptions | A |
 | C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question |
-| C17 | The remaining skill still loads when others are off | B: the Codex press |
-| C18 | Prep search off leaves no tool and no catalog line | B: the Codex instructions |
-| C19 | Switched-off capabilities apply as configured | B: the Codex instructions list only coding |
-| C20 | Text-protocol fallbacks are reported | A and B: the debug log |
+| C17 | The remaining skill still loads when others are off | B: the press |
+| C18 | Prep search off leaves no tool and no catalog line | B: Claude Code instructions |
+| C19 | Switched-off capabilities apply as configured | B: Claude Code instructions list only coding |
+| C20 | A reply the runner answered instead of running is reported, never failed | A and B |
 | C21 | Loaded guidance survives compaction | Not scheduled; unit-tested |
 
 ### General coaching flow
@@ -274,8 +267,8 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | G05 | A deliberate no-op is visible | A: the interviewer's logistics line |
 | G06 | The hint shortcut works, and a second hint advances | A: the presses |
 | G07 | Overlays are excluded from screenshots | Offline, in the Gate |
-| G08 | Stop ends cleanly and leaves no CLI child or Codex home | Every scenario |
-| G09 | Evaluate works on the stopped session | `--evaluate`, on A's session |
+| G08 | Stop ends cleanly, the evidence seals, and no subscription helper outlives the app | Every scenario |
+| G09 | Evaluate works on the stopped session | `--evaluate`, on A's session, with Claude Code |
 | G10 | The development menu has no update item | Dropped; `build-app.sh` strips the feed |
 
 ### Faults and change-triggered checks
@@ -285,7 +278,6 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | F01 | Frames never arrive | F01: no system frames degrades to microphone-only; no microphone frames ends the session |
 | F02 | The transcription provider refuses the key | F02: the session ends naming the rejection and `invalid_api_key` |
 | F03 | The permission gate walk | Manual |
-| F04 | A failed coaching cycle keeps listening, and a fresh budget follows without Start | F04 |
 | S01 | Realtime reconnect recovery | `./scripts/transcription-benchmark.sh reconnect` |
 | R01 | Check for Updates in a signed build | Manual, when update code changes |
 | R02 | Evaluate picks the right release source | Manual, when evaluation source selection changes |
@@ -324,8 +316,8 @@ it as unverified in its description.
   cleanly. Leave a Gemini session past ten minutes and confirm the `goAway` rotation replaces the
   socket with no user-visible notice.
 - **Transcription configuration,** when credential requirements or transcription provider selection
-  change, because it needs Settings and Apple Speech on macOS 26. Confirm Apple Speech with a CLI-only
-  brain route starts without an API key while any OpenAI transcription or brain target still requires
+  change, because it needs Settings and Apple Speech on macOS 26. Confirm Apple Speech with a
+  subscription-only brain route starts without an API key while any OpenAI transcription or brain target still requires
   one, a transcription setting changed mid-session leaves the running snapshot active until the next
   Start, and a forced Apple analyzer failure never sends audio to OpenAI as a fallback.
 - **Explain more and shortcut bindings,** because the run requests shortcuts without the global
@@ -348,7 +340,8 @@ it as unverified in its description.
   silent during healthy progress. Switch to ordinary coding and confirm AI-specific advice stops;
   disable the skill and confirm ordinary coding still works on the next Start.
 - **Settings route walk,** because it needs Settings and faults on several targets. Check the first-open
-  Brain state, the Connections **Add API key** state, and a signed-in Claude Code in Connections; with
+  Brain state, the Connections **Add API key** state, and Sign in, Cancel, and Sign out for each subscription in
+  Connections; with
   multiple fallbacks, force a temporary
   budget transition, a permanent one-attempt transition, an unavailable-target skip, and final route
   exhaustion; exercise a failed replacement with a pending conversation and Stop during a retry; and

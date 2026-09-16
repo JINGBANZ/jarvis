@@ -66,7 +66,6 @@ public enum AgenticEvaluation {
     /// agent knows where its inputs live). Throws `EvaluationError.noTraffic` when there is nothing
     /// to audit.
     public static func prepare(sessionDir: URL, workspaceProvenance: String) throws -> String {
-        try CodexRuntimeHome.removeLegacyHomes(from: sessionDir)
         let trafficURL = sessionDir.appendingPathComponent(FileSessionAudit.brainTrafficFilename)
         let jsonl = (try? String(contentsOf: trafficURL, encoding: .utf8)) ?? ""
         guard !JSONLRecords.parse(jsonl).lines.isEmpty else {

@@ -1,7 +1,6 @@
 import Foundation
 import Testing
 @testable import JarvisCore
-import JarvisBrainProviders
 
 /// A provider-boundary failure with only the two things the route policy reads: the disposition and
 /// the message the notice quotes. Every other field is fixed here so the tests below stay about
@@ -1018,7 +1017,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func threeTemporaryFailuresAdvanceOnAFreshAttempt() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let fallbackTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let primary = ThrowingBrain()
         let fallback = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "fallback", lines: ["fallback tip"])]),
@@ -1040,7 +1039,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func permanentFailureAdvancesAfterOneAttempt() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let fallbackTarget = BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-sol")
+        let fallbackTarget = BrainTarget(provider: .codexSubscription, modelID: "gpt-5.6-sol")
         let primary = ThrowingBrain(error: brainFailure(.permanent, "invalid credentials"))
         let fallback = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
@@ -1063,7 +1062,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         ])
         let (driver, transcript) = makeRouteDriver([
             (BrainTarget(provider: .openAI, modelID: "gpt-5.5"), primary),
-            (BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5"), fallback),
+            (BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5"), fallback),
         ])
         transcript.append(.init(speaker: .me, text: "first question", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
@@ -1076,7 +1075,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     @Test func refreshingRouteClientsPreservesFallbackCursor() async {
-        let primaryTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let primaryTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let fallbackTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let primary = ThrowingBrain(error: brainFailure(.permanent, "primary permanently failed"))
         let originalFallback = ScriptedBrain(script: [
@@ -1105,7 +1104,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     @Test func reconfiguringRouteClientsPreservesFallbackCursor() async {
-        let primaryTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let primaryTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let fallbackTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let primary = ThrowingBrain(error: brainFailure(.permanent, "primary permanently failed"))
         let originalFallback = ScriptedBrain(script: [
@@ -1137,7 +1136,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func scopedCredentialRefreshKeepsOtherProviderClients() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let fallbackTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let originalPrimary = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "original-primary")]),
         ])
@@ -1170,7 +1169,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     @Test func scopedCredentialRefreshKeepsOtherProviderInFlightFailureValid() async {
-        let primaryTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let primaryTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let fallbackTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let failureGate = AsyncGate()
         let originalPrimary = TwoFailuresThenGatedFailureBrain(gate: failureGate)
@@ -1216,7 +1215,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// observable in between, so a test can only guess when the commit landed — and a guess that
     /// lands early silently asserts nothing while a guess that lands late fails for no reason.
     @Test func aCommittedSkipIsDeliveredToTheCallbackItWasCommittedAgainst() async throws {
-        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let originalSkip = RouteTargetRecorder()
         let refreshedSkip = RouteTargetRecorder()
@@ -1227,7 +1226,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 targets: [
                     ConfiguredBrainTarget(
                         unavailable: unavailableTarget,
-                        failure: unavailableFailure(unavailableTarget, "Claude Code is signed out")),
+                        failure: unavailableFailure(unavailableTarget, "the sign-in service isn't running")),
                     ConfiguredBrainTarget(
                         target: availableTarget,
                         brain: ScriptedBrain(script: [
@@ -1245,7 +1244,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             targets: [
                 ConfiguredBrainTarget(
                     unavailable: unavailableTarget,
-                    failure: unavailableFailure(unavailableTarget, "Claude Code is still signed out")),
+                    failure: unavailableFailure(unavailableTarget, "the sign-in service still isn't running")),
                 ConfiguredBrainTarget(
                     target: availableTarget,
                     brain: ScriptedBrain(script: [
@@ -1262,7 +1261,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// The paired transition commits the target the route left behind together with the callback
     /// live at that moment, so the same refresh window must not redirect or drop it either.
     @Test func aCommittedAdvanceIsDeliveredToTheCallbackItWasCommittedAgainst() async throws {
-        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let originalAdvance = RouteTransitionRecorder()
         let refreshedAdvance = RouteTransitionRecorder()
@@ -1273,7 +1272,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 targets: [
                     ConfiguredBrainTarget(
                         unavailable: unavailableTarget,
-                        failure: unavailableFailure(unavailableTarget, "Claude Code is signed out")),
+                        failure: unavailableFailure(unavailableTarget, "the sign-in service isn't running")),
                     ConfiguredBrainTarget(
                         target: availableTarget,
                         brain: ScriptedBrain(script: [
@@ -1294,7 +1293,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             targets: [
                 ConfiguredBrainTarget(
                     unavailable: unavailableTarget,
-                    failure: unavailableFailure(unavailableTarget, "Claude Code is still signed out")),
+                    failure: unavailableFailure(unavailableTarget, "the sign-in service still isn't running")),
                 ConfiguredBrainTarget(
                     target: availableTarget,
                     brain: ScriptedBrain(script: [
@@ -1314,7 +1313,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// itself must not repeat that notice on the replacement callback, and the attempt that
     /// follows must run on the replacement client rather than the one the route started with.
     @Test func refreshingClientsDuringASkipRetargetsOnlyTheFollowingAttempt() async {
-        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let originalAvailable = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "old-client")]),
@@ -1333,7 +1332,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 targets: [
                     ConfiguredBrainTarget(
                         unavailable: unavailableTarget,
-                        failure: unavailableFailure(unavailableTarget, "Claude Code is signed out")),
+                        failure: unavailableFailure(unavailableTarget, "the sign-in service isn't running")),
                     ConfiguredBrainTarget(target: availableTarget, brain: originalAvailable),
                 ],
                 onSkipped: { target, _ in
@@ -1342,7 +1341,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                         targets: [
                             ConfiguredBrainTarget(
                                 unavailable: unavailableTarget,
-                                failure: unavailableFailure(unavailableTarget, "Claude Code is still signed out")),
+                                failure: unavailableFailure(unavailableTarget, "the sign-in service still isn't running")),
                             ConfiguredBrainTarget(
                                 target: availableTarget,
                                 brain: refreshedAvailable),
@@ -1367,7 +1366,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     /// once the refresh bumps the route revision, so it must be discarded and re-taken against the
     /// replacement client instead of running the client the route had already chosen.
     @Test func refreshingClientsDuringAnAdvanceRetargetsOnlyTheFollowingAttempt() async {
-        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let originalAvailable = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "old-client")]),
@@ -1386,7 +1385,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 targets: [
                     ConfiguredBrainTarget(
                         unavailable: unavailableTarget,
-                        failure: unavailableFailure(unavailableTarget, "Claude Code is signed out")),
+                        failure: unavailableFailure(unavailableTarget, "the sign-in service isn't running")),
                     ConfiguredBrainTarget(target: availableTarget, brain: originalAvailable),
                 ],
                 onAdvanced: { previous, current, _ in
@@ -1395,7 +1394,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                         targets: [
                             ConfiguredBrainTarget(
                                 unavailable: unavailableTarget,
-                                failure: unavailableFailure(unavailableTarget, "Claude Code is still signed out")),
+                                failure: unavailableFailure(unavailableTarget, "the sign-in service still isn't running")),
                             ConfiguredBrainTarget(
                                 target: availableTarget,
                                 brain: refreshedAvailable),
@@ -1421,7 +1420,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func inFlightSuccessAcrossClientRefreshResetsTheFailureSequence() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let fallbackTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let successGate = AsyncGate()
         let originalPrimary = TwoFailuresThenGatedSuccessBrain(gate: successGate)
         let fallback = ScriptedBrain(script: [
@@ -1455,7 +1454,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func inFlightSuccessAcrossEffortReconfigurationResetsFailureSequence() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let fallbackTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let successGate = AsyncGate()
         let originalPrimary = TwoFailuresThenGatedSuccessBrain(gate: successGate)
         let fallback = ScriptedBrain(script: [
@@ -1489,7 +1488,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func inFlightFailureAcrossEffortReconfigurationCountsTowardRouteHealth() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let fallbackTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let fallbackTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let failureGate = AsyncGate()
         let originalPrimary = TwoFailuresThenGatedFailureBrain(gate: failureGate)
         let fallback = ScriptedBrain(script: [
@@ -1567,7 +1566,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func explicitRouteUpdateSupersedesUndeliveredExhaustion() async {
         let failedTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let replacementTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let replacementTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let responseGate = AsyncGate()
         let failed = GatedThrowingBrain(
             gate: responseGate,
@@ -1621,7 +1620,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeRouteDriver(
             [
                 (BrainTarget(provider: .openAI, modelID: "gpt-5.5"), first),
-                (BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5"), second),
+                (BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5"), second),
             ],
             onExhausted: { exhausted.record(target: $0, failure: $1) })
         transcript.append(.init(speaker: .me, text: "bounded failure", at: 0))
@@ -1629,13 +1628,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(first.callCount == 3)
         #expect(second.callCount == 1)
-        #expect(exhausted.targets.map(\.provider) == [.claudeCode])
+        #expect(exhausted.targets.map(\.provider) == [.claudeSubscription])
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(exhausted.targets.count == 1)
     }
 
     @Test func advancingPastAPermanentPrimarySpeaksOnTheFallback() async {
-        let primaryTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let primaryTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let fallbackTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let permanent = brainFailure(.permanent, "provider boundary is permanently unavailable")
         let primary = ThrowingBrain(error: permanent)
@@ -1666,7 +1665,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func settingsRevisionDuringFinalFailureKeepsPendingWorkAlive() async {
         let failedTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let replacementTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let replacementTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let failed = ThrowingBrain(error: brainFailure(.temporary, "old route failed"))
         let replacement = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "replacement", lines: ["new route recovered"])]),
@@ -1699,8 +1698,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     @Test func settingsRevisionDuringUnavailableFinalTargetReselectsImmediately() async {
-        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
-        let replacementTarget = BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-sol")
+        let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
+        let replacementTarget = BrainTarget(provider: .codexSubscription, modelID: "gpt-5.6-sol")
         let replacement = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "replacement")]),
         ])
@@ -1712,7 +1711,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             targets: [
                 ConfiguredBrainTarget(
                     unavailable: unavailableTarget,
-                    failure: unavailableFailure(unavailableTarget, "Claude Code is signed out")),
+                    failure: unavailableFailure(unavailableTarget, "the sign-in service isn't running")),
             ],
             onSkipped: { _, _ in holder.updateRoute(replacementRoute) })
         let transcript = RollingTranscript()
@@ -1736,8 +1735,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func unavailableFallbackIsSkippedWithoutSyntheticAttempts() async {
         let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let unavailableTarget = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
-        let finalTarget = BrainTarget(provider: .codexCLI, modelID: "gpt-5.6-sol")
+        let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
+        let finalTarget = BrainTarget(provider: .codexSubscription, modelID: "gpt-5.6-sol")
         let primary = ThrowingBrain(error: brainFailure(.permanent, "primary permanently failed"))
         let final = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "final", lines: ["final target"])]),
@@ -1748,7 +1747,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 ConfiguredBrainTarget(target: primaryTarget, brain: primary),
                 ConfiguredBrainTarget(
                     unavailable: unavailableTarget,
-                    failure: unavailableFailure(unavailableTarget, "Claude Code is signed out")),
+                    failure: unavailableFailure(unavailableTarget, "the sign-in service isn't running")),
                 ConfiguredBrainTarget(target: finalTarget, brain: final),
             ],
             onSkipped: { target, _ in skipped.record(target) })
@@ -1791,7 +1790,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeRouteDriver(
             [
                 (BrainTarget(provider: .openAI, modelID: "gpt-5.5"), primary),
-                (BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5"), fallback),
+                (BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5"), fallback),
             ],
             screen: screen)
         transcript.append(.init(speaker: .me, text: "review visible code", at: 0))
@@ -2429,7 +2428,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(recorder.providers == [.openAI, .openAI])
         let replacement = ThrowingBrain()
         driver.updateBrainRoute(ConfiguredBrainRoute(
-            targets: [ConfiguredBrainTarget(target: BrainTarget(provider: .codexCLI, modelID: "gpt-5.5"), brain: replacement)],
+            targets: [ConfiguredBrainTarget(target: BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5"), brain: replacement)],
             onRecoveryChanged: { recorder.providers.append($0) }))
         #expect(recorder.providers == [.openAI, .openAI])
         clock.set(100)
@@ -2471,7 +2470,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedThrowBrain(script: [nil, nil, nil, nil,
             .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])])])
         let primary = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-        let unavailable = BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5")
+        let unavailable = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let transcript = RollingTranscript()
         let driver = CoachDriver(
             config: .default, transcript: transcript,
@@ -2540,7 +2539,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let transcript = RollingTranscript()
         var targets = [ConfiguredBrainTarget(target: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), brain: brain)]
         if unavailableTail {
-            targets.append(ConfiguredBrainTarget(unavailable: BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5"), failure: brainFailure(.permanent, "signed out", provider: .claudeCode)))
+            targets.append(ConfiguredBrainTarget(unavailable: BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5"), failure: brainFailure(.permanent, "signed out", provider: .claudeSubscription)))
         }
         let driver = CoachDriver(config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: targets, onExhausted: { _, failure in recorder.record(failure) }),
@@ -2575,7 +2574,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])])])
         let (driver, transcript) = makeRouteDriver([
             (BrainTarget(provider: .openAI, modelID: "gpt-5.5"), primary),
-            (BrainTarget(provider: .claudeCode, modelID: "claude-sonnet-5"), fallback),
+            (BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5"), fallback),
         ])
         defer { driver.cancelBackgroundWork() }
         transcript.append(.init(speaker: .them, text: "first question", at: 0))
@@ -2759,12 +2758,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.last?.contains { ($0.text ?? "").contains("latest follow-up question") } == true)
     }
 
-    @Test func cliWatchdogTimeoutSchedulesFreshAttemptWithoutNaturalTrigger() async {
+    @Test func providerTimeoutSchedulesFreshAttemptWithoutNaturalTrigger() async {
         let recorder = RouteFailureRecorder()
         let brain = TimeoutThenSpeakingBrain()
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(
-            brain: brain, brainProvider: .codexCLI, overlay: overlay,
+            brain: brain, brainProvider: .codexSubscription, overlay: overlay,
             clock: ManualClock(now: 0),
             onRouteFailure: { recorder.record($0) }
         )
@@ -3124,7 +3123,7 @@ final class RouteFailureRecorder: @unchecked Sendable {
     func record(_ failure: ProviderFailure) { lock.lock(); recorded.append(failure); lock.unlock() }
 }
 
-/// The CLI watchdog misses the first turn, then the same conversation succeeds on the next trigger.
+/// A provider times out on the first turn, then the same conversation succeeds on the next trigger.
 /// `@unchecked Sendable` is safe because `CoachDriver` awaits one `respond` call at a time, so this
 /// test double's `calls` array is never accessed concurrently.
 final class TimeoutThenSpeakingBrain: BrainClient, @unchecked Sendable {
@@ -3134,11 +3133,7 @@ final class TimeoutThenSpeakingBrain: BrainClient, @unchecked Sendable {
                  toolChoice: ToolChoice) async throws -> BrainResponse {
         calls.append(messages)
         if calls.count == 1 {
-            throw NSError(
-                domain: AgentCLIProcessRunner.errorDomain,
-                code: NSURLErrorTimedOut,
-                userInfo: [NSLocalizedDescriptionKey: "codex timed out after 30s"]
-            )
+            throw URLError(.timedOut)
         }
         return BrainResponse(
             toolCalls: [.speak(callId: "recovered", lines: ["recovered on the next turn"])],

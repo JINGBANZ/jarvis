@@ -21,19 +21,9 @@ import JarvisCore
         ].joined(separator: "\n") + "\n"
         let activityURL = dir.appendingPathComponent(ActivityLog.filename)
         try Data(activityJSONL.utf8).write(to: activityURL)
-        let legacyRuntimeHome = dir.appendingPathComponent(
-            ".codex-runtime-abandoned",
-            isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: legacyRuntimeHome,
-            withIntermediateDirectories: false)
-        try FileManager.default.createSymbolicLink(
-            at: legacyRuntimeHome.appendingPathComponent("auth.json"),
-            withDestinationURL: URL(fileURLWithPath: "/private/credential"))
 
         let prompt = try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
 
-        #expect(!FileManager.default.fileExists(atPath: legacyRuntimeHome.path))
         // The compact transcript is written beside the traffic, owner-only, with the rendered content.
         let transcriptURL = dir.appendingPathComponent(AgenticEvaluation.transcriptFilename)
         let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)

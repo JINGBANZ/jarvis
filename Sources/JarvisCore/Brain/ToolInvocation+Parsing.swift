@@ -26,9 +26,9 @@ public extension ToolInvocation {
     /// Map a wire-level tool call (name + JSON arguments) to a typed invocation — the one place the
     /// coach tool names are interpreted, shared by every brain client. Unknown tool → nil, and the
     /// attempt runner answers the raw call. `speak` is nil unless `lines` decodes to at least one
-    /// non-blank string: the API path guarantees the shape via Structured Outputs, but the CLI
-    /// protocol is prompt text, and a malformed `speak` accepted with empty lines would render an
-    /// empty overlay yet still count as a spoken turn.
+    /// non-blank string: a strict schema guarantees the shape, but Claude Code's requests
+    /// drop `strict`, and a malformed `speak` accepted with empty lines would render an empty overlay
+    /// yet still count as a spoken turn.
     static func parse(callId: String, name: String, argumentsJSON: String) -> ToolInvocation? {
         switch name {
         case captureScreenTool.name:
@@ -46,9 +46,9 @@ public extension ToolInvocation {
         case staySilentTool.name:
             return .staySilent(callId: callId)
         case searchPrepNotesTool.name:
-            // A loose object read, not a strict Decodable dictionary: the API path guarantees the
-            // shape via Structured Outputs, but the CLI protocol is free-form prompt text, and a
-            // sibling field of an unexpected type must not make the whole call fail to parse.
+            // A loose object read, not a strict Decodable dictionary: a strict schema guarantees the
+            // shape, but a request without `strict` does not, and a sibling field of an unexpected
+            // type must not make the whole call fail to parse.
             let object = (try? JSONSerialization.jsonObject(
                 with: Data(argumentsJSON.utf8))) as? [String: Any]
             let query = (object?["query"] as? String ?? "").trimmingCharacters(in: .whitespaces)
@@ -70,8 +70,8 @@ public extension ToolInvocation {
         }
     }
 
-    /// Only the OpenAI path's strict schema forces `highlightedLines` into every call; the CLI
-    /// brains read a prompt-text protocol and naturally omit an empty array when the snippet
+    /// Only a strict schema forces `highlightedLines` into every call; Claude Code's
+    /// requests drop `strict`, so its models naturally omit an empty array when the snippet
     /// corrects nothing. Absent or null therefore means "no highlights", and binding it like the
     /// other members would discard a snippet the model did produce. A present value of the wrong
     /// type stays malformed, so the hint survives on its own.

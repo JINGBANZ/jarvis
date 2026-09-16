@@ -53,16 +53,21 @@ import Testing
             text: "earlier requirement",
             source: .browserAccessibility,
             coverage: .activeTabAccessibilityTree,
-            truncated: true)])
+            truncated: true)], capturedAt: "00:03")
         #expect(browser.contains("Chrome Accessibility"))
         #expect(browser.contains("may include off-screen text"))
         #expect(browser.contains("truncated"))
         #expect(browser.contains("earlier requirement"))
 
         let ocr = JarvisPrompts.Coach.captureResult(textEvidence: [ScreenTextEvidence(
-            text: "visible code", source: .onDeviceOCR, coverage: .currentViewport)])
+            text: "visible code", source: .onDeviceOCR, coverage: .currentViewport)],
+            capturedAt: "00:03")
         #expect(ocr.contains("On-device OCR"))
-        #expect(ocr.contains("current screenshot viewport"))
+        // The stamp and the clause are the whole point: the same text sits in memory long after this
+        // turn, and the stamp alone let one live run answer a later question from it.
+        #expect(ocr.contains("captured at [00:03]"))
+        #expect(ocr.contains("the screen may have changed since"))
+        #expect(ocr.contains("screenshot viewport"))
     }
 
     @Test func captureToolOwnsScreenEvidenceGuidanceAndSchemasHaveNoMemoryMaintenance() {
@@ -199,7 +204,7 @@ import Testing
     @Test func parseRejectsUnknownToolsAndMalformedSpeak() {
         #expect(ToolInvocation.parse(callId: "c", name: "self_destruct", argumentsJSON: "{}") == nil)
         // speak without at least one non-blank line is a malformed call, not an empty spoken turn
-        // (the CLI protocol has no Structured Outputs guarantee).
+        // (a request without `strict` has no Structured Outputs guarantee).
         for args in [#"{}"#, #"{"lines":[]}"#, #"{"lines":["", "  "]}"#, #"{"text":"hi"}"#, "junk"] {
             #expect(ToolInvocation.parse(callId: "c", name: "speak", argumentsJSON: args) == nil,
                     "args=\(args)")
@@ -216,7 +221,7 @@ import Testing
     }
 
     @Test func parseSearchPrepNotesToleratesAnUnexpectedSiblingField() {
-        // The CLI protocol is free-form prompt text, not a Structured Outputs guarantee — a stray
+        // A request without `strict` has no Structured Outputs guarantee, so a stray
         // non-string sibling field must not make the whole call fail to parse.
         guard case .searchPrepNotes(_, let query)? = ToolInvocation.parse(
             callId: "c", name: "search_prep_notes",

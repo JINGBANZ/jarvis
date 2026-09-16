@@ -26,8 +26,8 @@ extension JarvisPrompts.Coach {
     }
 
     /// Answers both an unknown load name and a call to a tool this session does not offer. The
-    /// model is told plainly rather than failing the attempt: on a text protocol it can emit
-    /// any name at all, and a refusal it can read is what stops it repeating the call.
+    /// model is told plainly rather than failing the attempt: a model can emit a name no request
+    /// declared, and a refusal it can read is what stops it repeating the call.
     static func toolUnavailable(_ name: String) -> String {
         "No tool named \(name) is available."
     }

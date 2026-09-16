@@ -56,7 +56,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
     /// The session's switched-on tool set, resolved at Start. Deriving it per attempt is what let
-    /// it drift from the schemas a local-agent target was warmed with (#273), so this is a plain
+    /// the declared schemas drift from the ones the instructions describe (#273), so this is a plain
     /// `let` even though `prepMaterial` lands later.
     private let capabilities: CoachCapabilities
 
@@ -275,7 +275,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         $0 + $1.text.count(where: { $0 == "\n" }) + 1
                     }
                     jlog("🔤 read \(lines) lines of on-screen text")
-                    observations.append(.user(JarvisPrompts.Coach.screenText(shot.textEvidence)))
+                    observations.append(.user(JarvisPrompts.Coach.screenText(
+                        shot.textEvidence,
+                        capturedAt: RollingTranscript.stamp(clock.now() - sessionStart))))
                 }
                 work.screenObservation = observations
             } else {
@@ -331,10 +333,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
             var iterations = 0
             while iterations < maxToolIterations {
                 iterations += 1
-                // What the model may call right now. On the API path this is the declared array, so
-                // a load in one iteration makes the tool callable in the next; on a CLI target,
-                // whose baked instructions list every switched-on tool, it is only the membership
-                // the runner checks below.
+                // What the model may call right now: the declared array, so a load in one iteration
+                // makes the tool callable in the next, and the membership the runner checks below.
                 let loaded = alreadyLoaded.union(loadedThisAttempt)
                 let tools = capabilities.callable(loaded: loaded)
                 // A shortcut press joins the loop but must end in a visible hint: it may load and
@@ -440,8 +440,16 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // the route's retry delay. A press's prose is its hint instead of that round trip when
                 // the reply calls outside its set or calls nothing, and on the response at the cap
                 // whatever it called, since no later response can recover.
+                // The response's first call decides, whether or not it parsed: `toolCalls` omits a
+                // call whose arguments did not parse, so its first entry can be a later call than
+                // the one the model made first.
+                let firstParsed: ToolInvocation? = if let raw = response.rawToolCalls.first {
+                    response.toolCalls.first { $0.callID == raw.id }
+                } else {
+                    response.toolCalls.first
+                }
                 let call: ToolInvocation
-                if let parsed = response.toolCalls.first {
+                if let parsed = firstParsed {
                     if permitted?.contains(parsed.toolName) ?? true {
                         call = parsed
                     } else if let spoken = Self.spokenProse(response.outputText, permitted: permitted) {
@@ -507,8 +515,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 }
 
                 // A parsed call to a tool this session does not offer is answered, not executed and
-                // not failed: a switched-off tool must stay switched off, and a text protocol can
-                // name any tool the parser knows.
+                // not failed: a switched-off tool must stay switched off, whatever name a model emits.
                 guard let called = capabilities.tool(named: call.toolName) else {
                     jlog("⚠️ \(call.toolName) isn't available in this session — telling the model so")
                     appendToolContinuation(
@@ -518,8 +525,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     continue
                 }
                 if called.deferLoading, !loaded.contains(called.name) {
-                    // Offered but used before loading: only a text protocol can do this, and the
-                    // call is honest, so run it rather than spend a round trip teaching protocol.
+                    // Offered but used before loading: the model named a catalog tool this request
+                    // did not declare. The call is honest, so run it rather than spend a round trip
+                    // teaching protocol.
                     jlog("… \(called.name) was called before it was loaded — running it anyway")
                 }
 
@@ -540,14 +548,16 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             }
                             jlog("🔤 read \(lines) lines of on-screen text")
                         }
+                        let capturedAt = RollingTranscript.stamp(clock.now() - sessionStart)
                         work.screenObservation = [
-                            .user(JarvisPrompts.Coach.captureResult(textEvidence: shot.textEvidence)),
+                            .user(JarvisPrompts.Coach.captureResult(
+                                textEvidence: shot.textEvidence, capturedAt: capturedAt)),
                             .userImage(shot.imageBase64),
                         ]
                         appendToolContinuation(
                             toolCallId: callID,
                             resultText: JarvisPrompts.Coach.captureResult(
-                                textEvidence: shot.textEvidence),
+                                textEvidence: shot.textEvidence, capturedAt: capturedAt),
                             extraMessages: [.userImage(shot.imageBase64)],
                             newPhase: .captureScreenContinuation)
                     } else {

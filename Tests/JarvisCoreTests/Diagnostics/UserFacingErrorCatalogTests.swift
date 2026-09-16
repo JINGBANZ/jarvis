@@ -122,40 +122,29 @@ import Testing
         #expect(!UserFacingError.systemAudioStopped.severity.stopsSession)
     }
 
-    @Test func brainCLIMissingAlertsWithoutStoppingAndNamesTheProvider() {
-        // A preflight refusal: the Start never opened anything, and an in-place restart that trips
-        // it has a LIVE session that must survive — alert, never stop.
-        let e = UserFacingError.brainCLIMissing(provider: "Claude Code")
+    /// A route with no target left to coach is refused like a missing key: alert, never stop, and
+    /// the alert is the failure's own sentence, which says what to do.
+    @Test func anUnavailableRouteAlertsWithoutStoppingAndSaysWhatToDo() {
+        let failure = ProviderFailure(
+            source: .brain(.claudeSubscription), stage: .process, category: .authentication,
+            disposition: .permanent, identity: .init(), message: "")
+        let e = UserFacingError.brainRouteUnavailable(failure: failure)
         #expect(e.severity == .warning)
         #expect(e.severity.showsAlert)
         #expect(!e.severity.stopsSession)
-        #expect(e.title.contains("Claude Code"))
-    }
-
-    @Test func brainCLINotSignedInAlertsWithoutStopping() {
-        // An authoritative signed-out marker (Codex) refuses the Start — same preflight semantics.
-        let e = UserFacingError.brainCLINotSignedIn(provider: "Codex CLI")
-        #expect(e.severity == .warning)
-        #expect(e.severity.showsAlert)
-        #expect(!e.severity.stopsSession)
-    }
-
-    @Test func brainCLISignInUnconfirmedStaysQuiet() {
-        // A failed/timed-out probe is unknown rather than proof of logout, so warn without blocking.
-        let e = UserFacingError.brainCLISignInUnconfirmed(provider: "Claude Code")
-        #expect(e.severity == .degraded)
-        #expect(!e.severity.showsAlert)
-        #expect(!e.severity.stopsSession)
+        #expect(e.title == "Claude Code isn't ready")
+        #expect(e.message
+            == "Claude Code isn't signed in; open Settings → Connections, press Sign in for it, then press Start.")
     }
 
     @Test func exhaustedBrainRouteStopsQuietlyAndKeepsDiagnosticDetail() {
         let failure = ProviderFailure(
-            source: .brain(.claudeCode), stage: .process, category: .unknown,
+            source: .brain(.claudeSubscription), stage: .process, category: .unknown,
             disposition: .temporary, identity: .init(), message: "OAuth session expired")
         let e = UserFacingError.brainRouteExhausted(
             target: BrainTarget(
-                provider: .claudeCode,
-                modelID: BrainModelCatalog.defaultModel(for: .claudeCode).id),
+                provider: .claudeSubscription,
+                modelID: BrainModelCatalog.defaultModel(for: .claudeSubscription).id),
             failure: failure)
         #expect(e.severity == .terminal)
         #expect(!e.severity.showsAlert)

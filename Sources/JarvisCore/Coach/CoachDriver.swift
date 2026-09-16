@@ -198,7 +198,7 @@ public final class CoachDriver: @unchecked Sendable {
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
-            // The app passes the same value it baked into a local-agent target's instructions.
+            // The one set resolved at Start; see `CoachCapabilities`.
             capabilities: capabilities)
     }
 

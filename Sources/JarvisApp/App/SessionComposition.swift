@@ -151,7 +151,7 @@ final class SessionComposition {
     /// `reportContext`.
     func start(
         _ inputs: Inputs,
-        detectedCLIs: [BrainProvider: DetectedAgentCLI],
+        proxy: LocalProxySupervisor.Readiness?,
         readinessSession: JarvisReadiness.Session,
         reportContext: UserFacingError.PresentationContext
     ) -> Bool {
@@ -187,16 +187,13 @@ final class SessionComposition {
         // Each target's coach and summarizer share the session traffic log. Every fresh attempt is a
         // distinct audit-visible request; no transport wrapper replays a failed request.
         let sessionDirectory = artifacts.currentSessionDir!
-        // Fixed for the whole session — set before every construction/reapply path that bakes a
-        // system prompt, including a later `applyBrainPreferencesToRunningSession` hot switch.
+        // Fixed for the whole session.
         sessionCodeEnabled = inputs.codeEnabled
-        brain.codeEnabled = inputs.codeEnabled
         overlayBox.setCodeEnabled(inputs.codeEnabled)
         sessionExplanationsEnabled = inputs.explanationsEnabled
-        brain.explanationsEnabled = inputs.explanationsEnabled
-        // One capability set for the session, handed to both the targets that bake it into their
-        // instructions and the driver that sends it. Prep material counts as configured sources, not
-        // a finished index: the index lands later and must not change what the session offers (#273).
+        // One capability set for the session, handed to the driver that sends it. Prep material
+        // counts as configured sources, not a finished index: the index lands later and must not
+        // change what the session offers (#273).
         let prepMaterialSources = inputs.prepSources
         let bundledSkills = SkillCatalog.bundled()
         let capabilities = CoachCapabilities.compose(
@@ -204,7 +201,6 @@ final class SessionComposition {
             disabledSkills: brain.preferences.disabledSkills,
             prepSourcesConfigured: !prepMaterialSources.isEmpty,
             skills: bundledSkills)
-        brain.capabilities = capabilities
         // The one place a switched-off capability is visible: Activity never mentions what was not
         // offered. Read from the persisted names, so a name that matched nothing is reported as
         // nothing and a loader — which is synthesized, not switchable — is never named here.
@@ -228,7 +224,7 @@ final class SessionComposition {
                 ? "(none)" : honoredDisabled.joined(separator: ",")))
         let configuredRoute = brain.makeConfiguredRoute(
             inputs.brainRoute,
-            detectedCLIs: detectedCLIs,
+            proxy: proxy,
             apiKey: inputs.brainAPIKey,
             effort: brain.preferences.effort,
             sessionDirectory: sessionDirectory)
@@ -422,7 +418,7 @@ final class SessionComposition {
         self.audioSource = source
         self.turns = turns
         self.coachDriver = driver
-        brain.sessionWillStart(on: inputs.brainRoute.primary)
+        brain.sessionWillStart()
         micConnectionState = .connecting
         systemConnectionState = .connecting
         observeReadiness([
@@ -516,9 +512,7 @@ final class SessionComposition {
         // can still be writing when the audit seals.
         let compaction = coachDriver?.cancelBackgroundWork()
         coachDriver = nil
-        // Local-agent processes are signaled now; the drain waits for them to exit, because a Codex
-        // home can only be removed once its app-server has stopped writing it.
-        let brainTeardown = brain.sessionDidStop()
+        brain.sessionDidStop()
         // Mark both delivery endpoints stopped before draining the source. It hands chunks off
         // asynchronously, so callbacks already queued during teardown must see the transcribers'
         // stopped guards and become no-ops.
@@ -546,7 +540,7 @@ final class SessionComposition {
         var drain: Task<Void, Never>?
         if reason == .applicationQuit {
             audit?.abandon()
-        } else if audit != nil || !cancelled.isEmpty || compaction != nil || brainTeardown != nil {
+        } else if audit != nil || !cancelled.isEmpty || compaction != nil {
             let drainID = UUID()
             if !cancelled.isEmpty { pendingTurnDrainIDs.insert(drainID) }
             if let auditDirectory { artifacts.beginClosing(auditDirectory) }
@@ -555,7 +549,6 @@ final class SessionComposition {
                 await compaction?.value
                 self?.pendingTurnDrainIDs.remove(drainID)
                 self?.onCoachingStateChanged?()
-                await brainTeardown?.value
                 // Closing the handle is the barrier now: it waits for every accepted row, Activity
                 // included, so a just-recorded outcome cannot race the evaluator.
                 _ = await audit?.close()
@@ -571,7 +564,7 @@ final class SessionComposition {
     /// sockets are already authenticated; retain them and use the new key only if either socket later
     /// reconnects. The transcription half is session runtime and stays here; the brain half is
     /// composition's, and it installs fresh OpenAI target clients between coaching attempts without
-    /// probing or replacing CLI clients, changing route policy, or restarting transcription.
+    /// replacing subscription clients, changing route policy, or restarting transcription.
     ///
     /// Guarded by credential: a saved OpenAI key must never reach a Gemini-backed session (or vice
     /// versa). Each session applies only the credential it authenticates with and ignores the rest,
