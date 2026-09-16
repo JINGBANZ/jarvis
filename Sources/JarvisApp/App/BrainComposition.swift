@@ -59,10 +59,12 @@ final class BrainComposition {
         self.preferences = preferences
     }
 
-    /// The target a fresh session starts on, recorded so the first selection is not announced as a
-    /// change.
-    func sessionWillStart(on target: BrainTarget) {
-        activeBrainTarget = target
+    /// A fresh session has no active target until the route selects one. Naming the primary here
+    /// claimed a provider that may never serve: an unavailable one is skipped, and a topology edit
+    /// made before the first attempt then recorded a change away from a provider that never ran.
+    /// `onSelected` fills this in, and finds no pending change, so a first selection stays silent.
+    func sessionWillStart() {
+        activeBrainTarget = nil
         pendingBrainChangeFrom = nil
     }
 

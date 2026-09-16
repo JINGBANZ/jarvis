@@ -26,15 +26,16 @@ public struct LocalProxySignIn: Sendable {
     private let executable: URL
     private let configURL: URL
     private let authDirectory: URL
-    /// Where the running login's process id is published, so Quit can end it from outside.
-    private let signInPID: OSAllocatedUnfairLock<Int32?>
+    /// Where every running login publishes its process id, so Quit can end them from outside. Codex
+    /// and Claude can be signing in at the same time, so this is a set rather than one slot.
+    private let signInPIDs: OSAllocatedUnfairLock<Set<Int32>>
 
     public init(executable: URL, configURL: URL, authDirectory: URL,
-                signInPID: OSAllocatedUnfairLock<Int32?> = .init(initialState: nil)) {
+                signInPIDs: OSAllocatedUnfairLock<Set<Int32>> = .init(initialState: [])) {
         self.executable = executable
         self.configURL = configURL
         self.authDirectory = authDirectory
-        self.signInPID = signInPID
+        self.signInPIDs = signInPIDs
     }
 
     /// Runs the login for `provider`. Cancelling the consuming task, or dropping the stream,
@@ -85,8 +86,8 @@ public struct LocalProxySignIn: Sendable {
         // The child holds its own copy; closing ours is what lets the read below end at its exit.
         try? output.fileHandleForWriting.close()
         let pid = process.processIdentifier
-        signInPID.withLock { $0 = pid }
-        defer { signInPID.withLock { $0 = nil } }
+        signInPIDs.withLock { $0.insert(pid) }
+        defer { signInPIDs.withLock { $0.remove(pid) } }
         let timedOut = OSAllocatedUnfairLock(initialState: false)
         let watchdog = Task {
             try? await Task.sleep(for: Self.deadline)

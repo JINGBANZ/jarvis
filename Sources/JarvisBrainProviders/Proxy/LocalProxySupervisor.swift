@@ -86,9 +86,11 @@ public actor LocalProxySupervisor {
     private var clearedLeftovers = false
     /// Read by `terminateNow()`, which Quit calls from outside the actor.
     private nonisolated let helperPID = OSAllocatedUnfairLock<Int32?>(initialState: nil)
-    /// A sign-in the user started and has not finished. It is a child of Jarvis like the helper, so
-    /// Quit ends it too rather than leaving a login waiting on a redirect that can no longer arrive.
-    private nonisolated let signInPID = OSAllocatedUnfairLock<Int32?>(initialState: nil)
+    /// Sign-ins the user started and has not finished. They are children of Jarvis like the helper,
+    /// so Quit ends them too rather than leaving a login waiting on a redirect that can no longer
+    /// arrive. Connections can run the Codex and Claude logins at once, so this holds every one:
+    /// a single slot lost whichever child started first, and cleared when either finished.
+    private nonisolated let signInPIDs = OSAllocatedUnfairLock<Set<Int32>>(initialState: [])
 
     /// The helper's credential files, owner-only like the API key file.
     public nonisolated var authDirectory: URL { home.appendingPathComponent("auth", isDirectory: true) }
@@ -162,7 +164,7 @@ public actor LocalProxySupervisor {
     public func makeSignIn() async -> LocalProxySignIn? {
         guard case .running = await ensureRunning(), let executable else { return nil }
         return LocalProxySignIn(executable: executable, configURL: configURL,
-                                authDirectory: authDirectory, signInPID: signInPID)
+                                authDirectory: authDirectory, signInPIDs: signInPIDs)
     }
 
     public nonisolated func accountFiles(for provider: BrainProvider) -> [LocalProxyAccountFile] {
@@ -195,7 +197,10 @@ public actor LocalProxySupervisor {
         kill(pid, SIGTERM)
         let deadline = ContinuousClock.now + Self.stopGrace
         while helperRunning, ContinuousClock.now < deadline {
-            try? await Task.sleep(for: .milliseconds(50))
+            // A cancelled caller makes this throw without suspending. Spinning on it would hold the
+            // actor that `helperExited` needs to clear `helperRunning`, so the wait would run its
+            // full length and then kill a helper that had already exited. Stop waiting instead.
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
         if helperRunning { kill(pid, SIGKILL) }
     }
@@ -204,7 +209,7 @@ public actor LocalProxySupervisor {
     /// removes the configuration this leaves.
     public nonisolated func terminateNow() {
         if let pid = helperPID.withLock({ $0 }) { kill(pid, SIGTERM) }
-        if let pid = signInPID.withLock({ $0 }) { kill(pid, SIGTERM) }
+        for pid in signInPIDs.withLock({ $0 }) { kill(pid, SIGTERM) }
     }
 
     // MARK: - Lifecycle

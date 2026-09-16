@@ -418,7 +418,7 @@ final class SessionComposition {
         self.audioSource = source
         self.turns = turns
         self.coachDriver = driver
-        brain.sessionWillStart(on: inputs.brainRoute.primary)
+        brain.sessionWillStart()
         micConnectionState = .connecting
         systemConnectionState = .connecting
         observeReadiness([
