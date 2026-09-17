@@ -590,10 +590,11 @@ the live cursor between attempts. A reasoning-effort edit rebuilds clients at th
 failure counts; the already-running attempt remains valid, so its success or failure updates route
 health normally.
 
-Saving the OpenAI API key refreshes only OpenAI clients and OpenAI transcription reconnect
-credentials; it never replaces subscription clients. It preserves the route cursor and counts. An
-in-flight OpenAI failure belongs to the superseded credential and is ignored, while an in-flight
-attempt on an unaffected subscription retains normal success/failure accounting.
+Saving an API key refreshes only the clients of route targets that call their provider with that
+key, and the future reconnect credential of a live transcription socket that authenticates with it;
+it never replaces subscription clients. It preserves the route cursor and counts. An in-flight
+failure on a refreshed target belongs to the superseded credential and is ignored, while an
+in-flight attempt on an unaffected target keeps normal success and failure accounting.
 
 A **coaching attempt** snapshots one target and the latest provider-neutral conversation, then keeps
 that target for the complete tool loop. Every provider request in that loop is made once. A complete,
@@ -856,7 +857,10 @@ ChatGPT or Claude plan pay for coaching instead of a metered API key. Both are s
 [`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh). The helper holds the OAuth sign-ins
 and serves them as an OpenAI Responses endpoint on 127.0.0.1, so every target goes through the one
 [`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) and the attempt runner
-reads one wire shape. Only the endpoint, the key, and the target's tool policy differ.
+reads one wire shape. Only the endpoint, the key, and the target's tool policy differ, and each
+provider's [`BrainProviderDescriptor`](../Sources/JarvisCore/Brain/BrainProviderDescriptor.swift)
+names them, together with its display name, wire format, failure table, and effort floor, and for a
+subscription the helper's model owner, login flag, and account-file prefix.
 
 A proxy rather than the vendors' own CLIs: driving `claude` and `codex` as coaching processes meant
 imitating native function calls with a text protocol the model had to follow and Jarvis had to parse

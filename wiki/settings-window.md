@@ -424,10 +424,11 @@ The **Reasoning effort** group (`ReasoningEffort`: None / Low / Medium / High) i
 control whose segments show short labels and the prototype's bar glyphs, with the full name as each
 segment's tooltip, so all four fit at the window's minimum width. The effort is stored once and
 applies uniformly to whichever provider is active; its default lives with the others in
-[`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). `BrainAccessor` raises None to Low,
-and the output budget to at least the Low budget, for Claude Code, because None disables
-thinking on that path and Claude Fable 5.1 rejects it, and for GPT-6 Astra, because Astra requires
-reasoning. The stored effort remains unchanged, and every other target keeps the selected effort.
+[`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). The brain client raises None to Low,
+and the output budget to at least the Low budget, for Claude Code, whose provider descriptor carries
+that floor because None disables thinking on that path and Claude Fable 5.1 rejects it, and for
+GPT-6 Astra, whose catalog entry carries it because Astra requires reasoning. The stored effort
+remains unchanged, and every other target keeps the selected effort.
 
 Reads are validated: a persisted primary model id no longer in that provider's catalog uses the
 provider default without rewriting the invalid value, while invalid fallback rows are removed during
