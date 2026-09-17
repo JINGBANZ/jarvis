@@ -41,13 +41,6 @@ final class APIKeyControls: NSObject {
         }
     }
 
-    private static func headerDetail(for credential: Credential) -> String {
-        switch credential {
-        case .openAIAPIKey: "Brain and transcription"
-        case .geminiAPIKey: "Transcription only"
-        }
-    }
-
     private static let collapsedHeight = SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
     private static let editorHeight: CGFloat = 64
 
@@ -70,7 +63,7 @@ final class APIKeyControls: NSObject {
 
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
-        card.setHeader(title: credential.displayName, detail: Self.headerDetail(for: credential))
+        card.setHeader(title: credential.displayName, detail: "Brain and transcription")
         card.onLayout = { [weak self] in self?.layout() }
         self.card = card
         guard let content = card.contentView else { return card }
