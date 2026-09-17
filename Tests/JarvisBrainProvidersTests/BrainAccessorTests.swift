@@ -644,6 +644,22 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body["store"] as? Bool == false)
         #expect(body["generation_config"] != nil)
     }
+
+    @Test func aRejectedGeminiKeyIsPermanent() async throws {
+        let client = BrainAccessor(
+            provider: .gemini, apiKey: "AIzaTestKey", model: "gemini-3.8-flash",
+            endpoint: BrainProviderDescriptor.geminiInteractionsEndpoint,
+            send: { _ in
+                (Data(#"[{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}]"#.utf8), http(400))
+            })
+        do {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
+            Issue.record("a rejected key must throw")
+        } catch let failure as ProviderFailure {
+            #expect(failure.source == .brain(.gemini))
+            #expect(failure.category == .authentication && failure.disposition == .permanent)
+        }
+    }
 }
 
 // @unchecked: all mutable state is guarded by lock.

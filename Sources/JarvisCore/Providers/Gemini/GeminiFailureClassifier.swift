@@ -8,6 +8,8 @@ public enum GeminiFailureClassifier {
     ) -> ProviderFailure {
         let error = errorObject(from: body)
         let status = error?["status"] as? String
+        // Interactions errors carry a snake_case string `code` and no `status`.
+        let code = error?["code"] as? String
         let reason = (error?["details"] as? [[String: Any]])?
             .compactMap { $0["reason"] as? String }.first
         // A non-JSON body (edge HTML, proxy text) is still what the server said, so quote it.
@@ -15,11 +17,11 @@ public enum GeminiFailureClassifier {
             ?? body.flatMap { String(data: $0, encoding: .utf8) }
             ?? ""
         let (category, disposition) = categorize(
-            httpStatus: httpStatus, status: status?.uppercased(), reason: reason?.uppercased(),
+            httpStatus: httpStatus, status: (status ?? code)?.uppercased(), reason: reason?.uppercased(),
             message: message.lowercased(), stage: stage)
         return ProviderFailure(
             source: source, stage: stage, category: category, disposition: disposition,
-            identity: .init(httpStatus: httpStatus, errorType: status, errorCode: reason),
+            identity: .init(httpStatus: httpStatus, errorType: status, errorCode: reason ?? code),
             message: message)
     }
 
@@ -54,7 +56,8 @@ public enum GeminiFailureClassifier {
     private static func categorize(
         httpStatus: Int, status: String?, reason: String?, message: String, stage: ProviderFailure.Stage
     ) -> (ProviderFailure.Category, ProviderFailure.Disposition) {
-        if reason == "API_KEY_INVALID" || status == "UNAUTHENTICATED" || httpStatus == 401 {
+        if reason == "API_KEY_INVALID" || status == "UNAUTHENTICATED" || status == "AUTHENTICATION"
+            || httpStatus == 401 {
             return (.authentication, .permanent)
         }
         if status == "PERMISSION_DENIED" || httpStatus == 403 {
@@ -67,7 +70,7 @@ public enum GeminiFailureClassifier {
             // One status covers rate limits and spent free-tier quota, so it stays temporary.
             return (.quota, .temporary)
         }
-        if status == "NOT_FOUND" || httpStatus == 404 {
+        if status == "NOT_FOUND" || status == "MODEL_NOT_FOUND" || httpStatus == 404 {
             return (.configuration, .permanent)
         }
         switch httpStatus {
@@ -80,7 +83,9 @@ public enum GeminiFailureClassifier {
 
     private static func errorObject(from body: Data?) -> [String: Any]? {
         guard let body, !body.isEmpty,
-              let root = try? JSONSerialization.jsonObject(with: body) as? [String: Any] else { return nil }
-        return root["error"] as? [String: Any]
+              let root = try? JSONSerialization.jsonObject(with: body) else { return nil }
+        // Interactions wraps a bad-key reply's older error body in a one-element list.
+        let object = (root as? [[String: Any]])?.first ?? (root as? [String: Any])
+        return object?["error"] as? [String: Any]
     }
 }
