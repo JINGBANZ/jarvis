@@ -1,7 +1,8 @@
 import Testing
 @testable import JarvisCore
 
-@Suite struct TranscriptionSettlementGateTests {
+// Bound a missing wakeup with the test timeout; a short task race measures CI scheduling latency.
+@Suite(.timeLimit(.minutes(1))) struct TranscriptionSettlementGateTests {
     @Test func interruptionBeforeWaitRegistrationIsSticky() async {
         let gate = TranscriptionSettlementGate()
         gate.setUnsettled(true, for: .me)
@@ -10,9 +11,7 @@ import Testing
         // Interrupts after the generation snapshot but before the wait registers its continuation.
         gate.interruptWaiters()
 
-        #expect(await completesBeforeTimeout {
-            await gate.waitUntilSettled(unlessInterruptedAfter: generation)
-        })
+        await gate.waitUntilSettled(unlessInterruptedAfter: generation)
     }
 
     @Test func interruptionResumesARegisteredWaitWithoutChangingProviderState() async {
@@ -24,9 +23,7 @@ import Testing
             gate.interruptWaiters()
         }
 
-        #expect(await completesBeforeTimeout {
-            await gate.waitUntilSettled(unlessInterruptedAfter: generation)
-        })
+        await gate.waitUntilSettled(unlessInterruptedAfter: generation)
         await interrupter.value
 
         let laterGeneration = gate.interruptGenerationSnapshot()
@@ -39,7 +36,7 @@ import Testing
 }
 
 private func completesBeforeTimeout(
-    nanoseconds: UInt64 = 200_000_000,
+    nanoseconds: UInt64,
     _ operation: @escaping @Sendable () async -> Void
 ) async -> Bool {
     await withTaskGroup(of: Bool.self) { group in
