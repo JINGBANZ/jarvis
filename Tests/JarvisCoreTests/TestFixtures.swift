@@ -27,20 +27,4 @@ extension FileSessionAudit {
     func closeForTesting() async -> SessionAuditCloseResult {
         await close()
     }
-
-    func recordForTesting(
-        file: URL,
-        expectedLineCount: Int,
-        _ record: () -> Void
-    ) async -> Bool {
-        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
-        record()
-        while ContinuousClock.now < deadline {
-            let lineCount = (try? String(contentsOf: file, encoding: .utf8))?
-                .split(separator: "\n").count ?? 0
-            if lineCount >= expectedLineCount { return true }
-            await Task.yield()
-        }
-        return false
-    }
 }
