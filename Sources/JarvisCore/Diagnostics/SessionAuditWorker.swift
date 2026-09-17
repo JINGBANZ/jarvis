@@ -633,15 +633,25 @@ final class SessionAuditWorker: @unchecked Sendable {
     static func redactingImages(_ value: Any) -> Any {
         if let string = value as? String {
             guard string.hasPrefix("data:image/") else { return string }
-            return "[base64 image omitted — \(string.count / 1024) KB; the pixels are saved as shot-N.jpg in this session directory]"
+            return omittedImage(characters: string.count)
         }
         if let array = value as? [Any] {
             return array.map { redactingImages($0) }
         }
         if let dictionary = value as? [String: Any] {
-            return dictionary.mapValues { redactingImages($0) }
+            var redacted = dictionary.mapValues { redactingImages($0) }
+            // Gemini sends bare base64 with no `data:` prefix; the MIME type beside it names it.
+            if (dictionary["mime_type"] as? String)?.hasPrefix("image/") == true,
+               let data = dictionary["data"] as? String {
+                redacted["data"] = omittedImage(characters: data.count)
+            }
+            return redacted
         }
         return value
+    }
+
+    private static func omittedImage(characters: Int) -> String {
+        "[base64 image omitted — \(characters / 1024) KB; the pixels are saved as shot-N.jpg in this session directory]"
     }
 
     private static func outcomeName(_ outcome: TurnOutcome) -> String {

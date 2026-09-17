@@ -988,9 +988,9 @@ would only have moved the tangle.
   projection's session, `jlog`'s attachment, retention pruning, the close bookkeeping that keeps a
   still-sealing session from being pruned or evaluated, and the source-checkout lookup evaluation
   needs. It notifies the viewer through two closures rather than reaching into it.
-- **`BrainComposition`** owns provider preflight, brain-client construction, route construction with
-  its route-health callbacks, and the live reapply of brain preferences and credentials. It also
-  owns the route identity a Settings edit is announced against.
+- **`BrainComposition`** owns provider preflight, route construction with its route-health
+  callbacks, and the live reapply of brain preferences and credentials; `BrainClientFactory` builds
+  each target's clients. It also owns the route identity a Settings edit is announced against.
 
 `BrainCompositionHost` is the whole interface between composition and the runtime: four read-only
 accessors for the live session (`liveCoachDriver`, `liveSessionDirectory`, `liveSessionEvidence`,

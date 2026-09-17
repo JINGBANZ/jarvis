@@ -25,7 +25,8 @@ secrets file, and Codex and Claude Code signed in from Settings → Connections.
   `JarvisScreenCapture` is the OS-bound `screencapture` process/file adapter behind Core's
   `ScreenCapturing` port, split out so `JarvisScreenCaptureTests` can drive its cancellation,
   cleanup-verification, and latch contract headlessly. `JarvisBrainProviders` is the
-  Foundation-only concrete brain-provider library (the Responses client every brain target uses,
+  Foundation-only concrete brain-provider library (the brain transport every target uses, its
+  per-API wire formats, and the client factory,
   the bundled subscription helper's supervisor and sign-in, and the agent CLI detector and runner
   the session evaluator uses), composed by the app at Start. `JarvisEvaluation` is the
   Foundation-only sealed-session evaluation library shared by the app and `EvalPrep`.

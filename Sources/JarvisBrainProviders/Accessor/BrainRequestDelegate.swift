@@ -7,7 +7,7 @@ import FoundationNetworking
 /// Per-task diagnostics preserve the shared session's connection pooling and cancellation behavior.
 /// Only allowlisted metadata enters the audit: never URLs, headers, bodies, or NSError.userInfo text.
 /// `@unchecked Sendable` is safe because the sole mutable field is protected by `lock`.
-final class OpenAINetworkDiagnostics: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+final class BrainRequestDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var collectedPhases: [String: Int] = [:]
 

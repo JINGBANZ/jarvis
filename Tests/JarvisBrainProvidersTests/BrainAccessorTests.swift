@@ -73,7 +73,7 @@ private func speakResponseBody(arguments: String) -> Data {
             .rawItems([
                 #"{"type":"reasoning","id":"rs_1","summary":[]}"#,
                 #"{"type":"function_call","id":"fc_1","call_id":"call_1","name":"capture_screen","arguments":"{}"}"#,
-            ]),
+            ], calls: [RawToolCall(id: "call_1", name: "capture_screen", argumentsJSON: "{}")]),
             .init(role: .tool, text: "screenshot captured", toolCallId: "call_1"),
         ]
         _ = try await client.respond(messages: convo, tools: coachTools(detailEnabled: true))

@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import JarvisBrainProviders
 
-@Suite struct OpenAINetworkDiagnosticsTests {
+@Suite struct BrainRequestDelegateTests {
     @Test func errorSummaryKeepsCodesWithoutLeakingErrorPayloads() {
         let error = NSError(domain: NSURLErrorDomain, code: NSURLErrorTimedOut, userInfo: [
             NSLocalizedDescriptionKey: "secret conversation",
@@ -10,14 +10,14 @@ import Testing
             NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: 54,
                                          userInfo: [NSLocalizedDescriptionKey: "private payload"]),
         ])
-        let summary = OpenAINetworkDiagnostics.errorSummary(error)
+        let summary = BrainRequestDelegate.errorSummary(error)
         #expect(summary == "error_domain=NSURLErrorDomain error_code=-1001 underlying_domain=NSPOSIXErrorDomain underlying_code=54")
         #expect(!summary.contains("secret"))
         #expect(!summary.contains("private"))
     }
 
     @Test func arbitraryErrorDomainsCannotInjectLogContent() {
-        let summary = OpenAINetworkDiagnostics.errorSummary(
+        let summary = BrainRequestDelegate.errorSummary(
             NSError(domain: "secret\nforged-log", code: 7))
         #expect(summary == "error_domain=other error_code=7")
     }

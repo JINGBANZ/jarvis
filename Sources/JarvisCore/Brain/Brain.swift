@@ -19,7 +19,8 @@ public struct ChatMessage: Sendable {
     public let imageBase64JPEG: String?
     public let toolCallId: String?
     public let toolCalls: [RawToolCall]?
-    /// Re-emitted untouched: OpenAI rejects output items not replayed byte-for-byte and in order.
+    /// Re-emitted untouched, and nothing else for the message: OpenAI rejects output items not
+    /// replayed byte-for-byte and in order. `CoachHistory.commit` drops them and keeps `toolCalls`.
     public let rawItemsJSON: [String]?
 
     public init(role: Role, text: String? = nil, imageBase64JPEG: String? = nil,
@@ -37,7 +38,9 @@ public struct ChatMessage: Sendable {
     public static func user(_ t: String) -> ChatMessage { .init(role: .user, text: t) }
     public static func userImage(_ base64JPEG: String) -> ChatMessage { .init(role: .user, imageBase64JPEG: base64JPEG) }
     public static func assistantToolCalls(_ calls: [RawToolCall]) -> ChatMessage { .init(role: .assistant, toolCalls: calls) }
-    public static func rawItems(_ itemsJSON: [String]) -> ChatMessage { .init(role: .assistant, rawItemsJSON: itemsJSON) }
+    public static func rawItems(_ itemsJSON: [String], calls: [RawToolCall]) -> ChatMessage {
+        .init(role: .assistant, toolCalls: calls, rawItemsJSON: itemsJSON)
+    }
 }
 
 public struct ToolDef: Sendable, Equatable {
