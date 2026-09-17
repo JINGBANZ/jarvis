@@ -226,7 +226,7 @@ final class LiveE2ERunner: BrainCompositionHost {
                 openAIExpectedLanguages: [],
                 appleSpeechLocaleIdentifier: Defaults.Transcription.appleSpeechLocaleIdentifier),
             transcriptionKey: key,
-            brainAPIKey: key,
+            brainKeys: brain.savedKeys(for: route),
             brainRoute: route,
             appleSpeechLocale: nil,
             screen: SessionPlan.default.screen,
