@@ -127,7 +127,7 @@ final class SettingsPageView: NSView {
             let labelHeight = ceil(chipLabel.fittingSize.height)
             let capsBottom = (contentHeight - font.capHeight) / 2
             chipLabel.frame = NSRect(
-                x: 11, y: ((capsBottom + font.ascender - labelHeight) * 2).rounded() / 2,
+                x: 11, y: pixelAligned(capsBottom + font.ascender - labelHeight),
                 width: chipWidth - 22, height: labelHeight)
         }
         let textWidth = max(0, bounds.width - inset - x - chipWidth - 12)
