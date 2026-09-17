@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.1](https://github.com/JINGBANZ/jarvis/compare/v0.3.0...v0.3.1) (2026-09-17)
+
+
+### Features
+
+* **coach:** check on a quiet candidate after 45 seconds, then back off fourfold ([#342](https://github.com/JINGBANZ/jarvis/issues/342)) ([60ae964](https://github.com/JINGBANZ/jarvis/commit/60ae9641e45ecde10fe28eb53653e991655e1084))
+* **overlay:** add detail navigation hotkeys ([#350](https://github.com/JINGBANZ/jarvis/issues/350)) ([5bf7eed](https://github.com/JINGBANZ/jarvis/commit/5bf7eed31db3f10e0d31cb7c0e71ff3822436ca9))
+* **settings:** redesign Settings as a robot hub with Tools and Skills pages ([#347](https://github.com/JINGBANZ/jarvis/issues/347)) ([40fec24](https://github.com/JINGBANZ/jarvis/commit/40fec24e0749562895542cc6bd5399bcbc84c065))
+
+
+### Bug Fixes
+
+* **coach:** restore code alongside actionable hints ([#349](https://github.com/JINGBANZ/jarvis/issues/349)) ([16815be](https://github.com/JINGBANZ/jarvis/commit/16815bea3efdd430f613bd830604ef45089ed53a))
+
 ## [0.3.0](https://github.com/JINGBANZ/jarvis/compare/v0.2.4...v0.3.0) (2026-09-16)
 
 
