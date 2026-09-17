@@ -1,6 +1,6 @@
 ---
 name: coding
-description: Base guidance for every coding problem, including Code with AI. Also check the available AI-collaboration skill when the round permits a coding assistant; loading coding alone does not establish that this is an ordinary coding round.
+description: Use when the question is a coding problem, including Code with AI; this is the base coding guidance. Also check the available AI-collaboration skill when the round permits a coding assistant; loading coding alone does not establish that this is an ordinary coding round.
 ---
 # Coding questions
 

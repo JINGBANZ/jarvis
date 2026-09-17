@@ -1,6 +1,6 @@
 ---
 name: coding-with-ai
-description: Add to coding when the conversation establishes AI collaboration, the candidate uses a coding assistant, or the task offers one. An available task-integrated assistant tab plus clear AI-coding task context is sufficient even with zero AI messages or an unselected tab; recognize its role regardless of name. Generic browser AI controls, unrelated tabs, or disabled controls alone are insufficient. Explicit interview restrictions take precedence.
+description: Use when the conversation establishes AI collaboration, the candidate uses a coding assistant, or the task offers one. An available task-integrated assistant tab plus clear AI-coding task context is sufficient even with zero AI messages or an unselected tab; recognize its role regardless of name. Generic browser AI controls, unrelated tabs, or disabled controls alone are insufficient. Explicit interview restrictions take precedence.
 ---
 # Coding with AI
 
