@@ -900,7 +900,8 @@ is about 60 MB on disk and 20 MB per update.
   replacement waits for the next explicit start, which reuses the port and key. A probe whose caller
   was cancelled, by Stop, a newer Start, or a closing Settings window, proves nothing about the helper
   and leaves it alone. A helper that exits before
-  it answers is a failed start and is not retried until asked. A Jarvis that ended without Quit leaves
+  Jarvis has seen it answer, including while that probe is in flight, is a failed start and is not
+  retried until asked. A Jarvis that ended without Quit leaves
   its helper and configuration behind; the next launch stops that helper, once its process is proven
   to be this executable, and removes the files.
 - **Readiness is the model list.** One probe per Start or reapply: the helper lists a vendor's models

@@ -6,7 +6,8 @@ import Darwin
 struct ModelListStub: Sendable {
     private let descriptor: Int32
 
-    init(port: Int, body: String) throws {
+    /// `beforeResponding` runs on the stub's thread for every request, so it can hold an answer back.
+    init(port: Int, body: String, beforeResponding: @escaping @Sendable () -> Void = {}) throws {
         let descriptor = socket(AF_INET, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw POSIXError(.EIO) }
         var reuse: Int32 = 1
@@ -32,8 +33,13 @@ struct ModelListStub: Sendable {
             while true {
                 let client = accept(descriptor, nil, nil)
                 guard client >= 0 else { return }
+                // A held answer can outlive the client's timeout; writing to that closed socket
+                // must not SIGPIPE the test process.
+                var noSigPipe: Int32 = 1
+                setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
                 var request = [UInt8](repeating: 0, count: 4_096)
                 _ = read(client, &request, request.count)
+                beforeResponding()
                 _ = response.withUnsafeBytes { write(client, $0.baseAddress, $0.count) }
                 close(client)
             }
