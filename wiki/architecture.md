@@ -311,11 +311,10 @@ block rules and the `diff` correction shape, the `system-design` skill the merma
 the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
 a session that never loads the skill never pays for it in its cached prefix.
 
-With detail available, the coding skill pairs each actionable coding hint with the small block
-implementing that hint in the same reply, including an ordinary hint-shortcut reply. Conceptual
-guidance without a useful implementation can remain text-only. The general detail default defers
-to the loaded skill so brevity does not make the user press Show code for every implementation
-step. Code does not require a longer explanation; the confusion policy below governs prose.
+The general detail default defers to the loaded skill so brevity does not make the user press
+Show code for every implementation step. The pairing rules and exceptions live in the
+[`coding` skill](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md); the core keeps no second
+copy of that domain policy.
 
 [`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into what the box
 shows: the prose, the first fenced block the code bounds accept, and the first `mermaid` fence the
