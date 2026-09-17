@@ -11,17 +11,23 @@ public struct BrainProviderDescriptor: Sendable, Equatable {
 
     public enum AuthScheme: Sendable, Equatable {
         case bearer
+        case googAPIKey
     }
 
     public enum WireFormat: Sendable, Equatable {
         case responses
+        case interactions
     }
 
     public enum FailureTable: Sendable, Equatable {
         case openAI
+        case gemini
     }
 
     public static let openAIResponsesEndpoint = URL(string: "https://api.openai.com/v1/responses")!
+    // The stable version; the probe found it identical to v1beta.
+    public static let geminiInteractionsEndpoint =
+        URL(string: "https://generativelanguage.googleapis.com/v1/interactions")!
 
     public let displayName: String
     public let access: Access
