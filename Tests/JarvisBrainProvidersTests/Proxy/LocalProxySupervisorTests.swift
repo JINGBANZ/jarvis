@@ -148,19 +148,38 @@ import Testing
         #expect(await supervisor.ensureRunning() == .failed(reason: "is missing from this build"))
     }
 
-    /// The supervisor gives up at the fourth stop within its window.
+    /// The supervisor gives up at the fourth stop within its window. Each helper exits only once the
+    /// test has seen it answer: a helper that exits mid-probe leaves the start unfinished with no
+    /// restart, so a fixed lifetime flakes on a slow runner.
     @Test func aHelperThatKeepsStoppingRestartsThenGivesUp() async throws {
         try await withSupervisor(
-            script: "echo launched >> \"$(dirname \"$0\")/launches\"\nexec /bin/sleep 0.4",
+            script: """
+                dir="$(dirname "$0")"
+                echo launched >> "$dir/launches"
+                life=$(grep -c . "$dir/launches")
+                until [ -e "$dir/release-$life" ]; do sleep 0.05; done
+                """,
             clock: ImmediateClock()
-        ) { supervisor, first, home in
+        ) { supervisor, first, home async throws in
             guard case .running(let endpoint) = first else {
                 Issue.record("expected the first start to answer, got \(first)")
                 return
             }
+            let launches = home.appendingPathComponent("launches")
+            @Sendable func launchCount() -> Int {
+                ((try? String(contentsOf: launches, encoding: .utf8)) ?? "").split(separator: "\n").count
+            }
+            for life in 1...4 {
+                // Count first: once this launch is recorded, `.running` can only be its own.
+                #expect(await eventually {
+                    guard launchCount() == life else { return false }
+                    return await supervisor.state == .running(endpoint)
+                })
+                FileManager.default.createFile(
+                    atPath: home.appendingPathComponent("release-\(life)").path, contents: nil)
+            }
             #expect(await eventually { await supervisor.state == .failed(reason: "keeps stopping") })
-            let launches = try String(contentsOf: home.appendingPathComponent("launches"), encoding: .utf8)
-            #expect(launches.split(separator: "\n").count == 4)
+            #expect(launchCount() == 4)
             #expect(try await configuredPort(supervisor) == endpoint.baseURL.port)
             #expect(try String(contentsOf: supervisor.configURL, encoding: .utf8)
                 .contains("  - \"\(endpoint.key)\""))
