@@ -5,6 +5,36 @@ import Testing
 
 @MainActor
 @Suite struct DetailLayoutTests {
+    @Test func placementHeaderRendersAboveCodeWithInlineAnchor() throws {
+        let detail = try #require(ReplyDetail(markdown: """
+            Inside your `for right, ch in enumerate(s):` loop.
+
+            ```python
+            if ch in seen:
+                left = max(left, seen[ch] + 1)
+            seen[ch] = right
+            ```
+            """))
+        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        view.show(detail, stamp: "10:30:00", position: (0, 1), isHeld: false, isRolled: false,
+                  fontSize: 18)
+        view.layoutSubtreeIfNeeded()
+        let scroll = try #require(view.subviews.compactMap { $0 as? NSScrollView }.first)
+        let document = try #require(scroll.documentView)
+        let texts = document.subviews.compactMap { $0 as? NSTextView }
+        let header = try #require(texts.first { $0.accessibilityLabel() == "Detail" })
+        let code = try #require(texts.first { $0.accessibilityLabel() == "Code block" })
+        #expect(!header.isHidden)
+        #expect(header.string == "Inside your for right, ch in enumerate(s): loop.")
+        #expect(header.frame.maxY <= code.frame.minY)
+        #expect(scroll.documentVisibleRect.contains(header.frame))
+        let anchor = (header.string as NSString).range(of: "for right, ch in enumerate(s):")
+        let font = try #require(header.attributedString().attribute(
+            .font, at: anchor.location, effectiveRange: nil) as? NSFont)
+        #expect(font.isFixedPitch)
+        #expect(view.codeText.string == "if ch in seen:\n    left = max(left, seen[ch] + 1)\nseen[ch] = right")
+    }
+
     @Test func longLinesWrapWithoutChangingTheCode() throws {
         let detail = try #require(ReplyDetail(markdown: """
             ```python

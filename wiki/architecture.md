@@ -316,6 +316,11 @@ Show code for every implementation step. The pairing rules and exceptions live i
 [`coding` skill](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md); the core keeps no second
 copy of that domain policy.
 
+Code details carry a short placement header above the fenced block, with inline code styling for
+visible anchors, so the location stays with the code when the hint scrolls away. This contextual
+header is allowed independently of explanation paragraphs; without visible code it states the
+placement assumption instead of inventing an editor location.
+
 [`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into what the box
 shows: the prose, the first fenced block the code bounds accept, and the first `mermaid` fence the
 renderer accepts. A candidate the box rejects on the way to that one is removed from the prose, from
