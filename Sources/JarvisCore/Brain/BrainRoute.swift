@@ -24,6 +24,10 @@ public struct BrainRoute: Sendable, Equatable {
         [primary] + fallbackTargets
     }
 
+    public var requiredCredentials: Set<Credential> {
+        Set(targets.compactMap(\.provider.credential))
+    }
+
     /// Index 0 is the primary; `nil` when either position is outside the route. Rebuilding through
     /// `init` keeps the result normalized.
     public func movingTarget(at index: Int, by offset: Int) -> BrainRoute? {
