@@ -1,0 +1,67 @@
+import Testing
+@testable import JarvisCore
+
+/// The hub's slot lines. They must stay short enough for a 232-point slot and say what is saved.
+@Suite struct RobotPartSummariesTests {
+    @Test func brainNamesTheModelTheProviderAndTheEffortLevel() {
+        let summary = RobotPartSummaries.brain(
+            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5"),
+            effort: .high)
+        #expect(summary == RobotPartSummary(value: "GPT-5.5", detail: "VIA CODEX", level: 3))
+    }
+
+    @Test func noEffortLightsNoBars() {
+        let summary = RobotPartSummaries.brain(
+            primary: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), effort: .none)
+        #expect(summary.level == 0)
+        #expect(summary.detail == "VIA OPENAI API")
+    }
+
+    @Test func earShortensTheModelAndListsLanguages() {
+        let configuration = TranscriptionConfiguration(
+            provider: .openAI,
+            openAIModel: .gpt4oTranscribe,
+            openAIExpectedLanguages: [.mandarinChinese, .english],
+            appleSpeechLocaleIdentifier: "en_US")
+        #expect(RobotPartSummaries.ear(configuration)
+            == RobotPartSummary(value: "OpenAI · GPT-4o", detail: "HEARS EN · 中文"))
+    }
+
+    /// A model already named for its vendor reads alone, so the slot never says "Gemini" twice.
+    @Test func geminiDoesNotRepeatTheVendor() {
+        let configuration = TranscriptionConfiguration(
+            provider: .gemini,
+            openAIModel: .gpt4oTranscribe,
+            openAIExpectedLanguages: [],
+            appleSpeechLocaleIdentifier: "en_US")
+        #expect(RobotPartSummaries.ear(configuration)
+            == RobotPartSummary(value: "Gemini 3.5 Live", detail: "HEARS ANY LANGUAGE"))
+    }
+
+    @Test func appleSpeechShowsItsLocale() {
+        let configuration = TranscriptionConfiguration(
+            provider: .appleSpeech,
+            openAIModel: .gpt4oTranscribe,
+            openAIExpectedLanguages: [],
+            appleSpeechLocaleIdentifier: "zh_CN")
+        #expect(RobotPartSummaries.ear(configuration)
+            == RobotPartSummary(value: "Apple Speech", detail: "HEARS ZH-CN"))
+    }
+
+    @Test func eyeDescribesTheScope() {
+        #expect(RobotPartSummaries.eye(scope: .activeWindow, displayIndex: 1, browserTextEnabled: false)
+            == RobotPartSummary(value: "Active window", detail: "CHROME TEXT OFF"))
+        #expect(RobotPartSummaries.eye(scope: .activeWindow, displayIndex: 1, browserTextEnabled: true)
+            .detail == "CHROME TEXT ON")
+        #expect(RobotPartSummaries.eye(scope: .entireDisplay, displayIndex: 2, browserTextEnabled: true)
+            == RobotPartSummary(value: "Display 2", detail: "WHOLE SCREEN"))
+    }
+
+    @Test func mouthNamesWhatIsOnScreen() {
+        #expect(RobotPartSummaries.mouth(captionEnabled: false, boxEnabled: true)
+            == RobotPartSummary(value: "Overlay Box", detail: "BOX ON · CAPTION OFF"))
+        #expect(RobotPartSummaries.mouth(captionEnabled: true, boxEnabled: true).value == "Box and caption")
+        #expect(RobotPartSummaries.mouth(captionEnabled: true, boxEnabled: false).value == "Caption")
+        #expect(RobotPartSummaries.mouth(captionEnabled: false, boxEnabled: false).value == "Nothing on screen")
+    }
+}

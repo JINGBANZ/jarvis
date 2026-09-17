@@ -266,4 +266,51 @@ import Foundation
             }
         }
     }
+
+    /// Two targets of one provider: the swap moves that provider's remembered model with the primary,
+    /// and the old primary survives as an explicit fallback.
+    @Test func reorderingThePrimaryPersistsTheNewOrder() throws {
+        let d = freshDefaults()
+        let p = BrainPreferences(defaults: d)
+        let primary = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let fallback = BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini")
+        p.route = BrainRoute(primary: primary, fallbackTargets: [fallback])
+
+        p.route = try #require(p.route.movingTarget(at: 0, by: 1))
+
+        let reread = BrainPreferences(defaults: d)
+        #expect(reread.primaryTarget == fallback)
+        #expect(reread.fallbackTargets == [primary])
+        #expect(reread.model(for: .openAI).id == "gpt-5.4-mini")
+    }
+
+    /// Every UserDefaults write posts a change notification, even an identical one, and Settings
+    /// refreshes on that notification, so reading a route that is already normal must not write.
+    /// A write would drop the extra key this test plants.
+    @Test func readingANormalRouteLeavesStorageAlone() {
+        let d = freshDefaults()
+        d.set("openai", forKey: Defaults.Brain.providerKey)
+        d.set([["provider": "openai", "modelID": "gpt-5.4-mini", "marker": "untouched"]],
+              forKey: Defaults.Brain.fallbackTargetsKey)
+        let p = BrainPreferences(defaults: d)
+
+        _ = p.route
+        _ = p.fallbackTargets
+
+        let stored = d.array(forKey: Defaults.Brain.fallbackTargetsKey) as? [[String: String]]
+        #expect(stored?.first?["marker"] == "untouched")
+    }
+
+    @Test func readingAStaleRouteStillRewritesIt() {
+        let d = freshDefaults()
+        d.set("openai", forKey: Defaults.Brain.providerKey)
+        d.set([
+            ["provider": "openai", "modelID": "retired-model"],
+            ["provider": "openai", "modelID": "gpt-5.4-mini"],
+        ], forKey: Defaults.Brain.fallbackTargetsKey)
+        let p = BrainPreferences(defaults: d)
+
+        #expect(p.fallbackTargets == [BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini")])
+        #expect((d.array(forKey: Defaults.Brain.fallbackTargetsKey) ?? []).count == 1)
+    }
 }

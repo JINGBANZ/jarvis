@@ -44,7 +44,12 @@ public final class BrainPreferences {
             let candidates = stored.compactMap { persistedTarget(from: $0) }
             let normalized = BrainRoute(
                 primary: primaryTarget, fallbackTargets: candidates).fallbackTargets
-            persistFallbackTargets(normalized)
+            // Normalization only drops entries, so a count change is the only reason to rewrite.
+            // Every UserDefaults write posts a change notification, even an identical one, and the
+            // Settings window refreshes on that notification.
+            if normalized.count != stored.count {
+                persistFallbackTargets(normalized)
+            }
             return normalized
         }
         set {
@@ -96,9 +101,9 @@ public final class BrainPreferences {
         set { defaults.set(newValue.rawValue, forKey: Defaults.Brain.effortKey) }
     }
 
-    /// Tool names the user switched off in Settings → Brain → Capabilities, applied at the next
-    /// Start. Storing what is OFF rather than what is ON means a tool added in a later version is
-    /// on for everyone who never opened the card. The tools a session cannot run without are
+    /// Tool names the user switched off in Settings → Tools, applied at the next Start. Storing
+    /// what is OFF rather than what is ON means a tool added in a later version is on for everyone
+    /// who never opened the page. The tools a session cannot run without are
     /// dropped on write, so a hand-edited plist cannot compose a session that can never speak.
     public var disabledTools: Set<String> {
         get {
@@ -112,8 +117,8 @@ public final class BrainPreferences {
         }
     }
 
-    /// Skill names the user switched off, on the same terms as `disabledTools`: stored as what is
-    /// OFF, applied at the next Start. No skill is required for a session to run, so nothing is
+    /// Skill names the user switched off in Settings → Skills, on the same terms as
+    /// `disabledTools`: stored as what is OFF, applied at the next Start. No skill is required for a session to run, so nothing is
     /// dropped on write; a name matching no bundled skill is simply honored as nothing.
     public var disabledSkills: Set<String> {
         get {
