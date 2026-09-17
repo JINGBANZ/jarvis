@@ -18,7 +18,6 @@ extension RobotHeadView {
     static let visorRect = NSRect(x: 340, y: 212, width: 140, height: 42)
     static let eyeCenters = [NSPoint(x: 382, y: 233), NSPoint(x: 438, y: 233)]
     static let mouthRect = NSRect(x: 374, y: 292, width: 72, height: 46)
-    /// x, the two heights it swings between, and the swing period in seconds.
     static let mouthBars: [(x: CGFloat, from: CGFloat, to: CGFloat, period: Double)] = [
         (386, 12, 20, 1.2), (397, 24, 12, 1.4), (408, 32, 18, 1.0), (419, 20, 28, 1.3), (430, 10, 16, 1.1),
     ]
@@ -28,7 +27,6 @@ extension RobotHeadView {
         [NSPoint(x: 430, y: 184), NSPoint(x: 430, y: 172), NSPoint(x: 452, y: 172), NSPoint(x: 452, y: 158)],
         [NSPoint(x: 470, y: 184), NSPoint(x: 470, y: 174)],
     ]
-    /// Dot centers, pulse periods, and whether a dot starts dim (the pulses alternate).
     static let circuitDots: [(center: NSPoint, period: Double, startsDim: Bool)] = [
         (NSPoint(x: 372, y: 156), 1.8, false), (NSPoint(x: 410, y: 146), 1.8, true),
         (NSPoint(x: 452, y: 158), 2.2, false), (NSPoint(x: 470, y: 174), 2.2, true),

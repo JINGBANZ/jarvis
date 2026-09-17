@@ -218,12 +218,10 @@ final class RobotHeadView: NSView {
         NSGraphicsContext.restoreGraphicsState()
     }
 
-    /// 0 at t = 0, 1 at half the period, back to 0: the prototype's `from;to;from` keyframes.
     private static func swing(_ time: Double, period: Double) -> CGFloat {
         CGFloat((1 - cos(2 * .pi * time / period)) / 2)
     }
 
-    /// The eyes' vertical radius over a 4-second blink cycle: open, a quick close at 90 to 96 percent.
     private static func eyeOpenness(_ time: Double) -> CGFloat {
         let u = time.truncatingRemainder(dividingBy: 4) / 4
         switch u {

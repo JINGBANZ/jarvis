@@ -16,7 +16,6 @@ public enum RobotHub {
                 detail = liveDetail(activeTarget: active, route: inputs.route)
                 tone = .live
             }
-            // A problem outranks the live line: it is what the user can act on.
             if case .needsAttention(let reason, _, _)? = health {
                 detail = reason
                 tone = .attention

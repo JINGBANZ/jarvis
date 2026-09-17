@@ -2,8 +2,7 @@ import AppKit
 import JarvisCore
 import UniformTypeIdentifiers
 
-/// The switch stays enabled, but the runtime offers `search_prep_notes` only when sources exist, so
-/// its detail asks for notes while the list is empty.
+// Design: wiki/settings-window.md#tools
 @MainActor
 final class ToolsSection: NSObject, SettingsSection {
     let destination = SettingsDestination.tools
@@ -150,7 +149,7 @@ final class ToolsSection: NSObject, SettingsSection {
         layoutCard()
 
         // Existence is a stat() per source, which can block on a network volume or a sleeping disk,
-        // so it never runs on the main thread. A still-current render then marks the missing ones.
+        // so it never runs on the main thread.
         guard isOn, !sources.isEmpty else { return }
         Task.detached(priority: .utility) { [sources] in
             let missing = sources.filter { !$0.exists() }

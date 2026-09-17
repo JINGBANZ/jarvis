@@ -1,8 +1,6 @@
 @testable import JarvisCore
 
 extension RobotHubInputs {
-    /// A configured hub: Codex primary on High effort, OpenAI transcription hearing English, the
-    /// active window without Chrome text, and the box on with the caption off.
     static func fixture(
         route: BrainRoute = BrainRoute(
             primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5"), fallbackTargets: []),
@@ -32,7 +30,6 @@ extension RobotHubInputs {
 }
 
 extension RobotReadiness {
-    /// Everything granted and saved unless a test says otherwise.
     static func fixture(
         signedOut: Set<BrainProvider> = [],
         credentials: Set<Credential> = [.openAIAPIKey, .geminiAPIKey],

@@ -5,7 +5,6 @@ extension Skill {
     /// otherwise read as a word ("Coding with ai").
     private static let initialisms: Set<String> = ["ai"]
 
-    /// The skill's name as a sentence-case title: "system-design" reads "System design".
     public var displayTitle: String {
         name.split(separator: "-").enumerated().map { index, word in
             let lower = word.lowercased()

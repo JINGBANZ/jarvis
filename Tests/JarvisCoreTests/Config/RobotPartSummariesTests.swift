@@ -26,7 +26,6 @@ import Testing
             == RobotPartSummary(value: "OpenAI · GPT-4o", detail: "HEARS EN · 中文"))
     }
 
-    /// A model already named for its vendor reads alone, so the slot never says "Gemini" twice.
     @Test func geminiDoesNotRepeatTheVendor() {
         let configuration = TranscriptionConfiguration(
             provider: .gemini,

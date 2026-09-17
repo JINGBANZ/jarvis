@@ -64,7 +64,7 @@ final class SettingsCardView: NSBox {
         if let content = contentView, headerHeight > 0 {
             let y = content.bounds.height - headerHeight
             let inset = SettingsStyle.rowHorizontalInset
-            // The detail takes whatever the title leaves, so a sentence-long detail still reads.
+            // Capped so a sentence-long detail still has room.
             let headingWidth = min(ceil(headingLabel.fittingSize.width), content.bounds.width * 0.55)
             headingLabel.frame = NSRect(x: inset, y: y + 13, width: headingWidth, height: 18)
             let detailX = inset + headingWidth + 12

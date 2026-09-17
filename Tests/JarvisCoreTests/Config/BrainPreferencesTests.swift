@@ -258,8 +258,6 @@ import Foundation
         }
     }
 
-    /// Two targets of one provider: the swap moves that provider's remembered model with the primary,
-    /// and the old primary survives as an explicit fallback.
     @Test func reorderingThePrimaryPersistsTheNewOrder() throws {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)

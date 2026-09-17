@@ -11,7 +11,6 @@ final class SettingsPageView: NSView {
         static func live(_ text: String) -> Chip { Chip(text: text, tone: .live) }
     }
 
-    /// `nil` hides the back button.
     var onBack: (() -> Void)? {
         didSet {
             backButton.isHidden = onBack == nil
@@ -118,16 +117,13 @@ final class SettingsPageView: NSView {
             chipWidth = ceil(chipLabel.fittingSize.width) + 22
             chipBox.frame = NSRect(x: bounds.width - inset - chipWidth, y: headerTop - 34,
                                    width: chipWidth, height: Self.chipHeight)
-            // A label draws from the top of its frame, and all-capitals text has no descenders, so a
-            // centered label would sit the capitals high. Center the capitals themselves.
-            let font = Self.chipFont
             // Not the box's content view: it keeps a stale size until the box lays itself out, and a
             // page laid out only once would keep the wrong position.
             let contentHeight = Self.chipHeight - 2 * chipBox.borderWidth
             let labelHeight = ceil(chipLabel.fittingSize.height)
-            let capsBottom = (contentHeight - font.capHeight) / 2
             chipLabel.frame = NSRect(
-                x: 11, y: pixelAligned(capsBottom + font.ascender - labelHeight),
+                x: 11,
+                y: labelY(centeringCapitalsIn: contentHeight, font: Self.chipFont, labelHeight: labelHeight),
                 width: chipWidth - 22, height: labelHeight)
         }
         let textWidth = max(0, bounds.width - inset - x - chipWidth - 12)

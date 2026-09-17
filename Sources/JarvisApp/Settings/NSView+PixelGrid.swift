@@ -7,4 +7,10 @@ extension NSView {
         let scale = window?.backingScaleFactor ?? 2
         return (value * scale).rounded() / scale
     }
+
+    /// A label draws its text from the top of its frame, and all-capitals text has no descenders,
+    /// so centering the frame would sit the capitals high.
+    func labelY(centeringCapitalsIn height: CGFloat, font: NSFont, labelHeight: CGFloat) -> CGFloat {
+        pixelAligned((height - font.capHeight) / 2 + font.ascender - labelHeight)
+    }
 }

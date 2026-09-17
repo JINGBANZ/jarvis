@@ -162,11 +162,9 @@ final class BrainTargetRowView: NSView {
             statusTag.frame = NSRect(
                 x: 0, y: selectionY - 2, width: min(labelWidth, ceil(labelSize.width) + 10),
                 height: tagHeight)
-            // A label draws its capitals a fixed distance below its top edge, and they have no
-            // descenders, so the label is placed to center the capitals rather than its own frame.
-            let capsBottom = (tagHeight - font.capHeight) / 2
             statusLabel.frame = NSRect(
-                x: 5, y: pixelAligned(capsBottom + font.ascender - ceil(labelSize.height)),
+                x: 5,
+                y: labelY(centeringCapitalsIn: tagHeight, font: font, labelHeight: ceil(labelSize.height)),
                 width: ceil(labelSize.width), height: ceil(labelSize.height))
         } else {
             titleLabel.frame = NSRect(

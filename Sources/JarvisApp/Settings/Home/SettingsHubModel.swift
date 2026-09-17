@@ -1,6 +1,7 @@
 import Foundation
 import JarvisCore
 
+// Design: wiki/settings-window.md#status
 @MainActor
 final class SettingsHubModel {
     private(set) var state = RobotHubState.empty
@@ -46,7 +47,6 @@ final class SettingsHubModel {
         refresh(probe: false)
     }
 
-    /// Calls `handler` immediately, then on every change.
     @discardableResult
     func observe(_ handler: @escaping (RobotHubState) -> Void) -> UUID {
         let id = UUID()
@@ -59,8 +59,6 @@ final class SettingsHubModel {
         observers[id] = nil
     }
 
-    /// Only while Settings is open: Foundation posts this for every write in the app, even an
-    /// unchanged one. A burst such as a slider drag coalesces into one refresh.
     func beginObservingSettings() {
         guard defaultsObserver == nil else { return }
         defaultsObserver = NotificationCenter.default.addObserver(
@@ -84,8 +82,6 @@ final class SettingsHubModel {
         }
     }
 
-    /// Reading the route never writes (see `BrainPreferences.fallbackTargets`), so a refresh cannot
-    /// post the defaults notification that triggers it.
     private func inputs() -> RobotHubInputs {
         let route = brainPreferences.route
         return RobotHubInputs(

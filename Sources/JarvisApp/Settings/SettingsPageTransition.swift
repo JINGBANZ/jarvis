@@ -54,7 +54,6 @@ enum SettingsPageTransition {
         to end: (opacity: Float, transform: CATransform3D),
         reduce: Bool
     ) {
-        // An interrupted move starts from what is on screen; a fresh one from the given start.
         let isMoving = !(layer.animationKeys() ?? []).isEmpty
         let presentation = layer.presentation()
         let fromOpacity = isMoving ? (presentation?.opacity ?? layer.opacity) : start.opacity
@@ -82,11 +81,11 @@ enum SettingsPageTransition {
             fade.timingFunction = CAMediaTimingFunction(name: .linear)
             return fade
         }
-        // Critically damped, 0.38 s response: stiffness = (2π / 0.38)², damping = 4π / 0.38.
+        let response = 0.38
         let spring = CASpringAnimation(keyPath: keyPath)
         spring.mass = 1
-        spring.stiffness = 273.4
-        spring.damping = 33.07
+        spring.stiffness = pow(2 * .pi / response, 2)
+        spring.damping = 2 * (spring.stiffness * spring.mass).squareRoot()
         spring.fromValue = from
         spring.toValue = to
         spring.duration = spring.settlingDuration

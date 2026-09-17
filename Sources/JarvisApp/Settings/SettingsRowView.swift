@@ -46,7 +46,6 @@ final class SettingsRowView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// A `nil` color resets a detail recolored for a warning.
     func setDetail(_ detail: String?, color: NSColor? = nil) {
         detailLabel.stringValue = detail ?? ""
         detailLabel.toolTip = detail

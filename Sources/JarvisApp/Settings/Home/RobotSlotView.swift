@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import JarvisCore
 
 @MainActor
@@ -185,8 +186,8 @@ final class RobotSlotView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Key code 36 is Return and 76 is keypad Enter.
-        if event.charactersIgnoringModifiers == " " || event.keyCode == 36 || event.keyCode == 76 {
+        let isReturn = [kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode))
+        if event.charactersIgnoringModifiers == " " || isReturn {
             press()
         } else {
             super.keyDown(with: event)

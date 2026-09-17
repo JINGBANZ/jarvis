@@ -31,7 +31,6 @@ final class SettingsNoticeView: NSBox {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// The first sentence is bold and amber.
     private static func styled(_ text: String) -> NSAttributedString {
         let split = text.range(of: ". ")
         let lead = split.map { String(text[..<$0.upperBound]) } ?? text

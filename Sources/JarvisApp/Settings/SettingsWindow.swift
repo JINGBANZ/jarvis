@@ -5,7 +5,7 @@ import AppKit
 /// can't become first responder or accept paste.
 @MainActor
 final class SettingsWindow: NSObject, NSWindowDelegate {
-    /// Shared by every page, because per-page sizes made the window jump on each switch.
+    /// Shared by every page, so switching pages never resizes the window.
     private static let defaultContentSize = NSSize(width: 820, height: 600)
     private static let minContentSize = NSSize(width: 560, height: 460)
 
@@ -72,8 +72,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         if current == .home {
             returnOrigin = point.map { container.convert($0, from: nil) }
         }
-        // Moves to and from the hub use the remembered origin; a page-to-page move (a notice's fix
-        // button) grows from the center.
+        // The remembered origin is a hub slot, so a page-to-page move from a notice's fix button
+        // grows from the center.
         let center = NSPoint(x: container.bounds.midX, y: container.bounds.midY)
         let origin = destination == .home || current == .home ? (returnOrigin ?? center) : center
         current = destination
@@ -197,7 +197,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         for section in sections.values { section.windowWillClose() }
         hub.endObservingSettings()
         // Keep the window shell but release every page, so controls and Activity's WebView start
-        // fresh on the next open. The token bump drops a transition that is still running.
+        // fresh on the next open.
         transitionToken += 1
         returnOrigin = nil
         homeView?.removeFromSuperview()
