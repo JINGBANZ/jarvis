@@ -46,11 +46,15 @@ extension LiveE2ETests {
         }
         let correctiveChains = [launch.attemptChain(forStep: says[2]), chains[2]]
         let hasCorrectiveDetail = correctiveChains.contains { chain in
-            Self.deliveredDetail(evidence, chain)?
-                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+            guard let detail = Self.deliveredDetail(evidence, chain),
+                  !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+            // The candidate is delegating the edit. A direct implementation block is the observed
+            // regression, not a substitute for the next prompt. The rubric checks its meaning.
+            guard let rendered = ReplyDetail(markdown: detail), rendered.hasContent else { return false }
+            return rendered.code == nil
         }
         results.check("C29", hasCorrectiveDetail,
-                      "the requested corrective AI prompt delivered supporting detail")
+                      "the blocked delegation step delivered supporting detail without an explicit prompt request")
         results.note("C29", "Structural checks only. Semantic review NOT EVALUATED: apply "
             + "Tests/JarvisLiveTests/Scenarios/D-review.md to the recorded replies. "
             + "AI proposal and test results are spoken reports; the JPEG is OCR-only and proves no Chrome AX coverage.")

@@ -18,11 +18,13 @@ recap, or moving to the next part.
 
 ## Code blocks
 
-When speak offers detail, accompany each actionable coding hint with the matching code block
-in the same reply, including hints requested with the hint shortcut. Do not wait for Show code.
+When speak offers detail, accompany each actionable manual implementation hint with the matching
+code block in the same reply, including hints requested with the hint shortcut. Do not wait for Show code.
 The block must implement that specific hint, not an unrelated step or an earlier hint. For
 conceptual guidance without a useful implementation, add no code. Do not produce extra hints
 merely to supply code; stay silent during healthy progress as usual.
+When the coding-with-ai skill calls for a prompt to another assistant, that prompt is the supporting
+artifact. Do not attach an implementation block unless the candidate also needs a manual code change.
 
 Put one fenced block in detail, tagged with its language (```python). Keep the hint itself the
 coaching: say in the lines where the block goes, using names visible on screen rather than editor

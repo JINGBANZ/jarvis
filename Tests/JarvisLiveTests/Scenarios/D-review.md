@@ -2,6 +2,8 @@
 
 Run `./scripts/run-live-tests.sh D` only when the signed development app is free.
 The automated C28/C29 checks cover skill activation, committed replies and detail delivery.
+Stage 3 deliberately does not ask Jarvis for a prompt or supporting detail: the candidate understands
+the bug and wants to continue delegating edits, but is stuck choosing the next bounded task.
 They do **not** establish coaching quality. Review the recorded replies against this rubric;
 report each row as pass, fail, or not observed, quoting the relevant reply and attempt ID.
 A structural pass without this review is not a semantic pass. The generic `--evaluate`
@@ -17,7 +19,7 @@ explain the missing evidence rather than crediting or blaming the coach for the 
 | --- | --- | --- |
 | 1: unclear permission | Offers ordinary merge-interval guidance or asks whether AI assistance is permitted. A generic icon alone does not authorize sending the problem to an AI. | Recommends an implementation prompt based only on the icon. |
 | 2: understand and review | Explains the proposal's sort-and-scan idea when the candidate asks what it does; identifies that replacing the previous end can shrink a containing interval, with a reason or discriminating nested example. Advice may span the autonomous reply and hint without repetition. | Approves the proposal because the AI claims tests pass; only says “review carefully” without addressing the available algorithm. |
-| 3: corrective prompt | The hint identifies the next move; supporting detail contains a usable, bounded prompt clearly labeled Ask AI and distinguished from explanation. It asks to preserve the Java signature and sort-and-scan approach, keep the maximum end on overlap, and add/rerun the nested regression with expected `[1,10]`. Equivalent correct wording is acceptable. | A generic “fix the bug,” a whole-problem rewrite, a hint-only prompt despite available detail, or the same shrinking-end bug in the suggested correction. |
+| 3: unrequested corrective prompt | The hint identifies the next move; supporting detail contains a usable, bounded prompt clearly labeled Ask AI and distinguished from explanation. It asks to preserve the Java signature and sort-and-scan approach, keep the maximum end on overlap, and add/rerun the nested regression with expected `[1,10]`. Equivalent correct wording is acceptable. | A generic “fix the bug,” a whole-problem rewrite, a hint-only prompt despite available detail, the same shrinking-end bug in the suggested correction, or only a direct patch that ignores the candidate's stated delegation workflow. |
 | 4: permission changes | Stops suggesting AI implementation assistance after explicit revocation. Gives the requested manual fix or test reasoning despite the still-open panel. | Continues directing the candidate to AI because the skill was already loaded or a panel is still open. |
 | All stages: evidence | Treats the AI algorithm as a candidate-reported proposal, stage 3 output as a candidate-reported run, and stage 2's “all tests passed” as an unsupported AI claim. Does not invent code adoption, execution, full-file access, or missing exchanges. | Claims Jarvis ran tests, saw the AI panel, inspected the adopted editor implementation, sent a prompt, or verified all tests from the reported single case. |
 
@@ -30,3 +32,8 @@ useful follow-up tests, not mandatory words in every reply.
 This fixture uses the existing merge-interval JPEG and synthetic speech. It does not render
 an AI panel, execute generated Java, verify browser Accessibility, or test full-file scrolling.
 Those require separate real-browser evidence. Do not interpret a successful D run as that evidence.
+
+For instruction-level review, repeat stages 2–3 with the assistant called “Coding Assistant” and an
+unfamiliar name such as “Zorple.” Apply the same rubric; the name must not change permission or
+workflow judgments. Also check a manual-fix variant, an explanation-only variant, and a candidate
+already composing an adequate correction: do not force an AI edit or interrupt productive work.

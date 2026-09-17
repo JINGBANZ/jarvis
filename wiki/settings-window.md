@@ -496,8 +496,11 @@ cards sit in two columns, or one on a narrow window. The catalog is read when th
 The [Coding with AI skill](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)
 recognizes a usable assistant panel before the first prompt, with explicit interview restrictions
 taking precedence. Its coaching covers orientation, bounded delegation, understanding and evaluating
-AI output, and correcting it when needed. A suggested prompt uses the existing Markdown detail area
-when available, so it can be read separately from the short hint. When needed source is missing,
+AI output, and correcting it when needed. It identifies the coding assistant by its role and
+available actions, regardless of its name. When the candidate is already delegating edits and is
+stuck choosing the next task, the skill supplies a bounded prompt without requiring an explicit
+prompt request; chosen manual work still receives direct help. A suggested prompt uses the existing
+Markdown detail area when available, separately from the short hint, without requiring confusion. When needed source is missing,
 the skill can ask the candidate to show or slowly scroll through it; this does not add continuous
 capture or a file archive. [Capture Scope](#capture-scope) defines the actual evidence limits.
 
