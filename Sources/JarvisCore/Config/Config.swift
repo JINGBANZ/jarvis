@@ -2,6 +2,8 @@ import Foundation
 
 /// Harness tunables the user never sees. User-facing settings belong in `Defaults`.
 public struct Config: Sendable {
+    /// Short on purpose: a stuck candidate's muttered fragments keep restarting it.
+    /// See wiki/architecture.md#the-turn.
     public var silenceTimeoutSeconds: TimeInterval
     public var silenceMaxIntervalSeconds: TimeInterval
     public var silenceIdleCutoffSeconds: TimeInterval
@@ -25,7 +27,7 @@ public struct Config: Sendable {
     public var realtimePongTimeoutSeconds: TimeInterval
 
     public init(
-        silenceTimeoutSeconds: TimeInterval = 120,
+        silenceTimeoutSeconds: TimeInterval = 45,
         silenceMaxIntervalSeconds: TimeInterval = 960,
         silenceIdleCutoffSeconds: TimeInterval = 1_800,
         historyCompactionTokenThreshold: Int = 10_000,

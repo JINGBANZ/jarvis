@@ -7,17 +7,17 @@ import Testing
         #expect(b.next() == 30)
     }
 
-    @Test func doublesEachStepWhileQuiet() {
-        var b = SilenceBackoff(base: 30, maxInterval: 240)
+    @Test func quadruplesEachStepWhileQuiet() {
+        var b = SilenceBackoff(base: 30, maxInterval: 1_000)
         #expect(b.next() == 30)
-        #expect(b.next() == 60)
         #expect(b.next() == 120)
-        #expect(b.next() == 240)
+        #expect(b.next() == 480)
+        #expect(b.next() == 1_000)
     }
 
     @Test func capsAtMaxInterval() {
         var b = SilenceBackoff(base: 30, maxInterval: 240)
-        for _ in 0..<4 { _ = b.next() }
+        for _ in 0..<3 { _ = b.next() }
         #expect(b.next() == 240)
         #expect(b.next() == 240)
     }

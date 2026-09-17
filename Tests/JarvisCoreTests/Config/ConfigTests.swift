@@ -4,7 +4,7 @@ import Testing
 @Suite struct ConfigTests {
     @Test func defaults() {
         let c = Config.default
-        #expect(c.silenceTimeoutSeconds == 120)
+        #expect(c.silenceTimeoutSeconds == 45)
         #expect(c.silenceMaxIntervalSeconds == 960)
         #expect(c.silenceIdleCutoffSeconds == 1_800)
         #expect(c.historyCompactionTokenThreshold == 10_000)

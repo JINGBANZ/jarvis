@@ -1,6 +1,9 @@
 import Foundation
 
 public struct SilenceBackoff {
+    /// Steep so the second check lands well clear of the short first one.
+    static let growth: Double = 4
+
     private let base: TimeInterval
     private let maxInterval: TimeInterval
     private let idleCutoff: TimeInterval
@@ -13,7 +16,7 @@ public struct SilenceBackoff {
     }
 
     public mutating func next() -> TimeInterval {
-        let interval = min(base * pow(2, Double(step)), maxInterval)
+        let interval = min(base * pow(Self.growth, Double(step)), maxInterval)
         step += 1
         return interval
     }
