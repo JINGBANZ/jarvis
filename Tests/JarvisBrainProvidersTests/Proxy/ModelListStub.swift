@@ -33,6 +33,10 @@ struct ModelListStub: Sendable {
             while true {
                 let client = accept(descriptor, nil, nil)
                 guard client >= 0 else { return }
+                // A held answer can outlive the client's timeout; writing to that closed socket
+                // must not SIGPIPE the test process.
+                var noSigPipe: Int32 = 1
+                setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
                 var request = [UInt8](repeating: 0, count: 4_096)
                 _ = read(client, &request, request.count)
                 beforeResponding()
