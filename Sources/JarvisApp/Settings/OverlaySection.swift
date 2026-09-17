@@ -3,8 +3,7 @@ import JarvisCore
 
 @MainActor
 final class OverlaySection: NSObject, SettingsSection {
-    let title = "Overlay"
-    let fillsTab = true
+    let destination = SettingsDestination.mouth
 
     private let onBoxEnabledChanged: (Bool) -> Void
     private let appearance: OverlayAppearance
@@ -24,7 +23,7 @@ final class OverlaySection: NSObject, SettingsSection {
         self.box = box
     }
 
-    func makeView() -> NSView {
+    func makePage() -> SettingsPageView {
         let scrollView = SettingsScrollView(
             frame: NSRect(x: 0, y: 0, width: 712, height: 432))
         scrollView.autoresizingMask = [.width, .height]
@@ -37,16 +36,15 @@ final class OverlaySection: NSObject, SettingsSection {
 
         captionView = makeSurface(
             title: "Overlay Caption",
-            description: "A brief response that fades after each tip.",
+            description: "A short tip that fades away.",
             symbolName: "text.bubble",
-            tint: .controlAccentColor,
             enabled: appearance.captionEnabled,
             enableAction: #selector(captionEnabledChanged),
             sizeValue: appearance.captionFontSize,
             sizeRange: Defaults.Overlay.Caption.fontSizeRange,
             sizeAction: #selector(captionSizeChanged),
             sizeAccessibilityLabel: "Overlay caption text size",
-            opacityTitle: "Background opacity",
+            opacityTitle: "Opacity",
             opacityValue: appearance.captionBackgroundOpacity,
             opacityRange: Defaults.Overlay.Caption.opacityRange,
             opacityAction: #selector(captionOpacityChanged),
@@ -54,9 +52,8 @@ final class OverlaySection: NSObject, SettingsSection {
 
         boxView = makeSurface(
             title: "Overlay Box",
-            description: "A persistent history of recent Jarvis messages.",
+            description: "Every hint of this session, with details.",
             symbolName: "rectangle.inset.filled",
-            tint: .systemOrange,
             enabled: appearance.boxEnabled,
             enableAction: #selector(boxEnabledChanged),
             sizeValue: appearance.boxFontSize,
@@ -88,9 +85,11 @@ final class OverlaySection: NSObject, SettingsSection {
         relayout()
 
         return SettingsPageView(
-            title: "Overlay",
-            summary: "Tune the two capture-invisible coaching surfaces.",
-            status: "Live preview",
+            title: "Mouth",
+            summary: "How my hints show up on your screen.",
+            // True in both states: stopped, the sliders act on a sample; live, on the real box.
+            chip: .live("Live preview"),
+            part: .mouth,
             bodyView: scrollView)
     }
 
@@ -98,7 +97,6 @@ final class OverlaySection: NSObject, SettingsSection {
         title: String,
         description: String,
         symbolName: String,
-        tint: NSColor,
         enabled: Bool,
         enableAction: Selector,
         sizeValue: Double,
@@ -116,7 +114,6 @@ final class OverlaySection: NSObject, SettingsSection {
             title: title,
             description: description,
             symbolName: symbolName,
-            tint: tint,
             enabled: enabled,
             target: self,
             enableAction: enableAction,

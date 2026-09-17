@@ -44,4 +44,38 @@ import Testing
             provider: .claudeSubscription,
             modelID: BrainModelCatalog.defaultModel(for: .claudeSubscription).id))
     }
+
+    @Test func movingThePrimaryDownPromotesTheFirstFallback() {
+        let primary = BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5")
+        let first = BrainTarget(provider: .openAI, modelID: "gpt-5.6-sol")
+        let second = BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5")
+        let route = BrainRoute(primary: primary, fallbackTargets: [first, second])
+
+        let moved = route.movingTarget(at: 0, by: 1)
+
+        #expect(moved?.primary == first)
+        #expect(moved?.fallbackTargets == [primary, second])
+    }
+
+    @Test func movingTheFirstFallbackUpMakesItThePrimary() {
+        let primary = BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5")
+        let first = BrainTarget(provider: .openAI, modelID: "gpt-5.6-sol")
+        let route = BrainRoute(primary: primary, fallbackTargets: [first])
+
+        let moved = route.movingTarget(at: 1, by: -1)
+
+        #expect(moved?.primary == first)
+        #expect(moved?.fallbackTargets == [primary])
+    }
+
+    @Test func movingPastEitherEndIsRefused() {
+        let route = BrainRoute(
+            primary: BrainTarget(provider: .openAI, modelID: "gpt-5.5"),
+            fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini")])
+
+        #expect(route.movingTarget(at: 0, by: -1) == nil)
+        #expect(route.movingTarget(at: 1, by: 1) == nil)
+        #expect(route.movingTarget(at: 5, by: -1) == nil)
+        #expect(route.movingTarget(at: 1, by: .max) == nil)
+    }
 }

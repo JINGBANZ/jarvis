@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var updates: UpdateController?
     private var settingsWindow: SettingsWindow!
     private var brainSection: BrainSection!
+    private var settingsHub: SettingsHubModel!
+    private var settingsHome: SettingsHome!
     private let appearance = OverlayAppearance()
     private var brain: BrainComposition!
     private var proxySupervisor: LocalProxySupervisor?
@@ -138,22 +140,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             $0.shortcut == .hint || appearance.boxEnabled
         })
 
+        let signIns = SubscriptionSignIns(supervisor: supervisor)
         brainSection = BrainSection(
             preferences: brain.preferences,
-            supervisor: supervisor,
+            signIns: signIns,
             onPreferencesChanged: { [weak self] change in
                 Task {
                     await self?.brain.applyBrainPreferencesToRunningSession(
                         update: change == .topology ? .topologyEdit : .effortEdit)
                 }
-            },
-            transcriptionPreferences: transcriptionPreferences,
-            prepMaterialPreferences: prepMaterialPreferences)
+            })
         let connectionsSection = ConnectionsSection(
             supervisor: supervisor,
             keyStore: secretFile,
+            signIns: signIns,
             onKeySaved: { [weak self] credential, key in
                 self?.composition.applySavedAPIKey(key, for: credential)
+                // A saved key writes a file, not UserDefaults, so nothing else would re-judge the hub.
+                self?.settingsHub.refresh(probe: false)
             })
         let hotkeySection = HotkeySection(
                 preferences: hotkeyPreferences,
@@ -176,15 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 })
         let sections: [SettingsSection] = [
             brainSection,
-            connectionsSection,
-            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
-                onBoxEnabledChanged: { [weak self] _ in
-                    guard let self else { return }
-                    self.refreshOptionalShortcut(.explainMore)
-                    self.refreshOptionalShortcut(.showCode)
-                    self.refreshOptionalShortcut(.previousDetail)
-                    self.refreshOptionalShortcut(.nextDetail)
-                }),
+            TranscriptionSection(preferences: transcriptionPreferences),
             DisplaySection(
                 preferences: screenPreferences,
                 isSessionStopped: { [weak self] in
@@ -197,11 +193,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     guard let self else { return }
                     self.composition.updateScreenSelection(self.screenPreferences.selection)
                 }),
-            PrepMaterialSection(preferences: prepMaterialPreferences),
+            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
+                onBoxEnabledChanged: { [weak self] _ in
+                    guard let self else { return }
+                    self.refreshOptionalShortcut(.explainMore)
+                    self.refreshOptionalShortcut(.showCode)
+                    self.refreshOptionalShortcut(.previousDetail)
+                    self.refreshOptionalShortcut(.nextDetail)
+                }),
+            connectionsSection,
+            ToolsSection(brainPreferences: brain.preferences, prepPreferences: prepMaterialPreferences),
+            SkillsSection(preferences: brain.preferences),
             hotkeySection,
             ActivitySection(viewer: activityViewer),
         ]
-        settingsWindow = SettingsWindow(sections: sections)
+        settingsHub = SettingsHubModel(
+            brainPreferences: brain.preferences,
+            transcriptionPreferences: transcriptionPreferences,
+            screenPreferences: screenPreferences,
+            appearance: appearance,
+            secrets: secrets,
+            signIns: signIns)
+        settingsHome = SettingsHome(model: settingsHub)
+        settingsWindow = SettingsWindow(home: settingsHome, sections: sections, hub: settingsHub)
         menuBar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
 
         menuBar.onStart = { [weak self] in self?.start() ?? false }
@@ -478,7 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 hotkeys?.unregister(shortcut)
             }
         }
-        brainSection.setActiveTarget(
+        showActiveBrainTarget(
             brain.unavailability(for: brainRoute.primary, proxy: proxy) == nil ? brainRoute.primary : nil)
         return composition.start(
             SessionComposition.Inputs(
@@ -509,7 +523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             && reason != .applicationQuit
             && readiness.status.isBlocked
         composition.stop(reason: reason)
-        brainSection?.setActiveTarget(nil)
+        showActiveBrainTarget(nil)
         if !preservesStartupBlock,
            let readinessSession = readiness.activeSession,
            readinessSession != readinessToPreserve {
@@ -539,7 +553,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     func brainTargetDidChange(_ target: BrainTarget?) {
-        brainSection.setActiveTarget(target)
+        showActiveBrainTarget(target)
+    }
+
+    private func showActiveBrainTarget(_ target: BrainTarget?) {
+        brainSection?.setActiveTarget(target)
+        settingsHub?.setActiveTarget(target)
     }
 
     private func renderReadinessStatus(_ status: JarvisReadiness.Status) {

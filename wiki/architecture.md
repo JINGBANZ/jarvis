@@ -476,7 +476,7 @@ coach without any of them, so `PermissionGate` asks for all three at launch and 
 until it holds them. One button walks the dialogs, strictly one at a time because macOS queues them.
 The window's close button quits: grant or quit is the whole choice. Nothing records that the gate has
 run, because it is shown exactly when the grants are incomplete, which is also the only way back in
-after a refusal. There is no Permissions tab in Settings: the hard gate makes one unreachable.
+after a refusal. There is no Permissions page in Settings: the hard gate makes one unreachable.
 
 Chrome semantic text has a fourth, optional Accessibility grant. **Read Chrome page text** is off by
 default and can request this grant only from Settings while Jarvis is stopped. The setting remains
@@ -867,9 +867,9 @@ is about 60 MB on disk and 20 MB per update.
 
 - **One helper per app launch** ([`LocalProxySupervisor`](../Sources/JarvisBrainProviders/Proxy/LocalProxySupervisor.swift)).
   It starts when the saved route names a subscription at launch, when Connections appears, when the
-  Brain tab needs sign-in state and a sign-in is saved, and at a Start or route edit that routes to a
-  subscription. It stays up between sessions, because it is idle then and a sign-in made in Settings
-  must reach it, and stops at Quit. Each launch writes an owner-only configuration named by Jarvis's
+  Settings hub or Brain page needs sign-in state and a sign-in is saved, and when a Start, or a route
+  edit applied to a running session, routes to a subscription. It stays up between sessions, because it is idle then and a sign-in
+  made in Settings must reach it, and stops at Quit. Each launch writes an owner-only configuration named by Jarvis's
   process id, holding a free loopback port and a key that exists only for that launch; a development
   build and a release running side by side therefore never rewrite each other's file, which the helper
   would hot-reload. The helper starts with `-local-model`, so it never fetches a model catalog, and

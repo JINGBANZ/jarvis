@@ -1,6 +1,5 @@
 import AppKit
 import JarvisCore
-import JarvisBrainProviders
 
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
@@ -9,151 +8,101 @@ final class BrainSection: NSObject, SettingsSection {
         case effort
     }
 
-    let title = "Brain"
-    let fillsTab = true
+    let destination = SettingsDestination.brain
 
-    private static let coachingCardHeight =
+    private static let effortCardHeight =
         SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
 
     private let preferences: BrainPreferences
-    private let supervisor: LocalProxySupervisor
+    private let signIns: SubscriptionSignIns
     private let onPreferencesChanged: (PreferenceChange) -> Void
-    private let capabilities: CapabilitiesControls
-    private let transcription: TranscriptionControls
 
-    private var pageView: SettingsPageView?
-    private var scrollView: SettingsScrollView?
-    private var documentStack: NSStackView?
+    private var stack: SettingsCardStack?
     private var providerEditor: ProviderRouteEditor?
-    private var providerHeightConstraint: NSLayoutConstraint?
-    private var transcriptionHeightConstraint: NSLayoutConstraint?
-    /// `nil` until the first probe answers.
-    private var signedInSubscriptions: Set<BrainProvider>?
-    private var signInTask: Task<Void, Never>?
+    private var signInObserver: UUID?
     private var activeTarget: BrainTarget?
 
     init(
         preferences: BrainPreferences,
-        supervisor: LocalProxySupervisor,
-        onPreferencesChanged: @escaping (PreferenceChange) -> Void,
-        transcriptionPreferences: TranscriptionPreferences,
-        prepMaterialPreferences: PrepMaterialPreferences
+        signIns: SubscriptionSignIns,
+        onPreferencesChanged: @escaping (PreferenceChange) -> Void
     ) {
         self.preferences = preferences
-        self.supervisor = supervisor
+        self.signIns = signIns
         self.onPreferencesChanged = onPreferencesChanged
-        self.capabilities = CapabilitiesControls(
-            preferences: preferences, prepMaterialPreferences: prepMaterialPreferences)
-        self.transcription = TranscriptionControls(preferences: transcriptionPreferences)
     }
 
-    func makeView() -> NSView {
-        let scrollView = SettingsScrollView(
-            frame: NSRect(x: 0, y: 0, width: 760, height: 560))
-        scrollView.autoresizingMask = [.width, .height]
-
-        let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 760, height: 560))
-        stack.orientation = .vertical
-        stack.alignment = .width
-        stack.distribution = .fill
-        stack.spacing = SettingsStyle.sectionSpacing
-        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
-        stack.autoresizingMask = [.width]
-        self.scrollView = scrollView
-        self.documentStack = stack
-
+    func makePage() -> SettingsPageView {
+        let stack = SettingsCardStack()
+        self.stack = stack
         let providerEditor = ProviderRouteEditor(
             preferences: preferences,
             onChange: { [weak self] in self?.onPreferencesChanged(.topology) },
             onHeightChanged: { [weak self] height in
-                self?.providerHeightConstraint?.constant = height
-                self?.recalculateDocumentHeight()
+                guard let self, let editor = self.providerEditor else { return }
+                self.stack?.setHeight(height, for: editor.view)
             })
-        providerEditor.view.translatesAutoresizingMaskIntoConstraints = false
-        let providerHeight = providerEditor.view.heightAnchor.constraint(
-            equalToConstant: providerEditor.preferredHeight)
-        providerHeight.isActive = true
-        providerHeightConstraint = providerHeight
-        stack.addArrangedSubview(providerEditor.view)
         self.providerEditor = providerEditor
-
-        let reasoningCard = makeReasoningCard()
-        reasoningCard.heightAnchor.constraint(
-            equalToConstant: Self.coachingCardHeight).isActive = true
-        stack.addArrangedSubview(reasoningCard)
-
-        let capabilitiesCard = capabilities.makeView()
-        capabilitiesCard.heightAnchor.constraint(
-            equalToConstant: capabilities.preferredHeight).isActive = true
-        stack.addArrangedSubview(capabilitiesCard)
-
-        let transcriptionCard = transcription.makeView { [weak self] height in
-            self?.transcriptionHeightConstraint?.constant = height
-            self?.recalculateDocumentHeight()
-        }
-        transcriptionCard.translatesAutoresizingMaskIntoConstraints = false
-        let transcriptionHeight = transcriptionCard.heightAnchor.constraint(
-            equalToConstant: transcription.preferredHeight)
-        transcriptionHeight.isActive = true
-        transcriptionHeightConstraint = transcriptionHeight
-        stack.addArrangedSubview(transcriptionCard)
-
-        // Without this flexible tail, AppKit anchors a document shorter than the viewport at the
-        // bottom and leaves an empty band above the cards.
-        let bottomSpacer = NSView()
-        bottomSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-        bottomSpacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        bottomSpacer.heightAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
-        stack.setCustomSpacing(0, after: transcriptionCard)
-        stack.addArrangedSubview(bottomSpacer)
-
-        // Attach only the complete stack: a partial one makes AppKit solve an impossible layout.
-        scrollView.documentView = stack
-        scrollView.onViewportChanged = { [weak self] in
-            self?.recalculateDocumentHeight()
-            self?.revealTop()
-        }
+        let effortCard = makeEffortCard()
+        stack.install([
+            (providerEditor.view, providerEditor.preferredHeight),
+            (effortCard, Self.effortCardHeight),
+        ])
+        signInObserver = signIns.observe { [weak self] in self?.renderRoute() }
         renderRoute()
-        recalculateDocumentHeight()
-        revealTop()
-        let page = SettingsPageView(
+        return SettingsPageView(
             title: "Brain",
-            summary: "Choose how Jarvis thinks, reasons, and transcribes.",
-            status: activeTarget.map { "\($0.provider.displayName) in use" },
-            bodyView: scrollView)
-        pageView = page
-        return page
+            summary: "Who does my thinking, and how hard I think.",
+            chip: .neutral("Applies next attempt"),
+            part: .brain,
+            bodyView: stack.scrollView)
     }
 
     /// Display only: never writes preferences or reorders the saved route.
     func setActiveTarget(_ target: BrainTarget?) {
         activeTarget = target
-        pageView?.setStatus(target.map { "\($0.provider.displayName) in use" })
         renderRoute()
     }
 
     func didBecomeActive() {
-        refreshSignIns()
+        signIns.refresh()
     }
 
-    private func makeReasoningCard() -> SettingsCardView {
+    func windowWillClose() {
+        if let signInObserver { signIns.removeObserver(signInObserver) }
+        signInObserver = nil
+        stack = nil
+        providerEditor = nil
+    }
+
+    private func makeEffortCard() -> SettingsCardView {
         let card = SettingsCardView(
-            frame: NSRect(x: 0, y: 0, width: 712, height: Self.coachingCardHeight))
-        card.setHeader(title: "Coaching", detail: "Response behavior")
+            frame: NSRect(x: 0, y: 0, width: 712, height: Self.effortCardHeight))
+        card.setHeader(title: "Reasoning effort", detail: "More effort, slower hints")
         guard let content = card.contentView else { return card }
 
-        let effortPopup = NSPopUpButton()
-        effortPopup.addItems(withTitles: ReasoningEffort.allCases.map(\.displayName))
-        effortPopup.target = self
-        effortPopup.action = #selector(effortChanged)
-        effortPopup.setAccessibilityLabel("Reasoning effort")
+        // Short labels, so four segments with glyphs fit at the window's minimum width.
+        let effortControl = NSSegmentedControl(
+            labels: ReasoningEffort.allCases.map { $0 == .medium ? "Med" : $0.displayName },
+            trackingMode: .selectOne,
+            target: self,
+            action: #selector(effortChanged))
+        effortControl.setAccessibilityLabel("Reasoning effort")
+        effortControl.controlSize = .small
+        effortControl.segmentDistribution = .fillEqually
+        for (index, effort) in ReasoningEffort.allCases.enumerated() {
+            effortControl.setImage(Self.effortGlyph(level: index), forSegment: index)
+            effortControl.setImageScaling(.scaleProportionallyDown, forSegment: index)
+            effortControl.setToolTip(effort.displayName, forSegment: index)
+        }
         if let index = ReasoningEffort.allCases.firstIndex(of: preferences.effort) {
-            effortPopup.selectItem(at: index)
+            effortControl.selectedSegment = index
         }
         let effortRow = SettingsRowView(
-            title: "Reasoning effort",
-            detail: "Balances speed and depth",
-            controlView: effortPopup,
+            title: "Effort",
+            detail: "Applies to whichever brain is answering.",
+            controlView: effortControl,
+            controlSize: NSSize(width: 320, height: 28),
             showsSeparator: false)
         content.addSubview(effortRow)
 
@@ -167,69 +116,36 @@ final class BrainSection: NSObject, SettingsSection {
         return card
     }
 
-    private func refreshSignIns() {
-        guard signInTask == nil else { return }
-        let supervisor = supervisor
-        signInTask = Task { [weak self] in
-            // Start the helper only when a sign-in is saved; without one no subscription is
-            // choosable.
-            let hasAccount = SubscriptionControls.providers.contains {
-                !supervisor.accountFiles(for: $0).isEmpty
+    /// A template image, so the native segmented control tints it.
+    private static func effortGlyph(level: Int) -> NSImage {
+        let image = NSImage(size: NSSize(width: 21, height: 8), flipped: false) { @Sendable _ in
+            for index in 0..<3 {
+                let bar = NSBezierPath(
+                    roundedRect: NSRect(x: CGFloat(index) * 7 + 0.5, y: 1.5, width: 5, height: 5),
+                    xRadius: 1, yRadius: 1)
+                if index < level {
+                    NSColor.black.setFill()
+                    bar.fill()
+                } else {
+                    NSColor.black.setStroke()
+                    bar.lineWidth = 1
+                    bar.stroke()
+                }
             }
-            let readiness = hasAccount ? await supervisor.readiness() : nil
-            guard !Task.isCancelled, let self else { return }
-            signInTask = nil
-            if case .ready(_, let signedIn) = readiness {
-                signedInSubscriptions = signedIn
-            } else {
-                signedInSubscriptions = []
-            }
-            renderRoute()
+            return true
         }
+        image.isTemplate = true
+        return image
     }
 
     private func renderRoute() {
-        providerEditor?.render(signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
+        providerEditor?.render(signedInSubscriptions: signIns.selectable, activeTarget: activeTarget)
     }
 
-    private func recalculateDocumentHeight() {
-        guard let stack = documentStack else { return }
-        let visibleHeights = [
-            providerEditor?.preferredHeight,
-            Self.coachingCardHeight,
-            capabilities.preferredHeight,
-            transcription.preferredHeight,
-        ].compactMap { $0 }
-        let contentHeight = visibleHeights.reduce(0, +)
-            + CGFloat(max(0, visibleHeights.count - 1)) * SettingsStyle.sectionSpacing
-        let viewportHeight = scrollView?.contentView.bounds.height ?? 0
-        let height = max(contentHeight, viewportHeight)
-        let oldHeight = stack.frame.height
-        let oldOrigin = scrollView?.contentView.bounds.origin.y ?? 0
-        let distanceFromTop = max(0, oldHeight - oldOrigin - viewportHeight)
-
-        stack.frame.size.height = height
-        stack.needsLayout = true
-        stack.layoutSubtreeIfNeeded()
-        if let scrollView {
-            scrollView.contentView.scroll(to: NSPoint(
-                x: 0, y: max(0, height - viewportHeight - distanceFromTop)))
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
-    }
-
-    private func revealTop() {
-        guard let scrollView, let stack = documentStack else { return }
-        scrollView.contentView.scroll(to: NSPoint(
-            x: 0,
-            y: max(0, stack.bounds.height - scrollView.contentView.bounds.height)))
-        scrollView.reflectScrolledClipView(scrollView.contentView)
-    }
-
-    @objc private func effortChanged(_ sender: NSPopUpButton) {
-        let row = sender.indexOfSelectedItem
-        guard ReasoningEffort.allCases.indices.contains(row) else { return }
-        preferences.effort = ReasoningEffort.allCases[row]
+    @objc private func effortChanged(_ sender: NSSegmentedControl) {
+        let index = sender.selectedSegment
+        guard ReasoningEffort.allCases.indices.contains(index) else { return }
+        preferences.effort = ReasoningEffort.allCases[index]
         onPreferencesChanged(.effort)
     }
 }

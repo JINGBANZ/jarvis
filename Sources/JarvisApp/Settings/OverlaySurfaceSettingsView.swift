@@ -13,7 +13,7 @@ final class OverlaySurfaceSettingsView: NSView {
             self.slider = slider
             super.init(frame: NSRect(x: 0, y: 0, width: 310, height: 32))
             readout.alignment = .right
-            readout.textColor = .secondaryLabelColor
+            readout.textColor = SettingsTheme.mutedText
             addSubview(slider)
             addSubview(readout)
         }
@@ -82,7 +82,6 @@ final class OverlaySurfaceSettingsView: NSView {
         title: String,
         description: String,
         symbolName: String,
-        tint: NSColor,
         enabled: Bool,
         target: AnyObject,
         enableAction: Selector,
@@ -127,13 +126,14 @@ final class OverlaySurfaceSettingsView: NSView {
             systemSymbolName: symbolName,
             accessibilityDescription: nil)
         icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 17, weight: .medium)
-        icon.contentTintColor = tint
+        icon.contentTintColor = SettingsTheme.purple
 
         titleLabel.stringValue = title
         titleLabel.font = .boldSystemFont(ofSize: 13)
+        titleLabel.textColor = SettingsTheme.text
         descriptionLabel.stringValue = description
         descriptionLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        descriptionLabel.textColor = .secondaryLabelColor
+        descriptionLabel.textColor = SettingsTheme.mutedText
         descriptionLabel.lineBreakMode = .byTruncatingTail
 
         toggle.state = enabled ? .on : .off
@@ -142,7 +142,6 @@ final class OverlaySurfaceSettingsView: NSView {
         toggle.setAccessibilityLabel(title.hasPrefix("Show ") ? title : "Show \(title.lowercased())")
         stateLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
         stateLabel.alignment = .right
-        stateLabel.textColor = .secondaryLabelColor
 
         sizeSlider.setAccessibilityLabel(sizeAccessibilityLabel)
         opacitySlider.setAccessibilityLabel(opacityAccessibilityLabel)
@@ -192,6 +191,7 @@ final class OverlaySurfaceSettingsView: NSView {
     func updateEnabledState(_ enabled: Bool) {
         toggle.state = enabled ? .on : .off
         stateLabel.stringValue = enabled ? "On" : "Off"
+        stateLabel.textColor = enabled ? SettingsTheme.teal : SettingsTheme.mutedText
         sizeRow.isHidden = !enabled
         opacityRow.isHidden = !enabled
         for row in subordinateRows { row.isHidden = !enabled }

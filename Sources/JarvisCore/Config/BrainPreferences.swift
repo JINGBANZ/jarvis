@@ -31,7 +31,12 @@ public final class BrainPreferences {
             let candidates = stored.compactMap { persistedTarget(from: $0) }
             let normalized = BrainRoute(
                 primary: primaryTarget, fallbackTargets: candidates).fallbackTargets
-            persistFallbackTargets(normalized)
+            // Normalization only drops entries, so a count change is the only reason to rewrite.
+            // Every UserDefaults write posts a change notification, even an identical one, and the
+            // Settings window refreshes on that notification.
+            if normalized.count != stored.count {
+                persistFallbackTargets(normalized)
+            }
             return normalized
         }
         set {

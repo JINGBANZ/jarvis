@@ -11,7 +11,6 @@ final class APIKeyControls: NSObject {
     private var keyRow: SettingsRowView?
     private var onHeightChanged: ((CGFloat) -> Void)?
     private var editing = false
-    private var statusBadge: NSTextField?
     private var actionButton: NSButton?
     private var field: NSSecureTextField?
     private var saveButton: NSButton?
@@ -33,13 +32,19 @@ final class APIKeyControls: NSObject {
             }
         }
 
-        var color: NSColor {
+        @MainActor var color: NSColor {
             switch self {
-            case .checking: .secondaryLabelColor
-            case .answered(.accepted, _): .systemGreen
-            case .answered(.rejected, _): .systemRed
-            case .answered(.inconclusive, _): .systemOrange
+            case .checking: SettingsTheme.mutedText
+            case .answered(.accepted, _): SettingsTheme.teal
+            case .answered(.rejected, _), .answered(.inconclusive, _): SettingsTheme.amber
             }
+        }
+    }
+
+    private static func headerDetail(for credential: Credential) -> String {
+        switch credential {
+        case .openAIAPIKey: "Brain and transcription"
+        case .geminiAPIKey: "Transcription only"
         }
     }
 
@@ -65,17 +70,10 @@ final class APIKeyControls: NSObject {
 
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
-        card.setHeader(title: credential.displayName, detail: "Jarvis-managed credential")
+        card.setHeader(title: credential.displayName, detail: Self.headerDetail(for: credential))
         card.onLayout = { [weak self] in self?.layout() }
         self.card = card
         guard let content = card.contentView else { return card }
-
-        let statusBadge = NSTextField(labelWithString: "Key saved")
-        statusBadge.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        statusBadge.textColor = .systemGreen
-        statusBadge.alignment = .right
-        statusBadge.setAccessibilityLabel("\(credential.displayName) key saved")
-        self.statusBadge = statusBadge
 
         let action = NSButton(
             title: hasSavedKey ? "Edit" : "Add API key",
@@ -85,23 +83,17 @@ final class APIKeyControls: NSObject {
         action.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-action")
         self.actionButton = action
 
-        let trailingControls = NSStackView(views: [statusBadge, action])
-        trailingControls.orientation = .horizontal
-        trailingControls.alignment = .centerY
-        trailingControls.spacing = 8
-        statusBadge.setContentHuggingPriority(.required, for: .horizontal)
-        action.setContentHuggingPriority(.required, for: .horizontal)
-
         let controls = NSView()
-        trailingControls.translatesAutoresizingMaskIntoConstraints = false
-        controls.addSubview(trailingControls)
+        action.translatesAutoresizingMaskIntoConstraints = false
+        controls.addSubview(action)
         NSLayoutConstraint.activate([
-            trailingControls.leadingAnchor.constraint(greaterThanOrEqualTo: controls.leadingAnchor),
-            trailingControls.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
-            trailingControls.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
+            action.leadingAnchor.constraint(greaterThanOrEqualTo: controls.leadingAnchor),
+            action.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
+            action.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
         ])
         let row = SettingsRowView(
             title: "API key",
+            detail: "",
             controlView: controls,
             controlSize: NSSize(width: 220, height: 32),
             showsSeparator: false)
@@ -128,7 +120,7 @@ final class APIKeyControls: NSObject {
         saveButton = save
 
         let error = NSTextField(labelWithString: "")
-        error.textColor = .systemRed
+        error.textColor = SettingsTheme.amber
         error.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-key-error")
         content.addSubview(error)
         errorLabel = error
@@ -197,7 +189,8 @@ final class APIKeyControls: NSObject {
     }
 
     private func applyState() {
-        statusBadge?.isHidden = !hasSavedKey || editing
+        keyRow?.setDetail(
+            hasSavedKey ? "Saved" : "Not saved", color: hasSavedKey ? SettingsTheme.teal : nil)
         actionButton?.isHidden = editing
         actionButton?.title = hasSavedKey ? "Edit" : "Add API key"
         field?.isHidden = !editing
@@ -206,7 +199,7 @@ final class APIKeyControls: NSObject {
         errorLabel?.isHidden = !editing
         verdictLabel?.isHidden = verdict == nil
         verdictLabel?.stringValue = verdict?.text ?? ""
-        verdictLabel?.textColor = verdict?.color ?? .secondaryLabelColor
+        verdictLabel?.textColor = verdict?.color ?? SettingsTheme.mutedText
         card?.frame.size.height = preferredHeight
         card?.needsLayout = true
         layout()

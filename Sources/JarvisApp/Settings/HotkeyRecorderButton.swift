@@ -6,18 +6,22 @@ import JarvisCore
 final class HotkeyRecorderButton: NSButton {
     /// Reports a candidate only; the caller decides whether to persist it.
     var onRecorded: ((HotkeyCombination) -> Void)?
+    var onRecordingChanged: ((Bool) -> Void)?
 
-    private var isRecording = false
-    private var displayedCombination: HotkeyCombination
+    private var isRecording = false {
+        didSet {
+            guard isRecording != oldValue else { return }
+            title = isRecording ? "Press keys…" : "Record"
+            onRecordingChanged?(isRecording)
+        }
+    }
 
-    init(combination: HotkeyCombination) {
-        displayedCombination = combination
+    init() {
         super.init(frame: .zero)
         bezelStyle = .rounded
+        title = "Record"
         target = self
         action = #selector(startRecording)
-        setAccessibilityLabel("Manual hint shortcut")
-        updateTitle()
     }
 
     @available(*, unavailable)
@@ -25,16 +29,14 @@ final class HotkeyRecorderButton: NSButton {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func setCombination(_ combination: HotkeyCombination) {
-        displayedCombination = combination
+    func stopRecording() {
         isRecording = false
-        updateTitle()
     }
 
     override var acceptsFirstResponder: Bool { true }
 
     override func resignFirstResponder() -> Bool {
-        if isRecording { cancelRecording() }
+        isRecording = false
         return super.resignFirstResponder()
     }
 
@@ -56,30 +58,17 @@ final class HotkeyRecorderButton: NSButton {
 
     private func handleCandidateKeyEvent(_ event: NSEvent) {
         guard event.keyCode != UInt16(kVK_Escape) else {
-            cancelRecording()
+            isRecording = false
             return
         }
         let modifiers = event.modifierFlags.hotkeyModifiers
         guard modifiers.satisfiesHotkeyRequirement else { return }
-        let candidate = HotkeyCombination(keyCode: UInt32(event.keyCode), modifiers: modifiers)
         isRecording = false
-        displayedCombination = candidate
-        updateTitle()
-        onRecorded?(candidate)
+        onRecorded?(HotkeyCombination(keyCode: UInt32(event.keyCode), modifiers: modifiers))
     }
 
     @objc private func startRecording() {
         guard window?.makeFirstResponder(self) == true else { return }
         isRecording = true
-        title = "Press shortcut…"
-    }
-
-    private func cancelRecording() {
-        isRecording = false
-        updateTitle()
-    }
-
-    private func updateTitle() {
-        title = HotkeyKeyNames.displayString(for: displayedCombination)
     }
 }

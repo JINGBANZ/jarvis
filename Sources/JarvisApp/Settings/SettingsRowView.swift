@@ -25,11 +25,12 @@ final class SettingsRowView: NSView {
         autoresizingMask = [.width]
 
         titleLabel.stringValue = title
-        titleLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.textColor = SettingsTheme.text
 
         detailLabel.stringValue = detail ?? ""
-        detailLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        detailLabel.textColor = .secondaryLabelColor
+        detailLabel.font = .systemFont(ofSize: 11.5)
+        detailLabel.textColor = SettingsTheme.mutedText
         detailLabel.lineBreakMode = .byTruncatingTail
         detailLabel.isHidden = detail == nil
 
@@ -45,10 +46,16 @@ final class SettingsRowView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func setDetail(_ detail: String?) {
+    func setDetail(_ detail: String?, color: NSColor? = nil) {
         detailLabel.stringValue = detail ?? ""
+        detailLabel.toolTip = detail
+        detailLabel.textColor = color ?? SettingsTheme.mutedText
         detailLabel.isHidden = detail == nil
         needsLayout = true
+    }
+
+    func setTitleColor(_ color: NSColor) {
+        titleLabel.textColor = color
     }
 
     override func layout() {

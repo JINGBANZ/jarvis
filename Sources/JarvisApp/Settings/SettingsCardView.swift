@@ -16,15 +16,14 @@ final class SettingsCardView: NSBox {
         boxType = .custom
         borderWidth = 1
         cornerRadius = SettingsStyle.cardCornerRadius
-        borderColor = .separatorColor
-        fillColor = .controlBackgroundColor
+        borderColor = SettingsTheme.line
+        fillColor = SettingsTheme.cardFill
         contentViewMargins = .zero
 
-        headingLabel.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        headingLabel.textColor = .secondaryLabelColor
-        detailLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        detailLabel.textColor = .tertiaryLabelColor
+        detailLabel.font = .systemFont(ofSize: 11.5)
+        detailLabel.textColor = SettingsTheme.dimText
         detailLabel.alignment = .right
+        detailLabel.lineBreakMode = .byTruncatingTail
         headingLabel.isHidden = true
         detailLabel.isHidden = true
         headerSeparator.isHidden = true
@@ -41,9 +40,12 @@ final class SettingsCardView: NSBox {
 
     func setHeader(title: String, detail: String? = nil) {
         headerHeight = SettingsStyle.cardHeaderHeight
-        headingLabel.stringValue = title.uppercased()
+        headingLabel.attributedStringValue = NSAttributedString(string: title.uppercased(), attributes: [
+            .kern: 2, .font: NSFont.boldSystemFont(ofSize: 10.5), .foregroundColor: SettingsTheme.purple,
+        ])
         headingLabel.isHidden = false
         detailLabel.stringValue = detail ?? ""
+        detailLabel.toolTip = detail
         detailLabel.isHidden = detail == nil
         headerSeparator.isHidden = false
         needsLayout = true
@@ -61,15 +63,15 @@ final class SettingsCardView: NSBox {
         super.layout()
         if let content = contentView, headerHeight > 0 {
             let y = content.bounds.height - headerHeight
-            headingLabel.frame = NSRect(
-                x: SettingsStyle.rowHorizontalInset,
-                y: y + 13,
-                width: max(120, content.bounds.width * 0.55),
-                height: 18)
+            let inset = SettingsStyle.rowHorizontalInset
+            // Capped so a sentence-long detail still has room.
+            let headingWidth = min(ceil(headingLabel.fittingSize.width), content.bounds.width * 0.55)
+            headingLabel.frame = NSRect(x: inset, y: y + 13, width: headingWidth, height: 18)
+            let detailX = inset + headingWidth + 12
             detailLabel.frame = NSRect(
-                x: content.bounds.width * 0.5,
+                x: detailX,
                 y: y + 13,
-                width: max(0, content.bounds.width * 0.5 - SettingsStyle.rowHorizontalInset),
+                width: max(0, content.bounds.width - inset - detailX),
                 height: 18)
             headerSeparator.frame = NSRect(
                 x: 0,

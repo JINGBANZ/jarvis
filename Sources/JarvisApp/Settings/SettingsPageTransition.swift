@@ -1,0 +1,105 @@
+import AppKit
+import QuartzCore
+
+// Design: wiki/settings-window.md#motion
+@MainActor
+enum SettingsPageTransition {
+    enum Direction { case forward, back }
+
+    private static let pageScale: CGFloat = 0.86
+    private static let hubScale: CGFloat = 1.04
+
+    /// `incoming` and `outgoing` are layer-backed siblings filling the same container; `origin` is in
+    /// their shared, unflipped coordinates.
+    static func run(
+        _ direction: Direction,
+        incoming: NSView,
+        outgoing: NSView,
+        origin: NSPoint,
+        completion: @escaping @MainActor () -> Void
+    ) {
+        guard let inLayer = incoming.layer, let outLayer = outgoing.layer else {
+            completion()
+            return
+        }
+        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let center = NSPoint(x: incoming.bounds.midX, y: incoming.bounds.midY)
+        let inStart = direction == .forward
+            ? scaled(pageScale, about: origin, in: inLayer)
+            : scaled(hubScale, about: center, in: inLayer)
+        let outEnd = direction == .forward
+            ? scaled(hubScale, about: center, in: outLayer)
+            : scaled(pageScale, about: origin, in: outLayer)
+
+        CATransaction.begin()
+        CATransaction.setCompletionBlock {
+            MainActor.assumeIsolated { completion() }
+        }
+        animate(inLayer, start: (0, reduce ? CATransform3DIdentity : inStart),
+                to: (1, CATransform3DIdentity), reduce: reduce)
+        animate(outLayer, start: (1, CATransform3DIdentity),
+                to: (0, reduce ? CATransform3DIdentity : outEnd), reduce: reduce)
+        CATransaction.commit()
+    }
+
+    static func reset(_ view: NSView) {
+        view.layer?.removeAllAnimations()
+        view.layer?.opacity = 1
+        view.layer?.transform = CATransform3DIdentity
+    }
+
+    private static func animate(
+        _ layer: CALayer,
+        start: (opacity: Float, transform: CATransform3D),
+        to end: (opacity: Float, transform: CATransform3D),
+        reduce: Bool
+    ) {
+        let isMoving = !(layer.animationKeys() ?? []).isEmpty
+        let presentation = layer.presentation()
+        let fromOpacity = isMoving ? (presentation?.opacity ?? layer.opacity) : start.opacity
+        let fromTransform = isMoving ? (presentation?.transform ?? layer.transform) : start.transform
+        layer.removeAllAnimations()
+        layer.opacity = end.opacity
+        layer.transform = end.transform
+        layer.add(animation("opacity", from: fromOpacity, to: end.opacity, reduce: reduce),
+                  forKey: "settingsPage.opacity")
+        if !reduce {
+            layer.add(animation("transform",
+                                from: NSValue(caTransform3D: fromTransform),
+                                to: NSValue(caTransform3D: end.transform),
+                                reduce: false),
+                      forKey: "settingsPage.transform")
+        }
+    }
+
+    private static func animation(_ keyPath: String, from: Any, to: Any, reduce: Bool) -> CAAnimation {
+        if reduce {
+            let fade = CABasicAnimation(keyPath: keyPath)
+            fade.fromValue = from
+            fade.toValue = to
+            fade.duration = 0.2
+            fade.timingFunction = CAMediaTimingFunction(name: .linear)
+            return fade
+        }
+        let response = 0.38
+        let spring = CASpringAnimation(keyPath: keyPath)
+        spring.mass = 1
+        spring.stiffness = pow(2 * .pi / response, 2)
+        spring.damping = 2 * (spring.stiffness * spring.mass).squareRoot()
+        spring.fromValue = from
+        spring.toValue = to
+        spring.duration = spring.settlingDuration
+        return spring
+    }
+
+    /// AppKit anchors its layers at (0, 0), so the scale is taken about `point` explicitly.
+    private static func scaled(_ scale: CGFloat, about point: NSPoint, in layer: CALayer) -> CATransform3D {
+        let anchor = CGPoint(x: layer.anchorPoint.x * layer.bounds.width,
+                             y: layer.anchorPoint.y * layer.bounds.height)
+        let x = point.x - anchor.x
+        let y = point.y - anchor.y
+        var transform = CATransform3DMakeTranslation(x, y, 0)
+        transform = CATransform3DScale(transform, scale, scale, 1)
+        return CATransform3DTranslate(transform, -x, -y, 0)
+    }
+}

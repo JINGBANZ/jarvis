@@ -51,7 +51,7 @@ final class TranscriptionControls: NSObject {
 
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
-        card.setHeader(title: "Transcription", detail: "What Jarvis hears")
+        card.setHeader(title: "Transcription", detail: Self.headerDetail(for: preferences.provider))
         card.onLayout = { [weak self] in self?.layoutRows() }
         self.card = card
         guard let content = card.contentView else { return card }
@@ -65,8 +65,8 @@ final class TranscriptionControls: NSObject {
             if choice == .appleSpeech {
                 provider.lastItem?.isEnabled = Self.appleSpeechIsAvailable
                 provider.lastItem?.toolTip = Self.appleSpeechIsAvailable
-                    ? "On-device transcription using one selected conversation locale"
-                    : "Requires macOS 26 and Apple Speech support"
+                    ? "Transcribes on this Mac in one language you pick."
+                    : "Needs macOS 26 with Apple Speech."
             }
         }
         if let selected = provider.itemArray.firstIndex(where: {
@@ -81,7 +81,7 @@ final class TranscriptionControls: NSObject {
 
         let providerRow = SettingsRowView(
             title: "Provider",
-            detail: "Applies on the next Start",
+            detail: nil,
             controlView: provider)
         content.addSubview(providerRow)
         self.providerRow = providerRow
@@ -102,7 +102,7 @@ final class TranscriptionControls: NSObject {
         model.identifier = NSUserInterfaceItemIdentifier("transcription-model")
         let modelRow = SettingsRowView(
             title: "Model",
-            detail: "Speech-to-text model",
+            detail: "The model that turns speech into text.",
             controlView: model)
         content.addSubview(modelRow)
         self.modelRow = modelRow
@@ -113,7 +113,7 @@ final class TranscriptionControls: NSObject {
         languagePicker.identifier = NSUserInterfaceItemIdentifier("transcription-languages")
         let languagesRow = SettingsRowView(
             title: "Expected languages",
-            detail: "No selection means automatic",
+            detail: "Pick none and I listen for any language.",
             controlView: languagePicker,
             controlSize: NSSize(width: 340, height: 32))
         content.addSubview(languagesRow)
@@ -127,7 +127,7 @@ final class TranscriptionControls: NSObject {
         vocabularyField.identifier = NSUserInterfaceItemIdentifier("transcription-vocabulary")
         let vocabularyRow = SettingsRowView(
             title: "Vocabulary",
-            detail: "Only used by GPT Transcribe / GPT Live",
+            detail: "Names and jargon I should spell right, separated by commas.",
             controlView: vocabularyField,
             controlSize: NSSize(width: 340, height: 24))
         content.addSubview(vocabularyRow)
@@ -150,7 +150,7 @@ final class TranscriptionControls: NSObject {
         geminiModel.identifier = NSUserInterfaceItemIdentifier("transcription-gemini-model")
         let geminiModelRow = SettingsRowView(
             title: "Model",
-            detail: "Speech-to-text model",
+            detail: "The model that turns speech into text.",
             controlView: geminiModel)
         content.addSubview(geminiModelRow)
         self.geminiModelRow = geminiModelRow
@@ -162,7 +162,7 @@ final class TranscriptionControls: NSObject {
             NSUserInterfaceItemIdentifier("transcription-gemini-languages")
         let geminiLanguagesRow = SettingsRowView(
             title: "Expected languages",
-            detail: "No selection means automatic",
+            detail: "Pick none and I listen for any language.",
             controlView: geminiLanguagePicker,
             controlSize: NSSize(width: 340, height: 32))
         content.addSubview(geminiLanguagesRow)
@@ -178,7 +178,7 @@ final class TranscriptionControls: NSObject {
             NSUserInterfaceItemIdentifier("transcription-gemini-vocabulary")
         let geminiVocabularyRow = SettingsRowView(
             title: "Vocabulary",
-            detail: "Comma-separated jargon and names bias recognition",
+            detail: "Names and jargon I should spell right, separated by commas.",
             controlView: geminiVocabularyField,
             controlSize: NSSize(width: 340, height: 24))
         content.addSubview(geminiVocabularyRow)
@@ -201,7 +201,7 @@ final class TranscriptionControls: NSObject {
         geminiMode.identifier = NSUserInterfaceItemIdentifier("transcription-gemini-mode")
         let geminiModeRow = SettingsRowView(
             title: "Mode",
-            detail: "Smart removes filler words",
+            detail: "Smart drops filler words. Verbatim keeps every word.",
             controlView: geminiMode)
         content.addSubview(geminiModeRow)
         self.geminiModeRow = geminiModeRow
@@ -216,7 +216,7 @@ final class TranscriptionControls: NSObject {
         localePopup = locale
         let localeRow = SettingsRowView(
             title: "Conversation locale",
-            detail: "One locale for the whole session",
+            detail: "I listen in one language for the whole session.",
             controlView: locale)
         content.addSubview(localeRow)
         self.localeRow = localeRow
@@ -235,6 +235,7 @@ final class TranscriptionControls: NSObject {
                     localeRow] {
             row?.isHidden = row.map { !visible.contains(ObjectIdentifier($0)) } ?? true
         }
+        card?.setHeader(title: "Transcription", detail: Self.headerDetail(for: preferences.provider))
         refreshLanguageDetail()
         refreshVocabularyDetail()
         card?.frame.size.height = preferredHeight
@@ -246,14 +247,22 @@ final class TranscriptionControls: NSObject {
         let gpt4oIgnoresSelection = preferences.openAIModel == .gpt4oTranscribe
             && preferences.openAIExpectedLanguages.count > 1
         languagesRow?.setDetail(gpt4oIgnoresSelection
-            ? "GPT-4o treats multiple selections as Automatic"
-            : "No selection means Automatic")
+            ? "GPT-4o takes one language hint, so with two I listen automatically."
+            : "Pick none and I listen for any language.")
     }
 
     private func refreshVocabularyDetail() {
         vocabularyRow?.setDetail(preferences.openAIModel == .gpt4oTranscribe
-            ? "GPT-4o Transcribe ignores this — switch Model to use it"
-            : "Comma-separated jargon and names bias recognition")
+            ? "GPT-4o ignores this. Pick GPT Transcribe or GPT Live to use it."
+            : "Names and jargon I should spell right, separated by commas.")
+    }
+
+    private static func headerDetail(for provider: TranscriptionProvider) -> String {
+        switch provider {
+        case .openAI: "Uses your OpenAI key"
+        case .gemini: "Uses your Gemini key"
+        case .appleSpeech: "Runs on this Mac"
+        }
     }
 
     private func layoutRows() {

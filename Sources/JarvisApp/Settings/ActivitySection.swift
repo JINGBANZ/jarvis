@@ -3,7 +3,7 @@ import JarvisCore
 
 @MainActor
 final class ActivitySection: NSObject, SettingsSection {
-    let title = "Activity"
+    let destination = SettingsDestination.activity
 
     private let viewer: ActivityViewer
 
@@ -11,7 +11,7 @@ final class ActivitySection: NSObject, SettingsSection {
         self.viewer = viewer
     }
 
-    func makeView() -> NSView {
+    func makePage() -> SettingsPageView {
         let viewerContent = viewer.makeContentView()
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: 432))
@@ -23,11 +23,9 @@ final class ActivitySection: NSObject, SettingsSection {
         card.onLayout?()
         return SettingsPageView(
             title: "Activity",
-            summary: "Review the human-facing record of your coaching sessions.",
+            summary: "What I heard and said, session by session.",
             bodyView: card)
     }
     func didBecomeActive() { viewer.didBecomeActive() }
     func windowWillClose() { viewer.teardown() }
-
-    var fillsTab: Bool { true }
 }
