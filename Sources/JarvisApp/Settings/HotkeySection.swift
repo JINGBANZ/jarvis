@@ -5,6 +5,7 @@ import JarvisCore
 final class HotkeySection: NSObject, SettingsSection {
     let destination = SettingsDestination.shortcuts
     private let bindings: [HotkeyBindingView]
+    private var stack: SettingsCardStack?
 
     init(preferences: [HotkeyPreferences],
          boxEnabled: @escaping () -> Bool = { true },
@@ -19,56 +20,36 @@ final class HotkeySection: NSObject, SettingsSection {
     }
 
     func makePage() -> SettingsPageView {
-        let scroll = SettingsScrollView(frame: NSRect(x: 0, y: 0, width: 712, height: 432))
-        scroll.autoresizingMask = [.width, .height]
-        let stack = NSStackView(frame: scroll.bounds)
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.distribution = .fill
-        stack.spacing = SettingsStyle.sectionSpacing
-        stack.autoresizingMask = [.width]
-        for binding in bindings {
-            let view = binding.makeView()
-            stack.addArrangedSubview(view)
-            // These containers have no intrinsic width, so AppKit would collapse them to the
-            // callout's minimum fitting width.
-            view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+        let rows = bindings.enumerated().map { index, binding in
+            binding.makeRow(showsSeparator: index > 0)
         }
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .vertical)
-        spacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
-        spacer.heightAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
-        if let last = stack.arrangedSubviews.last { stack.setCustomSpacing(0, after: last) }
-        stack.addArrangedSubview(spacer)
-        scroll.documentView = stack
-        var previousViewportHeight = scroll.contentView.bounds.height
-        let relayout: () -> Void = { [weak self, weak scroll, weak stack] in
-            guard let self, let scroll, let stack else { return }
-            // The stack is non-flipped: retain the reading offset from its top as cards resize.
-            let distanceFromTop = max(0, stack.bounds.height
-                - scroll.contentView.bounds.origin.y - previousViewportHeight)
-            previousViewportHeight = scroll.contentView.bounds.height
-            let height = self.bindings.reduce(CGFloat(0)) { $0 + $1.preferredHeight }
-                + CGFloat(max(0, self.bindings.count - 1)) * SettingsStyle.sectionSpacing
-            stack.frame.size = NSSize(width: scroll.contentView.bounds.width,
-                                      height: max(height, scroll.contentView.bounds.height))
-            stack.layoutSubtreeIfNeeded()
-            let maximumY = max(0, stack.bounds.height - scroll.contentView.bounds.height)
-            scroll.contentView.scroll(to: NSPoint(x: 0,
-                y: min(maximumY, max(0, maximumY - distanceFromTop))))
-            scroll.reflectScrolledClipView(scroll.contentView)
+        let height = CGFloat(rows.count) * SettingsStyle.rowHeight
+        let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: height))
+        rows.forEach { card.contentView?.addSubview($0) }
+        card.onLayout = { [weak card] in
+            guard let card else { return }
+            let body = card.bodyFrame
+            for (index, row) in rows.enumerated() {
+                row.frame = NSRect(
+                    x: body.minX, y: body.maxY - CGFloat(index + 1) * SettingsStyle.rowHeight,
+                    width: body.width, height: SettingsStyle.rowHeight)
+            }
         }
-        bindings.forEach { $0.onHeightChanged = relayout }
-        scroll.onViewportChanged = relayout
-        relayout()
+        let stack = SettingsCardStack()
+        stack.install([(card, height)])
+        self.stack = stack
         return SettingsPageView(
             title: "Shortcuts",
             summary: "Ask me for help without waiting.",
             chip: .neutral("Works during a session"),
-            bodyView: scroll)
+            bodyView: stack.scrollView)
     }
 
     func didBecomeActive() {
         bindings.forEach { $0.didBecomeActive() }
+    }
+
+    func windowWillClose() {
+        stack = nil
     }
 }

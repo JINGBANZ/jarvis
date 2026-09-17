@@ -3,33 +3,22 @@ import JarvisCore
 
 @MainActor
 final class HotkeyBindingView: NSObject {
-
     private let preferences: HotkeyPreferences
     private let boxEnabled: () -> Bool
-    private var shortcutRow: SettingsRowView?
-    private var cardHeightConstraint: NSLayoutConstraint?
-
-    /// Non-hint shortcuts answer into the detail box, so they need the Overlay Box switched on.
-    private var isEnabled: Bool { preferences.shortcut == .hint || boxEnabled() }
-    private static let shortcutDetail = "Use ⌘ or ⌥ in the combination."
-    private var cardHeight: CGFloat {
-        SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
-    }
     /// False only when nothing was registered this run, because a rejected rebind keeps the
     /// previous combination live.
     private let hasActiveHotkey: () -> Bool
     private let applyCombination: (HotkeyCombination) -> HotkeyRegistrationOutcome
 
+    private var row: SettingsRowView?
+    private var keycaps: ShortcutKeycapsView?
     private var recorder: HotkeyRecorderButton?
-    private var callout: SettingsCalloutView?
-    private var calloutHeightConstraint: NSLayoutConstraint?
+    /// A rejected rebind's warning stays until the page is revisited.
+    private var lastOutcome: HotkeyRegistrationOutcome?
+    private var isRecording = false
 
-    private static let calloutHeight = SettingsCalloutView.preferredHeight
-    var onHeightChanged: (() -> Void)?
-    var preferredHeight: CGFloat {
-        cardHeight + SettingsStyle.sectionSpacing
-            + (calloutHeightConstraint?.constant ?? 0)
-    }
+    /// Non-hint shortcuts answer into the detail box, so they need the Overlay Box switched on.
+    private var isEnabled: Bool { preferences.shortcut == .hint || boxEnabled() }
 
     init(
         preferences: HotkeyPreferences,
@@ -43,109 +32,90 @@ final class HotkeyBindingView: NSObject {
         self.applyCombination = applyCombination
     }
 
-    func makeView() -> NSView {
-        let body = NSView(frame: NSRect(x: 0, y: 0, width: 712, height: 180))
-
-        let recorder = HotkeyRecorderButton(combination: preferences.combination)
-        recorder.setAccessibilityLabel("\(preferences.shortcut.title) shortcut")
-        recorder.onRecorded = { [weak self] combination in
-            self?.recorded(combination)
+    func makeRow(showsSeparator: Bool) -> SettingsRowView {
+        let title = preferences.shortcut.title
+        let keycaps = ShortcutKeycapsView(frame: .zero)
+        keycaps.keys = HotkeyKeyNames.keyCaps(for: preferences.combination)
+        keycaps.setAccessibilityLabel("\(title) shortcut")
+        let recorder = HotkeyRecorderButton()
+        recorder.setAccessibilityLabel("Record \(title) shortcut")
+        recorder.onRecorded = { [weak self] combination in self?.recorded(combination) }
+        recorder.onRecordingChanged = { [weak self] recording in
+            self?.isRecording = recording
+            self?.render()
         }
+        self.keycaps = keycaps
         self.recorder = recorder
 
-        let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
-        card.translatesAutoresizingMaskIntoConstraints = false
-        card.setHeader(title: preferences.shortcut.title,
-                       detail: Self.summary(of: preferences.shortcut))
-        let row = SettingsRowView(
-            title: "Shortcut",
-            detail: Self.shortcutDetail,
-            controlView: recorder,
-            controlSize: NSSize(width: 170, height: 32),
-            preferredHeight: SettingsStyle.rowHeight,
-            showsSeparator: false)
-        shortcutRow = row
-        card.contentView?.addSubview(row)
-        card.onLayout = { [weak card, weak row] in
-            guard let card, let row else { return }
-            row.frame = card.bodyFrame
-        }
-
-        let callout = SettingsCalloutView(text: "", tone: .warning)
-        callout.isHidden = true
-        callout.translatesAutoresizingMaskIntoConstraints = false
-        self.callout = callout
-
-        body.addSubview(card)
-        body.addSubview(callout)
+        let controls = NSStackView(views: [keycaps, recorder])
+        controls.orientation = .horizontal
+        controls.alignment = .centerY
+        controls.spacing = 10
+        keycaps.setContentHuggingPriority(.required, for: .horizontal)
+        recorder.setContentHuggingPriority(.required, for: .horizontal)
+        let container = NSView()
+        controls.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(controls)
         NSLayoutConstraint.activate([
-            card.topAnchor.constraint(equalTo: body.topAnchor),
-            card.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-            card.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-            callout.topAnchor.constraint(equalTo: card.bottomAnchor, constant: SettingsStyle.sectionSpacing),
-            callout.leadingAnchor.constraint(equalTo: body.leadingAnchor),
-            callout.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            controls.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor),
+            controls.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            controls.centerYAnchor.constraint(equalTo: container.centerYAnchor),
         ])
-        let height = card.heightAnchor.constraint(equalToConstant: cardHeight)
-        height.isActive = true
-        cardHeightConstraint = height
-        let calloutHeight = callout.heightAnchor.constraint(equalToConstant: 0)
-        calloutHeight.isActive = true
-        calloutHeightConstraint = calloutHeight
 
-        renderOutcome()
-
-        body.translatesAutoresizingMaskIntoConstraints = false
-        body.bottomAnchor.constraint(equalTo: callout.bottomAnchor).isActive = true
-        return body
+        let row = SettingsRowView(
+            title: title,
+            detail: "",
+            controlView: container,
+            controlSize: NSSize(width: 240, height: 32),
+            showsSeparator: showsSeparator)
+        self.row = row
+        lastOutcome = nil
+        render()
+        return row
     }
 
     func didBecomeActive() {
-        recorder?.setCombination(preferences.combination)
-        renderOutcome()
+        recorder?.stopRecording()
+        lastOutcome = nil
+        render()
     }
 
     private func recorded(_ combination: HotkeyCombination) {
         guard isEnabled else { return }
         let outcome = applyCombination(combination)
-        switch outcome {
-        case .registered:
+        if case .registered = outcome {
             preferences.combination = combination
-            recorder?.setCombination(combination)
-        case .failed:
-            // The previous combination is still registered, so show it and never persist the
-            // rejected one.
-            recorder?.setCombination(preferences.combination)
         }
-        renderOutcome(outcome)
+        lastOutcome = outcome
+        render()
     }
 
-    /// Pass a fresh rebind's `outcome` to flash feedback for that attempt. With `nil` (open or
-    /// revisit), the callout shows only when nothing is registered at all.
-    private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
-        defer { onHeightChanged?() }
+    private func render() {
+        keycaps?.keys = HotkeyKeyNames.keyCaps(for: preferences.combination)
         recorder?.isEnabled = isEnabled
-        cardHeightConstraint?.constant = cardHeight
-        shortcutRow?.setDetail(isEnabled
-            ? Self.shortcutDetail
-            : "Needs the Overlay Box. Switch it on in Mouth.")
+        keycaps?.alphaValue = isEnabled ? 1 : 0.45
+        guard isEnabled else {
+            row?.setDetail("Needs the Overlay Box. Switch it on in Mouth.")
+            return
+        }
+        if isRecording {
+            row?.setDetail("Press the new shortcut with ⌘ or ⌥. Esc cancels.", color: SettingsTheme.teal)
+            return
+        }
         let showsFailure: Bool
-        switch outcome {
+        switch lastOutcome {
         case .registered: showsFailure = false
         case .failed: showsFailure = true
         case nil: showsFailure = !hasActiveHotkey()
         }
-        guard isEnabled && showsFailure else {
-            calloutHeightConstraint?.constant = 0
-            callout?.isHidden = true
-            return
+        if showsFailure {
+            row?.setDetail(hasActiveHotkey()
+                ? "That shortcut is already in use. Your previous shortcut still works."
+                : "That shortcut is already in use, so this one isn't active.",
+                color: SettingsTheme.amber)
+        } else {
+            row?.setDetail(Self.summary(of: preferences.shortcut))
         }
-        callout?.setText(hasActiveHotkey()
-            ? "That shortcut is already in use. Your previous shortcut is unchanged."
-            : "That shortcut is already in use, and this shortcut is not "
-                + "currently active.")
-        calloutHeightConstraint?.constant = Self.calloutHeight
-        callout?.isHidden = false
     }
 
     private static func summary(of shortcut: CoachingShortcut) -> String {

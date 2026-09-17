@@ -4,15 +4,20 @@ import JarvisCore
 /// Carbon key codes are physical ANSI positions, so labels use a static table, not the layout.
 enum HotkeyKeyNames {
     static func displayString(for combination: HotkeyCombination) -> String {
-        modifierGlyphs(combination.modifiers) + keyGlyph(for: combination.keyCode)
+        keyCaps(for: combination).joined()
     }
 
-    private static func modifierGlyphs(_ modifiers: HotkeyModifiers) -> String {
-        var glyphs = ""
-        if modifiers.contains(.control) { glyphs += "⌃" }
-        if modifiers.contains(.option) { glyphs += "⌥" }
-        if modifiers.contains(.shift) { glyphs += "⇧" }
-        if modifiers.contains(.command) { glyphs += "⌘" }
+    /// Modifiers first, in the order macOS menus list them.
+    static func keyCaps(for combination: HotkeyCombination) -> [String] {
+        modifierGlyphs(combination.modifiers) + [keyGlyph(for: combination.keyCode)]
+    }
+
+    private static func modifierGlyphs(_ modifiers: HotkeyModifiers) -> [String] {
+        var glyphs: [String] = []
+        if modifiers.contains(.control) { glyphs.append("⌃") }
+        if modifiers.contains(.option) { glyphs.append("⌥") }
+        if modifiers.contains(.shift) { glyphs.append("⇧") }
+        if modifiers.contains(.command) { glyphs.append("⌘") }
         return glyphs
     }
 

@@ -49,6 +49,7 @@ final class SettingsRowView: NSView {
     /// A `nil` color resets a detail recolored for a warning.
     func setDetail(_ detail: String?, color: NSColor? = nil) {
         detailLabel.stringValue = detail ?? ""
+        detailLabel.toolTip = detail
         detailLabel.textColor = color ?? SettingsTheme.mutedText
         detailLabel.isHidden = detail == nil
         needsLayout = true
