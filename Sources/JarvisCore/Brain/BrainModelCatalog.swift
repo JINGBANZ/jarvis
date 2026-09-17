@@ -3,7 +3,8 @@ import Foundation
 public enum BrainModelCatalog {
     public static let all: [BrainModel] = [
         BrainModel(id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol"),
-        BrainModel(id: "gpt-6-astra", displayName: "GPT-6 Astra"),
+        // Rejects `none`.
+        BrainModel(id: "gpt-6-astra", displayName: "GPT-6 Astra", reasoningEffortFloor: .low),
         BrainModel(id: "gpt-5.6-terra", displayName: "GPT-5.6 Terra"),
         BrainModel(id: "gpt-5.6-luna", displayName: "GPT-5.6 Luna"),
         BrainModel(id: "gpt-5.5", displayName: "GPT-5.5"),
