@@ -182,6 +182,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     guard let self else { return }
                     self.refreshOptionalShortcut(.explainMore)
                     self.refreshOptionalShortcut(.showCode)
+                    self.refreshOptionalShortcut(.previousDetail)
+                    self.refreshOptionalShortcut(.nextDetail)
                 }),
             DisplaySection(
                 preferences: screenPreferences,
@@ -210,12 +212,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
 
         hotkeys?.onRequest = { [weak self] shortcut in
-            guard let self, self.composition.isLive else {
-                NSSound.beep() // ghost-mode-allowed: explicit user hotkey while stopped
+            guard let self else { return }
+            guard self.composition.isLive else {
+                if shortcut.triggerReason != nil {
+                    NSSound.beep() // ghost-mode-allowed: explicit user coaching hotkey while stopped
+                }
                 return
             }
             guard self.composition.allows(shortcut) else { return }
-            self.composition.requestShortcut(shortcut)
+            switch shortcut {
+            case .previousDetail: self.overlayBox.showPreviousDetail()
+            case .nextDetail: self.overlayBox.showNextDetail()
+            case .hint, .explainMore, .showCode: self.composition.requestShortcut(shortcut)
+            }
         }
 
         if !transcriptionPreferences.provider.requiredCredentials(
@@ -461,7 +470,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         stop(reason: .replacedByNewSession, preserving: readinessSession)
         // Follows the box setting this session is frozen with, not the live one.
-        for shortcut in [CoachingShortcut.showCode, .explainMore] {
+        for shortcut in CoachingShortcut.allCases where shortcut != .hint {
             if detailEnabled,
                let preference = hotkeyPreferences.first(where: { $0.shortcut == shortcut }) {
                 hotkeys?.apply(preference.combination, for: shortcut)

@@ -63,7 +63,7 @@ final class HotkeySection: NSObject, SettingsSection {
         scroll.onViewportChanged = relayout
         relayout()
         return SettingsPageView(title: title,
-            summary: "Request a hint, an explanation, or the next code block.", bodyView: scroll)
+            summary: "Request coaching or browse earlier and later details.", bodyView: scroll)
     }
 
     func didBecomeActive() {

@@ -68,7 +68,7 @@ lazy lifecycle; its adaptive light/dark feed is simply framed by the same page a
 | `ConnectionsSection` | "Connections" | yes | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions**. OpenAI and Gemini each expose their own Jarvis-managed API-key editor (`APIKeyControls`, one instance per `Credential`); Subscriptions (`SubscriptionControls`) signs Codex and Claude Code in and out through the bundled helper. Saving a key checks it with one models-list request and shows the vendor's verdict under the row. Saving never restarts a live conversation: an established OpenAI Realtime or Gemini Live socket stays connected and picks up the new key only on its next reconnect. |
 | `OverlaySection` | "Overlay" | yes | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off toggle, and the same Text Size + Opacity row layout; the box also carries the detail box's own Text size and Background opacity rows, with no switch of their own. When a surface is **on** its rows and live sample appear only while the Overlay tab is selected (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. Persists via `OverlayAppearance`. |
 | `DisplaySection` | "Screen" | yes | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — followed by a concise fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot. |
-| `HotkeySection` | "Shortcuts" | yes | Independent **Give me a hint**, **Explain more**, and **Show code** recorders, with per-binding failure feedback and persisted combinations. |
+| `HotkeySection` | "Shortcuts" | yes | Independent **Give me a hint**, **Explain more**, **Show code**, **Previous detail**, and **Next detail** recorders, with per-binding failure feedback and persisted combinations. |
 | `ActivitySection` | "Activity" | yes | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
 `AppDelegate` builds the section list at launch and passes it to `SettingsWindow`. All tabs are
@@ -179,17 +179,23 @@ existing recorder, requiring Command or Option. A successful rebind takes effect
 persists only that shortcut through `HotkeyPreferences`; defaults and storage keys live in
 `Defaults.Hotkey`. Escape cancels recording.
 
+**Previous detail** and **Next detail** navigate the existing detail history with **⌥⌘←** and
+**⌥⌘→**. They use the same recorders and registration rules as the other detail shortcuts.
+They mirror the arrow buttons without activating Jarvis or requesting coaching. At either end of
+history, while stopped, or with the box disabled or collapsed, they silently do nothing. Stepping
+back holds the chosen detail; reaching the newest resumes following incoming details.
+
 **Explain more** and **Show code** both answer into the detail box, so the Overlay Box switch is the
-only thing that decides whether they can be bound: with the box off, their recorders are disabled and
-their rows read "Requires Overlay Box · enable it in Overlay settings". Neither has a switch of its
-own, and the **Give me a hint** shortcut is unconditional. Whether a session can use them is fixed at
+only thing that decides whether they and the navigation shortcuts can be bound. With the box off,
+their recorders are disabled and their rows read "Requires Overlay Box · enable it in Overlay settings".
+These shortcuts have no separate switches; **Give me a hint** is unconditional. Whether a session can use them is fixed at
 Start: a session that started with the box off never registers them, even if the box is switched on
 mid-session, while a session that started with it on releases them when the box is switched off and
 registers them again when it is switched back on.
 
 A collision with another application or another Jarvis shortcut leaves the old working binding
 active and displays feedback for that card. If no binding could be registered at launch, its warning
-persists across tab visits. The three cards scroll at small window sizes, including when registration warnings
+persists across tab visits. The shortcut cards scroll at small window sizes, including when registration warnings
 are visible. Resizing or changing a binding card preserves the reading offset, clamped to the available
 content. The Overlay Box shows semibold hints in its upper section and the reply's detail in the
 lower one; a hint whose reply carried a detail ends with a dim marker. Both use the configured text

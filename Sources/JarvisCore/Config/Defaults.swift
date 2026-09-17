@@ -88,6 +88,14 @@ public enum Defaults {
     // MARK: - Hotkey
 
     public enum Hotkey {
+        public static let previousDetailKeyCodeKey = "hotkey.previousDetail.keyCode"
+        public static let previousDetailModifiersKey = "hotkey.previousDetail.modifiers"
+        public static let previousDetailCombination = HotkeyCombination(
+            keyCode: 123, modifiers: [.command, .option])
+        public static let nextDetailKeyCodeKey = "hotkey.nextDetail.keyCode"
+        public static let nextDetailModifiersKey = "hotkey.nextDetail.modifiers"
+        public static let nextDetailCombination = HotkeyCombination(
+            keyCode: 124, modifiers: [.command, .option])
         public static let codeKeyCodeKey = "hotkey.code.keyCode"
         public static let codeModifiersKey = "hotkey.code.modifiers"
         /// kVK_ANSI_K.
