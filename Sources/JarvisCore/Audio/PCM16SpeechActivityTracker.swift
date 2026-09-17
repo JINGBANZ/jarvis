@@ -1,9 +1,6 @@
 import Foundation
 
-/// Reports stable speech-activity edges from transient PCM16 observations without retaining audio.
-///
-/// The adaptive detector rejects the current noise floor. A short release delay bridges natural
-/// pauses so provider adapters do not wake coaching in the middle of an utterance.
+/// The release delay bridges natural pauses so coaching doesn't wake mid-utterance.
 public struct PCM16SpeechActivityTracker {
     private let releaseDelay: TimeInterval
     private var detector = AdaptiveAudioActivityDetector(configuration: .init())
@@ -15,8 +12,7 @@ public struct PCM16SpeechActivityTracker {
         self.releaseDelay = releaseDelay
     }
 
-    /// Returns `true` for a new speech onset, `false` after the release delay, and `nil` when the
-    /// externally visible state did not change.
+    /// True on a new onset, false once the release delay passes, nil when unchanged.
     public mutating func observe(pcm16: Data, at timestamp: TimeInterval) -> Bool? {
         guard timestamp.isFinite else { return nil }
         let observation = detector.observe(pcm16: pcm16)
@@ -39,8 +35,7 @@ public struct PCM16SpeechActivityTracker {
         return false
     }
 
-    /// Clears the adaptive floor and activity state. Returns `false` when callers need to publish
-    /// the end of a previously reported episode.
+    /// False when a reported episode was still active and its end must be published.
     public mutating func reset() -> Bool? {
         let change: Bool? = reportedActive ? false : nil
         detector = AdaptiveAudioActivityDetector(configuration: .init())

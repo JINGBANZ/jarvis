@@ -17,8 +17,7 @@ final class SyntheticAudioPlayer {
 
     private var player: AVAudioPlayer?
 
-    /// Preparing a player registers this process with Core Audio before the process-scoped tap is
-    /// built. The same retained player is reused for the first playback when possible.
+    /// Call before building the process tap: preparing registers this process with Core Audio.
     func prepare(_ url: URL) throws {
         let player = try AVAudioPlayer(contentsOf: url)
         guard player.prepareToPlay() else {
@@ -44,8 +43,7 @@ final class SyntheticAudioPlayer {
         }
         let startedAt = Date().timeIntervalSince1970
         if isAborted() { throw CancellationError() }
-        // ghost-mode-allowed: the explicit benchmark's process tap captures this fixed fixture while
-        // muting its hardware output, so no autonomous sound reaches the operator.
+        // ghost-mode-allowed: explicit benchmark; the process tap mutes this fixture's output
         guard player.play() else { throw Failure.playbackFailed(url.lastPathComponent) }
         while player.isPlaying {
             if isAborted() {

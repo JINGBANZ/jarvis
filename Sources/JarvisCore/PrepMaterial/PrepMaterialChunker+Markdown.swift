@@ -1,8 +1,7 @@
 import Foundation
 
 extension PrepMaterialChunker {
-    /// A small block boundary reader, not a Markdown renderer. Unrecognized constructs remain
-    /// prose. In particular, blank lines and heading-like comments inside a fence are code data.
+    /// Block boundaries only; blank lines and `#` comments inside a fence stay code.
     static func markdownParagraphs(_ text: String) -> [String] {
         var paragraphs: [String] = []
         var lines: [String] = []
@@ -30,8 +29,7 @@ extension PrepMaterialChunker {
             } else if line.trimmingCharacters(in: .whitespaces).isEmpty {
                 flush()
             } else {
-                // ATX headings interrupt prose even without a blank line. Keep consecutive
-                // heading prefixes together so they stay attached to their first evidence.
+                // Headings start a block without a blank line; consecutive headings stay together.
                 if isMarkdownHeading(line), lines.contains(where: { !isMarkdownHeading($0) }) {
                     flush()
                 }
@@ -50,15 +48,12 @@ extension PrepMaterialChunker {
         return (1...6).contains(hashes.count) && (rest.isEmpty || rest.first?.isWhitespace == true)
     }
 
-    /// Only recognizes leading/trailing-pipe tables with an explicit delimiter row. Literal pipe
-    /// text and unsupported table syntax retain ordinary paragraph behavior instead of guessing.
+    /// Nil unless an oversized table with leading and trailing pipes and a delimiter row; short
+    /// tables share their section's budget.
     static func splitMarkdownTable(_ paragraph: String, targetWordCount: Int) -> [String]? {
-        // Short tables share their surrounding prose's budget, preserving the section's context
-        // and caveats. Only an oversized table needs independent chunks with repeated headers.
         guard paragraph.split(whereSeparator: \.isWhitespace).count > targetWordCount else { return nil }
         let paragraphLines = paragraph.components(separatedBy: "\n")
-        // A heading can introduce a table without a blank line. Keep only that recognized
-        // prefix with its first rows; arbitrary prose must not be skipped or reinterpreted.
+        // Only headings may precede the rows; any other prose means this is not a table.
         let headings = paragraphLines.prefix(while: isMarkdownHeading)
         let lines = Array(paragraphLines.dropFirst(headings.count))
         guard lines.count >= 3,

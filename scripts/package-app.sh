@@ -1,25 +1,10 @@
 #!/usr/bin/env bash
-# Package Jarvis.app for distribution: Developer ID signing + notarization + stapling.
-# Produces Jarvis.dmg, which presents the app beside an Applications shortcut on any Apple silicon
-# Mac (macOS 14.2+) with no Gatekeeper friction. Driven locally or by CI
-# (.github/workflows/release.yml).
+# Package Jarvis.app as a signed, notarized, stapled Jarvis.dmg.
 #
-# Deliberately self-contained rather than layered on build-app.sh: the dev script's self-signed
-# "Jarvis Dev" identity exists only so local TCC grants persist, and creating it can prompt for
-# keychain access — a hang on a headless runner. Here the bundle is signed exactly once, with a
-# Developer ID certificate, hardened runtime, and a secure timestamp (all notarization
-# requirements). Hardened runtime blocks mic capture unless the audio-input entitlement is
-# granted, hence --entitlements.
-#
-# Credentials:
-#   Signing — a "Developer ID Application" certificate in the keychain search list
-#     (auto-detected), or pass IDENTITY="Developer ID Application: Name (TEAM)" explicitly.
-#   Notarization — either an App Store Connect API key via env (what CI uses):
-#       NOTARY_KEY_PATH=/path/to/AuthKey.p8  NOTARY_KEY_ID=<10 chars>  NOTARY_ISSUER_ID=<uuid>
-#     or a stored notarytool keychain profile (local one-time setup; app-specific password
-#     from appleid.apple.com):
-#       xcrun notarytool store-credentials jarvis-notary --apple-id you@example.com --team-id TEAMID
-#     Override the profile name with NOTARY_PROFILE.
+# Not layered on build-app.sh: creating its self-signed identity can prompt for keychain access,
+# which hangs a headless runner.
+# Notarization credentials: NOTARY_KEY_PATH, NOTARY_KEY_ID and NOTARY_ISSUER_ID (CI), or a profile from
+# `xcrun notarytool store-credentials` named by NOTARY_PROFILE.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -69,7 +54,7 @@ notarize_artifact() {
   echo "$submit_json"
   notary_status="$(plutil -extract status raw -o - - <<<"$submit_json" 2>/dev/null || true)"
   if [[ "$notary_status" != "Accepted" ]]; then
-    # The submission log names the exact offending file and reason — fetch it before failing.
+    # The submission log names the offending file and reason.
     submission_id="$(plutil -extract id raw -o - - <<<"$submit_json" 2>/dev/null || true)"
     [[ -n "$submission_id" ]] && xcrun notarytool log "$submission_id" "${notary[@]}" || true
     echo "error: $description notarization did not complete (status: ${notary_status:-unknown})" >&2
@@ -90,31 +75,22 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 
-# Sparkle powers the menu bar's explicit update check. SwiftPM leaves the framework beside the
-# executable; the bundle needs it at Contents/Frameworks, which is what the target's rpath names.
+# The target's rpath expects Sparkle at Contents/Frameworks.
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$SPARKLE"
-# SwiftPM emits each resource-bearing target's resources as its own side-by-side bundle — JarvisApp's
-# (the Silero VAD model) and JarvisCore's (the bundled coaching skills). Copy both into
-# Contents/Resources so `Bundle.module` resolves inside the assembled app, not just from .build.
+# SwiftPM emits resources as side-by-side bundles; `Bundle.module` finds them in Contents/Resources.
 ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisApp.bundle" \
       "$APP/Contents/Resources/Jarvis_JarvisApp.bundle"
 ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisCore.bundle" \
       "$APP/Contents/Resources/Jarvis_JarvisCore.bundle"
-# Sparkle's XPC services exist only to install updates from inside an App Sandbox. Jarvis is not
-# sandboxed, so shipping them would notarize and distribute code that can never run. A versioned
-# framework exposes each versioned directory through a top-level alias, so the alias goes too —
-# leaving it behind would ship a symlink pointing at something no longer there.
+# Sparkle's XPC services only serve sandboxed apps. Remove the top-level alias too, or it dangles.
 rm -rf "$SPARKLE/Versions/Current/XPCServices" "$SPARKLE/XPCServices"
-# The helper that serves the subscription targets, from the pinned, checksum-verified release.
 source scripts/lib/cliproxyapi.sh
 bundle_cliproxyapi "$APP"
 
 echo "▶ signing (hardened runtime + timestamp)"
-# Sparkle and the subscription helper bring the bundle's nested code, and codesign seals inner code
-# before outer: the update helpers, then the framework, then the helper, then the app. Not --deep,
-# which Apple documents as unsuitable for signing distributed code because it cannot apply the right
-# entitlements per nested binary.
+# Sign inner code before outer. Not --deep: Apple calls it unsuitable for distribution because it
+# can't apply per-binary entitlements. Hardened runtime blocks the mic without the app's entitlement.
 for nested in Versions/Current/Autoupdate Versions/Current/Updater.app; do
   codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE/$nested"
 done
@@ -146,10 +122,8 @@ cleanup_dmg_stage() {
   if [[ -n "${DMG_STAGE:-}" && -n "${DMG_STAGE_PREFIX:-}" \
         && "$DMG_STAGE" == "$DMG_STAGE_PREFIX"* && -d "$DMG_STAGE" \
         && ! -L "$DMG_STAGE" ]]; then
-    # A versioned framework is built out of relative symlinks (Versions/Current plus the aliases
-    # beside it), so the staged app legitimately contains them. What must never appear is a link
-    # resolving outside the staging directory — the only way this cleanup could reach anything else.
-    # A dangling link resolves to nothing and is treated as escaping, so the check fails closed.
+    # Framework symlinks are expected; refuse cleanup only if a link resolves outside the stage.
+    # A dangling link counts as escaping, so the check fails closed.
     stage_real="$(cd "$DMG_STAGE" && pwd -P)"
     escaping_links=""
     while IFS= read -r link; do
@@ -177,8 +151,7 @@ ditto -c -k --keepParent "$APP" "$APP_NOTARY_ARCHIVE"
 notarize_artifact "$APP_NOTARY_ARCHIVE" "application"
 rm -f "$APP_NOTARY_ARCHIVE"
 
-# The app must carry its own ticket before it is sealed inside the final disk image. Otherwise the
-# mounted artifact fails the same offline distribution policy that users rely on after copying it.
+# Staple the app before sealing it in the disk image, or the copied app fails offline Gatekeeper checks.
 echo "▶ stapling application"
 xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
@@ -195,13 +168,10 @@ codesign --verify --strict --verbose=2 "$DMG"
 
 notarize_artifact "$DMG" "disk image"
 
-# The outer ticket covers the exact container users download as well as the app ticket already
-# embedded inside it.
 echo "▶ stapling disk image"
 xcrun stapler staple "$DMG"
 
-# Verify the exact disk image users receive, not only the pre-container bundle. A packaging mistake
-# must leave the draft Release unpublished even if signing and notarization already succeeded.
+# A failure here keeps the draft Release unpublished even after notarization succeeded.
 verify_args=("$DMG")
 if [[ -n "${EXPECTED_RELEASE_TAG:-}" ]]; then
   verify_args+=("$EXPECTED_RELEASE_TAG")

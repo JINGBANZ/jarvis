@@ -1,7 +1,6 @@
 import Foundation
 
-/// The Settings hub's status rules. They judge saved settings and grants the way a Start would meet
-/// them, and name only problems Settings can fix or explain.
+/// Judges settings the way a Start would meet them, naming only what Settings can fix or explain.
 public enum RobotHealth {
     public static func health(
         of part: RobotPart, inputs: RobotHubInputs, readiness: RobotReadiness

@@ -2,9 +2,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Any AppKit call that can reveal Jarvis must be an explicit, reviewed exception. Keeping the marker
-# on the exact call site makes a newly introduced alert/window/browser/sound fail the normal gate
-# instead of relying on a future manual audit to notice it.
+# Any AppKit call that can reveal Jarvis needs a reviewed exception marker on the same line.
 pattern='NSAlert\(|(NSApp|NSApplication\.shared)\.(activate|setActivationPolicy)|makeKeyAndOrderFront|\.makeKey\(|orderFrontRegardless|\.orderFront\(|beginSheet\(|\.show\(relativeTo:|NSWorkspace\.shared\.open|NSSound|AudioServicesPlaySystemSound|requestUserAttention|UNUserNotification|NSUserNotification|\.runModal\('
 
 scan_status=0

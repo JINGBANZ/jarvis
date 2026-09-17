@@ -24,8 +24,6 @@ import Testing
         #expect(health.nextCycleAt == 40)
     }
 
-    /// Quiet time before a failure is not an outage, so the ceiling runs from the streak's first
-    /// failed cycle, and the session end reports the streak's latest cause.
     @Test func ceilingRunsFromTheStreaksFirstFailureAndKeepsTheLatestCause() {
         var health = BrainCycleRecovery()
         #expect(!health.ceilingReached(at: 10_000))

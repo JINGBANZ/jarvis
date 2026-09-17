@@ -1,7 +1,6 @@
 import Foundation
 import JarvisCore
 
-/// What one `AgentCLIRun` produced: captured stdout/stderr and the exit code.
 public struct AgentCLIOutput: Sendable {
     public let stdout: String
     public let stderr: String

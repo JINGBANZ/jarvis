@@ -1,6 +1,5 @@
 import AppKit
 
-/// An amber note at the top of a page: what needs the user, with an optional button to the fix.
 @MainActor
 final class SettingsNoticeView: NSBox {
     private let label = NSTextField(wrappingLabelWithString: "")
@@ -32,7 +31,7 @@ final class SettingsNoticeView: NSBox {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// The first sentence bold and amber, the rest in the page's text color.
+    /// The first sentence is bold and amber.
     private static func styled(_ text: String) -> NSAttributedString {
         let split = text.range(of: ". ")
         let lead = split.map { String(text[..<$0.upperBound]) } ?? text

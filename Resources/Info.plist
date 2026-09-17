@@ -5,8 +5,7 @@
   <key>CFBundleName</key><string>Jarvis</string>
   <key>CFBundleDisplayName</key><string>Jarvis</string>
   <key>CFBundleIdentifier</key><string>com.jarvis.coach</string>
-  <!-- Versions are bumped by release-please (the generic updater rewrites the semver on any line
-       carrying the annotation) — don't edit them by hand. -->
+  <!-- release-please owns these versions; don't edit them by hand. -->
   <key>CFBundleVersion</key><string>0.3.0</string> <!-- x-release-please-version -->
   <key>CFBundleShortVersionString</key><string>0.3.0</string> <!-- x-release-please-version -->
   <key>CFBundlePackageType</key><string>APPL</string>
@@ -14,13 +13,8 @@
   <key>CFBundleIconFile</key><string>Jarvis.icns</string>
   <key>LSMinimumSystemVersion</key><string>14.2</string>
   <key>LSUIElement</key><true/>
-  <!-- Sparkle, for the menu bar's "Check for Updates" item. The feed is the appcast.xml asset
-       published beside Jarvis.dmg on each Release; /releases/latest/ resolves to the newest
-       published one. scripts/build-app.sh removes SUFeedURL from the development bundle, which is
-       how a local build ends up with no updater at all.
-       Checks are user-initiated only: SUEnableAutomaticChecks stays false so Sparkle neither
-       schedules background checks nor shows its first-launch prompt asking to enable them, both of
-       which would present UI on an autonomous path. -->
+  <!-- SUEnableAutomaticChecks stays false: background checks and Sparkle's first-launch prompt
+       would present UI on an autonomous path. -->
   <key>SUFeedURL</key>
   <string>https://github.com/JINGBANZ/jarvis/releases/latest/download/appcast.xml</string>
   <key>SUEnableAutomaticChecks</key><false/>

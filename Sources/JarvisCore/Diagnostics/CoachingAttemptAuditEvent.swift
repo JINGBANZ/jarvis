@@ -1,6 +1,5 @@
 import Foundation
 
-/// Attempt-level provenance around provider traffic.
 public enum CoachingAttemptAuditEvent: Sendable {
     public enum Wake: String, Sendable {
         case trigger
@@ -24,7 +23,6 @@ public enum CoachingAttemptAuditEvent: Sendable {
         case cancelled
     }
 
-    /// Audit-visible result of the conservative runtime substance gate.
     public enum Classification: String, Sendable {
         case substantive
         case knownFiller = "known_filler"

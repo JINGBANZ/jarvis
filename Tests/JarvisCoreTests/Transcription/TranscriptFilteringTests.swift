@@ -9,7 +9,6 @@ import Testing
 
     @Test func captionArtifactsAreDroppedOnlyOnTheMicSide() {
         #expect(TranscriptFiltering.meaningfulTranscript("Thank you.", speaker: .me) == nil)
-        // A turn-ending reply from the other side is real speech, not an artifact.
         #expect(TranscriptFiltering.meaningfulTranscript("Thank you.", speaker: .them) == "Thank you.")
     }
 

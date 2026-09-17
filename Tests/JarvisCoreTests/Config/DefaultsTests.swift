@@ -1,14 +1,11 @@
 import Testing
 @testable import JarvisCore
 
-/// The registry is the single source for every user-facing setting's key, default, and range, so
-/// these tests pin the literals a user would see on a fresh install and the invariants the accessor
-/// types rely on.
 @Suite struct DefaultsTests {
 
     // MARK: - Keys
 
-    /// Keys are the on-disk contract: renaming one silently discards a real user's saved choice.
+    /// Renaming a persisted key silently discards a user's saved choice.
     @Test func persistedKeysAreStable() {
         #expect(Defaults.Brain.providerKey == "brain.provider")
         #expect(Defaults.Brain.fallbackTargetsKey == "brain.fallbackTargets")
@@ -36,7 +33,7 @@ import Testing
         #expect(Defaults.Hotkey.modifiersKey == "hotkey.modifiers")
     }
 
-    /// OpenAI keeps the pre-provider key so existing installs keep their model selection.
+    /// OpenAI keeps the unscoped key so existing installs keep their model selection.
     @Test func brainModelKeysAreProviderScoped() {
         #expect(Defaults.Brain.modelKey(for: .openAI) == "brain.model")
         #expect(Defaults.Brain.modelKey(for: .claudeSubscription) == "brain.model.claude-subscription")
@@ -51,7 +48,6 @@ import Testing
         #expect(Defaults.Brain.effort == .low)
     }
 
-    /// Every provider's default model must be one its own catalog actually offers.
     @Test func brainModelDefaultsComeFromEachProviderCatalog() {
         for provider in BrainProvider.allCases {
             let model = Defaults.Brain.model(for: provider)
@@ -62,7 +58,6 @@ import Testing
     @Test func transcriptionDefaults() {
         #expect(Defaults.Transcription.provider == .openAI)
         #expect(Defaults.Transcription.openAIModel == .gpt4oTranscribe)
-        // Empty means automatic detection — never a silent assumption of English.
         #expect(Defaults.Transcription.openAIExpectedLanguages.isEmpty)
         #expect(Defaults.Transcription.openAIVocabularyKeywords.isEmpty)
         #expect(!Defaults.Transcription.appleSpeechLocaleIdentifier.isEmpty)
@@ -74,8 +69,7 @@ import Testing
         #expect(Defaults.Screen.displayIndexMinimum == 1)
     }
 
-    /// kVK_ANSI_J + ⌘⌥ — the original hardcoded ⌥⌘J, so an existing install sees no behavior change
-    /// until it opts to rebind.
+    /// 38 is kVK_ANSI_J, so the default is ⌥⌘J.
     @Test func hotkeyDefaults() {
         #expect(Defaults.Hotkey.keyCode == 38)
         #expect(Defaults.Hotkey.modifiers == [.command, .option])
@@ -91,19 +85,15 @@ import Testing
         #expect(Defaults.Overlay.Box.fontSize == 25)
         #expect(Defaults.Overlay.Box.opacity == 0.45)
         #expect(Defaults.Overlay.Box.opacityRange == 0...1.0)
-        // Both surfaces expose one opacity range, because the Overlay tab presents them alike.
         #expect(Defaults.Overlay.Box.opacityRange == Defaults.Overlay.Caption.opacityRange)
         #expect(Defaults.Overlay.Box.width == 520)
         #expect(Defaults.Overlay.Box.height == 440)
-        // The two surfaces default opposite ways: caption off, box on.
         #expect(Defaults.Overlay.Caption.enabled == false)
         #expect(Defaults.Overlay.Box.enabled == true)
     }
 
     // MARK: - Invariants
 
-    /// Independent of the exact literals above: every default must sit inside its own range, and
-    /// every range must be non-empty. `OverlayAppearance` clamps against these on each read.
     @Test func overlayRangesContainTheirDefaults() {
         let pairs: [(ClosedRange<Double>, Double)] = [
             (Defaults.Overlay.Caption.fontSizeRange, Defaults.Overlay.Caption.fontSize),
@@ -119,8 +109,7 @@ import Testing
         }
     }
 
-    /// The display index is 1-based the way `screencapture -D` counts, so the default must not sit
-    /// below the clamp floor.
+    /// Display indexes are 1-based, as `screencapture -D` counts.
     @Test func screenDisplayIndexDefaultRespectsItsFloor() {
         #expect(Defaults.Screen.displayIndex >= Defaults.Screen.displayIndexMinimum)
     }

@@ -1,6 +1,5 @@
 import AppKit
 
-/// Skill cards in two columns, or one when the page is narrow; each row is as tall as its tallest card.
 @MainActor
 final class SkillCardGridView: NSView {
     private static let gap: CGFloat = 12
@@ -21,8 +20,7 @@ final class SkillCardGridView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// Sizes the document for the viewport: full width, and never shorter than the viewport, so the
-    /// grid stays pinned to the top.
+    /// Never shorter than the viewport, so the grid stays pinned to the top.
     func fit(width: CGFloat, minimumHeight: CGFloat) {
         let frames = cardFrames(forWidth: width)
         let contentHeight = frames.map(\.maxY).max() ?? 0

@@ -4,7 +4,6 @@ import JarvisCore
 @testable import JarvisEvaluation
 
 @Suite struct SessionMetricsTests {
-    /// One traffic line in the on-disk shape `FileSessionAudit` writes.
     private func line(tag: String = "coach", status: Int? = 200, ms: Int = 500,
                       request: [String: Any], response: [String: Any]? = nil,
                       error: String? = nil, recordKind: String? = nil) throws -> String {
@@ -28,8 +27,6 @@ import JarvisCore
         #expect(out.contains("total unavailable"))
     }
 
-    /// OpenAI Responses usage keeps an explicit zero distinct from unavailable telemetry and reads
-    /// the newer cache-write field when the provider emits it. API cost remains unavailable.
     @Test func rendersOpenAIUsageAndTotals() throws {
         let first = try line(request: ["model": "gpt-5.5"],
                              response: ["usage": ["input_tokens": 100,
@@ -60,7 +57,6 @@ import JarvisCore
         #expect(out.contains("session totals: 1 calls · input 100 · cache-read 40 · cache-write — · output 12 · cost —"))
     }
 
-    /// A transport error has no response usage. The call happened, but every usage value is unknown.
     @Test func rendersTransportErrorCallWithUnknownUsage() throws {
         let failed = try line(status: nil, request: ["model": "gpt-5.5"], error: "timed out")
         let out = SessionMetrics.render(jsonl: failed)
@@ -69,9 +65,6 @@ import JarvisCore
         #expect(out.contains("| gpt-5.5 | 1 | — | — | — | — | — |"))
     }
 
-    /// Claude warm-query envelope: cost from `total_cost_usd`, the Anthropic cache
-    /// creation/read split from `cli.usage`, and per-model rows from `modelUsage` — including the
-    /// internal sidecar (haiku) pass the call-level usage alone would hide.
     @Test func rendersCLIEnvelopeCostCacheSplitAndSidecarModels() throws {
         let cli: [String: Any] = [
             "total_cost_usd": 1.44,
@@ -90,19 +83,13 @@ import JarvisCore
                             response: ["exitCode": 0, "reply": "hi", "cli": cli])
         let out = SessionMetrics.render(jsonl: call)
 
-        // Per-call: the cache creation/read split and the dollar cost, all from the CLI envelope.
         #expect(out.contains("| 1 | coach | Claude Code | (CLI default) | 200 | 900 | 4 | 1285 | 12000 | 200 | $1.4400 |"))
         #expect(out.contains("session totals: 1 calls · input 4 · cache-read 1285 · cache-write 12000 · output 200 · cost $1.4400"))
-        // The per-model table breaks out both the main model and the sidecar haiku pass.
         #expect(out.contains("per-model totals"))
         #expect(out.contains("| claude-haiku-4-5 | 1 | 500 | 0 | 0 | 30 | $0.0400 |"))
         #expect(out.contains("| claude-opus-4-8 | 1 | 4 | 1285 | 12000 | 200 | $1.4000 |"))
     }
 
-    /// The one-shot `codex exec` summarizer records its completed turn, whose usage uses Codex's own
-    /// key names. Reading it keeps compaction token accounting in the session totals; before it the
-    /// values were rendered unavailable even though the transport had supplied them. No per-call
-    /// cost is reported, so cost stays unavailable.
     @Test func rendersCodexOneShotExecUsage() throws {
         let call = try line(
             request: ["provider": "codex-cli", "model": "gpt-5.4", "runtime": "one-shot-exec"],
@@ -120,8 +107,6 @@ import JarvisCore
         #expect(out.contains("| gpt-5.4 | 1 | 17102 | 9984 | 0 | 5 | — |"))
     }
 
-    /// Codex's recorded response has no usage envelope. Successful execution must not become a
-    /// deterministic claim that the call consumed zero tokens and cost nothing.
     @Test func rendersCodexUsageAsUnavailable() throws {
         let call = try line(request: ["provider": "codex-cli", "model": "gpt-5.4"],
                             response: ["exitCode": 0, "reply": "hi"])
@@ -132,9 +117,8 @@ import JarvisCore
         #expect(out.contains("| gpt-5.4 | 1 | — | — | — | — | — |"))
     }
 
-    /// Mixed providers get provider-specific token totals because OpenAI input includes cache hits
-    /// while Anthropic reports uncached/cache-read/cache-write values separately. Known Claude cost
-    /// remains explicitly partial instead of masquerading as the whole-session cost.
+    /// OpenAI input tokens include cache hits; Anthropic reports uncached, cache-read and
+    /// cache-write separately.
     @Test func separatesMixedProviderTokensAndLabelsPartialCost() throws {
         let openAI = try line(request: ["model": "gpt-5.5"],
                               response: ["usage": ["input_tokens": 100,
@@ -156,8 +140,6 @@ import JarvisCore
         #expect(!out.contains("input 102"))
     }
 
-    /// A field can be known for only part of a same-provider session. Preserve the known subtotal and
-    /// state the unavailable-call count instead of either dropping it or presenting it as complete.
     @Test func labelsPartialSameProviderMetric() throws {
         let first = try line(request: ["model": "gpt-5.5"],
                              response: ["usage": ["input_tokens": 100,

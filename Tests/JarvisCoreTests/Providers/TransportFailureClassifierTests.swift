@@ -3,8 +3,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct TransportFailureClassifierTests {
-    /// The description table is fixed text keyed on the code. A URLError's own description embeds
-    /// the failing URL, which for Gemini carries the API key, so it is never consulted.
+    /// A URLError's own description embeds the failing URL, which carries the Gemini key.
     @Test func urlErrorsGetFixedDescriptionsAndKeepTheirCode() {
         let error = URLError(.cannotConnectToHost, userInfo: [
             NSURLErrorFailingURLStringErrorKey: "wss://generativelanguage.googleapis.com/ws?key=AIzaSecretKey123",
@@ -61,9 +60,6 @@ import Testing
         #expect(pong.message == "no pong within 10s")
     }
 
-    /// This table is shared by the brain HTTP adapter and the credential check, neither of which has
-    /// a socket, so no description here may name one. The row is the diagnostic surface, and a wrong
-    /// noun on it costs exactly the evidence it exists to give.
     @Test func descriptionsNameNothingCallerSpecific() {
         #expect(TransportFailureClassifier.description(domain: NSURLErrorDomain, code: -1011)
                 == "the server sent an unusable response")

@@ -1,8 +1,7 @@
 import AppKit
 
-/// One of the hub's bottom buttons: a chamfered tile with a symbol above its title. It draws the
-/// frame, symbol, and title itself: the button cell's image-above layout pins the symbol to the top
-/// edge of a tall tile, and a sublayer would cover the cell's own drawing.
+/// Draws its own symbol and title: the cell's image-above layout pins the symbol to the top edge
+/// of a tall button.
 @MainActor
 final class HomeDockButton: NSButton {
     let destination: SettingsDestination
@@ -40,7 +39,7 @@ final class HomeDockButton: NSButton {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// The contract's outline, inset half a point so the stroke stays inside the bounds.
+    /// Inset half a point so the stroke stays inside the bounds.
     private func chamferPath() -> NSBezierPath {
         let w = bounds.width - 1
         let h = bounds.height - 1
@@ -68,7 +67,6 @@ final class HomeDockButton: NSButton {
         path.lineWidth = 1
         path.stroke()
 
-        // The symbol above the title, centered together.
         let gap: CGFloat = 6
         let symbolSize = symbol?.size ?? .zero
         let labelSize = label.size()

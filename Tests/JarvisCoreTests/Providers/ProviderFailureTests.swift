@@ -3,9 +3,6 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ProviderFailureTests {
-    /// A bare number is unreadable without its scale. Only URL loading codes are "network"; an
-    /// errno and an adapter's own code are different numberings, and labelling all three the same
-    /// sent a person to check their Wi-Fi over a CLI that had exited badly.
     @Test func identityNamesTheScaleACodeBelongsTo() {
         #expect(ProviderFailure.Identity(transportDomain: NSURLErrorDomain, transportCode: -1009)
                 .summary == "network -1009")
@@ -47,8 +44,6 @@ import Testing
         #expect(ProviderFailure.Identity().summary == "")
     }
 
-    /// Adapters hand errors nothing has classified through this initializer. It keeps the NSError
-    /// identity, never trusts the description with a URL, and stays temporary.
     @Test func unclassifiedErrorsKeepDomainAndCodeAndStayTemporary() {
         let error = NSError(domain: "ExampleAdapter", code: 1,
                             userInfo: [NSLocalizedDescriptionKey: "adapter unavailable"])
@@ -68,11 +63,6 @@ import Testing
         #expect(!transport.message.contains("example.test"))
     }
 
-    /// A permanent account, access, or configuration failure and a connection that never came up
-    /// are shared by both transcription sockets (same key, same network), so a system-audio-side
-    /// failure of that kind ends the session instead of hiding behind a mic-only degradation that
-    /// the mic socket then repeats seconds later. Local failures (Apple Speech, capture) and a
-    /// socket lost after it was ready stay stream-local.
     @Test func endsEverySessionFollowsStageAndDisposition() {
         #expect(failure(stage: .handshake, category: .access, disposition: .permanent).endsEverySession)
         #expect(failure(stage: .session, category: .authentication, disposition: .permanent).endsEverySession)
@@ -83,8 +73,6 @@ import Testing
         #expect(!failure(stage: .local, category: .unavailable, disposition: .permanent).endsEverySession)
     }
 
-    /// Every category has an explicit escalate-or-degrade answer for both dispositions so a future
-    /// category cannot default silently.
     @Test func everyCategoryHasAnExplicitDecision() {
         let escalatesWhenTemporary: Set<ProviderFailure.Category> = [.unreachable]
         for category in ProviderFailure.Category.allCases {

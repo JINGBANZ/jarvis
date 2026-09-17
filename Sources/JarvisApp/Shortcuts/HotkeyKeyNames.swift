@@ -1,11 +1,7 @@
 import Carbon.HIToolbox
 import JarvisCore
 
-/// Turns a `HotkeyCombination` into the glyphs Settings and `jlog` show, e.g. "⌥⌘J". Named keys are a
-/// small fixed table (letters, digits, function keys, common non-printing keys) rather than a
-/// layout-aware lookup — Carbon virtual key codes are already ANSI/physical-position based, matching
-/// the original hardcoded ⌥⌘J, so a static table keeps this in the same spirit without pulling in
-/// `UCKeyTranslate`/keyboard-layout plumbing for a single Settings label.
+/// Carbon key codes are physical ANSI positions, so labels use a static table, not the layout.
 enum HotkeyKeyNames {
     static func displayString(for combination: HotkeyCombination) -> String {
         modifierGlyphs(combination.modifiers) + keyGlyph(for: combination.keyCode)

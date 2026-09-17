@@ -3,7 +3,6 @@ import JarvisBrainProviders
 import JarvisCore
 import Testing
 
-/// The sign-in against stub login commands that print what the helper prints.
 @Suite struct LocalProxySignInTests {
     private static let noise = """
         echo 'CLIProxyAPI Version: 7.3.3'
@@ -69,9 +68,6 @@ import Testing
         #expect(seen.last == .failed(message: "claude authentication failed: state mismatch"))
     }
 
-    /// Jarvis opens whatever address the login prints, so one that is not a vendor's authorize host
-    /// ends the login with a message. Waiting it out would spend the ten-minute deadline and then
-    /// report a timeout, which says nothing about why no page ever opened.
     @Test func anAddressJarvisWontOpenEndsTheLogin() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }

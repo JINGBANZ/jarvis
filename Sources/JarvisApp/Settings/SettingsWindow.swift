@@ -1,17 +1,11 @@
 import AppKit
 
-/// The Settings window: the robot hub and the pages it opens. Non-modal; it promotes the accessory
-/// app to `.regular` while open so text fields can take keyboard focus, and drops back on close —
-/// the lesson the old API-key dialog and activity viewer both learned.
-///
-/// The window shell is kept between opens. The hub and each page are built on their first visit,
-/// kept while the window is open, and released on close, so controls start fresh and the window
-/// reopens on the hub. The views share a plain container rather than a tabless tab view, so a page
-/// change can keep both on screen while it animates.
+// Design: wiki/settings-window.md
+/// Promotes the accessory app to `.regular` while open, because text fields in an accessory app
+/// can't become first responder or accept paste.
 @MainActor
 final class SettingsWindow: NSObject, NSWindowDelegate {
-    /// One size for every page: navigating never resizes the window. The user can still resize
-    /// freely down to `minContentSize`, which keeps the hub's compact layout and every page usable.
+    /// Shared by every page, because per-page sizes made the window jump on each switch.
     private static let defaultContentSize = NSSize(width: 820, height: 600)
     private static let minContentSize = NSSize(width: 560, height: 460)
 
@@ -53,7 +47,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         window?.makeKeyAndOrderFront(nil) // ghost-mode-allowed: explicit Settings action
     }
 
-    /// Shows `destination`, growing it out of `point` (window coordinates) when it opens from the hub.
+    /// `point` is in window coordinates.
     func open(_ destination: SettingsDestination, from point: NSPoint? = nil) {
         guard destination != current, destination == .home || sections[destination] != nil,
               let container, let outgoing = builtView(for: current) else { return }
@@ -143,7 +137,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         return page
     }
 
-    /// Shows `destination` with no move, as the window opens.
     private func present(_ destination: SettingsDestination) {
         guard let container else { return }
         let view = builtView(for: destination) ?? makeView(for: destination)
@@ -172,7 +165,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         }
     }
 
-    /// The visible head page shows its part's advice, with a way to the fix when Settings has one.
     private func applyNotice() {
         guard let page = pages[current] else { return }
         guard let part = current.part,
@@ -196,12 +188,12 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        resignCurrent()        // e.g. turn the overlay preview off if Mouth was open
+        resignCurrent()
         home.windowWillClose()
         for section in sections.values { section.windowWillClose() }
         hub.endObservingSettings()
-        // Keep the window shell; release every page so controls start fresh next time. A transition
-        // still running has nothing left to finish.
+        // Keep the window shell but release every page, so controls and Activity's WebView start
+        // fresh on the next open. The token bump drops a transition that is still running.
         transitionToken += 1
         returnOrigin = nil
         homeView?.removeFromSuperview()

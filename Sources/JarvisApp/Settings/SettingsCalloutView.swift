@@ -1,7 +1,5 @@
 import AppKit
 
-/// The rounded note Settings pages put under a card: an icon and one wrapped sentence or two. Info
-/// explains; warning reports something that didn't work.
 @MainActor
 final class SettingsCalloutView: NSBox {
     enum Tone { case info, warning }

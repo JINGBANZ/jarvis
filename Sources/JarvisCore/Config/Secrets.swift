@@ -1,11 +1,9 @@
 import Foundation
 
-/// Source of an API credential. An owner-only file is primary (spec §5); env is a headless fallback.
 public protocol SecretStore {
     func apiKey(for credential: Credential) -> String?
 }
 
-/// Reads each credential's environment variable from a provided dictionary (defaults to process env).
 public struct EnvSecretStore: SecretStore {
     private let environment: [String: String]
     public init(environment: [String: String] = ProcessInfo.processInfo.environment) {
@@ -17,20 +15,13 @@ public struct EnvSecretStore: SecretStore {
     }
 }
 
-/// Reads/writes each credential in its own owner-only file under one Application Support directory.
-///
-/// We deliberately do *not* use the login Keychain. macOS keys Keychain access to a per-build code
-/// *partition* (a cdhash, for a self-signed app with no Apple Team ID), so a fresh build is treated as
-/// a new program and re-prompts for the login password on every rebuild — unlike TCC (mic/screen),
-/// which keys to the stable signing identity and persists. A 0600 file in a 0700 directory has the
-/// same practical trust boundary as the headless environment fallback (any process running as this
-/// user can read it) but never prompts and survives every rebuild.
+/// Deliberately not the Keychain: a self-signed app's Keychain access is keyed to each build's
+/// cdhash, so every rebuild re-prompts for the login password. A 0600 file in a 0700 directory has
+/// the same trust boundary as the environment fallback.
 public struct FileSecretStore: SecretStore {
-    /// Directory holding every credential file. Exposed because callers also derive sibling
-    /// Jarvis-managed paths (for example the sessions directory) from it.
     public let directoryURL: URL
 
-    /// Defaults to `~/Library/Application Support/Jarvis/`. Pass an explicit URL in tests.
+    /// Nil means `~/Library/Application Support/Jarvis/`.
     public init(directoryURL: URL? = nil) {
         if let directoryURL {
             self.directoryURL = directoryURL
@@ -41,7 +32,6 @@ public struct FileSecretStore: SecretStore {
         }
     }
 
-    /// Absolute path of one credential's file.
     public func fileURL(for credential: Credential) -> URL {
         directoryURL.appendingPathComponent(credential.fileName)
     }
@@ -56,25 +46,20 @@ public struct FileSecretStore: SecretStore {
     @discardableResult
     public func setApiKey(_ key: String, for credential: Credential) -> Bool {
         let fm = FileManager.default
-        // 0700 dir: a 0755 parent would leak the credential files' names/metadata to other local
-        // users (CWE-732). Mirrors how the per-session log directory is created.
+        // 0700 so other local users can't list credential file names (CWE-732).
         do {
             try fm.createDirectory(at: directoryURL, withIntermediateDirectories: true,
                                    attributes: [.posixPermissions: 0o700])
-            // createDirectory only applies the mode to directories it *creates*; a pre-existing dir
-            // (e.g. a 0755 left by a restored backup or another tool) keeps its mode. Tighten it so the
-            // owner-only guarantee holds regardless. Best-effort: a metadata-perms failure must not
-            // block saving the key, whose own bytes are still protected 0600.
+            // createDirectory leaves an existing directory's mode alone. Best-effort: the key file
+            // itself is still 0600.
             try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directoryURL.path)
         } catch { return false }
-        // Create the file 0600 from the start (createFile applies attributes atomically on creation),
-        // so the secret is never briefly world-readable between write and chmod.
+        // createFile applies 0600 at creation, so the secret is never briefly world-readable.
         return fm.createFile(atPath: fileURL(for: credential).path, contents: Data(key.utf8),
                              attributes: [.posixPermissions: 0o600])
     }
 }
 
-/// Tries each store in order for the requested credential; first non-nil wins. App uses [File, Env].
 public struct ChainedSecretStore: SecretStore {
     private let stores: [SecretStore]
     public init(_ stores: [SecretStore]) { self.stores = stores }

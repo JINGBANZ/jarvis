@@ -1,11 +1,7 @@
 #if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import Foundation
 
-/// One live e2e scenario: the session settings a launch starts with and the ordered steps it drives.
-///
-/// Decoded from `Tests/JarvisLiveTests/Scenarios/*.json` through a private string-typed layer, then
-/// validated into this model. The Core enums it names stay free of `Codable` conformances, because
-/// their raw strings are this file format's concern, not theirs.
+/// Decoded through a private string-typed layer so the Core enums it names stay free of `Codable`.
 public struct LiveE2EScenario: Sendable, Equatable {
     public enum Failure: Error, CustomStringConvertible {
         case invalid(String)
@@ -72,13 +68,12 @@ public struct LiveE2EScenario: Sendable, Equatable {
     public let audio: Audio
     public let brain: Brain
     public let capabilities: Capabilities
-    /// A file name inside the fixtures directory, or nil.
+    /// A file name inside the fixtures directory.
     public let prepNotes: String?
     public let transcription: Transcription
     public let voices: Voices
     public let steps: [Step]
 
-    /// Decode and validate. Throws a descriptive error naming the step index when a rule fails.
     public static func load(from url: URL, fixturesDirectory: URL) throws -> LiveE2EScenario {
         try decode(Data(contentsOf: url), fixturesDirectory: fixturesDirectory)
     }
@@ -119,8 +114,8 @@ extension LiveE2EScenario {
         voices = Voices(them: raw.voices.them, me: raw.voices.me)
         steps = try Self.steps(from: raw.steps, primary: primary, fixturesDirectory: fixturesDirectory)
 
-        // A stream the audio setting does not play carries no synthesized speech, so a line on it
-        // would leave the runner waiting out an attempt that never starts.
+        // A line on a stream that isn't played would leave the runner waiting for an attempt
+        // forever.
         func plays(_ speaker: Speaker) -> Bool {
             switch audio {
             case .fixture: true
@@ -170,7 +165,7 @@ extension LiveE2EScenario {
             case "screen":
                 let fixture = raw.screen ?? ""
                 try requireFixture(fixture, in: fixturesDirectory, field: "\(label).screen")
-                // The image goes to the coach as the captured screen, so it must be what a capture makes.
+                // The coach receives it as a screen capture, which is always JPEG.
                 guard ["jpg", "jpeg"].contains(URL(fileURLWithPath: fixture).pathExtension.lowercased()) else {
                     throw Failure.invalid("\(label).screen must be a JPEG image, got \"\(fixture)\"")
                 }
@@ -182,7 +177,6 @@ extension LiveE2EScenario {
                     throw invalid("say must be an object with speaker and text")
                 }
                 let whileAttemptRunning = raw.whileAttemptRunning ?? false
-                // The first step has no earlier attempt to overlap.
                 if index == 0, whileAttemptRunning {
                     throw invalid("whileAttemptRunning cannot mark the first step")
                 }
@@ -245,8 +239,7 @@ extension LiveE2EScenario {
         return value
     }
 
-    /// A fixture reference must be a plain file name so a scenario cannot reach outside the
-    /// fixtures directory the launcher copies.
+    /// Plain file names only, so a scenario can't reach outside the fixtures directory.
     private static func requireFixture(_ name: String, in directory: URL, field: String) throws {
         guard !name.isEmpty, !name.contains("/"), !name.contains("..") else {
             throw Failure.invalid("\(field) must be a plain file name, got \"\(name)\"")
@@ -305,8 +298,7 @@ private struct RawOverlap: Decodable {
     let afterSeconds: Double
 }
 
-/// A step object as written: every recognized key decoded if present, and every other key kept by
-/// name so validation can reject it with the step's index.
+/// Keeps unknown keys by name so validation can reject them with the step's index.
 private struct RawStep: Decodable {
     static let primaryKeyNames = ["screen", "press", "say", "switchBrain", "stop"]
     static let modifierKeyNames = ["overlap", "whileAttemptRunning"]

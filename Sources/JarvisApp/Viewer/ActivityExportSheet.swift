@@ -1,20 +1,12 @@
 import AppKit
 import JarvisCore
 
-/// Presents the "Export…" flow for `ActivityViewer`: a scrollable, checkable list of sessions (so
-/// an arbitrarily long history never distorts the dialog's layout), an export-format choice, and
-/// two content toggles — then a destination-folder panel, then writes one file (plus an
-/// `images/` subfolder when applicable) per selected session. The picker window and both panels
-/// run as blocking modal loops, the same explicit-user-action style as
-/// `ToolsSection.addSource()` and `ActivityViewer`'s own `clearHistoryTapped()`.
 @MainActor
 enum ActivityExportSheet {
     static func present(sessions: [SessionStore.Session], store: SessionStore) {
         guard !sessions.isEmpty else { return }
         let picker = SessionPickerWindow(sessions: sessions)
         var selectedSessions: [SessionStore.Session] = []
-        // Loop on an empty selection: reopen the same picker (preserving whatever format/toggle
-        // choices were already made) instead of ending the whole flow on a simple mistake.
         while true {
             guard picker.runModal() else { return } // ghost-mode-allowed: explicit user action in Settings
             selectedSessions = picker.selectedSessions
@@ -80,10 +72,6 @@ enum ActivityExportSheet {
     }
 }
 
-/// The session-selection window: a fixed-height scrollable checkbox list (so history length
-/// changes the scroll region, never the window), a format radio group, and two toggles, with
-/// Export/Cancel buttons. Runs as a classic blocking modal loop rather than a sheet, matching
-/// every other Settings confirmation in this file.
 @MainActor
 private final class SessionPickerWindow: NSObject, NSTableViewDataSource, NSTableViewDelegate,
     NSWindowDelegate {
@@ -120,14 +108,11 @@ private final class SessionPickerWindow: NSObject, NSTableViewDataSource, NSTabl
         window.delegate = self
         let content = makeContentView()
         window.contentView = content
-        // The stack's actual height (sessions list + format + toggles + buttons) is shorter than
-        // the placeholder frame above; shrink the window to fit instead of leaving whitespace.
         content.layoutSubtreeIfNeeded()
         window.setContentSize(NSSize(width: 380, height: content.fittingSize.height))
     }
 
-    /// Blocks until Export/Cancel/the window's close button is used; returns whether the user
-    /// confirmed Export.
+    /// Blocks until the window closes. Returns whether the user chose Export.
     func runModal() -> Bool {
         window.center()
         NSApp.runModal(for: window) // ghost-mode-allowed: explicit user action in Settings
@@ -236,8 +221,6 @@ private final class SessionPickerWindow: NSObject, NSTableViewDataSource, NSTabl
         checkedRows[sender.tag] = sender.state == .on
     }
 
-    /// Plain sibling `NSButton`s (not an `NSMatrix`) don't deselect each other automatically —
-    /// enforce single-selection explicitly so picking a different format actually sticks.
     @objc private func formatRadioTapped(_ sender: NSButton) {
         for (button, _) in formatButtons {
             button.state = button === sender ? .on : .off

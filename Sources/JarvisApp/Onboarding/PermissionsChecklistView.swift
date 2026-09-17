@@ -1,18 +1,10 @@
 import AppKit
 import JarvisCore
 
-/// The permission gate's contents: a plain list of the grants Jarvis needs, and the one button that
-/// walks them.
-///
-/// One button, never a row of them. It asks for every outstanding grant in checklist order, strictly
-/// one dialog at a time — macOS queues TCC dialogs, and asking for three at once stacks them into a
-/// pile the user can't tell apart. Its label is the only thing that changes as the walk progresses,
-/// ending on whatever is actually true: reopen, fix in System Settings, or start using Jarvis.
+// Design: wiki/architecture.md#permissions
 @MainActor
 final class PermissionsChecklistView: NSView {
-    /// The user is through the gate: every grant is held and they've asked to get on with it.
     var onFinished: (() -> Void)?
-    /// The user is leaving without granting. There is no Jarvis to fall back to, so this is a quit.
     var onQuit: (() -> Void)?
 
     private struct Row {
@@ -32,22 +24,11 @@ final class PermissionsChecklistView: NSView {
     private var quitButton = ClosureButton(title: "", action: {})
     private var rows: [Row] = []
     private var isRequesting = false
-    /// Retained so the gate can stop listening once it is done; otherwise `render()` would run on
-    /// every activation for the rest of the process's life.
     private var activationObserver: (any NSObjectProtocol)?
-    /// The permission being asked about right now, so the other rows can recede.
     private var asking: JarvisReadiness.Permission?
-    /// Permissions the user has already been sent to System Settings for. Screen Recording needs
-    /// this: once they have been there, a still-missing grant may equally be one they just switched
-    /// on, which this process cannot see either way, so the honest next step becomes a relaunch.
     private var sentToSettings: Set<JarvisReadiness.Permission> = []
-    /// Whether the walk has run. Until it has, a not-yet-granted permission reads as pending rather
-    /// than refused.
     private var hasWalked = false
-    /// Whether an *earlier* launch already asked for Screen Recording. Captured once at init: a
-    /// grant made in a previous process would be visible to this one, so "asked before and still
-    /// missing" is the only proof of refusal macOS leaves. Without it, a refusal is indistinguishable
-    /// from a grant awaiting relaunch, and the gate loops the user through Quit & Reopen forever.
+    /// Read at init, before this launch asks: only an earlier, still-missing ask proves refusal.
     private let screenAskedInEarlierLaunch: Bool
 
     private enum Layout {
@@ -75,16 +56,13 @@ final class PermissionsChecklistView: NSView {
         primaryButton.controlSize = .large
         primaryButton.keyEquivalent = "\r"
 
-        // Leaving is a quit, not a dismissal: nothing of Jarvis is running behind this window.
         quitButton = ClosureButton(title: "Quit") { [weak self] in self?.onQuit?() }
         quitButton.bezelStyle = .rounded
         quitButton.controlSize = .large
 
         rows = JarvisReadiness.Permission.allCases.map(makeRow(for:))
 
-        // Returning from System Settings changes what a click will do, and `primaryAction` reads
-        // that live. Without this the label keeps the last walk's text, so a button saying "Open
-        // System Settings" could quietly start Jarvis instead.
+        // Re-render on return from System Settings, so the label matches what a click will do.
         activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
@@ -102,8 +80,6 @@ final class PermissionsChecklistView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// Stops watching for activation. Called once the gate is satisfied: past that point the app
-    /// itself is running and this view has nothing left to refresh.
     func stopObservingActivation() {
         guard let activationObserver else { return }
         NotificationCenter.default.removeObserver(activationObserver)
@@ -126,7 +102,7 @@ final class PermissionsChecklistView: NSView {
         }
     }
 
-    /// Asks for every outstanding grant, one dialog at a time, in checklist order.
+    /// One dialog at a time: macOS queues TCC dialogs, and several at once stack confusingly.
     private func requestAll() {
         isRequesting = true
         render()
@@ -144,10 +120,7 @@ final class PermissionsChecklistView: NSView {
         }
     }
 
-    /// A refusal is not always final: the user may have just switched the toggle on in System
-    /// Settings and come back. Microphone is read live and Screen Recording has its relaunch, but
-    /// System Audio Recording has neither, so it is re-proved here before the user is sent back to
-    /// a pane where the toggle may already be on. A granted tap answers without a dialog.
+    /// System audio can't be read, so re-prove it before sending the user back to its toggle.
     private func recheck(_ refused: [JarvisReadiness.Permission]) {
         guard refused.contains(.systemAudio) else {
             openSystemSettings(for: refused)
@@ -165,18 +138,15 @@ final class PermissionsChecklistView: NSView {
         }
     }
 
-    /// macOS answers a refusal without prompting again, so the settings pane is the only way back.
     private func openSystemSettings(for permissions: [JarvisReadiness.Permission]) {
-        // Screen Recording and System Audio Recording share one pane from macOS 15 on, and only
-        // one pane can be opened, so the others are not visited by this click.
+        // Screen and system audio share one pane on macOS 15+, and a click opens only one pane.
         let opensMicrophonePane = permissions.first == .microphone
         let anchor = opensMicrophonePane ? "Privacy_Microphone" : "Privacy_ScreenCapture"
         let covered = permissions.filter { ($0 == .microphone) == opensMicrophonePane }
         guard let url = URL(
             string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")
         else { return }
-        // Only a pane the user actually reached counts as a visit. Recording one for an open that
-        // failed would advance the button to a relaunch they have no reason to make.
+        // Record a visit only if the pane opened, or the button would jump to a pointless relaunch.
         guard NSWorkspace.shared.open(url) else { // ghost-mode-allowed: explicit click on the gate
             jlog("Jarvis: couldn't open the \(anchor) settings pane")
             return
@@ -185,11 +155,9 @@ final class PermissionsChecklistView: NSView {
         render()
     }
 
-    /// A fresh Screen Recording grant is only visible to a new process. Safe to do from here and
-    /// nowhere else: the gate runs at launch, so there is no session to kill.
+    /// A new Screen Recording grant shows only in a new process. Safe only here: no session runs.
     private func relaunch() {
-        // One in-flight relaunch only: a second click would ask for a second instance while just
-        // this one exits.
+        // Blocks a second click, which would launch a second instance.
         isRequesting = true
         render()
         let configuration = NSWorkspace.OpenConfiguration()
@@ -227,16 +195,12 @@ final class PermissionsChecklistView: NSView {
         guard !missing.isEmpty else { return .satisfied }
 
         let refused = missing.filter(isBeyondAsking)
-        // Screen Recording can't be re-asked usefully once this launch has tried: macOS has the
-        // answer and won't share it until a new process. Everything else outstanding is still worth
-        // a dialog, and asking comes before reporting.
+        // After this launch asked, macOS reveals the Screen Recording answer only to a new process.
         let askable = missing.filter {
             !refused.contains($0) && !($0 == .screenRecording && hasWalked)
         }
         if !askable.isEmpty { return .none }
-        // Screen Recording alone, after a trip to System Settings: reopening is the only way to
-        // find out whether they granted it, and repeating "Open System Settings" would promise a
-        // readiness this process can never reach.
+        // After a Settings visit, only a relaunch shows whether Screen Recording was switched on.
         if refused == [.screenRecording], sentToSettings.contains(.screenRecording) {
             return .needsRelaunch
         }
@@ -244,18 +208,14 @@ final class PermissionsChecklistView: NSView {
         return .needsRelaunch
     }
 
-    /// Whether macOS has already given its final answer for this permission, so asking again would
-    /// be a silent no-op and the only way forward is System Settings.
+    /// True when macOS has answered, so asking again is a silent no-op.
     private func isBeyondAsking(_ permission: JarvisReadiness.Permission) -> Bool {
         switch permission {
         case .screenRecording:
-            // One attempt per launch before it counts as beyond asking. The remembered flag survives
-            // `tccutil reset`, which clears the grant back to undetermined, and skipping the request
-            // there would leave Jarvis absent from the Settings pane with no prompt to put it back.
+            // Also ask once this launch: the flag survives `tccutil reset`, which makes it askable.
             return screenAskedInEarlierLaunch && hasWalked
         case .systemAudio:
-            // A probe that could not run leaves no answer, and an unanswered grant is still worth
-            // asking for. Only a probe that played its tone and heard silence is a refusal.
+            // Only a probe that heard silence is a refusal; nil means the probe could not run.
             return hasWalked && Permissions.systemAudioProof == false
         case .microphone:
             return hasWalked
@@ -271,7 +231,6 @@ final class PermissionsChecklistView: NSView {
                 : (isBeyondAsking(row.permission) ? .systemOrange : .secondaryLabelColor)
             row.glyph.stringValue = granted ? "●" : "○"
             row.glyph.textColor = granted ? .systemGreen : .tertiaryLabelColor
-            // Only the row being asked about stays at full strength during the walk.
             let recedes = isRequesting && !isAsking
             for label in [row.glyph, row.name, row.why, row.status] {
                 label.alphaValue = recedes ? 0.38 : 1
@@ -291,7 +250,6 @@ final class PermissionsChecklistView: NSView {
         if granted { return "Granted" }
         if asking { return "Asking…" }
         if isBeyondAsking(permission) { return "Refused" }
-        // Asked this launch and still unreadable: that is Screen Recording waiting for a new process.
         if permission == .screenRecording, hasWalked { return "Reopen to finish" }
         return "Needed"
     }
@@ -312,7 +270,7 @@ final class PermissionsChecklistView: NSView {
         case .none where hasWalked && Permissions.systemAudioProof == nil:
             "I couldn’t check system audio just now. Try again."
         case .none:
-            // The rows already say what is being asked for; a line restating it is noise.
+            // Empty on purpose: the rows already say what is needed.
             ""
         case .refused(let refused):
             "macOS won’t let me ask twice. Switch "
@@ -369,8 +327,6 @@ final class PermissionsChecklistView: NSView {
         let width = bounds.width - inset * 2
         var top = bounds.height - Layout.titleTop
 
-        // Jarvis introduces itself in a sentence, so the title takes the height it needs rather
-        // than a fixed line.
         let titleHeight = ceil(titleLabel.sizeThatFits(
             NSSize(width: width, height: .greatestFiniteMagnitude)).height)
         top -= titleHeight
@@ -388,8 +344,7 @@ final class PermissionsChecklistView: NSView {
                                       width: 130, height: 16)
         }
 
-        // Buttons on the bottom row, the note on its own line above them: the longest note runs to
-        // two full-width lines and would truncate if it had to share the row.
+        // The note gets its own line: the longest one wraps to two full-width lines.
         let buttonWidth: CGFloat = 190
         let quitWidth: CGFloat = 74
         primaryButton.frame = NSRect(x: bounds.width - inset - buttonWidth, y: inset,

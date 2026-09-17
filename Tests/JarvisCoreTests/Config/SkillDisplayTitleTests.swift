@@ -1,7 +1,6 @@
 import Testing
 @testable import JarvisCore
 
-/// Skill cards title each skill from its folder name, so the rule is pinned here.
 @Suite struct SkillDisplayTitleTests {
     private func skill(_ name: String) -> Skill {
         Skill(name: name, description: "d", body: "b")

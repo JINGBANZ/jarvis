@@ -1,7 +1,5 @@
 import Foundation
 
-/// In the catalog only when the session has prep-material sources configured at Start. The search
-/// port itself lands later, after indexing.
 public let searchPrepNotesTool = ToolDef(
     name: "search_prep_notes",
     description: "Search the user's own prepared interview notes for content "
@@ -22,7 +20,6 @@ public let searchPrepNotesTool = ToolDef(
     deferLoading: true
 )
 
-// The tool results the harness sends for a search.
 extension JarvisPrompts.Coach {
     static func prepNotesResult(_ results: [PrepMaterialSearchResult]) -> String {
         guard !results.isEmpty else { return prepNotesNoResults }

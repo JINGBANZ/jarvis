@@ -1,8 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Settings → Ear: how Jarvis turns the conversation into text. The card is
-/// `TranscriptionControls`; its changes apply on the next Start, never inside a live session.
 @MainActor
 final class TranscriptionSection: NSObject, SettingsSection {
     let destination = SettingsDestination.ear

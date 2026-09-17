@@ -1,8 +1,6 @@
 import Foundation
 
-/// Turns one session's already-decoded Activity entries into an exportable document, for the
-/// "Export…" action in `ActivityViewer` (JarvisApp). Foundation-only and pure — this type never
-/// touches disk; the caller decides where to write `text` and each `images` pair.
+/// Never touches disk; the caller decides where to write `text` and each `images` pair.
 public enum ActivityHistoryExporter {
     public enum ExportFormat: String, CaseIterable, Sendable {
         case markdown, plainText, html
@@ -43,15 +41,8 @@ public enum ActivityHistoryExporter {
         }
     }
 
-    /// The `ActivityLog.cssClass` values counted as "Jarvis's own actions" for the
-    /// responses-only filter — today, its spoken tips (💬 `say`) and its screen views (👁 `see`).
-    /// Add another class here to broaden the filter later; nothing else needs to change.
     private static let jarvisResponseClasses: Set<String> = ["say", "see"]
 
-    /// Keeps only Jarvis's own actions (`jarvisResponseClasses`), dropping heard speech and
-    /// system/lifecycle notices. Independent of `includeScreenshots`: whether a kept screen-view
-    /// row's own image is actually exported is decided later, purely by that other toggle, with
-    /// no cross-referencing here.
     private static func responsesOnly(
         _ entries: [(ActivityLog.Entry, Data?)]
     ) -> [(ActivityLog.Entry, Data?)] {

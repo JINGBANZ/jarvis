@@ -2,39 +2,20 @@ import Foundation
 import JarvisCore
 import PDFKit
 
-/// Reads the user's configured prep-material sources and builds a `PrepMaterialIndex` from whatever
-/// text extracts successfully.
-///
-/// Lives in JarvisApp, not JarvisCore: it touches the filesystem and shells out to `textutil`, both
-/// banned from the Foundation-only coaching kernel by `scripts/check-coaching-kernel.sh`. Mirrors how
-/// `WindowScopedScreenCapture` sits behind `ScreenCapturing` — Core owns the port and the pure
-/// chunking/ranking logic, the macOS edge owns reading files and per-format extraction.
 enum PrepMaterialIndexBuilder {
     private static let supportedExtensions: Set<String> = ["txt", "md", "pdf", "docx"]
-    /// Caps how many files extract concurrently. A folder source can expand to an unbounded file
-    /// count; without a cap, one large folder would spawn that many simultaneous PDFKit parses and
-    /// `textutil` subprocesses from an unattended Session-Start background path.
+    /// Folder sources are unbounded, so cap concurrent PDFKit parses and `textutil` subprocesses.
     private static let maxConcurrentExtractions = 8
 
-    /// Builds an index from every configured source, skipping whatever fails to extract — a corrupt
-    /// PDF or an unreadable file never blocks the rest. Returns nil when nothing produced usable
-    /// text, so the caller installs no port rather than one with zero chunks. That does not change
-    /// what the session offers: `CoachCapabilities` decided that at Start from the configured
-    /// sources, and a search against a missing port returns no matches.
-    ///
-    /// Each file's extraction runs on its own detached task — the same "OS-bound synchronous edge,
-    /// so run it off the cooperative executor" reasoning `CoachDriver.captureScreen` already applies
-    /// to its own blocking subprocess call.
+    /// Skips files that fail to extract. Nil when nothing yielded text, so no port is installed.
+    /// Extraction blocks, so it runs on detached tasks off the cooperative executor.
     static func build(from sources: [PrepMaterialSource]) async -> PrepMaterialIndex? {
         let files = sources.flatMap(expand)
         guard !files.isEmpty else { return nil }
 
         var chunks: [PrepMaterialChunk] = []
         for batchStart in stride(from: 0, to: files.count, by: maxConcurrentExtractions) {
-            // A detached task isn't linked to its caller's cancellation, so once dispatched it runs
-            // to completion regardless — but checking here before dispatching a batch means a Stop
-            // that lands mid-build stops adding new file reads/subprocesses rather than working
-            // through the whole remaining list.
+            // Detached tasks ignore cancellation, so check before each batch to stop after a Stop.
             guard !Task.isCancelled else { break }
             let batch = files[batchStart..<min(batchStart + maxConcurrentExtractions, files.count)]
             let extractions = batch.map { file in
@@ -52,9 +33,7 @@ enum PrepMaterialIndexBuilder {
         return PrepMaterialIndex(chunks: chunks)
     }
 
-    /// A file source expands to itself (if its extension is supported); a folder expands to every
-    /// supported *regular file* inside it, recursively — a directory or package bundle whose name
-    /// happens to end in a supported extension is skipped rather than handed to `extractText`.
+    /// Folders yield regular files only, so a package bundle named like a document is skipped.
     private static func expand(_ source: PrepMaterialSource) -> [URL] {
         let url = URL(fileURLWithPath: source.path)
         guard source.isDirectory else {
@@ -87,24 +66,17 @@ enum PrepMaterialIndexBuilder {
             .compactMap { document.page(at: $0)?.string }
             .joined(separator: "\n\n")
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        // Verified directly against a real multi-page PDF: PDFPage.string never contains a blank-line
-        // boundary — every line within a page is joined by a single newline, identical to textutil's
-        // docx output below. Without normalizing, a page with no natural page-boundary relief (this
-        // one stayed small enough to avoid it) becomes one oversized, unsplittable chunk.
+        // PDFPage.string has no blank-line breaks, so otherwise a page is one unsplittable chunk.
         return normalizeLinesToParagraphs(text)
     }
 
-    /// `textutil` is a stock macOS CLI — no dependency, no network — that converts Word documents to
-    /// plain text. Same "borrow the OS tool" pattern as `screencapture`.
     private static func extractDocxText(from url: URL) -> String? {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/textutil")
         process.arguments = ["-convert", "txt", "-stdout", url.path]
         let stdout = Pipe()
         process.standardOutput = stdout
-        // Never a Pipe() nobody drains: textutil blocking on a full stderr pipe while this thread
-        // blocks on stdout's readDataToEndOfFile() is a classic Process deadlock. Same reason
-        // SyntheticSpeechFixtures.swift routes its own subprocess's stderr to the null device.
+        // Never an undrained Pipe: a full stderr pipe deadlocks against readDataToEndOfFile below.
         process.standardError = FileHandle.nullDevice
         do {
             try process.run()
@@ -118,20 +90,12 @@ enum PrepMaterialIndexBuilder {
               !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return nil
         }
-        // textutil separates paragraphs with a single newline too — same fix, same reasoning.
+        // textutil also separates paragraphs with a single newline.
         return normalizeLinesToParagraphs(text)
     }
 
-    /// Treats each non-empty line as its own paragraph, so `PrepMaterialChunker`'s blank-line
-    /// splitting has something to split on. Shared by both format-converted extraction paths
-    /// (`PDFPage.string` and `textutil`'s txt output), neither of which ever emits a blank-line
-    /// paragraph boundary on its own.
-    ///
-    /// Known imprecision: plain-text conversion loses the distinction between a real paragraph break
-    /// and a manual line break inside one paragraph (e.g. pasted text or a line-wrapped PDF), so this
-    /// can occasionally fragment one paragraph into several chunks. Bounded impact — worse retrieval
-    /// granularity for that source, not data loss — and not worth chasing without richer input (e.g.
-    /// an HTML conversion that keeps paragraph tags) than plain text can carry.
+    /// Makes each line a paragraph, since `PrepMaterialChunker` splits on blank lines. A wrapped
+    /// paragraph may fragment, because plain text can't tell a line break from a paragraph break.
     private static func normalizeLinesToParagraphs(_ text: String) -> String {
         text
             .components(separatedBy: "\n")

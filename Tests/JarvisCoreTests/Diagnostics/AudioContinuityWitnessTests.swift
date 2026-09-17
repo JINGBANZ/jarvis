@@ -297,9 +297,7 @@ import Testing
         deliver(5, at: 1.6, amplitude: 1_000)
         deliver(6, at: 1.9, amplitude: 1_000)
 
-        // The second local episode is part of the still-open server utterance. Poll before the
-        // server stop arrives: a start-only matcher used to warn here, then retract the warning when
-        // the completed server interval finally made the overlap visible.
+        // Polled before the server stop, while the second episode is inside the open utterance.
         #expect(!witness.poll(at: 2.4).anomalies.contains(where: {
             if case .localActivityUnmatched = $0 { true } else { false }
         }))

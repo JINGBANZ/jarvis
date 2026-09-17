@@ -1,12 +1,6 @@
 import Foundation
 
-/// The committed-transcript boundary, the one datum both halves of the coaching kernel share.
-///
-/// The scheduler reads it to decide whether a late turn-end trigger is already covered by speech an
-/// earlier attempt committed; the attempt runner reports into it when a complete, non-truncated
-/// terminal action commits. It only ever grows, which is why a plain leaf lock is enough and why
-/// neither half has to hold the other's.
-///
+/// Only grows, so a leaf lock suffices: it never takes the driver's lock or the runner's.
 /// `@unchecked Sendable`: the count is guarded by `lock`.
 final class CoachTranscriptLedger: @unchecked Sendable {
     private let lock = NSLock()
@@ -23,27 +17,8 @@ final class CoachTranscriptLedger: @unchecked Sendable {
     }
 }
 
-/// Runs one coaching attempt against one snapshotted target, and keeps the session's history.
-///
-/// This is the *attempt runner* half of the coaching kernel (wiki/lean-coaching-core.md, Phase 5).
-/// The state-ownership boundary with `CoachDriver`, the scheduler half:
-///
-/// - **The scheduler owns** trigger coalescing and pending-trigger generations, transcription
-///   settlement, the single-flight handling slot, and forward-only route state — selection,
-///   advance, skip, exhaustion, and the delivery tokens that make a terminal transition land
-///   exactly once. All of it lives under the driver's one lock.
-/// - **This type owns** the execution of one attempt: filler classification, the bounded tool loop,
-///   the `capture_screen` continuation, overlay delivery, history commit, and off-path history
-///   compaction with its own cancellation lifecycle. It also owns attempt identity, which nothing
-///   outside an attempt reads.
-///
-/// The interface between the halves is one call per attempt — an immutable `AttemptBrain` plus the
-/// pending work in, an `AttemptExecution` out — over the shared `CoachTranscriptLedger`. Nothing
-/// here schedules, advances a route, retries, or coalesces a trigger.
-///
-/// `@unchecked Sendable` is justified because `runnerLock` guards the compaction lifecycle and
-/// attempt numbering; `CoachHistory`, the transcript, the ledger, and the injected adapters are
-/// independently synchronized.
+/// @unchecked Sendable: `runnerLock` guards loads, compaction state, and attempt numbering; the
+/// history, transcript, ledger, and adapters synchronize themselves.
 final class CoachAttemptRunner: @unchecked Sendable {
     private let config: Config
     private let transcript: RollingTranscript
@@ -55,25 +30,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
-    /// The session's switched-on tool set, resolved at Start. Deriving it per attempt is what let
-    /// the declared schemas drift from the ones the instructions describe (#273), so this is a plain
-    /// `let` even though `prepMaterial` lands later.
+    /// Resolved once at Start, not per attempt, so declared schemas never drift from the prompt.
     private let capabilities: CoachCapabilities
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
-    /// What the session has loaded: a deferred tool by name, a skill under a `skill:` key so the
-    /// two namespaces cannot collide. A load belongs to the attempt that made it and lands here
-    /// only when that attempt commits a turn, so "already loaded" is true exactly when the loaded
-    /// content is in the committed history the next request replays.
+    /// Tools by name, skills under a `skill:` key. Added only when the loading attempt commits, so
+    /// "already loaded" holds exactly when the content is in replayed history.
     private var loadedCapabilities: Set<String> = []
-    /// Guards the single off-path compaction run (see `startCompactionIfIdle`).
     private var isCompacting = false
-    /// A compaction asked for while one was already running, run once the current pass ends.
     private var compactionRequested = false
-    /// The in-flight pass, so session teardown can cancel and drain it.
     private var compactionTask: Task<Void, Never>?
-    /// Latched by teardown: no further background pass may start on a stopped session.
     private var backgroundWorkStopped = false
 
     init(
@@ -107,34 +74,26 @@ final class CoachAttemptRunner: @unchecked Sendable {
         }
     }
 
-    /// Safety backstop against a pathological model that loops on capture_screen forever. The
-    /// longest sensible chain is load a skill, load a tool, search, capture, speak — five
-    /// responses, and the two spare absorb a second skill on an ambiguous question or one wasted
-    /// response, so a reasonable attempt does not die on the cap.
+    /// The longest sensible chain (load skill, load tool, search, capture, speak) is five
+    /// responses; two spare absorb a second skill or one wasted response.
     private let maxToolIterations = 7
 
     struct PendingCoachingWork {
         var reason: TriggerReason
-        /// Only an explicit hotkey wake may cross unsettled transcription. A retry of a failed
-        /// manual hint is automatic and resets this bit unless another hotkey press joins it.
+        /// A retry of a failed press is automatic, so it clears this unless another press joins.
         var bypassesTranscriptionSettlement: Bool
         var wake: CoachingAttemptAuditEvent.Wake = .trigger
-        /// Completed effects safe to carry between attempts and providers: ordinary user context
-        /// only, one independently-replaceable slot per contributing tool — at most the latest
-        /// screen observation, at most the latest search result. A flat, appended-to array can't
-        /// express this: `work` also carries forward verbatim into a retry after a failure
-        /// (`CoachDriver.swift`'s `work = failedWork`), so a second search on that retry must
-        /// replace the first search's stale result, not accumulate alongside it — while still never
-        /// disturbing whatever the screen slot holds, and vice versa. Never raw reasoning, tool ids,
-        /// or call/result linkage.
+        /// Carried into retries, so each tool gets one replaceable slot: a second search replaces
+        /// the first's stale result. Plain user context only, never reasoning, tool ids, or call
+        /// linkage.
         var screenObservation: [ChatMessage] = []
         var prepNotesObservation: ChatMessage?
-        /// Every carried observation, screen first, in the order the model should see them.
         var observations: [ChatMessage] {
             screenObservation + (prepNotesObservation.map { [$0] } ?? [])
         }
         var preparedManualReason: TriggerReason?
-        /// The actual input boundary, so failure cannot discard speech finalized during inference.
+        /// Speech finalized during inference lies past this boundary, so a failure cannot discard
+        /// it.
         var attemptedTranscriptBoundary = 0
 
         init(reason: TriggerReason) {
@@ -159,9 +118,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
         let result: AttemptResult
     }
 
-    /// The kernel's own verdict that a provider answered but the answer cannot be used. The provider
-    /// reported nothing, so there is no identity to carry: the stage and the message say what was
-    /// wrong. Always temporary: the next attempt asks the same target again.
     private static func unusableResponse(
         _ message: String, from target: BrainTarget
     ) -> ProviderFailure {
@@ -170,12 +126,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
             disposition: .temporary, identity: .init(), message: message)
     }
 
-    /// A press's prose as its reply, once asking again has been spent: the first non-empty line is
-    /// the hint and everything after it is the detail, so a press that answered in prose still
-    /// delivers the code block or explanation it wrote. The remainder keeps its Markdown verbatim,
-    /// because that is what the detail box renders. Nil unless this response may speak and has prose
-    /// to say — an automatic turn sends `required`, so `permitted` is nil there and the attempt
-    /// fails instead, leaving the route's retry to cover it.
+    /// Nil unless `permitted` includes speak, so an automatic turn (nil `permitted`) fails instead.
     private static func spokenProse(_ text: String?, permitted: [String]?,
                                     detailEnabled: Bool) -> ToolInvocation? {
         guard permitted?.contains(speakToolName) == true, let text,
@@ -187,7 +138,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
             detail: detailEnabled && !rest.isEmpty ? rest : nil)
     }
 
-    /// Run one attempt on one immutable target snapshot.
     func runAttempt(
         _ pendingWork: PendingCoachingWork,
         using attempt: CoachDriver.AttemptBrain
@@ -238,9 +188,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
         ].compactMap { $0 }.joined(separator: "\n\n")
         var turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
 
-        // A request needs meaningful speech, a trigger instruction, or a provider-neutral
-        // observation completed by the failed attempt. Activity has already retained finalized
-        // filler, so an empty fresh attempt has no value to send and needs no synthetic placeholder.
         if turnMessages.isEmpty {
             let preview = delta.lines.isEmpty
                 ? "nothing new"
@@ -249,8 +196,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
             ledger.commit(through: delta.upTo)
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
-        // One value describes the tools and offers them, so the prompt cannot name a tool the
-        // request does not carry — the state that invited a hallucinated call.
         let systemPrompt = JarvisPrompts.Coach.system(capabilities: capabilities)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
         if reason.isManual && work.preparedManualReason != reason {
@@ -289,7 +234,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
             }
-            // Replace the carried screen slot while retaining independent prep observations.
             turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
             work.preparedManualReason = reason
         }
@@ -314,8 +258,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("… attempt cancelled (interrupted)")
                 return AttemptExecution(id: attemptID, result: .cancelled)
             }
-            // Classified at the provider boundary when the adapter knew what it was; this passes
-            // one through unchanged and gives anything else the safe temporary default.
             let failure = ProviderFailure(
                 unclassified: error, source: .brain(attempt.target.provider), stage: .request)
             jlog("Jarvis coach: brain conversation failed on \(reason) via "
@@ -325,20 +267,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 result: .failed(outcome: .brainError, failure: failure, work: work))
         }
 
-        // Loads made by this attempt, session state only once it commits a turn. Every failure and
-        // cancellation path discards them, so the next attempt simply loads again — one round trip,
-        // and no "already loaded" answer pointing at a conversation that never happened.
+        // Failure and cancellation discard these, so "already loaded" never cites unsent history.
         var loadedThisAttempt: Set<String> = []
-        /// Whether this attempt has already spent its one refusal of a plain-text reply.
         var refusedProse = false
         let alreadyLoaded = runnerLock.withLock { loadedCapabilities }
 
-        // A Show code press preloads the `coding` skill, so moving the code rules into that skill
-        // does not cost the press a round trip: the runner writes the call and result a model load
-        // would have produced, and the model answers with the rules already in hand. It commits,
-        // replays, and survives compaction the same way; a failed attempt discards it with the rest
-        // of its loads, and the retry preloads again. The pair goes BEFORE the press's user messages
-        // so the request still ends in plain user text.
+        // Preload the coding skill as a synthetic call and result, saving a Show code press a round
+        // trip. It goes before the user messages so the request still ends in user text.
         if reason == .manualCode,
            let coding = capabilities.skill(named: JarvisPrompts.Coach.showCodeSkillName),
            !alreadyLoaded.contains(CoachCapabilities.loadedKey(forSkill: coding.name)) {
@@ -359,14 +294,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
             var iterations = 0
             while iterations < maxToolIterations {
                 iterations += 1
-                // What the model may call right now: the declared array, so a load in one iteration
-                // makes the tool callable in the next, and the membership the runner checks below.
                 let loaded = alreadyLoaded.union(loadedThisAttempt)
                 let tools = capabilities.callable(loaded: loaded)
-                // A shortcut press joins the loop but must end in a visible hint: it may load and
-                // search, never stay silent or capture again (the screen went into its first
-                // request), and its last permitted response is forced to speak. With only speak
-                // left, that is the plain forced request a session with nothing to load sends.
+                // A press must end in a hint and already sent the screen, so it never gets
+                // stay_silent or capture_screen.
                 let toolChoice: ToolChoice
                 if reason.isManual {
                     let permitted = tools.map(\.name).filter {
@@ -410,8 +341,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     return .cancelled
                 }
 
-                // Incomplete output cannot prove a terminal action, even if it happens to contain one.
-                // Do not render a partial tip or execute a partial tool decision.
+                // Incomplete output can't prove a terminal action, even if it contains one.
                 if let incompleteReason = response.incompleteReason {
                     jlog("⚠️ response incomplete (\(incompleteReason)) — scheduling fresh attempt")
                     return .failed(
@@ -421,23 +351,16 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         work: work)
                 }
 
-                // The set this response may call, read back from the choice its own request sent
-                // rather than trusted to the transport: not every provider can enforce a narrowed
-                // choice, and a press must still end in a tip. Nil when any offered tool may run.
+                // Checked here because not every provider enforces a narrowed tool choice.
+                // Nil when any offered tool may run.
                 let permitted: [String]? = switch toolChoice {
                 case .force(let name): [name]
                 case .allowed(let names): names
                 case .auto, .required: nil
                 }
-                // The forced last response has no later response to answer into.
                 let atCap = iterations == maxToolIterations
 
-                // Shared tail for every non-terminal tool call: replay the model's own calls (verbatim
-                // reasoning items when the provider needs them, or the plain call list otherwise),
-                // append the result for the call being answered and a not-executed result for every
-                // other call the response carried, since a replayed call with no result fails the
-                // provider's linkage validation, fold in any extra messages (e.g. an image), and
-                // advance to the continuation phase for the next request in this same attempt.
+                // Every replayed call needs a result, or the provider's linkage validation fails.
                 func appendToolContinuation(
                     toolCallId: String,
                     resultText: String,
@@ -460,16 +383,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     requestSequence += 1
                 }
 
-                // Resolve the reply to the one call this iteration runs. A call outside the permitted
-                // set, or one whose arguments did not parse, is answered and the model asked again,
-                // bounded by the cap: a bad reply costs one round trip instead of a failed attempt and
-                // the route's retry delay. A press answered in prose is refused the same way, once
-                // per attempt, since a refusal re-sends the whole request including the screenshot.
-                // Once that round trip is spent, or on the response at the cap, the prose becomes the
-                // reply itself, because no later response can recover.
-                // The response's first call decides, whether or not it parsed: `toolCalls` omits a
-                // call whose arguments did not parse, so its first entry can be a later call than
-                // the one the model made first.
+                // The first raw call decides: `toolCalls` omits calls whose arguments didn't parse,
+                // so its first entry may not be the model's first call.
                 let firstParsed: ToolInvocation? = if let raw = response.rawToolCalls.first {
                     response.toolCalls.first { $0.callID == raw.id }
                 } else {
@@ -537,10 +452,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                           permitted?.contains(speakToolName) == true,
                           let prose = response.outputText,
                           !prose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    // Prose is not an action. Answer it and ask again, exactly once: the refusal
-                    // re-sends the whole uncached request, screenshot included, so it is worth one
-                    // round trip and no more. `CoachHistory.commit` drops both messages, or the
-                    // nudge would replay on every later request and reach the summarizer.
+                    // Only once per attempt: a refusal re-sends the whole uncached request with the
+                    // screenshot. `CoachHistory.commit` drops both messages.
                     jlog("⚠️ reply had no tool call — asking for the speak call again")
                     refusedProse = true
                     turnMessages.append(.init(role: .assistant, text: prose))
@@ -563,8 +476,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         work: work)
                 }
 
-                // A parsed call to a tool this session does not offer is answered, not executed and
-                // not failed: a switched-off tool must stay switched off, whatever name a model emits.
+                // A switched-off tool stays off whatever the model emits: answer, don't run or
+                // fail.
                 guard let called = capabilities.tool(named: call.toolName) else {
                     jlog("⚠️ \(call.toolName) isn't available in this session — telling the model so")
                     appendToolContinuation(
@@ -574,9 +487,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     continue
                 }
                 if called.deferLoading, !loaded.contains(called.name) {
-                    // Offered but used before loading: the model named a catalog tool this request
-                    // did not declare. The call is honest, so run it rather than spend a round trip
-                    // teaching protocol.
                     jlog("… \(called.name) was called before it was loaded — running it anyway")
                 }
 
@@ -627,8 +537,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    // A session without the box never declared `detail`, so anything under that name
-                    // is scrubbed before it can reach the overlay, history, or Activity.
+                    // Undeclared `detail` never reaches the overlay, history, or Activity.
                     let parsedDetail = capabilities.detailEnabled
                         ? requestedDetail.flatMap(ReplyDetail.init(markdown:))
                         : nil
@@ -642,16 +551,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     guard delivery.accepted else { return .cancelled }
                     let delivered = delivery.detail
                     activity?.record(.tip(lines: lines, detail: delivered?.deliveredMarkdown))
-                    // Only the selected call executes; extra provider calls were never delivered.
-                    // History describes the detail the box actually showed, so a block the runtime
-                    // dropped is not read back as if the user saw it.
+                    // History records the detail actually shown, not blocks the runtime dropped.
                     var arguments: [String: Any] = ["lines": lines]
                     if capabilities.detailEnabled {
                         arguments["detail"] = delivered?.deliveredMarkdown ?? NSNull()
                     }
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
-                    // Built from the delivered call rather than copied from the response, so a hint
-                    // spoken from prose commits a call its result answers.
+                    // Rebuilt, not copied, so a hint spoken from prose still commits a call.
                     turnMessages.append(.assistantToolCalls([RawToolCall(
                         id: callID, name: speakToolName,
                         argumentsJSON: String(decoding: data, as: UTF8.self))]))
@@ -681,14 +587,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         jlog("… attempt cancelled (stopped) before searching prep notes")
                         return .cancelled
                     }
-                    // A missing port is the offered tool being used before indexing finished, or
-                    // after indexing found nothing usable in any configured source — the builder
-                    // installs no port either way. The model was told the tool exists because a
-                    // source is configured, so the call is legitimate: say the notes aren't there
-                    // rather than claiming they were read and found wanting. Which of the two it is
-                    // stays in `jlog`; Activity says only that coaching went ahead without them.
-                    // `prepNotesObservation` stays unset so a retry after an index lands is not fed
-                    // this answer.
+                    // No port yet (still indexing, or nothing usable). `prepNotesObservation` stays
+                    // unset so a retry after the index lands searches for real.
                     guard let prepMaterial = attempt.prepMaterial else {
                         jlog("📎 no prep-notes index yet (still building, or no source held usable "
                              + "text) — answering without them")
@@ -702,12 +602,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     let results = prepMaterial.search(query: query)
                     jlog("📎 searched prep notes for \"\(query)\" — \(results.count) match(es)")
                     activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
-                    // Mirrors capture_screen: if the very next request in this attempt fails, a
-                    // fresh retry starts with this result already in hand — search is cheap to
-                    // redo, but this still saves the model an extra tool-loop round-trip. Its own
-                    // slot: replacing prepNotesObservation (not appending to the flat list) means a
-                    // second search on a later retry supersedes the first's now-stale result instead
-                    // of piling on top of it, while never touching screenObservation either way.
                     work.prepNotesObservation = .user(JarvisPrompts.Coach.prepNotesResult(results))
                     appendToolContinuation(
                         toolCallId: callID,
@@ -723,8 +617,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         } else {
                             loadedThisAttempt.insert(tool.name)
                             jlog("📎 loaded the \(tool.name) tool")
-                            // The definition's name, never the model's argument: Activity states
-                            // what Jarvis did, not what it was asked for.
                             activity?.record(.capabilityLoaded(kind: .tool, name: tool.name))
                             resultText = JarvisPrompts.Coach.loadToolResult(tool)
                         }
@@ -740,7 +632,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 case .loadSkill(let callID, let name):
                     let resultText: String
                     if let skill = capabilities.skill(named: name) {
-                        // Namespaced, so a skill and a tool of the same name stay separate loads.
                         if loaded.contains(CoachCapabilities.loadedKey(forSkill: name)) {
                             jlog("📎 the \(name) skill was already loaded — saying so instead of "
                                  + "repeating it")
@@ -748,8 +639,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         } else {
                             loadedThisAttempt.insert(CoachCapabilities.loadedKey(forSkill: skill.name))
                             jlog("📎 loaded the \(skill.name) skill")
-                            // The catalog's name, never the model's argument: Activity states what
-                            // Jarvis did, not what it was asked for.
                             activity?.record(.capabilityLoaded(kind: .skill, name: skill.name))
                             resultText = JarvisPrompts.Coach.loadSkillResult(skill)
                         }
@@ -784,18 +673,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
         history.commit(turn)
     }
 
-    /// Called only where the attempt has just committed its turn. A load always adds a call and its
-    /// result to the turn, so the `turn.count > 1` test in `commitIfWorthKeeping` above cannot drop
-    /// a turn that loaded something — which is what makes "already loaded" point at real history.
+    /// Call only after the turn is committed.
     private func commitLoads(_ names: Set<String>) {
         guard !names.isEmpty else { return }
         runnerLock.withLock { loadedCapabilities.formUnion(names) }
     }
 
-
-    /// Screen capture is an OS-bound synchronous edge, so run it off the cooperative executor.
-    /// Cancellation asks the capture adapter to terminate its helper, then waits for `capture()` to
-    /// return so the attempt cannot outlive cleanup of screen-derived files.
+    /// Runs the blocking capture off the cooperative executor.
     private static func captureScreen(
         using screen: ScreenCapturing,
         selecting selection: ScreenCaptureSelection
@@ -805,8 +689,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return screen.capture(selection)
         }
         return await withTaskCancellationHandler {
-            // Await the producer itself. A cancelled AsyncStream consumer returns immediately and
-            // would let conversation/session drain race the helper's exit and JPEG cleanup.
+            // Await the producer itself so cancellation can't outrun helper exit and JPEG cleanup.
             await capture.value
         } onCancel: {
             capture.cancel()
@@ -816,27 +699,19 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
     // MARK: - History compaction
 
-    /// Compaction is auxiliary, so it runs off the attempt path: awaiting it here would spend its
-    /// whole budget as dead air, batching newly finalized speech behind a summary nobody is waiting
-    /// for. One run at a time — two overlapping runs each replace `0..<prefixCount`, so the second
-    /// would destroy the first's summary along with real turns. A skipped or failed run simply
-    /// retries from a fresh prefix after the next completed attempt.
+    /// Off the attempt path so speech isn't held behind a summary. One run at a time: overlapping
+    /// runs both replace `0..<prefixCount`, destroying real turns.
     func startCompactionIfIdle(using client: BrainClient) {
-        // Check the threshold before spawning: most completed attempts are nowhere near it, and a
-        // task per attempt would be pure churn on the shared executor.
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
         runnerLock.lock()
-        // Stop is final. A turn suspended in `conversation.finish()` when teardown ran resumes after
-        // `cancelBackgroundWork` already looked for a task, and would otherwise start a fresh
-        // provider request that nothing is left to drain.
+        // A turn resuming from `conversation.finish()` after teardown must not start a request
+        // that nothing will drain.
         guard !backgroundWorkStopped else {
             runnerLock.unlock()
             return
         }
         guard !isCompacting else {
-            // Coalesce rather than drop. An attempt landing mid-summary is also the attempt whose
-            // fresh OCR can invalidate that summary, so without this the rejected pass and the
-            // skipped request cancel each other out and history stays over the threshold.
+            // Coalesce, don't drop: this attempt's fresh OCR may invalidate the running summary.
             compactionRequested = true
             runnerLock.unlock()
             return
@@ -850,9 +725,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
         runnerLock.unlock()
     }
 
-    /// Run compaction until nothing more is pending, so a pass that ends without compacting — a
-    /// summary rejected as stale, or one skipped while another ran — is retried instead of waiting
-    /// for a further completed attempt.
     private func runCompactionPasses(using client: BrainClient) async {
         while true {
             await compactIfNeeded(using: client)
@@ -870,12 +742,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         }
     }
 
-    /// Cancel background work that must not outlive the session, handing back the task so teardown
-    /// can drain it before sealing the audit.
-    ///
-    /// Compaction runs off the attempt path, so `TurnTaskBox` does not own it. Without this a
-    /// summary keeps a provider process alive and billing after Stop, and can still be writing when
-    /// the session audit closes.
+    /// Returns the cancelled compaction task so teardown can drain it before sealing the audit.
     @discardableResult
     func cancelBackgroundWork() -> Task<Void, Never>? {
         runnerLock.lock()
@@ -888,7 +755,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         return task
     }
 
-    /// Auxiliary compaction fails soft and never counts against provider route health.
+    /// Fails soft: never counts against route health.
     private func compactIfNeeded(using client: BrainClient) async {
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
         guard let (oldest, count, revision) = history.compactionPrefix() else { return }
@@ -904,8 +771,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 jlog("… memory compaction returned nothing — keeping full history for now")
                 return
             }
-            // A summary that lands as teardown cancels must not mutate history on the way out: the
-            // session is over and the provider may simply have won the race.
+            // A summary that wins the race with teardown must not mutate history.
             guard !Task.isCancelled else { return }
             guard history.compact(prefixCount: count, summary: summary, revision: revision) else {
                 jlog("… discarded a summary written against superseded screen text — will retry later")

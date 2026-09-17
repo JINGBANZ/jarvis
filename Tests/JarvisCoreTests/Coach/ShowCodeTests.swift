@@ -2,8 +2,6 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// A Show code press preloads the `coding` skill, so moving the code-block rules into that skill
-/// does not cost the press the round trip the model would otherwise spend loading it.
 @Suite struct ShowCodeTests {
     private let coding = Skill(name: "coding", description: "Use when the question is a coding problem.",
                                body: "Put one fenced block in detail.")
@@ -14,7 +12,6 @@ import Testing
         let driver = makeDriver(brain, activity: activity)
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
 
-        // One request: the model answered with the rules already in hand.
         #expect(brain.calls.count == 1)
         let request = try #require(brain.calls.first)
         let callIndex = try #require(request.firstIndex {
@@ -27,7 +24,6 @@ import Testing
         #expect(result.role == .tool)
         #expect(result.toolCallId == call.id)
         #expect(result.text?.contains(coding.body) == true)
-        // Ahead of the press's user messages, so the request still ends in plain user text.
         let firstUser = try #require(request.firstIndex { $0.role == .user })
         #expect(callIndex < firstUser)
         #expect(request.last?.role == .user || request.last?.imageBase64JPEG != nil)
@@ -35,7 +31,6 @@ import Testing
         #expect(activity.loadedSkillNames == ["coding"])
     }
 
-    /// A second press sees the skill as loaded, so it preloads nothing and records nothing.
     @Test func asecondPressDoesNotPreloadAgain() async throws {
         let brain = ScriptedBrain(script: [speak(detail: "```python\nseen = {}\n```"),
                                            speak(detail: "```python\nleft = 0\n```")])
@@ -44,14 +39,12 @@ import Testing
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
         #expect(activity.loadedSkillNames == ["coding"])
-        // The second request carries the first press's committed load, and only that one.
         let second: [ChatMessage] = try #require(brain.calls.last)
         let loads: [RawToolCall] = second.flatMap { $0.toolCalls ?? [] }
             .filter { $0.name == CoachCapabilities.loadSkillName }
         #expect(loads.count == 1)
     }
 
-    /// Only a Show code press preloads. Every other trigger lets the model choose.
     @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .turnEnd])
     func noOtherTriggerPreloads(_ reason: TriggerReason) async throws {
         let brain = ScriptedBrain(script: [speak(detail: nil)])
@@ -64,7 +57,6 @@ import Testing
         #expect(brain.calls.first?.contains { $0.toolCalls != nil } != true)
     }
 
-    /// With `coding` switched off there is nothing to preload, and the press still answers.
     @Test func aSwitchedOffCodingSkillIsNotPreloaded() async throws {
         let brain = ScriptedBrain(script: [speak(detail: "Approach first.")])
         let activity = RecordingActivity()
@@ -74,8 +66,6 @@ import Testing
         #expect(brain.calls.count == 1)
     }
 
-    /// A failed attempt discards its loads, so the retry preloads again, exactly as a model load
-    /// behaves.
     @Test func aFailedAttemptDiscardsThePreloadAndTheRetryDoesItAgain() async throws {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [], incompleteReason: "max_output_tokens"),
@@ -91,8 +81,6 @@ import Testing
         #expect(activity.loadedSkillNames == ["coding", "coding"])
     }
 
-    /// The preload commits with the turn, so a later automatic turn reads the skill from history
-    /// and is told it is already loaded.
     @Test func thePreloadCommitsToTheSession() async throws {
         let brain = ScriptedBrain(script: [
             speak(detail: "```python\nseen = {}\n```"),

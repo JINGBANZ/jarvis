@@ -3,19 +3,8 @@ import CoreGraphics
 import JarvisCore
 import JarvisScreenCapture
 
-/// Captures just the frontmost app window (`screencapture -l`) when the capture scope is
-/// `.activeWindow`, with on-device OCR and optional browser Accessibility text. Falls back
-/// to a full-display capture (`ScreenCaptureCLI` — the plan's chosen display in `.entireDisplay`
-/// scope, the main display otherwise) when no eligible window is on screen or the window capture
-/// command fails. A cleanup-integrity failure returns without fallback. Full-display captures skip
-/// OCR deliberately (a whole display's text would feed the clutter back as tokens).
-///
-/// Window choice reads the window server's single front-to-back z-order
-/// (`CGWindowListCopyWindowInfo`), which spans all displays — so the pick is the window the user
-/// last clicked or typed into, whichever monitor it is on. The selection rule itself is pure logic
-/// in Core (`FrontWindowSelector`) where tests reach it; this type is only the CGWindowList dump
-/// and the extra CLI flag. `-l` reads the window's own backing image, so the shot is clean even
-/// when the window is partially covered; `-o` omits the window shadow.
+/// `screencapture -l` reads the window's own backing image, so the shot is clean even when the
+/// window is partly covered; `-o` omits the shadow.
 struct WindowScopedScreenCapture: ScreenCapturing {
     private let runner: ScreenCaptureRunner
     private let fallback: ScreenCaptureCLI
@@ -30,11 +19,10 @@ struct WindowScopedScreenCapture: ScreenCapturing {
     }
 
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
-        if selection.scope == .activeWindow,   // frozen with the attempt, like the display index
+        if selection.scope == .activeWindow,
            let window = Self.frontWindow() {
-            // Read the page identity around the JPEG operation. The resolver accepts browser text
-            // only while this exact document remains active, so a tab switch cannot pair text from
-            // a new page with pixels from the old one.
+            // Read the page identity before capturing: browser text is accepted only while this
+            // document stays active, so a tab switch cannot pair new text with old pixels.
             let browserDocumentIdentity = selection.browserTextEnabled
                 ? textResolver.browserDocumentIdentity(for: window)
                 : nil
@@ -62,7 +50,6 @@ struct WindowScopedScreenCapture: ScreenCapturing {
         runner.cancelCapture()
     }
 
-    /// Dumps the on-screen window list (front-to-back, all displays) into Core's selector.
     private static func frontWindow() -> WindowCandidate? {
         guard let entries = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
                                                        kCGNullWindowID) as? [[String: Any]]

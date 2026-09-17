@@ -1,9 +1,7 @@
 import Foundation
 
-/// The one reviewed table of what a Gemini failure means, shared by the Live transcriber (handshake
-/// status, close code and reason) and the credential check. Google's REST errors carry a gRPC
-/// `status` string plus optional `ErrorInfo.reason`; the Live socket carries only a close code and
-/// free-text reason. Unknown shapes stay temporary.
+/// Google's REST errors carry a gRPC `status` plus an optional `ErrorInfo.reason`; the Live socket
+/// carries only a close code and free-text reason. Unknown shapes stay temporary.
 public enum GeminiFailureClassifier {
     public static func classify(
         httpStatus: Int, body: Data?, source: ProviderFailure.Source, stage: ProviderFailure.Stage
@@ -12,8 +10,7 @@ public enum GeminiFailureClassifier {
         let status = error?["status"] as? String
         let reason = (error?["details"] as? [[String: Any]])?
             .compactMap { $0["reason"] as? String }.first
-        // A body that is not Google's error JSON (an edge's HTML page, a proxy's plain text) is
-        // still the only thing the server said, so it is quoted rather than dropped.
+        // A non-JSON body (edge HTML, proxy text) is still what the server said, so quote it.
         let message = error?["message"] as? String
             ?? body.flatMap { String(data: $0, encoding: .utf8) }
             ?? ""
@@ -26,17 +23,10 @@ public enum GeminiFailureClassifier {
             message: message)
     }
 
-    /// EMPIRICAL FACT, established against the live endpoint with a deliberately invalid API key:
-    /// Gemini does not reject a bad key with an HTTP 401 at the WebSocket handshake, and the Live
-    /// API has no error frame at all (see https://ai.google.dev/api/live). The handshake succeeds
-    /// and the server closes with 1008, which makes that close the only signal a key was rejected.
-    ///
-    /// 1008 is Google's generic policy-violation close, though: a retired model id and an
-    /// unsupported request shape use it too. All three are permanent, so only the classification
-    /// differs, and the free-text reason is the one signal telling them apart. Google does not
-    /// document its wording as a stable contract, so this matches a couple of narrow, stable
-    /// substrings rather than parsing sentence structure. The default must stay `.configuration`:
-    /// an unrecognized reason claiming the key was rejected would send a user to rotate a good key.
+    /// Verified live: Gemini accepts the handshake for a bad key and closes with 1008, since the
+    /// Live API has no error frame. 1008 also covers a retired model or bad request shape, and the
+    /// reason wording is undocumented, so match narrow substrings. Default to `.configuration` so
+    /// an unrecognized reason never sends a user to rotate a good key.
     public static func classify(closeCode: Int, reason: String?, source: ProviderFailure.Source) -> ProviderFailure {
         let text = reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         switch closeCode {
@@ -74,8 +64,7 @@ public enum GeminiFailureClassifier {
             return (.access, .permanent)
         }
         if status == "RESOURCE_EXHAUSTED" || httpStatus == 429 {
-            // Google uses one status for rate limits and exhausted free-tier quota; the message
-            // says which, and neither may exhaust a target on its own.
+            // One status covers rate limits and spent free-tier quota, so it stays temporary.
             return (.quota, .temporary)
         }
         if status == "NOT_FOUND" || httpStatus == 404 {

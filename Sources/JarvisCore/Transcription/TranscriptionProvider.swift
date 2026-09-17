@@ -1,9 +1,5 @@
 import Foundation
 
-/// The service that turns the captured microphone and system-audio streams into text.
-///
-/// This choice is independent of `BrainProvider`: transcription supplies the conversation, while
-/// the brain decides how to coach from it.
 public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
     case openAI = "openai"
     case appleSpeech = "apple-speech"
@@ -20,8 +16,6 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// The credential this provider needs to transcribe, if any. Apple Speech is on-device.
-    /// `public` because `AppDelegate` (JarvisApp) selects the transcription key from it.
     public var ownCredential: Credential? {
         switch self {
         case .openAI: .openAIAPIKey
@@ -30,9 +24,6 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// Every credential a Start needs: this provider's own, plus OpenAI's when any authorized brain
-    /// target is OpenAI. Both halves can require a key independently — Gemini ears with an OpenAI
-    /// brain needs two — which a single Bool could not express.
     public func requiredCredentials(for brainRoute: BrainRoute?) -> Set<Credential> {
         var required = Set(ownCredential.map { [$0] } ?? [])
         if brainRoute?.targets.contains(where: { $0.provider == .openAI }) == true {
@@ -41,8 +32,6 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
         return required
     }
 
-    /// The PCM format capture must deliver for this provider. Fixed for the session, because the
-    /// provider is resolved before capture is built and never changes inside a live session.
     public var audioFormat: TranscriptionAudioFormat {
         switch self {
         case .openAI, .appleSpeech: .pcm16Mono24k

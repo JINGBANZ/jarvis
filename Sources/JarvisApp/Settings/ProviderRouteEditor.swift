@@ -2,10 +2,6 @@ import AppKit
 import JarvisCore
 import JarvisBrainProviders
 
-/// The complete persisted brain-provider route shown as one uninterrupted Settings card.
-///
-/// Primary and fallback targets share one row language because they are one ordered route. This
-/// AppKit adapter owns only editing and availability presentation; runtime failover remains in Core.
 @MainActor
 final class ProviderRouteEditor: NSObject {
     let view = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: 138))
@@ -16,7 +12,7 @@ final class ProviderRouteEditor: NSObject {
     private let addButton = NSButton(title: "＋ Add fallback", target: nil, action: nil)
     private var primaryRow: BrainTargetRowView?
     private var fallbackRows: [BrainTargetRowView] = []
-    /// Subscriptions the last helper probe proved signed in; nil before it answers.
+    /// Subscriptions the last helper probe proved signed in; `nil` before it answers.
     private var signedInSubscriptions: Set<BrainProvider>?
     private var activeTarget: BrainTarget?
 
@@ -118,7 +114,7 @@ final class ProviderRouteEditor: NSObject {
 
         addButton.isEnabled = nextAvailableTarget() != nil
         if let content = view.contentView {
-            // Rows are rebuilt on each edit. Keep Add last in accessibility and keyboard order.
+            // Re-add after the rebuilt rows so Add stays last in accessibility and keyboard order.
             addButton.removeFromSuperview()
             content.addSubview(addButton)
         }
@@ -297,8 +293,7 @@ final class ProviderRouteEditor: NSObject {
         save(targets)
     }
 
-    /// Swaps a target with its neighbor anywhere in the route, the primary included. This is a
-    /// topology edit, so a running session restarts the route at the new primary on its next attempt.
+    /// A topology edit: a running session restarts the route at the new primary on its next attempt.
     private func move(routeIndex: Int, offset: Int) {
         guard let moved = preferences.route.movingTarget(at: routeIndex, by: offset) else { return }
         preferences.route = moved

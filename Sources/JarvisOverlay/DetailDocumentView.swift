@@ -1,8 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// One `detail` drawn as a document: its prose, then the code block, then the diagram. Every section
-/// wraps at the viewport width without changing what the model sent.
 @MainActor
 final class DetailDocumentView: NSView {
     private let prose = NSTextView()
@@ -39,10 +37,8 @@ final class DetailDocumentView: NSView {
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
 
-    /// Skip re-rendering text that is already on screen. A single resize frame reaches here three
-    /// times over: the panel refreshes the box, measures its preferred height, then lays out,
-    /// shrinking the font until the content fits. Only that last loop changes what is rendered, and
-    /// `fit` reflows the existing text storage, so a skipped render still answers the new width.
+    /// Skips an unchanged render: one resize frame calls this several times, and `fit` reflows the
+    /// existing text for the new width anyway.
     func show(_ detail: ReplyDetail, fontSize: CGFloat) {
         guard rendered?.detail != detail || rendered?.fontSize != fontSize else { return }
         rendered = (detail, fontSize)
@@ -64,12 +60,7 @@ final class DetailDocumentView: NSView {
         }
     }
 
-    /// - Parameters:
-    ///   - viewportWidth: the scroll view's content width.
-    ///   - viewportHeight: the content height a diagram may scale into. The graph takes what the
-    ///     prose and the code block leave, so it follows a drag on either edge the way the pinned
-    ///     diagram area it replaced did. Sizing it from the width alone left a `flowchart TD` fixed
-    ///     however tall the box was dragged.
+    /// A diagram scales into the part of `viewportHeight` the prose and code leave.
     func fit(viewportWidth: CGFloat, viewportHeight: CGFloat) {
         let width = max(1, viewportWidth)
         var y: CGFloat = 0
@@ -86,17 +77,14 @@ final class DetailDocumentView: NSView {
             y += height
         }
         if let diagram = rendered?.detail.diagram {
-            // The box the graph scales into: the width the viewport gives, and the height left after
-            // the text above it. The floor keeps a graph legible in a box too small to hold both,
-            // where the scroll view is the answer.
+            // The 80 pt floor keeps a graph legible in a tiny box; the scroll view takes the rest.
             let available = NSSize(width: max(1, width - 28),
                                    height: max(80, viewportHeight - y - 14))
             if drawnDiagram?.diagram != diagram || drawnDiagram?.available != available {
                 drawing.image = DiagramHintImage.render(diagram, fitting: available)
                 drawnDiagram = (diagram, available)
             }
-            // Frame the drawn image rather than the box it was fitted into, so a graph narrower or
-            // shorter than the space is not surrounded by dead area the user cannot scroll past.
+            // Frame the drawn image, not the fitted box, so no unscrollable dead area surrounds it.
             let drawn = drawing.image?.size ?? available
             drawing.frame = NSRect(x: 14, y: y + 6, width: drawn.width, height: drawn.height)
             y = drawing.frame.maxY + 8

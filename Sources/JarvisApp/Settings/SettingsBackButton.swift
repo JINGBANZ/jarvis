@@ -1,6 +1,5 @@
 import AppKit
 
-/// The page header's way back to the hub: `‹ JARVIS`, also bound to ⌘[. Hover turns it teal.
 @MainActor
 final class SettingsBackButton: NSButton {
     private var isHovered = false {

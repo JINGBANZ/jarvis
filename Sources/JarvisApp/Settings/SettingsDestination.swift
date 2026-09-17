@@ -1,7 +1,6 @@
 import JarvisCore
 
-/// Every page the Settings window can show. The hub is `home`; each other case is one section.
-/// The four head parts map to their pages here and nowhere else.
+/// The only place the four head parts map to their pages.
 enum SettingsDestination: String, CaseIterable, Sendable {
     case home, brain, ear, eye, mouth, connections, tools, skills, shortcuts, activity
 
@@ -14,7 +13,6 @@ enum SettingsDestination: String, CaseIterable, Sendable {
         }
     }
 
-    /// The head part this page configures, if any.
     var part: RobotPart? {
         switch self {
         case .brain: .brain

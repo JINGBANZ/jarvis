@@ -1,6 +1,5 @@
 import JarvisCore
 
-/// How the Settings window names and draws each part of Jarvis's head.
 extension RobotPart {
     var title: String {
         switch self {

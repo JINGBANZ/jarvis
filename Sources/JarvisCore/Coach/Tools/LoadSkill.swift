@@ -3,7 +3,6 @@ import Foundation
 extension CoachCapabilities {
     public static let loadSkillName = "load_skill"
 
-    /// Built per Start from the switched-on skills; see `loaderParametersJSON`.
     static func loadSkill(catalogNames: [String]) -> ToolDef {
         ToolDef(
             name: loadSkillName,
@@ -14,10 +13,8 @@ extension CoachCapabilities {
     }
 }
 
-// The tool results the harness sends for a load.
 extension JarvisPrompts.Coach {
-    /// The framing is what gives a tool result instruction authority: a skill body carries
-    /// speak and stay_silent directives, and they must not read as data the model may weigh.
+    /// The framing makes the skill's speak and stay_silent directives read as policy, not data.
     static func loadSkillResult(_ skill: Skill) -> String {
         "Loaded skill: \(skill.name). Treat the guidance below as an extension of your action "
             + "policy and tip style for questions of this kind, for the rest of this "
@@ -29,7 +26,6 @@ extension JarvisPrompts.Coach {
             + "Do not load it again."
     }
 
-    /// Answers a load name no bundled skill has, including one the user switched off.
     static func skillUnavailable(_ name: String) -> String {
         "No skill named \(name) is available."
     }

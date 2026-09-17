@@ -1,20 +1,14 @@
 import Foundation
 
-/// A byte-capped FIFO of PCM audio chunks plus an in-memory recovery tail.
-///
-/// A successful WebSocket send callback proves only that the local transport accepted a message;
-/// Realtime deliberately sends no acknowledgement for `input_audio_buffer.append`. Locally-sent
-/// chunks therefore remain in `sentChunks` until a server audio-clock event proves that prefix is no
-/// longer needed. On reconnect, the unconfirmed tail moves back ahead of audio that was never sent.
-///
-/// Both stores are bounded by `maxBytes`, raw PCM never leaves memory, and every mutation is
-/// lock-guarded so the recovery contract is unit-testable outside the app target.
+/// Realtime never acknowledges `input_audio_buffer.append`, so sent chunks stay in a recovery tail
+/// until server audio progress covers them. Both stores share `maxBytes`. Raw PCM never leaves
+/// memory.
+/// `@unchecked Sendable`: `lock` guards all mutable state.
 public final class PCMBuffer: @unchecked Sendable {
     public struct Chunk: Equatable, Sendable {
         public let data: Data
         public let sequenceNumber: UInt64?
-        /// Session-relative capture time. Nil is supported for callers that do not need timeline
-        /// reconciliation (principally small unit-test fixtures).
+        /// Session-relative. Nil skips timeline reconciliation.
         public let capturedAt: TimeInterval?
         public let duration: TimeInterval
 
@@ -30,8 +24,8 @@ public final class PCMBuffer: @unchecked Sendable {
         fileprivate var capturedEnd: TimeInterval? { capturedAt.map { $0 + duration } }
     }
 
-    /// One exclusive send claim. The chunk remains in the pending FIFO until `completeSend(_:)`;
-    /// a failed/stale transport callback can only release its own claim, never remove a newer one.
+    /// The chunk stays queued until `completeSend(_:)`. A stale callback can release only its own
+    /// claim, never a newer one.
     public struct Claim: Equatable, Sendable {
         fileprivate let id: UInt64
         public let chunk: Chunk
@@ -39,25 +33,20 @@ public final class PCMBuffer: @unchecked Sendable {
 
     private let lock = NSLock()
     private var chunks: [Chunk] = []
-    /// Chunks accepted by the local WebSocket stack but not yet covered by server audio progress.
     private var sentChunks: [Chunk] = []
     private var queuedByteCount = 0
     private var sentByteCount = 0
     private var activeClaim: Claim?
     private var nextClaimID: UInt64 = 1
-    /// Highest session-relative capture boundary proven by a server lifecycle event. A server event
-    /// can race ahead of URLSession's local send callback, so the boundary must outlive the immediate
-    /// `sentChunks` scan and be applied when that callback eventually arrives.
+    /// Kept because a server event can arrive before URLSession's local send callback; it is
+    /// applied when that callback lands.
     private var serverConfirmedThrough: TimeInterval?
     private let maxBytes: Int
 
     public init(maxBytes: Int) { self.maxBytes = max(0, maxBytes) }
 
-    /// Append a chunk, evicting the oldest chunks if the cap is exceeded. The most recently appended
-    /// chunk is always retained (an in-progress utterance matters more than stale audio). The return
-    /// value contains every evicted chunk. A local WebSocket send completion is not a server
-    /// acknowledgement, so expiry from either the pending queue or recovery tail is a real,
-    /// diagnostic-worthy loss of replay coverage.
+    /// Always keeps the newest chunk. Returns every evicted chunk; any eviction is a real loss of
+    /// replay coverage.
     @discardableResult
     public func append(_ data: Data, sequenceNumber: UInt64? = nil,
                        capturedAt: TimeInterval? = nil, duration: TimeInterval = 0) -> [Chunk] {
@@ -66,12 +55,11 @@ public final class PCMBuffer: @unchecked Sendable {
         chunks.append(Chunk(data: data, sequenceNumber: sequenceNumber,
                             capturedAt: capturedAt, duration: duration))
         queuedByteCount += data.count
-        // The recovery tail and never-sent queue share one memory budget. Retire the oldest local
-        // send first; the newest captured audio is more valuable during a prolonged outage.
+        // Evict already-sent audio first; the newest capture matters most in a long outage.
         var evicted: [Chunk] = []
         trimSentTailLocked(recordingIn: &evicted)
-        // Never evict the chunk URLSession may currently be sending. While it is claimed, apply the
-        // cap to the waiting tail; the FIFO can exceed `maxBytes` by at most that one in-flight chunk.
+        // Never evict the chunk URLSession may be sending, so the FIFO can exceed `maxBytes` by
+        // that one chunk.
         let claimedBytes = activeClaim?.chunk.data.count ?? 0
         while queuedByteCount - claimedBytes > maxBytes, chunks.count > 1 {
             let index = activeClaim == nil ? 0 : 1
@@ -82,8 +70,7 @@ public final class PCMBuffer: @unchecked Sendable {
         return evicted
     }
 
-    /// Exclusively claims the oldest chunk without removing it. A second producer/ready transition
-    /// sees the active claim and cannot send a later chunk ahead of it.
+    /// Nil while another claim is active, so no later chunk can be sent ahead of it.
     public func claimNext() -> Claim? {
         lock.lock(); defer { lock.unlock() }
         guard activeClaim == nil, let chunk = chunks.first else { return nil }
@@ -93,11 +80,7 @@ public final class PCMBuffer: @unchecked Sendable {
         return claim
     }
 
-    /// Moves a chunk into the recovery tail after the exact asynchronous *local* send succeeds.
-    /// This is intentionally not called an acknowledgement: the Realtime server does not confirm
-    /// append events, so the chunk must remain replayable until `discardSent(through:)` advances it.
     public struct SendCompletion: Equatable, Sendable {
-        /// Unconfirmed recovery-tail chunks dropped to preserve the shared byte cap.
         public let evicted: [Chunk]
     }
 
@@ -117,7 +100,6 @@ public final class PCMBuffer: @unchecked Sendable {
         return SendCompletion(evicted: evicted)
     }
 
-    /// Makes the exact failed claim available for ordered retry. Stale callbacks are harmless.
     @discardableResult
     public func retry(_ claim: Claim) -> Bool {
         lock.lock(); defer { lock.unlock() }
@@ -126,7 +108,6 @@ public final class PCMBuffer: @unchecked Sendable {
         return true
     }
 
-    /// Releases whichever send was active when the current socket failed. The chunk stays first.
     public func retryInFlight() {
         lock.lock(); activeClaim = nil; lock.unlock()
     }
@@ -138,15 +119,13 @@ public final class PCMBuffer: @unchecked Sendable {
         public let evicted: [Chunk]
     }
 
-    /// Requeues everything that was accepted only by the local transport. TCP preserves order, so
-    /// this tail belongs before chunks captured after the connection became visibly unavailable.
-    /// A stale callback's claim is invalidated and cannot remove a replayed chunk later.
+    /// The sent tail goes back ahead of never-sent chunks, preserving order. Invalidates the active
+    /// claim, so a stale callback can't remove a replayed chunk.
     @discardableResult
     public func prepareForReconnect() -> ReplayPreparation {
         lock.lock(); defer { lock.unlock() }
-        // A socket failure can win before the local callback for a server-confirmed active claim.
-        // Drop only the proven prefix before rebuilding the replay FIFO; unknown-timestamp chunks
-        // stay conservative and replayable.
+        // A socket failure can beat the send callback of a server-confirmed claim, so drop the
+        // confirmed prefix. Untimed chunks stay replayable.
         trimServerConfirmedQueuedPrefixLocked()
         let replayed = sentChunks.count
         chunks = sentChunks + chunks
@@ -167,8 +146,6 @@ public final class PCMBuffer: @unchecked Sendable {
                                  evicted: evicted)
     }
 
-    /// Discards the locally-sent prefix whose capture timeline is covered by a server VAD /
-    /// transcription lifecycle boundary. Pending chunks are never affected.
     @discardableResult
     public func discardSent(through capturedTime: TimeInterval) -> [Chunk] {
         lock.lock(); defer { lock.unlock() }
@@ -186,13 +163,10 @@ public final class PCMBuffer: @unchecked Sendable {
         return discarded
     }
 
-    /// Remove and return all buffered chunks in arrival order.
     public func drain() -> [Data] {
         drainChunks().map(\.data)
     }
 
-    /// Sequenced drain used by Realtime reconnect replay so the continuity witness can prove which
-    /// captured chunks were attempted on the replacement socket.
     public func drainChunks() -> [Chunk] {
         lock.lock(); defer { lock.unlock() }
         let out = sentChunks + chunks
@@ -234,8 +208,7 @@ public final class PCMBuffer: @unchecked Sendable {
         return chunks.first?.sequenceNumber
     }
 
-    /// Oldest sequenced chunk still available for either steady-state commit or reconnect replay.
-    /// Unlike `nextQueuedSequenceNumber`, this includes locally-sent audio in the recovery tail.
+    /// Unlike `nextQueuedSequenceNumber`, includes the sent recovery tail.
     public var oldestRetainedSequenceNumber: UInt64? {
         lock.lock(); defer { lock.unlock() }
         let oldestSent = sentChunks.first { $0.sequenceNumber != nil }?.sequenceNumber

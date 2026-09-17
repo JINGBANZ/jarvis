@@ -1,47 +1,26 @@
 import Foundation
 
-/// Decides whether a transcript line carries coaching-relevant substance or is only a clear
-/// hesitation sound ("Hmm", "Uh", "嗯嗯"). The coach loop removes those sounds from brain-facing
-/// context and skips a turn-end whose whole delta is discardable — from either speaker — so it never
-/// buys a request.
-/// The finalized transcript still remains in Activity for the user to audit.
-///
-/// The list is deliberately conservative: lexical replies such as "Yes", "No", "Okay", "Right",
-/// "对", and "可以" can change the conversation, so they always fail open to the brain regardless of
-/// speaker. Elongation/repetition normalization absorbs spelling variants ("Hmmmm." → "hm", "嗯嗯" →
-/// "嗯"). The model stays the judge of meaning; this is punctuation-level hygiene, not a wake-word gate.
+/// Deliberately conservative: short replies such as "Yes", "Okay", or "对" can change the
+/// conversation, so only clear hesitation sounds count as filler.
 public enum TurnSubstance {
-    /// Audit-visible classification of the same conservative gate used at runtime. Keeping the
-    /// reason alongside the Boolean decision lets session evaluation distinguish one known filler
-    /// sound from a punctuation-separated filler sequence without re-implementing this policy.
     typealias Classification = CoachingAttemptAuditEvent.Classification
 
-    /// Human-readable non-semantic vocal sounds, kept in natural spelling. Each is run through
-    /// `normalized` when the set is built so it matches normalized input. Keep semantic
-    /// acknowledgements out of this set even when they are often used casually.
+    /// Only non-semantic sounds; keep acknowledgements out even when they are used casually.
     private static let discardableSounds: Set<String> = Set([
-        // English
         "hm", "m", "uh", "um", "er", "erm", "oh", "ah",
-        // Chinese
         "嗯", "恩", "啊", "哦", "噢", "呃",
     ].map(normalized))
 
-    /// Separators that may join several independent hesitation sounds in one transcription result
-    /// ("Uh. Hmm. Oh."). Hyphens stay inside a form so affirmative sounds such as "Mm-hmm" fail
-    /// open instead of being mistaken for the separate noises "m" and "hm".
+    /// Hyphen is not a separator, so "Mm-hmm" stays substantive rather than "m" plus "hm".
     private static let soundSeparators = CharacterSet.punctuationCharacters
         .subtracting(CharacterSet(charactersIn: "-"))
         .union(.symbols)
         .union(.whitespacesAndNewlines)
 
-    /// True when the line should reach the brain. Order matters: overrides first (a question or an
-    /// address is always substance, whoever said it), then normalize and consult the closed class.
     public static func isSubstantive(_ text: String) -> Bool {
         classification(of: text).isSubstantive
     }
 
-    /// The reason behind `isSubstantive`, persisted with coaching-attempt provenance. This stays
-    /// internal because it is a diagnostics contract, not a second public filtering surface.
     static func classification(of text: String) -> Classification {
         let lower = text.lowercased()
         if lower.contains("jarvis") { return .substantive }
@@ -50,22 +29,17 @@ public enum TurnSubstance {
 
         let collapsed = normalized(lower)
 
-        if collapsed.isEmpty { return .empty }                              // pure punctuation / noise
-        if discardableSounds.contains(collapsed) { return .knownFiller }    // one clear sound
-        if isDiscardableSoundSequence(lower) { return .compositeFiller }    // several clear sounds
+        if collapsed.isEmpty { return .empty }
+        if discardableSounds.contains(collapsed) { return .knownFiller }
+        if isDiscardableSoundSequence(lower) { return .compositeFiller }
         return .substantive
     }
 
-    /// Speaker-labeled entry point used by the coach's delta gate. Classification stays neutral:
-    /// ambiguous short replies are preserved for both speakers.
     public static func isSubstantive(_ line: TranscriptLine) -> Bool {
         return isSubstantive(line.text)
     }
 
-    /// Keep only letters/digits (CJK ideographs are letters), dropping punctuation, whitespace, and
-    /// symbols; then collapse consecutive repeats so elongations fold onto their base form
-    /// ("Hmmmm." → "hm", "嗯嗯" → "嗯"). Applied to both incoming lines and `discardableSounds`
-    /// so the two are compared in the same shape.
+    /// Alphanumerics only, with repeats collapsed: "Hmmmm." becomes "hm", "嗯嗯" becomes "嗯".
     private static func normalized(_ lower: String) -> String {
         var collapsed = ""
         for scalar in lower.unicodeScalars where CharacterSet.alphanumerics.contains(scalar) {
@@ -75,16 +49,12 @@ public enum TurnSubstance {
         return collapsed
     }
 
-    /// True only when separators divide two or more clear hesitation sounds. Requiring every part
-    /// to be in the conservative set keeps technical fragments such as "B.F.S." substantive.
     private static func isDiscardableSoundSequence(_ lower: String) -> Bool {
         let parts = normalizedSeparatorParts(lower)
         return parts.count > 1 && parts.allSatisfy(discardableSounds.contains)
     }
 
-    /// Preserve an all-uppercase token whose lowercase spelling collides with a sound ("M", "ER",
-    /// "UM", "OH"). Capitalization is the only local evidence that it may be a variable or acronym;
-    /// ordinary ASR fillers such as "Um" and "Oh" remain discardable.
+    /// All-caps "ER" or "UM" may be an acronym or variable, while "Um" stays filler.
     private static func containsAcronymLikeSound(_ text: String) -> Bool {
         text.components(separatedBy: soundSeparators).contains { part in
             guard discardableSounds.contains(normalized(part.lowercased())) else { return false }

@@ -1,10 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// One provider/model target row shared by Primary and fallbacks in the unified Provider card.
-///
-/// The row owns only presentation and discrete control callbacks. Primary-route persistence,
-/// fallback-list mutation, availability policy, and runtime state remain with their existing owners.
 @MainActor
 final class BrainTargetRowView: NSView {
     struct Actions {
@@ -45,8 +41,7 @@ final class BrainTargetRowView: NSView {
         self.titleLabel = titleLabel
 
         if let status {
-            // A bordered teal tag; its layer border is set once the row is built and again on every
-            // appearance change, because a layer color does not follow the appearance by itself.
+            // A layer border doesn't follow the appearance, so `applyStatusBorder()` reapplies it.
             let label = NSTextField(labelWithString: status.uppercased())
             label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize - 1)
             label.textColor = SettingsTheme.teal
@@ -92,8 +87,8 @@ final class BrainTargetRowView: NSView {
         self.modelPopup = modelPopup
 
         if let actions {
-            // Start at its final frame size so AppKit never solves the button constraints against
-            // a transient zero-sized stack while the Provider card is being assembled.
+            // Start at the final size so AppKit never solves the button constraints against a
+            // transient zero-sized stack.
             let controls = NSStackView(
                 frame: NSRect(x: 0, y: 0, width: 98, height: 32))
             controls.orientation = .horizontal
@@ -148,8 +143,6 @@ final class BrainTargetRowView: NSView {
     override func layout() {
         super.layout()
 
-        // Every target uses the same full-width provider/model columns. Row actions occupy a
-        // separate compact line below, so adding controls never changes either popup's width.
         let labelWidth: CGFloat = 92
         let gap: CGFloat = 9
         let selectionWidth = max(225, bounds.width - labelWidth - gap)

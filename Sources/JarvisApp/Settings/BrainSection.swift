@@ -1,11 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Settings → Brain: the provider route and the reasoning effort.
-///
-/// Provider/model ordering is edited by `ProviderRouteEditor`; shared authentication lives on the
-/// Connections page. Which subscriptions are signed in comes from `SubscriptionSignIns`, the answer
-/// the hub shows too, and completed preference edits are handed to the running session.
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
     enum PreferenceChange: Equatable {
@@ -25,7 +20,6 @@ final class BrainSection: NSObject, SettingsSection {
     private var stack: SettingsCardStack?
     private var providerEditor: ProviderRouteEditor?
     private var signInObserver: UUID?
-    /// Session-local runtime state only. This marker never writes preferences or reorders the route.
     private var activeTarget: BrainTarget?
 
     init(
@@ -64,7 +58,7 @@ final class BrainSection: NSObject, SettingsSection {
             bodyView: stack.scrollView)
     }
 
-    /// Reflect the driver's selected runtime target without mutating the saved route.
+    /// Display only: never writes preferences or reorders the saved route.
     func setActiveTarget(_ target: BrainTarget?) {
         activeTarget = target
         renderRoute()
@@ -87,8 +81,7 @@ final class BrainSection: NSObject, SettingsSection {
         card.setHeader(title: "Reasoning effort", detail: "More effort, slower hints")
         guard let content = card.contentView else { return card }
 
-        // Short labels, as in the prototype, so four segments with glyphs fit the row's control
-        // width even at the window's 560-point minimum; the tooltip carries the full name.
+        // Short labels, so four segments with glyphs fit at the window's minimum width.
         let effortControl = NSSegmentedControl(
             labels: ReasoningEffort.allCases.map { $0 == .medium ? "Med" : $0.displayName },
             trackingMode: .selectOne,
@@ -123,8 +116,7 @@ final class BrainSection: NSObject, SettingsSection {
         return card
     }
 
-    /// `level` filled bars out of three, drawn next to each effort label: the prototype's power bars,
-    /// as a template image so the native control tints it.
+    /// A template image, so the native segmented control tints it.
     private static func effortGlyph(level: Int) -> NSImage {
         let image = NSImage(size: NSSize(width: 21, height: 8), flipped: false) { @Sendable _ in
             for index in 0..<3 {

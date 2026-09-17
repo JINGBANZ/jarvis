@@ -106,8 +106,7 @@ def convert(wrapper: torch.nn.Module) -> ct.models.MLModel:
             ct.TensorType(name="state_out", dtype=np.float32),
         ],
         minimum_deployment_target=ct.target.macOS14,
-        # float32 throughout: the endpointer compares against fixed thresholds, so drifting the
-        # probability to save a few hundred KB would silently move every turn boundary.
+        # float32: the endpointer uses fixed thresholds, so float16 drift would move every turn boundary.
         compute_precision=ct.precision.FLOAT32,
         compute_units=ct.ComputeUnit.CPU_ONLY,
         convert_to="mlprogram",
@@ -190,9 +189,8 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(compiled, args.output)
 
-    # coremltools writes an analytics blob that differs run to run. The model loads and scores
-    # identically without it, and keeping it would make every regeneration show a spurious diff on a
-    # committed artifact whose whole point is being reproducible.
+    # coremltools' analytics blob differs run to run and isn't needed to load the model; drop it so
+    # regenerating the committed artifact is reproducible.
     analytics = args.output / "analytics"
     if analytics.exists():
         shutil.rmtree(analytics)

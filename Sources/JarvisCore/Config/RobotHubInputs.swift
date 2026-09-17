@@ -1,6 +1,5 @@
 import Foundation
 
-/// Everything the Settings hub shows, read by the app in one pass.
 public struct RobotHubInputs: Sendable, Equatable {
     public var route: BrainRoute
     public var effort: ReasoningEffort
@@ -10,9 +9,9 @@ public struct RobotHubInputs: Sendable, Equatable {
     public var browserTextEnabled: Bool
     public var captionEnabled: Bool
     public var boxEnabled: Bool
-    /// Keys, grants, and sign-ins. Nil until the app has read them, so the hub shows no status.
+    /// `nil` until the app has read it, so the hub shows no status.
     public var readiness: RobotReadiness?
-    /// The brain the running session is using; nil when stopped.
+    /// `nil` when stopped.
     public var activeTarget: BrainTarget?
 
     public init(

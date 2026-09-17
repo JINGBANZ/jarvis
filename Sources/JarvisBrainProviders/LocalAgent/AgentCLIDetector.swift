@@ -5,9 +5,6 @@ import Darwin
 import Glibc
 #endif
 
-/// Finds installed `claude` / `codex` CLIs for the session evaluator and checks whether each is
-/// signed in. Binary discovery stays a pure filesystem probe. Claude's sign-in state comes from its
-/// bounded, non-billing status command; Codex's auth file marker remains authoritative.
 public struct AgentCLIDetector: Sendable {
     private let home: URL
     private let pathVariable: String?
@@ -29,8 +26,7 @@ public struct AgentCLIDetector: Sendable {
         self.temporaryDirectory = temporaryDirectory
     }
 
-    /// The requested CLIs that are installed, in first-occurrence order, probed away from the
-    /// caller's executor so a slow status command cannot hold it. A CLI named twice is probed once.
+    /// Probed off the caller's executor so a slow status command cannot hold it.
     public func detectAllAsync(_ clis: [AgentCLI]) async -> [DetectedAgentCLI] {
         await withCheckedContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -42,7 +38,6 @@ public struct AgentCLIDetector: Sendable {
         }
     }
 
-    /// The given CLI, or nil when its binary isn't installed.
     public func detect(_ cli: AgentCLI) -> DetectedAgentCLI? {
         guard let url = firstExecutable(for: cli) else { return nil }
         return DetectedAgentCLI(
@@ -51,11 +46,8 @@ public struct AgentCLIDetector: Sendable {
             authenticationStatus: authenticationStatus(cli, executable: url))
     }
 
-    /// The common install locations consulted after $PATH — the single source of truth, also used
-    /// by `AgentCLIProcessRunner` to seed the subprocess PATH: a CLI *found* in one of these dirs
-    /// may need its interpreter or helpers from another (an npm-shim `claude` whose
-    /// `/usr/bin/env node` lives in `/opt/homebrew/bin`), so detection and execution must see the
-    /// same directories or detection succeeds while every launch fails.
+    /// Also seeds the runner's PATH: an npm-shim `claude` may need `node` from another directory,
+    /// so detection and execution must see the same list.
     static func fallbackDirectories(home: URL) -> [String] {
         [
             home.appendingPathComponent(".claude/local").path,   // claude's self-managed install
@@ -68,9 +60,6 @@ public struct AgentCLIDetector: Sendable {
         ] + nvmDirectories(home: home)
     }
 
-    /// Stable $PATH entries first, then common install locations. Apps opened from a terminal inherit
-    /// that terminal's PATH, which can contain short-lived launcher wrappers under the system temp
-    /// directory. A long-running app must not retain one of those paths after its owner exits.
     private func firstExecutable(for cli: AgentCLI) -> URL? {
         let dirs = Self.stableSearchDirectories(
             pathVariable: pathVariable,
@@ -89,9 +78,8 @@ public struct AgentCLIDetector: Sendable {
         return nil
     }
 
-    /// Search/environment PATH shared by detection and execution. Only inherited entries under the
-    /// system temporary directory are discarded; explicit user and system install locations retain
-    /// their normal precedence and are appended as fallbacks.
+    /// Drops inherited entries under the temp directory: a terminal-launched app inherits
+    /// short-lived launcher wrappers there, which must not outlive their owner.
     static func stableSearchDirectories(pathVariable: String?, home: URL,
                                         temporaryDirectory: URL) -> [String] {
         let inherited = (pathVariable ?? "").split(separator: ":").map(String.init)
@@ -124,12 +112,10 @@ public struct AgentCLIDetector: Sendable {
         let loggedIn: Bool
     }
 
-    /// The status document is tiny. This is only a runaway-output backstop for a broken wrapper, and
-    /// keeps the post-timeout pipe drain bounded in both time and memory.
+    /// Only a runaway-output backstop for a broken wrapper; the status document is tiny.
     private static let maxProbeOutputBytes = 64 * 1_024
 
-    /// Claude's own status command reads whichever credential store that installation uses and does
-    /// not make a model request. A malformed result or timeout is `unknown`, never "signed out".
+    /// Makes no model request. A malformed result or timeout is `unknown`, never signed out.
     private func claudeAuthenticationStatus(executable: URL) -> AgentCLIAuthenticationStatus {
         guard let output = runProbe(executable: executable,
                                     arguments: ["auth", "status", "--json"]),
@@ -138,8 +124,6 @@ public struct AgentCLIDetector: Sendable {
         return status.loggedIn ? .signedIn : .signedOut
     }
 
-    /// Run one local, non-model status command under a bounded process policy. No API key is
-    /// inherited, and stderr is irrelevant to the machine-readable probe.
     private func runProbe(executable: URL, arguments: [String]) -> Data? {
         let process = Process()
         process.executableURL = executable
@@ -167,9 +151,8 @@ public struct AgentCLIDetector: Sendable {
             return nil
         }
 
-        // `Process` termination callbacks can be delayed while the test runner or app is busy.
-        // Wait for the child directly and bound that wait with pid-only watchdogs, matching the
-        // production CLI runner without capturing the non-Sendable Process in GCD closures.
+        // `Process` termination callbacks can be delayed while the app is busy, so wait directly
+        // and bound the wait with pid-only watchdogs.
         let pid = process.processIdentifier
         let timeout = max(0.01, authStatusTimeout)
         let terminator = DispatchWorkItem { kill(pid, SIGTERM) }
@@ -182,9 +165,8 @@ public struct AgentCLIDetector: Sendable {
         return Self.readAvailableOutput(stdout.fileHandleForReading, maxBytes: Self.maxProbeOutputBytes)
     }
 
-    /// Drain only bytes already available after the wrapper exits. A wrapper may leave a child
-    /// holding the inherited stdout pipe open; a blocking `readDataToEndOfFile()` would then defeat
-    /// the process watchdog while waiting for that unrelated child to close its writer.
+    /// Non-blocking: a wrapper's child may still hold stdout open, and `readDataToEndOfFile()`
+    /// would wait on it past the watchdog.
     private static func readAvailableOutput(_ handle: FileHandle, maxBytes: Int) -> Data {
         let descriptor = handle.fileDescriptor
         let flags = fcntl(descriptor, F_GETFL)

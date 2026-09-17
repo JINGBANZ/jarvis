@@ -4,22 +4,11 @@ import JarvisCore
 import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (Core tests on Linux)
 #endif
 
-/// Brain client over the OpenAI **Responses API** (`POST /v1/responses`), sent to OpenAI itself or to
-/// the bundled CLIProxyAPI helper that serves the subscription targets. System text is passed via
-/// `instructions`; the conversation is sent as typed `input` items; function calls are threaded with
-/// `function_call` / `function_call_output`. Every call is self-contained: session memory is
-/// client-managed
-/// (`CoachHistory`) and arrives in `messages`, built in stable append-only order so OpenAI's prompt
-/// cache keeps hitting. `store:true` keeps each request/response inspectable in the OpenAI dashboard
-/// logs for debugging (a documented retention tradeoff; see wiki/sandbox.md).
 public struct BrainAccessor: BrainClient, Sendable {
-    /// Injected transport; returns the body and the HTTP response (for status + headers).
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
 
-    /// OpenAI's own Responses endpoint, used by every target not served by the bundled helper.
     public static let openAIEndpoint = URL(string: "https://api.openai.com/v1/responses")!
 
-    /// The target this client serves, which every failure it raises names.
     private let provider: BrainProvider
     private let apiKey: String
     private let model: String
@@ -30,9 +19,6 @@ public struct BrainAccessor: BrainClient, Sendable {
     private let promptCacheKey: String
     private let toolChoicePolicy: ToolChoicePolicy
     private let send: Sender?
-    /// When set, every round trip (request body, response body, status, latency — or the transport
-    /// error) is recorded to the session's `brain-traffic.jsonl`, tagged with `trafficTag` so the
-    /// coach and the summarizer are distinguishable. Nil (tests, the evaluator itself) records nothing.
     private let traffic: (any BrainTrafficAuditing)?
     private let trafficTag: String
 
@@ -42,10 +28,7 @@ public struct BrainAccessor: BrainClient, Sendable {
                 reasoningEffort: String = Defaults.Brain.effort.rawValue,
                 endpoint: URL = BrainAccessor.openAIEndpoint,
                 timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
-                // The cap MUST track the effort: it's a combined reasoning+output budget, so a value
-                // too small for the effort truncates the run (the high-effort bug). Callers pass the
-                // budget for the *selected* effort (`AppDelegate` → `effort.maxOutputTokens`); this
-                // default mirrors the default effort so there's one source of truth, never a magic number.
+                // Reasoning plus output budget: it must track the effort or the run truncates.
                 maxOutputTokens: Int = Defaults.Brain.effort.maxOutputTokens,
                 promptCacheKey: String = "jarvis-coach-v1",
                 toolChoicePolicy: ToolChoicePolicy = .providerEnforced,
@@ -56,9 +39,8 @@ public struct BrainAccessor: BrainClient, Sendable {
         self.provider = provider
         self.apiKey = apiKey
         self.model = model
-        // The target's floor, and GPT-6 Astra's own of low. Raise the effort and its budget to the
-        // floor without rewriting the user's shared preference, which can still disable reasoning
-        // on other models.
+        // GPT-6 Astra's effort floor is low. Raise to the floor here without rewriting the user's
+        // shared preference, which other models may still use to disable reasoning.
         let floor = [minimumReasoningEffort, model == "gpt-6-astra" ? ReasoningEffort.low : nil]
             .compactMap { $0 }.max()
         if let floor, let selected = ReasoningEffort(rawValue: reasoningEffort), selected < floor {
@@ -84,15 +66,11 @@ public struct BrainAccessor: BrainClient, Sendable {
                 messages: messages, tools: tools, toolChoice: toolChoice)
         } catch {
             if Task.isCancelled || error is CancellationError { throw error }
-            // A brain request is one round trip with nothing "ready" behind it, which is exactly
-            // what this initializer's transport path assumes: a refused connection reads as
-            // unreachable, and the failing URL never becomes the message.
+            // One round trip with nothing ready behind it: a refused connection is unreachable.
             throw ProviderFailure(unclassified: error, source: .brain(provider), stage: .request)
         }
     }
 
-    /// Keep classification at the provider boundary so the ordered route never guesses from raw
-    /// provider strings.
     private func performRequest(messages: [ChatMessage], tools: [ToolDef],
                                 toolChoice: ToolChoice) async throws -> BrainResponse {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
@@ -102,8 +80,7 @@ public struct BrainAccessor: BrainClient, Sendable {
         let body = try encodeBody(messages: messages, tools: tools, toolChoice: toolChoice)
         request.httpBody = body
 
-        // This transport makes exactly one request. `CoachDriver` never replays it; a failure leaves
-        // the conversation pending so a fresh attempt can include newer finalized transcript.
+        // Exactly one request, never retried: a fresh attempt should include newer transcript.
         let started = Date()
         let diagnostics = OpenAINetworkDiagnostics()
         let data: Data
@@ -116,8 +93,6 @@ public struct BrainAccessor: BrainClient, Sendable {
                 (data, http) = (result.0, result.1 as? HTTPURLResponse)
             }
         } catch {
-            // Record the failed round trip too — a transport error (timeout, dropped connection) is
-            // exactly the kind of issue the session evaluation should see.
             traffic?.record(tag: trafficTag, provider: provider, request: body, response: nil, status: nil,
                             latencyMs: Self.elapsedMs(since: started),
                             error: OpenAINetworkDiagnostics.errorSummary(error), phases: diagnostics.phases)
@@ -163,10 +138,8 @@ public struct BrainAccessor: BrainClient, Sendable {
                 }
 
             case .assistant:
-                // Verbatim passthrough items (a prior response's whole `output` array) go back
-                // exactly as the model emitted them — OpenAI requires a function call's output items
-                // (reasoning included) to accompany its result, unmodified and in order, or the
-                // request fails linkage validation / the model re-reasons from scratch.
+                // OpenAI requires a function call's output items, reasoning included, to be
+                // replayed unmodified and in order, or linkage validation fails.
                 if let raw = m.rawItemsJSON {
                     for itemJSON in raw {
                         if let item = (try? JSONSerialization.jsonObject(with: Data(itemJSON.utf8))) as? [String: Any] {
@@ -174,7 +147,6 @@ public struct BrainAccessor: BrainClient, Sendable {
                         }
                     }
                 }
-                // Replay the model's function calls as `function_call` input items (the tool loop).
                 if let calls = m.toolCalls {
                     for c in calls {
                         input.append([
@@ -198,10 +170,8 @@ public struct BrainAccessor: BrainClient, Sendable {
             }
         }
 
-        // On a `filteredAuto` target the declared array itself carries the permitted set and the
-        // choice is always `auto`. A press then misses the prompt cache from the tools block onward,
-        // measured at about a second on OpenAI, accepted only where the provider can neither force
-        // nor narrow a call.
+        // A `filteredAuto` provider can't force or narrow a call, so the declared tools carry the
+        // permitted set. That costs the prompt cache from the tools block on, about a second.
         let declared: [ToolDef]
         switch (toolChoicePolicy, toolChoice) {
         case (.filteredAuto, .allowed(let names)): declared = tools.filter { names.contains($0.name) }
@@ -210,19 +180,13 @@ public struct BrainAccessor: BrainClient, Sendable {
         }
         let toolsJSON: [[String: Any]] = try declared.map { t in
             let params = try JSONSerialization.jsonObject(with: Data(t.parametersJSON.utf8))
-            // Responses API uses a FLAT function tool shape (no nested "function"). `strict:true`
-            // turns on Structured Outputs for the call's arguments — the model is constrained to the
-            // schema, so e.g. `speak`'s `lines` always decodes as an array of strings (no splitting
-            // client-side). Strict requires every object in `parameters` to set
-            // additionalProperties:false and list all its keys as required (see ToolDef.parametersJSON).
+            // Responses uses a flat function tool shape. `strict` requires every object in the
+            // schema to set additionalProperties:false and list all keys as required.
             return ["type": "function", "name": t.name, "description": t.description,
                     "parameters": params, "strict": true]
         }
 
-        // Responses tool_choice: the strings "auto"/"required", an allowed_tools object to require a
-        // call from a subset, or a {type:function,name} object to force one specific function. The
-        // subset narrows tool_choice rather than the declared `tools`, so the cached prefix is the
-        // same one the automatic path sends.
+        // A subset narrows tool_choice, not the declared tools, so the cached prefix holds.
         let toolChoiceJSON: Any
         switch toolChoicePolicy == .filteredAuto ? ToolChoice.auto : toolChoice {
         case .auto: toolChoiceJSON = "auto"
@@ -244,12 +208,9 @@ public struct BrainAccessor: BrainClient, Sendable {
             "parallel_tool_calls": false,      // the coach loop consumes one tool call per turn
             "reasoning": ["effort": reasoningEffort],
             "max_output_tokens": maxOutputTokens,
-            // store:true keeps each request/response inspectable in the OpenAI dashboard logs for
-            // debugging. This DOES retain transcripts/screenshots server-side — a deliberate
-            // debuggability-over-retention choice; see wiki/sandbox.md. A subscription target sends
-            // false: that traffic runs on the user's own consumer plan, where nothing offers a
-            // dashboard to inspect. The bundled helper forces the same value on the Codex path, and
-            // saying it here means a pin bump cannot quietly turn retention back on.
+            // store:true deliberately retains transcripts and screenshots at OpenAI for dashboard
+            // debugging (wiki/sandbox.md). Subscription targets send false so a helper bump can't
+            // turn retention back on.
             "store": !provider.servedByLocalProxy,
             "prompt_cache_key": promptCacheKey, // stable system prompt → better cache routing
         ]
@@ -290,11 +251,8 @@ public struct BrainAccessor: BrainClient, Sendable {
 
     private func decode(_ data: Data) throws -> BrainResponse {
         let decoded = try JSONDecoder().decode(Response.self, from: data)
-        // Log per-turn token usage so the per-effort `max_output_tokens` budgets can be tuned DOWN
-        // from real consumption (OpenAI's own advice). `reasoning` is the share spent thinking — the
-        // part that silently ate the whole cap at high effort. `cached` is the prompt-cache hit for
-        // this call: history is built append-only precisely so this stays high, so a run of zeros
-        // here is the signal to investigate (per the session-audit finding), not a per-call anomaly.
+        // Logged to tune the per-effort budgets from real use. History is append-only to keep
+        // `cached` high, so a run of zeros needs investigating.
         if let usage = decoded.usage {
             let input = usage.input_tokens ?? 0
             let cached = usage.input_tokens_details?.cached_tokens ?? 0
@@ -304,8 +262,7 @@ public struct BrainAccessor: BrainClient, Sendable {
         }
         var invocations: [ToolInvocation] = []
         var raws: [RawToolCall] = []
-        // Plain text output — unused by coaching turns (tool_choice: required) but the whole payload
-        // of a tool-less summarizer call.
+        // Unused by coaching turns, but the whole payload of a tool-less summarizer call.
         let outputText = decoded.output
             .filter { $0.type == "message" }
             .flatMap { $0.content ?? [] }
@@ -322,9 +279,7 @@ public struct BrainAccessor: BrainClient, Sendable {
                 jlog("Jarvis coach: ignoring unknown tool '\(name)'")
             }
         }
-        // A truncated run (`status:"incomplete"`, e.g. reasoning+output exceeding max_output_tokens)
-        // can carry zero tool calls — surface the reason so the coach loop doesn't mistake it for
-        // a deliberate stay-silent. Prefer the explicit reason; fall back to "incomplete".
+        // A truncated run can carry zero tool calls; the reason keeps it from reading as a silence.
         let incompleteReason = decoded.status == "incomplete"
             ? (decoded.incomplete_details?.reason ?? "incomplete")
             : nil
@@ -334,10 +289,8 @@ public struct BrainAccessor: BrainClient, Sendable {
                              outputItemsJSON: Self.outputItemsJSON(in: data))
     }
 
-    /// The response's entire `output` array, each item re-serialized whole so the tool loop can
-    /// replay it untouched (`input.push(...response.output)` — reasoning ids, function_call item
-    /// ids, any encrypted payload all preserved). Extracted from the raw bytes — the typed
-    /// `Response` above deliberately doesn't model every provider field, and replay must lose none.
+    /// Read from the raw bytes because replay must keep fields `Response` doesn't model, such as
+    /// reasoning ids and encrypted payloads.
     private static func outputItemsJSON(in data: Data) -> [String] {
         guard let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let output = root["output"] as? [[String: Any]] else { return [] }

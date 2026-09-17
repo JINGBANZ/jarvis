@@ -1,9 +1,6 @@
 import Foundation
 
-/// Correlates content-free local PCM activity episodes with server VAD intervals.
-///
-/// `AudioContinuityWitness` owns capture/delivery/socket accounting; this focused value owns the
-/// independent matching state. Callers provide serialized access, so it needs no lock of its own.
+/// Callers serialize access, so it needs no lock of its own.
 struct AudioContinuityMatcher {
     struct Observation {
         let sampleCount: Int
@@ -73,9 +70,8 @@ struct AudioContinuityMatcher {
             closeServerSpeech()
             return anomalies
         case .transcriptionCompleted, .transcriptionFailed:
-            // A terminal event is the server's final lifecycle boundary when speech_stopped is lost
-            // or malformed. Item identity prevents a late terminal for an older item from closing a
-            // newer active utterance.
+            // Closes the utterance when speech_stopped is lost. The item check keeps a late
+            // terminal for an older item from closing a newer utterance.
             if let itemID, itemID == activeServerSpeechItemID {
                 closeServerSpeech()
             }

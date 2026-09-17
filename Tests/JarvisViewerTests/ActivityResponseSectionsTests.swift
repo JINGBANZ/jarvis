@@ -17,7 +17,6 @@ import WebKit
         let injected = try await h.eval("document.querySelectorAll('#log script').length") as? Int
         #expect(injected == 0)
         let text = try await h.eval("document.querySelector('#log').textContent") as? String
-        // The detail is Markdown, written out verbatim; the fence and its literal code survive.
         #expect(text?.contains("return \"<script>bad()</script>\"") == true)
         #expect(text?.contains("legacy fallback") == false)
     }
@@ -35,7 +34,6 @@ import WebKit
         #expect(text?.contains("Return result.") == true)
     }
 
-    /// A session recorded before the detail box still opens with the sections it was written with.
     @MainActor @Test func aRowWrittenBeforeTheDetailBoxStillRendersBothOldSections() async throws {
         let legacy = try #require(try? JSONDecoder().decode(ActivityResponse.self, from: Data("""
             {"lines":["Return result after the loop."],

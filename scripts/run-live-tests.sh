@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
-# Live e2e tests: build Jarvis Dev.app, then run the JarvisLiveTests target, which launches the app
-# once per scenario in its live e2e mode against real providers and asserts every case on the session
-# folder the app leaves. See wiki/live-e2e-tests.md for prerequisites and what the run covers.
+# Build Jarvis Dev.app, then run the JarvisLiveTests target against real providers.
+# Prerequisites and cases: wiki/live-e2e-tests.md
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
@@ -80,8 +79,8 @@ abort_run() {
       touch "$scenario_dir/abort"
     fi
   done
-  # LaunchServices started the app outside this process group, so the signal never reached it. Give
-  # it the launcher's ten seconds to seal its session, then kill it so capture cannot outlive the run.
+  # LaunchServices started the app outside this process group, so the signal never reached it.
+  # Give it the launcher's 10s to seal its session, then kill it so capture cannot outlive the run.
   for _ in {1..50}; do
     /usr/bin/pgrep -f "$APP_PROCESS_PATTERN" >/dev/null || break
     sleep 0.2
@@ -125,8 +124,8 @@ if [[ "$EVALUATE" == 1 ]]; then
   done
   if [[ "$session_count" -ne 1 ]]; then
     echo "G09 fail Scenario A did not leave exactly one session" >> "$RUN_DIR/results.txt"
-  # Claude Code, not the default Codex-first choice: the evaluation is the run's largest agent spend,
-  # and the ChatGPT plan's usage limit is the one a day of runs exhausts.
+  # Claude, not the Codex-first default: evaluation is the run's largest agent spend, and a day of
+  # runs exhausts the ChatGPT plan's limit first.
   elif EVAL_AGENT=claude ./scripts/eval-session.sh "$evaluated_session" > "$RUN_DIR/evaluate.log" 2>&1 \
       && grep -q '^## Summary' "${evaluated_session}eval-report.md" \
       && grep -q '^## Findings' "${evaluated_session}eval-report.md" \

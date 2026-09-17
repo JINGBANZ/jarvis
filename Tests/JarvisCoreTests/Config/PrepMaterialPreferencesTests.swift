@@ -3,7 +3,6 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct PrepMaterialPreferencesTests {
-    /// A fresh, isolated UserDefaults suite per test so nothing touches the real app domain.
     private func freshDefaults() -> UserDefaults {
         let suite = "PrepMaterialPreferencesTests.\(UUID().uuidString)"
         let d = UserDefaults(suiteName: suite)!
@@ -49,7 +48,6 @@ import Foundation
     }
 
     @Test func malformedPersistedEntryIsDropped() {
-        // A hand-edited or stale plist entry must never crash a read.
         let d = freshDefaults()
         d.set([["id": "not-a-uuid", "path": "/tmp/a.md", "isDirectory": false]],
               forKey: "prepMaterial.sources")

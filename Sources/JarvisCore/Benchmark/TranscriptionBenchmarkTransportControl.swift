@@ -1,9 +1,6 @@
 import Foundation
 
-/// Process-local fault controller used only by the explicit reconnect benchmark.
-///
-/// It can hold one replacement connection while synthetic audio fills the real replay buffer. The
-/// active transcriber installs the scoped interruption operation; no host network state is changed.
+/// Process-local only: no host network state is changed.
 /// `@unchecked Sendable`: `lock` protects the handler, hold state, and deferred reconnect operation.
 public final class TranscriptionBenchmarkTransportControl: @unchecked Sendable {
     private let lock = NSLock()

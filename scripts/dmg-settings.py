@@ -13,8 +13,6 @@ if not application.is_absolute():
 if application.name != APP_NAME or application.is_symlink() or not application.is_dir():
     raise ValueError("the DMG source must be a regular Jarvis.app bundle")
 
-# Keep the visible surface to the two conventional drag-install targets. dmgbuild writes the
-# Finder metadata and bundled arrow directly, so this layout is deterministic without a GUI session.
 files = [(str(application), APP_NAME)]
 symlinks = {"Applications": "/Applications"}
 

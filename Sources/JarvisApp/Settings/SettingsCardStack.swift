@@ -1,10 +1,7 @@
 import AppKit
 
-/// A top-aligned column of fixed-height cards inside a Settings scroll view.
-///
-/// Owners keep each card's height current through `setHeight(_:for:)`. The document is never shorter
-/// than the viewport, because AppKit anchors a short document at the bottom and would leave an empty
-/// band above the first card. A height change keeps the reader's distance from the top.
+/// Keeps the document at least as tall as the viewport, because AppKit anchors a short document at
+/// the bottom and leaves an empty band above the first card.
 @MainActor
 final class SettingsCardStack {
     let scrollView = SettingsScrollView(frame: NSRect(x: 0, y: 0, width: 760, height: 560))
@@ -22,8 +19,8 @@ final class SettingsCardStack {
         stack.autoresizingMask = [.width]
     }
 
-    /// Adds every card and only then attaches the document: attaching a partly built stack makes
-    /// AppKit briefly solve an impossible intermediate layout.
+    /// Attaches the document only once complete: a partly built stack makes AppKit solve an
+    /// impossible layout.
     func install(_ items: [(view: NSView, height: CGFloat)]) {
         for item in items {
             item.view.translatesAutoresizingMaskIntoConstraints = false
@@ -35,7 +32,6 @@ final class SettingsCardStack {
             item.view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             cards.append((item.view, height))
         }
-        // The flexible tail absorbs the space below short content.
         let tail = NSView()
         tail.setContentHuggingPriority(.defaultLow, for: .vertical)
         tail.setContentCompressionResistancePriority(.defaultLow, for: .vertical)

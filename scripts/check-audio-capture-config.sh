@@ -72,8 +72,7 @@ if /usr/bin/grep -Fq 'TranscriptionBenchmark' "$normal_session_contract" \
     echo "Normal transcription contracts and app wiring must not expose benchmark capabilities." >&2
     exit 1
 fi
-# The live e2e mode is selected in main.swift alone: its symbols stay out of normal app wiring and
-# the coaching kernel, and its fixture source never becomes a production audio source.
+# main.swift alone may select the live e2e mode.
 live_e2e_status=0
 live_e2e_references="$(/usr/bin/grep -RIl 'LiveE2E' Sources/JarvisApp/App \
     Sources/JarvisCore/Transcription Sources/JarvisCore/Coach)" || live_e2e_status=$?
@@ -103,7 +102,6 @@ while IFS= read -r reference; do
             ;;
     esac
 done <<< "$fixture_references"
-# The live e2e mode is compiled only into debug builds, so the release app ships none of it.
 if ! /usr/bin/grep -Fq '.define("JARVIS_LIVE_E2E", .when(configuration: .debug))' Package.swift \
     || ! /usr/bin/grep -Fq 'swiftSettings: liveE2ESettings' Package.swift \
     || ! /usr/bin/grep -Fq 'liveE2ESettings + ' Package.swift; then

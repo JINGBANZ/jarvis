@@ -1,7 +1,7 @@
 import Foundation
 
-/// Prunes persisted transcription benchmark runs without following links or touching unrelated
-/// children. The current run counts toward the cap and is always retained.
+/// Never follows links or touches non-run children. The current run counts toward the cap and is
+/// always kept.
 public struct TranscriptionBenchmarkRunStore: Sendable {
     private let base: URL
     private let current: URL

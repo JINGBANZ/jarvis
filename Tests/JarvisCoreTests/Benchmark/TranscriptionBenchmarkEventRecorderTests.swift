@@ -4,7 +4,6 @@ import Testing
 
 @Suite("Transcription benchmark event recorder")
 struct TranscriptionBenchmarkEventRecorderTests {
-    /// A socket that dropped after it was ready, the shape the benchmark's fault arm produces.
     private static let connectionLost = ProviderFailure(
         source: .transcription(.openAI), stage: .transport, category: .disconnected,
         disposition: .temporary, identity: .init(transportDomain: NSURLErrorDomain, transportCode: -1005),

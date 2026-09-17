@@ -2,9 +2,6 @@ import AppKit
 import JarvisCore
 import JarvisBrainProviders
 
-/// Settings → Connections: shared authentication and provider readiness, kept separate from the
-/// pages that use it. Its own sign-in probes also answer `SubscriptionSignIns`, so the hub and the
-/// Brain page agree with what this page shows.
 @MainActor
 final class ConnectionsSection: NSObject, SettingsSection {
     let destination = SettingsDestination.connections

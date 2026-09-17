@@ -1,74 +1,35 @@
 import Foundation
 import JarvisCore
 
-/// One live WebSocket for a transcription stream: the `URLSession`, the task, the generation counter
-/// that rejects late callbacks, the readiness deadline, the ping/pong liveness probe, the close and
-/// receive paths, and the retry timer. Every decision it makes comes from `SocketLifecyclePolicy`;
-/// everything a vendor does differently comes from its `WebSocketConnectionAdapter`.
+/// Design: wiki/architecture.md#resilience
 ///
-/// It exists because both socket transcribers had grown their own copy of this machinery, and the
-/// copies had already drifted apart in four places (issue #279). Readiness, retry budget, and the
-/// exhaustion category are now decided once, in Core, under test.
+/// Lock order: the adapter's lock and the lifecycle, continuity, and coaching locks all precede
+/// this `lock`, which is a leaf: never call the adapter while holding it. Adapters call into those
+/// other locks only with their own released.
 ///
-/// ## Locks
-///
-/// Three locks meet here, and the order between them is what keeps the stream's bookkeeping honest:
-///
-/// - **D**, this type's `lock`, guards socket state: session, task, generation, timers, policy.
-/// - **A**, the adapter's own lock, guards stream state: audio buffers, turn coordinators, replay
-///   bookkeeping.
-/// - **L**, the locks inside `RealtimeTranscriptionLifecycle`, `RealtimeContinuityReporter`, and
-///   `TranscriptionCoachingCoordinator`.
-///
-/// The order is A then D, L then D, and A then L only with A released. **D is a leaf: this type
-/// never calls an adapter method while holding `lock`.**
-///
-/// That is what lets an adapter mirror readiness in its own A-guarded state and have producers read
-/// only the mirror. Each state change here is immediately followed by an adapter callback that takes
-/// A and flips the mirror, so a producer holding A sees either the whole pre-change picture or the
-/// whole post-change one, never a half-applied handoff. This connection's answers (`isReady`,
-/// `readyLease`, `isCurrent`) say which socket to address, never what the stream should record; a
-/// stale answer always means "that socket died a moment ago", and `connectionWillRetry` needs A, so
-/// it always runs after the producer it raced and requeues whatever that producer did.
-///
-/// `@unchecked Sendable`: every mutable field is guarded by `lock` except `readyTimer`, `pingTimer`,
-/// and `pongTimer`. Those are created, read, invalidated, and nilled only from main-queue blocks,
-/// including inside `stop()`, which hops to main rather than touching them under `lock`. Main-queue
-/// confinement is what makes them safe: reading them under `lock` and hopping to main only for the
-/// `invalidate()` call would race an off-main stop against a main-queue writer assigning a
-/// replacement timer. `stopped` is set before that hop and every timer body re-checks it, so a timer
-/// firing in the gap does nothing.
+/// `@unchecked Sendable`: mutable state is guarded by `lock`, except `readyTimer`, `pingTimer`, and
+/// `pongTimer`, which are read, invalidated, and nilled only on the main queue, never under `lock`.
 final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @unchecked Sendable {
-    /// One socket's identity: the task to address and the generation that authorizes it. A callback
-    /// carrying a stale lease is from a socket that has already been replaced.
     struct Lease: Sendable {
         let task: URLSessionWebSocketTask
         let generation: Int
     }
 
-    /// Why a socket is being retired. An expected rotation costs no retry budget and reports nothing
-    /// to the user; a failure consults the budget and may end the stream.
     private enum Retirement {
         case failure(ProviderFailure)
         case expectedRotation(reason: String)
     }
 
-    /// Weak, because the adapter owns this connection: see the protocol's header. Every callback
-    /// through it is a no-op once the adapter is gone, which is the right answer for a `URLSession`
-    /// that outlived its stream.
+    /// Weak: the adapter owns this connection.
     private weak var adapter: (any WebSocketConnectionAdapter)?
-    /// Prefix for every diagnostic line about this socket, for example `Jarvis realtime [me]`.
     private let logPrefix: String
-    /// This stream's identity in every failure this connection classifies.
     private let source: ProviderFailure.Source
-    /// Detail appended to the "opening socket" line. Never names the connect URL: Gemini's carries
-    /// the API key in its query string.
+    /// Never names the connect URL: Gemini's carries the API key.
     private let openDetail: String
     private let readyTimeout: TimeInterval
     private let pingInterval: TimeInterval
     private let pongTimeout: TimeInterval
     private let networkStatus: @Sendable () -> String
-    /// `nil` for every normal coaching session; only the explicit reconnect benchmark installs one.
     private let transportControl: TranscriptionBenchmarkTransportControl?
     private let onStateChange: @Sendable (TranscriptionConnectionState) -> Void
 
@@ -81,8 +42,6 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
     private var connected = false      // true only between "session ready" and the next drop or close
     private var stopped = true
     private var terminalFailureReported = false
-    /// A server warned that this socket is going away, so the close and receive failure it produces
-    /// next are the rotation itself rather than a fault. Cleared when the replacement opens.
     private var rotationExpected = false
     private var pendingPingGeneration: Int?
     private var readyTimer: Timer?
@@ -130,8 +89,6 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         terminalFailureReported = false
         rotationExpected = false
         pendingPingGeneration = nil
-        // `start` is always `.open(attempt: 1)`, and it is what makes a fresh session never-ready
-        // again, so the short first-connect budget applies even on an instance that ran one before.
         let action = policy.start()
         lock.unlock()
         emitState(.connecting)
@@ -160,8 +117,8 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         emitState(.stopped)
     }
 
-    /// Keep a healthy socket in place; the replacement credential is picked up if this stream later
-    /// reconnects. This avoids destroying live transcript state merely because Settings saved a key.
+    /// Takes effect on the next socket. A healthy socket is deliberately kept so live transcript
+    /// state survives a key saved in Settings.
     func updateAPIKey(_ apiKey: String) {
         lock.lock()
         self.apiKey = apiKey
@@ -170,34 +127,29 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     // MARK: - What the adapter may ask
 
-    /// The socket that is ready to carry audio right now, or nil while none is.
     var readyLease: Lease? {
         lock.lock(); defer { lock.unlock() }
         guard let task, connected, !stopped else { return nil }
         return Lease(task: task, generation: generation)
     }
 
-    /// Whether `lease` is still the installed socket. True from the moment it opens, so a frame that
-    /// arrives before readiness is still attributed to the right socket.
+    /// True from the moment the socket opens, before readiness.
     func isCurrent(_ lease: Lease) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return isCurrentLocked(lease)
     }
 
-    /// Whether `lease` is installed and ready, so audio sent on it can be expected to land.
     func isReady(_ lease: Lease) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return isCurrentLocked(lease) && connected
     }
 
-    /// Whether the socket of this generation is still installed, for callers that kept only the
-    /// number. Generation alone identifies a socket: it is bumped on every open and on every stop.
+    /// Generation alone identifies a socket: it is bumped on every open and every stop.
     func isLive(generation candidate: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return isLiveLocked(candidate)
     }
 
-    /// Whether the socket of this generation is installed and ready.
     func isReady(generation candidate: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return isLiveLocked(candidate) && connected
@@ -208,9 +160,8 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         return generation
     }
 
-    /// Send on `lease`. A transport error retires the socket through the usual funnel; `completion`
-    /// runs first with `false` so the adapter can release its own in-flight bookkeeping before the
-    /// retirement asks for it back.
+    /// On a transport error, `completion(false)` runs before the socket is retired, so the adapter
+    /// can release its in-flight bookkeeping first.
     func send(
         _ message: URLSessionWebSocketTask.Message,
         on lease: Lease,
@@ -224,7 +175,6 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         }
     }
 
-    /// The provider acknowledged the session configuration. An open socket alone is not readiness.
     func acknowledgeReady(_ lease: Lease) {
         lock.lock()
         guard isCurrentLocked(lease), !connected,
@@ -240,13 +190,8 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         startPing(lease)
     }
 
-    /// The server warned that this socket is going away. Announce it once, then let the close or
-    /// receive failure it produces next be read as the rotation it is.
-    ///
-    /// Only a socket that reached ready can be replaced for free. A warning that arrives before the
-    /// acknowledgement describes a socket that never worked, and treating that as a rotation would
-    /// reopen with no delay and no budget spent, forever, against a server that closes every
-    /// handshake. Those take the ordinary failure path instead.
+    /// Only a socket that reached ready can rotate for free. An earlier warning takes the failure
+    /// path, or a server that closes every handshake would be reopened forever.
     func noteExpectedRotation(_ lease: Lease, reason: String) {
         lock.lock()
         guard isCurrentLocked(lease), connected, !rotationExpected else { lock.unlock(); return }
@@ -255,21 +200,15 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         jlog("\(logPrefix): socket #\(lease.generation) rotating (\(reason))")
     }
 
-    /// Replace a socket the server already warned is closing, ahead of the actual close. Spends no
-    /// retry budget and reports nothing to the user: this is expected churn, not a fault.
     func requestRotation(_ lease: Lease, reason: String) {
         retire(lease, .expectedRotation(reason: reason))
     }
 
-    /// Retire this socket with a cause the adapter classified itself, such as a local encoding fault
-    /// or an in-band rejection a retry could still clear.
     func fail(_ lease: Lease, cause: ProviderFailure) {
         retire(lease, .failure(cause))
     }
 
-    /// End a green-but-unusable stream immediately. `failure.disposition` must be `.permanent`: the
-    /// policy terminates on those from any live phase, and answers `.ignore` only once something
-    /// else has already ended this endpoint.
+    /// `failure.disposition` must be `.permanent`.
     func reportTerminalFailure(_ failure: ProviderFailure) {
         lock.lock()
         guard !stopped, !terminalFailureReported,
@@ -286,8 +225,6 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         adapter?.connectionDidTerminate(cause)
     }
 
-    /// Supplies the optional benchmark controller with the narrow fault operation. The controller,
-    /// rather than normal capture state, owns whether a replacement connection is held.
     private func interruptForBenchmark() -> Bool {
         guard let lease = readyLease else { return false }
         retire(lease, .failure(ProviderFailure(
@@ -300,17 +237,15 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
     // MARK: - Opening
 
     private func openSocket(attempt: Int) {
-        guard let adapter else { return }   // the stream is gone; there is nothing to connect for
+        guard let adapter else { return }
         lock.lock(); let key = apiKey; lock.unlock()
-        // NEVER log this request, its `.url`, or anything derived from it: Gemini authenticates with
-        // a query parameter, so the key travels in the URL. `openDetail` is the safe form.
+        // Never log this request or its URL: Gemini's carries the key in the query string.
         let request = adapter.makeRequest(apiKey: key)
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         let task = session.webSocketTask(with: request)
         lock.lock()
-        // A stop can land between the retry timer's guard and here, and the adapter does real work
-        // in `connectionWillRetry` in that window. Installing this socket then would leave one live
-        // that nothing cancels, held alive by its own `URLSession`.
+        // A stop can land while the adapter ran `connectionWillRetry`. Installing this socket then
+        // would leave one live that nothing cancels.
         guard !stopped else {
             lock.unlock()
             session.invalidateAndCancel()
@@ -323,10 +258,6 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         self.task = task
         connected = false
         pendingPingGeneration = nil
-        // A fresh socket is not rotating anything, whether this is the first connect, a reconnect
-        // after backoff, or the replacement a rotation just opened. Clearing it here keeps a genuine
-        // failure of THIS socket on the budget-consuming path instead of being mistaken for the
-        // churn its predecessor was warned about.
         rotationExpected = false
         lock.unlock()
         previousSession?.invalidateAndCancel()   // release the previous session's delegate retain
@@ -350,18 +281,15 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
             guard self.isCurrent(lease) else { return }
             switch result {
             case .failure(let error):
-                // A failed pending receive is the EXPECTED artifact of an intentional stop
-                // (cancel, then ENOTCONN / POSIX 57). Suppress it then; only a live failure retires.
+                // An intentional stop fails the pending receive (ENOTCONN, POSIX 57); ignore that.
                 self.lock.lock()
                 let isStopped = self.stopped
                 let everReady = self.policy.everReady
                 self.lock.unlock()
                 if isStopped { return }
                 guard let adapter = self.adapter else { return }
-                // A refused upgrade (non-101) surfaces here as a transport error and the HTTP status
-                // is on the task. Both vendors accept the upgrade even for a bad key and reject
-                // afterwards, so a refused handshake is the edge itself refusing: region, VPN exit,
-                // wrong URL. A permanent one ends the stream now instead of after the whole budget.
+                // A refused upgrade lands here, status on the task. Vendors reject a bad key only
+                // after upgrading, so a refusal is the edge itself: region, VPN, or URL.
                 let cause: ProviderFailure
                 if let status = (task.response as? HTTPURLResponse)?.statusCode, status != 101 {
                     cause = adapter.classifyHandshake(status: status)
@@ -373,8 +301,6 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
                     self.reportTerminalFailure(cause)
                     return
                 }
-                // `retire` reads a failure on a socket already warned as going away as the rotation
-                // it is, so there is nothing to check here.
                 self.retire(lease, .failure(cause))
             case .success(let message):
                 self.adapter?.handle(message, on: lease)
@@ -392,20 +318,14 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         let lease = Lease(task: currentTask, generation: generation)
         let isStopped = stopped
         lock.unlock()
-        if isStopped { return }   // An intentional stop closes the socket on purpose.
+        if isStopped { return }
         guard let adapter else { return }
-        // A close code can be advance warning on its own: OpenAI's 1001 is a routine rotation we
-        // reconnect through even when no in-band notice preceded it, since the two can arrive in
-        // either order. Any other code stays visible.
         if adapter.isExpectedRotation(closeCode: closeCode.rawValue) {
             noteExpectedRotation(lease, reason: "server going away")
         }
-        // `reason` is server-supplied content. It reaches Activity only through the failure record,
-        // which redacts it, and is never logged verbatim.
+        // `reason` is server-supplied: never log it; it reaches Activity only redacted.
         let reasonText = reason.flatMap { String(data: $0, encoding: .utf8) }
         let cause = adapter.classifyClose(code: closeCode.rawValue, reason: reasonText)
-        // A permanent close skips the retry budget entirely: it is a provider-boundary failure a
-        // retry cannot fix, the one case AGENTS.md permits exhausting a target immediately.
         if cause.disposition == .permanent {
             reportTerminalFailure(cause)
             return
@@ -415,21 +335,13 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
 
     // MARK: - Retiring a socket
 
-    /// Move one socket out of service exactly once, then do whatever the policy says comes next.
-    /// Every failure source (receive, close, send, readiness deadline, pong deadline, benchmark
-    /// fault) and every rotation funnels through here; the lease guard prevents a late callback from
-    /// an old socket from disrupting its healthy replacement.
     private func retire(_ lease: Lease, _ retirement: Retirement) {
         lock.lock()
         guard isCurrentLocked(lease), !terminalFailureReported else { lock.unlock(); return }
         var retirement = retirement
-        // A failure on a socket the server already warned about is that warning coming true, not a
-        // new fault, so it must not spend the budget a genuine failure will need.
         if case .failure(let cause) = retirement, rotationExpected {
             retirement = .expectedRotation(reason: cause.errorDescription ?? "socket failure")
         }
-        // A socket that was never acknowledged cannot be rotated: see `noteExpectedRotation`. Leave
-        // it installed and let the readiness deadline retire it on the budget instead.
         if case .expectedRotation(let reason) = retirement, !connected {
             lock.unlock()
             jlog("\(logPrefix): socket #\(lease.generation) reported \(reason) before it was "
@@ -443,19 +355,14 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         }
         connected = false
         pendingPingGeneration = nil
-        // Remove the failed task immediately. A receive callback can pass `isCurrent` just before
-        // this retirement wins the lock; `acknowledgeReady` checks the installed task again, so
-        // clearing it prevents a late acknowledgement from resetting the budget or draining buffered
-        // audio into the cancelled socket during the retry delay.
+        // Clear the task now: a receive callback may have passed `isCurrent` just before this, and
+        // `acknowledgeReady` rechecks the task, so a late acknowledgement cannot revive the socket.
         let retiredSession = session
         task = nil
         session = nil
         if case .terminate = action { terminalFailureReported = true }
         lock.unlock()
 
-        // The stream requeues whatever this socket never had acknowledged. It runs for a rotation
-        // too: a replacement still has to replay the audio the retiring socket was carrying. Nothing
-        // follows a termination, so its salvage happens in `connectionDidTerminate` instead.
         switch action {
         case .open(let attempt), .retry(_, let attempt):
             adapter?.connectionWillRetry(lease, attempt: attempt)
@@ -483,8 +390,7 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
             jlog("\(logPrefix): giving up on socket #\(lease.generation), stopping")
             adapter?.connectionDidTerminate(failure)
         case .ready, .ignore:
-            // Unreachable: `failed` and `expectedRotation` never answer either, and the lease guard
-            // above already rejected the stopped and terminal phases that answer `.ignore`.
+            // Unreachable: the lease guard above already rejected the phases that answer these.
             break
         }
     }
@@ -506,8 +412,6 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) { reconnect() }
             return
         }
-        // The benchmark can hold the replacement connection while synthetic audio fills the replay
-        // buffer. Without one installed the path is identical.
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
             transportControl.runReconnectWhenReleased(reconnect)
         }
@@ -620,21 +524,16 @@ final class WebSocketConnection: NSObject, URLSessionWebSocketDelegate, @uncheck
         !stopped && task != nil && generation == candidate
     }
 
-    /// A retry delay is being waited out, so no socket is installed and none may be addressed.
     private var isBackingOffLocked: Bool {
         if case .backingOff = policy.phase { return true }
         return false
     }
 
-    /// The socket is installed but has not been acknowledged yet, which is what the readiness
-    /// deadline is waiting on.
     private func isPendingReadiness(_ lease: Lease) -> Bool {
         lock.lock(); defer { lock.unlock() }
         return isCurrentLocked(lease) && !connected
     }
 
-    /// Classify a transport error against this socket's readiness, which decides whether it reads as
-    /// a connection that never came up or one lost after it was working.
     private func transportFailure(_ error: any Error) -> ProviderFailure {
         lock.lock(); let everReady = policy.everReady; lock.unlock()
         return TransportFailureClassifier.classify(

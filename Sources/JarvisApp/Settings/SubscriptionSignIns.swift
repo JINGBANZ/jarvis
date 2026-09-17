@@ -2,19 +2,14 @@ import Foundation
 import JarvisBrainProviders
 import JarvisCore
 
-/// The Settings window's one answer to "which subscriptions are signed in", shared by the hub and
-/// the Brain page so they never disagree. It asks the bundled helper only when a sign-in is saved,
-/// so opening Settings never starts the helper for nothing, and it takes Connections' own answers
-/// when that page probes; a fresh answer cancels any probe still in flight, so an older answer can
-/// never land on top of it.
+/// Asks the helper only when a sign-in is saved, so opening Settings never starts it for nothing. A
+/// fresh answer cancels any probe in flight, so an older answer can't land on top of it.
 @MainActor
 final class SubscriptionSignIns {
-    /// Subscriptions a route edit may pick right now; nil before any answer. A helper that isn't
-    /// running serves nothing, so it empties this, as the Brain page always has.
+    /// `nil` before any answer. A helper that isn't running serves nothing, so it empties this.
     private(set) var selectable: Set<BrainProvider>?
 
-    /// What the last real answer proved signed in. A helper that couldn't answer proves nothing, so it
-    /// leaves this alone and the hub never calls a subscription signed out on that basis.
+    /// A helper that couldn't answer proves nothing, so it leaves this alone.
     private var provenSignedIn: Set<BrainProvider>?
     private let supervisor: LocalProxySupervisor
     private var probe: Task<Void, Never>?

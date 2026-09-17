@@ -2,11 +2,10 @@ import CoreAudio
 import Foundation
 import JarvisCore
 
-/// Process-scoped system-audio capture for the explicit benchmark mode. It taps only this app's
-/// synthetic playback process, never opens a microphone, and never retains PCM after delivery.
+/// Taps only this process's synthetic playback: it never opens a microphone or retains PCM.
 ///
-/// `@unchecked Sendable`: lifecycle/device ownership is guarded by `lock`; audio state is confined
-/// to the single IOProc while running, and `AudioDeviceStop` drains it before teardown mutates state.
+/// `@unchecked Sendable`: lifecycle is guarded by `lock`; audio state is confined to the IOProc,
+/// and `AudioDeviceStop` drains it before teardown mutates state.
 final class SystemAudioBenchmarkCapture: @unchecked Sendable {
     enum Failure: Error, CustomStringConvertible {
         case unsupported
@@ -42,13 +41,11 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
     private var aggregateID = AudioObjectID(kAudioObjectUnknown)
     private var procID: AudioDeviceIOProcID?
     private var downToWire: Resampler?
-    /// Confined to `deliveryQueue`, never the IOProc: it runs a Core ML prediction. Same contract as
-    /// the production path in `AggregateEchoCapture`.
+    /// Used only on `deliveryQueue`, never the IOProc: it runs a Core ML prediction.
     private var turnDetector: LocalTurnDetector?
-    /// IOProc-only state while the device runs; teardown first drains that callback.
+    /// IOProc-only while the device runs.
     private var sequence: UInt64 = 0
-    /// Keeps model inference off the realtime callback while preserving capture order, which the
-    /// benchmark depends on for its turn boundaries.
+    /// Serial, so turn boundaries stay in capture order off the realtime callback.
     private let deliveryQueue = DispatchQueue(
         label: "jarvis.benchmark.delivery", qos: .userInitiated)
 
@@ -183,10 +180,6 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
             / TimeInterval(TranscriptionAudioFormat.pcm16Mono24k.sampleRate)
         let data = wireSamples.withUnsafeBufferPointer { Data(buffer: $0) }
         let onChunk = self.onChunk
-        // Turn detection and delivery both hop off the realtime callback. The queue is serial, so
-        // chunks stay in capture order; the runner supplies
-        // `TranscriptionBenchmarkSessionRelay.enqueue`, which only binds this chunk to the relay's
-        // own serial stream. Provider work never runs on the IOProc.
         deliveryQueue.async { [turnDetector] in
             let speechEvents = turnDetector
                 .speechEvents(from: nativeSamples, capturedAt: capturedAt)

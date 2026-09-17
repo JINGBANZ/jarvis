@@ -1,7 +1,6 @@
 import Foundation
 
-/// Each part's slot text, derived from saved settings only. The pages name everything in full; a
-/// slot is 232 points wide, so these lines stay short.
+/// Slots are 232 points wide, so these lines stay short.
 public enum RobotPartSummaries {
     public static func brain(primary: BrainTarget, effort: ReasoningEffort) -> RobotPartSummary {
         RobotPartSummary(

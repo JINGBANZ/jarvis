@@ -1,7 +1,6 @@
 import Testing
 @testable import JarvisCore
 
-/// The hub's whole picture comes from one input value.
 @Suite struct RobotHubTests {
     @Test func everyPartGetsASlotFromItsSavedSettings() {
         let state = RobotHub.state(for: .fixture())

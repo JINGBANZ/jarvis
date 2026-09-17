@@ -1,9 +1,6 @@
 import Foundation
 
-/// Accumulates the `…transcription.completed` fragments of one spoken turn so the coach sees the
-/// WHOLE utterance, not just the first fragment. The shared transcription coordinator briefly waits
-/// to batch nearby fragments and drains this buffer only after the provider reports no unfinished
-/// work. Pure and lock-guarded so the batching is unit-testable outside the app target.
+/// `@unchecked Sendable`: `lock` guards all mutable state.
 public final class UtteranceBuffer: @unchecked Sendable {
     public enum DrainResult: Equatable, Sendable {
         case empty
@@ -14,26 +11,23 @@ public final class UtteranceBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var text = ""
     private var fragments = 0
-    /// A batching delay expired while the provider still owned unfinished work. The lifecycle,
-    /// rather than a polling timer, uses this bit to schedule a fresh batch once that work is terminal.
+    /// Set when a batch delay expires during pending work, so settlement reschedules it, not
+    /// polling.
     private var waitingForPendingTranscriptions = false
 
     public init() {}
 
-    /// Append a non-empty fragment, space-joined onto what's pending.
     public func append(_ fragment: String) {
         guard !fragment.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
         text += (text.isEmpty ? "" : " ") + fragment
         fragments += 1
-        // This new final fragment starts a fresh batching delay. If another item is still active,
-        // expiry will put the buffer back into the waiting state.
+        // A new fragment starts a fresh batching delay.
         waitingForPendingTranscriptions = false
     }
 
-    /// Drain only after every provider item for this speaker is terminal. A later fragment can already
-    /// be active when the previous fragment's final transcript arrives, so an elapsed batching delay
-    /// alone is not evidence that the semantic turn ended.
+    /// An elapsed batching delay alone doesn't end a turn: a later fragment may already be in
+    /// flight.
     public func drainIfSettled(hasPendingTranscriptions: Bool) -> DrainResult {
         lock.lock(); defer { lock.unlock() }
         guard fragments > 0 else {
@@ -49,8 +43,7 @@ public final class UtteranceBuffer: @unchecked Sendable {
         return result
     }
 
-    /// Returns true exactly once when a delayed batch has become eligible for a fresh wait. This also
-    /// wakes a buffered turn when the last pending item resolves without text.
+    /// True once per delayed batch, including when the last pending item resolves without text.
     public func shouldResumeAfterPendingTranscriptionsSettle(
         hasPendingTranscriptions: Bool
     ) -> Bool {
@@ -62,7 +55,6 @@ public final class UtteranceBuffer: @unchecked Sendable {
         return true
     }
 
-    /// Return the coalesced utterance and fragment count, and reset.
     public func flush() -> (text: String, fragments: Int) {
         lock.lock(); defer { lock.unlock() }
         let result = (text, fragments)

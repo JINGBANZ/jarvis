@@ -1,8 +1,7 @@
 import Foundation
 
-/// Coalesces a continuous replay-buffer overflow into periodic content-free sequence summaries.
-/// The first eviction is visible immediately; later loss cannot be hidden by that first report, but
-/// a long overflow also cannot emit one activity-log line per 10 ms audio chunk.
+/// Reports the first eviction at once, then periodically, so a long overflow can't log one line per
+/// 10 ms chunk.
 public struct ReconnectBufferOverflowAccumulator: Sendable {
     private let reportInterval: TimeInterval
     private var lastReportAt: TimeInterval?

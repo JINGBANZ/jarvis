@@ -7,8 +7,7 @@ import Testing
         gate.setUnsettled(true, for: .me)
         let generation = gate.interruptGenerationSnapshot()
 
-        // Models a manual hint landing after CoachDriver's pending-trigger snapshot but before the
-        // settlement gate has installed the continuation.
+        // Interrupts after the generation snapshot but before the wait registers its continuation.
         gate.interruptWaiters()
 
         #expect(await completesBeforeTimeout {
@@ -30,8 +29,6 @@ import Testing
         })
         await interrupter.value
 
-        // The interruption wakes only the explicit hint. A later automatic wait still sees the
-        // provider as unsettled and remains parked until it finishes.
         let laterGeneration = gate.interruptGenerationSnapshot()
         #expect(!(await completesBeforeTimeout(nanoseconds: 20_000_000) {
             await gate.waitUntilSettled(unlessInterruptedAfter: laterGeneration)

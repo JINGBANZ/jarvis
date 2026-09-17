@@ -1,11 +1,9 @@
 import AppKit
 import JarvisCore
 
-/// The Settings hub page: Jarvis's head, whose parts and bottom buttons open every other page. It
-/// draws whatever `SettingsHubModel` publishes and asks the model to re-read on every visit.
 @MainActor
 final class SettingsHome {
-    /// Set by the Settings window. The point is where the click happened, in window coordinates.
+    /// The point is where the click happened, in window coordinates.
     var onOpen: ((SettingsDestination, NSPoint?) -> Void)?
 
     private let model: SettingsHubModel

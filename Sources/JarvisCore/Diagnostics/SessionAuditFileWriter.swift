@@ -5,19 +5,16 @@ import Darwin
 import Glibc
 #endif
 
-/// Owner-only file implementation of the session-audit disk edge.
+/// Every file is created owner-only (0600): sessions hold screen- and audio-derived data.
 struct SessionAuditFileWriter: SessionAuditWriting {
     func openSession(at directory: URL, initialHealth: Data) throws {
         try ensureOwnerOnlyFile(
             directory.appendingPathComponent(FileSessionAudit.brainTrafficFilename))
         try ensureOwnerOnlyFile(
             directory.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename))
-        // The agent-facing debug log is per-session-fresh because the session directory is created
-        // per Start; creating rather than truncating keeps open idempotent for the retry below.
         try ensureOwnerOnlyFile(
             directory.appendingPathComponent(FileSessionAudit.diagnosticFilename))
-        // Created empty and owner-only up front so `SessionStore.listSessions()` can discover the
-        // session before its first human-facing row exists.
+        // Created up front so `SessionStore.listSessions()` finds the session before its first row.
         try ensureOwnerOnlyFile(
             directory.appendingPathComponent(ActivityLog.filename))
         try replaceHealth(initialHealth, in: directory)
@@ -64,7 +61,7 @@ struct SessionAuditFileWriter: SessionAuditWriting {
         NSLog("%@", message)
     }
 
-    /// Open can be retried after a health-file failure without truncating records already written.
+    /// Never truncates, so open can be retried after a health-file failure.
     private func ensureOwnerOnlyFile(_ url: URL) throws {
         if !FileManager.default.fileExists(atPath: url.path) {
             guard FileManager.default.createFile(

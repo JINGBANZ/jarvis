@@ -1,11 +1,6 @@
 @preconcurrency import AVFoundation
 
-/// A stateful mono PCM16 sample-rate converter. AEC3 runs at 48 kHz but the transcription wire rate
-/// is provider-derived (24 kHz for OpenAI/Apple Speech, 16 kHz for Gemini — see
-/// `TranscriptionAudioFormat`), so each AEC stream resamples up on the way in and (for the cleaned
-/// mic) back down to that rate on the way out.
-/// The `AVAudioConverter` is built once and reused so its filter state carries across calls — keep
-/// ONE `Resampler` per audio stream (don't share across the mic and system sides).
+/// Stateful: filter history carries across calls, so use one instance per audio stream.
 final class Resampler {
     private let converter: AVAudioConverter
     private let srcFormat: AVAudioFormat
@@ -28,8 +23,7 @@ final class Resampler {
 
         let cap = AVAudioFrameCount(Double(input.count) * ratio) + 16
         guard let outBuf = AVAudioPCMBuffer(pcmFormat: dstFormat, frameCapacity: cap) else { return [] }
-        // Supply the source buffer once, then signal no-more-data (Apple TN3136); the converter is
-        // reused so its resampling history persists across calls for continuity.
+        // Supply the source buffer once, then signal no data now (Apple TN3136).
         let fed = Fed()
         var err: NSError?
         let status = converter.convert(to: outBuf, error: &err) { _, inStatus in
@@ -41,13 +35,10 @@ final class Resampler {
         return Array(UnsafeBufferPointer(start: outCh[0], count: Int(outBuf.frameLength)))
     }
 
-    /// Drop the resampling history. Callers use this when the audio timeline breaks (a device
-    /// rebuild), where carrying filter state across the discontinuity would smear unrelated audio
-    /// into the first converted samples.
     func reset() {
         converter.reset()
     }
 }
 
-// Single-use flag, touched only within one synchronous `convert` call on one thread.
+// @unchecked: touched only within one synchronous `convert` call on one thread.
 private final class Fed: @unchecked Sendable { var done = false }

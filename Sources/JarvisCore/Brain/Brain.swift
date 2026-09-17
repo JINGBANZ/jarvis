@@ -1,8 +1,6 @@
 import Foundation
 
-/// A tool call exactly as the model emitted it — needed to replay the assistant turn back
-/// into the conversation (the Chat Completions API requires the assistant `tool_calls` message
-/// to precede any `tool` result message).
+/// As the model emitted it: providers require the assistant call message before its tool result.
 public struct RawToolCall: Sendable, Equatable {
     public let id: String
     public let name: String
@@ -14,21 +12,14 @@ public struct RawToolCall: Sendable, Equatable {
     }
 }
 
-/// A message in the brain conversation. Minimal, provider-agnostic; the real client maps it.
 public struct ChatMessage: Sendable {
     public enum Role: String, Sendable { case system, user, assistant, tool }
     public let role: Role
     public let text: String?
-    /// Base64-encoded JPEG, for feeding a screenshot back to a vision model (user role).
     public let imageBase64JPEG: String?
-    /// For tool-result messages: which tool call this answers.
     public let toolCallId: String?
-    /// For assistant messages that made tool calls: the calls to replay.
     public let toolCalls: [RawToolCall]?
-    /// Provider items replayed VERBATIM, one JSON object per string (a Responses `output` array:
-    /// reasoning items, function_call items with their ids, …). The client re-emits them untouched:
-    /// OpenAI requires a response's output items to ride along with the tool output, byte-for-byte
-    /// and in order, or the reasoning/function-call linkage validation rejects the request.
+    /// Re-emitted untouched: OpenAI rejects output items not replayed byte-for-byte and in order.
     public let rawItemsJSON: [String]?
 
     public init(role: Role, text: String? = nil, imageBase64JPEG: String? = nil,
@@ -49,25 +40,14 @@ public struct ChatMessage: Sendable {
     public static func rawItems(_ itemsJSON: [String]) -> ChatMessage { .init(role: .assistant, rawItemsJSON: itemsJSON) }
 }
 
-/// A tool definition exposed to the model.
-///
-/// A tool carries everything the model needs to use it: the one-line `description` it is chosen
-/// from, the `parametersJSON` it is called with, and the `guidance` governing when and how. Keeping
-/// guidance on the tool is what lets `CoachCapabilities` build a prompt that never describes a tool
-/// the session does not offer, and lets a deferred tool hand its guidance over on load instead.
 public struct ToolDef: Sendable, Equatable {
     public let name: String
     public let description: String
-    /// JSON Schema for parameters, as a JSON string. Every object in it sets
-    /// `additionalProperties:false` and lists every key in `required`, because `BrainAccessor`
-    /// sends each tool with `strict:true` Structured Outputs, which requires both. An optional field
-    /// is nullable instead, and an object with no properties is valid as it is.
+    /// Strict Structured Outputs: every object sets `additionalProperties:false` and lists every
+    /// key in `required`, so an optional field is nullable instead.
     public let parametersJSON: String
-    /// Usage instructions, rendered into the system prompt for a hot tool and returned by
-    /// `load_tool` for a deferred one. Empty when the description says everything.
+    /// In the system prompt for a hot tool, the `load_tool` result for a deferred one.
     public let guidance: String
-    /// When true the prompt lists only this tool's name and description, in the loadable catalog;
-    /// the model must call `load_tool` before it may be called.
     public let deferLoading: Bool
     public init(name: String, description: String, parametersJSON: String,
                 guidance: String = "", deferLoading: Bool = false) {
@@ -79,52 +59,26 @@ public struct ToolDef: Sendable, Equatable {
     }
 }
 
-/// A tool call the model wants the harness to perform.
 public enum ToolInvocation: Sendable, Equatable {
     case captureScreen(callId: String)
-    /// The overlay lines to show, already split by the model (the `speak` tool's `lines` array) and
-    /// rendered one at a time — so the client never splits a free-form string on punctuation.
-    /// `detail` is the Markdown document the detail box renders; it is declared only where the box
-    /// can show one, so a session that has no box never carries it.
+    /// `lines` arrive split by the model; the client never splits text on punctuation.
     case speak(callId: String, lines: [String], detail: String? = nil)
-    /// The model's explicit "nothing useful to add" decision. Silence is a tool call (not the absence
-    /// of one) so that `tool_choice: required` can forbid plain-text output entirely — free text from
-    /// a stay-quiet turn used to be stored in the server-side conversation, where the model imitated
-    /// its own leaked deliberation and degenerated (and every stored byte was re-billed every turn).
+    /// A tool call, not an absence, so `tool_choice: required` can forbid plain-text replies.
     case staySilent(callId: String)
-    /// A lookup against the user's configured prep material. In the session's set only when at
-    /// least one source was configured at Start — see `PrepMaterialSearching`.
     case searchPrepNotes(callId: String, query: String)
-    /// The model asking for a deferred tool's schema and guidance, which come back as the result.
-    /// Offered only while the session has something left to load.
     case loadTool(callId: String, name: String)
-    /// The model asking for a bundled skill's guidance, which comes back as the result. Offered
-    /// only while the session has a switched-on skill.
     case loadSkill(callId: String, name: String)
 }
 
-/// One brain response: parsed tool calls (possibly empty = stay silent), plus the raw calls
-/// needed to replay the assistant turn during the tool loop.
 public struct BrainResponse: Sendable {
     public let toolCalls: [ToolInvocation]
     public let rawToolCalls: [RawToolCall]
-    /// The response's ENTIRE `output` array, verbatim (one JSON object per string, in output
-    /// order — reasoning, function_call, everything, ids intact). OpenAI's function-calling
-    /// guidance: when a tool call is fulfilled client-side, replay the model's output items whole
-    /// and unmodified with the tool output (`input.push(...response.output)`) — a reasoning item
-    /// replayed next to a rebuilt, id-less function_call trips the provider's reasoning/function-call
-    /// linkage validation, and dropping the reasoning makes the model re-reason from scratch. Only
-    /// the within-turn tool loop needs this; `CoachHistory.commit` converts it before it reaches
-    /// session memory.
+    /// The whole `output` array, verbatim. OpenAI rejects a reasoning item replayed beside a
+    /// rebuilt function call, so the tool loop replays these whole.
     public let outputItemsJSON: [String]
-    /// Non-nil when the model run did NOT finish cleanly (Responses `status:"incomplete"`), carrying
-    /// the reason (e.g. `"max_output_tokens"`). Such a response cannot confirm a provider cutover,
-    /// even if it includes a usable tool call. With no tool call it is *truncation*, not a deliberate
-    /// decision to stay silent — the coach loop distinguishes them.
+    /// Non-nil (e.g. `"max_output_tokens"`) when the run did not finish; never trust its tool
+    /// calls.
     public let incompleteReason: String?
-    /// The response's plain text output, if any. The whole payload of a tool-less call like the
-    /// history summarizer; on a coaching shortcut press the attempt runner speaks it when the reply
-    /// carries no call the press can use.
     public let outputText: String?
     public init(toolCalls: [ToolInvocation], rawToolCalls: [RawToolCall] = [],
                 incompleteReason: String? = nil, outputText: String? = nil,
@@ -137,14 +91,7 @@ public struct BrainResponse: Sendable {
     }
 }
 
-/// How the model may use tools on a given turn. `required` (some tool, model's pick) is what
-/// audio-driven turns use: with `stay_silent` in the tool set every decision — nudge, look, or stay
-/// quiet — is a clean tool call and the model never emits plain text into the stored conversation.
-/// `allowed(names)` is `required` narrowed to the listed tools while the declared array stays whole,
-/// and `force(name)` requires exactly that function. A coaching shortcut uses both: it may load and
-/// search but never stay silent or recapture, and its last permitted response forces `speak`, so an
-/// explicit keypress always ends in a visible hint (see `CoachAttemptRunner.runAttempt`). `auto`
-/// (zero or more calls) is for tool-less callers such as history compaction.
+/// `allowed` is `required` narrowed to the listed names while the declared tool array stays whole.
 public enum ToolChoice: Sendable, Equatable {
     case auto
     case required
@@ -152,41 +99,29 @@ public enum ToolChoice: Sendable, Equatable {
     case force(String)
 }
 
-/// One provider conversation owned by exactly one coaching attempt.
-///
-/// The attempt may contain more than one model turn when the model requests `capture_screen`.
-/// Provider-native state is allowed inside this boundary, but it is never reused by another
-/// coaching attempt. `finish()` is explicit so Stop and provider changes can release a leased local
-/// runtime immediately.
+/// Owned by one attempt; provider-native state is never reused by another. Call `finish()` to
+/// release any leased runtime.
 public protocol BrainConversation: Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef],
                  toolChoice: ToolChoice) async throws -> BrainResponse
     func finish() async
 }
 
-/// Abstraction over the brain model so CoachDriver is testable with a mock. Session memory remains
-/// client-managed (`CoachHistory`) and is sent in `messages`; `makeConversation()` only gives one
-/// coaching attempt a provider-native continuation boundary for its within-attempt tool loop.
 public protocol BrainClient: Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse
     func makeConversation() async throws -> any BrainConversation
-    /// Begin preparing provider resources for the currently reachable route target.
     func prepare()
 }
 
 public extension BrainClient {
-    /// Convenience overload so callers/tests need not pass every argument.
     func respond(messages: [ChatMessage], tools: [ToolDef]) async throws -> BrainResponse {
         try await respond(messages: messages, tools: tools, toolChoice: .auto)
     }
 
-    /// Stateless clients and existing test doubles need no provider session: the default lease
-    /// simply forwards every call to the client and has nothing to tear down.
     func makeConversation() async throws -> any BrainConversation {
         ForwardingBrainConversation(client: self)
     }
 
-    /// Stateless clients have no provider runtime to prepare.
     func prepare() {}
 }
 

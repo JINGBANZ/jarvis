@@ -1,10 +1,7 @@
 import Foundation
 
-/// A primary brain target followed by the user's ordered fallback targets.
-///
-/// Construction normalizes untrusted preference input: an unknown primary model becomes that
-/// provider's default, while unknown fallback models and exact duplicate targets are omitted.
-/// Provider repetition is otherwise valid because model ids are part of target identity.
+/// Normalizes untrusted preference input: an unknown primary model becomes the provider default,
+/// and unknown or duplicate fallback targets are dropped.
 public struct BrainRoute: Sendable, Equatable {
     public let primary: BrainTarget
     public let fallbackTargets: [BrainTarget]
@@ -27,9 +24,8 @@ public struct BrainRoute: Sendable, Equatable {
         [primary] + fallbackTargets
     }
 
-    /// The same targets with the one at `index` swapped with its neighbor `offset` away, where index 0
-    /// is the primary. Nil when either position is outside the route. Rebuilding through `init` keeps
-    /// the result normalized like any other route.
+    /// Index 0 is the primary; `nil` when either position is outside the route. Rebuilding through
+    /// `init` keeps the result normalized.
     public func movingTarget(at index: Int, by offset: Int) -> BrainRoute? {
         var reordered = targets
         let destination = index + offset

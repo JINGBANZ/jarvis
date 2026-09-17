@@ -1,15 +1,13 @@
 import AppKit
 import JarvisCore
 
-/// The hub's content: header, readiness meter, robot, four slots, and the bottom buttons. Wide
-/// windows get the prototype's stage with connectors; small ones get one scrolling column. Keyboard
-/// order comes from the window's automatic key view loop, so this view sets no `nextKeyView`.
+/// Sets no `nextKeyView`: the window recalculates its key view loop.
 @MainActor
 final class SettingsHomeView: NSView {
     static let wideMinimum = NSSize(width: 780, height: 560)
     private static let stageSize = NSSize(width: 740, height: 282)
     private static let slotSize = NSSize(width: 232, height: 76)
-    /// Slot origins and connector polylines in stage coordinates, from the prototype.
+    /// Stage coordinates from the prototype.
     private static let slotOrigins: [RobotPart: NSPoint] = [
         .brain: NSPoint(x: 0, y: 10), .ear: NSPoint(x: 0, y: 152),
         .eye: NSPoint(x: 508, y: 10), .mouth: NSPoint(x: 508, y: 152),
@@ -102,7 +100,6 @@ final class SettingsHomeView: NSView {
         if isWideLayout { layoutWide() } else { layoutCompact(width: bounds.width) }
     }
 
-    /// The document height the compact layout needs at `width`.
     func requiredHeight(forWidth width: CGFloat) -> CGFloat {
         compactFrames(width: width).bottom
     }

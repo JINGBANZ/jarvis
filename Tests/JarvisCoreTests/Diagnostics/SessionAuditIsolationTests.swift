@@ -5,14 +5,9 @@ import FoundationNetworking
 import Testing
 @testable import JarvisCore
 
-// A few cases deliberately park the synchronous disk edge. Keep their gates serial so the parallel
-// repository test run never consumes several cooperative-pool threads on test-only blockers. Cases
-// that install a `JarvisLog` attachment (via `CoachingParityHarness`) also hold
-// `JarvisLogAttachmentLock`, since `.serialized` only covers cases within this one suite and the
-// attachment is one process-global slot shared with other suites. The oversize variant is primed
-// through the handle directly rather than through `jlog`, so no other suite's lines can share it.
+// Serialized so the cases that park the disk edge never hold several pool threads at once.
 @Suite(.serialized) struct SessionAuditIsolationTests {
-    /// Holds the worker in its first open while mailbox admission remains available.
+    /// @unchecked: its only state is two thread-safe semaphores.
     private final class BlockingOpenWriter: SessionAuditWriting, @unchecked Sendable {
         let openEntered = DispatchSemaphore(value: 0)
         private let release = DispatchSemaphore(value: 0)
@@ -43,7 +38,7 @@ import Testing
         }
     }
 
-    /// Fails one append, then delegates every later record to the real writer.
+    /// @unchecked: the append count is guarded by `lock`.
     private final class FailFirstAppendWriter: SessionAuditWriting, @unchecked Sendable {
         enum Failure: Error { case injected }
 
@@ -81,7 +76,7 @@ import Testing
         func emitToConsole(_ message: String) {}
     }
 
-    /// Fails the initial open only. The next record can retry the idempotent file setup.
+    /// @unchecked: `didFail` is guarded by `lock`.
     private final class FailFirstOpenWriter: SessionAuditWriting, @unchecked Sendable {
         enum Failure: Error { case injected }
 
@@ -118,7 +113,7 @@ import Testing
         func emitToConsole(_ message: String) {}
     }
 
-    /// Parks one selected session's first terminal marker replacement.
+    /// @unchecked: `didBlock` is guarded by `lock`, and the semaphores are thread-safe.
     private final class BlockingTerminalHealthWriter: SessionAuditWriting, @unchecked Sendable {
         let terminalHealthEntered = DispatchSemaphore(value: 0)
         private let release = DispatchSemaphore(value: 0)
@@ -172,9 +167,7 @@ import Testing
         async throws {
         let absent = await CoachingParityHarness.run()
 
-        // The invariant is only as strong as the scenario behind it, so pin the baseline: both
-        // terminal outcomes, one provider request per attempt (3 primary + 1 tip + 3 final), the
-        // delivered tip, and all three route transition kinds in delivery order.
+        // 7 requests: 3 primary attempts, the tip, then 3 final-target attempts in trigger two.
         #expect(absent.outcomes == [.spoke, .brainError])
         #expect(absent.providerRequests.count == 7)
         #expect(absent.overlayEvents.map(\.lines) == [["same tip"]])
@@ -199,7 +192,6 @@ import Testing
             try? FileManager.default.removeItem(at: failingDirectory)
         }
 
-        // Enabled: a healthy audit records everything and closes complete.
         let enabled = FileSessionAudit(
             directory: enabledDirectory,
             worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()))
@@ -207,7 +199,6 @@ import Testing
             observers: .init(brainTraffic: enabled, coachingAttempts: enabled))
         #expect(await enabled.close() == .complete)
 
-        // Full: a one-event mailbox behind a parked open overflows, losing records.
         let fullWriter = BlockingOpenWriter()
         let full = FileSessionAudit(
             directory: fullDirectory,
@@ -221,8 +212,6 @@ import Testing
         #expect(await full.close() == .partial)
         #expect((try healthMarker(in: fullDirectory)["queue_overflow"] as? Int ?? 0) > 0)
 
-        // Blocked: the worker never leaves its first open during the whole run. Nothing is lost
-        // under production limits, so the evidence still closes complete after release.
         let blockedWriter = BlockingOpenWriter()
         let blocked = FileSessionAudit(
             directory: blockedDirectory,
@@ -233,8 +222,7 @@ import Testing
         blockedWriter.releaseOpen()
         #expect(await blocked.close() == .complete)
 
-        // Oversize: every brain-traffic record (a full request body) exceeds the retained-byte
-        // cap outright and is dropped.
+        // 256 bytes is smaller than any brain-traffic request body, so each one is dropped.
         let oversize = FileSessionAudit(
             directory: oversizeDirectory,
             worker: SessionAuditWorker(
@@ -246,7 +234,6 @@ import Testing
         #expect(await oversize.close() == .partial)
         #expect((try healthMarker(in: oversizeDirectory)["oversize_record"] as? Int ?? 0) > 0)
 
-        // Failing: the first file append fails; later records still persist.
         let failingWriter = FailFirstAppendWriter()
         let failing = FileSessionAudit(
             directory: failingDirectory,
@@ -264,10 +251,6 @@ import Testing
         #expect(failingSnapshot == absent)
     }
 
-    /// The same parity invariant for the diagnostics category Phase 1 moved onto the shared stack.
-    /// `jlog` is called from inside the live attempt path, so a blocked, full, oversize, or failing
-    /// debug log must leave provider calls, route transitions, terminal outcomes, and overlay
-    /// output byte-identical to a run with no diagnostics destination at all.
     @Test func coachingIsIdenticalAcrossBlockedFullOversizeAndFailingDiagnostics() async throws {
         let absent = await CoachingParityHarness.run()
 
@@ -282,7 +265,6 @@ import Testing
             try? FileManager.default.removeItem(at: failingDirectory)
         }
 
-        // Blocked: the worker never leaves its first open for the whole coaching run.
         let blockedWriter = BlockingOpenWriter()
         let blocked = FileSessionAudit(
             directory: blockedDirectory,
@@ -293,7 +275,6 @@ import Testing
         blockedWriter.releaseOpen()
         #expect(await blocked.close() == .complete)
 
-        // Full: a one-slot mailbox behind a parked open overflows on the first diagnostic burst.
         let fullWriter = BlockingOpenWriter()
         let full = FileSessionAudit(
             directory: fullDirectory,
@@ -307,9 +288,7 @@ import Testing
         #expect(await full.close() == .partial)
         #expect((try healthMarker(in: fullDirectory)["queue_overflow"] as? Int ?? 0) > 0)
 
-        // Oversize: one diagnostic larger than the whole retained-byte budget is refused outright,
-        // and coaching then runs against that already-degraded handle. Priming it explicitly rather
-        // than hoping a scenario line is long enough keeps the variant deterministic.
+        // Primed on the handle, not via `jlog`, so the loss is deterministic and unshared.
         let oversize = FileSessionAudit(
             directory: oversizeDirectory,
             worker: SessionAuditWorker(
@@ -323,7 +302,6 @@ import Testing
         #expect(await oversize.close() == .partial)
         #expect((try healthMarker(in: oversizeDirectory)["oversize_record"] as? Int ?? 0) > 0)
 
-        // Failing: the first debug-log append fails; later diagnostics still persist.
         let failingWriter = FailFirstAppendWriter()
         let failing = FileSessionAudit(
             directory: failingDirectory,
@@ -340,9 +318,6 @@ import Testing
         #expect(failingSnapshot == absent)
     }
 
-    /// The same parity invariant for the human-facing category. Activity is the one producers were
-    /// most tempted to treat as privileged, so proving a blocked, full, or failing Activity
-    /// destination changes nothing about coaching matters more here than anywhere else.
     @Test func coachingIsIdenticalAcrossAbsentBlockedFullAndFailingActivity() async throws {
         let absent = await CoachingParityHarness.run()
 
@@ -357,7 +332,6 @@ import Testing
             try? FileManager.default.removeItem(at: failingDirectory)
         }
 
-        // Enabled: a healthy handle projects every occurrence and closes complete.
         let projection = ActivityLog()
         defer { projection.disable() }
         let enabled = FileSessionAudit(
@@ -368,14 +342,12 @@ import Testing
         let enabledSnapshot = await CoachingParityHarness.run(
             observers: .init(activity: enabled))
         #expect(await enabled.close() == .complete)
-        // Pin that the variant was not vacuous: the delivered tip really did reach the window.
         _ = projection.attach { _ in }
         let rows = try String(
             contentsOf: enabledDirectory.appendingPathComponent(ActivityLog.filename),
             encoding: .utf8)
         #expect(rows.contains("💬 same tip"))
 
-        // Blocked: the worker never leaves its first open for the whole coaching run.
         let blockedProjection = ActivityLog()
         defer { blockedProjection.disable() }
         let blockedWriter = BlockingOpenWriter()
@@ -390,7 +362,6 @@ import Testing
         blockedWriter.releaseOpen()
         #expect(await blocked.close() == .complete)
 
-        // Full: a one-slot mailbox behind a parked open drops Activity rows outright.
         let fullProjection = ActivityLog()
         defer { fullProjection.disable() }
         let fullWriter = BlockingOpenWriter()
@@ -408,7 +379,6 @@ import Testing
         #expect(await full.close() == .partial)
         #expect((try healthMarker(in: fullDirectory)["queue_overflow"] as? Int ?? 0) > 0)
 
-        // Failing: the first Activity write fails; later rows still reach history.
         let failingProjection = ActivityLog()
         defer { failingProjection.disable() }
         let failingWriter = FailFirstAppendWriter()
@@ -643,8 +613,8 @@ import Testing
             contentsOf: directory.appendingPathComponent(
                 FileSessionAudit.brainTrafficFilename),
             encoding: .utf8)
-        // Local JSONL parse: the loss-aware `JSONLRecords` reader lives with the sealed-session
-        // consumers in JarvisEvaluation, and this test only needs the valid records' tags.
+        // Parsed here since `JSONLRecords` lives in JarvisEvaluation, which this target can't
+        // import.
         return text.split(separator: "\n")
             .compactMap {
                 (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]

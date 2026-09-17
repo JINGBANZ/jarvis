@@ -3,9 +3,6 @@ import AppKit
 import Foundation
 import JarvisCore
 
-/// The hidden process `scripts/run-live-tests.sh` launches once per scenario, a sibling of the
-/// transcription benchmark's delegate. It builds no menu bar, hotkeys, permission gate, Settings, or
-/// Activity window; the runner writes its own completion marker or error file.
 @MainActor
 final class LiveE2EAppDelegate: NSObject, NSApplicationDelegate {
     private let runner: LiveE2ERunner
@@ -26,8 +23,7 @@ final class LiveE2EAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         runTask?.cancel()
         runner.terminateProxyHelper()
-        // A crash-free abort still leaves no synthesized speech behind. Nothing reads the run after
-        // this, and a finished marker was never written for it, so the log is the only place left.
+        // Remove speech even on abort. No marker follows terminate, so the log is the only report.
         do {
             try runner.removeGeneratedAudio()
         } catch {

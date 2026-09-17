@@ -1,8 +1,5 @@
 import Foundation
 
-/// Provider-neutral owner for finalized transcript delivery and the coaching triggers derived from it.
-/// Provider adapters report only final text and whether their own work is unsettled; this coordinator
-/// keeps transcript batching, speech gating, and silence backoff identical across providers.
 /// `@unchecked Sendable`: `lock` guards every mutable field; collaborators and callbacks are Sendable.
 public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private let speaker: Speaker
@@ -14,8 +11,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private let onTurnEnd: @Sendable (_ transcriptBoundary: Int) -> Void
     private let onSilence: @Sendable (TimeInterval) -> Void
     private let onTranscriptionWorkChanged: @Sendable (Bool) -> Void
-    /// Injected for the same reason as `CoachDriver`'s: heard speech must land in this session's
-    /// log rather than whichever one is globally enabled.
+    /// Injected so heard speech lands in this session's log, not whichever one is globally enabled.
     private let activity: (any ActivityEventRecording)?
 
     private let lock = NSLock()
@@ -94,8 +90,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         if reportSettled { onTranscriptionWorkChanged(false) }
     }
 
-    /// Normalize and publish one provider-final result. Provider-specific recovery detail remains in
-    /// `source`, which is written only to the debug log; Activity receives its closed typed event.
+    /// `source` goes only to the debug log, never to Activity.
     @discardableResult
     public func recordFinalizedTranscript(
         _ rawText: String,
@@ -114,8 +109,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         pending.append(text)
         pendingTranscriptBoundary = max(pendingTranscriptBoundary ?? 0, transcriptBoundary)
         let generation = generation
-        // Activity and model context share the same speech-time chronology. Transcript completion
-        // time remains visible in debug, but it must not decide conversation order.
+        // Stamped with speech time, not completion time, so Activity matches the model's order.
         activity?.record(
             .heard(speaker: speaker, text: text),
             at: Date(timeIntervalSince1970: sessionStart + at))
@@ -127,8 +121,6 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         return true
     }
 
-    /// Realtime supplies its complete item/recovery state. Apple supplies its best available
-    /// content-free local PCM proxy. A deferred turn resumes when the provider reports no work.
     public func updateTranscriptionWork(_ hasPendingWork: Bool) {
         lock.lock()
         guard !stopped, hasPendingTranscriptionWork != hasPendingWork else {

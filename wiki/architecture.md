@@ -67,10 +67,15 @@ moments the model judges worthwhile.
    transcript-batching window, which groups rapid final fragments but does not establish
    cross-speaker chronology),
    or a **silence check** fires (you've gone quiet, maybe stuck). The silence check carries *how
-   long* you've been quiet and backs off across a long silence (the interval
-   doubles each step up to a cap — see `Config`), resetting on speech; past an idle cutoff it stops
-   probing entirely (you've stepped away — a nudge into an empty room still bills a request) until
-   speech re-arms it.
+   long* you've been quiet and backs off across a long silence (each interval is four times the
+   last, up to a cap — see `Config` and `SilenceBackoff`), resetting on speech; past an idle cutoff
+   it stops probing entirely (you've stepped away — a nudge into an empty room still bills a
+   request) until speech re-arms it. The first check comes after well under a minute of quiet, not
+   two minutes: a stuck candidate is rarely silent that long, because a muttered "okay", a request
+   for a moment, or a half sentence each restart the wait, and a two-minute wait lets a whole stuck
+   stretch pass unchecked. The fourfold growth, rather than doubling, keeps the second check a few
+   minutes after the first, so quiet thinking that the first check saw is not checked again soon,
+   and a long quiet stretch costs a few requests. Speech from either side defers a check.
 2. Before an automatic attempt, `TranscriptionSettlementGate` waits until both provider streams say
    that no active speech, finalization, or recovery can still produce an earlier transcript line.
    OpenAI reconnect-buffered audio remains unsettled even before replay creates a server item; Apple
@@ -851,8 +856,8 @@ is about 60 MB on disk and 20 MB per update.
 - **One helper per app launch** ([`LocalProxySupervisor`](../Sources/JarvisBrainProviders/Proxy/LocalProxySupervisor.swift)).
   It starts when the saved route names a subscription at launch, when Connections appears, when the
   Settings hub or Brain page needs sign-in state and a sign-in is saved, and at a Start or route edit
-  that routes to a subscription. It stays up between sessions, because it is idle then and a sign-in made in Settings
-  must reach it, and stops at Quit. Each launch writes an owner-only configuration named by Jarvis's
+  that routes to a subscription. It stays up between sessions, because it is idle then and a sign-in
+  made in Settings must reach it, and stops at Quit. Each launch writes an owner-only configuration named by Jarvis's
   process id, holding a free loopback port and a key that exists only for that launch; a development
   build and a release running side by side therefore never rewrite each other's file, which the helper
   would hot-reload. The helper starts with `-local-model`, so it never fetches a model catalog, and

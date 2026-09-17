@@ -1,10 +1,9 @@
-# Copy to .github/workflows/sync-shared-rules.yml in your repo. One-time repo setting:
-# Settings → Actions → General → enable "Allow GitHub Actions to create and approve pull requests".
+# Requires Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests".
 name: Sync shared rules
 
 on:
   schedule:
-    - cron: "0 6 * * 1" # weekly, Monday 06:00 UTC; run manually via workflow_dispatch when needed
+    - cron: "0 6 * * 1"
   workflow_dispatch: {}
 
 permissions: {}

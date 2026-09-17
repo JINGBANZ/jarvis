@@ -1,8 +1,8 @@
 import Foundation
 
 public enum Speaker: String, Sendable, Hashable {
-    case me        // the user thinking aloud (mic)
-    case them      // the other side of a call (system audio)
+    case me        // mic
+    case them      // system audio
 }
 
 public struct TranscriptLine: Sendable {
@@ -17,15 +17,14 @@ public struct TranscriptLine: Sendable {
     }
 }
 
-/// Holds the session transcript and renders a recent, timestamped window for the model.
+/// `@unchecked Sendable`: `lock` guards `chronology`.
 public final class RollingTranscript: @unchecked Sendable {
     private var chronology = ConversationChronology<TranscriptLine>()
     private let lock = NSLock()
 
     public init() {}
 
-    /// Append one line and return its exclusive insertion boundary. A turn trigger carries this
-    /// identity so the coach can suppress a deferred wake after that same line is already committed.
+    /// Returns the line's exclusive insertion boundary, which identifies it to a turn trigger.
     @discardableResult
     public func append(_ line: TranscriptLine) -> Int {
         lock.lock(); defer { lock.unlock() }
@@ -33,7 +32,6 @@ public final class RollingTranscript: @unchecked Sendable {
         return chronology.count
     }
 
-    /// Number of lines recorded — used as the index boundary for server-side delta sending.
     public var count: Int {
         lock.lock(); defer { lock.unlock() }
         return chronology.count
@@ -44,20 +42,15 @@ public final class RollingTranscript: @unchecked Sendable {
         return chronology.latestOccurredAt
     }
 
-    /// Seconds since the last spoken line. Callers pass session-relative time, so with **no speech yet
-    /// this session** the user has been silent the *whole* session — return the elapsed `now`, not 0.
-    /// Returning 0 would peg the "are you stuck?" silence check below its interval forever, so it would
-    /// never fire before the first utterance (a user who opens Jarvis and works silently got no nudges).
+    /// `now` is session-relative. With no speech yet this returns `now`, not 0, so the silence
+    /// check can fire before the first utterance.
     public func silenceDuration(now: TimeInterval) -> TimeInterval {
         guard let last = lastSpeechTime else { return max(0, now) }
         return max(0, now - last)
     }
 
-    /// The delta since `index`: the rendered text, the line count rendered up to, AND the raw lines —
-    /// returned together from a SINGLE locked snapshot so the caller's "advance to" index exactly
-    /// matches the lines actually rendered (no duplicate-on-concurrent-append race). The index is
-    /// clamped to a valid range (defensive against a stale caller index). The raw `lines` are what the
-    /// coach loop's substance gate inspects (see `TurnSubstance`) before spending a brain request.
+    /// All three values come from one locked snapshot, so `upTo` matches the rendered lines even
+    /// under a concurrent append. `index` is clamped.
     public func renderFrom(index: Int) -> (text: String, upTo: Int, lines: [TranscriptLine]) {
         lock.lock(); let snapshot = chronology.snapshot(fromInsertionIndex: index); lock.unlock()
         let insertionOrderedLines = snapshot.insertionOrderedItems.map(\.element)
@@ -68,10 +61,8 @@ public final class RollingTranscript: @unchecked Sendable {
             insertionOrderedLines)
     }
 
-    /// Render lines as `[mm:ss] speaker: text`, one per line, in SPOKEN order. The two transcription
-    /// sockets (mic/"me", system audio/"them") append independently and a slow utterance can complete
-    /// — and so be appended — after a later one, so insertion order isn't time order. We sort by `.at`
-    /// (stable on ties via the original index) so the coach always sees the order things were said.
+    /// Sorts by `.at` (stable on ties): the two speakers append independently, so insertion order
+    /// isn't spoken order.
     static func render<S: Sequence>(_ lines: S) -> String where S.Element == TranscriptLine {
         renderChronological(ConversationChronology<TranscriptLine>.ordered(lines, occurredAt: \.at))
     }

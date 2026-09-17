@@ -9,10 +9,8 @@ struct TranscriptionBenchmarkAbortMonitorTests {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
         let marker = directory.appendingPathComponent("abort")
-        // The operation ignores the cancellation the monitor sends it and stays outstanding until
-        // this test releases it, which is what makes the claim decidable by ordering alone. Racing
-        // a timed operation instead left the assertion measuring how promptly a loaded machine
-        // happened to schedule the abort rather than whether the abort waited for anything.
+        // The operation ignores cancellation until released, so the check rests on ordering, not
+        // on how promptly a loaded machine schedules the abort.
         let setup = ManualSetupOperation()
         defer { setup.release() }
         let monitored = Task {
@@ -51,9 +49,7 @@ struct TranscriptionBenchmarkAbortMonitorTests {
     }
 }
 
-/// Setup work that begins when the monitor runs it and finishes only when the test releases it,
-/// standing in for a non-cooperative operation such as a model download that ignores cancellation.
-/// `@unchecked Sendable` is safe because `lock` guards every stored property.
+/// @unchecked: lock guards every stored property.
 private final class ManualSetupOperation: @unchecked Sendable {
     private let lock = NSLock()
     private var startWaiter: CheckedContinuation<Void, Never>?

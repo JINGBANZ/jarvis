@@ -1,6 +1,5 @@
 import AppKit
 
-/// The backdrop behind every Settings page: a soft radial glow, redrawn per appearance.
 @MainActor
 final class SettingsBackgroundView: NSView {
     private let gradient = CAGradientLayer()

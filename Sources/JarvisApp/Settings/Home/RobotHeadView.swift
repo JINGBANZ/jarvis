@@ -2,12 +2,7 @@ import AppKit
 import JarvisCore
 import QuartzCore
 
-/// Jarvis's head, drawn in code from one design space so the hub and every page badge share it.
-///
-/// The view draws in the prototype's coordinates (flipped, top-left origin) and scales
-/// `designCrop` to fit. It animates only while its owner wants it to, its window is key and visible,
-/// and Reduce Motion is off; otherwise it holds the last frame it drew. It is not an accessibility
-/// element: the hub's slots are the accessible way to the same pages.
+/// Not an accessibility element: the hub's slots are the accessible path to the same pages.
 @MainActor
 final class RobotHeadView: NSView {
     enum Style: Equatable {
@@ -28,9 +23,8 @@ final class RobotHeadView: NSView {
     var onClick: ((RobotPart, NSPoint) -> Void)?
 
     private let style: Style
-    /// Animation clocks, advanced only while the link runs, so stopping holds the pose and resuming
-    /// continues from it. The mouth keeps its own clock because live speech runs it faster, and
-    /// scaling one shared clock would jump the bars whenever `isLive` changes.
+    /// Advanced only while the link runs, so stopping holds the pose. The mouth keeps its own clock
+    /// so a change to `isLive` doesn't make the bars jump.
     private var animationTime: Double = 0
     private var mouthTime: Double = 0
     private var lastTick: CFTimeInterval?

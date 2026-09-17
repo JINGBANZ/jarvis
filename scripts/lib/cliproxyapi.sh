@@ -1,15 +1,11 @@
-# CLIProxyAPI, the helper that serves the Codex and Claude Code targets. Sourced by
-# scripts/build-app.sh and scripts/package-app.sh, so the development and the release app bundle
-# the same pinned, checksum-verified release.
-#
-# Bumping the helper is this pin plus a Jarvis release: take the version and the darwin_aarch64
-# checksum from checksums.txt at https://github.com/router-for-me/CLIProxyAPI/releases.
+# The pinned CLIProxyAPI subscription helper, shared by build-app.sh and package-app.sh.
+# To bump, take the version and darwin_aarch64 checksum from checksums.txt at
+# https://github.com/router-for-me/CLIProxyAPI/releases.
 CLIPROXYAPI_VERSION="7.3.3"
 CLIPROXYAPI_SHA256_ARM64="f142744581a97888425c2e2d728dc3dc1478a02eac314913ec067ae144f7ae78"
 
-# Copy the pinned helper into an assembled app: the binary beside the app's executable, where
-# Bundle.url(forAuxiliaryExecutable:) finds it, and its MIT license, which must travel with it. The
-# archive is cached under .build and verified on every use, so a corrupted cache fails the build.
+# The binary goes in Contents/MacOS for Bundle.url(forAuxiliaryExecutable:), and its MIT license
+# must ship with it. The cached archive is re-verified on every use.
 bundle_cliproxyapi() {
   local app="$1"
   local cache=".build/cliproxyapi/$CLIPROXYAPI_VERSION"

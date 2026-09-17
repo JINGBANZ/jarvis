@@ -1,9 +1,5 @@
 import AppKit
 
-/// One standard label/help/control row used inside Settings cards.
-///
-/// Owners still create the real AppKit control and keep its target/action behavior; this view owns
-/// only the shared row rhythm and responsive trailing alignment.
 @MainActor
 final class SettingsRowView: NSView {
     let controlView: NSView
@@ -50,8 +46,7 @@ final class SettingsRowView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// `color` defaults to the theme's muted text, so a detail recolored for a warning resets on the
-    /// next plain update.
+    /// A `nil` color resets a detail recolored for a warning.
     func setDetail(_ detail: String?, color: NSColor? = nil) {
         detailLabel.stringValue = detail ?? ""
         detailLabel.textColor = color ?? SettingsTheme.mutedText

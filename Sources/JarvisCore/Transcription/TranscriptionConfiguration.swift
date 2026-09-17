@@ -1,9 +1,7 @@
 import Foundation
 
-/// Immutable transcription choices captured at Start and shared by both speaker endpoints.
-///
-/// Keeping one value for the provider-specific settings prevents a Settings edit or reconnect from
-/// splitting the mic and system-audio streams across different models, hints, or Apple locales.
+/// Captured once at Start, so a Settings edit or reconnect can't split the two speaker streams
+/// across different models, hints, or locales.
 public struct TranscriptionConfiguration: Equatable, Sendable {
     public let provider: TranscriptionProvider
     public let openAIModel: OpenAITranscriptionModel
@@ -38,7 +36,7 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
         self.geminiMode = geminiMode
     }
 
-    /// Apple owns result segmentation internally; OpenAI exposes an explicit turn strategy.
+    /// Nil for providers that segment turns themselves.
     public var turnDetectionStrategy: TranscriptionTurnDetectionStrategy? {
         provider == .openAI ? openAIModel.turnDetectionStrategy : nil
     }

@@ -2,11 +2,6 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// The session's coach tool set is fixed for the session's whole life.
-///
-/// This is not a preference: the system prompt describing each tool and the schemas every request
-/// declares come from one set resolved at Start, and a set that grew or changed shape mid-session
-/// would let them disagree. See #273.
 @Suite(.serialized) struct SessionToolSetTests {
     private func makeDriver(
         brain: BrainClient,
@@ -32,9 +27,6 @@ import Testing
               rawToolCalls: [RawToolCall(id: "s1", name: "stay_silent", argumentsJSON: "{}")])
     }
 
-    /// How the app actually composes a session: prep sources are configured at Start, but the index
-    /// is still building, so the port lands only after the first attempts have already run. The tool
-    /// set must not change when it does.
     @Test func prepMaterialLandingMidSessionDoesNotChangeTheToolSet() async {
         let brain = ScriptedBrain(script: [staySilent, staySilent])
         let (driver, transcript) = makeDriver(
@@ -57,8 +49,6 @@ import Testing
             == brain.offeredTools[1].map(\.parametersJSON))
     }
 
-    /// The inverse of the case above: a session composed without prep material keeps the tool absent
-    /// even after a port is installed, because its instructions never described that schema.
     @Test func aSessionComposedWithoutPrepMaterialNeverGainsTheTool() async {
         let brain = ScriptedBrain(script: [staySilent, staySilent])
         let (driver, transcript) = makeDriver(brain: brain, prepMaterial: nil)

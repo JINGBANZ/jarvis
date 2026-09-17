@@ -3,7 +3,6 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct FileSessionAuditTrafficTests {
-    /// Read the traffic file back as parsed JSON lines.
     private func lines(in dir: URL) throws -> [[String: Any]] {
         let text = try String(contentsOf: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
                               encoding: .utf8)
@@ -35,7 +34,7 @@ import Foundation
         let req = try #require(entry["request"] as? [String: Any])
         let input = try #require(req["input"] as? [[String: Any]])
         let textPart = try #require((input[0]["content"] as? [[String: Any]])?.first)
-        #expect(textPart["text"] as? String == "hi")   // non-image content untouched
+        #expect(textPart["text"] as? String == "hi")
         let imagePart = try #require((input[1]["content"] as? [[String: Any]])?.first)
         let url = try #require(imagePart["image_url"] as? String)
         #expect(url.hasPrefix("[base64 image omitted"))

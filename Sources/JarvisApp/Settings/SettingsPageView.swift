@@ -1,9 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// The shell of every Settings page except the hub: a back button, the part's mini robot for the four
-/// head pages, an uppercase title, one short explanation, an optional chip, an optional notice, and
-/// the page body, with identical outer spacing on every page.
 @MainActor
 final class SettingsPageView: NSView {
     struct Chip: Equatable {
@@ -14,7 +11,7 @@ final class SettingsPageView: NSView {
         static func live(_ text: String) -> Chip { Chip(text: text, tone: .live) }
     }
 
-    /// Set by the Settings window when it builds the page. Nil hides the back button.
+    /// `nil` hides the back button.
     var onBack: (() -> Void)? {
         didSet {
             backButton.isHidden = onBack == nil
@@ -83,8 +80,7 @@ final class SettingsPageView: NSView {
         needsLayout = true
     }
 
-    /// Shows or clears the amber note above the page body. The same note is kept rather than
-    /// rebuilt, so its button keeps focus and VoiceOver doesn't read it again.
+    /// An unchanged note is kept, so its button keeps focus and VoiceOver doesn't read it again.
     func setNotice(text: String?, actionTitle: String? = nil, action: (() -> Void)? = nil) {
         let content = text.map { (text: $0, actionTitle: actionTitle) }
         guard content?.text != noticeContent?.text || content?.actionTitle != noticeContent?.actionTitle

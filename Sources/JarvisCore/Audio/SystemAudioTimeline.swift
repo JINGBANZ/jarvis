@@ -1,8 +1,7 @@
 import Foundation
 
-/// Preserves every captured far-end sample while keeping the transcription stream's audio clock
-/// moving through tap silence. Core Audio may return a short or empty system tap for a mic callback;
-/// padding that missing tail lets server VAD observe trailing silence and finalize the interviewer.
+/// Core Audio can return a short or empty system tap for a mic callback. Padding, never truncating,
+/// keeps the audio clock moving so server VAD sees trailing silence and finalizes the interviewer.
 public enum SystemAudioTimeline {
     public static func preservingSamples(_ samples: [Int16],
                                          minimumFrameCount: Int) -> [Int16] {

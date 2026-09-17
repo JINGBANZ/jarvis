@@ -1,9 +1,7 @@
 import AppKit
 
-/// Holds the Settings hub and pages. During a page change the outgoing view stays on screen while it
-/// animates away, sometimes above the incoming one, but only the current view takes clicks: AppKit
-/// hit-tests by frame and ignores a layer's opacity and transform, so a page fading out would
-/// otherwise swallow clicks meant for the hub.
+/// Only the current view takes clicks: AppKit hit-tests by frame and ignores layer opacity and
+/// transform, so a page fading out would swallow clicks meant for the hub.
 @MainActor
 final class SettingsPageContainer: NSView {
     weak var currentView: NSView?

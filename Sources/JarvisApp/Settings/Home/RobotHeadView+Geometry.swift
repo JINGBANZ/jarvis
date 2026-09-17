@@ -1,7 +1,7 @@
 import AppKit
 import JarvisCore
 
-/// The robot's shapes in its design space, copied from the approved prototype.
+/// The approved prototype's design space: top-left origin, y down.
 extension RobotHeadView {
     static let designCrop = CGRect(x: 296, y: 110, width: 234, height: 282)
     static let neckRect = NSRect(x: 385, y: 370, width: 50, height: 16)
@@ -61,7 +61,7 @@ extension RobotHeadView {
         return path
     }
 
-    /// Where a click or hover counts as that part. The ears get a few points of slack; they are thin.
+    /// The ears get a few points of slack because they are thin.
     static func hitPath(for part: RobotPart) -> NSBezierPath {
         switch part {
         case .brain:

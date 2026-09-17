@@ -1,14 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Settings panel for the global manual-hint hotkey: one "click to record" control, plus an inline
-/// callout when a user-chosen combination can't be registered (e.g. another app already owns it) —
-/// see #229. A rejected rebind always leaves the previous, still-working combination live, so that
-/// stays displayed and the failure is only flashed as immediate feedback on the attempt itself
-/// (`recorded(_:)`); it does not persist across a page revisit, since the previous shortcut is still
-/// fine. The one case that *is* persistent — the shipped default itself colliding with another app at
-/// launch, so nothing is registered at all — keeps showing the callout on every revisit instead of
-/// going quiet on a stale success.
 @MainActor
 final class HotkeyBindingView: NSObject {
 
@@ -17,22 +9,15 @@ final class HotkeyBindingView: NSObject {
     private var shortcutRow: SettingsRowView?
     private var cardHeightConstraint: NSLayoutConstraint?
 
-    /// Show code and Explain more both answer into the detail box, so the Overlay Box switch is the
-    /// one thing that decides whether they can be bound at all. The hint shortcut is unconditional.
+    /// Non-hint shortcuts answer into the detail box, so they need the Overlay Box switched on.
     private var isEnabled: Bool { preferences.shortcut == .hint || boxEnabled() }
     private static let shortcutDetail = "Use ⌘ or ⌥ in the combination."
     private var cardHeight: CGFloat {
         SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
     }
-    /// Whether the controller currently has *any* combination registered. This is the only thing
-    /// that must persist across Settings visits: a rejected rebind always leaves the previous,
-    /// still-working combination live (see `HotkeyController.apply`), so the sole way this is false
-    /// is the shipped default itself colliding with another app at launch — nothing was ever
-    /// registered this run. Both branches of `renderOutcome` read this: it decides whether a
-    /// revisit shows the persistent-failure callout, and it picks that callout's wording.
+    /// False only when nothing was registered this run, because a rejected rebind keeps the
+    /// previous combination live.
     private let hasActiveHotkey: () -> Bool
-    /// Attempts to register a candidate combination and reports whether it took. Persisting the
-    /// choice is this section's job, only after a `.registered` outcome — see `recorded(_:)`.
     private let applyCombination: (HotkeyCombination) -> HotkeyRegistrationOutcome
 
     private var recorder: HotkeyRecorderButton?
@@ -128,18 +113,15 @@ final class HotkeyBindingView: NSObject {
             preferences.combination = combination
             recorder?.setCombination(combination)
         case .failed:
-            // The controller left the previous, still-working combination registered — reflect that,
-            // not the rejected candidate, and never persist a combination that isn't actually live.
+            // The previous combination is still registered, so show it and never persist the
+            // rejected one.
             recorder?.setCombination(preferences.combination)
         }
         renderOutcome(outcome)
     }
 
-    /// `outcome` is the immediate result of one `recorded(_:)` attempt — pass it right after a
-    /// rebind to flash honest feedback about *that* attempt. Passing nothing (`makeView()` opening
-    /// the page, `didBecomeActive()` revisiting it) must not replay that transient result: a rejected
-    /// rebind whose previous combination is still active is not an ongoing problem, so on a revisit
-    /// the callout shows only for the one state that *is* persistent — nothing registered at all.
+    /// Pass a fresh rebind's `outcome` to flash feedback for that attempt. With `nil` (open or
+    /// revisit), the callout shows only when nothing is registered at all.
     private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
         defer { onHeightChanged?() }
         recorder?.isEnabled = isEnabled
@@ -166,7 +148,6 @@ final class HotkeyBindingView: NSObject {
         callout?.isHidden = false
     }
 
-    /// What the shortcut does, in the card header.
     private static func summary(of shortcut: CoachingShortcut) -> String {
         switch shortcut {
         case .hint: "I look at your screen and the conversation, then answer now."

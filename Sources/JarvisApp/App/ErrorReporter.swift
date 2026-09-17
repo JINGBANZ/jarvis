@@ -1,19 +1,8 @@
 import AppKit
 import JarvisCore
 
-/// The single funnel for user-facing failures. Severity decides the lifecycle consequence; the
-/// call-site context decides whether a startup alert is permitted. Runtime failures never activate
-/// the app or present UI, even when they stop the session. The only place an *error* `NSAlert` is
-/// raised (confirmation prompts, e.g. ActivityViewer's clear-history, are a separate concern and
-/// don't route here).
-///
-/// Diagnostics stay in the agent-facing `JarvisLog`/`jlog` debug log; this type owns *user-facing
-/// surfacing + session-lifecycle consequence*. `report(_:)` is `nonisolated` so any
-/// thread (the capture IOProc, a URLSession delegate) can call it directly; it hops to the main actor.
 @MainActor
 final class ErrorReporter {
-    /// Invoked for an error whose severity stops the session (on the main actor), correcting the
-    /// menu without requiring a modal alert. Wired by `AppDelegate` once the menu bar exists.
     var onFatal: ((SessionEndReason) -> Void)?
 
     nonisolated func report(_ error: UserFacingError,
@@ -21,9 +10,8 @@ final class ErrorReporter {
         Task { @MainActor in self.reportImmediately(error, context: context) }
     }
 
-    /// Deliver synchronously when the caller is already on the main actor. This keeps a guarded
-    /// runtime failure atomic with its lifecycle consequence instead of introducing another queued
-    /// task in which a newer provider configuration could be stopped.
+    /// Synchronous, so the session stop can't run in a later task after a newer provider
+    /// configuration has started.
     func reportImmediately(_ error: UserFacingError,
                            context: UserFacingError.PresentationContext) {
         present(error, context: context)
@@ -31,7 +19,7 @@ final class ErrorReporter {
 
     private func present(_ error: UserFacingError,
                          context: UserFacingError.PresentationContext) {
-        jlog("Jarvis: \(error.severity) — \(error.title): \(error.message)")  // diagnostics still go to JarvisLog
+        jlog("Jarvis: \(error.severity) — \(error.title): \(error.message)")
         if error.severity.stopsSession {
             onFatal?(error.sessionEndReason ?? .unexpectedError(detail: error.message))
         }

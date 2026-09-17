@@ -1,7 +1,5 @@
 import Foundation
 
-/// The delivered parts of one coaching response, retained separately for live Activity, history,
-/// and export. The plain message remains readable by older builds and evidence consumers.
 public struct ActivityResponse: Codable, Equatable, Sendable {
     /// Only a row written before the detail box existed carries one of these.
     public struct Code: Codable, Equatable, Sendable {
@@ -11,11 +9,10 @@ public struct ActivityResponse: Codable, Equatable, Sendable {
     }
 
     public let lines: [String]
-    /// The detail box's Markdown, exactly as it was delivered.
+    /// Markdown, exactly as delivered.
     public let detail: String?
-    // Read back from rows written before this change, so a past session still opens with the
-    // sections it was recorded with. Declared without an initial value on purpose: a `let` with a
-    // default is excluded from the synthesized `Decodable`, and every old row would decode as nil.
+    // Decoded from older rows. No initial value on purpose: synthesized `Decodable` skips a `let`
+    // with a default, so every old row would decode as nil.
     public let explanation: String?
     public let code: Code?
 

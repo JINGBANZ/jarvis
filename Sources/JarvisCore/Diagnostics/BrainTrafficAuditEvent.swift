@@ -1,10 +1,7 @@
 import Foundation
 
-/// One provider-boundary observation retained by the session audit worker.
-///
-/// The event deliberately keeps request and response bodies as bytes. JSON parsing, image redaction,
-/// serialization, and file access all happen after bounded mailbox admission, never on the provider
-/// response path.
+/// Bodies stay raw bytes on purpose: parsing, image redaction, and file access happen on the
+/// worker, never on the provider response path.
 public struct BrainTrafficAuditEvent: Sendable {
     public enum Kind: String, Sendable {
         case providerCall = "provider_call"
@@ -12,8 +9,7 @@ public struct BrainTrafficAuditEvent: Sendable {
     }
 
     public let tag: String
-    /// The route target that made the request, so a reader of the record never infers it from the
-    /// body: OpenAI and Codex send the same request shape.
+    /// OpenAI and Codex send the same request shape, so the body can't tell them apart.
     public var provider: BrainProvider? = nil
     public let request: Data
     public let response: Data?

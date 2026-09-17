@@ -1,7 +1,6 @@
 import Foundation
 
-/// The Settings hub's one decision point: the app gathers `RobotHubInputs`, and everything the hub
-/// shows is computed here, so the views only draw.
+// Design: wiki/settings-window.md#hub
 public enum RobotHub {
     public static func state(for inputs: RobotHubInputs) -> RobotHubState {
         var slots: [RobotPart: RobotSlotState] = [:]

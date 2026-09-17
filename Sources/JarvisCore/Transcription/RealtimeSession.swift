@@ -1,36 +1,14 @@
 import Foundation
 
-/// Pure builders for the OpenAI GA Realtime **transcription** session — extracted from the
-/// WebSocket client so the wire contract is unit-testable (the live socket is not). Verified
-/// against the realtime-transcription guide (2026-08).
 public enum RealtimeSession {
-    /// A transcription-only session is selected at connect time via `?intent=transcription`
-    /// (`?model=` is the speech-to-speech form). No `OpenAI-Beta` header in GA.
+    /// `?intent=transcription` selects a transcription-only session (`?model=` is
+    /// speech-to-speech). GA needs no `OpenAI-Beta` header.
     public static func connectURL() -> URL {
         URL(string: "wss://api.openai.com/v1/realtime?intent=transcription")!
     }
 
-    /// The `session.update` payload: `session.type:"transcription"` with config nested under
-    /// `session.audio.input` (format / transcription model / model-compatible turn detection).
-    ///
-    /// GPT-4o accepts the legacy singular `language` hint. GPT Transcribe and GPT Live accept the
-    /// plural `languages` list and a free-form recording context; GPT Live also receives the low
-    /// streaming-delay setting. GPT-4o sessions with zero or multiple expected languages omit
-    /// `language` and use automatic recognition.
-    ///
-    /// GPT-4o uses `server_vad`; `silenceDurationMs` tunes how long a pause must last before the
-    /// server ends the turn. GPT Transcribe and GPT Live require committed-turn transcription, so
-    /// their payloads clear `turn_detection` and the client commits boundaries found by local
-    /// WebRTC VAD. See wiki/architecture.md (Models and APIs).
-    ///
-    /// `noiseReduction` ("near_field" for a headset/close mic, "far_field" for a laptop/room mic, or
-    /// nil to disable) filters the input buffer *before* it reaches VAD and the model — OpenAI's
-    /// first-line defense against non-speech blips firing the VAD and producing phantom transcripts.
-    /// Sent as an object `{"type": …}`; a bare string is rejected by the server.
-    ///
-    /// `keywords` are literal vocabulary terms (jargon, names) that bias recognition. Only GPT
-    /// Transcribe and GPT Live accept them, matching their `prompt` support; GPT-4o Transcribe has
-    /// neither, so keywords are silently inert there rather than rejected by the server.
+    /// `noiseReduction` is "near_field", "far_field", or nil to disable. The server rejects it as a
+    /// bare string, so it is sent as `{"type": …}`. `keywords` are dropped for GPT-4o Transcribe.
     public static func sessionUpdate(
         model: OpenAITranscriptionModel,
         speaker: Speaker = .me,
@@ -73,9 +51,7 @@ public enum RealtimeSession {
         var input: [String: Any] = [
             "format": [
                 "type": "audio/pcm",
-                // OpenAI's rate is fixed, not a caller-selectable option — no production caller ever
-                // passed a different rate, so the spec's "explicit sample rate" requirement is met by
-                // inlining it here rather than threading a parameter nothing varies.
+                // OpenAI's Realtime PCM rate is fixed, so this is not a parameter.
                 "rate": TranscriptionAudioFormat.pcm16Mono24k.sampleRate,
             ],
             "transcription": transcription,
@@ -90,26 +66,21 @@ public enum RealtimeSession {
         ]
     }
 
-    /// Append-audio event (base64 PCM16).
     public static func appendAudio(base64PCM: String) -> [String: Any] {
         ["type": "input_audio_buffer.append", "audio": base64PCM]
     }
 
-    /// Explicitly finalize the current input buffer for a client-commit model.
     public static func commitAudio(eventID: String) -> [String: Any] {
         ["type": "input_audio_buffer.commit", "event_id": eventID]
     }
 
-    /// A socket is usable only after the server acknowledges `session.update`. The earlier created
-    /// event proves the handshake opened, but not that the requested transcription model/format/VAD
-    /// configuration was accepted.
+    /// Only the `session.update` acknowledgement proves the requested config was accepted;
+    /// `session.created` only proves the handshake opened.
     public static func isConfiguredSessionEventType(_ type: String) -> Bool {
         type == "session.updated" || type == "transcription_session.updated"
     }
 
-    /// True if a parsed wire event is the server's `session_expired` error — emitted when a transcription
-    /// session hits its maximum lifetime (~60 min) and the socket rotates. An EXPECTED rotation, not a
-    /// fault (callers log it calmly and quiet the reconnect noise; see `RealtimeTranscriber`).
+    /// Sent at the ~60 min session lifetime. An expected rotation, not a fault.
     public static func isSessionExpired(_ event: [String: Any]) -> Bool {
         guard event["type"] as? String == "error",
               let error = event["error"] as? [String: Any] else { return false }
@@ -121,8 +92,8 @@ public enum RealtimeSession {
     public static let audioBufferCommittedType = "input_audio_buffer.committed"
     public static let deltaTranscriptionType = "conversation.item.input_audio_transcription.delta"
 
-    /// Server-VAD sessions may emit `input_audio_buffer.committed` as part of their normal server-owned
-    /// turn lifecycle. Only client-commit models bind that event to a Jarvis-managed local boundary.
+    /// Server-VAD sessions also emit `input_audio_buffer.committed`, so only client-commit models
+    /// bind it to a local boundary.
     public enum AudioBufferCommitEvent: Equatable, Sendable {
         case ignored
         case malformedAcknowledgement
@@ -143,12 +114,10 @@ public enum RealtimeSession {
         return .acknowledgement(itemID: itemID)
     }
 
-    /// The event type the server emits when an utterance's transcription is final.
     public static let completedTranscriptionType = "conversation.item.input_audio_transcription.completed"
     public static let failedTranscriptionType = "conversation.item.input_audio_transcription.failed"
 
-    /// GPT Transcribe's detected language codes from a completed event. `nil` means the event carries
-    /// no detected-language field; an empty array is meaningful and means no reliable prediction.
+    /// Nil means the event has no detected-language field; empty means no reliable prediction.
     public static func detectedLanguageCodes(from event: [String: Any]) -> [String]? {
         guard event["type"] as? String == completedTranscriptionType,
               let languages = event["languages"] as? [[String: Any]] else {
@@ -161,15 +130,6 @@ public enum RealtimeSession {
         }
     }
 
-    /// The transcript text from a parsed realtime event, if it is a **completed** input-audio
-    /// transcription carrying real speech — otherwise nil. Pure and unit-testable; the live socket
-    /// is not, so this is where the wire→text parsing (and hallucination filtering) is verified.
-    ///
-    /// `speaker` scopes the phrase denylist: a bare "Thank you."/"Thanks" is a silence hallucination on
-    /// the *me* (mic) side but a real turn-ending reply on the *them* (system-audio) side, so the
-    /// denylist applies to `.me` only. The punctuation/whitespace-only drop applies to both. The filter
-    /// itself lives in `TranscriptFiltering` — every streaming recognizer emits these artifacts, not
-    /// just this provider's.
     public static func completedTranscript(from event: [String: Any], speaker: Speaker) -> String? {
         guard event["type"] as? String == completedTranscriptionType,
               let text = event["transcript"] as? String else { return nil }

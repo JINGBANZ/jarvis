@@ -1,10 +1,7 @@
 import AppKit
 import QuartzCore
 
-/// Moves between two Settings pages the way the design asks: a page grows out of the point that
-/// opened it and shrinks back into the same point, on a critically damped spring. A move that
-/// starts mid-animation begins from what is on screen, so reversing is seamless. Under Reduce
-/// Motion it only cross-fades. It knows nothing about which pages these are.
+// Design: wiki/settings-window.md#motion
 @MainActor
 enum SettingsPageTransition {
     enum Direction { case forward, back }
@@ -27,8 +24,6 @@ enum SettingsPageTransition {
         }
         let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         let center = NSPoint(x: incoming.bounds.midX, y: incoming.bounds.midY)
-        // Forward: the incoming page grows from the origin while the outgoing view swells and fades.
-        // Back: the incoming view settles from slightly large while the page shrinks into the origin.
         let inStart = direction == .forward
             ? scaled(pageScale, about: origin, in: inLayer)
             : scaled(hubScale, about: center, in: inLayer)
@@ -47,7 +42,6 @@ enum SettingsPageTransition {
         CATransaction.commit()
     }
 
-    /// Settles a view with no animation, for a page shown without a move.
     static func reset(_ view: NSView) {
         view.layer?.removeAllAnimations()
         view.layer?.opacity = 1
@@ -99,7 +93,7 @@ enum SettingsPageTransition {
         return spring
     }
 
-    /// A scale about `point` (in the view's coordinates) for a layer, whatever its anchor point.
+    /// AppKit anchors its layers at (0, 0), so the scale is taken about `point` explicitly.
     private static func scaled(_ scale: CGFloat, about point: NSPoint, in layer: CALayer) -> CATransform3D {
         let anchor = CGPoint(x: layer.anchorPoint.x * layer.bounds.width,
                              y: layer.anchorPoint.y * layer.bounds.height)

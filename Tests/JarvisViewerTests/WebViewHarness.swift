@@ -1,10 +1,8 @@
 import Foundation
 import WebKit
 
-/// Drives a real `WKWebView` headlessly inside `swift test`: loads HTML and awaits the navigation,
-/// then runs JS via `evaluateJavaScript`. A per-load timeout + a single-resume guard mean a stuck or
-/// failed load *fails the test* instead of hanging CI. swift-testing's runner pumps the main run
-/// loop, so no `NSApplication` is needed (verified on Command-Line-Tools-only machines).
+/// swift-testing pumps the main run loop, so no `NSApplication` is needed. The load timeout makes a
+/// stuck load fail the test instead of hanging CI.
 @MainActor
 final class WebViewHarness: NSObject, WKNavigationDelegate {
     let webView = WKWebView(frame: .init(x: 0, y: 0, width: 480, height: 320))
@@ -18,7 +16,6 @@ final class WebViewHarness: NSObject, WKNavigationDelegate {
 
     enum HarnessError: Error { case timeout }
 
-    /// Load `html` and await `didFinish` (or fail on error / 5s timeout).
     func load(_ html: String) async throws {
         resumed = false
         let timeout = Task { @MainActor in

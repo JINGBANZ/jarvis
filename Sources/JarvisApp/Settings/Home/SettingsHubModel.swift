@@ -1,8 +1,6 @@
 import Foundation
 import JarvisCore
 
-/// Reads everything the Settings hub shows into one `RobotHubInputs` and publishes the resulting
-/// `RobotHubState`, so hub views render a value and never read preferences themselves.
 @MainActor
 final class SettingsHubModel {
     private(set) var state = RobotHubState.empty
@@ -37,20 +35,18 @@ final class SettingsHubModel {
         refresh(probe: false)
     }
 
-    /// Re-reads the settings and publishes when the state changed. With `probe`, it also asks for
-    /// fresh sign-ins, whose answer arrives through the sign-in observer.
+    /// With `probe`, the fresh sign-in answer arrives later through the sign-in observer.
     func refresh(probe: Bool) {
         if probe { signIns.refresh() }
         publish(RobotHub.state(for: inputs()))
     }
 
-    /// The brain the running session is using, or nil when stopped. Never touches saved settings.
     func setActiveTarget(_ target: BrainTarget?) {
         activeTarget = target
         refresh(probe: false)
     }
 
-    /// Calls `handler` now with the current state and again on every change.
+    /// Calls `handler` immediately, then on every change.
     @discardableResult
     func observe(_ handler: @escaping (RobotHubState) -> Void) -> UUID {
         let id = UUID()
@@ -63,9 +59,8 @@ final class SettingsHubModel {
         observers[id] = nil
     }
 
-    /// While Settings is open, any preference edit (a route move, an overlay switch) re-judges the
-    /// parts. Edits can come in bursts, such as a slider drag, so they coalesce into one refresh and
-    /// never probe. Only while open: Foundation posts this for every write in the app.
+    /// Only while Settings is open: Foundation posts this for every write in the app, even an
+    /// unchanged one. A burst such as a slider drag coalesces into one refresh.
     func beginObservingSettings() {
         guard defaultsObserver == nil else { return }
         defaultsObserver = NotificationCenter.default.addObserver(

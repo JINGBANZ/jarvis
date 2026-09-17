@@ -1,8 +1,5 @@
 import AppKit
 
-/// Jarvis's Settings palette: purple for structure, teal for what is on or selected, amber for what
-/// needs the user. Every color resolves per appearance, high contrast included, so a view that draws
-/// with these picks up light and dark mode without observing it.
 @MainActor
 enum SettingsTheme {
     static let purple = dynamic(light: 0x7C4DFF, dark: 0xB18CFF)
@@ -28,12 +25,11 @@ enum SettingsTheme {
     static let slotGlow = dynamic(light: 0x0E9F87, dark: 0x36E2C5, alpha: (0.35, 0.55))
     static let calloutFill = dynamic(light: 0x0E9F87, dark: 0x36E2C5, alpha: (0.07, 0.06))
     static let noticeFill = dynamic(light: 0xFFAA28, dark: 0xFFB547, alpha: (0.12, 0.08))
-    /// The eyes glow the same teal in both modes; the visor behind them stays dark.
     static let eyeGlow = rgb(0x36E2C5)
     static let eyeOff = rgb(0x4A3D80)
 
-    /// The provider closure is `@Sendable` and calls only a `nonisolated` helper, because AppKit may
-    /// resolve a dynamic color outside the main actor.
+    /// `@Sendable`, calling only a `nonisolated` helper, because AppKit may resolve a dynamic color
+    /// off the main actor.
     private static func dynamic(
         light: UInt32,
         dark: UInt32,

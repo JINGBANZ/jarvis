@@ -22,18 +22,9 @@ views on screen together while it animates ([Motion](#motion)).
 
 ### `SettingsSection` protocol
 
-```swift
-@MainActor
-protocol SettingsSection: AnyObject {
-    var destination: SettingsDestination { get }
-    func makePage() -> SettingsPageView
-    func didBecomeActive()            // default: no-op — this page became the visible one
-    func didResignActive()            // default: no-op — another page chosen, or window closing
-    func windowWillClose()            // default: no-op
-}
-```
-
-The protocol is the only seam between `SettingsWindow` and the individual pages — sections know
+See `SettingsSection` in [`Sources/JarvisApp/Settings/SettingsSection.swift`](../Sources/JarvisApp/Settings/SettingsSection.swift).
+A section names its destination, builds its page, and has three lifecycle hooks, each a no-op by
+default. The protocol is the only seam between `SettingsWindow` and the individual pages — sections know
 nothing about the hub, the window, or each other. On every navigation the window pairs
 `didResignActive()` on the outgoing page with `didBecomeActive()` on the incoming one, and resigns
 the visible page on close; the hub gets the same pair. This lets a page run side effects **only while

@@ -26,8 +26,8 @@ import Testing
         #expect(Defaults.Brain.effort == .low)
     }
 
-    /// The combined cap scales with effort and never sits at the old flat 768 that starved high-effort
-    /// reasoning (the truncation bug). `high` clears OpenAI's recommended ≥25k reserve.
+    /// 25k is OpenAI's recommended reasoning reserve; a flat 768 cap truncated high-effort
+    /// reasoning.
     @Test func maxOutputTokensScalesWithEffort() {
         #expect(ReasoningEffort.none.maxOutputTokens < ReasoningEffort.low.maxOutputTokens)
         #expect(ReasoningEffort.low.maxOutputTokens < ReasoningEffort.medium.maxOutputTokens)

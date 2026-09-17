@@ -1,8 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// One hub slot: a part's icon, name, current line, and status light. It is a keyboard-focusable
-/// button; hovering or focusing it lights the matching part of the head.
 @MainActor
 final class RobotSlotView: NSView {
     let part: RobotPart
@@ -80,8 +78,7 @@ final class RobotSlotView: NSView {
         case .live: SettingsTheme.teal
         case .attention: SettingsTheme.amber
         }
-        // Theme colors are dynamic, so the attributed string follows appearance changes when it draws.
-        // An attributed value carries its own line breaking, so truncation is set here as well.
+        // An attributed value ignores the field's line break mode.
         let truncating = NSMutableParagraphStyle()
         truncating.lineBreakMode = .byTruncatingTail
         detailLabel.attributedStringValue = NSAttributedString(string: state.detail, attributes: [
@@ -181,7 +178,7 @@ final class RobotSlotView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        // Space, Return, or keypad Enter.
+        // Key code 36 is Return and 76 is keypad Enter.
         if event.charactersIgnoringModifiers == " " || event.keyCode == 36 || event.keyCode == 76 {
             press()
         } else {

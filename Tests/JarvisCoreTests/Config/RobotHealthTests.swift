@@ -1,7 +1,6 @@
 import Testing
 @testable import JarvisCore
 
-/// The hub's status rules. Each names only what Settings can fix or explain.
 @Suite struct RobotHealthTests {
     private let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5")
     private let openAI = BrainTarget(provider: .openAI, modelID: "gpt-5.6-sol")

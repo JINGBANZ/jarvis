@@ -1,7 +1,6 @@
 import Foundation
 
-/// Foundation-only fixed input plan for the system-audio transcription benchmark. Audio capture,
-/// playback, provider sessions, and reconnect control stay in the app shell.
+// Design: wiki/transcription-benchmark.md
 public enum TranscriptionBenchmark {
     public static let schemaVersion = 1
     public static let retainedRunCount = 10
@@ -12,9 +11,8 @@ public enum TranscriptionBenchmark {
         case bilingual
     }
 
-    /// Fixed hint variants retained in benchmark summaries. Production preferences use an open
-    /// list of individual languages; the benchmark keeps these stable cases so older result files
-    /// remain decodable under schema version 1.
+    /// Fixed cases, unlike the production language list, so schema-version-1 result files stay
+    /// decodable.
     public enum LanguageProfile: String, Codable, Sendable {
         case automatic
         case english
@@ -45,8 +43,7 @@ public enum TranscriptionBenchmark {
         }
     }
 
-    /// Fixed, non-user input. A runner synthesizes each phrase once and replays those exact bytes for
-    /// every repetition, recording only the fixture hash in the persisted summary.
+    /// Fixed, non-user input. Only each fixture's hash is persisted.
     public static let phrases: [Phrase] = [
         Phrase(
             id: "english-technical",
@@ -65,8 +62,6 @@ public enum TranscriptionBenchmark {
             voice: "Tingting"),
     ]
 
-    /// `model` is typed `OpenAITranscriptionModel?` rather than a provider-neutral identifier, so
-    /// Gemini is not yet a benchmarkable arm — see the note on `standardArms` below.
     public struct Arm: Codable, Equatable, Sendable {
         public let id: String
         public let provider: TranscriptionProvider
@@ -92,11 +87,7 @@ public enum TranscriptionBenchmark {
         }
     }
 
-    /// Gemini has no arms here yet: `Arm.model` is `OpenAITranscriptionModel?`, and
-    /// `TranscriptionBenchmarkRunner`'s `requiredProviders` set only requires `.openAI` (plus
-    /// `.appleSpeech` on macOS 26+), so an unlisted Gemini stays explicitly out of scope rather
-    /// than silently unsupported. Extending the matrix needs a provider-neutral model identifier
-    /// on `Arm` before Gemini arms can be added.
+    /// No Gemini arms: `Arm.model` is OpenAI-typed rather than a provider-neutral model id.
     public static var standardArms: [Arm] {
         let openAI = OpenAITranscriptionModel.allCases.flatMap { model in
             phrases.map { phrase in

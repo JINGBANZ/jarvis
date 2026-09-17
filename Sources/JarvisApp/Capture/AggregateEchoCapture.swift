@@ -2,27 +2,14 @@ import Foundation
 import CoreAudio
 import JarvisCore
 
-/// One-clock capture + echo cancellation. Builds a single PRIVATE Core Audio aggregate device =
-/// built-in mic (clock master) + system-output process tap (drift-compensated), so ONE IOProc
-/// delivers mic + reference synchronized at 48 kHz — the single-clock case AEC3 needs (proven live:
-/// 30–50 dB cancellation, works in Zoom on speakers). Inside that callback it runs WebRTC AEC3
-/// (reference = tap, near = mic), then downsamples to the selected provider's wire rate: cleaned
-/// mic → `onMicClean` ("me"
-/// socket), raw tap → `onSystem` ("them" socket). Replaces the separate AVAudioEngine mic +
-/// ScreenCaptureKit capture. macOS 14.2+.
+/// Design: wiki/architecture.md#capture-device-rate-adaptation
 ///
-/// The tap targets the output device and the aggregate pins a mic sub-device, both chosen at build
-/// time — so when the audio route changes mid-session (headphones in/out, AirPods, mic swapped) we
-/// rebuild against the new default devices (route listeners, debounced). AEC3 stays on across all
-/// routes: it's near-passthrough on headphones (no echo to cancel) and we deliberately don't try to
-/// "detect headphones and bypass" — that detection is unreliable (a Bluetooth *speaker* looks like
-/// headphones) and a wrong bypass would let the echo back in.
+/// AEC3 stays on for every route. Never bypass it for "headphones": a Bluetooth speaker looks like
+/// one, and a wrong bypass readmits the echo.
 ///
-/// `@unchecked Sendable`: audio state is touched only by the single IOProc thread; lifecycle
-/// (build/teardown/rebuild/stop) is serialized by `lock`. The IOProc never takes `lock`, and teardown
-/// calls `AudioDeviceStop` (which drains in-flight callbacks) before destroying anything. Client
-/// audio delivery is moved onto one serial queue so encoding/network work cannot stall Core Audio;
-/// `onUnavailable` is invoked outside the lock.
+/// `@unchecked Sendable`: audio state is touched only by the IOProc thread, and lifecycle is
+/// serialized by `lock`, which the IOProc never takes. Teardown calls `AudioDeviceStop`, which
+/// drains in-flight callbacks, before destroying anything.
 final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
     private struct SequencedAudioChunk: Sendable {
         let data: Data
@@ -37,11 +24,7 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
     private let onSystem: @Sendable (Data, UInt64, TimeInterval) -> Void
     private let onMicSpeechEvent: @Sendable (LocalSpeechEvent, UInt64) -> Void
     private let onSystemSpeechEvent: @Sendable (LocalSpeechEvent, UInt64) -> Void
-    /// Fired if the device can't be built/started mid-session (route-change rebuild) — the caller
-    /// decides how to surface it. Carries a human-readable reason.
     var onUnavailable: (@Sendable (String) -> Void)?
-    /// True while the capture owns a bounded route-rebuild incident, false after it successfully
-    /// rebuilds. Exhaustion is reported through `onUnavailable` instead.
     var onRecoveryStateChange: (@Sendable (Bool) -> Void)?
 
     private var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -49,22 +32,15 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
     private var procID: AudioDeviceIOProcID?
 
     private let aec = WebRTCEchoCanceller()          // adaptive; re-converges across route rebuilds
-    /// The provider-selected wire format — resolved once at Start and injected, since capture never
-    /// switches providers inside a live session.
     private let audioFormat: TranscriptionAudioFormat
     private let micDown: Resampler?
     private let sysDown: Resampler?
     private let usesLocalTurnDetection: Bool
-    /// Turn detection runs on `deliveryQueue`, not in the IOProc: neural inference does not belong on
-    /// the realtime thread, and the delivery queue is already serial and already ordered by capture,
-    /// so frames stay in sample order for free. Both detectors are confined to that queue, which is
-    /// what `@unchecked Sendable` is covering for them.
+    /// Confined to `deliveryQueue`: Core ML inference must stay off the realtime IOProc thread.
     private let micTurnDetector: LocalTurnDetector?
     private let systemTurnDetector: LocalTurnDetector?
-    /// Device-native → 48 kHz, rebuilt per `buildAudioLocked` from the aggregate's actual rate. `nil`
-    /// when the device is already 48 kHz (then mic/tap feed AEC directly — the built-in path, unchanged).
-    /// Touched only by the IOProc thread (read in `handle`) and by build/rebuild under `lock` while the
-    /// device is stopped — same discipline as `procID`/`aggregateID`, covered by `@unchecked Sendable`.
+    /// Device-native to 48 kHz, nil when the device is already 48 kHz. Read by the IOProc; replaced
+    /// only under `lock` while the device is stopped.
     private var micUp: Resampler?
     private var sysUp: Resampler?
 
@@ -72,20 +48,19 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
 
     private let lock = NSLock()
     private let routeQueue = DispatchQueue(label: "jarvis.aec.routes")
-    /// Device routes often disappear briefly while macOS switches hardware. Preserve the live
-    /// conversation through that interval; only a full bounded retry budget proves capture unusable.
+    /// Routes often vanish briefly while macOS switches hardware; only an exhausted budget proves
+    /// capture unusable.
     private var rebuildIncident = RetryIncident(schedule: RetrySchedule(
         maximumRetries: 6, initialDelay: 0.5, maximumDelay: 5))
-    /// Confined to `routeQueue`; keeps repeated device notifications inside one recovery interval.
+    /// Confined to `routeQueue`.
     private var rebuildRecoveryInProgress = false
-    /// Both speaker streams share one queue to preserve the IOProc's callback order (cleaned mic,
-    /// then untouched system tap) without doing Realtime encoding/sends on the audio thread.
+    /// One queue for both streams keeps the IOProc's callback order while moving work off the audio
+    /// thread.
     private let deliveryQueue = DispatchQueue(label: "jarvis.aec.delivery", qos: .userInitiated)
     private var routeListener: AudioObjectPropertyListenerBlock?
     private var pendingRebuild: DispatchWorkItem?
     private var stopped = false
-    /// Assigned on the single IOProc thread and preserved across route rebuilds. A gap at any later
-    /// boundary is therefore diagnosable without retaining the audio itself.
+    /// IOProc-only, and kept across route rebuilds so a gap stays diagnosable.
     private var micSequence: UInt64 = 0
     private var systemSequence: UInt64 = 0
 
@@ -93,8 +68,6 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
          localTurnDetectionSilenceDuration: TimeInterval?,
          delivery: AudioDelivery) {
         self.audioFormat = audioFormat
-        // AEC always runs at 48 kHz; the wire rate is the selected provider's requirement. Gemini's
-        // 16 kHz is an exact 3:1 decimation from 48, so there is never a second resampling stage.
         micDown = Resampler(fromHz: Self.aecRate, toHz: Double(audioFormat.sampleRate))
         sysDown = Resampler(fromHz: Self.aecRate, toHz: Double(audioFormat.sampleRate))
         onMicCaptured = delivery.onMicCaptured
@@ -105,8 +78,7 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         onSystemSpeechEvent = delivery.onSystemSpeechEvent
         usesLocalTurnDetection = localTurnDetectionSilenceDuration != nil
         if let localTurnDetectionSilenceDuration {
-            // Detectors see post-AEC audio, which is always at the AEC rate regardless of the
-            // device's native rate.
+            // Detectors see post-AEC audio, which is always at the AEC rate, not the device rate.
             micTurnDetector = LocalTurnDetector(
                 inputSampleRate: Self.aecRate,
                 trailingSilenceDuration: localTurnDetectionSilenceDuration)
@@ -119,8 +91,6 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         }
     }
 
-    /// Build + start capture. Returns `nil` on success, or a human-readable reason on failure (the
-    /// caller surfaces it via `ErrorReporter`). Mid-session rebuild failures go through `onUnavailable`.
     func start() -> String? {
         var reason: String?
         routeQueue.sync {
@@ -131,8 +101,7 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         }
         lock.lock()
         stopped = false
-        // A client-commit session whose detectors failed to build would start, stream audio, and
-        // never commit a turn: no transcript, no error. Fail the start instead.
+        // A client-commit session without detectors would stream audio but never commit a turn.
         let localTurnDetectionReady = !usesLocalTurnDetection
             || (micTurnDetector != nil && systemTurnDetector != nil)
         if #available(macOS 14.2, *), aec != nil, micDown != nil, sysDown != nil,
@@ -165,9 +134,7 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
 
     // MARK: - Build / teardown (must hold `lock`)
 
-    /// Builds tap + aggregate + IOProc. Self-cleaning: on any failure it tears down whatever it
-    /// already created and returns false, so it never leaves partial state. Logs the failure; the
-    /// caller notifies `onUnavailable` outside the lock.
+    /// Self-cleaning: on failure it tears down whatever it created and returns the reason.
     private func buildAudioLocked() -> String? {
         guard #available(macOS 14.2, *) else { return "Jarvis needs macOS 14.2 or later." }
         guard let micUID = Self.defaultInputDeviceUID() else {
@@ -194,9 +161,8 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
             kAudioAggregateDeviceTapListKey: [
                 [kAudioSubTapUIDKey: tapDesc.uuid.uuidString, kAudioSubTapDriftCompensationKey: 1],
             ],
-            // Deliberately omit tap auto-start. Enabling it waits for a tapped process to begin
-            // writing system audio before starting the entire aggregate, including the microphone.
-            // Quiet sessions would otherwise arm successfully without ever delivering an IOProc.
+            // Deliberately no tap auto-start: it holds the whole aggregate, mic included, until a
+            // tapped process writes audio, so a quiet session would never get an IOProc.
         ]
         var agg = AudioObjectID(kAudioObjectUnknown)
         guard AudioHardwareCreateAggregateDevice(description as CFDictionary, &agg) == noErr,
@@ -206,17 +172,14 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         }
         aggregateID = agg
 
-        // Don't fight the device's rate — read it. AEC3, the 480-sample framing, and the down-to-wire
-        // resamplers all run at 48 kHz, so resample the device-native rate up to 48 kHz before AEC (mic+tap come off
-        // ONE clock, so they stay sample-synced; the far/near lockstep in `handle` absorbs converter slack).
-        // If we can't read the rate, fail loud — assuming 48 kHz when it isn't would corrupt the echo
-        // model and mislabel the wire rate (the exact thing the old pin guarded).
+        // Fail if the rate is unreadable: assuming 48 kHz would corrupt the echo model and mislabel
+        // the wire rate.
         guard let deviceRate = Self.nominalSampleRate(agg) else {
             jlog("Jarvis: capture — could not read the input device's sample rate")
             teardownAudioLocked(); return "Couldn't read the audio input device's sample rate."
         }
         if abs(deviceRate - Self.aecRate) < 1 {
-            micUp = nil; sysUp = nil                         // already 48 kHz — feed AEC directly
+            micUp = nil; sysUp = nil
         } else {
             guard let mu = Resampler(fromHz: deviceRate, toHz: Self.aecRate),
                   let su = Resampler(fromHz: deviceRate, toHz: Self.aecRate) else {
@@ -257,9 +220,8 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
     // MARK: - Route changes — rebuild against the new default devices (debounced)
 
     private func registerRouteListenersLocked() {
-        // Coalesce: a single physical swap can flip both default-in and default-out (two callbacks);
-        // debounce so we rebuild once. The listener runs on routeQueue (serial), so the work-item
-        // bookkeeping needs no extra locking.
+        // One physical swap can flip both default devices, so debounce to a single rebuild. The
+        // listener runs on serial `routeQueue`, so the work-item bookkeeping needs no lock.
         let block: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
             guard let self else { return }
             guard self.rebuildIncident.beginOrContinue() else { return }
@@ -292,19 +254,15 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         routeListener = nil
     }
 
-    /// Default input/output device changed — rebuild the tap + aggregate against the new route. Runs
-    /// on `routeQueue` (serial, debounced); the `stopped` guard makes a late change a no-op.
+    /// Runs on `routeQueue`.
     private func rebuild() {
         var reason: String?
         var failureAction = RetryIncident.FailureAction.ignore
         lock.lock()
         if !stopped {
             teardownAudioLocked()
-            // A route change splices two unrelated audio timelines together. Drop the detectors'
-            // stream state so the first frames of the new device are not coloured by the old one.
-            // Ordering falls out of the serial delivery queue: teardown has drained the IOProc, so
-            // every pre-rebuild delivery is already enqueued ahead of this, and the rebuilt device
-            // cannot enqueue anything until `buildAudioLocked` starts it below.
+            // Reset detector stream state across the route splice. Teardown drained the IOProc, so
+            // the serial delivery queue runs this after every pre-rebuild chunk.
             deliveryQueue.async { [micTurnDetector, systemTurnDetector] in
                 micTurnDetector?.resetStreamContinuity()
                 systemTurnDetector?.resetStreamContinuity()
@@ -349,27 +307,22 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
     private func handle(_ list: UnsafePointer<AudioBufferList>) {
         let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: list))
         guard buffers.count >= 2, let aec, let micDown, let sysDown else { return }
-        // Composition order = sub-devices (mic) then taps; confirmed live: buf0=mic, buf1=tap.
+        // Buffers follow composition order, sub-devices then taps: buf0 is the mic, buf1 the tap.
         var mic = Self.monoInt16(buffers[0])
         var tap = Self.monoInt16(buffers[1])
-        // Resample device-native → 48 kHz for AEC (no-ops to today's path when the device is already
-        // 48 kHz and the up-resamplers are nil).
         if let micUp { mic = micUp.convert(mic) }
         if let sysUp { tap = sysUp.convert(tap) }
-        // Keep two purpose-specific copies. Transcription preserves every real tap sample and pads a
-        // short/empty callback to the mic duration so the server audio clock and trailing-silence VAD
-        // keep advancing. AEC needs an exact mic-length reference and may therefore also truncate.
+        // Two copies on purpose. Transcription keeps every tap sample, padding short callbacks so
+        // the server audio clock and VAD keep advancing; AEC needs an exact mic-length reference.
         let systemTap = tap
-        // Keep far and near in lockstep AT THE AEC RATE: AEC3's reference and capture must advance by the
-        // SAME sample count each callback, or the two framers drift apart for the rest of the session. The
-        // tap can legitimately be short/empty (silence), and the two converters can emit a sample or two
-        // apart — so pad/truncate the tap to the mic's count after resampling.
+        // AEC3's reference and capture must advance by the same sample count each callback, or the
+        // two framers drift apart for the rest of the session.
         let aecTap = EchoReferenceAlignment.aligned(systemTap, toFrameCount: mic.count)
         let systemTimeline = SystemAudioTimeline.preservingSamples(
             systemTap, minimumFrameCount: mic.count)
 
-        aec.processReverse(aecTap)         // far-end reference FIRST
-        let clean = aec.process(mic)       // near-end, echo removed
+        aec.processReverse(aecTap)         // far-end reference first
+        let clean = aec.process(mic)
 
         let micData = clean.isEmpty ? nil : Self.data(micDown.convert(clean))
         let systemData = systemTimeline.isEmpty ? nil : Self.data(sysDown.convert(systemTimeline))
@@ -396,8 +349,6 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         let onMicSpeechEvent = self.onMicSpeechEvent
         let onSystemSpeechEvent = self.onSystemSpeechEvent
         deliveryQueue.async { [self] in
-            // Turn detection happens here rather than in the IOProc. `clean` and `systemTimeline` are
-            // value types, so the realtime thread hands them over without doing the work itself.
             let micSpeechEvents = micTurnDetector?.speechEvents(
                 from: clean, capturedAt: capturedAt) ?? []
             let systemSpeechEvents = systemTurnDetector?.speechEvents(
@@ -426,8 +377,8 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
     }
 
 
-    /// Commit through the whole delivered wire-rate chunk containing the endpoint. This keeps the wire
-    /// FIFO and capture boundary identical even when a resampler emits a small converter tail.
+    /// Commits through the whole delivered chunk containing the endpoint, so the wire FIFO and the
+    /// capture boundary stay identical even when a resampler emits a small tail.
     private static func committing(
         events: [SpeechEndpointDetector.Event],
         through commitAt: TimeInterval
@@ -444,7 +395,6 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
 
     // MARK: - Core Audio / format helpers
 
-    /// One AudioBuffer of interleaved Float32 → mono PCM16 (downmix logic is in `JarvisCore`).
     private static func monoInt16(_ b: AudioBuffer) -> [Int16] {
         let total = Int(b.mDataByteSize) / MemoryLayout<Float32>.size
         guard total > 0, let raw = b.mData else { return [] }
@@ -456,7 +406,6 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
         samples.withUnsafeBufferPointer { Data(buffer: $0) }
     }
 
-    /// Read a device's current nominal sample rate. Returns nil if it can't be read.
     private static func nominalSampleRate(_ dev: AudioObjectID) -> Double? {
         var addr = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate,
                                               mScope: kAudioObjectPropertyScopeGlobal,

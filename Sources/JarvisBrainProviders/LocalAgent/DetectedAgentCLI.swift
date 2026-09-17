@@ -1,6 +1,5 @@
 import Foundation
 
-/// A locally installed coding-agent CLI and whether `AgentCLIDetector` found it signed in.
 public struct DetectedAgentCLI: Sendable, Equatable {
     public let cli: AgentCLI
     public let executableURL: URL

@@ -1,7 +1,6 @@
 import Testing
 @testable import JarvisCore
 
-/// The hub's slot lines. They must stay short enough for a 232-point slot and say what is saved.
 @Suite struct RobotPartSummariesTests {
     @Test func brainNamesTheModelTheProviderAndTheEffortLevel() {
         let summary = RobotPartSummaries.brain(

@@ -1,7 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Lightweight lexical accents only: unknown languages remain fully readable plain code.
 @MainActor
 enum CodeBlockFormatting {
     static func render(_ block: CodeBlock, fontSize: CGFloat) -> NSAttributedString {
@@ -26,9 +25,6 @@ enum CodeBlockFormatting {
                 result.addAttribute(.foregroundColor, value: color, range: match.range)
             }
         }
-        // A correction arrives as a `diff` block instead of indices into the snippet: the added line
-        // is tinted the way a highlight used to be, and the line it replaces is struck through, so
-        // the candidate can see what changed without counting lines.
         guard block.isDiff else { return result }
         var offset = 0
         for line in block.code.components(separatedBy: "\n") {
@@ -48,15 +44,12 @@ enum CodeBlockFormatting {
         return result
     }
 
-    // Both variants are compiled once: the panel re-lexes the block on every frame of a resize
-    // drag, and building an NSRegularExpression per call made that drag pay for the whole grammar.
+    // Compiled once: the panel re-lexes on every frame of a resize drag.
     private static let slashLexer = lexer(hashComments: false)
     private static let hashAndSlashLexer = lexer(hashComments: true)
 
-    /// `#` opens a comment in these languages only. Elsewhere it is load-bearing syntax
-    /// (`#include`, `#define`, `#available`, `#if`), and coloring such a line inert would tell a
-    /// candidate under pressure that it does nothing. `language` is free text from the model, so
-    /// accept the short forms it tends to use.
+    /// Elsewhere `#` is live syntax (`#include`, `#if`) and must not be colored as a comment.
+    /// `language` is free text from the model, so short forms are listed too.
     private static let hashCommentLanguages: Set<String> = [
         "python", "py", "python3", "ruby", "rb", "shell", "sh", "bash", "zsh", "fish",
         "perl", "pl", "yaml", "yml", "toml", "r", "make", "makefile", "cmake", "dockerfile",
@@ -66,9 +59,9 @@ enum CodeBlockFormatting {
         hashCommentLanguages.contains(language)
     }
 
-    /// A single ordered lexer prevents keywords inside strings or comments being recolored.
-    /// Keep quoted tokens on one line: a lifetime or truncated string must not color later code.
-    /// The two variants differ only inside group 1, so the color dispatch above stays the same.
+    /// One ordered alternation, so keywords inside strings or comments are not recolored. Quoted
+    /// tokens stay on one line so a Rust lifetime or truncated string can't color later code.
+    /// The color dispatch in `render` depends on this group order.
     private static func lexer(hashComments: Bool) -> NSRegularExpression? {
         let comment = hashComments ? #"(//[^\n]*|#[^\n]*)"# : #"(//[^\n]*)"#
         let rest = #"|("(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*')|\b(func|def|let|var|const|return|if|else|for|while|in|class|struct|enum|guard|import|from|public|private|static|new|nil|null|true|false|None|True|False|async|await|throw|try|catch|break|continue)\b|\b\d+(?:\.\d+)?\b"#

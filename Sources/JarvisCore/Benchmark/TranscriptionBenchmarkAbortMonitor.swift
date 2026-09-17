@@ -1,8 +1,7 @@
 import Foundation
 
-/// Races a potentially non-cooperative benchmark setup operation against the command's abort
-/// marker. The operation runs in an unstructured task intentionally: structured task groups wait
-/// for cancelled children, which would let a model download keep Ctrl-C blocked until it returned.
+/// Uses unstructured tasks on purpose: a task group waits for cancelled children, so a model
+/// download that ignores cancellation would block Ctrl-C.
 public enum TranscriptionBenchmarkAbortMonitor {
     public enum Failure: Error, Equatable, Sendable {
         case aborted

@@ -2,9 +2,6 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// A provider-boundary failure with only the two things the route policy reads: the disposition and
-/// the message the notice quotes. Every other field is fixed here so the tests below stay about
-/// route behavior rather than classification, which is tested beside each provider adapter.
 private func brainFailure(
     _ disposition: ProviderFailure.Disposition,
     _ message: String,
@@ -15,20 +12,13 @@ private func brainFailure(
         disposition: disposition, identity: .init(), message: message)
 }
 
-/// What the app hands the route for a target it proved unavailable before the session started, so
-/// the driver skips it instead of charging it a synthetic provider attempt.
 private func unavailableFailure(_ target: BrainTarget, _ message: String) -> ProviderFailure {
     ProviderFailure(
         source: .brain(target.provider), stage: .process, category: .unavailable,
         disposition: .permanent, identity: .init(), message: message)
 }
 
-/// Mock brain: replays a script of responses and records the messages + tool-choice it saw.
-///
-/// `@unchecked Sendable` is safe because every mutable property is accessed only under `lock`. The
-/// lock is load-bearing rather than decorative: as a summarizer this double is driven from the
-/// detached compaction task while the test polls its counters, so unsynchronized access would be a
-/// genuine data race on the arrays' COW buffers.
+/// @unchecked: `lock` guards all mutable state, which the detached compaction task also reads.
 final class ScriptedBrain: BrainClient, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls: [[ChatMessage]] = []
@@ -56,11 +46,7 @@ final class ScriptedBrain: BrainClient, @unchecked Sendable {
     func prepare() { lock.withLock { _preparationCount += 1 } }
 }
 
-/// A brain whose per-call script can be a response OR a throw (nil), recording the messages it saw —
-/// to verify what survives a failed turn and reaches the next one.
-///
-/// `@unchecked Sendable` is safe for the same reason as `ScriptedBrain`: all mutable state is
-/// accessed under `lock`, which the detached compaction path makes necessary rather than optional.
+/// Each nil script entry throws. @unchecked: all mutable state is guarded by `lock`.
 final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
     private let lock = NSLock()
     private var _calls: [[ChatMessage]] = []
@@ -69,8 +55,6 @@ final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
     var calls: [[ChatMessage]] { lock.withLock { _calls } }
     var requestContexts: [CoachingRequestContext?] { lock.withLock { _requestContexts } }
     let script: [BrainResponse?]
-    /// What a scripted throw raises. Defaulted, because most callers only care that the turn failed;
-    /// a caller that asserts on the row Activity renders supplies an error carrying the text it wants.
     let error: any Error
     init(script: [BrainResponse?], error: any Error = NSError(domain: "test", code: 500)) {
         self.script = script
@@ -106,13 +90,12 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
     func cancelCapture() {}
 }
 
+/// @unchecked: no stored state.
 final class UnavailableScreen: ScreenCapturing, @unchecked Sendable {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
     func cancelCapture() {}
 }
 
-/// A screen whose `capture()` parks until released. Cancellation releases it through the same
-/// adapter boundary production uses to terminate `screencapture`.
 final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     let entered = DispatchSemaphore(value: 0)
     let release = DispatchSemaphore(value: 0)
@@ -132,8 +115,7 @@ final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     }
 }
 
-/// A cancelled capture acknowledges the stop request but holds its final helper/file cleanup until
-/// the test releases it. This distinguishes requesting cancellation from awaiting cleanup.
+/// @unchecked: counts are guarded by `lock`, and the semaphores are thread-safe.
 final class HeldCleanupScreen: ScreenCapturing, @unchecked Sendable {
     let entered = DispatchSemaphore(value: 0)
     let cancellationRequested = DispatchSemaphore(value: 0)
@@ -217,9 +199,7 @@ private actor FinishTrackingConversation: BrainConversation {
 }
 
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
-    /// One entry per `render` call: the lines the brain returned, passed straight through (no splitting).
     var rendered: [[String]] = []
-    /// The per-line display times passed alongside each `render` call (length-scaled by the driver).
     var renderedSeconds: [[TimeInterval]] = []
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
         rendered.append(lines)
@@ -227,17 +207,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 }
 
-// Each test that reads activity owns the `ActivityLog` it hands its driver, so a snapshot holds
-// that test's rows and nothing else. Being the only suite that *enables* the shared log was never
-// enough on its own: every driver alive anywhere in the process appended to whichever log happened
-// to be enabled, so a peer suite's rows landed in these snapshots.
-// Serialized for the same reason as CoachDriverManualHintTests: the two tests here that use
-// `GatedScreen` / `HeldCleanupScreen` park their `capture()` until the test releases it, and the
-// driver runs that capture on a `Task.detached`, holding a cooperative-pool thread for the whole
-// park. Three such tests exist in the repository and a CI runner has three pool threads, so
-// overlapping parks can starve every release path. Cap this suite at one at a time. One case also
-// installs a process-global `JarvisLog` attachment and holds `JarvisLogAttachmentLock` for it, since
-// `.serialized` alone does not protect against the other suites that do the same.
+// Serialized: a parked GatedScreen or HeldCleanupScreen capture holds a cooperative-pool thread,
+// and a CI runner has only three, so overlapping parks can starve every release path.
 @Suite(.serialized) struct CoachDriverPipelineTests {
     private func makeDriver(activity: (any ActivityEventRecording)? = nil,
                             brain: BrainClient, brainProvider: BrainProvider? = nil,
@@ -319,8 +290,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     private func waitUntilRouteReportsExhaustion(_ driver: CoachDriver) async -> Bool {
-        // Yield counts are not a deadline: CI can finish the loop before the provider resumes.
-        // Wait for the committed state without admitting another coaching trigger.
+        // Poll committed state, not yields: CI can finish yielding before the provider resumes.
         await waitUntilAsync { driver.takeBrainSelectionStep().alreadyExhausted }
     }
 
@@ -342,18 +312,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         #expect(screen.captureCount == 1)
         #expect(overlay.rendered == [["What's the complexity of that nested loop?"]])
-        // The driver must hand the overlay length-scaled per-line durations, not a constant — one
-        // entry per line, each = OverlayTiming.displaySeconds for that line under the active config.
         let expectedSeconds = OverlayTiming.displaySeconds(
             for: "What's the complexity of that nested loop?", config: .default)
         #expect(overlay.renderedSeconds == [[expectedSeconds]])
         #expect(brain.calls.count == 2)
-        // Second brain call must replay the model's own capture call, the tool-result answering it,
-        // and the screenshot image — the client-managed tool loop (no server-side conversation).
         #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls?.first?.name == "capture_screen" })
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "c1" })
         #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
-        // No OCR text on this snapshot → the tool result stays the plain marker.
         #expect(brain.calls[1].first { $0.role == .tool }?.text == "screenshot captured")
         #expect(brain.requestContexts.compactMap { $0 }.map(\.phase) == [
             .initial, .captureScreenContinuation,
@@ -361,9 +326,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(Set(brain.requestContexts.compactMap { $0 }.map(\.attemptID)).count == 1)
     }
 
-    /// D2 (OCR sidecar): when the capture carries recognized text, it rides in the capture_screen
-    /// tool-result text — flagged as fallible OCR — right next to the image, so the model reads
-    /// the exact code instead of deciphering pixels.
     @Test func recognizedTextRidesInTheCaptureToolResult() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
@@ -381,17 +343,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let toolResult = brain.calls[1].first { $0.role == .tool && $0.toolCallId == "c1" }?.text ?? ""
         #expect(toolResult.contains("screenshot captured"))
-        #expect(toolResult.contains("while(true){ cnt--; }"))     // the OCR text, verbatim
-        #expect(toolResult.contains("may misread tokens"))         // …flagged as fallible
-        #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })   // image still ground truth
+        #expect(toolResult.contains("while(true){ cnt--; }"))
+        #expect(toolResult.contains("may misread tokens"))
+        #expect(brain.calls[1].contains { $0.imageBase64JPEG != nil })
     }
 
-    /// End-to-end: a real capture→speak turn through the production `CoachDriver` with the activity
-    /// log enabled (as it is for every session). Proves the screenshot the model looked at lands in
-    /// the activity log as a genuine, owner-only JPEG rendered as a clickable thumbnail linked to
-    /// the full image — the behaviour verified by hand, now automated against regressions.
-    ///
-    /// This drives a test-owned `ActivityLog` through the real typed activity-event path.
     @Test func screenshotLandsInActivityLogAsValidJpeg() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-e2e-\(ProcessInfo.processInfo.globallyUniqueString)")
@@ -407,38 +363,28 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
                                              argumentsJSON: #"{"lines":["Watch the off-by-one there."]}"#)]),
         ])
-        let screen = FakeScreen(payload: TestFixtures.tinyJpegBase64)   // a real JPEG, like screencapture
+        let screen = FakeScreen(payload: TestFixtures.tinyJpegBase64)
         let (driver, transcript) = makeDriver(
             activity: evidence, brain: brain, screen: screen, clock: clock)
         transcript.append(.init(speaker: .me, text: "here's my solution", at: 100))
 
         await driver.handleTrigger(.turnEnd)
 
-        // attach() runs on the activity log's serial queue (a sync barrier after the async record()
-        // calls), so everything is persisted before we assert.
-        _ = await evidence.close()
+        _ = await evidence.close()   // barrier: drains this session's accepted rows
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
-        #expect(jsonl.contains("looking at your screen"))   // the capture line
-        #expect(jsonl.contains("shot-"))                     // line references the saved screenshot
+        #expect(jsonl.contains("looking at your screen"))
+        #expect(jsonl.contains("shot-"))
 
-        // Match the fixture byte for byte rather than taking the first valid JPEG, so this asserts
-        // on the image the capture actually persisted. This proves the capture
-        // round-tripped to disk unchanged. Then assert it's owner-only.
         let shots = try FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
             .filter { $0.lastPathComponent.hasPrefix("shot-") && $0.pathExtension == "jpg" }
         let shot = try #require(try shots.first { try Data(contentsOf: $0) == TestFixtures.tinyJpeg },
                                 "expected our screenshot (byte-exact) in the activity log dir")
-        // Sanity: the matched bytes really are a JPEG (SOI/EOI markers intact).
         let bytes = try Data(contentsOf: shot)
         #expect(bytes.prefix(2) == Data([0xFF, 0xD8]) && bytes.suffix(2) == Data([0xFF, 0xD9]))
         let perms = try FileManager.default.attributesOfItem(atPath: shot.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
     }
 
-    /// A hotkey trigger leaves no "🗣 heard:" transcript line (the user pressed a key, didn't speak),
-    /// so the manual hint must record its OWN activity line — including the synthetic message we
-    /// pre-fill as the user's request — so the viewer shows what the shortcut sent to the brain.
-    /// Drives a test-owned `ActivityLog` like the screenshot e2e above.
     @Test func manualHintTriggerAndPrefilledMessageLandInActivityLog() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-hintlog-\(ProcessInfo.processInfo.globallyUniqueString)")
@@ -456,19 +402,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         _ = await evidence.close()   // barrier: drains this session's accepted rows
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
-        // The trigger marker carries the pre-filled synthetic request ("…pressed the hint shortcut…").
         #expect(jsonl.contains("hint shortcut"))
     }
 
-    /// The activity viewer is the human coaching record, not a second debug console. Internal turn
-    /// state still belongs in `jarvis-debug.log`, while the tip produced by that turn remains visible.
     @Test func activityLogExcludesCoachingDiagnostics() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-activity-boundary-\(ProcessInfo.processInfo.globallyUniqueString)")
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        // Diagnostics and Activity now share this session's one evidence handle, so both files are
-        // read after sealing it rather than immediately after the turn. Sharing a stack is exactly
-        // what makes this boundary worth pinning: the two projections must still stay separate.
         let (activityLog, evidence) = ActivityLog.recordingSession(in: dir)
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
         try await JarvisLogAttachmentLock.withExclusiveAttachment {
@@ -540,9 +480,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let task = Task { await driver.handleTrigger(.turnEnd) }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
-            DispatchQueue.global().async { screen.entered.wait(); cont.resume() }   // capture in flight
+            DispatchQueue.global().async { screen.entered.wait(); cont.resume() }
         }
-        task.cancel()                                         // Stop requests capture cancellation
+        task.cancel()
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             DispatchQueue.global().async {
                 screen.cancellationRequested.wait()
@@ -568,15 +508,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(releasedAfterCaptureCleanup)
 
         #expect(await task.value == .cancelled)
-        #expect(screen.captureCount == 1)        // captured once...
-        #expect(screen.cancelCount == 1)         // ...and cancelled through the capture adapter
-        #expect(overlay.rendered.isEmpty)        // ...but never rendered a tip after Stop
-        #expect(await brain.recordedCallCount() == 1) // and never looped back with the image
+        #expect(screen.captureCount == 1)
+        #expect(screen.cancelCount == 1)
+        #expect(overlay.rendered.isEmpty)
+        #expect(await brain.recordedCallCount() == 1)
     }
 
-    /// A `speak` with an empty `lines` array (the decode fallback, or a model returning []) is passed
-    /// straight through: the real overlay no-ops on it, but the turn still reports `.spoke`. Pin this
-    /// so the empty-speak contract stays intentional, not incidental.
     @Test func emptySpeakLinesStillReportsSpoke() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: [])])])
@@ -587,10 +524,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(overlay.rendered == [[]])
     }
 
-    /// The model's explicit stay-quiet decision is the `stay_silent` TOOL (tool_choice is `required`,
-    /// so free-text silence can't leak into stored context): it renders nothing, reports
-    /// `.silentByModel`, and leaves NO trace in the session memory — the next request carries the
-    /// prior speech but neither the call nor any tool message for it.
     @Test func staySilentToolRendersNothingAndLeavesNoTrace() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet1")],
@@ -604,13 +537,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "maybe a map of columns", at: 5))
         await driver.handleTrigger(.turnEnd)
         let second = brain.calls[1]
-        #expect(second.contains { ($0.text ?? "").contains("thinking about the columns") })  // memory kept
-        #expect(!second.contains { $0.role == .assistant && $0.toolCalls != nil })           // no call replayed
-        #expect(!second.contains { $0.role == .tool })                                       // no dangling result
+        #expect(second.contains { ($0.text ?? "").contains("thinking about the columns") })
+        #expect(!second.contains { $0.role == .assistant && $0.toolCalls != nil })
+        #expect(!second.contains { $0.role == .tool })
     }
 
-    /// `stay_silent` is a real brain action. It stays out of model memory, but it belongs in the
-    /// human-facing Activity record so a healthy no-op cannot look like a stalled brain.
     @Test func staySilentActionLandsInActivityLog() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-silent-action-\(ProcessInfo.processInfo.globallyUniqueString)")
@@ -634,8 +565,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(snapshot.rows[0].contains("stayed silent"))
     }
 
-    /// A failed `capture_screen` records the action and fixed recovery guidance before the model
-    /// makes its terminal choice.
     @Test func failedScreenActionAndStaySilentBothLandInActivityLog() async throws {
         let dir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-failed-screen-action-\(ProcessInfo.processInfo.globallyUniqueString)")
@@ -665,9 +594,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(snapshot.rows[1].contains("stayed silent"))
     }
 
-    /// A silence check the model shrugs at (stay_silent, nothing new said) leaves NO trace in the
-    /// session memory: committing its bare trigger note would pile up answerless user messages,
-    /// re-billed on every later request and confusing to read back in the request log.
     @Test func silentSilenceCheckLeavesNoTriggerNoteInHistory() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "q1")],
@@ -677,12 +603,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
         await driver.handleTrigger(.turnEnd)
-        // Scoped to user messages: the system prompt legitimately shows a "(no speech for …)" example.
+        // Only user messages: the system prompt legitimately contains a "no speech for" example.
         #expect(!brain.calls[1].contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
     }
 
-    /// But a silence check where the model DID look at the screen keeps the whole turn in memory —
-    /// the capture (and the note that prompted it) is context a later turn can build on.
     @Test func silenceCheckWithCaptureIsKeptInHistory() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedThrowBrain(script: [
@@ -698,12 +622,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
         await driver.handleTrigger(.turnEnd)
         let last = brain.calls.last!
-        #expect(last.contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })   // the note survives
-        #expect(last.contains { $0.role == .tool && $0.toolCallId == "c1" })                        // with its capture
+        #expect(last.contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
+        #expect(last.contains { $0.role == .tool && $0.toolCallId == "c1" })
     }
 
-    /// A complete response that ignores `tool_choice: required` is a failed attempt, not a
-    /// deliberate silence decision.
     @Test func noToolCallsEndCycleAfterThreeAttemptsWithoutRendering() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: Array(repeating: .init(toolCalls: []), count: 4)
@@ -718,8 +640,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     // MARK: - The substance gate: clear hesitation sounds never buy a brain request
 
-    /// A turn-end whose whole delta is clear hesitation sounds — from EITHER speaker — is skipped
-    /// without a request: those sounds can't produce a tip, and the call would only re-bill context.
     @Test func fillerOnlyTurnEndSkipsTheBrain() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -756,8 +676,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(jsonl.contains(#""terminal":"skipped_filler""#))
     }
 
-    /// Several clear hesitation sounds in one transcription completion are still one filler-only
-    /// turn and do not buy a request.
     @Test func compositeFillerTurnEndSkipsTheBrain() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
@@ -769,8 +687,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.isEmpty)
     }
 
-    /// The gate is speaker-NEUTRAL: an interviewer question is substance and reaches the brain — the
-    /// prompt lets the model offer the user a proactive tip for answering it.
     @Test func interviewerQuestionReachesTheBrain() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Walk through your loop out loud."])])])
@@ -781,8 +697,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)
     }
 
-    /// Context-dependent short replies remain substantive for either speaker, including when the
-    /// transcriber combines one with a clear hesitation sound.
     @Test func contextDependentTerseRepliesReachTheBrainForEitherSpeaker() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
@@ -799,8 +713,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(userText.contains("Yes. Hmm."))
     }
 
-    /// Uppercase tokens that spell like hesitation sounds can be variables or acronyms. They must
-    /// reach the brain rather than being permanently consumed at the transcript boundary.
     @Test func acronymLikeShortUtterancesReachTheBrain() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
@@ -817,7 +729,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(userText.contains("[00:02] me: M"))
     }
 
-    /// An empty-delta turn-end (fragments already sent last turn) is skipped the same way.
     @Test func emptyDeltaTurnEndSkipsTheBrain() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -828,8 +739,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.isEmpty)
     }
 
-    /// Activity has already retained finalized speech, so a locally skipped filler line is consumed
-    /// and does not inflate the next substantive request.
     @Test func skippedFillerDoesNotRideAlongOnTheNextTurn() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -846,7 +755,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(userText.contains("I'd check both neighbors at that height"))
     }
 
-    /// A clear hesitation sound beside real speech remains in Activity but is removed from input.
     @Test func mixedDeltaSendsOnlySubstantiveLines() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
@@ -862,8 +770,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(userText.contains("How would you test that?"))
     }
 
-    /// Silence wake-ups are NOT gated: with nothing new said, the model may still want to look at the
-    /// screen and nudge — the gate applies to turn-ends only.
     @Test func silenceTriggerStillReachesTheBrainWithoutNewSpeech() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -874,8 +780,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)
     }
 
-    /// A filler wake after a failed silence attempt has no new value to send. It consumes the
-    /// transcript boundary instead of starting a fresh provider request with an empty user message.
     @Test func fillerWakeAfterFailedSilenceSkipsEmptyFreshAttempt() async {
         let gate = AsyncGate()
         let brain = GatedFailureThenSpeakingBrain(gate: gate)
@@ -898,8 +802,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     // MARK: - Client-managed session memory (CoachHistory)
 
-    /// The next request carries the whole prior turn: the user's words, the model's `speak` call, and
-    /// the tool-result closing it — continuity without any server-side conversation.
     @Test func historyCarriesPriorTurnToNextRequest() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -917,8 +819,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(second.contains { $0.role == .tool && $0.toolCallId == "spk1" })
     }
 
-    /// Changing provider/model is a model-layer swap, not a new coaching session: the replacement
-    /// receives the existing client-managed history plus only the transcript delta it has not seen.
     @Test func brainUpdateAppliesToNextTurnWithoutLosingHistory() async {
         let clock = ManualClock(now: 0)
         let firstBrain = ScriptedBrain(script: [
@@ -948,8 +848,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(replacementContext.contains { $0.role == .tool && $0.toolCallId == "old" })
     }
 
-    /// One capture/tool loop is one provider transaction. A switch during its first request waits
-    /// for the next turn instead of sending the captured result to a different provider/model.
     @Test func brainUpdateDoesNotSplitAnInFlightToolLoop() async {
         let clock = ManualClock(now: 0)
         let gate = AsyncGate()
@@ -982,8 +880,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(nextBrain.calls.count == 1)
     }
 
-    /// A manual hint starts before its detached screenshot finishes. Settings changes during that
-    /// capture belong to the next turn; the captured hint must finish on its original provider.
     @Test func brainUpdateDuringManualHintCaptureAppliesToNextTurn() async {
         let clock = ManualClock(now: 0)
         let screen = GatedScreen()
@@ -1207,14 +1103,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedFallback.calls.count == 1)
     }
 
-    /// Regression: a route notice belongs to the callback it was committed against. A client
-    /// refresh landing after the commit but before the delivery crosses to the main actor may
-    /// neither redirect the notice onto the replacement callback nor drop it.
-    ///
-    /// The commit and the delivery are driven directly because that is the only way to sit inside
-    /// that window. Under `handleTrigger` the two are adjacent within a single task with nothing
-    /// observable in between, so a test can only guess when the commit landed — and a guess that
-    /// lands early silently asserts nothing while a guess that lands late fails for no reason.
+    /// Drives commit and delivery directly: under `handleTrigger` they are adjacent, leaving no
+    /// observable window for the refresh to land in.
     @Test func aCommittedSkipIsDeliveredToTheCallbackItWasCommittedAgainst() async throws {
         let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
@@ -1259,8 +1149,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedSkip.targets.isEmpty)
     }
 
-    /// The paired transition commits the target the route left behind together with the callback
-    /// live at that moment, so the same refresh window must not redirect or drop it either.
     @Test func aCommittedAdvanceIsDeliveredToTheCallbackItWasCommittedAgainst() async throws {
         let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
@@ -1286,8 +1174,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
 
-        // The first step skips the unavailable head and remembers where the route came from; the
-        // second commits the transition onto the target that can actually run.
+        // The first step skips the unavailable head; only the second commits the advance.
         _ = driver.takeBrainSelectionStep()
         let committed = try #require(driver.takeBrainSelectionStep().advanced)
         #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(
@@ -1310,9 +1197,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedAdvance.events.isEmpty)
     }
 
-    /// The other half of the contract, driven end to end: a refresh raised from inside the notice
-    /// itself must not repeat that notice on the replacement callback, and the attempt that
-    /// follows must run on the replacement client rather than the one the route started with.
     @Test func refreshingClientsDuringASkipRetargetsOnlyTheFollowingAttempt() async {
         let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
@@ -1363,9 +1247,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(refreshedAvailable.calls.count == 1)
     }
 
-    /// The same shape around a transition. The selection committed alongside the advance is stale
-    /// once the refresh bumps the route revision, so it must be discarded and re-taken against the
-    /// replacement client instead of running the client the route had already chosen.
     @Test func refreshingClientsDuringAnAdvanceRetargetsOnlyTheFollowingAttempt() async {
         let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
         let availableTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
@@ -1808,9 +1689,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!fallbackRequest.contains { $0.toolCalls != nil })
     }
 
-    /// A completed screen observation is useful context for a fresh attempt even when the only new
-    /// speech is filler. Send the observation directly: do not recapture, replay raw tool state, or
-    /// manufacture an empty/synthetic speech message.
     @Test func savedObservationStartsFreshAttemptWithoutEmptySpeech() async throws {
         let gate = AsyncGate()
         let brain = CaptureThenGatedFailureThenSpeakingBrain(gate: gate)
@@ -1937,8 +1815,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)
 
         await delayGate.release()
-        // Give a broken retry a bounded chance to make the forbidden second call. While `.them`
-        // remains active, the pending attempt must stay parked instead.
+        // A bounded wait gives a broken retry the chance to make the forbidden second call.
         #expect(!(await waitUntil {
             brain.calls.count == 2
         }))
@@ -2037,8 +1914,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 1)
 
         await delayGate.release()
-        // A broken manual-hint retry would make its second call while `.them` is still active.
-        // Keep transcription unsettled long enough to prove the retry reached the settlement gate.
+        // A bounded wait gives a broken retry the chance to call while `.them` is still active.
         #expect(!(await waitUntil {
             brain.calls.count == 2
         }))
@@ -2075,10 +1951,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let allText = brain.calls[1].compactMap(\.text).joined(separator: "\n")
         #expect(allText.contains("maybe a hash map"))
         let occurrences = allText.components(separatedBy: "two sum brute force").count - 1
-        #expect(occurrences == 1)   // in history once; NOT re-sent as a new delta
+        #expect(occurrences == 1)
     }
 
-    /// Speech is not committed by a failed attempt, so the automatic fresh attempt rebuilds it.
     @Test func unsentSpeechIsRebuiltByAutomaticAttempt() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedThrowBrain(script: [
@@ -2089,17 +1964,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "important words", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(brain.calls.count == 2)
-        #expect(brain.calls.last!.contains { ($0.text ?? "").contains("important words") })   // re-sent
+        #expect(brain.calls.last!.contains { ($0.text ?? "").contains("important words") })
         let provenance = brain.requestContexts.compactMap { $0 }
         #expect(provenance.map(\.trigger) == ["turn_end", "pending_work"])
         #expect(provenance.map(\.sourceTrigger) == ["turn_end", "turn_end"])
         #expect(provenance.map(\.phase) == [.initial, .initial])
     }
 
-    /// Reasoning passthrough: a capture_screen response's WHOLE output (reasoning + the function_call
-    /// with its item id) rides verbatim into the tool loop's next request, ahead of the tool result —
-    /// the canonical `input.push(...response.output)` loop. Commit converts it: the next turn's
-    /// request carries the id-less synthetic call instead, and no reasoning.
     @Test func reasoningItemsRideTheToolLoopButNotMemory() async {
         let outputItems = [
             #"{"type":"reasoning","id":"rs_1"}"#,
@@ -2119,27 +1990,21 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "another thought", at: 5))
         await driver.handleTrigger(.turnEnd)
 
-        // Within the turn: one verbatim passthrough message, whole and in order, before the result.
         let second = brain.calls[1]
         let rawIndex = second.firstIndex { $0.rawItemsJSON != nil }
         let resultIndex = second.firstIndex { $0.role == .tool && $0.toolCallId == "c1" }
         #expect(rawIndex != nil && resultIndex != nil)
         if let r = rawIndex, let t = resultIndex { #expect(r < t) }
         #expect(second.first { $0.rawItemsJSON != nil }?.rawItemsJSON == outputItems)
-        #expect(!second.contains { $0.toolCalls?.contains { $0.name == "capture_screen" } ?? false })   // no duplicate synthetic call
+        #expect(!second.contains { $0.toolCalls?.contains { $0.name == "capture_screen" } ?? false })
 
-        // After commit: reasoning gone, the call converted to the id-less synthetic history shape.
         let third = brain.calls[2]
         #expect(!third.contains { $0.rawItemsJSON != nil })
         #expect(third.contains { $0.toolCalls == [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")] })
     }
 
-    /// Observation masking: a screenshot only lives within the turn that took it — once the turn
-    /// commits, later requests carry a text stub instead of pixels.
     @Test func screenshotsStubbedAfterTheirTurnCommits() async {
         let clock = ManualClock(now: 0)
-        // Every turn: capture then speak. ScriptedBrain repeats the last entry, so we script one
-        // capture+speak pair and run it twice, then inspect the request of a third turn.
         let brain = ScriptedThrowBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
@@ -2160,14 +2025,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await driver.handleTrigger(.turnEnd)
 
         let last = brain.calls.last!
-        #expect(!last.contains { $0.imageBase64JPEG != nil })                            // no pixels survive
-        #expect(last.filter { ($0.text ?? "").contains("no longer available") }.count == 2)   // a stub each
+        #expect(!last.contains { $0.imageBase64JPEG != nil })
+        #expect(last.filter { ($0.text ?? "").contains("no longer available") }.count == 2)
     }
 
     // MARK: - Compaction
 
-    /// Past the threshold, the oldest span of memory is replaced by the summarizer's briefing; a
-    /// later request opens with the condensed block instead of the raw early turns.
     @Test func historyCompactsIntoSummaryPastThreshold() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -2177,13 +2040,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 30))
         transcript.append(.init(speaker: .me, text: String(repeating: "the problem statement goes on ", count: 8), at: 0))
-        await driver.handleTrigger(.turnEnd)   // one long message — nothing to split yet
+        await driver.handleTrigger(.turnEnd)
         transcript.append(.init(speaker: .me, text: "and some more detail about the grid", at: 1))
-        await driver.handleTrigger(.turnEnd)   // a second message pushes past the threshold → compaction
+        await driver.handleTrigger(.turnEnd)
 
-        // Compaction runs off the attempt path, and the summarizer's call count only proves the
-        // request was dispatched — the summary is applied later, after that call returns. Drive
-        // turns until the condensed block reaches a request rather than assuming a fixed one does.
+        // The summary lands asynchronously after the summarizer returns, so poll with turns.
         var condensed = ""
         for turn in 0..<20 where condensed.isEmpty {
             transcript.append(.init(speaker: .me, text: "next idea \(turn)", at: 5 + Double(turn)))
@@ -2192,16 +2053,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             if latest.contains("PROBLEM: tic-tac-toe columns.") { condensed = latest }
         }
 
-        // The summarizer wrote it, not the coach brain. Later turns may compact again as history
-        // regrows, so this is a floor rather than an exact count.
+        // A floor: later turns may compact again as history regrows.
         #expect(summarizer.calls.count >= 1)
         #expect(condensed.contains("condensed"))
         #expect(condensed.contains("PROBLEM: tic-tac-toe columns."))
-        #expect(!condensed.contains("the problem statement goes on"))   // raw early turn replaced
+        #expect(!condensed.contains("the problem statement goes on"))
         await driver.cancelBackgroundWork()?.value
     }
 
-    /// Compaction fails soft: if the summarizer errors, the full history simply rides along.
     @Test func compactionFailureKeepsFullHistory() async {
         let clock = ManualClock(now: 0)
         let recorder = RouteFailureRecorder()
@@ -2217,17 +2076,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "next thought", at: 5))
         await driver.handleTrigger(.turnEnd)
         let second = brain.calls[1].compactMap(\.text).joined(separator: "\n")
-        #expect(second.contains("a reasonably long problem statement to remember"))   // nothing lost
-        #expect(recorder.failures.isEmpty)   // auxiliary failure never enters route health
-        // Compaction runs off the attempt path, so confirm the failing path was actually exercised
-        // rather than silently skipped — the history assertion above would hold either way.
+        #expect(second.contains("a reasonably long problem statement to remember"))
+        #expect(recorder.failures.isEmpty)
+        // The checks above also pass if compaction never ran, so confirm the summarizer was called.
         #expect(await waitUntilAsync { summarizer.calls.count >= 1 })
         await driver.cancelBackgroundWork()?.value
     }
 
-    /// Compaction is auxiliary and must never hold the coaching slot. A summary still being written
-    /// cannot delay the attempt that triggered it: otherwise every compaction spends its whole
-    /// budget as dead air, and speech arriving meanwhile batches behind it instead of being coached.
     @Test func compactionDoesNotBlockTheAttempt() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -2245,17 +2100,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             await driver.handleTrigger(.turnEnd)
         }
 
-        // The attempt completed…
         #expect(outcome == .silentByModel)
-        // …while the summarizer was still parked, never having been released.
         #expect(await waitUntilAsync { await gate.hasEntered })
         await gate.release()
         await driver.cancelBackgroundWork()?.value
     }
 
-    /// Compaction runs off the attempt path, so the turn box that Stop cancels does not own it.
-    /// Session teardown must cancel and drain it itself, or a summary keeps a provider process alive
-    /// and billing after the user stopped, and can still be writing when the audit seals.
     @Test func sessionTeardownCancelsAndDrainsCompaction() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -2271,13 +2121,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await driver.handleTrigger(.turnEnd)
         #expect(await waitUntilAsync { await gate.hasEntered })
 
-        // Teardown hands back the in-flight pass so the caller can drain it.
         let drained = driver.cancelBackgroundWork()
         #expect(drained != nil)
         await gate.release()
         await drained?.value
 
-        // The cancelled summary never reached history: the next request still carries the raw turns.
         transcript.append(.init(speaker: .me, text: "third thought", at: 9))
         await driver.handleTrigger(.turnEnd)
         let third = brain.calls[2].compactMap(\.text).joined(separator: "\n")
@@ -2303,7 +2151,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
     }
 
-    /// No cooldown: two back-to-back substantive turns both reach the brain and both speak.
     @Test func consecutiveTurnsBothReachBrain() async {
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["first"])])])
@@ -2312,12 +2159,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 100))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         transcript.append(.init(speaker: .me, text: "second idea about the rows", at: 101))
-        #expect(await driver.handleTrigger(.turnEnd) == .spoke)   // immediately again — not held back
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 2)
         #expect(overlay.rendered.count == 2)
     }
 
-    /// Incomplete output never renders, even across an outage longer than the fallback threshold.
     @Test func incompleteResponsesEndCycleWithoutRenderingPartialOutput() async {
         let brain = ScriptedBrain(script: Array(repeating:
             .init(toolCalls: [], rawToolCalls: [], incompleteReason: "max_output_tokens"), count: 4)
@@ -2330,12 +2176,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(overlay.rendered.isEmpty)
     }
 
-    /// Each exhausted tool loop becomes a fresh attempt without rendering unfinished work, until the
-    /// only target spends its failure budget.
     @Test func repeatedToolLoopExhaustionEndsCycle() async {
-        // `CoachAttemptRunner.maxToolIterations` responses per attempt, three attempts before a
-        // target is exhausted. The trailing stay_silent is never reached: that it goes unused is
-        // what proves every attempt died on the loop bound rather than finishing.
+        // `CoachAttemptRunner.maxToolIterations` times the three attempts a target gets.
         let boundedResponses = 7 * 3
         let brain = ScriptedBrain(script: Array(repeating:
             .init(toolCalls: [.captureScreen(callId: "c")],
@@ -2350,9 +2192,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 
     @Test func freshAttemptCarriesOnlyTheLatestScreenObservation() async {
-        // Exactly one attempt's worth of captures (`CoachAttemptRunner.maxToolIterations`), so the
-        // speak below is the FIRST request of a fresh attempt — which is the case under test: that
-        // request carries the single latest screen observation, never an accumulation of them.
+        // `CoachAttemptRunner.maxToolIterations`, so the speak opens a fresh attempt.
         let responsesPerAttempt = 7
         let captures = (0..<responsesPerAttempt).map { index in
             BrainResponse(
@@ -2606,14 +2446,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(recorder.failures.first?.message == "invalid key")
     }
 
-    /// The deadline belongs to the streak's first failed cycle, but the session end reports the
-    /// streak's latest cause through its own reason rather than route exhaustion.
     @Test func failedCycleDeadlineEndsSessionWithTheLatestFailure() async {
         let clock = ManualClock()
         let deadline = AsyncGate()
         let expired = RouteFailureRecorder()
         let exhausted = RouteFailureRecorder()
-        // The first cycle throws; every later attempt returns no tool call, a different failure.
         let brain = ScriptedThrowBrain(
             script: [nil, nil, nil, .init(toolCalls: [])],
             error: brainFailure(.temporary, "first outage"))
@@ -2636,8 +2473,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls.count == 6)
     }
 
-    /// Idle time is not an outage. The first failure after a long quiet stretch keeps the session
-    /// and starts a full ceiling of its own.
     @Test func firstFailureAfterLongQuietKeepsTheSession() async {
         let clock = ManualClock()
         let delays = RecoveryDelayProbe()
@@ -2872,8 +2707,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!freshAttemptUserText.contains("no speech for"))
     }
 
-    /// Audio-driven turns REQUIRE a tool call (never free text): the model picks which tool from the
-    /// prompt — reply, look at the screen, or stay_silent — but must answer with one of them.
     @Test func everyAudioTurnRequiresAToolCall() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["hi"])])])
@@ -2883,27 +2716,23 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.toolChoices.last == .required)
     }
 
-    /// While one turn is in flight, a second concurrent trigger must be reported as `.busy` AND
-    /// coalesced: the running turn picks it up and runs it too, so nothing is dropped.
     @Test func concurrentTriggerIsBusyThenCoalesced() async {
         let clock = ManualClock(now: 0)
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", lines: ["hi"])]))
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
         transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 0))
-        async let first = driver.handleTrigger(.turnEnd)   // parks in the brain call, holds the slot
+        async let first = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
         transcript.append(.init(speaker: .me, text: "second idea about the rows", at: 1))
-        let second = await driver.handleTrigger(.turnEnd)  // busy → queued as pending
+        let second = await driver.handleTrigger(.turnEnd)
         #expect(second == .busy)
         await gate.release()
         _ = await first
-        #expect(brain.callCount >= 2)                      // the original AND the coalesced turn ran
+        #expect(brain.callCount >= 2)
     }
 
-    /// The settling speaker's delayed transcript-batch callback can arrive after a parked attempt has
-    /// already admitted and included that speaker's final line. Its boundary identifies the callback
-    /// as already consumed, so it cannot buy a duplicate request.
+    /// A delayed transcript callback lands after the parked attempt already sent its line.
     @Test func deferredTurnForCommittedTranscriptDoesNotStartAnotherAttempt() async {
         let gate = AsyncGate()
         let brain = GatedBrain(
@@ -2927,8 +2756,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     }
 }
 
-/// Synchronous on purpose: it holds main-actor delivery at a deterministic point while the test
-/// advances the provider revision from another executor.
+/// Synchronous on purpose: blocking the main actor holds route delivery at a deterministic point.
 @MainActor
 private func blockMainActor(entered: DispatchSemaphore, release: DispatchSemaphore) {
     entered.signal()
@@ -2998,7 +2826,7 @@ private final class CoachDriverHolder: @unchecked Sendable {
     }
 }
 
-/// A brain that always throws, to exercise the `.brainError` outcome.
+/// @unchecked: all mutable state is guarded by `lock`.
 final class ThrowingBrain: BrainClient, @unchecked Sendable {
     private let lock = NSLock()
     private let error: Error
@@ -3023,8 +2851,7 @@ final class ThrowingBrain: BrainClient, @unchecked Sendable {
     }
 }
 
-/// A permanent failure parked behind an async gate so tests can commit route exhaustion while the
-/// main actor is deliberately occupied. `lock` guards the observable call count.
+/// @unchecked: `lock` guards the call count.
 private final class GatedThrowingBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let error: Error
@@ -3051,8 +2878,7 @@ private final class GatedThrowingBrain: BrainClient, @unchecked Sendable {
     }
 }
 
-/// Two temporary failures establish a near-exhausted sequence, then a successful third request
-/// parks so the runtime clients can be refreshed before the completion is recorded.
+/// @unchecked: `lock` guards the call count.
 private final class TwoFailuresThenGatedSuccessBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let lock = NSLock()
@@ -3085,8 +2911,7 @@ private final class TwoFailuresThenGatedSuccessBrain: BrainClient, @unchecked Se
     }
 }
 
-/// Two temporary failures establish a near-exhausted sequence, then a third failure parks so a
-/// same-topology effort reconfiguration can happen before that valid attempt outcome is recorded.
+/// @unchecked: `lock` guards the call count.
 private final class TwoFailuresThenGatedFailureBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let lock = NSLock()
@@ -3128,9 +2953,7 @@ final class RouteFailureRecorder: @unchecked Sendable {
     func record(_ failure: ProviderFailure) { lock.lock(); recorded.append(failure); lock.unlock() }
 }
 
-/// A provider times out on the first turn, then the same conversation succeeds on the next trigger.
-/// `@unchecked Sendable` is safe because `CoachDriver` awaits one `respond` call at a time, so this
-/// test double's `calls` array is never accessed concurrently.
+/// @unchecked: `CoachDriver` awaits one `respond` at a time, so `calls` never races.
 final class TimeoutThenSpeakingBrain: BrainClient, @unchecked Sendable {
     private(set) var calls: [[ChatMessage]] = []
 
@@ -3153,8 +2976,7 @@ final class TimeoutThenSpeakingBrain: BrainClient, @unchecked Sendable {
     }
 }
 
-/// A brain that parks inside `respond` until released, so a second concurrent trigger can be
-/// observed hitting the single-in-flight guard.
+/// @unchecked: all mutable state is guarded by `lock`.
 final class GatedBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let script: [BrainResponse]
@@ -3179,9 +3001,7 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
     }
 }
 
-/// A temporary first failure with a parked request, followed by success. This proves the driver's
-/// coalesced trigger—not only a later external trigger—keeps the conversation alive.
-/// `@unchecked Sendable` is safe because `recordedCalls` is always accessed through `NSLock`.
+/// @unchecked: `recordedCalls` is only accessed under `lock`.
 final class GatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let lock = NSLock()
@@ -3212,8 +3032,7 @@ final class GatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
     }
 }
 
-/// Captures once, then parks and fails the continuation request. The next call belongs to a fresh
-/// attempt and lets tests inspect exactly which provider-neutral context survives.
+/// @unchecked: `recordedCalls` is only accessed under `lock`.
 final class CaptureThenGatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let lock = NSLock()
@@ -3256,11 +3075,7 @@ final class CaptureThenGatedFailureThenSpeakingBrain: BrainClient, @unchecked Se
     }
 }
 
-/// A summarizer that parks mid-summary, so a test can observe the triggering attempt completing
-/// without it.
-///
-/// `@unchecked Sendable` is safe because `calls` is only ever touched under `lock`; the detached
-/// compaction task and the polling test task would otherwise race on it.
+/// @unchecked: `lock` guards `calls` against the detached compaction task and the polling test.
 private final class GatedSummarizer: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let summary: String
@@ -3277,8 +3092,8 @@ private final class GatedSummarizer: BrainClient, @unchecked Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef],
                  toolChoice: ToolChoice) async throws -> BrainResponse {
         lock.withLock { calls += 1 }
-        // Release on cancellation so a regression fails the test instead of hanging it: `AsyncGate`
-        // parks on a plain continuation, which a cancelled enclosing task group would wait on forever.
+        // Release on cancellation: `AsyncGate` parks on a plain continuation, which would hang a
+        // cancelled task group instead of failing the test.
         await withTaskCancellationHandler {
             await gate.enter()
         } onCancel: {
@@ -3288,7 +3103,6 @@ private final class GatedSummarizer: BrainClient, @unchecked Sendable {
     }
 }
 
-/// A one-shot async gate: the parked task signals it entered, then awaits release.
 actor AsyncGate {
     private var entered = false
     private var enteredWaiters: [CheckedContinuation<Void, Never>] = []

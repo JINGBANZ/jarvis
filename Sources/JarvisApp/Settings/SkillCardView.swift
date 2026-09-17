@@ -1,8 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// One bundled skill as a card: icon, title, switch, the skill file's own description, and whether
-/// it is equipped. A switched-off card dims but keeps its switch live, so it can be switched back.
 @MainActor
 final class SkillCardView: NSView {
     private static let padding: CGFloat = 14

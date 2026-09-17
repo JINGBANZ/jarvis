@@ -5,40 +5,24 @@ import Darwin
 import Synchronization
 #endif
 
-/// One bounded process-level worker for every file-backed session's evidence. Its mailbox carries
-/// one versioned `SessionEvent` per occurrence; the typed producer ports — brain traffic, coaching
-/// attempts, and agent-facing diagnostics — converge on it through their per-session handle. There
-/// is deliberately no second worker per category (wiki/lean-coaching-core.md, "One Event, Two
-/// Projections"): one mailbox, one lifecycle, one completeness record, one uniform loss contract.
-///
-/// The type keeps its Phase 0 name. The wiki's rule that renaming persisted artifacts is not a
-/// completion requirement applies to the transport types too: a rename would touch every evaluator
-/// and test call site without changing behavior.
-///
-/// The mailbox lock protects only retained in-memory values and counters. Parsing, redaction,
-/// serialization, and file I/O run on the private serial queue after that lock is released.
+/// @unchecked Sendable: `mailboxLock` guards all mailbox state; file work runs only on `queue`
+/// after the lock is released.
 final class SessionAuditWorker: @unchecked Sendable {
     struct Limits: Sendable {
         let maxEventCount: Int
         let maxRetainedBytes: Int
 
-        /// Sized for the whole shared stack, not just audit records. Audit events arrive a handful
-        /// per coaching attempt; agent-facing diagnostics arrive from 180-odd call sites and can
-        /// burst during reconnects and teardown. A count bound tight enough for audit alone would
-        /// turn ordinary diagnostic bursts into routine `queue_overflow`, making every busy session
-        /// read as partial. Envelopes are small unless they carry a provider body, and the byte
-        /// bound — unchanged — is what actually caps memory.
+        /// The count is sized for bursty diagnostics, not just audit records, so busy sessions
+        /// don't routinely overflow. The byte bound is what caps memory.
         static let production = Limits(
             maxEventCount: 4_096,
             maxRetainedBytes: 32 * 1024 * 1024)
     }
 
-    /// Compiler-checked `Sendable`: mutable state is held only in atomic references.
     final class Session: Sendable {
         let id = UUID()
         let directory: URL
-        /// The human-facing projection for this session's Activity occurrences, rendered on the
-        /// worker so no producer pays for it. Absent when nothing is showing Activity.
+        /// Nil when nothing is showing Activity.
         let activity: ActivityLog?
         let health = HealthCounters()
         private let sealed = AtomicCounter()
@@ -72,7 +56,6 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
     }
 
-    /// Compiler-checked `Sendable`: all counters are immutable atomic references.
     final class HealthCounters: Sendable {
         private let queueOverflow = AtomicCounter()
         private let oversizeRecord = AtomicCounter()
@@ -132,25 +115,21 @@ final class SessionAuditWorker: @unchecked Sendable {
     private enum Payload: Sendable {
         case open
         case event(SessionEvent)
-        /// A diagnostic emitted with no live session handle, or after its handle was sealed. It
-        /// reaches the asynchronous process log (Console) and stops there: guessing it into
-        /// whichever session happens to be newest would be worse evidence than none.
+        /// Console only. Guessing it into the newest session would be worse evidence than none.
         case processDiagnostic(DiagnosticAuditEvent)
         case close(
             forcePartial: Bool,
             completion: @Sendable (SessionAuditCloseResult) -> Void)
     }
 
-    /// `session` is nil only for `.processDiagnostic`, which owns no session directory and
-    /// therefore no health record.
     private struct Envelope: Sendable {
+        /// Nil only for `.processDiagnostic`.
         let session: Session?
         let payload: Payload
         let retainedBytes: Int
     }
 
-    /// A close that did not fit in the ring. This table is independently bounded, and a close becomes
-    /// runnable only after every accepted envelope for its sealed session has finished.
+    /// A close that didn't fit in the ring. It runs once its session's accepted envelopes finish.
     private struct DeferredClose: Sendable {
         let session: Session
         let forcePartial: Bool
@@ -185,8 +164,7 @@ final class SessionAuditWorker: @unchecked Sendable {
     private var unfinishedEnvelopeCounts: [UUID: Int] = [:]
     private var deferredCloses: [DeferredClose] = []
     private let timestampFormatter: DateFormatter
-    /// Millisecond precision, matching what `jlog` wrote before the move: diagnostics are read to
-    /// order events inside one turn, where whole seconds are too coarse.
+    /// Milliseconds, because whole seconds are too coarse to order events inside one turn.
     private let diagnosticTimestampFormatter: DateFormatter
 
     init(limits: Limits, writer: any SessionAuditWriting) {
@@ -213,9 +191,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         return session
     }
 
-    /// Returns whether the mailbox accepted the envelope. A caller that holds a fallback — the
-    /// process log, for diagnostics — uses it when this returns false, so a sealed handle or a full
-    /// mailbox costs the session folder a record rather than silently costing the line entirely.
+    /// False when the handle is sealed or the mailbox is full, so a caller can use its fallback.
     @discardableResult
     func record(_ event: SessionEvent, for session: Session) -> Bool {
         enqueue(
@@ -225,8 +201,6 @@ final class SessionAuditWorker: @unchecked Sendable {
                 retainedBytes: event.approximateRetainedBytes))
     }
 
-    /// Admit a diagnostic that belongs to no live session. Bounded by the same mailbox as every
-    /// other category — it has no reserved capacity, and an overflow simply loses the line.
     func recordProcessDiagnostic(_ event: DiagnosticAuditEvent) {
         _ = enqueue(
             Envelope(
@@ -256,22 +230,20 @@ final class SessionAuditWorker: @unchecked Sendable {
                 forcePartial: forcePartial,
                 completion: completion))
         } else if unfinishedEnvelopeCounts[session.id] == nil {
-            // No accepted work can mutate this session after the lock is released. Its existing
-            // in-progress marker is a stable incomplete result, so no worker retention is needed.
+            // Nothing accepted can touch this session, so its in-progress marker stays a partial.
             immediateCompletions.append(completion)
         } else if let readyIndex = deferredCloses.firstIndex(where: {
             unfinishedEnvelopeCounts[$0.session.id] == nil
         }) {
-            // Preserve the close whose session still has accepted work. The evicted close is already
-            // stable at in-progress and can report partial without risking an evaluator/file race.
+            // Evict a close whose session is already stable, keeping the one with pending work.
             immediateCompletions.append(deferredCloses.remove(at: readyIndex).completion)
             deferredCloses.append(DeferredClose(
                 session: session,
                 forcePartial: forcePartial,
                 completion: completion))
         } else {
-            // With at most `maxEventCount` retained envelopes, a new session cannot be unfinished
-            // when that many distinct deferred sessions are also unfinished.
+            // Unreachable: at most `maxEventCount` envelopes are retained, so this many deferred
+            // sessions cannot all be unfinished alongside a new one.
             assertionFailure("bounded audit close table has no stable entry")
             immediateCompletions.append(completion)
         }
@@ -414,8 +386,6 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
     }
 
-    /// Project one envelope onto the session folder. File choice per kind is a projection detail;
-    /// the record schemas and filenames are the unchanged Phase 0 contract.
     private func persist(_ event: SessionEvent, session: Session) {
         switch event.detail {
         case .brainTraffic(let traffic):
@@ -429,8 +399,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
     }
 
-    /// Console first, then the session's `jarvis-debug.log`, so a file failure still leaves the line
-    /// visible in Console — the same order `jlog` used when it did both on the caller.
+    /// Console first, so a file failure still leaves the line visible.
     private func persistDiagnostic(_ event: DiagnosticAuditEvent, session: Session) {
         writer.emitToConsole(event.message)
         guard ensureOpen(session) else { return }
@@ -483,12 +452,8 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
     }
 
-    /// Project one Activity occurrence onto the human window and the session folder.
-    ///
-    /// The screenshot is written **before** the row that references it, so a persisted reference
-    /// always points at a file that exists; if that write fails the row is still recorded, without
-    /// the attachment, and the session's evidence is marked partial. The live push happens last,
-    /// so a failed disk write costs the row its place in history, not its place on screen.
+    /// The screenshot is written before its row, so a persisted reference always names an existing
+    /// file. The live push runs last, so a failed write costs history, not the screen.
     private func persistActivity(_ event: ActivityAuditEvent, session: Session) {
         guard let projection = session.activity else { return }
         var shotFilename: String?
@@ -513,13 +478,9 @@ final class SessionAuditWorker: @unchecked Sendable {
         case .row(let admitted):
             row = admitted
         case .sessionEnded:
-            // The terminal marker is final for a session; later rows are dropped by design.
             return
         case .notCurrent:
-            // The window rotated to the next session before this row drained, so it can never be
-            // given a chronology entry and is lost from history. Mark it rather than lose it
-            // silently: under worker back-pressure this is exactly the visible-partial case the
-            // uniform loss contract exists for.
+            // The row is lost from history, so record the loss instead of dropping it silently.
             session.health.markWriteFailure()
             return
         }
@@ -547,8 +508,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         let snapshot = session.health.snapshot
         let result: SessionAuditCloseResult = forcePartial || !snapshot.isComplete
             ? .partial : .complete
-        // The seal is the last honest moment to tell the window: a loss recorded after the final
-        // row would otherwise never reach the human view of a session that is still on screen.
+        // A loss recorded after the final row would otherwise never reach a window still on screen.
         session.activity?.noteEvidence(isComplete: result == .complete, for: session.id)
         do {
             try writer.replaceHealth(

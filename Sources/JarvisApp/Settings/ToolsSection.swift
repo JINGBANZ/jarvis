@@ -2,14 +2,8 @@ import AppKit
 import JarvisCore
 import UniformTypeIdentifiers
 
-/// Settings → Tools: the coaching tools the user can switch. Prep notes search is the only one, and
-/// its source list lives with it, shown only while the tool is on.
-///
-/// Jarvis stores only the chosen paths, never a copy, and reads them fresh when needed, so removing a
-/// source only forgets it. The switch writes `BrainPreferences.disabledTools` and nothing else; a
-/// session reads its capabilities once at Start. The switch is always enabled, but the runtime offers
-/// `search_prep_notes` only when sources exist, which is why its detail asks for notes while the list
-/// is empty.
+/// The switch stays enabled, but the runtime offers `search_prep_notes` only when sources exist, so
+/// its detail asks for notes while the list is empty.
 @MainActor
 final class ToolsSection: NSObject, SettingsSection {
     let destination = SettingsDestination.tools
@@ -19,9 +13,8 @@ final class ToolsSection: NSObject, SettingsSection {
     private static let messageRowHeight: CGFloat = 44
     private static let addRowHeight: CGFloat = 46
 
-    /// What the file picker accepts: the formats prep indexing can read. `UTType(filenameExtension:)`
-    /// synthesizes a type for ".md" and ".docx", which have no dedicated system UTI. Folders are
-    /// unfiltered; their contents are filtered by the same list at indexing time.
+    /// `UTType(filenameExtension:)` synthesizes types for .md and .docx, which have no system UTI.
+    /// Folder contents are filtered by the same list at indexing time.
     private static let allowedContentTypes: [UTType] = [
         .plainText, .pdf, UTType(filenameExtension: "md"), UTType(filenameExtension: "docx"),
     ].compactMap { $0 }
@@ -34,7 +27,6 @@ final class ToolsSection: NSObject, SettingsSection {
     /// Built once per page so the switch is never re-parented while it is being toggled.
     private var switchRow: SettingsRowView?
     private let addButton = NSButton(title: "＋ Add files or folders…", target: nil, action: nil)
-    /// Everything below the switch row, rebuilt on each render.
     private var listViews: [NSView] = []
     private var rowsBySourceID: [UUID: SettingsRowView] = [:]
     /// Guards a background existence check against a stale result landing after a newer render.
@@ -183,8 +175,6 @@ final class ToolsSection: NSObject, SettingsSection {
         return label
     }
 
-    /// Top-down placement inside the card body: the switch row, then the list; each view's height
-    /// comes from its role.
     private func layoutCard() {
         guard let card else { return }
         let body = card.bodyFrame

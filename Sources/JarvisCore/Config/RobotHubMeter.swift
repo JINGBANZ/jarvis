@@ -1,6 +1,5 @@
 import Foundation
 
-/// The hub header's readiness meter.
 public struct RobotHubMeter: Sendable, Equatable {
     /// One flag per part, in `RobotPart.allCases` order.
     public let ready: [Bool]

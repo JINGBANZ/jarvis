@@ -5,7 +5,6 @@ public enum EvaluationSource: Sendable, Equatable {
     case localCheckout(URL)
     case release(version: String?, fallbackVersion: String? = nil)
 
-    /// Build identity chooses the path; session identity chooses the release version.
     public static func resolve(isDevelopmentBuild: Bool, bundleURL: URL,
                                sessionID: String, currentVersion: String?) -> Self {
         if isDevelopmentBuild {

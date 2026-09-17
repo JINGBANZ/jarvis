@@ -53,8 +53,7 @@ public extension TranscriptionBenchmark {
             textsByItem[itemID, default: []].insert(normalize(text))
         }
         let revisionCount = textsByItem.values.reduce(0) { $0 + max(0, $1.count - 1) }
-        // A provider may legitimately split one fixture across distinct finalized items. Count only
-        // repeated item identities or repeated normalized text, not every fragment after the first.
+        // A provider may split one fixture across items, so count only repeated item ids or text.
         let duplicateCount = duplicateDeliveryCount(in: usableFinals)
         let providerDuplicateCount = max(
             0,
@@ -152,9 +151,8 @@ public extension TranscriptionBenchmark {
                 && $0.model == model.rawValue
         }
         let readyGenerations = Array(Set(readyEvents.map(\.generation))).sorted()
-        // The successful replacement-ready event reports the FIFO actually replayed into the
-        // generation whose finals are scored. Earlier or later reconnect hops cannot lend evidence
-        // to this one acceptance result.
+        // Only the scored generation's ready event counts; other reconnect hops can't lend
+        // evidence.
         let replayEvents = replacementGeneration.map { replacementGeneration in
             events.filter {
                 $0.kind == .ready && $0.generation == replacementGeneration
@@ -252,9 +250,8 @@ public extension TranscriptionBenchmark {
         return previous[right.count]
     }
 
-    /// Returns the fixed reconnect phrases recognized by replacement-generation final events, in
-    /// spoken order. Both the live waiter and final evaluator use this function so extra,
-    /// unavailable, or duplicate finals cannot make the runner stop before every expected phrase.
+    /// Shared by the live waiter and the evaluator, so extra or duplicate finals can't stop the
+    /// runner early.
     static func recognizedReconnectPhraseIDs(
         _ phraseIDs: [String],
         in events: [TranscriptionBenchmarkEvent],
@@ -277,9 +274,7 @@ public extension TranscriptionBenchmark {
         }
     }
 
-    /// Reconnect verification is about recognizing the fixed outage phrases, not merely receiving
-    /// any two final events. A transcript must stay within this fixed normalized CER threshold to
-    /// count as the corresponding phrase; standard-mode results still report the unbounded CER.
+    /// Normalized CER a reconnect final must stay within to count as its phrase.
     private static let reconnectMaximumCharacterErrorRate = 0.5
 
     private static func recognizedPhraseID(
@@ -333,10 +328,8 @@ public extension TranscriptionBenchmark {
             consumesEveryFinal: false)
     }
 
-    /// Finds the lowest-error partition that reconstructs the expected number of phrases from all
-    /// usable replacement-generation finals. Every item in a multi-event group must improve the
-    /// reconstruction: the group must beat each fragment alone and removing any member must make
-    /// the match worse. This permits real segmentation without absorbing an unrelated extra final.
+    /// Every member of a multi-final group must improve the match, which allows real segmentation
+    /// without absorbing an unrelated extra final.
     private static func bestReconnectPartition(
         _ finals: [TranscriptionBenchmarkEvent],
         groupCount: Int,

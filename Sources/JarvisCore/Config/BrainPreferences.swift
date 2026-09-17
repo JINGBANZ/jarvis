@@ -1,12 +1,5 @@
 import Foundation
 
-/// Persisted brain selection: a primary provider/model target, an ordered list of fallback targets,
-/// the `BrainModel` remembered *per provider*, and the `ReasoningEffort` applied to whichever target
-/// is active. Backed by UserDefaults; each provider keeps its remembered model independently.
-/// Every key and default comes from `Defaults.Brain`; reads normalize stale providers/models and
-/// exact route duplicates before they reach the runtime.
-/// Foundation-only so it stays unit-testable in JarvisCore; inject a `UserDefaults(suiteName:)` in
-/// tests. Mirrors `OverlayAppearance`.
 public final class BrainPreferences {
     private let defaults: UserDefaults
 
@@ -14,7 +7,6 @@ public final class BrainPreferences {
         self.defaults = defaults
     }
 
-    /// The selected brain provider. Absent or unrecognized → `Defaults.Brain.provider`.
     public var provider: BrainProvider {
         get {
             guard let raw = defaults.string(forKey: Defaults.Brain.providerKey),
@@ -27,15 +19,10 @@ public final class BrainPreferences {
         }
     }
 
-    /// The selected provider and its remembered model.
     public var primaryTarget: BrainTarget {
         BrainTarget(provider: provider, modelID: model(for: provider).id)
     }
 
-    /// Ordered, explicitly authorized fallback provider/model targets.
-    ///
-    /// Unknown providers/models, exact primary duplicates, and repeated fallback targets are
-    /// removed; order and same-provider/different-model targets are preserved.
     public var fallbackTargets: [BrainTarget] {
         get {
             guard let stored = defaults.array(forKey: Defaults.Brain.fallbackTargetsKey) else {
@@ -58,7 +45,7 @@ public final class BrainPreferences {
         }
     }
 
-    /// Complete persisted route. Runtime cursor and failure counters deliberately live elsewhere.
+    /// The runtime cursor and failure counters deliberately live elsewhere.
     public var route: BrainRoute {
         get { BrainRoute(primary: primaryTarget, fallbackTargets: fallbackTargets) }
         set {
@@ -70,7 +57,6 @@ public final class BrainPreferences {
         }
     }
 
-    /// The selected model for the *current* provider. Absent or unknown id → that provider's default.
     public var model: BrainModel {
         get { model(for: provider) }
         set { setModel(newValue, for: provider) }
@@ -91,7 +77,6 @@ public final class BrainPreferences {
         }
     }
 
-    /// The reasoning effort, applied to whichever model is selected. Absent or unrecognized → default.
     public var effort: ReasoningEffort {
         get {
             guard let raw = defaults.string(forKey: Defaults.Brain.effortKey),
@@ -101,10 +86,8 @@ public final class BrainPreferences {
         set { defaults.set(newValue.rawValue, forKey: Defaults.Brain.effortKey) }
     }
 
-    /// Tool names the user switched off in Settings → Tools, applied at the next Start. Storing
-    /// what is OFF rather than what is ON means a tool added in a later version is on for everyone
-    /// who never opened the page. The tools a session cannot run without are
-    /// dropped on write, so a hand-edited plist cannot compose a session that can never speak.
+    /// Stores what is off, so a tool added in a later version starts on. Required tools are dropped
+    /// on write.
     public var disabledTools: Set<String> {
         get {
             Set(defaults.stringArray(forKey: Defaults.Brain.disabledToolsKey)
@@ -117,9 +100,6 @@ public final class BrainPreferences {
         }
     }
 
-    /// Skill names the user switched off in Settings → Skills, on the same terms as
-    /// `disabledTools`: stored as what is OFF, applied at the next Start. No skill is required for a session to run, so nothing is
-    /// dropped on write; a name matching no bundled skill is simply honored as nothing.
     public var disabledSkills: Set<String> {
         get {
             Set(defaults.stringArray(forKey: Defaults.Brain.disabledSkillsKey)

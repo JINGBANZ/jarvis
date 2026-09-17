@@ -1,12 +1,6 @@
 import Foundation
 
-/// Persisted binding for one coaching shortcut. Backed by UserDefaults; keys and the shipped
-/// defaults come from `Defaults.Hotkey`. Foundation-only so it stays unit-testable in JarvisCore;
-/// inject a `UserDefaults(suiteName:)` in tests. Mirrors `ScreenCapturePreferences`.
-///
-/// `@unchecked Sendable`: the stored shortcut is immutable, and `UserDefaults`
-/// is documented thread-safe — both `HotkeyController` and the Settings section that edits this read
-/// and write on the main actor only.
+/// `@unchecked Sendable`: `shortcut` is immutable and `UserDefaults` is thread-safe.
 public final class HotkeyPreferences: @unchecked Sendable {
     private let defaults: UserDefaults
     public let shortcut: CoachingShortcut
@@ -37,9 +31,8 @@ public final class HotkeyPreferences: @unchecked Sendable {
         self.shortcut = shortcut
     }
 
-    /// Absent, or a stored combination whose modifiers don't satisfy `satisfiesHotkeyRequirement`
-    /// (a hand-edited or corrupted plist — the shortcut recorder never writes one), falls back to the
-    /// shipped default rather than registering an unsafe combination app-wide.
+    /// A stored combination failing `satisfiesHotkeyRequirement` falls back to the default, so a
+    /// corrupt plist can't register an unsafe global hotkey.
     public var combination: HotkeyCombination {
         get {
             guard defaults.object(forKey: keyCodeKey) != nil,

@@ -1,8 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Settings → Mouth: the two overlay surfaces. Both surfaces use the shared Settings page/card/row
-/// language while retaining their live enable, appearance, and preview behavior.
 @MainActor
 final class OverlaySection: NSObject, SettingsSection {
     let destination = SettingsDestination.mouth
@@ -67,8 +65,6 @@ final class OverlaySection: NSObject, SettingsSection {
             opacityRange: Defaults.Overlay.Box.opacityRange,
             opacityAction: #selector(boxOpacityChanged),
             opacityAccessibilityLabel: "Overlay box opacity",
-            // The detail box has no switch of its own: whether a reply may carry one at all is the
-            // Overlay Box switch's decision, and the model judges when a detail helps.
             subordinate: .init(
                 title: "Code, diagrams, and explanations",
                 sizeTitle: "Detail text size",

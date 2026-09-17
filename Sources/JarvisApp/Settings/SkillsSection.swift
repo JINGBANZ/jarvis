@@ -1,9 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Settings → Skills: one card per bundled coaching skill, each switched on or off for the next
-/// Start. A card's text is the skill file's own `description`, so there is one source for it. Writes
-/// go to `BrainPreferences.disabledSkills` and nothing else; a session reads its skills once at Start.
 @MainActor
 final class SkillsSection: NSObject, SettingsSection {
     let destination = SettingsDestination.skills

@@ -2,18 +2,8 @@
 import Foundation
 import JarvisCore
 
-/// An `AudioSource` that plays scheduled speech clips into the two transcription streams in real
-/// time, with digital silence in between, the way a quiet capture device delivers frames.
-///
-/// A 20 ms timer drives an `AudioTimeline`. Each chunk is stamped on the same Unix-time base the
-/// production capture uses, delivered captured-before-clean with one sequence number, and followed
-/// by local speech edges at clip boundaries so a client-commit transcription model would also close
-/// its turns. A stream the timeline leaves dead delivers nothing, which is what a device that never
-/// produces frames looks like to capture readiness.
-///
-/// `@unchecked Sendable`: the timeline, the timer, and the tick bookkeeping are touched only on
-/// `queue`; the delivery closures are immutable; the two recovery callbacks are assigned before
-/// `start` and never fired, because fixture frames cannot lose a device.
+/// `@unchecked Sendable`: mutable state is touched only on `queue`, and the recovery callbacks are
+/// set before `start` and never fired.
 final class FixtureAudioSource: AudioSource, @unchecked Sendable {
     var onUnavailable: (@Sendable (String) -> Void)?
     var onRecoveryStateChange: (@Sendable (Bool) -> Void)?
@@ -64,8 +54,7 @@ final class FixtureAudioSource: AudioSource, @unchecked Sendable {
         }
     }
 
-    /// Play `samples` on `stream` once `afterSeconds` have passed, or after whatever that stream is
-    /// already playing.
+    /// Starts after `afterSeconds` or after what `stream` already has queued, whichever is later.
     func schedule(_ samples: [Int16], on stream: AudioTimeline.Stream, afterSeconds: TimeInterval = 0) {
         let afterChunks = Int((afterSeconds / Self.chunkDuration).rounded())
         queue.async {
@@ -73,7 +62,7 @@ final class FixtureAudioSource: AudioSource, @unchecked Sendable {
         }
     }
 
-    /// Emit every chunk whose time has come, so a late timer fire catches up instead of drifting.
+    /// Emits every due chunk, so a late timer fire catches up instead of drifting.
     private func emitDueChunks() {
         let due = Int((Date().timeIntervalSince1970 - startedAt) / Self.chunkDuration) + 1
         while emittedTicks < due {
@@ -88,6 +77,7 @@ final class FixtureAudioSource: AudioSource, @unchecked Sendable {
     private func deliver(_ chunk: AudioTimeline.Chunk, capturedAt: TimeInterval) {
         let data = chunk.samples.withUnsafeBufferPointer { Data(buffer: $0) }
         let sampleCount = chunk.samples.count
+        // Production order: captured before clean, both with the chunk's sequence number.
         switch chunk.stream {
         case .microphone:
             delivery.onMicCaptured(chunk.sequence, sampleCount, capturedAt)

@@ -1,7 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Jarvis-managed credential editor used by Connections Settings. One instance per `Credential`.
 @MainActor
 final class APIKeyControls: NSObject {
     private let credential: Credential
@@ -19,8 +18,7 @@ final class APIKeyControls: NSObject {
     private var cancelButton: NSButton?
     private var errorLabel: NSTextField?
     private var verdictLabel: NSTextField?
-    /// What the provider said about the key just saved, kept until the key is edited again. `nil`
-    /// means nothing has been checked in this window, which is not the same as "fine".
+    /// `nil` means nothing was checked in this window, not that the key is fine.
     private var verdict: Verdict?
     private var verdictTask: Task<Void, Never>?
 
@@ -44,7 +42,6 @@ final class APIKeyControls: NSObject {
         }
     }
 
-    /// What the card's key is for, in the card header.
     private static func headerDetail(for credential: Credential) -> String {
         switch credential {
         case .openAIAPIKey: "Brain and transcription"
@@ -163,9 +160,8 @@ final class APIKeyControls: NSObject {
     func windowWillClose() {
         verdictTask?.cancel()
         verdictTask = nil
-        // This object outlives the window and is reused on the next open, so a checking state left
-        // behind would greet that open with a check no task is running. An answered verdict stays:
-        // it is still what the provider said about the saved key.
+        // This object is reused on the next open, where a leftover checking state would have no
+        // task behind it. An answered verdict still describes the saved key, so it stays.
         if case .checking = verdict { verdict = nil }
     }
 
@@ -234,8 +230,6 @@ final class APIKeyControls: NSObject {
         editing = true
         errorLabel?.stringValue = ""
         field?.stringValue = ""
-        // A verdict belongs to the key that was checked. Editing starts a different key, so the old
-        // answer stops being about anything on screen.
         verdictTask?.cancel()
         verdictTask = nil
         verdict = nil
@@ -265,8 +259,8 @@ final class APIKeyControls: NSObject {
         editing = false
         field?.stringValue = ""
         errorLabel?.stringValue = ""
-        // The key is saved either way; the check only reports what the provider makes of it, so a
-        // slow or failed check never blocks the save.
+        // The check only reports on the already saved key, so a slow or failed check never blocks
+        // it.
         verdict = .checking("Checking the key with \(credential.vendorName)…")
         applyState()
         verdictTask?.cancel()

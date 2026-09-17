@@ -1,8 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// The hub header's readiness meter: a label over one segment per part, teal when that part is
-/// ready and amber when it needs the user.
 @MainActor
 final class ReadinessMeterView: NSView {
     private let label = NSTextField(labelWithString: "")

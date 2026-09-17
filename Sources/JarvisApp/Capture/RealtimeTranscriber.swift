@@ -1,36 +1,11 @@
 import Foundation
 import JarvisCore
 
-/// Client for the OpenAI GA Realtime API used as a **transcription session**. Streams PCM16 audio,
-/// configures model-compatible turn detection, and parses transcription + speech events. The shared
-/// Core coordinator publishes finalized lines and owns provider-neutral coaching triggers.
+/// Design: wiki/architecture.md#resilience
 ///
-/// The wire contract (connect URL with `?intent=transcription`, the `session.update` payload, the
-/// audio-append/commit events) is built by the pure, unit-tested `RealtimeSession` in JarvisCore.
-/// GPT-4o uses server VAD. GPT Transcribe and GPT Live disable automatic turn detection and commit
-/// boundaries supplied by capture-side WebRTC VAD, after the ordered FIFO has sent every matching
-/// audio chunk. Provisional deltas remain lifecycle-only; finalized text is still the sole input to
-/// Activity and the coaching model.
-///
-/// Robustness: the socket itself belongs to `WebSocketConnection`, which both socket transcribers
-/// share. It waits for the server's configuration acknowledgement before reporting ready, probes
-/// ready sockets with ping/pong, and reconnects with capped exponential backoff on every detected
-/// send, receive, close, startup-timeout, or liveness failure. This type is its OpenAI adapter,
-/// supplying the request, the `session.update` payload, the event reader, the two classifiers, and
-/// the replay bookkeeping each socket handoff needs.
-///
-/// `streamReady`/`everStreamReady` mirror the connection's readiness under this type's own `lock`,
-/// and every producer reads the mirror rather than asking the connection. That is what keeps a
-/// producer's decision atomic with the replay bookkeeping it drives; see `WebSocketConnection`'s
-/// header for the lock order and why the mirror exists.
-///
-/// `@unchecked Sendable`: every mutable field is guarded by `lock`. The four implicitly unwrapped
-/// or optional collaborators (`connection`, `coachingCoordinator`, `transcriptionLifecycle`,
-/// `jarvisManagedTurnCoordinator`) are assigned once in `init`, before this instance is shared, and
-/// never reassigned; they are not `let` only because building them captures `self`. No timer or
-/// other main-queue-confined state lives here, because the socket's timers belong to
-/// `WebSocketConnection`. `continuityReporter`, `coachingCoordinator`, and `audioBuffer` guard their
-/// own state, and this type calls them under the A-then-D order that header documents.
+/// `@unchecked Sendable`: mutable state is guarded by `lock`. `connection`, `coachingCoordinator`,
+/// and `transcriptionLifecycle` are assigned once in `init`, before the instance is shared. Lock
+/// order is documented on `WebSocketConnection`.
 final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapter,
     @unchecked Sendable {
     private enum OutboundAction {
@@ -42,57 +17,42 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
     var onSilence: (@Sendable (TimeInterval) -> Void)?
     var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
-    /// Fired when transcription becomes unusable, either from an unrecoverable provider rejection or
-    /// after reconnection is abandoned, so the app can stop instead of lying green.
     var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
     private let model: OpenAITranscriptionModel
     private let expectedLanguages: [TranscriptionLanguage]
     private let vocabularyKeywords: [String]
-    /// Who this socket is transcribing: `.me` (mic) or `.them` (system audio). Two transcribers run
-    /// in parallel — one per side — feeding the same `RollingTranscript`, so the coach sees both.
     private let speaker: Speaker
     private let clock: Clock
     private let sessionStart: TimeInterval
     private let silenceDurationMs: Int
     private let noiseReduction: NoiseReductionMode
-    /// `nil` for every normal coaching session. Optional chaining then skips event construction.
     private let benchmark: TranscriptionBenchmarkInstrumentation?
-    /// The socket. Built in `init` because it takes this transcriber as its adapter.
     private var connection: WebSocketConnection!
 
     private let lock = NSLock()
     private var coachingCoordinator: TranscriptionCoachingCoordinator!
     private var transcriptionLifecycle: RealtimeTranscriptionLifecycle!
     private let continuityReporter: RealtimeContinuityReporter
-    private let audioBuffer: PCMBuffer        // mic audio captured while the socket is down
-    /// Present only for client-commit models. Mutated under `lock` so commit ordering is atomic with
-    /// FIFO/socket state; the value itself remains Foundation-only and unit-tested in Core.
+    private let audioBuffer: PCMBuffer
     private var jarvisManagedTurnCoordinator: RealtimeJarvisManagedTurnCoordinator?
-    /// Jarvis-managed models keep only a short local pre-roll while idle. Active speech and endpoint
-    /// trailing silence then enter `audioBuffer`; server-VAD models bypass this gate.
     private var jarvisManagedSpeechBuffer: SpeechGatedAudioBuffer?
     private var stopped = false
-    /// This stream's own view of readiness, flipped only inside the connection's lifecycle
-    /// callbacks. Producers read this, never the connection, so their decisions stay atomic with the
-    /// replay bookkeeping below; see the type's header comment.
+    /// Readiness mirror, moved only by the connection callbacks. Producers read this, never the
+    /// connection, so their decisions stay atomic with the replay bookkeeping.
     private var streamReady = false
     private var everStreamReady = false  // distinguishes the first connect from a reconnect
-    /// Closes the short handoff between snapshotting old item state and accepting new outage audio.
-    /// Producers set the companion bit instead of calling into the lifecycle until initialization
-    /// completes, avoiding both a missed barrier and an inverse lock order.
+    /// While set, producers set `bufferedAudioDuringRecoveryInitialization` instead of calling the
+    /// lifecycle, which avoids both a missed barrier and an inverse lock order.
     private var reconnectRecoveryIsInitializing = false
     private var bufferedAudioDuringRecoveryInitialization = false
-    /// Stays set until replacement readiness snapshots it. This closes the race where a producer
-    /// accepts outage audio, readiness wins before its lifecycle callback, and the gate otherwise
-    /// sees no untracked replay work.
+    /// Sticky until replacement readiness snapshots it, so outage audio accepted just before
+    /// readiness still counts as untracked replay work.
     private var hasUntrackedBufferedReplayAudio = false
-    /// The session id from the acknowledgement frame, handed to `connectionDidBecomeReady` so the
-    /// ready line can name it. The connection has no way to know it.
     private var pendingSessionID: String?
     /// Realtime's `audio_start_ms` is relative to audio written on one socket. These origins map it
-    /// back onto Jarvis's overall session clock, including audio buffered during reconnect backoff.
+    /// onto the session clock, including audio buffered during reconnect backoff.
     private var pendingAudioTimelineOrigin: TimeInterval = 0
     private var activeAudioTimelineOrigin: TimeInterval = 0
 
@@ -143,7 +103,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         self.continuityReporter = RealtimeContinuityReporter(
             speaker: speaker, clock: clock, sessionStart: sessionStart,
             // Client-commit models run with `turn_detection: null`, so the server never reports
-            // speech boundaries and the local-vs-server comparison would flag every real utterance.
+            // speech boundaries.
             expectsServerSpeechEvents: model.turnDetectionStrategy != .clientCommit)
         self.connection = WebSocketConnection(
             adapter: self,
@@ -156,10 +116,8 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             apiKey: apiKey,
             policy: SocketLifecyclePolicy(
                 source: .transcription(.openAI),
-                // A socket that has never been ready has nothing to preserve, and every attempt
-                // costs the user silence with no explanation. Three attempts is enough to ride out
-                // a transient refusal; past that the cause is the key, the region, or the network,
-                // and the session should say so.
+                // Short first-connect budget: past three attempts the cause is the key, the region,
+                // or the network, and the session should say so.
                 firstConnect: RetrySchedule(maximumRetries: 2, initialDelay: 1, maximumDelay: 30),
                 reconnect: RetrySchedule(maximumRetries: 6, initialDelay: 1, maximumDelay: 30)),
             readyTimeout: readyTimeout,
@@ -213,8 +171,8 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             coachingCoordinator: coachingCoordinator,
             terminalTimeout: transcriptionTerminalTimeout,
             activeTimeout: transcriptionActiveTimeout,
-            // These ask the connection rather than the mirror above: the lifecycle holds its own
-            // lock while it calls them, and the connection's lock is the leaf both may take.
+            // These ask the connection, not the mirror: the lifecycle holds its own lock while it
+            // calls them, and only the connection's lock is a leaf.
             isCurrentGeneration: { [weak self] generation in
                 self?.connection.isLive(generation: generation) == true
             },
@@ -228,12 +186,9 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
     }
 
     func connect() {
-        // Start clean: clear the stopped flag AND any stale recovery state from a prior session.
         lock.lock()
         stopped = false
         streamReady = false
-        // Readiness selects the retry budget and how an exhausted budget is categorized, so a fresh
-        // session must start as never-ready even if this instance ran one before.
         everStreamReady = false
         reconnectRecoveryIsInitializing = false
         bufferedAudioDuringRecoveryInitialization = false
@@ -248,16 +203,14 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         continuityReporter.start()
     }
 
-    /// Keep a healthy socket in place; the replacement credential is picked up if this side later
-    /// reconnects. This avoids destroying live transcript state merely because Settings saved a key.
     func updateAPIKey(_ apiKey: String, for credential: Credential) {
         guard credential == .openAIAPIKey else { return }
         connection.updateAPIKey(apiKey)
     }
 
     func stop() {
-        // The connection first: its `stopped` is what makes every timer and socket callback already
-        // in flight a no-op, including one racing this Stop from off the main queue.
+        // Stop the connection first: its `stopped` turns every in-flight timer and socket callback
+        // into a no-op, including one racing this Stop off the main queue.
         connection.stop()
         lock.lock()
         stopped = true
@@ -281,8 +234,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
     }
 
     func configureSession(on lease: WebSocketConnection.Lease) {
-        // Resolve .auto against the live default-input device each session, so a reconnect after a
-        // device swap (e.g. plugging in AirPods) picks the right profile.
+        // Resolve `.auto` per session so a reconnect after a device swap picks the right profile.
         let profile = NoiseReduction.profile(mode: noiseReduction, micProximity: InputDeviceProximity.current())
         let update = RealtimeSession.sessionUpdate(
             model: model,
@@ -302,8 +254,6 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         connection.send(.string(text), on: lease) { _ in }
     }
 
-    /// Records the first content-free checkpoint on the delivery queue using the timestamp assigned
-    /// inside the IOProc. This preserves capture-to-delivery timing without locking the audio thread.
     func recordCapturedAudio(sequenceNumber: UInt64, sampleCount: Int,
                              capturedAt: TimeInterval) {
         lock.lock(); let isStopped = stopped; lock.unlock()
@@ -313,10 +263,6 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
     }
 
     func sendAudio(_ pcm: Data, sequenceNumber: UInt64, capturedAt: TimeInterval) {
-        // GPT-4o sends every chunk; client-commit models release only bounded pre-roll and
-        // endpoint-gated speech.
-        // Eligible audio enters one ordered FIFO. Local send completion moves it into a bounded
-        // recovery tail because only later server item lifecycle can retire that prefix safely.
         let observedAt = clock.now() - sessionStart
         let sessionRelativeCaptureAt = capturedAt - sessionStart
         let chunk = PCMBuffer.Chunk(
@@ -392,8 +338,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         }
     }
 
-    /// Move speech-gated chunks into the reconnect-safe FIFO. Callers serialize the Jarvis-managed
-    /// speech gate with turn/socket state under `lock`; `PCMBuffer` protects its own storage.
+    /// Call under `lock`.
     private func appendToAudioBuffer(_ chunks: [PCMBuffer.Chunk]) -> [PCMBuffer.Chunk] {
         chunks.flatMap { chunk in
             audioBuffer.append(
@@ -428,10 +373,8 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         var action: OutboundAction?
         var droppedTurns: [RealtimeJarvisManagedTurnCoordinator.Turn] = []
         lock.lock()
-        // Both halves are required. `streamReady` says this stream's own replay bookkeeping has
-        // settled for the current socket; the lease says which socket to address. Asking only the
-        // connection could send audio into a socket that is ready but whose replacement handoff has
-        // not run yet.
+        // Both are required: `streamReady` says the replacement handoff has run; the lease names
+        // the socket. The connection alone can be ready before that handoff.
         guard !stopped, streamReady, let lease = connection.readyLease else {
             lock.unlock(); return
         }
@@ -488,10 +431,8 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         connection.send(.string(text), on: lease) { [weak self] delivered in
             guard let self else { return }
             guard delivered else {
-                // The connection retires the socket for us. Its state transition releases the
-                // current FIFO claim while no producer can select this failed socket; retrying
-                // before that transition would let a racing producer send the same head on the
-                // dead task.
+                // Don't retry the claim: retirement releases it while no producer can select this
+                // socket, so the head is never resent on a dead task.
                 self.continuityReporter.recordSendFailure(
                     sequence: sequence, socketGeneration: socketGeneration)
                 return
@@ -554,35 +495,31 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         }
     }
 
-    /// OpenAI sends every server event as a text frame, so a binary one is not ours to read.
+    /// OpenAI sends every server event as a text frame.
     func handle(_ message: URLSessionWebSocketTask.Message, on lease: WebSocketConnection.Lease) {
         guard case .string(let text) = message else { return }
         handleEvent(text, on: lease)
     }
 
     func classifyHandshake(status: Int) -> ProviderFailure {
-        // OpenAI rejects a bad key in-band after a successful upgrade, so a refused handshake is the
-        // edge itself refusing: region, VPN exit, wrong URL.
         OpenAIFailureClassifier.classify(
             httpStatus: status, body: nil, source: source, stage: .handshake)
     }
 
-    /// OpenAI closes a rejected session with 3000 and `<type>.<code>` after the in-band error event.
-    /// Classifying the close as well covers the case where the event was not recognized.
+    /// OpenAI closes a rejected session with 3000 and `<type>.<code>` after the in-band error
+    /// event, so classifying the close covers an event that was not recognized.
     func classifyClose(code: Int, reason: String?) -> ProviderFailure {
         OpenAIFailureClassifier.classify(closeCode: code, reason: reason, source: source)
     }
 
-    /// A server "going away" (1001) is a routine rotation or restart we just reconnect through, even
-    /// when no `session_expired` error preceded it: the two can arrive in either order.
+    /// OpenAI's 1001 is a routine rotation even without a `session_expired` error; the two can
+    /// arrive in either order.
     func isExpectedRotation(closeCode: Int) -> Bool {
         closeCode == URLSessionWebSocketTask.CloseCode.goingAway.rawValue
     }
 
     private func handleEvent(_ text: String, on lease: WebSocketConnection.Lease) {
         let socketGeneration = lease.generation
-        // A buffered message can still arrive after an intentional Stop; don't mutate the transcript
-        // or log on a torn-down pipeline (mirrors the failure/close-path gates).
         lock.lock(); let isStopped = stopped; lock.unlock()
         if isStopped { return }
         guard let data = text.data(using: .utf8),
@@ -616,10 +553,8 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
                      + "(item \(itemID))")
                 break
             }
-            // Client-commit models have no server VAD events. The commit acknowledgement is the
-            // provider-side proof for the locally timed interval, so feed that content-free boundary
-            // into the same continuity matcher instead of generating false "no provider speech"
-            // anomalies.
+            // Client-commit models get no server VAD events. The commit acknowledgement stands in
+            // as provider speech, or the continuity witness would flag every utterance.
             continuityReporter.recordServerSpeech(
                 .speechStarted,
                 audioTimeMilliseconds: nil,
@@ -677,10 +612,6 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
                     itemID: itemID, delta: delta, socketGeneration: socketGeneration)
             }
         case RealtimeSession.completedTranscriptionType:
-            // A completed utterance fragment: record it immediately (so the model's context is
-            // whole), but DON'T fire the coach yet — briefly batch rapid fragments of one spoken
-            // sentence into a single trigger. `audio_start_ms`, captured by the ledger on
-            // speech_started, timestamps the line when it was spoken rather than when inference ended.
             guard let itemID = obj["item_id"] as? String else {
                 jlog("Jarvis realtime [\(speaker.rawValue)]: completed transcription missing item_id")
                 break
@@ -774,18 +705,13 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
                     },
                     observedAt: clock.now()))
             }
-            // Do not reset proactive silence here. Bare VAD start/stop events contain no usable
-            // context; only an appended final/salvaged line begins a fresh silence interval.
+            // Don't reset proactive silence here: bare VAD events carry no usable context.
         case "session.created", "transcription_session.created":
-            // The WebSocket handshake succeeded, but our transcription configuration has not yet
-            // been acknowledged. Stay in `connecting` and keep buffering until the updated event.
+            // Not readiness: the transcription configuration is not acknowledged yet.
             break
         case "error":
-            // A session_expired error is the server telling us this session hit its lifetime cap.
-            // That is an expected rotation, not a fault: tell the connection to expect it, so the
-            // close and receive failure it triggers next do not pile on scary lines or spend retry
-            // budget, then replace the socket at once rather than waiting out a backoff delay for
-            // churn the server announced. Any OTHER error is a real fault, logged verbatim.
+            // `session_expired` is an announced lifetime cap. Note it so the close that follows
+            // spends no retry budget, then rotate at once.
             if RealtimeSession.isSessionExpired(obj) {
                 connection.noteExpectedRotation(lease, reason: "reached its time limit")
                 connection.requestRotation(lease, reason: "reached its time limit")
@@ -804,8 +730,6 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
     // MARK: - Socket lifecycle
 
     func connectionWillOpen(_ lease: WebSocketConnection.Lease) {
-        // Idempotent: the mirror is already false after a retirement and after `connect`. Setting it
-        // here keeps the rule that only these callbacks ever move it.
         lock.lock()
         if !stopped { streamReady = false }
         lock.unlock()
@@ -821,12 +745,8 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         let bufferedChunks = audioBuffer.queuedChunkCount
         let hasUntrackedReplayAudio = hasUntrackedBufferedReplayAudio
         hasUntrackedBufferedReplayAudio = false
-        // Keep old-socket deltas throughout reconnect attempts so terminal failure can still salvage
-        // them. Once a replacement is ready, its replayed PCM becomes authoritative and old item IDs
-        // must leave before the replacement emits its own lifecycle events.
-        //
-        // Flipping the mirror in the same critical section as that snapshot is what makes a
-        // producer see either the whole outage picture or the whole live one.
+        // Flip the mirror in the same critical section as the replay snapshot, so a producer sees
+        // either the whole outage picture or the whole live one.
         streamReady = true
         everStreamReady = true
         lock.unlock()
@@ -858,26 +778,20 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             generation: lease.generation,
             observedAt: clock.now(),
             replayedChunks: replacement ? bufferedChunks : nil))
-        // Producers always append to the same claimed FIFO. Making readiness visible before this
-        // pump is safe: a racing producer may claim the oldest chunk itself, but cannot bypass it or
-        // strand the chunk it just appended.
+        // Safe to pump after readiness is visible: a racing producer may claim the head itself but
+        // cannot bypass it or strand the chunk it appended.
         pumpAudioIfReady()
     }
 
-    /// The socket carrying this stream is gone and another will follow, either after a backoff delay
-    /// or at once for an expected rotation. Requeue everything the server never acknowledged, then
-    /// hand the interrupted items to the recovery gate so the replacement can replay into them.
     func connectionWillRetry(_ lease: WebSocketConnection.Lease, attempt: Int) {
         let failureAt = clock.now() - sessionStart
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        // The mirror, the requeue, and the initializing flag move together. A producer must never
-        // see this stream as neither ready nor initializing: it would publish a replay barrier into
-        // the lifecycle before `beginReconnectRecovery` below had snapshotted the old item state.
+        // The mirror, the requeue, and the initializing flag move together: a producer must never
+        // see this stream as neither ready nor initializing.
         streamReady = false
-        // Local WebSocket send completions are not server acknowledgements. Requeue the entire
-        // unconfirmed tail now, while producers are excluded by this lock, so audio sent during a
-        // half-open interval precedes audio captured during reconnect backoff.
+        // Local send completions are not server acknowledgements. Requeue the whole unconfirmed
+        // tail under `lock`, so audio sent while half-open precedes audio captured during backoff.
         let replay = audioBuffer.prepareForReconnect()
         let droppedJarvisManagedTurns = jarvisManagedTurnCoordinator?.prepareForReconnect(
             oldestAvailableSequenceNumber: replay.oldestSequenceNumber) ?? []
@@ -911,9 +825,6 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         }
         reportDroppedJarvisManagedTurns(droppedJarvisManagedTurns)
         reportBufferEviction(replay.evicted, connectionUnavailable: true)
-        // Old-socket deltas are now held by the reconnect recovery gate. They remain a fallback if
-        // every handshake fails or bounded replay loses coverage, without keeping stale item IDs in
-        // the replacement ledger or releasing a partial coaching turn early.
         if interruptedItems > 0 && attempt == 1 {
             jlog("Jarvis realtime [\(speaker.rawValue)] retaining \(interruptedItems) interrupted "
                  + "transcription item(s) until replacement replay is ready")
@@ -924,15 +835,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         }
     }
 
-    /// Nothing follows this socket. Salvage what the stream still holds so an utterance interrupted
-    /// mid-flight is not simply lost, then report the failure.
-    ///
-    /// Both terminal paths arrive here, an exhausted retry budget and a permanent provider
-    /// rejection. The permanent one used to skip the salvage. Keeping an interrupted item is
-    /// strictly better for the transcript than dropping it, and the cost is at most one salvaged
-    /// fragment on a session whose key was just revoked.
-    /// Guarded on `stopped`: a terminal failure already in flight when the user pressed Stop must
-    /// not report one, or Activity shows a session ended by error for a session the user ended.
+    /// Guarded on `stopped`: a failure racing Stop must not show an error for a user-ended session.
     func connectionDidTerminate(_ failure: ProviderFailure) {
         lock.lock()
         guard !stopped else { lock.unlock(); return }
@@ -954,6 +857,5 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
         return description.isEmpty ? "unknown error" : description
     }
 
-    /// This transcriber's identity in every failure it classifies.
     private var source: ProviderFailure.Source { .transcription(.openAI) }
 }

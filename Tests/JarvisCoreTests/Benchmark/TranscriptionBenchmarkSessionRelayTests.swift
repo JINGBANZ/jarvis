@@ -2,6 +2,7 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
+/// @unchecked: lock guards the recorded audio; the callbacks are never set.
 private final class BenchmarkSessionSpy: TranscriptionSession, @unchecked Sendable {
     struct Delivery: Equatable, Sendable {
         let sequence: UInt64
@@ -56,6 +57,7 @@ private final class BenchmarkSessionSpy: TranscriptionSession, @unchecked Sendab
     }
 }
 
+/// @unchecked: lock guards observations.
 private final class BenchmarkCaptureSpy: @unchecked Sendable {
     private let lock = NSLock()
     private var observations: [(UInt64, Int)] = []

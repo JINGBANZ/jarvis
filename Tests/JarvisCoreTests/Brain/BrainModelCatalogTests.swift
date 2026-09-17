@@ -5,7 +5,7 @@ import Testing
     @Test func catalogIsNonEmptyWithUniqueIDs() {
         let ids = BrainModelCatalog.all.map(\.id)
         #expect(!ids.isEmpty)
-        #expect(Set(ids).count == ids.count)   // no duplicate model ids
+        #expect(Set(ids).count == ids.count)
     }
 
     @Test func sharedOpenAIListIncludesLatestModel() {
@@ -20,8 +20,7 @@ import Testing
         ])
     }
 
-    /// Concrete releases the helper serves: Haiku is the dated id, which the helper routes where
-    /// the undated alias reads as an unknown model.
+    /// CLIProxyAPI routes Haiku only by its dated id; the undated alias reads as unknown.
     @Test func claudeSubscriptionIncludesLatestReleaseAndPreservesSavedModels() {
         #expect(BrainModelCatalog.models(for: .claudeSubscription).map(\.id) == [
             "claude-opus-5",
