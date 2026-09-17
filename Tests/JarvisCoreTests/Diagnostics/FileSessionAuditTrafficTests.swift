@@ -43,6 +43,29 @@ import Foundation
         #expect(resp["status"] as? String == "completed")
     }
 
+    /// A provider may echo input steps, a screenshot included, back in its reply.
+    @Test func responseImagesAreRedactedToo() async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = await FileSessionAudit.readyForTesting(directory: dir)
+        let response = try JSONSerialization.data(withJSONObject: [
+            "status": "completed",
+            "steps": [["type": "user_input", "content": [
+                ["type": "image", "mime_type": "image/jpeg", "data": TestFixtures.tinyJpegBase64],
+            ]]],
+        ])
+        log.record(tag: "coach", request: Data(#"{"model":"gemini-3.8-flash"}"#.utf8),
+                   response: response, status: 200, latencyMs: 900)
+        _ = await log.closeForTesting()
+
+        let text = try String(contentsOf: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
+                              encoding: .utf8)
+        // The writer escapes `/`, so both spellings are searched.
+        let needle = String(TestFixtures.tinyJpegBase64.prefix(24))
+        #expect(!text.contains(needle))
+        #expect(!text.contains(needle.replacingOccurrences(of: "/", with: "\\/")))
+        #expect(text.contains("[base64 image omitted"))
+    }
+
     @Test func transportErrorRecordsRequestAndErrorWithoutResponse() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = await FileSessionAudit.readyForTesting(directory: dir)
