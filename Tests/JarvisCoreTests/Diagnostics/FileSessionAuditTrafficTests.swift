@@ -87,6 +87,21 @@ import Foundation
         #expect((inner?["image_url"] as? String)?.hasPrefix("[base64 image omitted") == true)
     }
 
+    @Test func redactionRemovesBareImageDataByStructure() {
+        let redacted = SessionAuditWorker.redactingImages([
+            "input": [["type": "user_input", "content": [
+                ["type": "image", "mime_type": "image/jpeg", "data": "/9j/4AAQSkZJRgABAQ"],
+                ["type": "text", "text": "data stays when no image type is named"],
+            ]]],
+            "other": ["mime_type": "text/plain", "data": "kept"],
+        ]) as? [String: Any]
+        let content = ((redacted?["input"] as? [[String: Any]])?.first?["content"] as? [[String: Any]]) ?? []
+        #expect((content.first?["data"] as? String)?.hasPrefix("[base64 image omitted") == true)
+        #expect(content.first?["mime_type"] as? String == "image/jpeg")
+        #expect(content.last?["text"] as? String == "data stays when no image type is named")
+        #expect((redacted?["other"] as? [String: Any])?["data"] as? String == "kept")
+    }
+
     @Test func coachingRequestContextLinksTheWireCallToItsAttempt() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = await FileSessionAudit.readyForTesting(directory: dir)
