@@ -88,6 +88,58 @@ import JarvisBrainProviders
             atPath: session.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
     }
 
+    @Test func aFailedRunQuotesTheCLIsRedactedError() async throws {
+        let root = tmp()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = root.appendingPathComponent("session")
+        let bin = root.appendingPathComponent("bin")
+        let home = root.appendingPathComponent("home")
+        for directory in [session, bin, home] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        try await writeSessionInputs(to: session)
+        let executable = bin.appendingPathComponent("claude")
+        let script = """
+            #!/bin/sh
+            if [ "$1" = "auth" ]; then
+              printf '{"loggedIn":true}'
+              exit 0
+            fi
+            echo "Warning: an unrelated notice" >&2
+            printf 'Invalid API key sk-abcdef123456 · Please run /login\\n\\n'
+            exit 1
+            """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o700], ofItemAtPath: executable.path)
+        let evaluator = AgenticEvaluator(
+            source: .localCheckout(root),
+            preferredCLI: .claude,
+            detector: AgentCLIDetector(
+                home: home,
+                pathVariable: bin.path,
+                authStatusTimeout: 1,
+                temporaryDirectory: root.appendingPathComponent("unrelated-system-temp")),
+            timeout: 5)
+
+        await #expect(throws: AgenticEvaluator.EvaluationError.agentFailed(
+            cli: AgentCLI.claude.displayName,
+            reason: "Invalid API key sk-… · Please run /login (exit status 1)")) {
+            _ = try await evaluator.evaluate(sessionDirectory: session)
+        }
+    }
+
+    @Test func aFailureReasonFallsBackToStderrThenToTheStatus() {
+        let codex = AgentCLIOutput(
+            stdout: "", stderr: "warning: a notice\nERROR: the model is not supported\n", exitCode: 1)
+        #expect(AgenticEvaluator.failureReason(codex)
+            == "ERROR: the model is not supported (exit status 1)")
+
+        let silent = AgentCLIOutput(stdout: " \n", stderr: "", exitCode: 3)
+        #expect(AgenticEvaluator.failureReason(silent)
+            == "it exited with status 3 and printed no error.")
+    }
+
     private func detected(_ cli: AgentCLI, _ status: AgentCLIAuthenticationStatus) -> DetectedAgentCLI {
         DetectedAgentCLI(
             cli: cli, executableURL: URL(fileURLWithPath: "/usr/local/bin/\(cli.executableName)"),
