@@ -555,7 +555,7 @@ final class SessionAuditWorker: @unchecked Sendable {
             ]
         }
         line["request"] = Self.redactingImages(Self.jsonValue(event.request))
-        if let response = event.response { line["response"] = Self.jsonValue(response) }
+        if let response = event.response { line["response"] = Self.redactingImages(Self.jsonValue(response)) }
         return try JSONSerialization.data(withJSONObject: line, options: [.sortedKeys])
     }
 

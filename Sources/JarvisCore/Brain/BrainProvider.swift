@@ -4,6 +4,7 @@ public enum BrainProvider: String, CaseIterable, Sendable {
     case openAI = "openai"
     case codexSubscription = "codex-subscription"
     case claudeSubscription = "claude-subscription"
+    case gemini = "gemini"
 
     public var descriptor: BrainProviderDescriptor {
         switch self {
@@ -41,6 +42,19 @@ public enum BrainProvider: String, CaseIterable, Sendable {
                 failureTable: .openAI,
                 toolChoicePolicy: .filteredAuto,
                 reasoningEffortFloor: .low)
+        // Called directly, not through the helper: the helper would need the key in its config file
+        // and drops Gemini's narrowed tool choice, which Gemini itself honors.
+        case .gemini:
+            BrainProviderDescriptor(
+                displayName: "Gemini API",
+                access: .apiKey(
+                    credential: .geminiAPIKey,
+                    endpoint: BrainProviderDescriptor.geminiInteractionsEndpoint,
+                    auth: .googAPIKey),
+                wire: .interactions,
+                failureTable: .gemini,
+                toolChoicePolicy: .providerEnforced,
+                reasoningEffortFloor: nil)
         }
     }
 

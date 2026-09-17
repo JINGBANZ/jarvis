@@ -108,8 +108,7 @@ public struct LiveSessionEvidence: Sendable {
         public let instructions: String?
         /// `request.tools[].name`, in order.
         public let declaredToolNames: [String]
-        /// A string `tool_choice` itself (`auto`, `required`), or an object choice's `type`
-        /// (`allowed_tools`, `function`).
+        /// A string choice itself, or the kind of an object choice (`allowed_tools`, `function`).
         public let toolChoiceType: String?
         /// Calls replayed in the request, in order.
         public let replayedFunctionCalls: [FunctionCall]

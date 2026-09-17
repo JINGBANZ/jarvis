@@ -76,8 +76,8 @@ public enum ToolInvocation: Sendable, Equatable {
 public struct BrainResponse: Sendable {
     public let toolCalls: [ToolInvocation]
     public let rawToolCalls: [RawToolCall]
-    /// The whole `output` array, verbatim. OpenAI rejects a reasoning item replayed beside a
-    /// rebuilt function call, so the tool loop replays these whole.
+    /// The reply's own output items verbatim (Responses `output`, Interactions `steps`). The tool
+    /// loop replays them whole: providers reject rebuilt calls beside their reasoning.
     public let outputItemsJSON: [String]
     /// Non-nil (e.g. `"max_output_tokens"`) when the run did not finish; never trust its tool
     /// calls.

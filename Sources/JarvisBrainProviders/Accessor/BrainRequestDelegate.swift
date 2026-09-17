@@ -36,6 +36,14 @@ final class BrainRequestDelegate: NSObject, URLSessionTaskDelegate, @unchecked S
         lock.withLock { collectedPhases = phases }
     }
 
+    // Every brain request carries a key in a header, which a followed redirect would forward.
+    func urlSession(_ session: URLSession, task: URLSessionTask,
+                    willPerformHTTPRedirection response: HTTPURLResponse,
+                    newRequest request: URLRequest,
+                    completionHandler: @escaping @Sendable (URLRequest?) -> Void) {
+        completionHandler(nil)
+    }
+
     static func errorSummary(_ error: Error) -> String {
         let error = error as NSError
         var result = "error_domain=\(safeDomain(error.domain)) error_code=\(error.code)"

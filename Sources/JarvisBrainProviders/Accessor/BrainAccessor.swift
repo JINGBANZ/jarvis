@@ -50,6 +50,8 @@ public struct BrainAccessor: BrainClient, Sendable {
             wire = ResponsesWireFormat(
                 model: model, reasoningEffort: effort, maxOutputTokens: cap,
                 store: !provider.servedByLocalProxy)
+        case .interactions:
+            wire = InteractionsWireFormat(model: model, reasoningEffort: effort, maxOutputTokens: cap)
         }
         self.endpoint = endpoint
         self.timeout = timeout
@@ -78,6 +80,7 @@ public struct BrainAccessor: BrainClient, Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         switch provider.descriptor.auth {
         case .bearer: request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        case .googAPIKey: request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         }
         let resolved = toolChoicePolicy.resolve(tools: tools, choice: toolChoice)
         let body = try wire.encode(messages: messages, tools: resolved.tools, toolChoice: resolved.choice)
@@ -114,6 +117,9 @@ public struct BrainAccessor: BrainClient, Sendable {
         switch provider.descriptor.failureTable {
         case .openAI:
             OpenAIFailureClassifier.classify(
+                httpStatus: httpStatus, body: body, source: .brain(provider), stage: .request)
+        case .gemini:
+            GeminiFailureClassifier.classify(
                 httpStatus: httpStatus, body: body, source: .brain(provider), stage: .request)
         }
     }

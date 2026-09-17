@@ -98,16 +98,17 @@ struct LiveE2ETests {
         if let evidence = Self.requireEvidence(launch, &results) {
             let presses = launch.stepIndices(Self.isPress)
             let says = launch.stepIndices(Self.isSay)
-            guard presses.count == 2, says.count == 1 else {
+            guard presses.count == 3, says.count == 1 else {
                 results.check("B", false,
-                              "B has 2 presses and 1 spoken step (saw \(presses.count), \(says.count))")
+                              "B has 3 presses and 1 spoken step (saw \(presses.count), \(says.count))")
                 try launcher.finish(results)
                 return
             }
             let b1 = launch.attemptChain(forStep: presses[0])
             let b3 = launch.attemptChain(forStep: presses[1])
             let b2 = launch.attemptChain(forStep: says[0])
-            Self.noteStalls([("B1", b1), ("B3", b3), ("B2", b2)], evidence, &results)
+            let b4 = launch.attemptChain(forStep: presses[2])
+            Self.noteStalls([("B1", b1), ("B3", b3), ("B2", b2), ("B4", b4)], evidence, &results)
             let b1Rows = evidence.rows(inChain: b1)
             // Committed only: a retried press preloads again, so a stall must not read as two
             // loads.
@@ -170,7 +171,28 @@ struct LiveE2ETests {
             let catalogs = Set(claude.map { Self.skillCatalog(in: $0.instructions ?? "") })
             results.check("C19", catalogs == [["coding"]],
                           "the skills catalog lists only coding (saw \(catalogs.sorted { $0.count < $1.count }))")
+
+            // C27: Gemini takes over after a switch. Its first request replays the Show code preload
+            // Claude Code's attempt committed, a call Gemini never made, which needs the placeholder
+            // thought.
+            let gemini = Self.coachTraffic(evidence, on: .gemini)
+            let ranOnGemini = [b2, b4].map { chain in
+                chain.contains { evidence.traffic(for: $0).contains { $0.provider == BrainProvider.gemini.rawValue } }
+            }
+            results.check("C27", [
+                (evidence.activity.filter { $0.kind == "brainChangeApplied" }.count == 1, "the Gemini switch applied"),
+                (ranOnGemini == [true, true], "B2 and B4 ran on Gemini (saw \(ranOnGemini))"),
+                (evidence.rows(inChain: b4).contains { $0.kind == "tip" }, "B4's hint press on Gemini ended in a tip"),
+                (!gemini.isEmpty && !gemini.contains { $0.status == 400 },
+                 "no Gemini request was refused as malformed "
+                    + "(statuses \(gemini.map { $0.status.map(String.init) ?? "none" }))"),
+                (gemini.first?.replayedFunctionCalls.contains {
+                    $0.callID.hasPrefix("runner_") && $0.name == "load_skill"
+                } == true, "the first Gemini request replays the runner-written coding preload"),
+            ])
+            results.time("B4 press-to-tip", seconds: Self.pressToTip(evidence, b4))
             Self.noteReplyRecoveries(evidence, &results)
+            Self.checkNoScreenshotBytes(launch, &results)
             Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         }
         try launcher.finish(results)
@@ -467,6 +489,7 @@ struct LiveE2ETests {
         ])
 
         results.note("C24", "A7's Show code press delivered \(Self.describeDetail(evidence, a7[1]))")
+        Self.checkNoScreenshotBytes(launch, &results)
         Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         try launcher.finish(results)
     }
@@ -499,6 +522,22 @@ struct LiveE2ETests {
             checks.append((last?.message.contains("session ended by user") == true, "the session ended by user"))
         }
         results.check("G08", checks)
+    }
+
+    /// G11: the needle is the fixture's own base64, which a request holds only if redaction missed it.
+    /// The recorder escapes `/`, so both spellings are searched.
+    static func checkNoScreenshotBytes(_ launch: LiveE2ELaunch, _ results: inout LiveE2EResults) {
+        let fixture = LiveE2ELauncher.fixturesDirectory.appendingPathComponent("coding-problem.jpg")
+        let opening = (try? Data(contentsOf: fixture)).map { String($0.base64EncodedString().prefix(64)) }
+        let needles = opening.map { [$0, $0.replacingOccurrences(of: "/", with: "\\/")] } ?? []
+        let traffic = launch.sessionDirectory
+            .map { $0.appendingPathComponent(FileSessionAudit.brainTrafficFilename) }
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+        results.check("G11", [
+            (!needles.isEmpty && traffic != nil, "the fixture and brain-traffic.jsonl were readable"),
+            (!needles.isEmpty && needles.allSatisfy { traffic?.contains($0) == false },
+             "brain-traffic.jsonl holds none of the screenshot's bytes"),
+        ])
     }
 
     static func noteReplyRecoveries(_ evidence: Evidence, _ results: inout LiveE2EResults) {

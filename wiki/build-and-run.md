@@ -14,8 +14,8 @@ needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`
 The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Line Tools, which is
 what CI runs; no Xcode project exists. Developer desktops also have full Xcode and the Xcode MCP,
 whose macOS workflow builds, launches, stops, and reads logs, so an agent may drive the app that way;
-the scripts use `open`. The live e2e tests assume the three TCC grants, an OpenAI key saved in the
-secrets file, and Codex and Claude Code signed in from Settings → Connections.
+the scripts use `open`. The live e2e tests assume the three TCC grants, an OpenAI key and a Gemini
+key saved in the secrets file, and Codex and Claude Code signed in from Settings → Connections.
 
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested
@@ -207,8 +207,8 @@ omits the item rather than offering an action that a self-signed build could nev
   to only one running process. The second app logs that the shortcut is unavailable; use its menu-bar
   controls directly or quit the other variant when testing the shortcut.
 - Jarvis does **not** auto-start: choose transcription and Primary brain providers in Settings, meet
-  their credential or local sign-in requirements, then **Start / Stop** from the menu. OpenAI keys
-  are saved to an owner-only file; `OPENAI_API_KEY` is a headless fallback. The icon is a quiet
+  their credential or local sign-in requirements, then **Start / Stop** from the menu. API keys are
+  saved to owner-only files; `OPENAI_API_KEY` and `GEMINI_API_KEY` are headless fallbacks. The icon is a quiet
   monochrome tile while stopped and a lit Listening Lens in every other state: amber while starting or
   reconnecting, violet once ready, red when a Start is blocked by a requirement needing attention.
 

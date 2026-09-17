@@ -80,9 +80,10 @@ agent as that user. Any required administrator setup remains a separate, explici
 
 ### 3. Secrets
 
-The OpenAI API key lives in an **owner-only file** (`~/Library/Application Support/Jarvis/openai-api-key`,
-mode `0600` in a `0700` directory), entered once through the menu bar. It is never committed, never
-logged.
+The OpenAI and Gemini API keys live in **owner-only files**
+(`~/Library/Application Support/Jarvis/openai-api-key` and `gemini-api-key`, mode `0600` in a `0700`
+directory), entered through Settings → Connections, with `OPENAI_API_KEY` and `GEMINI_API_KEY` as
+headless fallbacks. They are never committed, never logged.
 
 We deliberately **don't** use the macOS Keychain. macOS keys Keychain access to a per-build code
 *partition* — for a self-signed app with no Apple Team ID, that partition is the binary's `cdhash`,
@@ -148,6 +149,15 @@ Narrow and explicit. Data leaves the machine only via:
   path the helper forces `store: false`; on the Claude path it presents the traffic as Anthropic's own
   Claude Code client, so Jarvis's system prompt reaches Anthropic behind that client's identity block. Anthropic's terms
   prohibit intermediating Claude session tokens; the owner accepts that risk on his own account.
+- **With Gemini selected**, transcription audio goes to the Gemini Live socket at
+  `generativelanguage.googleapis.com`, which takes the key in its URL as Google requires for that
+  socket; Jarvis never logs that URL. Coaching sends the brain payload to
+  `generativelanguage.googleapis.com/v1/interactions` with the key in a header
+  ([architecture.md → Gemini API target](./architecture.md#gemini-api-target)). Coaching requests
+  send `store: false`, so Google keeps no interaction for later reads. That does not cover the 55
+  days Google retains prompts and output for abuse monitoring. On an unpaid project, Google may also
+  use them to improve its products, and people may review them. This posture assumes a paid project,
+  meaning one tied to an active billing account.
 - **An explicit Activity → Evaluate click** sends the selected completed session to a read-only,
   non-persisted Claude Code / Codex agent under that CLI account. Unlike a coaching turn, this agent
   may inspect the complete `jarvis-activity.jsonl`, coaching-attempt provenance, brain traffic,
@@ -168,7 +178,7 @@ logged without page text.
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: audio is either
-streamed to OpenAI and dropped or analyzed on-device by Apple Speech, the live transcript lives in
+streamed to the selected transcription provider and dropped or analyzed on-device by Apple Speech, the live transcript lives in
 memory, and the transient file `screencapture` writes a frame into is created inside the owner-only
 session directory (never `/tmp`) and deleted —
 with its absence verified — before the capture returns. Session-derived data persists *on this
@@ -191,7 +201,7 @@ and provider-retention paths described here.
 > *debuggability-over-retention* choice. A future `store:false` change must also preserve stateless
 > tool-loop reasoning continuity; it is not part of the public-launch hardening. Requests to the Codex
 > subscription pass through the bundled helper, which forces `store:false`, so this retention applies
-> to the OpenAI API target only.
+> to the OpenAI API target only. Gemini requests send `store:false`.
 
 **The per-session log directory is the bounded session-data persistence, hardened to stay
 owner-only.** Nothing else on this machine holds session-derived data: the helper runs in

@@ -24,6 +24,16 @@ public enum BrainModelCatalog {
         BrainModel(id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5"),
     ]
 
+    // Preview and 2.5 models are left out: the 2.5 family uses a different thinking control.
+    private static let gemini: [BrainModel] = [
+        // 3.8 and 3.7 reject `minimal`, which is what `none` becomes.
+        BrainModel(id: "gemini-3.8-flash", displayName: "Gemini 3.8 Flash", reasoningEffortFloor: .low),
+        BrainModel(id: "gemini-3.7-flash", displayName: "Gemini 3.7 Flash", reasoningEffortFloor: .low),
+        BrainModel(id: "gemini-3.6-flash", displayName: "Gemini 3.6 Flash"),
+        BrainModel(id: "gemini-3.5-flash", displayName: "Gemini 3.5 Flash"),
+        BrainModel(id: "gemini-3.5-flash-lite", displayName: "Gemini 3.5 Flash-Lite"),
+    ]
+
     /// Older releases stay listed so saved routes stay valid; a model Codex doesn't serve fails
     /// with `model_not_found`. Invitation-only Mythos releases and rolling aliases are excluded.
     public static func models(for provider: BrainProvider) -> [BrainModel] {
@@ -32,6 +42,8 @@ public enum BrainModelCatalog {
             return all
         case .claudeSubscription:
             return claude
+        case .gemini:
+            return gemini
         }
     }
 
@@ -49,6 +61,7 @@ public enum BrainModelCatalog {
         case .openAI: return "gpt-5.4-mini"
         case .claudeSubscription: return "claude-haiku-4-5-20251001"
         case .codexSubscription: return ""
+        case .gemini: return "gemini-3.5-flash-lite"
         }
     }
 }

@@ -12,7 +12,7 @@ import Testing
     }
 
     @Test func subscriptionsAreServedByTheBundledHelper() {
-        #expect(BrainProvider.allCases == [.openAI, .codexSubscription, .claudeSubscription])
+        #expect(BrainProvider.allCases == [.openAI, .codexSubscription, .claudeSubscription, .gemini])
         #expect(BrainProvider.allCases.filter(\.servedByLocalProxy)
             == [.codexSubscription, .claudeSubscription])
         #expect(BrainProvider.codexSubscription.proxyModelOwner == "openai")
@@ -40,5 +40,22 @@ import Testing
             #expect(provider.displayName == provider.descriptor.displayName)
             #expect(provider.credential == (provider == .openAI ? .openAIAPIKey : nil))
         }
+    }
+
+    @Test func geminiIsAKeyedTargetOnTheInteractionsAPI() {
+        let gemini = BrainProvider.gemini
+        #expect(gemini.rawValue == "gemini")
+        #expect(gemini.displayName == "Gemini API")
+        #expect(BrainProviderDescriptor.geminiInteractionsEndpoint.absoluteString
+            == "https://generativelanguage.googleapis.com/v1/interactions")
+        #expect(gemini.descriptor.access == .apiKey(
+            credential: .geminiAPIKey,
+            endpoint: BrainProviderDescriptor.geminiInteractionsEndpoint, auth: .googAPIKey))
+        #expect(gemini.descriptor.wire == .interactions)
+        #expect(gemini.descriptor.failureTable == .gemini)
+        #expect(gemini.toolChoicePolicy == .providerEnforced)
+        #expect(gemini.reasoningEffortFloor == nil)
+        #expect(!gemini.servedByLocalProxy)
+        #expect(Defaults.Brain.modelKey(for: .gemini) == "brain.model.gemini")
     }
 }

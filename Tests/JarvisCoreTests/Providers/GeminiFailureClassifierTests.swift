@@ -84,4 +84,43 @@ import Testing
         let failure = GeminiFailureClassifier.classify(closeCode: 1008, reason: "bad key AIzaSyExample1234 for ?key=AIzaSyExample1234", source: source)
         #expect(!failure.message.contains("AIzaSyExample"))
     }
+
+    @Test func aBadKeyInsideAListIsARejectedKey() {
+        let body = Data(#"[{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"API_KEY_INVALID","domain":"googleapis.com"}]}}]"#.utf8)
+        let failure = GeminiFailureClassifier.classify(
+            httpStatus: 400, body: body, source: .brain(.gemini), stage: .request)
+        #expect(failure.category == .authentication && failure.disposition == .permanent)
+        #expect(failure.identity == .init(httpStatus: 400, errorType: "INVALID_ARGUMENT", errorCode: "API_KEY_INVALID"))
+        #expect(failure.activitySentence == "Gemini API rejected the API key (HTTP 400, API_KEY_INVALID: "
+            + "API key not valid. Please pass a valid API key.); check Settings → Connections")
+    }
+
+    @Test func interactionsErrorsQuoteTheirCode() {
+        func classify(_ status: Int, _ json: String) -> ProviderFailure {
+            GeminiFailureClassifier.classify(
+                httpStatus: status, body: Data(json.utf8), source: .brain(.gemini), stage: .request)
+        }
+        let malformed = classify(400, #"{"error":{"code":"invalid_request","message":"Request contains an invalid argument."}}"#)
+        #expect(malformed.category == .rejected && malformed.disposition == .temporary)
+        #expect(malformed.identity == .init(httpStatus: 400, errorCode: "invalid_request"))
+        let missing = classify(404, #"{"error":{"code":"not_found","message":"Model 'gemini-9.9-flash' not found."}}"#)
+        #expect(missing.category == .configuration && missing.disposition == .permanent)
+        let limited = classify(429, #"{"error":{"code":"rate_limit_exceeded","message":"Slow down."}}"#)
+        #expect(limited.category == .quota && limited.disposition == .temporary)
+        let expired = classify(401, #"{"error":{"code":"authentication","message":"API key is missing, invalid, or expired."}}"#)
+        #expect(expired.category == .authentication && expired.disposition == .permanent)
+        let down = classify(503, #"{"error":{"code":"service_unavailable","message":"Overloaded."}}"#)
+        #expect(down.category == .unavailable && down.disposition == .temporary)
+    }
+
+    /// A later turn with different words may pass, so a safety block must not exclude the target.
+    @Test func aSafetyBlockIsATemporaryRefusalThatQuotesGoogle() {
+        let body = Data(#"{"error":{"message":"Input blocked: This request was blocked by Gemini's filters. They can occasionally trigger by mistake on safe coding, security, or biology-related queries. Please try rephrasing your prompt.","code":"content_blocked"}}"#.utf8)
+        let failure = GeminiFailureClassifier.classify(
+            httpStatus: 400, body: body, source: .brain(.gemini), stage: .request)
+        #expect(failure.category == .rejected && failure.disposition == .temporary)
+        #expect(failure.identity == .init(httpStatus: 400, errorCode: "content_blocked"))
+        #expect(failure.activitySentence.hasPrefix(
+            "Gemini API refused the coaching request (HTTP 400, content_blocked: Input blocked:"))
+    }
 }

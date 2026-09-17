@@ -10,6 +10,8 @@ public extension RecordedExchange {
         switch provider.flatMap(BrainProvider.init(rawValue:))?.descriptor.wire {
         case .responses, nil:
             return ResponsesWireFormat.readRecorded(request: request, response: response)
+        case .interactions:
+            return InteractionsWireFormat.readRecorded(request: request, response: response)
         }
     }
 }

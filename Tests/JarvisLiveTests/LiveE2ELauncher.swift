@@ -244,14 +244,16 @@ struct LiveE2ELaunch {
     }
 }
 
-/// Reads files only, so it never starts a second helper beside the app's.
+/// Checks both keys and both sign-ins. Reads files only, so it never starts a second helper beside
+/// the app's.
 enum LiveE2EPreflight {
     static let failure: String? = {
         // LaunchServices does not pass this shell's environment, so only the key file serves the
         // run.
-        guard FileSecretStore().apiKey(for: .openAIAPIKey)?.isEmpty == false else {
-            return "No OpenAI API key in Jarvis's key file: save one in Jarvis Settings → Connections. "
-                + "OPENAI_API_KEY does not reach an app launched with open."
+        for credential in [Credential.openAIAPIKey, .geminiAPIKey]
+        where FileSecretStore().apiKey(for: credential)?.isEmpty != false {
+            return "No \(credential.displayName) key in Jarvis's key file: save one in Jarvis Settings → Connections. "
+                + "\(credential.environmentVariable) does not reach an app launched with open."
         }
         let auth = FileSecretStore().directoryURL
             .appendingPathComponent("proxy/auth", isDirectory: true)

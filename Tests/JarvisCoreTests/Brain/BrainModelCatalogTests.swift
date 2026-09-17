@@ -45,7 +45,7 @@ import Testing
     @Test func everyProviderUsesItsFirstCatalogEntryAsDefault() {
         for provider in BrainProvider.allCases {
             let models = BrainModelCatalog.models(for: provider)
-            #expect(models.count == (provider == .claudeSubscription ? 5 : 7))
+            #expect(models.count == ([.claudeSubscription, .gemini].contains(provider) ? 5 : 7))
             #expect(Set(models.map(\.id)).count == models.count)
             #expect(models.allSatisfy { !$0.id.isEmpty })
             #expect(BrainModelCatalog.defaultModel(for: provider) == models.first)
@@ -73,8 +73,17 @@ import Testing
         #expect(BrainModelCatalog.summarizerModelID(for: .codexSubscription) == "")
     }
 
+    @Test func geminiListsTheStableFlashModels() {
+        #expect(BrainModelCatalog.models(for: .gemini).map(\.id) == [
+            "gemini-3.8-flash", "gemini-3.7-flash", "gemini-3.6-flash",
+            "gemini-3.5-flash", "gemini-3.5-flash-lite",
+        ])
+        #expect(BrainModelCatalog.defaultModel(for: .gemini).id == "gemini-3.8-flash")
+        #expect(BrainModelCatalog.summarizerModelID(for: .gemini) == "gemini-3.5-flash-lite")
+    }
+
     @Test func effortFloorsAreModelData() {
-        let floored: Set<String> = ["gpt-6-astra"]
+        let floored: Set<String> = ["gpt-6-astra", "gemini-3.8-flash", "gemini-3.7-flash"]
         for provider in BrainProvider.allCases {
             for model in BrainModelCatalog.models(for: provider) {
                 #expect(model.reasoningEffortFloor == (floored.contains(model.id) ? .low : nil),

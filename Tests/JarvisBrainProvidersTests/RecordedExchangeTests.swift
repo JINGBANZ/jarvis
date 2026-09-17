@@ -61,4 +61,11 @@ import JarvisCore
         #expect(exchange.input == [.text("hello"), .image(nil)])
         #expect(RecordedExchange.read(provider: nil, request: nil, response: nil) == RecordedExchange())
     }
+
+    @Test func geminiRecordsUseTheInteractionsReader() {
+        let request: [String: Any] = ["model": "gemini-3.8-flash", "system_instruction": "You are Jarvis."]
+        let exchange = RecordedExchange.read(provider: "gemini", request: request, response: nil)
+        #expect(exchange == InteractionsWireFormat.readRecorded(request: request, response: nil))
+        #expect(exchange.instructions == "You are Jarvis.")
+    }
 }
