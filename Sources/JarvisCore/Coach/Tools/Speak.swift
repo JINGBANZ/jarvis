@@ -8,7 +8,7 @@ public func speakTool(detailEnabled: Bool) -> ToolDef {
         description: "Show a coaching reply: up to 3 short overlay lines, one idea each, under 12 "
             + "words. Call only when a reply is useful."
             + (detailEnabled
-                ? " Put a code block or a diagram in detail as Markdown; null for an ordinary hint."
+                ? " Use detail for Markdown content required by a loaded skill or a warranted explanation; otherwise null."
                 : ""),
         // Line breaks and the indentation after them are stripped, so no JSON string here may
         // contain a line break.
@@ -16,7 +16,7 @@ public func speakTool(detailEnabled: Bool) -> ToolDef {
             ? #"""
             {"type":"object","properties":{
                 "lines":{"type":"array","items":{"type":"string"}},
-                "detail":{"type":["string","null"],"description":"Markdown shown under the hint in the box. Null for an ordinary hint."}
+                "detail":{"type":["string","null"],"description":"Markdown shown under the hint in the box. Follow loaded skill guidance; otherwise null unless an explanation is warranted."}
             },"required":["lines","detail"],"additionalProperties":false}
             """#
             : #"""
@@ -52,8 +52,8 @@ private let tipStyle = """
 
 private let detailGuidance = """
     # Detail
-    The lines are the coaching. Say what the user needs there, including a short explanation, and
-    leave detail null.
+    The lines are the coaching. Keep the hint and its brief rationale there. Include detail when a
+    loaded skill calls for supporting content or an explanation is warranted; otherwise leave it null.
     detail is Markdown shown under the hint in the persistent box. Use it for what a line cannot
     hold: a code block or a diagram a loaded skill asked for. Write paragraphs there only when the
     user asks you to explain, or is clearly lost: they ask why, they restate something wrongly, or

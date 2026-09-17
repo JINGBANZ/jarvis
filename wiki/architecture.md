@@ -311,6 +311,11 @@ block rules and the `diff` correction shape, the `system-design` skill the merma
 the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
 a session that never loads the skill never pays for it in its cached prefix.
 
+The general detail default defers to the loaded skill so brevity does not make the user press
+Show code for every implementation step. The pairing rules and exceptions live in the
+[`coding` skill](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md); the core keeps no second
+copy of that domain policy.
+
 [`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into what the box
 shows: the prose, the first fenced block the code bounds accept, and the first `mermaid` fence the
 renderer accepts. A candidate the box rejects on the way to that one is removed from the prose, from
@@ -392,7 +397,8 @@ while stopped, an explicit shortcut only beeps. Activity records which shortcut 
 Explain more and Show code answer into the detail box, so the Overlay Box switch is the one thing that
 decides whether they exist: with the box off they are not registered, and `SessionComposition.allows`
 refuses them even when a runner calls `requestShortcut` directly. There is no separate switch for
-either, because the model judges when an explanation or a code block helps.
+either; the model follows the [detail guidance](#the-detail-box) and the loaded skill to supply
+the content alongside the hint.
 
 A Show code press preloads the `coding` skill. Moving the code rules into that skill would otherwise
 cost the press two round trips: one for the model to call `load_skill`, one to answer. Instead the

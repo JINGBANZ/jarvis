@@ -1,0 +1,15 @@
+{
+  "id": "C",
+  "audio": "fixture",
+  "brain": { "primary": "claude-subscription", "fallbacks": [] },
+  "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": ["behavioral", "system-design", "coding-with-ai"] },
+  "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "steps": [
+    { "screen": "coding-problem.jpg" },
+    { "say": { "speaker": "me", "text": "For merge intervals, I understand the approach: sort the intervals by their start, then scan and merge overlaps into the last result. I have chosen that approach, but the Java method is still empty. I am stuck on implementing the first step." } },
+    { "press": "hint" },
+    { "press": "hint" },
+    { "stop": true }
+  ]
+}
