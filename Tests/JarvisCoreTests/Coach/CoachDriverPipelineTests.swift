@@ -72,15 +72,18 @@ final class ScriptedThrowBrain: BrainClient, @unchecked Sendable {
     }
 }
 
+/// @unchecked: `lock` guards the count, which the detached capture task writes.
 final class FakeScreen: ScreenCapturing, @unchecked Sendable {
-    var captureCount = 0
+    private let lock = NSLock()
+    private var storedCaptureCount = 0
+    var captureCount: Int { lock.withLock { storedCaptureCount } }
     let payload: String
     let recognizedText: String?
     init(payload: String = "ZmFrZS1qcGVn", recognizedText: String? = nil) { // "fake-jpeg"
         self.payload = payload; self.recognizedText = recognizedText
     }
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
-        captureCount += 1
+        lock.withLock { storedCaptureCount += 1 }
         return ScreenSnapshot(
             imageBase64: payload,
             textEvidence: recognizedText.map {
@@ -96,21 +99,25 @@ final class UnavailableScreen: ScreenCapturing, @unchecked Sendable {
     func cancelCapture() {}
 }
 
+/// @unchecked: counts are guarded by `lock`, and the semaphores are thread-safe.
 final class GatedScreen: ScreenCapturing, @unchecked Sendable {
     let entered = DispatchSemaphore(value: 0)
     let release = DispatchSemaphore(value: 0)
-    private(set) var captureCount = 0
-    private(set) var cancelCount = 0
+    private let lock = NSLock()
+    private var storedCaptureCount = 0
+    private var storedCancelCount = 0
+    var captureCount: Int { lock.withLock { storedCaptureCount } }
+    var cancelCount: Int { lock.withLock { storedCancelCount } }
     let payload: String
     init(payload: String = "ZmFrZS1qcGVn") { self.payload = payload }
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
-        captureCount += 1
+        lock.withLock { storedCaptureCount += 1 }
         entered.signal()
         release.wait()
         return ScreenSnapshot(imageBase64: payload)
     }
     func cancelCapture() {
-        cancelCount += 1
+        lock.withLock { storedCancelCount += 1 }
         release.signal()
     }
 }
@@ -198,12 +205,18 @@ private actor FinishTrackingConversation: BrainConversation {
     }
 }
 
+/// @unchecked: `lock` guards the log, which the main actor writes while tests read it.
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
-    var rendered: [[String]] = []
-    var renderedSeconds: [[TimeInterval]] = []
+    private let lock = NSLock()
+    private var storedRendered: [[String]] = []
+    private var storedRenderedSeconds: [[TimeInterval]] = []
+    var rendered: [[String]] { lock.withLock { storedRendered } }
+    var renderedSeconds: [[TimeInterval]] { lock.withLock { storedRenderedSeconds } }
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
-        rendered.append(lines)
-        renderedSeconds.append(perLineSeconds)
+        lock.withLock {
+            storedRendered.append(lines)
+            storedRenderedSeconds.append(perLineSeconds)
+        }
     }
 }
 
