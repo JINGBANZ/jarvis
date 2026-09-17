@@ -368,7 +368,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     newPhase: CoachingAttemptAuditEvent.RequestPhase
                 ) {
                     if !response.outputItemsJSON.isEmpty {
-                        turnMessages.append(.rawItems(response.outputItemsJSON))
+                        turnMessages.append(.rawItems(response.outputItemsJSON, calls: response.rawToolCalls))
                     } else {
                         turnMessages.append(.assistantToolCalls(response.rawToolCalls))
                     }

@@ -137,16 +137,15 @@ public struct BrainAccessor: BrainClient, Sendable {
                 }
 
             case .assistant:
-                // OpenAI requires a function call's output items, reasoning included, to be
-                // replayed unmodified and in order, or linkage validation fails.
+                // OpenAI requires a function call's output items, reasoning included, to be replayed
+                // unmodified and in order. Raw items already contain the calls, so they are sent alone.
                 if let raw = m.rawItemsJSON {
                     for itemJSON in raw {
                         if let item = (try? JSONSerialization.jsonObject(with: Data(itemJSON.utf8))) as? [String: Any] {
                             input.append(item)
                         }
                     }
-                }
-                if let calls = m.toolCalls {
+                } else if let calls = m.toolCalls {
                     for c in calls {
                         input.append([
                             "type": "function_call",

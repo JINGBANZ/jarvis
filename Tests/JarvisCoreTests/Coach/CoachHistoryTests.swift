@@ -77,7 +77,8 @@ import Testing
         let h = CoachHistory()
         h.commit([.user("a"),
                   .rawItems([#"{"type":"reasoning","id":"rs_1","encrypted_content":"blob"}"#,
-                             #"{"type":"function_call","id":"fc_1","call_id":"c1","name":"capture_screen","arguments":"{}"}"#]),
+                             #"{"type":"function_call","id":"fc_1","call_id":"c1","name":"capture_screen","arguments":"{}"}"#],
+                            calls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
                   .init(role: .tool, text: "screenshot captured", toolCallId: "c1")])
         let snap = h.snapshot()
         #expect(!snap.contains { $0.rawItemsJSON != nil })
@@ -87,9 +88,24 @@ import Testing
         #expect(snap.contains { $0.role == .tool && $0.toolCallId == "c1" })
     }
 
+    /// The items here aren't OpenAI's shape; commit must not need to read them.
+    @Test func commitKeepsParsedCallsWithoutReadingRawItems() {
+        let h = CoachHistory()
+        let call = RawToolCall(id: "call_1_ab12cd34", name: "capture_screen", argumentsJSON: "{}")
+        h.commit([.user("a"),
+                  .rawItems([#"{"type":"thought","signature":"opaque"}"#,
+                             #"{"type":"function_call","id":"call_1_ab12cd34","name":"capture_screen","arguments":{}}"#],
+                            calls: [call]),
+                  .init(role: .tool, text: "screenshot captured", toolCallId: "call_1_ab12cd34")])
+        let snap = h.snapshot()
+        #expect(!snap.contains { $0.rawItemsJSON != nil })
+        #expect(snap.compactMap(\.toolCalls).flatMap { $0 } == [call])
+        #expect(snap.contains { $0.role == .tool && $0.toolCallId == "call_1_ab12cd34" })
+    }
+
     @Test func reasoningOnlyPassthroughIsDroppedWholeAtCommit() {
         let h = CoachHistory()
-        h.commit([.user("a"), .rawItems([#"{"type":"reasoning","id":"rs_1"}"#]), .user("b")])
+        h.commit([.user("a"), .rawItems([#"{"type":"reasoning","id":"rs_1"}"#], calls: []), .user("b")])
         #expect(h.snapshot().compactMap(\.text) == ["a", "b"])
         #expect(!h.snapshot().contains { $0.rawItemsJSON != nil || $0.toolCalls != nil })
     }
@@ -104,7 +120,8 @@ import Testing
             ]),
             .init(role: .tool, text: "not on a shortcut press", toolCallId: "q1"),
             .init(role: .tool, text: "Loaded coding.", toolCallId: "l1"),
-            .rawItems([#"{"type":"function_call","call_id":"q2","name":"stay_silent","arguments":"{}"}"#]),
+            .rawItems([#"{"type":"function_call","call_id":"q2","name":"stay_silent","arguments":"{}"}"#],
+                      calls: [RawToolCall(id: "q2", name: "stay_silent", argumentsJSON: "{}")]),
             .init(role: .tool, text: "not executed", toolCallId: "q2"),
             .assistantToolCalls([RawToolCall(id: "s1", name: "speak", argumentsJSON: #"{"lines":["Hi."]}"#)]),
             .init(role: .tool, text: "shown", toolCallId: "s1"),

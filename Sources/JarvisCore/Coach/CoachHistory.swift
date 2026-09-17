@@ -23,10 +23,12 @@ public final class CoachHistory: @unchecked Sendable {
     public func commit(_ turn: [ChatMessage]) {
         guard !turn.isEmpty else { return }
         lock.lock(); defer { lock.unlock() }
-        // Raw passthrough items convert first, so a `stay_silent` call among them is found too.
+        // Raw items go first so a `stay_silent` call among them is dropped too. Their reasoning matters
+        // only within the tool loop and would be re-billed on every later request.
         var turn = Self.droppingRefusedProse(Self.droppingSilence(turn.compactMap { m -> ChatMessage? in
-            guard let raw = m.rawItemsJSON else { return m }
-            return Self.convertRawItems(raw)
+            guard m.rawItemsJSON != nil else { return m }
+            guard let calls = m.toolCalls, !calls.isEmpty else { return nil }
+            return .assistantToolCalls(calls)
         }))
         let screenTextHeader = JarvisPrompts.Coach.screenTextHeader
         if let newest = turn.lastIndex(where: { $0.text?.contains(screenTextHeader) == true }) {
@@ -88,20 +90,6 @@ public final class CoachHistory: @unchecked Sendable {
                 + JarvisPrompts.Coach.supersededScreenTextStub,
             toolCallId: m.toolCallId
         )
-    }
-
-    /// Drops reasoning items: OpenAI needs them only within the turn's tool loop, and they would be
-    /// re-billed on every later request.
-    private static func convertRawItems(_ itemsJSON: [String]) -> ChatMessage? {
-        let calls = itemsJSON.compactMap { itemJSON -> RawToolCall? in
-            guard let item = (try? JSONSerialization.jsonObject(with: Data(itemJSON.utf8))) as? [String: Any],
-                  item["type"] as? String == "function_call",
-                  let callId = item["call_id"] as? String,
-                  let name = item["name"] as? String else { return nil }
-            return RawToolCall(id: callId, name: name,
-                               argumentsJSON: item["arguments"] as? String ?? "{}")
-        }
-        return calls.isEmpty ? nil : .assistantToolCalls(calls)
     }
 
     /// ASCII counts chars/4 and each non-ASCII scalar one token, so CJK text isn't undercounted.

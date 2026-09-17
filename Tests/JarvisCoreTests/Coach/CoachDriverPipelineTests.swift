@@ -1996,7 +1996,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(rawIndex != nil && resultIndex != nil)
         if let r = rawIndex, let t = resultIndex { #expect(r < t) }
         #expect(second.first { $0.rawItemsJSON != nil }?.rawItemsJSON == outputItems)
-        #expect(!second.contains { $0.toolCalls?.contains { $0.name == "capture_screen" } ?? false })
+        #expect(second.first { $0.rawItemsJSON != nil }?.toolCalls
+            == [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")])
+        #expect(second.filter { $0.toolCalls?.contains { $0.name == "capture_screen" } ?? false }.count == 1)
 
         let third = brain.calls[2]
         #expect(!third.contains { $0.rawItemsJSON != nil })
