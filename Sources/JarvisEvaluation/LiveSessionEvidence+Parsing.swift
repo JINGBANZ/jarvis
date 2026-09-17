@@ -136,9 +136,8 @@ extension LiveSessionEvidence {
     static func parseTraffic(_ object: [String: Any], index: Int) -> TrafficRecord {
         let context = object["coach_attempt"] as? [String: Any]
         let request = object["request"] as? [String: Any] ?? [:]
-        let input = request["input"] as? [[String: Any]] ?? []
-        let tools = request["tools"] as? [[String: Any]] ?? []
-        let toolChoice = request["tool_choice"]
+        let provider = object["provider"] as? String ?? request["provider"] as? String
+        let exchange = RecordedExchange.read(provider: provider, request: request, response: object["response"])
         return TrafficRecord(
             index: index,
             tag: object["tag"] as? String ?? "",
@@ -146,44 +145,32 @@ extension LiveSessionEvidence {
             sourceTrigger: context?["source_trigger"] as? String,
             status: object["status"] as? Int,
             error: object["error"] as? String,
-            provider: object["provider"] as? String ?? request["provider"] as? String,
-            instructions: request["instructions"] as? String,
-            declaredToolNames: tools.compactMap { $0["name"] as? String },
-            toolChoiceType: toolChoice as? String
-                ?? (toolChoice as? [String: Any])?["type"] as? String,
-            replayedFunctionCalls: input.compactMap { item in
-                guard item["type"] as? String == "function_call" else { return nil }
-                return FunctionCall(
-                    callID: item["call_id"] as? String ?? "",
-                    name: item["name"] as? String ?? "",
-                    arguments: item["arguments"] as? String ?? "")
+            provider: provider,
+            instructions: exchange.instructions,
+            declaredToolNames: exchange.toolNames,
+            toolChoiceType: exchange.toolChoiceType,
+            replayedFunctionCalls: exchange.input.compactMap { item in
+                guard case .call(let call) = item else { return nil }
+                return FunctionCall(callID: call.id ?? "", name: call.name ?? "", arguments: call.arguments ?? "")
             },
-            replayedFunctionOutputCallIDs: input.compactMap { item in
-                guard item["type"] as? String == "function_call_output" else { return nil }
-                return item["call_id"] as? String ?? ""
+            replayedFunctionOutputCallIDs: exchange.input.compactMap { item in
+                guard case .result(let callID, _) = item else { return nil }
+                return callID ?? ""
             },
-            speakParameters: speakParameters(in: tools),
-            speakDetail: speakDetail(inResponse: object["response"]))
-    }
-
-    static func speakParameters(in tools: [[String: Any]]) -> [String]? {
-        guard let speak = tools.first(where: { $0["name"] as? String == speakToolName }),
-              let parameters = speak["parameters"] as? [String: Any],
-              let properties = parameters["properties"] as? [String: Any]
-        else { return nil }
-        return properties.keys.sorted()
+            speakParameters: exchange.speakParameters,
+            speakDetail: speakDetail(in: exchange))
     }
 
     /// Reports what the model wrote: a speak call the runner built from prose is absent from the
     /// response and reads as `.noSpeakCall`. Null and absent `detail` both read as `.none`, as in
     /// `ToolInvocation.parse`.
-    static func speakDetail(inResponse response: Any?) -> SpeakDetail {
-        guard let output = (response as? [String: Any])?["output"] as? [[String: Any]],
-              let call = output.first(where: {
-                  $0["type"] as? String == "function_call" && $0["name"] as? String == speakToolName
-              })
-        else { return .noSpeakCall }
-        let arguments = (call["arguments"] as? String).flatMap(jsonObject)
+    static func speakDetail(in exchange: RecordedExchange) -> SpeakDetail {
+        let call = exchange.outputs.lazy.compactMap { output -> RecordedExchange.Call? in
+            guard case .call(let call) = output, call.name == speakToolName else { return nil }
+            return call
+        }.first
+        guard let call else { return .noSpeakCall }
+        let arguments = call.arguments.flatMap(jsonObject)
         guard let detail = arguments?["detail"] as? String else { return .none }
         return .present(detail)
     }

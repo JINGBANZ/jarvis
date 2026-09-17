@@ -156,7 +156,10 @@ enum SessionMetrics {
             guard let entry = record.object else { continue }
             let request = entry["request"] as? [String: Any]
             let response = entry["response"] as? [String: Any]
-            let model = request?["model"] as? String ?? "?"
+            let exchange = RecordedExchange.read(
+                provider: entry["provider"] as? String ?? request?["provider"] as? String,
+                request: request, response: response)
+            let model = exchange.model ?? "?"
             let recordKind = (entry["record_kind"] as? String)
                 .flatMap(BrainTrafficAuditEvent.Kind.init(rawValue:)) ?? .providerCall
             var call = Call(number: record.number,
@@ -204,12 +207,11 @@ enum SessionMetrics {
                 call.perModel[model] = ModelTotals(input: call.input, cacheRead: call.cacheRead,
                                                    cacheWrite: call.cacheWrite, output: call.output,
                                                    cost: nil, calls: 1)
-            } else if let usage = response?["usage"] as? [String: Any] {
-                call.input = int(usage["input_tokens"])
-                let details = usage["input_tokens_details"] as? [String: Any]
-                call.cacheRead = int(details?["cached_tokens"])
-                call.cacheWrite = int(details?["cache_write_tokens"])
-                call.output = int(usage["output_tokens"])
+            } else if let usage = exchange.usage {
+                call.input = usage.input
+                call.cacheRead = usage.cacheRead
+                call.cacheWrite = usage.cacheWrite
+                call.output = usage.output
                 call.perModel[model] = ModelTotals(input: call.input, cacheRead: call.cacheRead,
                                                    cacheWrite: call.cacheWrite, output: call.output,
                                                    cost: nil, calls: 1)

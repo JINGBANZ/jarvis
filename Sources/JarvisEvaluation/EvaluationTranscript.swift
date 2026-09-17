@@ -1,4 +1,5 @@
 import Foundation
+import JarvisBrainProviders
 import JarvisCore
 
 /// Request content unchanged since the previous call on the same stream is elided with a marker;
@@ -28,12 +29,15 @@ enum EvaluationTranscript {
             let tag = entry["tag"] as? String ?? "?"
             let request = entry["request"] as? [String: Any]
             let response = entry["response"] as? [String: Any]
+            let exchange = RecordedExchange.read(
+                provider: entry["provider"] as? String ?? request?["provider"] as? String,
+                request: entry["request"], response: entry["response"])
             let provider = SessionMetrics.providerName(
                 provider: entry["provider"] as? String, request: request, response: response)
             let isPreRequestFailure = entry["record_kind"] as? String
                 == BrainTrafficAuditEvent.Kind.preRequestFailure.rawValue
             // A failover keeps the tag, so elision state is keyed by provider and model too.
-            let model = request?["model"] as? String ?? "?"
+            let model = exchange.model ?? "?"
             let streamKey = "\(tag)\u{1F}\(provider)\u{1F}\(model)"
             var lines: [String] = []
 
@@ -59,15 +63,15 @@ enum EvaluationTranscript {
             lines.append(header)
             if let error = entry["error"] as? String { lines.append("TRANSPORT ERROR: \(error)") }
 
-            if let request {
-                lines.append(contentsOf: renderRequest(request, tag: tag, streamKey: streamKey,
+            if request != nil {
+                lines.append(contentsOf: renderRequest(exchange, tag: tag, streamKey: streamKey,
                                                        prevInstructions: &prevInstructions,
                                                        prevTools: &prevTools,
                                                        prevInput: &prevInput,
                                                        prevInputText: &prevInputText))
             }
             if let response = entry["response"] {
-                lines.append(contentsOf: renderResponse(response, tag: tag))
+                lines.append(contentsOf: renderResponse(response, exchange: exchange, tag: tag))
             }
             blocks.append(lines.joined(separator: "\n"))
         }
@@ -88,19 +92,17 @@ enum EvaluationTranscript {
             + "\n\n" + body
     }
 
-    private static func renderRequest(_ request: [String: Any], tag: String, streamKey: String,
+    private static func renderRequest(_ exchange: RecordedExchange, tag: String, streamKey: String,
                                       prevInstructions: inout [String: String],
                                       prevTools: inout [String: String],
                                       prevInput: inout [String: [String]],
                                       prevInputText: inout [String: [String?]]) -> [String] {
         var lines: [String] = []
-        var params = "request: model=\(request["model"] as? String ?? "?")"
-        if let reasoning = request["reasoning"] { params += " reasoning=\(compact(reasoning))" }
-        if let cap = request["max_output_tokens"] { params += " max_output_tokens=\(cap)" }
-        if let choice = request["tool_choice"] { params += " tool_choice=\(compact(choice))" }
+        var params = "request: model=\(exchange.model ?? "?")"
+        for parameter in exchange.parameters { params += " \(parameter.name)=\(parameter.value)" }
         lines.append(params)
 
-        let instructions = request["instructions"] as? String ?? ""
+        let instructions = exchange.instructions ?? ""
         if instructions == prevInstructions[streamKey] {
             lines.append("instructions: (unchanged — \(instructions.count) chars)")
         } else if !instructions.isEmpty {
@@ -108,20 +110,21 @@ enum EvaluationTranscript {
         }
         prevInstructions[streamKey] = instructions
 
-        let tools = canonical(request["tools"] ?? [])
+        let tools = exchange.toolsFingerprint
         if tools == prevTools[streamKey] {
-            let count = (request["tools"] as? [Any])?.count ?? 0
-            lines.append("tools: (unchanged — \(count) defs)")
+            lines.append("tools: (unchanged — \(exchange.toolCount) defs)")
         } else {
             lines.append("tools: \(tools)")
         }
         prevTools[streamKey] = tools
 
-        let items = request["input"] as? [Any] ?? []
-        let canon = items.map { canonical($0) }
+        let items = exchange.input
+        let canon = exchange.inputFingerprints
         let prev = prevInput[streamKey] ?? []
         let previousText = prevInputText[streamKey] ?? []
-        let currentText = items.map(cliText)
+        let currentText = items.map { item -> String? in
+            if case .text(let text) = item { text } else { nil }
+        }
         var shared = 0
         while shared < min(canon.count, prev.count), canon[shared] == prev[shared] { shared += 1 }
         lines.append("brain request input (\(items.count) items):")
@@ -139,62 +142,50 @@ enum EvaluationTranscript {
         return lines
     }
 
-    /// Image parts were redacted at record time, so `image_url` holds a placeholder.
     private static func renderInputItem(
-        _ item: Any,
-        previousCLIText: String?,
-        tag: String
+        _ item: RecordedExchange.InputItem, previousCLIText: String?, tag: String
     ) -> String {
-        guard let dict = item as? [String: Any] else { return compact(item) }
-        if let role = dict["role"] as? String {
-            let content = (dict["content"] as? [[String: Any]] ?? [])
-                .compactMap { ($0["text"] ?? $0["image_url"]) as? String }
-                .joined(separator: "\n")
-            return "\(role): \(content)"
-        }
-        switch dict["type"] as? String {
-        case "function_call":
-            return "assistant → function_call \(dict["name"] as? String ?? "?")(\(dict["arguments"] as? String ?? ""))"
-        case "function_call_output":
-            return "tool result: \(dict["output"] as? String ?? "")"
-        case "reasoning":
-            // Replayed verbatim with a possibly large `encrypted_content` blob and no audit signal.
-            return "assistant reasoning (replayed verbatim — \(compact(dict).count) chars)"
+        switch item {
+        case .message(let role, let parts):
+            return "\(role): \(parts.joined(separator: "\n"))"
+        case .call(let call):
+            return "assistant → function_call \(call.name ?? "?")(\(call.arguments ?? ""))"
+        case .result(_, let output):
+            return "tool result: \(output ?? "")"
+        case .reasoning(let characters):
+            // Replayed verbatim with a possibly large opaque blob and no audit signal.
+            return "assistant reasoning (replayed verbatim — \(characters) chars)"
         // Older CLI-provider records: plain content blocks, images already stubbed.
-        case "text":
-            let text = dict["text"] as? String ?? ""
-            return "text: " + renderCLITextDelta(text, previous: previousCLIText, tag: tag)
-        case "image":
-            return "image: \(dict["image"] as? String ?? "(redacted)")"
-        default:
-            return compact(dict)
+        case .text(let text):
+            return "text: " + renderCLITextDelta(text ?? "", previous: previousCLIText, tag: tag)
+        case .image(let image):
+            return "image: \(image ?? "(redacted)")"
+        case .other(let json):
+            return json
         }
     }
 
-    private static func renderResponse(_ response: Any, tag: String) -> [String] {
+    private static func renderResponse(_ response: Any, exchange: RecordedExchange, tag: String) -> [String] {
         let outputLabel = tag == "coach" ? "Jarvis brain output" : "\(tag) brain output"
         guard let dict = response as? [String: Any] else {
             return ["\(outputLabel) (unparsed): \(compact(response))"]
         }
         var lines: [String] = []
         var header = "\(outputLabel):"
-        if let status = dict["status"] as? String { header += " status=\(status)" }
-        if let details = dict["incomplete_details"] { header += " incomplete_details=\(compact(details))" }
+        if let status = exchange.status { header += " status=\(status)" }
+        if let details = exchange.incompleteDetail { header += " incomplete_details=\(details)" }
         if let exit = dict["exitCode"] as? Int { header += " exit=\(exit)" }   // CLI-provider record
         lines.append(header)
-        for item in dict["output"] as? [[String: Any]] ?? [] {
-            switch item["type"] as? String {
-            case "function_call":
-                lines.append("  → function_call \(item["name"] as? String ?? "?")(\(item["arguments"] as? String ?? ""))")
-            case "message":
-                let text = (item["content"] as? [[String: Any]] ?? [])
-                    .compactMap { $0["text"] as? String }
-                    .joined()
+        for output in exchange.outputs {
+            switch output {
+            case .call(let call):
+                lines.append("  → function_call \(call.name ?? "?")(\(call.arguments ?? ""))")
+            case .text(let text):
                 lines.append("  → text: \(text)")
-            case "reasoning":
+            case .reasoning:
                 continue   // encrypted/empty reasoning stubs carry no signal
-            default:
-                lines.append("  → \(compact(item))")
+            case .other(let json):
+                lines.append("  → \(json)")
             }
         }
         // CLI-provider records carry the reply as one string instead of an `output` array.
@@ -207,7 +198,7 @@ enum EvaluationTranscript {
             lines.append("  runtime: \(compact(removingDuplicateReply(runtime, reply: reply)))")
         }
         if let stderr = dict["stderr"] as? String, !stderr.isEmpty { lines.append("  stderr: \(stderr)") }
-        if let usage = dict["usage"] { lines.append("  usage: \(compact(usage))") }
+        if let usage = exchange.usage { lines.append("  usage: \(usage.rendered)") }
         if let error = dict["error"], !(error is NSNull) { lines.append("  API ERROR: \(compact(error))") }
         return lines
     }
@@ -243,13 +234,6 @@ enum EvaluationTranscript {
         return marker + "\n" + text[safeEnd...]
     }
 
-    private static func cliText(_ item: Any) -> String? {
-        guard let dict = item as? [String: Any],
-              dict["type"] as? String == "text"
-        else { return nil }
-        return dict["text"] as? String
-    }
-
     /// Codex's runtime envelope repeats `response.reply` inside `items`/`itemsView`.
     private static func removingDuplicateReply(_ value: Any, reply: String?) -> Any {
         guard let reply else { return value }
@@ -266,10 +250,7 @@ enum EvaluationTranscript {
     }
 
     private static func canonical(_ value: Any) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: value,
-                                                     options: [.sortedKeys, .fragmentsAllowed])
-        else { return String(describing: value) }
-        return String(data: data, encoding: .utf8) ?? ""
+        RecordedExchange.canonical(value)
     }
 
     private static func compact(_ value: Any) -> String { canonical(value) }

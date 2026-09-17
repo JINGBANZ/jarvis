@@ -111,9 +111,9 @@ public struct LiveSessionEvidence: Sendable {
         /// A string `tool_choice` itself (`auto`, `required`), or an object choice's `type`
         /// (`allowed_tools`, `function`).
         public let toolChoiceType: String?
-        /// `request.input` items of type `function_call`, in order.
+        /// Calls replayed in the request, in order.
         public let replayedFunctionCalls: [FunctionCall]
-        /// `call_id`s of `request.input` items of type `function_call_output`, in order.
+        /// Ids of the call results replayed in the request, in order.
         public let replayedFunctionOutputCallIDs: [String]
         /// Sorted property names of the declared `speak` tool; nil when none was declared.
         public let speakParameters: [String]?
