@@ -11,7 +11,6 @@ final class SubscriptionControls: NSObject {
 
     private struct Row {
         let view: SettingsRowView
-        let status: NSTextField
         let button: NSButton
     }
 
@@ -47,37 +46,27 @@ final class SubscriptionControls: NSObject {
         guard let content = card.contentView else { return card }
 
         for (index, provider) in Self.providers.enumerated() {
-            let status = NSTextField(labelWithString: "Checking…")
-            status.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-            status.alignment = .right
-            status.textColor = SettingsTheme.mutedText
             let button = NSButton(title: "Sign in", target: self, action: #selector(buttonPressed(_:)))
             button.bezelStyle = .rounded
             button.tag = index
             button.identifier = NSUserInterfaceItemIdentifier("\(provider.rawValue)-action")
 
-            let trailing = NSStackView(views: [status, button])
-            trailing.orientation = .horizontal
-            trailing.alignment = .centerY
-            trailing.spacing = 8
-            status.setContentHuggingPriority(.required, for: .horizontal)
-            button.setContentHuggingPriority(.required, for: .horizontal)
             let controls = NSView()
-            trailing.translatesAutoresizingMaskIntoConstraints = false
-            controls.addSubview(trailing)
+            button.translatesAutoresizingMaskIntoConstraints = false
+            controls.addSubview(button)
             NSLayoutConstraint.activate([
-                trailing.leadingAnchor.constraint(greaterThanOrEqualTo: controls.leadingAnchor),
-                trailing.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
-                trailing.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
+                button.leadingAnchor.constraint(greaterThanOrEqualTo: controls.leadingAnchor),
+                button.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
+                button.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
             ])
             let row = SettingsRowView(
                 title: provider.displayName,
-                detail: nil,
+                detail: "Checking…",
                 controlView: controls,
                 controlSize: NSSize(width: 240, height: 32),
                 showsSeparator: index > 0)
             content.addSubview(row)
-            rows[provider] = Row(view: row, status: status, button: button)
+            rows[provider] = Row(view: row, button: button)
         }
         card.onLayout = { [weak self, weak card] in
             guard let self, let card else { return }
@@ -190,25 +179,26 @@ final class SubscriptionControls: NSObject {
         for provider in Self.providers {
             guard let row = rows[provider] else { continue }
             let presentation = presentation(for: provider)
-            row.status.stringValue = presentation.status
-            row.status.textColor = presentation.color
-            row.status.setAccessibilityLabel("\(provider.displayName): \(presentation.status)")
             row.button.title = presentation.button
             row.button.isEnabled = presentation.buttonEnabled
             row.button.setAccessibilityLabel("\(presentation.button) \(provider.displayName)")
-            row.view.setDetail(actionFailures[provider] ?? presentation.detail)
+            if let failure = actionFailures[provider] {
+                row.view.setDetail(failure, color: SettingsTheme.amber)
+            } else {
+                row.view.setDetail(presentation.status, color: presentation.color)
+            }
         }
         onStatusChanged?()
     }
 
     private func presentation(for provider: BrainProvider) -> (
-        status: String, color: NSColor, detail: String?, button: String, buttonEnabled: Bool
+        status: String, color: NSColor, button: String, buttonEnabled: Bool
     ) {
         if signIns[provider] != nil {
-            return ("Signing in…", SettingsTheme.mutedText, "Finish in your browser", "Cancel", true)
+            return ("Signing in. Finish in your browser.", SettingsTheme.mutedText, "Cancel", true)
         }
         guard let readiness else {
-            return ("Checking…", SettingsTheme.mutedText, Self.accountHint(provider), "Sign in", false)
+            return ("Checking…", SettingsTheme.mutedText, "Sign in", false)
         }
         let account = supervisor.accountFiles(for: provider).first
         let who = account.map { file in
@@ -216,15 +206,16 @@ final class SubscriptionControls: NSObject {
         }.flatMap { $0.isEmpty ? nil : $0 }
         switch readiness {
         case .unavailable(let reason):
-            return ("Not running", SettingsTheme.amber, "The sign-in service \(reason)", "Try again", true)
+            return ("Not running. The sign-in service \(reason)", SettingsTheme.amber, "Try again", true)
         case .ready(_, let signedIn) where signedIn.contains(provider):
-            return ("Signed in", SettingsTheme.teal, who.map { "As \($0)" }, "Sign out", true)
+            return (["Signed in", who].compactMap { $0 }.joined(separator: " · "),
+                    SettingsTheme.teal, "Sign out", true)
         case .ready where account != nil:
-            return ("Not usable", SettingsTheme.amber,
-                    "\(who.map { "\($0) is" } ?? "The account is") saved but not usable right now; sign in again",
-                    "Sign in", true)
+            return ("Not usable. \(who.map { "\($0) is" } ?? "The account is") saved but can't be used "
+                        + "right now, so sign in again.",
+                    SettingsTheme.amber, "Sign in", true)
         case .ready:
-            return ("Signed out", SettingsTheme.mutedText, Self.accountHint(provider), "Sign in", true)
+            return ("Signed out. \(Self.accountHint(provider)).", SettingsTheme.mutedText, "Sign in", true)
         }
     }
 

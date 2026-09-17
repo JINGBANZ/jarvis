@@ -11,7 +11,6 @@ final class APIKeyControls: NSObject {
     private var keyRow: SettingsRowView?
     private var onHeightChanged: ((CGFloat) -> Void)?
     private var editing = false
-    private var statusBadge: NSTextField?
     private var actionButton: NSButton?
     private var field: NSSecureTextField?
     private var saveButton: NSButton?
@@ -76,20 +75,6 @@ final class APIKeyControls: NSObject {
         self.card = card
         guard let content = card.contentView else { return card }
 
-        let statusBadge = NSTextField(labelWithString: "Saved")
-        statusBadge.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        statusBadge.widthAnchor.constraint(
-            equalToConstant: ceil(statusBadge.intrinsicContentSize.width) + 12).isActive = true
-        statusBadge.textColor = SettingsTheme.teal
-        statusBadge.alignment = .center
-        statusBadge.drawsBackground = true
-        statusBadge.backgroundColor = SettingsTheme.calloutFill
-        statusBadge.wantsLayer = true
-        statusBadge.layer?.cornerRadius = 5
-        statusBadge.layer?.masksToBounds = true
-        statusBadge.setAccessibilityLabel("\(credential.displayName) key saved")
-        self.statusBadge = statusBadge
-
         let action = NSButton(
             title: hasSavedKey ? "Edit" : "Add API key",
             target: self,
@@ -98,23 +83,17 @@ final class APIKeyControls: NSObject {
         action.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-action")
         self.actionButton = action
 
-        let trailingControls = NSStackView(views: [statusBadge, action])
-        trailingControls.orientation = .horizontal
-        trailingControls.alignment = .centerY
-        trailingControls.spacing = 8
-        statusBadge.setContentHuggingPriority(.required, for: .horizontal)
-        action.setContentHuggingPriority(.required, for: .horizontal)
-
         let controls = NSView()
-        trailingControls.translatesAutoresizingMaskIntoConstraints = false
-        controls.addSubview(trailingControls)
+        action.translatesAutoresizingMaskIntoConstraints = false
+        controls.addSubview(action)
         NSLayoutConstraint.activate([
-            trailingControls.leadingAnchor.constraint(greaterThanOrEqualTo: controls.leadingAnchor),
-            trailingControls.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
-            trailingControls.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
+            action.leadingAnchor.constraint(greaterThanOrEqualTo: controls.leadingAnchor),
+            action.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
+            action.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
         ])
         let row = SettingsRowView(
             title: "API key",
+            detail: "",
             controlView: controls,
             controlSize: NSSize(width: 220, height: 32),
             showsSeparator: false)
@@ -210,7 +189,8 @@ final class APIKeyControls: NSObject {
     }
 
     private func applyState() {
-        statusBadge?.isHidden = !hasSavedKey || editing
+        keyRow?.setDetail(
+            hasSavedKey ? "Saved" : "Not saved", color: hasSavedKey ? SettingsTheme.teal : nil)
         actionButton?.isHidden = editing
         actionButton?.title = hasSavedKey ? "Edit" : "Add API key"
         field?.isHidden = !editing

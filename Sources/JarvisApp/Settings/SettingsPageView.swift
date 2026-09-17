@@ -121,7 +121,9 @@ final class SettingsPageView: NSView {
             // A label draws from the top of its frame, and all-capitals text has no descenders, so a
             // centered label would sit the capitals high. Center the capitals themselves.
             let font = Self.chipFont
-            let contentHeight = chipBox.contentView?.bounds.height ?? Self.chipHeight
+            // Not the box's content view: it keeps a stale size until the box lays itself out, and a
+            // page laid out only once would keep the wrong position.
+            let contentHeight = Self.chipHeight - 2 * chipBox.borderWidth
             let labelHeight = ceil(chipLabel.fittingSize.height)
             let capsBottom = (contentHeight - font.capHeight) / 2
             chipLabel.frame = NSRect(

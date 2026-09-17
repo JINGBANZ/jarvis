@@ -544,7 +544,7 @@ cards are **OpenAI API**, **Gemini API**, and **Subscriptions**. The OpenAI and 
 cards each report and edit only their own Jarvis-managed owner-only file through `APIKeyControls`
 (one instance per `Credential`, keyed by `credential.rawValue` so their accessibility labels,
 identifiers, and saved-key state never collide); each card's header says what the key is used for,
-and its action is **Add API key** or **Edit**, beside a teal **Saved** badge once a key is saved.
+and its action is **Add API key** or **Edit**. The row reads **Saved** in teal once a key is saved.
 The `OPENAI_API_KEY` fallback remains usable by Start but is deliberately not presented as a
 Jarvis-managed saved key; Gemini has the same headless fallback in `GEMINI_API_KEY`
 (`Credential.geminiAPIKey.environmentVariable`, read by `EnvSecretStore`), also not presented as a
@@ -574,7 +574,8 @@ claim that the account is healthy.
 The **Subscriptions** card (`SubscriptionControls`) has one row each for **Codex**
 and **Claude Code**. Opening Connections probes the bundled helper, starting it if it is
 not running, and reads its credential files, so each row says what a Start would find; each answer
-also updates `SubscriptionSignIns`, so the hub and the Brain page agree with this card:
+also updates `SubscriptionSignIns`, so the hub and the Brain page agree with this card. The state
+reads under the row's title, as the key rows' does, with the row's button on the right:
 
 - **Checking…** until the probe answers.
 - **Signed in** (teal), with the account's email and plan, and a **Sign out** button.
