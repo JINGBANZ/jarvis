@@ -105,7 +105,9 @@ same pages.
 **Slots.** Each part has a slot (`RobotSlotView`) with its icon, name, current value, and a short
 detail line. Brain shows the primary model and `VIA <PROVIDER>`, with three bars lit for the
 reasoning effort (none for None, three for High). Ear shows the transcription provider and short
-model name and the languages it expects. Eye shows the capture scope and whether Chrome text is on.
+model name and the languages it expects; GPT-4o Transcribe with more than one language reads as
+hearing any language, because that model takes a single hint. Eye shows the capture scope and
+whether Chrome text is on, which needs both the switch and a live Accessibility grant.
 Mouth shows which overlays are on. Slots are keyboard-focusable buttons (Space or Return opens) that
 VoiceOver reads as "<Part> settings" with the slot's value and detail. Hovering or focusing a slot
 lights its part of the head and its connector; hovering a part lights its slot.
@@ -471,8 +473,9 @@ When it is on with no sources, its detail asks the user to add notes, because th
 and keeps it; switching it back on shows the same list.
 
 Jarvis stores only the chosen paths (`PrepMaterialPreferences`), never a copy of their contents, and
-reads them fresh when needed, so removing a source only forgets it; a callout under the card says
-so. The file picker accepts the formats prep indexing can read. Whether each source still exists is
+reads them fresh when needed, so removing a source only forgets it. The search runs on this Mac,
+but the passages it finds join the coaching request to the brain provider, so the card header says
+only where the search runs and the callout under the card says where matches go. The file picker accepts the formats prep indexing can read. Whether each source still exists is
 checked off the main thread, because a stat can block on a network volume or a sleeping disk; a
 missing source shows its title and path in amber. The page re-checks every time it becomes visible.
 

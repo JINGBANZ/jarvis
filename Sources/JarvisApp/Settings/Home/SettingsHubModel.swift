@@ -90,7 +90,7 @@ final class SettingsHubModel {
             transcription: transcriptionPreferences.configuration,
             screenScope: screenPreferences.scope,
             displayIndex: screenPreferences.displayIndex,
-            browserTextEnabled: screenPreferences.browserTextEnabled,
+            browserTextEnabled: screenPreferences.browserTextEnabled && BrowserAccessibilityPermission.isGranted,
             captionEnabled: appearance.captionEnabled,
             boxEnabled: appearance.boxEnabled,
             readiness: RobotReadiness(

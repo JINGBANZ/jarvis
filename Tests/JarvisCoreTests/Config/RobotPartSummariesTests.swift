@@ -19,11 +19,27 @@ import Testing
     @Test func earShortensTheModelAndListsLanguages() {
         let configuration = TranscriptionConfiguration(
             provider: .openAI,
-            openAIModel: .gpt4oTranscribe,
+            openAIModel: .gptTranscribe,
             openAIExpectedLanguages: [.mandarinChinese, .english],
             appleSpeechLocaleIdentifier: "en_US")
         #expect(RobotPartSummaries.ear(configuration)
-            == RobotPartSummary(value: "OpenAI · GPT-4o", detail: "HEARS EN · 中文"))
+            == RobotPartSummary(value: "OpenAI · GPT", detail: "HEARS EN · 中文"))
+    }
+
+    @Test func gpt4oWithTwoLanguagesHearsAnyLanguage() {
+        let twoLanguages = TranscriptionConfiguration(
+            provider: .openAI,
+            openAIModel: .gpt4oTranscribe,
+            openAIExpectedLanguages: [.english, .mandarinChinese],
+            appleSpeechLocaleIdentifier: "en_US")
+        #expect(RobotPartSummaries.ear(twoLanguages)
+            == RobotPartSummary(value: "OpenAI · GPT-4o", detail: "HEARS ANY LANGUAGE"))
+        let oneLanguage = TranscriptionConfiguration(
+            provider: .openAI,
+            openAIModel: .gpt4oTranscribe,
+            openAIExpectedLanguages: [.english],
+            appleSpeechLocaleIdentifier: "en_US")
+        #expect(RobotPartSummaries.ear(oneLanguage).detail == "HEARS EN")
     }
 
     @Test func geminiDoesNotRepeatTheVendor() {
