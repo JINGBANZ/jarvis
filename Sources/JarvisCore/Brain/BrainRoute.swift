@@ -28,8 +28,8 @@ public struct BrainRoute: Sendable, Equatable {
     /// `init` keeps the result normalized.
     public func movingTarget(at index: Int, by offset: Int) -> BrainRoute? {
         var reordered = targets
-        let destination = index + offset
-        guard reordered.indices.contains(index), reordered.indices.contains(destination) else {
+        let (destination, overflow) = index.addingReportingOverflow(offset)
+        guard !overflow, reordered.indices.contains(index), reordered.indices.contains(destination) else {
             return nil
         }
         reordered.swapAt(index, destination)

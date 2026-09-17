@@ -76,5 +76,6 @@ import Testing
         #expect(route.movingTarget(at: 0, by: -1) == nil)
         #expect(route.movingTarget(at: 1, by: 1) == nil)
         #expect(route.movingTarget(at: 5, by: -1) == nil)
+        #expect(route.movingTarget(at: 1, by: .max) == nil)
     }
 }
