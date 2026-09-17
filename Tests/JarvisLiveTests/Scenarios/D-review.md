@@ -64,3 +64,21 @@ these semantic checks are not proved by C28/C29 or by matching words in the skil
 - **Defective output:** A proposed optimization removes indices from Python lists inside a nested
   pair loop. Pass: retain the performance review and explain why repeated linear removal can
   undermine the intended improvement; a corrective prompt remains short and focused.
+
+## Skill selection before loading
+
+Evaluate these cases with only the initial coach instructions and skill catalog, before providing
+any skill body. Return skill bodies only when requested, as in the production loading loop.
+Repeat with `coding` already loaded. Check the actions, not merely a claim of recognizing the round.
+
+| Evidence | Expected selection |
+| --- | --- |
+| Active task URL has `/ai-coding/practice/`; task-local tabs are Guide, Output, and an available assistant named Orbit; task reports `0 AI messages`; Guide is selected; candidate asks about a visible bug. | Load `coding-with-ai` and `coding`, in either order, before advice. No first message or opening the assistant is required. |
+| Same task, with the assistant renamed Coding Assistant or Zorple. | Same selection; no product-name allowlist. |
+| Ordinary coding editor; browser toolbar has Ask AI; unrelated browser tab mentions AI coding. | Load `coding`; those cues alone do not establish permitted task assistance. |
+| Coding task with an explicitly disabled assistant and no permission evidence. | Ordinary coding guidance; do not infer permission from the disabled control. |
+| Available task assistant, but interviewer explicitly prohibits AI. | Ordinary coding guidance; no delegated implementation prompt. |
+| Candidate explicitly establishes a Code with AI round; assistant panel is collapsed. | Load both skills; panel visibility is not required after the conversation establishes the round. |
+
+The supplied synthetic evidence should be used directly without browsing or collecting a new
+screen. This instruction-level review does not replace a real provider run against the session.

@@ -1,11 +1,16 @@
 ---
 name: coding-with-ai
-description: Use when a coding interview offers a usable AI assistant panel, the conversation establishes a Code with AI round, or the candidate is prompting another AI or reviewing its code.
+description: Add to coding when the conversation establishes AI collaboration, the candidate uses a coding assistant, or the task offers one. An available task-integrated assistant tab plus clear AI-coding task context is sufficient even with zero AI messages or an unselected tab; recognize its role regardless of name. Generic browser AI controls, unrelated tabs, or disabled controls alone are insufficient. Explicit interview restrictions take precedence.
 ---
 # Coding with AI
 
 Apply this guidance when a usable coding AI panel is available, even before the first prompt, or
-the conversation establishes AI collaboration. A generic icon, disabled control, or Jarvis's own
+the conversation establishes AI collaboration. An available assistant tab integrated into the task,
+together with clear AI-coding task context, is sufficient even while another task tab is selected
+and zero AI messages have been sent. Consider the current task's URL/title, task-local assistant
+controls, and conversation together; a URL keyword or unrelated browser tab alone is insufficient.
+Do not require the candidate to open the assistant or send a message just to recognize the round.
+A generic icon, disabled control, or Jarvis's own
 hints alone does not establish it. Explicit interview restrictions override interface availability;
 explanation-only permission does not authorize implementation prompts. Keep established round
 context through manual work or a collapsed panel; reconsider it when the round or rules change,

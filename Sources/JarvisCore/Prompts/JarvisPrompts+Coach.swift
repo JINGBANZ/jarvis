@@ -79,7 +79,10 @@ extension JarvisPrompts {
             return """
             # Loading
             Before choosing an action, load what this question needs and has not loaded: \(loaders).
-            Load one per response; the result comes straight back, so act on it in the same turn.
+            Skills can apply together. Loading one does not finish skill selection: reassess the other
+            available descriptions when new conversation or screen evidence arrives, including after
+            a capture. Load each additional applicable skill before coaching; do not wait for the user
+            to name it. Load one per response; continue loading if needed when its result comes back.
             When the turn says you must call speak, skip loading and speak with what you have.
             """
         }

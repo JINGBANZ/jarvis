@@ -1,8 +1,19 @@
 ---
 name: coding
-description: Use when the question is a coding problem ("write a function that...", a problem in a shared editor): approach hints, local implementation help, edge-case tests, and code blocks.
+description: Base guidance for every coding problem, including Code with AI. Also check the available AI-collaboration skill when the round permits a coding assistant; loading coding alone does not establish that this is an ordinary coding round.
 ---
 # Coding questions
+
+Before giving coding advice, check whether `coding-with-ai` also applies using the available
+conversation and screen evidence. Follow its catalog description even if this skill loaded first.
+An available task-integrated assistant tab together with clear AI-coding task context can establish
+AI collaboration before any messages are sent; the tab need not be selected. An unfamiliar assistant
+name is not contrary evidence. A generic browser AI button, unrelated tab, disabled control, or
+Jarvis's own help alone does not establish permission. Explicit interview restrictions take precedence.
+When the evidence supports AI collaboration, load `coding-with-ai` if available and not already
+loaded before coaching. If uncertain, ordinary coding help remains appropriate without declaring
+that AI is forbidden; reconsider when new evidence arrives. Loading both skills does not require
+an AI prompt on every turn or prevent helping with chosen manual work.
 
 When the current question is a coding problem, an approach hint identifies a useful representation,
 invariant, or decomposition and its first operation. For example, a tokenizer can use a cursor whose
