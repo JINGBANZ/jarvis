@@ -20,7 +20,8 @@ public func speakTool(detailEnabled: Bool) -> ToolDef {
         description: "Show a coaching reply: up to 3 short overlay lines, one idea each, under 12 "
             + "words. Call only when a reply is useful."
             + (detailEnabled
-                ? " Put a code block or a diagram in detail as Markdown; null for an ordinary hint."
+                ? " Put a code block, a diagram, or a short explanation in detail as Markdown; "
+                    + "null for an ordinary hint."
                 : ""),
         // Laid out one field per line for reading. Line breaks and the indentation after them are
         // stripped, so every brain receives the compact form; no JSON string here contains a line
@@ -84,8 +85,8 @@ private let detailGuidance = """
     needs an idea they do not have yet.
     "me" is in a live conversation and cannot stop to ask you why, so read that need from the
     conversation: "them" pushes past what "me" gave, such as asking for a better approach, and "me"
-    has no answer; or "me" hesitates, trails off, or restates something wrongly. A new question
-    or quiet alone does not show it.
+    has no answer; or "me" asks for time, stops mid-sentence, or restates something wrongly. A new
+    question or quiet alone does not show it, and you hear transcripts, not tone.
     "me" reads detail in seconds, under pressure. Keep it to what the gap needs, in plain words and
     a few short lines: the key idea in one sentence, a tiny example on the case already in play
     when it helps, and any block a loaded skill asks for. No headings, background, or alternatives.

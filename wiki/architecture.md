@@ -369,12 +369,14 @@ needing a next step from needing an idea the user does not have, using the avail
 history, newest speech, and current screen. It reads that need from the conversation, never from a
 request to Jarvis, because mid-interview the user is talking to the interviewer and cannot stop to
 ask why. The interviewer pushing past the user's answer, such as asking for a better approach the
-user has not offered, or the user hesitating, trailing off, or restating something wrongly, warrants
-an explanation; a new question, silence, or unchanged code alone does not. The explanation is read in
-seconds under stress, so it is a few plain lines: the key idea, a tiny example on the case in play,
-and any block the loaded skill asks for. Repeated confusion calls for simpler framing or a smaller
-example, while productive progress calls for silence. This policy applies to every kind of question
-without a separate classifier, timer, or model request.
+user has not offered, or the user asking for time, stopping mid-sentence, or restating something
+wrongly, warrants an explanation; a new question, silence, or unchanged code alone does not. Only
+transcript evidence counts, because clear hesitation sounds never reach the model
+([The turn](#the-turn)). The explanation is read in seconds under stress, so it is a few plain lines:
+the key idea, a tiny example on the case in play, and any block the loaded skill asks for. Repeated
+confusion calls for simpler framing or a smaller example, while productive progress calls for
+silence. This policy applies to every kind of question without a separate classifier, timer, or
+model request.
 
 Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
 **⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests

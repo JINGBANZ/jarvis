@@ -36,7 +36,8 @@ import Testing
         #expect(tool.parametersJSON.contains(
             "Markdown shown under the hint in the box. Null for an ordinary hint."))
         #expect(tool.description.contains(
-            "Put a code block or a diagram in detail as Markdown; null for an ordinary hint."))
+            "Put a code block, a diagram, or a short explanation in detail as Markdown; "
+                + "null for an ordinary hint."))
         #expect(tool.guidance.contains("# Detail"))
         #expect(!speakTool(detailEnabled: false).guidance.contains("# Detail"))
         #expect(!tool.guidance.contains("mermaid"))
@@ -211,7 +212,9 @@ import Testing
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         #expect(detail.contains("cannot stop to ask you why"))
         #expect(detail.contains("\"them\" pushes past what \"me\" gave, such as asking for a better approach"))
-        #expect(detail.contains("A new question or quiet alone does not show it."))
+        // Filler never reaches the model (`TurnSubstance`), so the signals are ones a transcript shows.
+        #expect(detail.contains("\"me\" asks for time, stops mid-sentence, or restates something wrongly"))
+        #expect(detail.contains("A new question or quiet alone does not show it, and you hear transcripts, not tone."))
         #expect(detail.contains("No headings, background, or alternatives."))
         #expect(!detail.contains("only when the user asks you to explain"))
     }
@@ -227,6 +230,8 @@ import Testing
         let sketch = try #require(body.range(of: "3. Pseudo-code for the whole approach"))
         #expect(reason.lowerBound < trace.lowerBound && trace.lowerBound < sketch.lowerBound)
         #expect(body.contains("A better approach's sketch, above, is the one exception."))
+        // A wrong approach otherwise gets no code; the interviewer's request is what licenses the sketch.
+        #expect(body.contains("add no code, unless the interviewer asked for a better approach: then give its sketch."))
     }
 
     /// A live session shipped "compare left spine height vs right spine height" — inside the line
