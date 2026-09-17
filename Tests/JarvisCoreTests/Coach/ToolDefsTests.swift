@@ -29,9 +29,9 @@ import Testing
     @Test func theDetailFieldIsGovernedByPromptTextAlone() {
         let tool = speakTool(detailEnabled: true)
         #expect(tool.parametersJSON.contains(
-            "Markdown shown under the hint in the box. Null for an ordinary hint."))
+            "Follow loaded skill guidance; otherwise null unless an explanation is warranted."))
         #expect(tool.description.contains(
-            "Put a code block or a diagram in detail as Markdown; null for an ordinary hint."))
+            "Use detail for Markdown content required by a loaded skill or a warranted explanation; otherwise null."))
         #expect(tool.guidance.contains("# Detail"))
         #expect(!speakTool(detailEnabled: false).guidance.contains("# Detail"))
         #expect(!tool.guidance.contains("mermaid"))
