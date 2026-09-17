@@ -12,7 +12,11 @@ private func liveE2EDelegate() -> (any NSApplicationDelegate)? {
         exit(2)
     }
     do {
-        return try LiveE2EAppDelegate(options: LiveE2EOptions())
+        let options = try LiveE2EOptions()
+        if CommandLine.arguments.contains("--browser-capture-check") {
+            return BrowserCaptureCheckDelegate(options: options)
+        }
+        return LiveE2EAppDelegate(options: options)
     } catch {
         fputs("Jarvis live e2e: \(error)\n", stderr)
         exit(2)

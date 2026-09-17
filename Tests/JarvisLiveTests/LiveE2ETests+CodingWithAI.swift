@@ -1,0 +1,61 @@
+import Foundation
+import JarvisCore
+import JarvisEvaluation
+import Testing
+
+extension LiveE2ETests {
+    @Test func scenarioD() async throws {
+        guard let launcher = await LiveE2ELauncher.begin(scenario: "D") else { return }
+        let launch = try await launcher.launch()
+        var results = LiveE2EResults(scenario: "D")
+        guard let evidence = Self.requireEvidence(launch, &results) else {
+            try launcher.finish(results)
+            return
+        }
+        let presses = launch.stepIndices(Self.isPress)
+        let says = launch.stepIndices(Self.isSay)
+        guard presses.count == 4, says.count == 4 else {
+            results.check("D", false, "four hint presses and four spoken steps ran "
+                + "(saw \(presses.count), \(says.count))")
+            try launcher.finish(results)
+            return
+        }
+        let chains = presses.map { launch.attemptChain(forStep: $0) }
+        for (index, chain) in chains.enumerated() {
+            let label = "D hint \(index + 1)"
+            Self.noteStalls([(label, chain)], evidence, &results)
+            let tip = evidence.rows(inChain: chain).last { $0.kind == "tip" }
+            results.check("C28", [
+                (chain.last?.isCommitted == true, "\(label) committed a reply"),
+                (tip?.response?.lines.contains {
+                    !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                } == true, "\(label) delivered hint text"),
+                (tip.map { !Self.carriesProtocolText($0.message) } ?? false,
+                 "\(label) delivered no protocol text"),
+            ])
+            results.time("\(label) press-to-tip", seconds: Self.pressToTip(evidence, chain))
+        }
+
+        // Speech can trigger a load before the subsequent shortcut, so use committed session rows.
+        let loadedRows = evidence.attempts.filter(\.isCommitted).flatMap { evidence.rows(in: $0) }
+        let reviewTip = evidence.rows(inChain: chains[1]).last { $0.kind == "tip" }
+        for skill in ["coding-with-ai", "coding"] {
+            let load = loadedRows.first { $0.loadedCapability?.name == skill }
+            results.check("C28", Self.precedes(load?.index, reviewTip?.index),
+                          "\(skill) loaded before the permitted AI review tip")
+        }
+        let correctiveChains = [launch.attemptChain(forStep: says[2]), chains[2]]
+        let hasCorrectiveDetail = correctiveChains.contains { chain in
+            Self.deliveredDetail(evidence, chain)?
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+        results.check("C29", hasCorrectiveDetail,
+                      "the requested corrective AI prompt delivered supporting detail")
+        results.note("C29", "Structural checks only. Semantic review NOT EVALUATED: apply "
+            + "Tests/JarvisLiveTests/Scenarios/D-review.md to the recorded replies. "
+            + "AI proposal and test results are spoken reports; the JPEG is OCR-only and proves no Chrome AX coverage.")
+        Self.checkNoScreenshotBytes(launch, &results)
+        Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
+        try launcher.finish(results)
+    }
+}

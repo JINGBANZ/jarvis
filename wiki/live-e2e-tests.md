@@ -88,7 +88,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|C|R|F01|F02|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|D|R|F01|F02|all] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -122,9 +122,10 @@ every other brain response runs on a subscription.
 A result line is `<case> pass`, `fail`, `note`, or `skipped`. `pass` and `fail` come from assertions.
 `note` records a model's choice and never affects the exit code (see
 [Notes and the rerun rule](#notes-and-the-rerun-rule)). The `skipped` lines are fixed: G07 (offline),
-G10 (dropped), C21 (optional), and F03, R01, R02, S01 (manual). The exit code counts only `fail`
-lines, missing finished markers, and a failed test process, so a launch that dies mid-scenario fails
-the run even when no assertion ran.
+G10 (dropped), C21 (optional), and F03, R01, R02, S01 (manual). A successful run requires a nonempty successful Swift Testing completion summary, results and a
+finished marker for every selected scenario, and no failed assertions or process/logging failures.
+An empty run or a process that exits zero before its tests finish fails. The offline Gate applies
+the same Swift Testing completion check; synthetic runner regressions exercise both wrappers.
 
 Each session directory is an ordinary one, so `scripts/eval-session.sh` or an agent reads it like any
 other. Run directories hold screenshots and finalized speech, which is why they stay owner-only under
@@ -147,6 +148,7 @@ layout in the Gate.
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
 | B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
+| D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, and an explicitly requested corrective prompt. C28/C29 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
@@ -203,6 +205,45 @@ C26 checks the delivered Activity response, after overlay acceptance, for both n
 and a code block accepted by `ReplyDetail`. The candidate already understands a viable approach
 and is stuck implementing it, so code accompanies these actionable hints. A missing block is a
 regression failure, not a note; conceptual orientation is covered by other scenarios.
+
+Scenario D's AI proposal and test output are candidate reports carried through real transcription.
+Its JPEG remains the coding fixture, so its assertions do not establish Chrome panel detection or
+observed test execution. Advice quality, restrictions, and factual caveats are judged against the
+[scenario rubric](../Tests/JarvisLiveTests/Scenarios/D-review.md). Results explicitly record semantic
+review as not evaluated; structural success alone does not establish that the advice is correct.
+
+## Explicit Chrome capture check
+
+`scripts/run-browser-capture-check.sh [expectation.json]` exercises `WindowScopedScreenCapture`
+inside the signed development app with Chrome text enabled, without audio or provider calls. It
+uses the existing confined live-e2e output options and a separate debug-only delegate. The script
+requires a built development app and no running development instance; it never quits a live preview
+to begin the check. Unlike the scenario command, this check reads the real foreground window.
+
+The operator opens the authorized fixture in Chrome and brings it forward during the script's
+five-second preparation window. Screen Recording and Accessibility grants must already exist;
+missing grants or a non-Chrome foreground app produce a blocked result and exit 2. Missing capture,
+missing completion evidence, truncation, and mismatched expectations fail with exit 1. Success exits
+0. The script waits up to 30 seconds, then requests cancellation and allows five seconds for cleanup.
+The app independently cancels capture after 25 seconds. If cancellation is not acknowledged, the
+command fails and leaves the app alive to finish its helper cleanup; the output directory requires
+inspection before another run.
+
+The default HTML and JSON under `Tests/JarvisLiveTests/Fixtures/browser-capture.*` are a small
+synthetic smoke fixture, not a CoderPad emulator. `BrowserCaptureExpectation` requires exact text
+blocks from accessibility evidence; OCR cannot satisfy them. Include the entire expected file as
+one required block to check every line and indentation. Separate blocks check only those blocks,
+not the unseen content between them. An optional forbidden-text list can detect content from an
+unselected tab when the operator places its sentinel there. Gate tests cover missing middle lines,
+wrong file names, whitespace changes, OCR-only captures, truncation, and excluded text.
+
+Results and the supplied expectation stay owner-only under the main workspace's `.jarvis/live-e2e`,
+even when the source worktree is temporary. The check writes no raw captured text or image archive. Successful capture removes its temporary
+image through the production runner. A failed or unacknowledged cleanup can leave a transient image
+in the protected output directory and must be investigated. A pass establishes the expected text
+in that capture and unchanged foreground application, not cursor/scroll stability, file memory,
+revision identity, or CoderPad-wide full-file support. Run it with expectations for the actual
+editor to measure those exposure limits; the operator owns all file switches and scrolling.
 
 ## Notes and the rerun rule
 
@@ -270,6 +311,8 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C25 | Explain more delivers a detail, even when the model first answers in prose | B: the Explain more press |
 | C26 | Ordinary hint presses deliver hint and code in the same reply without Show code | C: both hint presses |
 | C27 | A keyed target coaches after a switch, replaying another provider's calls | B: the behavioral question and the hint press, on Gemini |
+| C28 | Code with AI guidance loads before permitted review and ordinary hint presses deliver committed replies | D |
+| C29 | An explicitly requested corrective prompt delivers supporting detail | D; semantics use `Tests/JarvisLiveTests/Scenarios/D-review.md` |
 
 ### General coaching flow
 
@@ -346,8 +389,9 @@ it as unverified in its description.
   work through demonstrated understanding, a local block, a visible bug, completion without tests, and
   valid progress; confirm the overlay stays at most three short lines and healthy progress stays
   silent.
-- **Browser screen text,** when screen capture, OCR, or Chrome Accessibility extraction changes,
-  because the run views a fixture screenshot instead of Chrome. Follow
+- **Browser screen text,** when screen capture, OCR, or Chrome Accessibility extraction changes.
+  Run the [explicit capture check](#explicit-chrome-capture-check) for exact expected text, then
+  check cursor/scroll stability and real-editor behavior following
   [build-and-run.md → Browser screen-text validation](./build-and-run.md#browser-screen-text-validation).
 - **Coding with AI in CoderPad,** when the `coding-with-ai` skill or browser text extraction changes,
   because it needs a live CoderPad page with Chrome page text enabled. Establish an AI-assisted
