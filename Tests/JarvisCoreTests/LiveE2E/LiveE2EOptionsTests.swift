@@ -4,8 +4,6 @@ import Testing
 
 @Suite("Live e2e options")
 struct LiveE2EOptionsTests {
-    /// A throwaway checkout: `<root>/repo` holds `Package.swift` and the scenario output directory;
-    /// the scenario file, fixtures, and an outside directory sit beside it so one removal cleans up.
     private struct Layout {
         let root: URL
 

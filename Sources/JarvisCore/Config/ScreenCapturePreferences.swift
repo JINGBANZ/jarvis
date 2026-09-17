@@ -1,16 +1,7 @@
 import Foundation
 
-/// Persisted screen-capture selection: what `capture_screen` shoots (`scope`) and, for
-/// entire-display captures, which display — stored as the 1-based index `screencapture -D` uses
-/// (1 = the main display, the one with the menu bar).
-/// Backed by UserDefaults; keys and defaults come from `Defaults.Screen`, and reads clamp so an
-/// absent or nonsense value falls back to the default.
-/// Foundation-only so it stays unit-testable in JarvisCore; inject a `UserDefaults(suiteName:)` in
-/// tests. Mirrors `BrainPreferences`.
-///
-/// `@unchecked Sendable`: the only stored property is an immutable reference to `UserDefaults`,
-/// which is documented thread-safe — `ScreenCaptureCLI` reads the selection off the main actor at
-/// capture time while the Settings pane writes it on the main actor.
+/// `@unchecked Sendable`: the only stored property is an immutable `UserDefaults`, which is
+/// thread-safe.
 public final class ScreenCapturePreferences: @unchecked Sendable {
     private let defaults: UserDefaults
 
@@ -18,13 +9,10 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
         self.defaults = defaults
     }
 
-    /// Which display entire-display captures shoot, as the 1-based index `screencapture -D`
-    /// counts (1 = main display). Absent → the declared default; stored values below the floor
-    /// clamp to it. Ignored in active-window scope.
+    /// The 1-based `screencapture -D` index. Ignored in active-window scope.
     public var displayIndex: Int {
         get {
-            // `integer(forKey:)` cannot distinguish an absent key from a stored 0, so check
-            // presence first — otherwise the declared default is dead and changing it does nothing.
+            // `integer(forKey:)` returns 0 for an absent key, so check presence first.
             guard defaults.object(forKey: Defaults.Screen.displayIndexKey) != nil else {
                 return Defaults.Screen.displayIndex
             }
@@ -38,8 +26,6 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
         }
     }
 
-    /// What to capture: the active window (default) or the entire selected display. Absent or
-    /// unrecognized stored values fall back to the default, like `displayIndex` clamps.
     public var scope: ScreenCaptureScope {
         get {
             defaults.string(forKey: Defaults.Screen.scopeKey)
@@ -48,8 +34,7 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
         set { defaults.set(newValue.rawValue, forKey: Defaults.Screen.scopeKey) }
     }
 
-    /// Whether active-window captures may read semantic text from a supported foreground browser.
-    /// The macOS permission is checked independently at capture time; this is the user's opt-in.
+    /// The user's opt-in only. The Accessibility grant is checked at capture time.
     public var browserTextEnabled: Bool {
         get {
             guard defaults.object(forKey: Defaults.Screen.browserTextEnabledKey) != nil else {
@@ -60,8 +45,7 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
         set { defaults.set(newValue, forKey: Defaults.Screen.browserTextEnabledKey) }
     }
 
-    /// Clears an opt-in that the system can no longer honor, such as after Accessibility access
-    /// is revoked in System Settings. Returns whether the persisted setting changed.
+    /// Clears an opt-in the system can no longer honor. Returns whether the setting changed.
     @discardableResult
     public func reconcileBrowserTextAvailability(isAvailable: Bool) -> Bool {
         guard browserTextEnabled, !isAvailable else { return false }
@@ -69,10 +53,8 @@ public final class ScreenCapturePreferences: @unchecked Sendable {
         return true
     }
 
-    /// The display a capture must explicitly target (`screencapture -D`), or nil when a plain
-    /// capture — which shoots the main display — is right: active-window scope, where fallbacks
-    /// must not be steered by an index left over from an old entire-display selection, and
-    /// entire-display scope on the main display itself.
+    /// Nil for a plain main-display capture. Active-window scope ignores the stored index so a
+    /// stale one can't steer its fallbacks.
     public var explicitDisplay: Int? {
         scope == .entireDisplay && displayIndex > 1 ? displayIndex : nil
     }

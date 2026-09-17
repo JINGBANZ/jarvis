@@ -22,30 +22,26 @@ import Testing
         #expect(selected?.windowID == 7)
     }
 
-    /// The dock, menu bar, and floating panels ride at non-zero layers ahead of app windows in the
-    /// list — they must never be "the window the user works in".
+    /// The Dock, menu bar, and floating panels sit at non-zero layers.
     @Test func skipsNonZeroLayers() {
         let selected = FrontWindowSelector.frontWindow(
             in: [window(1, layer: 25), window(2, layer: 20), window(3)], ownPID: ownPID)
         #expect(selected?.windowID == 3)
     }
 
-    /// Jarvis's own Settings window frontmost (the user just tweaked a setting, then hit the hint
-    /// hotkey): the pick is the user's previously active window right under it.
     @Test func skipsOwnWindowsAndPicksTheOneBeneath() {
         let selected = FrontWindowSelector.frontWindow(
             in: [window(1, pid: ownPID), window(2, pid: 42)], ownPID: ownPID)
         #expect(selected?.windowID == 2)
     }
 
-    /// Status bubbles and 1-pt helper windows sit at layer 0 too; a shot of one is useless.
+    /// Status bubbles and 1 pt helper windows also sit at layer 0.
     @Test func skipsTinyLayerZeroWindows() {
         let selected = FrontWindowSelector.frontWindow(
             in: [window(1, width: 320, height: 24), window(2)], ownPID: ownPID)
         #expect(selected?.windowID == 2)
     }
 
-    /// Bare desktop (or a transiently empty list): nil, so the caller falls back to full-display.
     @Test func returnsNilWhenNothingEligible() {
         #expect(FrontWindowSelector.frontWindow(in: [], ownPID: ownPID) == nil)
         #expect(FrontWindowSelector.frontWindow(

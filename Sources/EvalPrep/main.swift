@@ -3,19 +3,6 @@ import JarvisBrainProviders
 import JarvisCore
 import JarvisEvaluation
 
-// eval-prep: the thin dev-side CLI entry point for the same agentic evaluator Activity uses.
-//
-//   eval-prep <session-dir>          renders the session's recorded brain traffic to an owner-only
-//                                    `eval-transcript.txt` inside <session-dir> and prints the agent
-//                                    task prompt to stdout
-//   eval-prep --html <session-dir>   renders the saved `eval-report.md` to a browsable
-//                                    `eval-report.html` beside it and prints the page's path
-//   eval-prep --evaluate <repo> <session-dir> [claude|codex]
-//                                    runs the read-only evaluator, saves the report, renders its page,
-//                                    and prints the page's path
-//
-// Foundation-only, so it builds and runs on any machine (no macOS UI frameworks).
-
 let args = CommandLine.arguments
 do {
     switch (args.count, args.count > 1 ? args[1] : "") {

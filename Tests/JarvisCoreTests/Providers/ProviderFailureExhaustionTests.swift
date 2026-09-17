@@ -5,8 +5,6 @@ import Testing
 @Suite struct ProviderFailureExhaustionTests {
     private let source = ProviderFailure.Source.transcription(.openAI)
 
-    /// The bug this whole change exists for: a socket that never reached ready spends its budget and
-    /// the session must say what kept refusing it, not "the connection was lost".
     @Test func aBudgetSpentBeforeReadyKeepsTheCauseAndEscalates() {
         let refused = ProviderFailure(
             source: source, stage: .connect, category: .unreachable, disposition: .temporary,
@@ -23,8 +21,6 @@ import Testing
                 == "OpenAI couldn't be reached for transcription (network -1004: could not connect to the server); check your network or VPN")
     }
 
-    /// A socket lost after it was ready stays a blip local to that one stream, so the system-audio
-    /// side degrades to microphone-only instead of ending the session.
     @Test func aBudgetSpentAfterReadyStaysStreamLocal() {
         let dropped = ProviderFailure(
             source: source, stage: .close, category: .disconnected, disposition: .temporary,
@@ -38,8 +34,6 @@ import Testing
                 == "the transcription connection to OpenAI was lost (close 1006)")
     }
 
-    /// The last cause's own category is discarded: what matters when a budget runs out is whether
-    /// the socket was ever ready, not how the final attempt happened to fail.
     @Test func theCategoryComesFromReadinessNotTheLastCause() {
         let timedOut = ProviderFailure(
             source: source, stage: .readiness, category: .disconnected, disposition: .temporary,
@@ -48,8 +42,6 @@ import Testing
                 == .unreachable)
     }
 
-    /// Nothing was ever classified (every attempt failed before a cause could be observed): the row
-    /// still names the surface and the direction of the failure.
     @Test func noObservedCauseStillRendersASentence() {
         let never = ProviderFailure.exhausted(last: nil, source: source, everReady: false)
         #expect(never.stage == .connect)
@@ -61,7 +53,6 @@ import Testing
         #expect(lost.activitySentence == "the transcription connection to OpenAI was lost")
     }
 
-    /// The carried message goes through the record's redaction like every other quoted provider text.
     @Test func theCarriedMessageStaysRedacted() {
         let leaky = ProviderFailure(
             source: source, stage: .session, category: .rejected, disposition: .temporary,

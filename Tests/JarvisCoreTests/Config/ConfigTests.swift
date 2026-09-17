@@ -19,8 +19,6 @@ import Testing
         #expect(c.realtimePongTimeoutSeconds == 10)
     }
 
-    /// The overlay timing knobs must form a usable model: a positive buffer and per-word rate, a cap
-    /// above the buffer (so even a one-word line fits under it), and a non-negative inter-line gap.
     @Test func overlayTimingConstantsAreCoherent() {
         let c = Config.default
         #expect(c.overlayNoticeBufferSeconds > 0)

@@ -83,10 +83,6 @@ import Foundation
         #expect(!export.text.contains("session ended"))
     }
 
-    /// The two toggles are independent: "Jarvis responses only" only decides which rows survive;
-    /// "Include screenshots" only decides whether a surviving row's own image is exported. Since a
-    /// screen-view row is itself one of Jarvis's own actions, its screenshot comes along for free
-    /// with no cross-referencing between the two options.
     @Test func jarvisResponsesOnlyExportsScreenshotsFromKeptScreenViewRowsWhenIncluded() {
         let entries: [(ActivityLog.Entry, Data?)] = [
             (ActivityLog.Entry(time: "10:00:00", message: "🗣 heard (them): hi", imageFile: nil), nil),

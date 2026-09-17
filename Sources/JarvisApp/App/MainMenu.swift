@@ -1,25 +1,19 @@
 import AppKit
 
-/// The app's main menu bar. A menu-bar (`LSUIElement`) app installs no main menu by default, which
-/// means the standard editing shortcuts (⌘X / ⌘C / ⌘V / ⌘A) have no menu items to dispatch them — so
-/// they silently do nothing in the Settings text fields (paste fails). Installing a minimal menu with
-/// an Edit submenu restores them: AppKit resolves the shortcuts against the main menu and routes the
-/// responder-chain selectors to whatever field editor is first responder.
+/// An `LSUIElement` app has no main menu, so ⌘X/⌘C/⌘V/⌘A silently do nothing in text fields until
+/// an Edit menu exists for AppKit to resolve them against.
 enum MainMenu {
     @MainActor
     static func install() {
         let mainMenu = NSMenu()
 
-        // First slot is always the application menu (system shows it titled with the app name). Holds
-        // Quit so ⌘Q works while the Settings window is focused.
+        // AppKit always shows the first item as the application menu, titled with the app name.
         let appItem = NSMenuItem()
         mainMenu.addItem(appItem)
         let appMenu = NSMenu()
         appItem.submenu = appMenu
         appMenu.addItem(withTitle: "Quit Jarvis", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
-        // The reason this menu exists: standard editing commands, targeting the first responder via the
-        // responder chain (nil target).
         let editItem = NSMenuItem()
         mainMenu.addItem(editItem)
         let editMenu = NSMenu(title: "Edit")

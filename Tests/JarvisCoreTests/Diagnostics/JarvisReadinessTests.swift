@@ -13,8 +13,6 @@ import Testing
 
         #expect(start.effects == [.statusChanged(.checking(.permissions))])
 
-        // Live subsystems may finish before preflight. Their typed snapshots are retained, but they
-        // cannot bypass an earlier mandatory requirement.
         _ = readiness.observe([
             .capture(.ready),
             .transcriptionEndpoint(stream: .system, state: .ready),
@@ -113,7 +111,6 @@ import Testing
             .transcriptionEndpoint(stream: .microphone, state: .reconnecting(attempt: 2)),
             for: session)
         #expect(readiness.status == .recovering(.transcriptionEndpoints, attempt: 2))
-        // Capture's previous healthy snapshot is not enough while the endpoint owns recovery.
         #expect(readiness.observe(.capture(.ready), for: session).isEmpty)
         #expect(readiness.status == .recovering(.transcriptionEndpoints, attempt: 2))
 
@@ -186,8 +183,6 @@ import Testing
         #expect(effects == [
             .statusChanged(.blocked(.permissions([.systemAudio, .screenRecording]))),
         ])
-        // A permission callback or other late completion must not autonomously start the attempt the
-        // user was already told was blocked. A new explicit Start gets a new token.
         #expect(readiness.observe([
             .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
             .credentials(available: [.openAIAPIKey]),
@@ -205,8 +200,8 @@ import Testing
         let start = readiness.begin(
             configuration: .init(requiredPermissions: [.microphone, .systemAudio]))
 
-        // A refused system-audio grant kills the whole aggregate device, so it blocks the attempt
-        // up front rather than surfacing later as a capture-construction failure.
+        // A refused system-audio grant breaks the whole aggregate device, so it must block up
+        // front.
         let effects = readiness.observe(.permissions(granted: [.microphone]), for: start.session)
 
         #expect(effects == [.statusChanged(.blocked(.permissions([.systemAudio])))])

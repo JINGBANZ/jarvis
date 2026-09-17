@@ -1,9 +1,6 @@
 import Foundation
 
-/// One benchmark-only observation from a real transcription provider lifecycle.
-///
-/// Events may contain transcript text but never audio. They exist only while an explicit benchmark
-/// run supplies `TranscriptionBenchmarkInstrumentation`; normal coaching constructs and records none.
+/// May carry transcript text but never audio.
 public struct TranscriptionBenchmarkEvent: Codable, Equatable, Sendable {
     public enum Kind: String, Codable, Sendable {
         case ready

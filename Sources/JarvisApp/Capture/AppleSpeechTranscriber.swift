@@ -1,8 +1,5 @@
-// The whole adapter names macOS 26 Speech APIs (`SpeechAnalyzer`, `SpeechTranscriber`,
-// `AnalyzerInput`), so it compiles only when both the compiler and active SDK expose them.
-// `FoundationModels` is the macOS 26 SDK marker because `Speech` itself predates those APIs. The
-// fallback in `TranscriptionSessionFactory` / `AppleSpeechModelPreparation` keeps Apple Speech
-// unavailable on older SDKs and when explicitly force-building the fallback.
+// Compiles only when the SDK exposes the macOS 26 Speech APIs. `FoundationModels` marks that SDK
+// because `Speech` itself predates them.
 #if compiler(>=6.2) && canImport(FoundationModels) && canImport(Speech) && !JARVIS_FORCE_APPLE_SPEECH_FALLBACK
 import Foundation
 @preconcurrency import AVFoundation
@@ -10,16 +7,12 @@ import CoreMedia
 import JarvisCore
 @preconcurrency import Speech
 
-/// On-device macOS 26+ transcription session backed by `SpeechAnalyzer`. Final results enter the
-/// shared Core coaching coordinator; volatile results are deliberately disabled so provisional
-/// revisions never reach Activity or model context. Transcription itself stays ungated for accuracy.
-/// A transient local PCM activity tracker requests analyzer finalization. The provider reports
-/// settled only after the analyzer publishes finalization and this adapter consumes result progress
-/// through the same submitted-audio boundary.
+/// Volatile results are deliberately disabled so provisional text never reaches Activity or model
+/// context.
 ///
 /// `@unchecked Sendable`: `lock` guards lifecycle, callback eligibility, and analyzer ownership;
-/// `audioQueue` exclusively owns conversion, buffering, stream submission, and PCM activity state.
-/// Callbacks are configured before `connect()` and remain immutable for the live session.
+/// `audioQueue` exclusively owns conversion, buffering, submission, and activity state. Callbacks
+/// are set before `connect()` and never change during the session.
 @available(macOS 26.0, *)
 final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
@@ -41,8 +34,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let boundary: CMTime
     }
 
-    /// `AVAudioConverter` requires a Sendable input block. The block and this flag are confined to
-    /// one synchronous `convert` call on `audioQueue`.
+    /// `@unchecked`: `AVAudioConverter` requires a Sendable input block, and this flag is confined
+    /// to one synchronous `convert` call on `audioQueue`.
     private final class ConversionFeed: @unchecked Sendable {
         var supplied = false
     }
@@ -54,7 +47,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private let maximumBufferedBytes: Int
     private let finalizationResultTimeout: TimeInterval
     private let continuityReporter: RealtimeContinuityReporter
-    /// `nil` for every normal coaching session. Optional chaining then skips event construction.
     private let benchmark: TranscriptionBenchmarkInstrumentation?
 
     private let lock = NSLock()
@@ -63,17 +55,15 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private var generation = 0
     private var terminalFailureReported = false
     private var benchmarkFinalSequence: UInt64 = 0
-    /// Session-relative time of the first buffer accepted by this analyzer. SpeechAnalyzer ranges
-    /// start at zero; adding this offset keeps the two independently prepared endpoints on the
-    /// shared transcript/continuity clock without injecting wall-clock jitter into every buffer.
+    /// SpeechAnalyzer ranges start at zero; this session-relative offset maps them onto the shared
+    /// clock without adding wall-clock jitter to every buffer.
     private var analyzerTimelineOffset: TimeInterval?
     private var setupTask: Task<Void, Never>?
     private var resultsTask: Task<Void, Never>?
     private var analyzer: SpeechAnalyzer?
     private var coachingCoordinator: TranscriptionCoachingCoordinator!
 
-    /// Audio-queue-only state. Capture delivery is already serial, and this provider-local queue
-    /// keeps activity observation, conversion, and stream submission ordered while setup completes.
+    /// Audio-queue-only state.
     private var converter: AVAudioConverter?
     private var inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
     private var bufferedAudio: [BufferedAudio] = []
@@ -471,8 +461,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     private func handle(_ result: SpeechTranscriber.Result, generation: Int) {
         guard isLive(generation: generation) else { return }
         let resultsFinalizationTime = result.resultsFinalizationTime
-        // Run this only after any accepted text below has entered the shared transcript. Apple
-        // documents that `finalize` may return before the app consumes already-published results.
+        // Runs after any accepted text below enters the transcript: Apple documents that `finalize`
+        // may return before the app consumes already-published results.
         defer {
             audioQueue.async { [weak self] in
                 self?.recordConsumedFinalResults(
@@ -511,8 +501,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             source: "Apple Speech"
         )
         guard accepted else {
-            // Preserve the normal adapter behavior: unusable language reaches neither coaching nor
-            // continuity. An explicit benchmark alone records the provider's unavailable terminal.
             guard let benchmarkItemID, isLive(generation: generation) else { return }
             benchmark?.observer.record(.init(
                 kind: .providerFinal,
@@ -607,8 +595,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
                 diagnostic: "could not finalize before analyzer audio was submitted")
             return
         }
-        // One exclusive end-of-buffer boundary drives both sides of settlement: what the analyzer
-        // must finalize and how far result consumption must advance.
+        // One boundary sets both what the analyzer finalizes and how far results must be consumed.
         let finalizationBoundary = CMTime(
             value: submittedAnalyzerFrameCount,
             timescale: analyzerTimeScale)
@@ -671,8 +658,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         applyFinalizationEffects(effects, generation: generation)
     }
 
-    /// Correctness is state-based. This deadline only converts a provider/result-stream stall into
-    /// the adapter's normal terminal failure instead of leaving coaching parked forever.
+    /// Correctness is state-based; this deadline only turns a result stall into a terminal failure.
     private func scheduleFinalizationResultDeadline(
         token: TranscriptionFinalizationState.Token,
         generation: Int
@@ -701,8 +687,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         coachingCoordinator.stop()
         jlog("Jarvis Apple Speech [\(speaker.rawValue)]: \(diagnostic)")
         emitState(.failed)
-        // Apple Speech runs on this Mac, so it shares no account or network surface with the other
-        // stream: `.local` keeps a failure here from ending a session the microphone could continue.
+        // `.local`: this stream shares no account or network with the other, so its failure must
+        // not end a session the other stream could continue.
         onTerminalFailure?(ProviderFailure(
             source: .transcription(.appleSpeech), stage: .local, category: .unavailable,
             disposition: .permanent, identity: .init(), message: diagnostic))

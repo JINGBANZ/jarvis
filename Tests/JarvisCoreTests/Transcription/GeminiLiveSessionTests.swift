@@ -45,8 +45,6 @@ import Foundation
         #expect(transcription(setup())["languageCodes"] as? [String] == [])
     }
 
-    /// Gemini's own documented codes (`geminiHint`), not OpenAI's `multipleHint` — see
-    /// `TranscriptionLanguage.geminiHint`'s doc comment for why they differ.
     @Test func selectedLanguagesAreSentAsGeminisDocumentedCodes() {
         let codes = transcription(setup(languages: [.english, .mandarinChinese]))["languageCodes"]
         #expect(codes as? [String] == ["en-US", "cmn-Hans-CN"])
@@ -72,9 +70,7 @@ import Foundation
         #expect(input?["audioStreamEnd"] as? Bool == true)
     }
 
-    /// Gemini's `BidiGenerateContent` endpoint sends its JSON responses as BINARY frames carrying the
-    /// same UTF-8 JSON text a TEXT frame would, so the transport layer feeds both frame kinds through
-    /// this one decoder.
+    /// Gemini sends JSON responses as binary frames holding the same UTF-8 text a text frame would.
     @Test func parseFrameDecodesUTF8JSONBytesFromEitherFrameKind() {
         let bytes = Data(#"{"setupComplete": {}}"#.utf8)
         let parsed = GeminiLiveSession.parseFrame(bytes)
@@ -82,8 +78,6 @@ import Foundation
         #expect(GeminiLiveSession.isSetupComplete(parsed ?? [:]))
     }
 
-    /// Bytes that are not valid UTF-8, or that are valid UTF-8 but not a JSON object, must decode to
-    /// `nil` so the caller can log and drop the frame instead of tearing down the socket.
     @Test func parseFrameRejectsUndecodableOrUnparsableBytes() {
         #expect(GeminiLiveSession.parseFrame(Data([0xFF, 0xFE, 0xFD])) == nil)
         #expect(GeminiLiveSession.parseFrame(Data("not json".utf8)) == nil)
@@ -103,7 +97,6 @@ import Foundation
             == "let's talk about indexes")
     }
 
-    /// Interim hypotheses are speculative and are never appended to the transcript.
     @Test func interimTranscriptNeverYieldsText() {
         let event: [String: Any] = ["serverContent": [
             "interimInputTranscription": ["text": "let's talk about ind"],
@@ -111,8 +104,6 @@ import Foundation
         #expect(GeminiLiveSession.finalTranscript(from: event, speaker: .me) == nil)
     }
 
-    /// An interim frame is the only thing that should read as "recognition in flight" — the presence
-    /// check must not require or leak the text itself.
     @Test func hasInterimTranscriptionIsTrueOnlyForAnInterimFrame() {
         let event: [String: Any] = ["serverContent": [
             "interimInputTranscription": ["text": "let's talk about ind"],
@@ -120,8 +111,6 @@ import Foundation
         #expect(GeminiLiveSession.hasInterimTranscription(event))
     }
 
-    /// A finalized-only frame must NOT read as interim, or the "recognition in flight" flag would
-    /// never clear once the final it was waiting for actually arrives.
     @Test func hasInterimTranscriptionIsFalseForAFinalizedOnlyFrame() {
         let event: [String: Any] = ["serverContent": [
             "inputTranscription": ["text": "let's talk about indexes"],
@@ -147,11 +136,6 @@ import Foundation
         #expect(GeminiLiveSession.hasFinalizedTranscription(event))
     }
 
-    /// This is the whole point of the predicate: a finalized frame whose text the shared
-    /// hallucination filter rejects is STILL a finalized frame — Gemini finished recognizing the
-    /// utterance regardless of what `finalTranscript` goes on to do with the text. A caller using
-    /// `finalTranscript(...) != nil` as its finalized-frame test cannot tell this case apart from "not
-    /// a finalized frame at all," which is exactly the bug this predicate exists to let callers avoid.
     @Test func hasFinalizedTranscriptionIsTrueEvenWhenTheFilterWouldRejectTheText() {
         let thankYou: [String: Any] = ["serverContent": ["inputTranscription": ["text": "Thank you."]]]
         #expect(GeminiLiveSession.hasFinalizedTranscription(thankYou))
@@ -175,8 +159,7 @@ import Foundation
         #expect(!GeminiLiveSession.hasFinalizedTranscription([:]))
     }
 
-    /// Real frame shape from a live capture: `voiceActivity` is a TOP-LEVEL key, a sibling of
-    /// `serverContent` (which the server sends empty alongside it), not nested inside it.
+    /// Real frame shape: voiceActivity is top-level, beside an empty serverContent.
     @Test func voiceActivityStartFrameIsAStart() {
         let event: [String: Any] = [
             "voiceActivity": ["type": "ACTIVITY_START", "audioOffset": "0.280s"],
@@ -185,8 +168,6 @@ import Foundation
         #expect(GeminiLiveSession.isVoiceActivityStart(event))
     }
 
-    /// The end marker must NOT read as a start — it is not a substitute finalization signal, and
-    /// treating it as one would defeat the point of having a distinct start-only predicate.
     @Test func voiceActivityEndFrameIsNotAStart() {
         let event: [String: Any] = [
             "voiceActivity": ["type": "ACTIVITY_END", "audioOffset": "1.230s"],
@@ -199,21 +180,17 @@ import Foundation
         #expect(!GeminiLiveSession.isVoiceActivityStart([:]))
     }
 
-    /// A malformed or unexpected `type` value must stay false rather than being treated as a start.
     @Test func voiceActivityWithUnexpectedTypeIsNotAStart() {
         #expect(!GeminiLiveSession.isVoiceActivityStart(["voiceActivity": ["type": "SOMETHING_ELSE"]]))
         #expect(!GeminiLiveSession.isVoiceActivityStart(["voiceActivity": [String: Any]()]))
     }
 
-    /// Real frame shape: `goAway` is a TOP-LEVEL key, a sibling of `serverContent`, carrying the
-    /// protobuf-`Duration`-encoded `timeLeft`.
+    /// Real frame shape: goAway is top-level, with a protobuf Duration string in timeLeft.
     @Test func goAwayFrameIsDetected() {
         let event: [String: Any] = ["goAway": ["timeLeft": "9.5s"]]
         #expect(GeminiLiveSession.isGoAway(event))
     }
 
-    /// Every other frame kind — setup acknowledgement, finalized/interim transcription, voice
-    /// activity, or an empty object — must not read as `goAway`.
     @Test func otherFrameKindsAreNotGoAway() {
         #expect(!GeminiLiveSession.isGoAway(["setupComplete": [String: Any]()]))
         #expect(!GeminiLiveSession.isGoAway(["serverContent": ["inputTranscription": ["text": "hi"]]]))
@@ -221,7 +198,6 @@ import Foundation
         #expect(!GeminiLiveSession.isGoAway([:]))
     }
 
-    /// A malformed `goAway` (wrong value type, or none at all) must not crash and must read as absent.
     @Test func malformedGoAwayDoesNotCrash() {
         #expect(!GeminiLiveSession.isGoAway(["goAway": "not an object"]))
         #expect(!GeminiLiveSession.isGoAway(["goAway": NSNull()]))
@@ -233,9 +209,6 @@ import Foundation
         #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": ["timeLeft": "3s"]]) == 3.0)
     }
 
-    /// Missing `goAway`, a missing/non-string `timeLeft`, or a non-numeric/unsuffixed value must all
-    /// read as `nil` rather than crashing or returning a bogus number, so the caller falls back to its
-    /// own fixed grace-period cap.
     @Test func goAwayTimeLeftIsNilForMissingOrMalformedValues() {
         #expect(GeminiLiveSession.goAwayTimeLeft([:]) == nil)
         #expect(GeminiLiveSession.goAwayTimeLeft(["goAway": [String: Any]()]) == nil)

@@ -1,11 +1,5 @@
 import Foundation
 
-/// Where the brain (coach and summarizer) runs. `openAI` calls the Responses API with the user's API
-/// key. The subscription providers send the same Responses requests to the bundled CLIProxyAPI helper
-/// on this Mac, which holds the user's ChatGPT or Claude sign-in, so the plan pays for the brain
-/// instead of API metering.
-/// Voice transcription is a separately selected provider; choosing a brain changes only who answers
-/// the coaching turns.
 public enum BrainProvider: String, CaseIterable, Sendable {
     case openAI = "openai"
     case codexSubscription = "codex-subscription"
@@ -14,18 +8,16 @@ public enum BrainProvider: String, CaseIterable, Sendable {
     public var displayName: String {
         switch self {
         case .openAI: return "OpenAI API"
-        // The names the user knows these plans by. The raw values keep the `-subscription` spelling:
-        // they are persisted route ids, and renaming them would drop saved routes.
+        // Raw values keep `-subscription`: they are persisted route ids, so renaming them would
+        // drop saved routes.
         case .codexSubscription: return "Codex"
         case .claudeSubscription: return "Claude Code"
         }
     }
 
-    /// Served by the bundled CLIProxyAPI helper instead of the vendor's own endpoint.
     public var servedByLocalProxy: Bool { proxyModelOwner != nil }
 
-    /// The `owned_by` value in the helper's model list that proves this subscription is signed in:
-    /// the helper lists a vendor's models only while it holds a credential for that vendor.
+    /// The helper lists a vendor's models only while signed in, so this `owned_by` proves sign-in.
     public var proxyModelOwner: String? {
         switch self {
         case .codexSubscription: return "openai"
@@ -34,9 +26,8 @@ public enum BrainProvider: String, CaseIterable, Sendable {
         }
     }
 
-    /// How this provider's requests carry the permitted set; see `ToolChoicePolicy`. The Claude
-    /// subscription cannot be forced: through the helper, a forced tool is a 400 on Claude Fable 5.1
-    /// and strips thinking on Opus 5, and a narrowed choice is dropped, so it gets `filteredAuto`.
+    /// Through the helper, a forced Claude tool is a 400 on Fable 5.1 and strips thinking on Opus
+    /// 5, and a narrowed choice is dropped.
     public var toolChoicePolicy: ToolChoicePolicy {
         switch self {
         case .claudeSubscription: return .filteredAuto
@@ -44,9 +35,8 @@ public enum BrainProvider: String, CaseIterable, Sendable {
         }
     }
 
-    /// The lowest reasoning effort this provider accepts, raised to without rewriting the user's
-    /// shared preference; nil when every level is accepted. `none` disables thinking on the Claude
-    /// path, which Claude Fable 5.1 rejects.
+    /// Applied without rewriting the saved preference; nil when every level is accepted. `none`
+    /// disables thinking on the Claude path, which Fable 5.1 rejects.
     public var reasoningEffortFloor: ReasoningEffort? {
         switch self {
         case .claudeSubscription: return .low

@@ -1,12 +1,8 @@
 import Foundation
 import JarvisCore
 
-/// One cheap request per saved key, so a bad key, a blocked region, or a dead network shows up in
-/// Settings rather than after the first coaching session dies in silence.
-///
-/// A models-list call is the smallest request both vendors answer without spending inference. Both
-/// take the key in a header; Gemini's `x-goog-api-key` is used in place of the `key` query parameter
-/// the Live socket needs, so the secret never enters a URL here.
+/// Lists models because both vendors answer that without spending inference. Gemini's key goes in
+/// the `x-goog-api-key` header, not the `key` query parameter, so the secret never enters a URL.
 struct CredentialVerifier: Sendable {
     private static let timeout: TimeInterval = 10
 

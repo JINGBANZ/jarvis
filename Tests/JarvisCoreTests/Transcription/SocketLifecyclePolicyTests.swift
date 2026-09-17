@@ -17,8 +17,6 @@ import Testing
             error: URLError(.cannotConnectToHost), source: source, everReady: false)
     }
 
-    /// The bug this branch exists for: seven attempts of silence before a row that named nothing.
-    /// A socket that was never acknowledged gets three attempts, then the session ends with the cause.
     @Test func aSocketThatIsNeverReadyGivesUpAfterThreeAttempts() {
         var policy = policy()
         #expect(policy.start() == .open(attempt: 1))
@@ -37,8 +35,6 @@ import Testing
         #expect(policy.phase == .terminal)
     }
 
-    /// Once a socket has worked, there is buffered audio worth replaying, so the budget is the long
-    /// one and running it out degrades that stream rather than ending the session.
     @Test func aReadySocketKeepsTheLongBudgetAndStaysStreamLocal() {
         var policy = policy()
         _ = policy.start()
@@ -58,8 +54,6 @@ import Testing
         #expect(!exhausted.endsEverySession)
     }
 
-    /// A rejected key, a denied region, or a retired model is not something a retry fixes, so the
-    /// budget is skipped entirely and the cause is reported as the provider stated it.
     @Test func aPermanentCauseTerminatesImmediatelyFromAnyLivePhase() {
         let rejected = ProviderFailure(
             source: source, stage: .close, category: .authentication, disposition: .permanent,
@@ -81,8 +75,6 @@ import Testing
         #expect(backingOff.failed(rejected) == .terminate(rejected))
     }
 
-    /// A replacement that comes up returns the full budget, and says it is a replacement so the
-    /// caller replays instead of starting fresh.
     @Test func acknowledgementResetsTheBudgetAndNamesAReplacement() {
         var policy = policy()
         _ = policy.start()
@@ -92,7 +84,6 @@ import Testing
         #expect(policy.acknowledged() == .ready(replacement: true))
         #expect(policy.phase == .ready)
 
-        // Six more retries are available again, so the counter really did reset.
         for _ in 1...6 {
             guard case .retry = policy.failed(transportCause()) else {
                 Issue.record("expected a retry"); return
@@ -104,8 +95,6 @@ import Testing
         }
     }
 
-    /// Gemini's `goAway` says the socket is going away on schedule. Replacing it is the plan, so it
-    /// must not eat the budget a real failure will need.
     @Test func anExpectedRotationSpendsNoBudget() {
         var policy = policy()
         _ = policy.start()
@@ -126,8 +115,7 @@ import Testing
         }
     }
 
-    /// Stop is final: a callback already queued from a socket being torn down must not report
-    /// against, or reopen, anything.
+    /// A callback already queued by a socket being torn down must not report or reopen.
     @Test func stopMakesEveryLaterEventIgnored() {
         var policy = policy()
         _ = policy.start()
@@ -141,7 +129,6 @@ import Testing
         #expect(policy.phase == .stopped)
     }
 
-    /// The same holds once a failure has ended the endpoint, so one cause produces one report.
     @Test func terminationIsReportedOnce() {
         var policy = policy()
         _ = policy.start()
@@ -154,8 +141,6 @@ import Testing
         #expect(policy.retryElapsed() == .ignore)
     }
 
-    /// A restart is a fresh session, not a continuation: the short budget applies again even though
-    /// this instance had a working socket before.
     @Test func startingAgainIsNeverReady() {
         var policy = policy()
         _ = policy.start()

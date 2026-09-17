@@ -1,13 +1,8 @@
 import Testing
 @testable import JarvisCore
 
-/// The catalog is the single source of truth for *which* failures are loud. These tests lock in the
-/// loudness of each canonical failure so a regression (e.g. silently downgrading a capture failure, or
-/// making the graceful "them"-socket degrade pop a modal) is caught without a UI session.
 @Suite struct UserFacingErrorCatalogTests {
     @Test func noAPIKeyIsFatalAndNamesTheMissingCredential() {
-        // A single missing Gemini key must name Gemini, not send the user hunting through both
-        // providers — this is the defect the spec calls out.
         let geminiOnly = UserFacingError.noAPIKey(missing: [.geminiAPIKey])
         #expect(geminiOnly.message.contains("Gemini API"))
         #expect(!geminiOnly.message.contains("OpenAI"))
@@ -16,8 +11,6 @@ import Testing
         #expect(openAIOnly.message.contains("OpenAI API"))
         #expect(!openAIOnly.message.contains("Gemini"))
 
-        // Gemini transcription plus an OpenAI-only brain route can legitimately miss both at once;
-        // the message must name both, in a stable (sorted) order regardless of set iteration order.
         let both = UserFacingError.noAPIKey(missing: [.geminiAPIKey, .openAIAPIKey])
         #expect(both.message.contains("Gemini API and OpenAI API"))
 
@@ -59,14 +52,13 @@ import Testing
         #expect(systemAudio.message.contains("Enable System Audio Recording in System Settings"))
         #expect(!systemAudio.message.contains("Microphone"))
 
-        // Named in one stable order, so the notice never reshuffles between attempts.
         let all = UserFacingError.permissionsMissing([.screenRecording, .systemAudio, .microphone])
         #expect(all.title == "Permissions needed")
         #expect(all.message.contains("Microphone, System Audio Recording, and Screen Recording"))
     }
 
     @Test func aMissingScreenGrantAsksForARelaunchRatherThanAnotherStart() {
-        // The grant only becomes visible to a new process, so "press Start again" would loop.
+        // macOS applies a Screen Recording grant only to a new process, so Start again would loop.
         let screen = UserFacingError.permissionsMissing([.screenRecording])
         #expect(screen.message.contains("reopen Jarvis"))
         #expect(!screen.message.contains("press Start again"))
@@ -75,7 +67,6 @@ import Testing
             .contains("press Start again"))
     }
 
-    /// What the capture layer records when the aggregate device goes away.
     private static let noInputDevice = ProviderFailure(
         source: .capture, stage: .local, category: .unavailable, disposition: .permanent,
         identity: .init(), message: "no input device")
@@ -97,8 +88,6 @@ import Testing
         #expect(e.sessionEndReason == .audioCaptureUnavailable(failure: Self.noInputDevice))
     }
 
-    /// Whatever a transcription boundary reports, the stop is terminal and quiet, and the message is
-    /// the failure's own sentence, so the alert-free stop still says what happened.
     @Test func transcriptionStoppedIsTerminal() {
         for category in ProviderFailure.Category.allCases {
             let failure = ProviderFailure(
@@ -116,14 +105,11 @@ import Testing
     }
 
     @Test func systemAudioStoppedStaysQuiet() {
-        // The graceful degrade: mic still works, so this must NOT alert or stop the session.
         #expect(UserFacingError.systemAudioStopped.severity == .degraded)
         #expect(!UserFacingError.systemAudioStopped.severity.showsAlert)
         #expect(!UserFacingError.systemAudioStopped.severity.stopsSession)
     }
 
-    /// A route with no target left to coach is refused like a missing key: alert, never stop, and
-    /// the alert is the failure's own sentence, which says what to do.
     @Test func anUnavailableRouteAlertsWithoutStoppingAndSaysWhatToDo() {
         let failure = ProviderFailure(
             source: .brain(.claudeSubscription), stage: .process, category: .authentication,

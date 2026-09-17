@@ -1,19 +1,7 @@
 import Foundation
 
-/// The one name every surface matches a `speak` call by. The definition is built per session, so
-/// nothing outside `CoachCapabilities` may reach for a global to learn what the tool is called.
 public let speakToolName = "speak"
 
-/// Built once per session by `CoachCapabilities.compose`.
-///
-/// `detail` exists only when the Overlay Box can show it, so no session declares a field the box
-/// would throw away. The session's one capability set both describes the tool in the prompt and
-/// declares it on every request, so a session can never describe one schema and send another
-/// (#273). `detail` is nullable rather than absent because that is what makes a field optional
-/// under strict Structured Outputs.
-///
-/// What belongs in `detail` is prompt text's decision, not the runtime's: the guidance here says
-/// when to write one at all, and a loaded skill says what its own domain puts there.
 public func speakTool(detailEnabled: Bool) -> ToolDef {
     ToolDef(
         name: speakToolName,
@@ -22,9 +10,8 @@ public func speakTool(detailEnabled: Bool) -> ToolDef {
             + (detailEnabled
                 ? " Put a code block or a diagram in detail as Markdown; null for an ordinary hint."
                 : ""),
-        // Laid out one field per line for reading. Line breaks and the indentation after them are
-        // stripped, so every brain receives the compact form; no JSON string here contains a line
-        // break.
+        // Line breaks and the indentation after them are stripped, so no JSON string here may
+        // contain a line break.
         parametersJSON: (detailEnabled
             ? #"""
             {"type":"object","properties":{
@@ -40,8 +27,6 @@ public func speakTool(detailEnabled: Bool) -> ToolDef {
         guidance: tipStyle + (detailEnabled ? "\n\n" + detailGuidance : ""))
 }
 
-/// The system prompt's tip style. It governs `speak` and nothing else, and `speak` is always on, so
-/// the action policy's cross-reference to it can never dangle.
 private let tipStyle = """
     # Tip style
     Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
@@ -65,8 +50,6 @@ private let tipStyle = """
     accuracy outranks brevity.
     """
 
-/// Present only when the Overlay Box can show a detail. It says what `detail` is for and what keeps
-/// it null; a loaded skill adds the rules for its own domain's blocks.
 private let detailGuidance = """
     # Detail
     The lines are the coaching. Say what the user needs there, including a short explanation, and
@@ -82,8 +65,6 @@ private let detailGuidance = """
     Never invent personal experience or screen details you haven't seen.
     """
 
-// The tool result the harness sends once a tip is on screen. It names anything the box could not
-// show, so the model treats a dropped block as a fact rather than assuming it landed.
 extension JarvisPrompts.Coach {
     static func tipShown(dropped: [String] = []) -> String {
         dropped.isEmpty ? "shown to the user" : "shown to the user; " + dropped.joined(separator: "; ")

@@ -1,11 +1,7 @@
 import Foundation
 
-/// Provider-neutral state for an analyzer that must explicitly finalize input after speech ends.
-///
-/// Local PCM silence requests finalization; it is not itself proof that the provider has delivered
-/// every final result. Settlement requires both analyzer completion and matching result consumption.
-/// A newer speech episode invalidates settlement from an older pass and causes another pass after
-/// that newer episode ends.
+/// Local silence only requests finalization. A pass settles once the analyzer completes and its
+/// results are consumed. Newer speech forces another pass once that speech ends.
 public struct TranscriptionFinalizationState: Sendable {
     public struct Token: Equatable, Hashable, Sendable {
         fileprivate let revision: UInt64
@@ -14,11 +10,10 @@ public struct TranscriptionFinalizationState: Sendable {
     public struct Effects: Equatable, Sendable {
         public static let none = Effects()
 
-        /// A value to publish at the provider work boundary, or nil when it did not change.
+        /// Nil when unchanged.
         public let pendingWork: Bool?
-        /// The exact finalization pass the adapter should run, or nil when none is ready.
+        /// The pass to run now, or nil.
         public let finalization: Token?
-        /// A pass whose analyzer and result-consumption boundaries are both complete.
         public let completedFinalization: Token?
 
         fileprivate init(
@@ -70,8 +65,6 @@ public struct TranscriptionFinalizationState: Sendable {
         beginFinalizationIfPossible(analyzerAvailable: true)
     }
 
-    /// The analyzer has published final results for this pass. Publication alone is not settlement:
-    /// the adapter must also consume result progress through the pass's audio boundary.
     public mutating func analyzerFinalizationCompleted(
         _ token: Token,
         analyzerAvailable: Bool
@@ -81,8 +74,7 @@ public struct TranscriptionFinalizationState: Sendable {
         return finishFinalizationIfPossible(analyzerAvailable: analyzerAvailable)
     }
 
-    /// The app has consumed module-result progress through this pass's audio boundary. This may
-    /// arrive before or after the analyzer's own finalization call returns.
+    /// May arrive before or after `analyzerFinalizationCompleted`.
     public mutating func finalResultsConsumed(
         _ token: Token,
         analyzerAvailable: Bool

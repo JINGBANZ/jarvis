@@ -1,6 +1,6 @@
 import Foundation
 
-/// Bounds one Accessibility-tree pass by elapsed time and extracted UTF-8 bytes.
+/// One per Accessibility pass. `deadline` is in `ProcessInfo.systemUptime` seconds.
 final class AccessibilityReadBudget {
     let deadline: TimeInterval
     private let byteLimit: Int

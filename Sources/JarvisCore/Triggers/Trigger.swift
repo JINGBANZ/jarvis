@@ -1,21 +1,18 @@
 import Foundation
 
-/// Why the coach loop woke up. Every trigger goes straight to the brain, which decides whether to
-/// speak — including when the user addresses Jarvis by name (the model reads that from the transcript).
 public enum TriggerReason: Sendable, Equatable {
-    case turnEnd                              // the transcriber finalized an utterance
-    case silence(secondsQuiet: TimeInterval)  // no speech for the current backoff interval
-    case manualHint                           // capture + a hint the attempt always ends in
-    case manualExplanation                    // capture + explain the current confusion
+    case turnEnd
+    case silence(secondsQuiet: TimeInterval)
+    case manualHint
+    case manualExplanation
 
-    case manualCode                           // capture + next logical snippet, hotkey only
+    case manualCode
 
     public var isManual: Bool {
         self == .manualHint || self == .manualExplanation || self == .manualCode
     }
 }
 
-/// Timing context handed to the model so it can tell "thinking" from "stuck".
 public struct TriggerContext: Sendable {
     public let reason: TriggerReason
     public let sessionElapsedSeconds: TimeInterval
@@ -24,11 +21,8 @@ public struct TriggerContext: Sendable {
         self.sessionElapsedSeconds = sessionElapsedSeconds
     }
 
-    /// The trigger note appended to the user message — or nil when the message already says it all.
-    /// A turn-end adds nothing: the "New since last turn" block IS the signal, its [mm:ss] stamps
-    /// carry the timing, and a boilerplate sentence on top would be committed to memory and re-billed
-    /// on every later request. The notes that remain (silence, manual hint) open with the same
-    /// [mm:ss] session stamp as transcript lines, so the model reads all timing in one idiom.
+    /// Nil for a turn-end: the new-speech block is the signal, and extra text would be re-billed on
+    /// every later request.
     public var promptLine: String? {
         let stamp = RollingTranscript.stamp(sessionElapsedSeconds)
         switch reason {
@@ -48,8 +42,6 @@ public struct TriggerContext: Sendable {
         }
     }
 
-    /// Human-readable duration ("45s", "2m 26s", "3h 30m"): a quiet stretch can run to hours, where
-    /// a raw seconds count makes the model (and anyone reading the request log) do arithmetic.
     static func durationPhrase(_ seconds: TimeInterval) -> String {
         let total = Int(seconds.rounded(.down))
         if total < 60 { return "\(total)s" }

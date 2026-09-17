@@ -3,7 +3,6 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct OverlayAppearanceTests {
-    /// A fresh, isolated UserDefaults suite per test so nothing touches the real app domain.
     private func freshDefaults() -> UserDefaults {
         let suite = "OverlayAppearanceTests.\(UUID().uuidString)"
         let d = UserDefaults(suiteName: suite)!
@@ -41,7 +40,6 @@ import Foundation
         #expect(a.boxFontSize == Defaults.Overlay.Box.fontSize)
     }
 
-    /// The two surfaces default opposite ways: the caption off, the box on.
     @Test func enabledDefaults() {
         let a = OverlayAppearance(defaults: freshDefaults())
         #expect(a.captionEnabled == Defaults.Overlay.Caption.enabled)
@@ -69,7 +67,6 @@ import Foundation
         #expect(reloaded.boxFontSize == 20)
         #expect(reloaded.captionEnabled == true)
         #expect(reloaded.boxEnabled == false)
-        // The size the user dragged the box to must survive a relaunch unchanged.
         #expect(reloaded.boxWidth == 512)
         #expect(reloaded.boxHeight == 448)
     }
@@ -104,9 +101,7 @@ import Foundation
     }
 
     @Test func nonFiniteInputFallsBackToTheDefault() {
-        // A corrupted plist value (NaN/±inf) must never reach systemFont(ofSize:)/withAlphaComponent:.
-        // It restores the setting's default: with an opacity floor of 0, falling back to the lower
-        // bound would turn corruption into an invisible surface.
+        // Not the lower bound: with an opacity floor of 0 that would hide the surface.
         let a = OverlayAppearance(defaults: freshDefaults())
         for bad in [Double.nan, .infinity, -.infinity] {
             a.captionFontSize = bad
@@ -122,8 +117,6 @@ import Foundation
         }
     }
 
-    /// 0% is a reachable, meaningful setting — a text-only surface with no backdrop — so it must
-    /// survive a round trip rather than being clamped away.
     @Test func fullyTransparentOpacityIsPersistable() {
         let d = freshDefaults()
         OverlayAppearance(defaults: d).boxOpacity = 0

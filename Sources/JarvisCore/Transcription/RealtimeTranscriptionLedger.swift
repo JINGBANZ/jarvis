@@ -1,10 +1,8 @@
 import Foundation
 
-/// Reconciles the independent events emitted for each Realtime input-audio item.
-///
-/// Realtime can finish items out of order, and a failed or missing terminal event must not make an
-/// entire spoken turn disappear. The ledger therefore keeps streamed deltas and VAD timing keyed by
-/// `item_id` until the item completes, fails, or the caller declares its terminal event overdue.
+/// Realtime can finish items out of order or never, so deltas and VAD timing stay keyed by
+/// `item_id` until a terminal event or a caller-declared timeout. A lost terminal event must not
+/// drop a turn.
 // @unchecked Sendable: all mutable state is guarded by `lock`.
 public final class RealtimeTranscriptionLedger: @unchecked Sendable {
     private static let minimumContextGapDurationMilliseconds = 750
@@ -44,15 +42,12 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
 
     private let lock = NSLock()
     private var items: [String: Item] = [:]
-    /// Makes late duplicate terminal events harmless. In particular, a final transcript arriving
-    /// after the stopped-without-terminal deadline must not append a second copy of the same turn.
+    /// A final transcript arriving after a timeout must not append a second copy of the turn.
     private var finalizedItemIDs: Set<String> = []
-    /// Highest audio-clock boundary belonging to a terminal item in this socket generation. Kept
-    /// separately because transcription completions may arrive out of spoken order.
+    /// Tracked separately because completions may arrive out of spoken order.
     private var latestFinalizedAudioEndAt: TimeInterval?
-    /// A terminal event proves the item completed, but without `audio_end_ms` its exact replay
-    /// retirement boundary is unknowable. Retain its start until a later VAD start proves where the
-    /// earlier item must have ended; guessing from terminal arrival time could discard newer speech.
+    /// Finalized items without `audio_end_ms`. A later VAD start proves where each ended; guessing
+    /// from terminal arrival time could discard newer speech.
     private var finalizedStartsAwaitingLaterBoundary: [TimeInterval] = []
 
     public init() {}
@@ -74,14 +69,14 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
                 finalizedStartsAwaitingLaterBoundary.removeAll { $0 < spokenAt }
             }
         }
-        // Event delivery is not guaranteed to follow VAD order. A late start adds timing metadata;
-        // it must not reopen an item that already received speech_stopped and has a short deadline.
+        // Events can arrive out of VAD order. A late start adds timing but must not reopen an item
+        // that already received speech_stopped.
         items[itemID] = item
         return true
     }
 
-    /// Returns true when the item is still awaiting a completed/failed event and therefore needs a
-    /// caller-owned deadline. A stop event can arrive without a start event, so it creates the item.
+    /// True when the item still awaits a terminal event and needs a caller-owned deadline. A stop
+    /// can arrive without a start, so this may create the item.
     @discardableResult
     public func recordSpeechStopped(itemID: String, audioEndMilliseconds: Int? = nil) -> Bool {
         guard !itemID.isEmpty else { return false }
@@ -96,8 +91,8 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         return true
     }
 
-    /// Returns true only when this delta creates the item. The caller can use that signal to arm the
-    /// active-item backstop when speech_started was missing, without scheduling one timer per delta.
+    /// True only when this delta creates the item, so the caller arms one backstop timer, not one
+    /// per delta.
     @discardableResult
     public func recordDelta(itemID: String, delta: String) -> Bool {
         guard !itemID.isEmpty, !delta.isEmpty else { return false }
@@ -110,9 +105,8 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         return createdItem
     }
 
-    /// Final text is authoritative. If it is empty/unusable but streamed text is available, retain
-    /// that partial text rather than dropping the spoken turn. A long VAD-confirmed item with neither
-    /// remains a diagnostic-only resolution; very short/no-timing items stay ignored as noise blips.
+    /// Unusable final text falls back to streamed deltas. With neither, long VAD-confirmed speech
+    /// returns a text-less item and a short or untimed blip returns nil.
     public func recordCompleted(itemID: String, transcript: String,
                                 speaker: Speaker) -> FinalizedItem? {
         guard !itemID.isEmpty else { return nil }
@@ -142,24 +136,17 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
                              recoveredFromDeltas: true, isTranscriptUnavailable: false)
     }
 
-    /// A failed transcription still represents detected speech. Preserve streamed text when there
-    /// is any; otherwise return a diagnostic-only resolution only for VAD-confirmed speech long
-    /// enough to be conversational. Short or untimed empty failures remain ordinary noise blips.
     public func recordFailed(itemID: String, speaker: Speaker) -> FinalizedItem? {
         finalizeInterruptedItem(itemID: itemID, requireSpeechStopped: false,
                                 suppressShortEmptyItem: true, speaker: speaker)
     }
 
-    /// Resolves a speech-stopped item whose completed/failed event never arrived. The caller owns the
-    /// timer so this Core type stays Foundation-only and deterministic in tests.
     public func resolveStoppedItemTimeout(itemID: String, speaker: Speaker) -> FinalizedItem? {
         finalizeInterruptedItem(itemID: itemID, requireSpeechStopped: true,
                                 suppressShortEmptyItem: true, speaker: speaker)
     }
 
-    /// Resolves a speech-started item whose VAD stop and transcription terminal both disappeared.
-    /// This is a much longer caller-owned deadline than the stopped-item deadline because a genuine
-    /// utterance can last for minutes.
+    /// Needs a much longer deadline than the stopped-item one: a real utterance can last minutes.
     public func resolveActiveItemTimeout(itemID: String, speaker: Speaker) -> FinalizedItem? {
         guard !itemID.isEmpty else { return nil }
         lock.lock(); defer { lock.unlock() }
@@ -171,8 +158,7 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
                                               speaker: speaker)
     }
 
-    /// A socket cannot deliver any more events after it fails. Finalize every item still owned by
-    /// that socket immediately so no stale "active speech" state leaks into the replacement session.
+    /// Call when the socket fails, so no stale active speech leaks into the replacement session.
     public func resolveAllInterruptedItems(speaker: Speaker) -> [FinalizedItem] {
         lock.lock(); defer { lock.unlock() }
         let pending = items
@@ -190,8 +176,6 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         return !items.isEmpty
     }
 
-    /// True only while at least one item has started (or emitted deltas without a start event) and
-    /// has not reached its VAD stop/finalization boundary.
     public var hasActiveSpeech: Bool {
         lock.lock(); defer { lock.unlock() }
         return items.values.contains { !$0.speechStopped }
@@ -202,20 +186,15 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         return items.count
     }
 
-    /// Number of already-appended items that remain in the reconnect tail because their terminal
-    /// event had no stop timestamp. Replay starts at each such item's known start, so the recovery
-    /// coordinator suppresses the corresponding replacement item instead of duplicating context.
+    /// Appended items with no end time that replay will repeat, so recovery suppresses that many
+    /// replacement items.
     public var replayDuplicateRiskItemCount: Int {
         lock.lock(); defer { lock.unlock() }
         return finalizedStartsAwaitingLaterBoundary.count
     }
 
-    /// Session-relative capture boundary that can leave the reconnect tail safely.
-    ///
-    /// If any item remains unresolved, retain audio from the earliest such speech start. Once every
-    /// earlier item is terminal, advance through the furthest terminal end even when completions
-    /// arrived out of order. An item with no start time blocks advancement because its position is
-    /// unknowable.
+    /// Session-relative. Nil while any pending item has no start time; otherwise the earliest
+    /// pending start, or the furthest terminal end once nothing earlier is pending.
     public var safeReplayDiscardTime: TimeInterval? {
         lock.lock(); defer { lock.unlock() }
         if items.values.contains(where: { $0.spokenAt == nil }) { return nil }
@@ -261,10 +240,8 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
                                  spokenEndAt: item.spokenEndAt,
                                  recoveredFromDeltas: true, isTranscriptUnavailable: false)
         }
-        // A missing terminal event does not turn a click/typing blip into missing conversational
-        // context. Match the completed-event path: only a VAD-confirmed duration long enough to be
-        // plausible speech gets a diagnostic resolution. The item is still finalized above, so a
-        // late terminal event cannot append a duplicate.
+        // As in `recordCompleted`, a short blip returns nil. It is still finalized above, so a late
+        // terminal event can't append a duplicate.
         if suppressShortEmptyItem {
             guard let duration = item.detectedSpeechDurationMilliseconds,
                   duration >= Self.minimumContextGapDurationMilliseconds else { return nil }

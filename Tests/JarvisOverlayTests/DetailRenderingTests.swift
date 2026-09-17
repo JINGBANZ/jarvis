@@ -3,7 +3,6 @@ import JarvisCore
 import Testing
 @testable import JarvisOverlay
 
-/// What the detail box draws for one reply's `detail`: its prose, its code block, its diagram.
 @Suite struct DetailRenderingTests {
     @MainActor @Test(arguments: ["'", "\""])
     func unmatchedQuotesDoNotColorAcrossLines(_ quote: String) throws {
@@ -26,13 +25,10 @@ import Testing
         #expect(try firstColor("c", "#define MAX 100") == plain)
         #expect(try firstColor("swift", "#available(macOS 14, *)") == plain)
         #expect(try firstColor("python", "# count seen") == comment)
-        // A fence's info string is lowercased on the way in, so the short forms land too.
         #expect(try firstColor("py", "# count seen") == comment)
         #expect(try firstColor("bash", "# count seen") == comment)
     }
 
-    /// A `diff` block tints what was added and strikes what it replaces, which is what replaced the
-    /// old per-line highlight indices.
     @MainActor @Test func aDiffBlockTintsAdditionsAndStrikesRemovals() throws {
         let block = try #require(CodeBlock(language: "diff",
             code: " for right, ch in enumerate(s):\n-    if ch in last_seen:\n+    if ch in last_seen and last_seen[ch] >= left:"))
@@ -46,14 +42,11 @@ import Testing
         #expect(text.attribute(.strikethroughStyle, at: added.location, effectiveRange: nil) == nil)
         #expect(text.attribute(.backgroundColor, at: context.location, effectiveRange: nil) == nil)
 
-        // A plain block is never treated as a diff, whatever its first characters look like.
         let plain = try #require(CodeBlock(language: "python", code: "-x\n+y"))
         let plainText = CodeBlockFormatting.render(plain, fontSize: 16)
         #expect(plainText.attribute(.strikethroughStyle, at: 0, effectiveRange: nil) == nil)
     }
 
-    /// The box re-shows the same detail on every frame of a resize drag; only a genuine change of
-    /// detail or font size may re-render it.
     @MainActor @Test func anUnchangedDetailKeepsItsRenderedText() throws {
         let detail = try #require(ReplyDetail(markdown: "Start here.\n\n```swift\nlet value = 1\nreturn value\n```"))
         let view = DetailView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
@@ -71,8 +64,6 @@ import Testing
         #expect(view.codeText.attribute(marker, at: 0, effectiveRange: nil) == nil)
     }
 
-    /// Paragraphs, list items, and inline code all reach the box; a link keeps its text and loses
-    /// its destination, because the box is inert.
     @MainActor @Test func proseKeepsStructureAndDropsLinks() throws {
         let detail = try #require(ReplyDetail(markdown: """
             Two things matter here.
@@ -129,7 +120,6 @@ import Testing
         }
     }
 
-    /// The box is opaque and fixed-pitch where it should be, and its controls carry no tooltip.
     @MainActor @Test func theDetailBoxIsOpaqueReadableAndTooltipFree() throws {
         let detail = try #require(ReplyDetail(markdown: "```swift\n  let value = 1\n  return value\n```"))
         let view = DetailView(frame: NSRect(x: 0, y: 0, width: 300, height: 130))
@@ -146,8 +136,6 @@ import Testing
         }
     }
 
-    /// The hint box holds hints only. A reply that carried a detail ends with a dim marker, and a
-    /// box hidden during the request keeps the detail off both the screen and the model's memory.
     @MainActor @Test func hintsCarryAMarkerAndAHiddenBoxScrubsTheDetail() throws {
         let box = OverlayBoxPanel()
         box.setEnabled(true)
@@ -157,7 +145,6 @@ import Testing
         #expect(box.deliver(["Move the left edge."], perLineSeconds: [2], detail: detail) == detail)
         #expect(box.currentText.contains("Move the left edge."))
         #expect(box.currentText.contains("detail below"))
-        // The document, not the hint box, is where the detail is drawn.
         #expect(!box.currentText.contains("left = 0"))
         #expect(box.currentDetailCodeText.string == "left = 0")
         #expect(box.currentSharingType == .none)
@@ -172,7 +159,6 @@ import Testing
         #expect(box.currentDetail == detail)
     }
 
-    /// A reply whose only block the renderer refused leaves the box exactly as it was.
     @MainActor @Test func aDetailWithNothingLeftToDrawDoesNotTakeTheBox() throws {
         let box = OverlayBoxPanel()
         box.setEnabled(true)
@@ -186,7 +172,6 @@ import Testing
         #expect(box.currentDetail == good)
     }
 
-    /// Clear empties both boxes; Stop resets them and the next Start opens empty.
     @MainActor @Test func clearAndStopEmptyBothBoxes() throws {
         let box = OverlayBoxPanel()
         box.setEnabled(true)
@@ -219,7 +204,6 @@ import Testing
     }
 }
 
-/// The color of the first character, compared against a baseline render rather than a literal.
 @MainActor private func firstColor(_ language: String, _ code: String) throws -> NSColor {
     let block = try #require(CodeBlock(language: language, code: code))
     return try #require(CodeBlockFormatting.render(block, fontSize: 16)

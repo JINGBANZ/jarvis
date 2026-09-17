@@ -1,9 +1,8 @@
 import Foundation
 
 extension AgentCLIDetector {
-    /// Finder does not inherit nvm's shell PATH. Inspect its versioned installs without sourcing
-    /// startup scripts, which can hang or present UI during live provider preflight. An explicit
-    /// PATH selection still wins; otherwise use the newest installed version containing the CLI.
+    /// Finder doesn't inherit nvm's shell PATH. Scan its installs, newest first, instead of
+    /// sourcing startup scripts, which can hang or present UI.
     static func nvmDirectories(home: URL) -> [String] {
         let versions = home.appendingPathComponent(".nvm/versions/node")
         let entries = (try? FileManager.default.contentsOfDirectory(

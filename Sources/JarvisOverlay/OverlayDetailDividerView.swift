@@ -1,6 +1,6 @@
 import AppKit
 
-/// A narrow drag target keeps window movement available everywhere outside the divider.
+/// Kept thin: `mouseDownCanMoveWindow == false` blocks window dragging across this whole frame.
 @MainActor
 final class OverlayDetailDividerView: NSView {
     static let thickness: CGFloat = 8
@@ -31,7 +31,6 @@ final class OverlayDetailDividerView: NSView {
         "Detail box height: \(Int(frame.midY.rounded())) points"
     }
 
-    /// Reuse the panel's bounds and report whether an accessible adjustment actually moved it.
     private func adjustHeight(by delta: CGFloat) -> Bool {
         guard !isHiddenOrHasHiddenAncestor, window?.isVisible == true,
               let onHeightChanged else { return false }
@@ -74,8 +73,8 @@ final class OverlayDetailDividerView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         let highlighted = isHovered || dragStart != nil
-        // Like the outer resize grips, draw feedback inside the excluded panel: inactive apps
-        // cannot reliably set a resize cursor, and a tooltip would create another window.
+        // Drawn here because an inactive app can't set a resize cursor, and a tooltip would open a
+        // window outside capture exclusion.
         NSColor(white: 1, alpha: highlighted ? 0.7 : 0.25).setFill()
         NSRect(x: 0, y: bounds.midY, width: bounds.width, height: 1).fill()
         let grip = NSRect(x: bounds.midX - 18, y: bounds.midY - 1, width: 36, height: 3)

@@ -2,8 +2,6 @@ import Foundation
 import JarvisBrainProviders
 import JarvisCore
 
-/// Record decoding for `LiveSessionEvidence`. Each reader names the writer it mirrors, so a field
-/// that moves on the writer side is found by reading the two side by side.
 extension LiveSessionEvidence {
     private static let loadedMessagePrefix = "📎 loaded the "
 
@@ -24,8 +22,7 @@ extension LiveSessionEvidence {
         }
     }
 
-    /// `ActivityEvent.rendered` writes `📎 loaded the <name> <tool|skill>`: the kind is the last word
-    /// and everything between the prefix and it is the name.
+    /// Mirrors `ActivityEvent.rendered`: `📎 loaded the <name> <tool|skill>`.
     static func loadedCapability(fromMessage message: String) -> LoadedCapability? {
         guard message.hasPrefix(loadedMessagePrefix) else { return nil }
         let rest = message.dropFirst(loadedMessagePrefix.count)
@@ -36,9 +33,7 @@ extension LiveSessionEvidence {
         return LoadedCapability(name: name, kind: kind)
     }
 
-    /// `SessionAuditWorker.encodeAttempt`: `started` and `finished` records keyed by `attempt`. A
-    /// finished record pairs with the started record before it that has the same id; a finished
-    /// record with no such started record, or a repeated one, is ignored.
+    /// Mirrors `SessionAuditWorker.encodeAttempt`.
     static func parseAttempts(_ objects: [[String: Any]], sessionDate: Date) -> [Attempt] {
         let instants = parseClockStamps(objects.map { $0["t"] as? String }, sessionDate: sessionDate)
         var startedIndices: [Int] = []
@@ -84,14 +79,8 @@ extension LiveSessionEvidence {
         }
     }
 
-    /// Dates the local `HH:mm:ss` stamps of attempt records, given in file order.
-    ///
-    /// `SessionAuditWorker` formats `t` without a time zone, so the stamp is the machine's local
-    /// clock with no date; `SessionDirectoryID.make` names the folder in the same local time.
-    /// Records are appended in time order, so a stamp earlier than the one before it means the
-    /// session crossed midnight, and it and every later stamp move to the next day. The session's
-    /// own start time seeds that comparison, so a session begun just before midnight whose first
-    /// attempt starts after it is dated correctly too.
+    /// `SessionAuditWorker` writes `t` as local `HH:mm:ss` with no date. Stamps are in file order,
+    /// so one earlier than the last means midnight passed; the session start seeds that comparison.
     static func parseClockStamps(_ stamps: [String?], sessionDate: Date) -> [TimeInterval?] {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
@@ -122,9 +111,8 @@ extension LiveSessionEvidence {
         return (hour, minute, second)
     }
 
-    /// `SessionDirectoryID.make` stamps the folder `yyyy-MM-dd_HH-mm-ss` in local time behind an
-    /// optional build prefix. Searching for the stamp instead of matching the whole name keeps older
-    /// unprefixed names and copied folders readable.
+    /// Mirrors `SessionDirectoryID.make`: a local-time stamp behind an optional build prefix, so
+    /// search for the stamp rather than match the whole name.
     static func parseSessionDate(fromDirectoryName name: String) -> Date? {
         guard let match = name.firstMatch(
             of: /[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}/)
@@ -143,9 +131,8 @@ extension LiveSessionEvidence {
         return object["state"] as? String
     }
 
-    /// `SessionAuditWorker.encodeTraffic`. `request` is the Responses API body from
-    /// `BrainAccessor.encodeBody`; a body that was not JSON is stored as a string and reads as empty
-    /// here. The record names its provider at the top level.
+    /// Mirrors `SessionAuditWorker.encodeTraffic`. A non-JSON request body is stored as a string
+    /// and reads as empty.
     static func parseTraffic(_ object: [String: Any], index: Int) -> TrafficRecord {
         let context = object["coach_attempt"] as? [String: Any]
         let request = object["request"] as? [String: Any] ?? [:]
@@ -179,8 +166,6 @@ extension LiveSessionEvidence {
             speakDetail: speakDetail(inResponse: object["response"]))
     }
 
-    /// The property names of the declared `speak` tool, sorted, so a checker can assert the schema
-    /// a session composed rather than the one it hoped for.
     static func speakParameters(in tools: [[String: Any]]) -> [String]? {
         guard let speak = tools.first(where: { $0["name"] as? String == speakToolName }),
               let parameters = speak["parameters"] as? [String: Any],
@@ -189,11 +174,9 @@ extension LiveSessionEvidence {
         return properties.keys.sorted()
     }
 
-    /// The speak call's `detail` argument. The response is the raw Responses body, whose `output`
-    /// lists calls as `function_call` items with JSON-string `arguments`. A null and an absent
-    /// `detail` both read as `.none`, as `ToolInvocation.parse` reads them. A speak call the runner
-    /// made from a press's prose holds no call in the response, so it reads as `.noSpeakCall`: this
-    /// reports what the model wrote.
+    /// Reports what the model wrote: a speak call the runner built from prose is absent from the
+    /// response and reads as `.noSpeakCall`. Null and absent `detail` both read as `.none`, as in
+    /// `ToolInvocation.parse`.
     static func speakDetail(inResponse response: Any?) -> SpeakDetail {
         guard let output = (response as? [String: Any])?["output"] as? [[String: Any]],
               let call = output.first(where: {
@@ -205,7 +188,6 @@ extension LiveSessionEvidence {
         return .present(detail)
     }
 
-    /// The persisted `ActivityResponse` of a `tip` row, decoded back through its own `Codable`.
     static func activityResponse(_ object: [String: Any]) -> ActivityResponse? {
         guard let data = try? JSONSerialization.data(withJSONObject: object) else { return nil }
         return try? JSONDecoder().decode(ActivityResponse.self, from: data)

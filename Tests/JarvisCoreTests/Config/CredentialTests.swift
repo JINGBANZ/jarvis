@@ -17,7 +17,6 @@ import Foundation
         #expect(Credential.geminiAPIKey.displayName == "Gemini API")
     }
 
-    /// Two credentials share one directory but never one file — saving Gemini must not disturb OpenAI.
     @Test func savingOneCredentialLeavesTheOtherIntact() {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -41,7 +40,6 @@ import Foundation
         #expect(store.apiKey(for: .geminiAPIKey) == nil)
     }
 
-    /// The credential file must never be group- or world-readable, and neither may its directory.
     @Test func savedCredentialIsOwnerOnlyInsideAnOwnerOnlyDirectory() throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -70,7 +68,6 @@ import Foundation
         #expect(store.apiKey(for: .geminiAPIKey) == nil)
     }
 
-    /// The chain forwards the credential rather than collapsing to one key.
     @Test func chainedStoreFallsBackPerCredential() {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

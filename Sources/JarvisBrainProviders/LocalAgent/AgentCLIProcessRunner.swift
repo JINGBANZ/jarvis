@@ -6,22 +6,15 @@ import Glibc
 #endif
 import JarvisCore
 
-/// Spawns one CLI invocation (`AgentCLIRun`) and captures its output (`AgentCLIOutput`). All
-/// blocking work (pipe I/O, `waitUntilExit`) happens on a GCD thread, never the cooperative pool;
-/// a watchdog SIGTERMs a hung CLI at `timeout`,
-/// and cancelling the calling task (Stop pressed mid-turn) kills the subprocess immediately — a
-/// cancelled turn's reply can never be used, so the CLI must not keep burning the user's quota.
+/// Blocking work runs on a GCD thread, never the cooperative pool. Cancelling kills the CLI at
+/// once: a cancelled turn's reply is never used, so the CLI must not keep burning the user's quota.
 public enum AgentCLIProcessRunner {
-    /// Public because it is this adapter's identity on every error that leaves it.
     public static let errorDomain = "AgentCLIProcessRunner"
 
-    /// `timings` is stamped as the run reaches each observable boundary. It is passed in (not
-    /// returned) so a cancellation/timeout that unwinds through a throw still leaves the caller the
-    /// phases completed before the failure. Defaults to a throwaway recorder for callers that don't
-    /// care about phase latency.
+    /// `timings` is passed in, not returned, so a throw still leaves the caller the phases so far.
     public static func run(_ invocation: AgentCLIRun,
                            timings: AgentCLIPhaseTimings = AgentCLIPhaseTimings()) async throws -> AgentCLIOutput {
-        try Task.checkCancellation()   // don't even spawn for an already-cancelled turn
+        try Task.checkCancellation()
         let pidBox = Box<Int32?>(nil)
         let cancelled = Box(false)
         let output = try await withTaskCancellationHandler {
@@ -36,24 +29,20 @@ public enum AgentCLIProcessRunner {
         } onCancel: {
             cancelled.set(true)
             if let pid = pidBox.get() { terminate(pid) }
-            // else: the process hasn't launched yet — runBlocking re-checks `cancelled` right
-            // after launch, closing the race.
+            // Not launched yet: runBlocking re-checks `cancelled` right after launch.
         }
-        // A killed run unwinds through the normal exit path; surface Stop as CancellationError
-        // rather than a bogus exit-code result.
+        // A killed run unwinds normally, so surface Stop as CancellationError here.
         try Task.checkCancellation()
         return output
     }
 
-    /// SIGTERM now, SIGKILL shortly after for a CLI that ignores SIGTERM. A stale pid is harmless
-    /// (ESRCH); 2s is far too short for pid reuse.
+    /// SIGKILL follows if SIGTERM is ignored. A stale pid is harmless: 2 s is too short for reuse.
     private static func terminate(_ pid: Int32) {
         kill(pid, SIGTERM)
         DispatchQueue.global().asyncAfter(deadline: .now() + 2) { kill(pid, SIGKILL) }
     }
 
-    /// An NSLock-guarded cell so the pipe-drain handlers and the watchdog can share state with the
-    /// blocking thread. `@unchecked Sendable`: every access goes through the lock.
+    /// `@unchecked Sendable`: every access goes through the lock.
     private final class Box<T>: @unchecked Sendable {
         private let lock = NSLock()
         private var value: T
@@ -70,9 +59,7 @@ public enum AgentCLIProcessRunner {
         process.executableURL = run.executable
         process.arguments = run.arguments
         process.currentDirectoryURL = run.workingDirectory
-        // Use the same stable PATH policy as detection, then append the selected CLI's directory so
-        // an npm-installed executable can find its interpreter/helpers. Inherited launch wrappers
-        // under the system temporary directory must not leak into the long-running app's subprocess.
+        // Detection's PATH, plus the CLI's own directory so an npm shim finds its interpreter.
         var environment = ProcessInfo.processInfo.environment
         let home = URL(fileURLWithPath: NSHomeDirectory())
         let searchDirectories = AgentCLIDetector.stableSearchDirectories(
@@ -82,9 +69,7 @@ public enum AgentCLIProcessRunner {
         )
         environment["PATH"] = ([run.executable.deletingLastPathComponent().path] + searchDirectories)
             .joined(separator: ":")
-        // Jarvis's own secret must not widen its exposure: when the documented OPENAI_API_KEY
-        // fallback is in use, the transcription key would otherwise be inherited by the brain CLI
-        // (and anything its config loads), which authenticates with its own credentials.
+        // Jarvis's key must not leak to the CLI, which uses its own credentials.
         environment.removeValue(forKey: "OPENAI_API_KEY")
         process.environment = environment
 
@@ -93,9 +78,7 @@ public enum AgentCLIProcessRunner {
         process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
-        // Drain stdout/stderr via readability handlers (they run on FileHandle's own queue) so
-        // neither pipe can fill its buffer and stall the child while we block elsewhere — the
-        // classic subprocess deadlock. Each signals its semaphore on EOF.
+        // Drain concurrently so a full pipe buffer can't stall the child while this thread blocks.
         func drain(_ handle: FileHandle, into box: Box<Data>, done: DispatchSemaphore,
                    onFirstByte: (@Sendable () -> Void)? = nil) {
             handle.readabilityHandler = { h in
@@ -104,7 +87,7 @@ public enum AgentCLIProcessRunner {
                     h.readabilityHandler = nil
                     done.signal()
                 } else {
-                    onFirstByte?()   // no-op after the first stamp; the recorder keeps the earliest
+                    onFirstByte?()   // the recorder keeps only the earliest stamp
                     box.set(box.get() + chunk)
                 }
             }
@@ -118,13 +101,11 @@ public enum AgentCLIProcessRunner {
         try process.run()
         timings.mark(.processLaunched)
 
-        // Watchdogs by pid (an Int32, so the Sendable closures needn't capture the Process object):
-        // SIGTERM at the timeout, SIGKILL shortly after for a CLI that ignores SIGTERM — otherwise
-        // `waitUntilExit` below would hang forever despite the timeout.
+        // Watchdogs capture only the pid, not the Process. The SIGKILL keeps `waitUntilExit` from
+        // hanging on a CLI that ignores SIGTERM.
         let timedOut = Box(false)
         let pid = process.processIdentifier
-        // Publish the pid for the caller's cancellation handler, then close the race with a
-        // cancel that fired between spawn and publish.
+        // Re-check after publishing, for a cancel that fired between spawn and publish.
         pidBox.set(pid)
         if cancelled.get() { terminate(pid) }
         let watchdog = DispatchWorkItem {
@@ -135,15 +116,12 @@ public enum AgentCLIProcessRunner {
         DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout, execute: watchdog)
         DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout + 5, execute: killer)
 
-        // Feeding stdin inline is safe: the output pipes are already draining concurrently, so a
-        // prompt larger than the pipe buffer just blocks here until the child consumes it.
+        // Writing stdin inline is safe because the output pipes are already draining.
         #if canImport(Darwin)
-        // A provider that exits before reading the prompt must become a normal EPIPE write error,
-        // not SIGPIPE terminating the Jarvis process before Swift can preserve the failure timing.
+        // A CLI that exits before reading must cause EPIPE, not a SIGPIPE that kills Jarvis.
         _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         #else
-        // Linux has no per-pipe F_SETNOSIGPIPE. Ignore it process-wide so Foundation surfaces
-        // EPIPE from the write instead; CLI invocations never use SIGPIPE as application control.
+        // Linux has no per-pipe F_SETNOSIGPIPE, so ignore SIGPIPE process-wide.
         _ = signal(SIGPIPE, SIG_IGN)
         #endif
         var stdinDelivered = true
@@ -162,20 +140,16 @@ public enum AgentCLIProcessRunner {
         let processExited = DispatchTime.now().uptimeNanoseconds
         watchdog.cancel()
         killer.cancel()
-        // EOF normally lands with the exit, but a stray grandchild that inherited the pipes' write
-        // ends would hold EOF open until IT dies — bound the wait and take what's been captured
-        // (the CLI's own output was written before it exited).
+        // A grandchild holding the pipes' write ends would delay EOF, so bound the wait.
         _ = stdoutDone.wait(timeout: .now() + 2)
         _ = stderrDone.wait(timeout: .now() + 2)
         stdoutPipe.fileHandleForReading.readabilityHandler = nil
         stderrPipe.fileHandleForReading.readabilityHandler = nil
-        // Finalize exit only after the stdout handler has drained. A very short-lived process can
-        // exit before its readability callback is scheduled; the recorder clamps that necessarily
-        // pre-exit byte to this captured exit instant instead of dropping the reversed interval.
+        // Marked after draining: a short-lived process can exit before its stdout callback runs,
+        // and the recorder clamps that byte to this exit instant.
         timings.mark(.processExited, at: processExited)
 
-        // Only a SIGTERM exit counts as our timeout — the flag alone could race a normal exit that
-        // lands just as the watchdog fires.
+        // The flag alone could race a normal exit that lands as the watchdog fires.
         if timedOut.get() && process.terminationReason == .uncaughtSignal {
             let stderr = String(decoding: stderrBox.get(), as: UTF8.self)
                 .trimmingCharacters(in: .whitespacesAndNewlines)

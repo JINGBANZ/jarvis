@@ -1,14 +1,9 @@
 import Foundation
 
-/// The coaching skills this build ships, read once at Start.
-///
-/// Lives in `Config/` rather than beside the coach: this is the only part of the skill path that
-/// touches the filesystem, and the coaching kernel may not (`scripts/check-coaching-kernel.sh`).
-/// The kernel is handed the parsed result, like every other control-plane snapshot.
+/// Lives outside the coach because the coaching kernel may not touch the filesystem
+/// (`scripts/check-coaching-kernel.sh`).
 public enum SkillCatalog {
-    /// Every valid `<name>/SKILL.md` under the bundled skills directory, sorted by name. An
-    /// unreadable or invalid file is skipped rather than fatal — a broken skill costs its own
-    /// guidance, never the session — and the count is logged so the cause is visible at Start.
+    /// Sorted by name. An unreadable or invalid skill file is skipped and logged, never fatal.
     public static func bundled() -> [Skill] {
         guard let directory = skillsDirectory() else {
             jlog("Jarvis coach skills: none found — coaching without them")
@@ -28,14 +23,10 @@ public enum SkillCatalog {
         return skills
     }
 
-    /// Frontmatter, then the body. The file opens with a `---` line; `key: value` lines follow
-    /// until the closing `---`; a value may be wrapped in single or double quotes; unknown keys are
-    /// ignored. A frontmatter line that is not `key: value` is an error rather than something to
-    /// skip: silently dropping it is how a description continued onto a second line would ship
-    /// truncated.
+    /// A frontmatter line that is not `key: value` throws rather than being skipped, so a
+    /// description wrapped onto a second line can't ship truncated.
     public static func parse(_ text: String, folderName: String) throws -> Skill {
-        // Normalized first: `CharacterSet.whitespaces` is Zs plus tab, so a CRLF file would leave a
-        // trailing \r on the opening fence and the whole skill would be skipped as unparseable.
+        // `CharacterSet.whitespaces` excludes \r, so a CRLF file would fail the fence check.
         let lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         guard lines.first?.trimmingCharacters(in: .whitespaces) == fence else {
             throw SkillParseError.missingFrontmatter
@@ -72,8 +63,6 @@ public enum SkillCatalog {
         }
         let body = lines[(closing + 1)...].joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        // Validated like the two keys above, and for the same reason: a skill with nothing after
-        // the frontmatter would load successfully and hand the model an empty guidance block.
         guard !body.isEmpty else { throw SkillParseError.missingBody }
         return Skill(name: name, description: description, body: body)
     }
@@ -96,34 +85,25 @@ public enum SkillCatalog {
         }
     }
 
-    /// The same three layouts `SileroVoiceActivityDetector.bundledModelURL()` probes, for the same
-    /// reason: `Bundle.module`'s generated accessor looks only beside `Bundle.main.bundleURL` or at
-    /// the absolute build path baked in at compile time, and `fatalError`s when neither exists — a
-    /// real install has neither. Under `swift test`, `Bundle.main` is the toolchain's testing
-    /// helper, unrelated to this checkout, so the source tree is read through `#filePath`.
-    ///
-    /// A candidate counts only when it actually holds a skill: an empty `Skills` directory beside
-    /// the executable would otherwise shadow the checked-out one under test.
+    /// Avoids `Bundle.module`, whose accessor `fatalError`s in an installed app. Probes the
+    /// installed app, the executable's directory, then (for `swift test`) the source tree via
+    /// `#filePath`. A candidate counts only when it holds a skill, so an empty directory can't
+    /// shadow the source.
     private static func skillsDirectory() -> URL? {
         let resourceBundle = "Jarvis_JarvisCore.bundle"
         var candidates: [URL] = []
-        // Installed app: the packaging scripts copy the resource bundle into Contents/Resources.
         if let resources = Bundle.main.resourceURL {
             candidates.append(resources.appendingPathComponent(resourceBundle)
                 .appendingPathComponent("Skills"))
         }
-        // `swift build`/`swift run`, the benchmark harness: SwiftPM leaves it beside the executable.
         candidates.append(Bundle.main.bundleURL.appendingPathComponent(resourceBundle)
             .appendingPathComponent("Skills"))
-        // `swift test`: read the checked-out source directly, two directories up from this file
-        // (Config/ -> JarvisCore/) and back down into Resources/Skills/.
         candidates.append(URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("Resources").appendingPathComponent("Skills"))
         return candidates.first { !skillFiles(in: $0).isEmpty }
     }
 
-    /// `<directory>/<folder>/SKILL.md` for every subdirectory that has one, in name order.
     private static func skillFiles(in directory: URL) -> [URL] {
         let contents = (try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.isDirectoryKey],
@@ -138,8 +118,6 @@ public enum SkillCatalog {
     }
 }
 
-/// Why one `SKILL.md` was rejected. Bundled files are validated by a test, so these reach a user
-/// only through a corrupted install — but they name the offending file's problem in the debug log.
 public enum SkillParseError: Error, Equatable, CustomStringConvertible {
     case missingFrontmatter
     case unterminatedFrontmatter

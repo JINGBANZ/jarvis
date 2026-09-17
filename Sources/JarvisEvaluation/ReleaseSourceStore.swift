@@ -2,10 +2,8 @@ import Foundation
 import JarvisCore
 import JarvisBrainProviders
 
-/// Public release source only, fetched fresh for one evaluation and discarded when it ends.
-/// Nothing is kept between runs: the agent CLI that consumes this source needs the network anyway,
-/// so a cache could never rescue an offline evaluation, and re-downloading a few megabytes is noise
-/// against a multi-minute agentic run. Session artifacts are never copied here.
+/// No cache on purpose: the agent CLI needs the network anyway, so one could never rescue an
+/// offline run. Never copy session artifacts here.
 public struct ReleaseSourceStore: Sendable {
     public enum Failure: LocalizedError, Equatable {
         case invalidVersion
@@ -30,7 +28,6 @@ public struct ReleaseSourceStore: Sendable {
         }
     }
 
-    /// One evaluation's extracted source tree. The evaluator discards it when its run ends.
     public struct Checkout: Sendable {
         public let directory: URL
         public let version: String
@@ -49,18 +46,15 @@ public struct ReleaseSourceStore: Sendable {
     private let root: URL
     private let fetcher: Fetcher
 
-    /// Per-user temporary storage, so the OS reclaims a run that Quit abandoned mid-download and no
-    /// staging, publication, or retention bookkeeping is needed to keep the directory from leaking.
+    /// The temporary directory lets the OS reclaim a run that Quit abandoned mid-download.
     public init(root: URL = FileManager.default.temporaryDirectory,
                 fetcher: @escaping Fetcher = ReleaseSourceStore.download) {
         self.root = root
         self.fetcher = fetcher
     }
 
-    /// The session's own version, falling back to the running release only when the session records
-    /// no version or its tag no longer exists. A download failure never retries a different version:
-    /// the second download fails the same way, and naming the recorded version keeps the failure
-    /// diagnosable from a screenshot of Activity. Cancellation never falls back.
+    /// Falls back only when the session has no valid version or its tag is gone. A download failure
+    /// never falls back: it would fail again and hide the recorded version from the error.
     public func fetch(version: String?, fallbackVersion: String?) async throws -> Checkout {
         let recorded = version.flatMap { EvaluationSource.isValidVersion($0) ? $0 : nil }
         let fallback = fallbackVersion.flatMap { EvaluationSource.isValidVersion($0) ? $0 : nil }
@@ -82,8 +76,6 @@ public struct ReleaseSourceStore: Sendable {
         let manager = FileManager.default
         let container = root.appendingPathComponent("jarvis-source-\(UUID().uuidString)",
                                                     isDirectory: true)
-        // Every exit but a complete checkout takes the tree with it, so a failed or cancelled run
-        // can never leave a partial workspace behind for the next evaluation to find.
         var complete = false
         defer { if !complete { try? manager.removeItem(at: container) } }
         do {

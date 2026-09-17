@@ -1,6 +1,6 @@
 import Foundation
 
-/// Stable identities shared by shortcut preferences and the app's Carbon event routing.
+/// Raw values are the Carbon `EventHotKeyID` ids.
 public enum CoachingShortcut: UInt32, CaseIterable, Sendable {
     case hint = 1
     case explainMore = 2

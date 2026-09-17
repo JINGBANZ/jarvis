@@ -1,24 +1,17 @@
 import Foundation
 
 extension ProviderFailure {
-    /// The human sentence Activity shows for this failure: one fixed clause per category, with the
-    /// structured identity and the redacted provider message quoted in parentheses, and advice
-    /// where the category has a next step. Producers never author copy; they choose a category.
-    /// The clause is fixed so the row stays readable; the parenthetical is what makes an
-    /// unclassified failure diagnosable from a screenshot.
+    /// The quoted identity and message make an unclassified failure diagnosable from a screenshot.
     public var activitySentence: String {
         activitySentenceWithoutAdvice + activityAdvice
     }
 
-    /// The sentence without its advice clause, for a frame that appends what Jarvis is doing about
-    /// the failure. Leaving the advice in front of such a frame put two different instructions on
-    /// either side of its dash, one telling the reader to act and one telling them Jarvis already
-    /// is; the advice reads better as the row's last word.
+    /// For a frame that appends what Jarvis is doing, so the advice can come last in the row.
     public var activitySentenceWithoutAdvice: String {
         clauseAndAdvice.clause + activityDetail
     }
 
-    /// The advice clause with its leading separator, or "" when the category has no next step.
+    /// Includes its leading separator; "" when the category has no next step.
     public var activityAdvice: String {
         clauseAndAdvice.advice.map { "; \($0)" } ?? ""
     }
@@ -62,9 +55,6 @@ extension ProviderFailure {
         return (clause, advice)
     }
 
-    /// A subscription target's failures that have a next step of their own: a signed-out account,
-    /// the bundled sign-in service not answering, and a plan's usage limit. Nil for every other
-    /// failure, which reads as any provider's does.
     private var subscriptionClauseAndAdvice: (clause: String, advice: String?)? {
         guard case .brain(let provider) = source, provider.servedByLocalProxy else { return nil }
         let name = source.displayName
@@ -73,18 +63,15 @@ extension ProviderFailure {
         switch category {
         case .authentication:
             return signIn
-        // The sign-in service restarts on its own after a crash, so the first thing to do is wait;
-        // Connections is where a helper that stayed down is retried by hand.
+        // The sign-in service restarts itself after a crash, so the first advice is to wait.
         case .unreachable:
             return ("\(name) couldn't reach the sign-in service",
                     "wait a moment, then press Try again in Settings → Connections")
-        // Raised by the supervisor, whose message names what the sign-in service did; an upstream
-        // 5xx arrives at another stage and reads as any provider's outage.
+        // Only the supervisor raises this at `.process`; an upstream 5xx reads as any outage.
         case .unavailable where stage == .process:
             return ("\(name) is unavailable", "press Try again in Settings → Connections")
-        // The helper answers `unknown provider for model` both for a signed-out vendor and for a
-        // model it does not serve. Start's probe names a subscription that was signed out before the
-        // session, but one whose token lapses mid-session arrives here, so the advice names both.
+        // CLIProxyAPI answers `unknown provider for model` both for a signed-out vendor and for an
+        // unserved model, and a token can lapse mid-session, so the advice names both.
         case .configuration:
             return ("\(name) rejected the \(source.surfaceNoun) configuration",
                     "check Settings → Brain, or sign in again in Settings → Connections")
@@ -96,8 +83,7 @@ extension ProviderFailure {
         }
     }
 
-    /// The quoted evidence alone, with a leading space, or "" when nothing is known. Frames that
-    /// place their own verb around the failure (route advance, credential verdict) use this.
+    /// Includes a leading space; "" when nothing is known.
     public var activityDetail: String {
         let summary = identity.summary
         switch (summary.isEmpty, message.isEmpty) {

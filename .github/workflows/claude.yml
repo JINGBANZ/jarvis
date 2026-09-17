@@ -1,7 +1,6 @@
 name: Claude Code
 
-# Public comments are untrusted input. Only the repository owner can invoke the agent; the central
-# reusable workflow remains the single implementation of the @claude behavior.
+# Public comments are untrusted input, so only the repository owner can invoke the agent.
 on:
   issue_comment:
     types: [created]

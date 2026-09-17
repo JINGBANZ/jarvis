@@ -2,16 +2,9 @@ import AppKit
 import Carbon.HIToolbox
 import JarvisCore
 
-/// A "click to record" control for the manual-hint global hotkey: shows the current combination as a
-/// button title; a click starts recording, and the next key + modifier(s) pressed becomes the
-/// candidate. `HotkeyModifiers.satisfiesHotkeyRequirement` gates what's accepted — a key held with no
-/// modifier, only Shift (e.g. Shift-3 for "#"), or only Control (⌃A/⌃E/⌃K/⌃D collide with macOS's
-/// Emacs-style text-editing bindings) is ignored; at least one of ⌘/⌥ is required. Escape cancels
-/// recording and restores the previous display without calling `onRecorded`.
 @MainActor
 final class HotkeyRecorderButton: NSButton {
-    /// Called with a candidate combination once a valid key + modifier(s) is pressed while recording.
-    /// The caller (not this control) decides whether to persist it — see `HotkeySection`.
+    /// Reports a candidate only; the caller decides whether to persist it.
     var onRecorded: ((HotkeyCombination) -> Void)?
 
     private var isRecording = false
@@ -32,8 +25,6 @@ final class HotkeyRecorderButton: NSButton {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// Reflect a combination decided elsewhere (a confirmed save, or reverting after a failed
-    /// registration) without re-entering recording mode.
     func setCombination(_ combination: HotkeyCombination) {
         displayedCombination = combination
         isRecording = false
@@ -47,11 +38,8 @@ final class HotkeyRecorderButton: NSButton {
         return super.resignFirstResponder()
     }
 
-    // AppKit resolves a Command-holding key-down as a *key equivalent* — offering it to the menu bar
-    // (via `performKeyEquivalent`) before it would ever reach `keyDown`. Recording ⌘Q while this
-    // control is first responder would otherwise quit the app instead of being captured, since
-    // `MainMenu` binds Quit to exactly that combo. Intercepting here, while recording, keeps every
-    // Command-holding candidate ours before the menu ever sees it.
+    // AppKit offers Command key-downs to the menu as key equivalents before `keyDown`, so without
+    // this, recording ⌘Q would quit the app.
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         guard isRecording else { return super.performKeyEquivalent(with: event) }
         handleCandidateKeyEvent(event)
@@ -81,8 +69,6 @@ final class HotkeyRecorderButton: NSButton {
     }
 
     @objc private func startRecording() {
-        // A declined first-responder change (e.g. another view refuses to resign) must not leave the
-        // button stuck showing "Press shortcut…" with no way to actually capture a key press.
         guard window?.makeFirstResponder(self) == true else { return }
         isRecording = true
         title = "Press shortcut…"

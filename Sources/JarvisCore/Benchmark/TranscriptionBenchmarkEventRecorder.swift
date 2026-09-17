@@ -92,9 +92,8 @@ public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkOb
         } as Bool
     }
 
-    /// Waits until at least `minimumCount` finals have arrived and no additional final has been
-    /// observed for `quietPeriod`. Providers may split one fixture across multiple finalized items,
-    /// so the standard benchmark cannot treat the first callback as the complete transcript.
+    /// Providers may split one fixture across several finals, so the first one isn't the whole
+    /// transcript.
     public func waitForFinalStreamToSettle(
         minimumCount: Int,
         quietPeriod: TimeInterval,
@@ -122,9 +121,8 @@ public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkOb
         throw Failure.timedOut("a settled finalized transcript stream")
     }
 
-    /// Waits for every expected phrase in one replacement generation, then keeps observing that
-    /// generation until its final stream has stayed quiet. Late duplicate or unrelated finals are
-    /// therefore included in the acceptance snapshot rather than hidden by an early session stop.
+    /// Waits for quiet even after every phrase arrives, so late duplicate or unrelated finals still
+    /// reach the acceptance snapshot.
     public func waitForRecognizedReconnectFinalStreamToSettle(
         _ phraseIDs: [String],
         inGeneration generation: Int,

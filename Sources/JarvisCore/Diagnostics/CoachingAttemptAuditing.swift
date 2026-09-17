@@ -1,7 +1,5 @@
 import Foundation
 
-/// Coach-facing, best-effort session-audit port.
-///
 /// Implementations must return immediately, must not throw, and must never invoke coaching callbacks.
 public protocol CoachingAttemptAuditing: Sendable {
     func record(_ event: CoachingAttemptAuditEvent)

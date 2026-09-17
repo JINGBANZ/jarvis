@@ -52,8 +52,7 @@ struct EvalReportPageTests {
         #expect(body.contains(#"<a href="https://example.com/x">docs</a>"#))
     }
 
-    /// Only http(s) may become a live href — the report is LLM output, so an active scheme in a
-    /// markdown link must stay inert text.
+    /// The report is LLM output, so only http(s) links may become live hrefs.
     @Test func unsafeLinkSchemesNeverBecomeHrefs() {
         let body = EvalReportPage.body(from: """
         [a](javascript:alert(1)) and [b](data:text/html;base64,x) and [c](file:///etc/passwd) \
@@ -62,7 +61,7 @@ struct EvalReportPageTests {
         #expect(!body.contains(#"href="javascript:"#))
         #expect(!body.contains(#"href="data:"#))
         #expect(!body.contains(#"href="file:"#))
-        #expect(body.contains("[a](javascript:alert(1))"))   // left as escaped literal text
+        #expect(body.contains("[a](javascript:alert(1))"))
         #expect(body.contains(#"<a href="http://example.com">ok</a>"#))
     }
 
@@ -83,8 +82,8 @@ struct EvalReportPageTests {
         let page = EvalReportPage.render(markdown: markdown, title: "t")
         #expect(page.contains(#"<button id="copy""#))
         #expect(page.contains("navigator.clipboard.writeText"))
-        // The textarea holds the markdown verbatim modulo entity escaping, so `.value` (which the
-        // browser decodes) round-trips to the exact bytes an agent should receive.
+        // The browser decodes the textarea's entities, so its `.value` round-trips to these exact
+        // bytes.
         #expect(page.contains("## Section\n\n- a **finding** with `code`"))
         #expect(page.contains(#"<textarea id="md""#))
     }

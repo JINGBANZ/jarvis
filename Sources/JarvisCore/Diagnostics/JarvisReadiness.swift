@@ -1,30 +1,21 @@
 import Foundation
 
-/// Foundation-only composition authority for whether one selected Jarvis session can coach.
-///
-/// Focused subsystem owners keep their own policy: permission and credential adapters report what
-/// is available, brain/transcription preparation reports its typed result, transcription endpoints
-/// report their connection state, and `CaptureReadinessMonitor` reports provider-plus-frame health.
-/// This reducer combines those snapshots into one overall status without performing preparation,
-/// recovery, lifecycle, logging, or presentation itself.
 public final class JarvisReadiness {
-    /// An opaque generation token. Every observation must name the session attempt it belongs to, so
-    /// callbacks queued across Stop -> Start cannot mutate the replacement session.
+    /// Observations name their attempt, so callbacks queued across Stop and Start
+    /// cannot mutate the replacement session.
     public struct Session: Sendable, Hashable {
         fileprivate let generation: UInt64
     }
 
-    /// Declaration order is the order a notice or checklist names them, so a multi-permission
-    /// message never reshuffles between attempts.
+    /// Declaration order is the order notices name them, so a message never reshuffles.
     public enum Permission: String, Sendable, Hashable, CaseIterable {
         case microphone
-        /// Core Audio process taps. macOS offers no API to request or read this grant, so the only
-        /// evidence is an adapter having built and started a tap-backed device at least once.
+        /// macOS has no API to request or read the process-tap grant, so the only evidence is an
+        /// adapter having started a tap-backed device.
         case systemAudio
         case screenRecording
 
-        /// The name macOS itself uses in System Settings, so a notice and the permission checklist
-        /// point at the same row the user has to find.
+        /// The names macOS uses in System Settings.
         public var displayName: String {
             switch self {
             case .microphone: "Microphone"
@@ -58,8 +49,6 @@ public final class JarvisReadiness {
         case preparationFailed
     }
 
-    /// A typed, user-actionable requirement. Application adapters decide how an explicit Start
-    /// surfaces it; no AppKit or fixed presentation copy crosses into Core.
     public enum Blocker: Sendable, Equatable {
         case permissions(Set<Permission>)
         case credentials(Set<Credential>)
@@ -90,8 +79,6 @@ public final class JarvisReadiness {
         case blocked(TranscriptionBlocker)
     }
 
-    /// Typed subsystem snapshots. Collections let an adapter atomically publish related changes,
-    /// such as a failed system endpoint plus `CaptureReadinessMonitor`'s microphone-only result.
     public enum Observation: Sendable, Equatable {
         case permissions(granted: Set<Permission>)
         case credentials(available: Set<Credential>)
@@ -107,15 +94,11 @@ public final class JarvisReadiness {
         case brainCycleFailed(BrainProvider)
     }
 
-    /// Effects are deliberately presentation- and lifecycle-free. The app renders `statusChanged`
-    /// on every surface and may use `readinessEstablished` for a diagnostic milestone.
     public enum Effect: Sendable, Equatable {
         case statusChanged(Status)
         case readinessEstablished(ReadyMode)
     }
 
-    /// Requirements are selected once at Start. A non-required credential or preparation step is
-    /// satisfied immediately; endpoint and capture health remain mandatory for every live session.
     public struct Configuration: Sendable, Equatable {
         public let requiredPermissions: Set<Permission>
         public let requiredCredentials: Set<Credential>
@@ -147,9 +130,7 @@ public final class JarvisReadiness {
     public private(set) var status: Status = .stopped
 
     private var nextGeneration: UInt64 = 0
-    /// The attempt observations currently count for, or nil once it stopped. The app reads this
-    /// rather than mirroring the token, so the Start path and the session composition agree on
-    /// which attempt is current without sharing a second copy.
+    /// Nil once stopped. The app reads this rather than keeping its own copy of the token.
     public private(set) var activeSession: Session?
     private var configuration = Configuration()
     private var permissionState: CheckState = .satisfied
@@ -166,7 +147,6 @@ public final class JarvisReadiness {
 
     public init() {}
 
-    /// Begin a fresh selected-configuration attempt and invalidate every older token.
     @discardableResult
     public func begin(configuration: Configuration) -> (session: Session, effects: [Effect]) {
         nextGeneration &+= 1
@@ -191,8 +171,7 @@ public final class JarvisReadiness {
         observe([observation], for: session)
     }
 
-    /// Fold one atomic group of subsystem snapshots. Stale, post-Stop, and post-block observations
-    /// are inert; a user-actionable blocker requires a fresh explicit Start.
+    /// Stale, post-Stop, and post-block observations are inert; a blocker needs a fresh Start.
     @discardableResult
     public func observe(_ observations: [Observation], for session: Session) -> [Effect] {
         guard activeSession == session, !Self.isBlocked(status) else { return [] }
@@ -202,7 +181,7 @@ public final class JarvisReadiness {
         return transition(to: reducedStatus())
     }
 
-    /// Cancel or stop the named attempt. No later observation carrying its token can leave Stopped.
+    /// No later observation carrying this token can leave Stopped.
     @discardableResult
     public func stop(session: Session) -> [Effect] {
         guard activeSession == session else { return [] }
@@ -319,7 +298,7 @@ public final class JarvisReadiness {
         case .waitingForMicrophone, .waitingForSystem, nil:
             return .checking(.capture)
         case .stopped:
-            // Handled above so the blocked cause remains typed.
+            // Unreachable: handled above so the blocked cause remains typed.
             return .blocked(.capture(.microphone))
         }
     }

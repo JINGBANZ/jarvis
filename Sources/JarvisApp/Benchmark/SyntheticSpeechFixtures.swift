@@ -3,8 +3,6 @@ import CryptoKit
 import Foundation
 import JarvisCore
 
-/// Synthetic, non-user speech generated once per run and replayed byte-identically across arms.
-/// The files live only inside the benchmark run directory and are removed before the app exits.
 final class SyntheticSpeechFixtures {
     struct Fixture: Sendable {
         let phrase: TranscriptionBenchmark.Phrase
@@ -52,8 +50,7 @@ final class SyntheticSpeechFixtures {
                 [.posixPermissions: 0o600], ofItemAtPath: endpointSilence.path)
         } catch {
             let generationFailure = error
-            // This initializer has not produced an owner yet, so perform its normal temporary-file
-            // cleanup here rather than relying on `removeGeneratedAudio()`.
+            // No instance exists yet to call `removeGeneratedAudio()`, so clean up here.
             if createdDirectory,
                fixtureDirectory.deletingLastPathComponent() == standardizedOutput,
                fixtureDirectory.lastPathComponent == "fixtures" {

@@ -1,18 +1,10 @@
 #!/usr/bin/env bash
 # Render the Sparkle appcast for a finished release disk image.
-#
-# Sparkle's menu-bar update check reads this feed, compares its version with the running bundle, and
-# verifies the downloaded disk image against the EdDSA signature recorded here. The signature must
-# therefore be taken over the *final* artifact: stapling rewrites the file, so this runs after
-# package-app.sh has notarized, stapled, and verified Jarvis.dmg — never before.
-#
 # Usage:  ./scripts/generate-appcast.sh Jarvis.dmg v0.1.8 [release-notes.html]
 #
-# Credentials:
-#   SPARKLE_ED_PRIVATE_KEY — the EdDSA private key whose public half is SUPublicEDKey in
-#     Resources/Info.plist. Generated once with Sparkle's generate_keys and held as a repository
-#     secret in the release environment. Passed on standard input, never as an argument, so it
-#     cannot appear in the process list.
+# Run only after package-app.sh staples the DMG: stapling rewrites it, and the EdDSA signature must
+# cover the final bytes. SPARKLE_ED_PRIVATE_KEY goes to tools on stdin, never as an argument, so it
+# stays out of the process list.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -34,8 +26,7 @@ if [[ -z "${SPARKLE_ED_PRIVATE_KEY:-}" ]]; then
   exit 1
 fi
 
-# Sparkle ships its signing tools in the same SwiftPM artifact the app links against, so the release
-# build has already fetched them and the versions cannot drift apart.
+# From the same SwiftPM artifact the app links, so tool and framework versions can't drift.
 SIGN_UPDATE=".build/artifacts/sparkle/Sparkle/bin/sign_update"
 if [[ ! -x "$SIGN_UPDATE" ]]; then
   echo "error: Sparkle's sign_update tool is missing; run swift build first" >&2
@@ -49,10 +40,8 @@ VERSION="$(plist_value CFBundleVersion)"
 SHORT_VERSION="$(plist_value CFBundleShortVersionString)"
 MINIMUM_SYSTEM="$(plist_value LSMinimumSystemVersion)"
 
-# Prove the signing key is the one installed copies verify against. Signing and then verifying with
-# the same private key is self-referential: it passes for *any* valid keypair, so a rotated or
-# mis-pasted secret would publish a feed that every client silently rejects until the next release.
-# Sparkle exports a 32-byte Ed25519 seed, so the public half is derived rather than sliced off.
+# Sign-then-verify with one key passes for any keypair, so compare the derived public key with the
+# one installed copies trust. Sparkle exports a 32-byte Ed25519 seed, so the public half is derived.
 DERIVED_PUBLIC_KEY="$(printf '%s' "$SPARKLE_ED_PRIVATE_KEY" | /usr/bin/swift -e '
 import CryptoKit
 import Foundation
@@ -68,15 +57,12 @@ if [[ "$DERIVED_PUBLIC_KEY" != "$(plist_value SUPublicEDKey)" ]]; then
   exit 1
 fi
 
-# The feed must describe the artifact the tag actually published, or Sparkle would offer an update
-# that downloads different bytes than the release notes describe.
 if [[ "$TAG" != "v$SHORT_VERSION" ]]; then
   echo "error: release tag $TAG does not match bundled version $SHORT_VERSION" >&2
   exit 1
 fi
 
-# Pin the enclosure to the tag rather than /releases/latest/, so this item keeps resolving to the
-# exact disk image it was signed over even after later releases move "latest".
+# Pinned to the tag, not /releases/latest/, so the item keeps matching the bytes it signed.
 REPOSITORY="${GITHUB_REPOSITORY:-JINGBANZ/jarvis}"
 SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}"
 ENCLOSURE_URL="$SERVER_URL/$REPOSITORY/releases/download/$TAG/Jarvis.dmg"
@@ -89,10 +75,8 @@ if [[ -z "$SIGNATURE" ]]; then
 fi
 PUB_DATE="$(/bin/date -u '+%a, %d %b %Y %H:%M:%S +0000')"
 
-# Release notes are author-controlled Markdown rendered to HTML upstream, so the text can contain
-# anything a commit subject can. CDATA keeps that HTML out of the XML grammar, and the one sequence
-# that could close the section early is split across two CDATA sections rather than deleted: a
-# single-pass strip re-forms the terminator from `]]]]>>` and would let content escape into markup.
+# Release notes are untrusted HTML inside CDATA. Split `]]>` across two sections instead of deleting
+# it: a single-pass strip re-forms the terminator from `]]]]>>`.
 DESCRIPTION=""
 if [[ -n "$NOTES_HTML" ]]; then
   if [[ ! -f "$NOTES_HTML" || -L "$NOTES_HTML" ]]; then
@@ -129,8 +113,6 @@ XML
 XML
 } > "$APPCAST"
 
-# The signature covers the right bytes (checked above against the plist's public key), so the
-# remaining risk is a malformed feed — a description that broke out of its CDATA section would show
-# up here as invalid XML.
+# A description that escaped its CDATA section shows up here as invalid XML.
 /usr/bin/xmllint --noout "$APPCAST"
 echo "✅ $APPCAST describes Jarvis $SHORT_VERSION ($LENGTH bytes)"

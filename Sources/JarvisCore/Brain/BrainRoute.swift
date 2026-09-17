@@ -1,10 +1,7 @@
 import Foundation
 
-/// A primary brain target followed by the user's ordered fallback targets.
-///
-/// Construction normalizes untrusted preference input: an unknown primary model becomes that
-/// provider's default, while unknown fallback models and exact duplicate targets are omitted.
-/// Provider repetition is otherwise valid because model ids are part of target identity.
+/// Normalizes untrusted preference input: an unknown primary model becomes the provider default,
+/// and unknown or duplicate fallback targets are dropped.
 public struct BrainRoute: Sendable, Equatable {
     public let primary: BrainTarget
     public let fallbackTargets: [BrainTarget]

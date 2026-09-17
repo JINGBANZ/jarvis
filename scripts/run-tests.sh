@@ -9,6 +9,5 @@ cd "$(dirname "$0")/.."
 ./scripts/check-release-config.sh
 
 source scripts/lib/swift-test-flags.sh
-# The live e2e target launches the signed app against real providers. The Gate compiles it but never
-# runs it; scripts/run-live-tests.sh is its one entry point.
+# The live target hits real providers, so only scripts/run-live-tests.sh runs it.
 exec swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} --skip JarvisLiveTests "$@"

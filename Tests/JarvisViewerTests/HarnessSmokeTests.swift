@@ -2,9 +2,7 @@ import Testing
 import WebKit
 @testable import JarvisCore
 
-/// Locks in the one real risk from the design review: that a real `WKWebView` loads HTML and runs
-/// JS headlessly under `swift test`. If this fails to link, the run-tests.sh CLT framework flags
-/// need attention; if it hangs, the harness timeout converts it to a failure.
+/// A link failure here points at the CLT framework flags in `scripts/run-tests.sh`.
 @Suite struct HarnessSmokeTests {
     @MainActor @Test func loadsAndEvaluates() async throws {
         let h = WebViewHarness()

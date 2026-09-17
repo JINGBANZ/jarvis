@@ -1,15 +1,8 @@
 import Foundation
 
-/// The catalog of the app's user-facing failures: the single source of truth for each failure's
-/// lifecycle consequence. Presentation additionally depends on startup versus runtime context; no
-/// runtime severity may reveal UI. Dynamic copy composed at the failure site (e.g. a capture reason)
-/// is passed through. Call sites reference these so the policy is centralized and unit-testable.
 public extension UserFacingError {
-    /// No API key on Start for the selected transcription provider or a configured brain target.
-    /// Names each missing credential so a user with one valid key isn't left guessing which one is
-    /// absent — e.g. Gemini transcription plus an OpenAI brain route can legitimately miss both.
     static func noAPIKey(missing: Set<Credential>) -> UserFacingError {
-        // Sorted by display name for a stable, deterministic message across attempts.
+        // Sorted so the message is stable across attempts.
         let named = missing.map(\.displayName).sorted()
         return .init(
             title: "Missing API key",
@@ -19,8 +12,7 @@ public extension UserFacingError {
             sessionEndReason: .openAIAPIKeyMissing)
     }
 
-    /// Apple Speech is selected on an unsupported OS/device, or its selected locale is unavailable.
-    /// This is a preflight refusal, so a currently running session remains intact.
+    /// A preflight refusal, so a running session remains intact.
     static var appleSpeechUnavailable: UserFacingError {
         .init(
             title: "Apple Speech unavailable",
@@ -28,8 +20,7 @@ public extension UserFacingError {
             severity: .warning)
     }
 
-    /// The selected Apple model could not be downloaded or prepared. Keep raw framework/download
-    /// detail in the debug log and give the explicit Start action a fixed recovery suggestion.
+    /// Fixed copy; raw framework and download detail stays in the debug log.
     static var appleSpeechPreparationFailed: UserFacingError {
         .init(
             title: "Couldn’t prepare Apple Speech",
@@ -37,27 +28,20 @@ public extension UserFacingError {
             severity: .warning)
     }
 
-    /// No target in the brain route can serve a request: each is a subscription that is signed out
-    /// or whose sign-in service couldn't start. A *preflight* failure: the Start is refused before
-    /// anything is torn down, so it alerts without stopping, and an in-place restart that trips it
-    /// has a live session that must survive. It carries the first target's failure, whose sentence
-    /// says what to do.
+    /// A preflight failure: Start is refused before any teardown, so a live session survives.
     static func brainRouteUnavailable(failure: ProviderFailure) -> UserFacingError {
         .init(title: "\(failure.source.displayName) isn't ready",
               message: "\(failure.activitySentence).",
               severity: .warning)
     }
 
-    /// A permission required by the selected session is unavailable. This is distinct from capture
-    /// construction: Screen Recording may be optional, and a TCC refusal has its own recovery path.
     static func permissionsMissing(
         _ missing: Set<JarvisReadiness.Permission>
     ) -> UserFacingError {
         let named = JarvisReadiness.Permission.allCases
             .filter(missing.contains)
             .map(\.displayName)
-        // Screen Recording is only visible to a new process, so telling the user to press Start
-        // again would send them round a loop that cannot end.
+        // A Screen Recording grant is only visible to a new process, so Start again would loop.
         let ending = missing.contains(.screenRecording) ? "reopen Jarvis." : "press Start again."
         let message = named.isEmpty
             ? "Check Jarvis permissions in System Settings → Privacy & Security, then \(ending)"
@@ -69,15 +53,12 @@ public extension UserFacingError {
             sessionEndReason: .permissionsMissing)
     }
 
-    /// "A", "A and B", "A, B, and C" — the shape the permission notice reads in.
     private static func sentenceList(_ items: [String]) -> String {
         guard items.count > 1 else { return items.first ?? "" }
         guard items.count > 2 else { return "\(items[0]) and \(items[1])" }
         return items.dropLast().joined(separator: ", ") + ", and " + items[items.count - 1]
     }
 
-    /// The finite user-authorized brain route was exhausted. Individual target failures never use
-    /// this terminal path; they retry or advance the route while pending work moves forward.
     static func brainRouteExhausted(
         target: BrainTarget,
         failure: ProviderFailure
@@ -88,8 +69,6 @@ public extension UserFacingError {
               sessionEndReason: .brainRouteExhausted(last: failure))
     }
 
-    /// A streak of failed coaching cycles reached the recovery ceiling without one success. Ends as
-    /// quietly as route exhaustion; Activity carries the most recent failure as the explanation.
     static func brainRecoveryExpired(failure: ProviderFailure) -> UserFacingError {
         .init(title: "Coaching stopped",
               message: "\(failure.activitySentenceWithoutAdvice)\n\nCoaching kept failing for \(Int(BrainCycleRecovery.ceiling / 60)) minutes, so the session ended. Check Settings → Brain, then Start again.",
@@ -97,22 +76,18 @@ public extension UserFacingError {
               sessionEndReason: .brainRecoveryExpired(last: failure))
     }
 
-    /// Audio capture couldn't be built or started (no input device, permission, unreadable rate, …).
-    /// Fatal — there's nothing to coach from.
     static func captureFailed(failure: ProviderFailure) -> UserFacingError {
         .init(title: "Couldn't start audio capture", message: failure.message, severity: .fatal,
               sessionEndReason: .audioCaptureUnavailable(failure: failure))
     }
 
-    /// Audio capture started, then became unavailable after a route rebuild. Coaching cannot
-    /// continue, but a runtime failure must stop without activating the app.
+    /// A runtime failure, so it stops without activating the app.
     static func captureStopped(failure: ProviderFailure) -> UserFacingError {
         .init(title: "Audio capture stopped", message: failure.message, severity: .terminal,
               sessionEndReason: .audioCaptureUnavailable(failure: failure))
     }
 
-    /// The mic ("me") transcription endpoint gave up — NOT a mic-hardware failure (that's
-    /// `captureStopped`). Coaching can't continue, so stop without revealing UI.
+    /// The mic transcription endpoint gave up. Mic hardware failure is `captureStopped`.
     static func transcriptionStopped(failure: ProviderFailure) -> UserFacingError {
         .init(title: "Transcription stopped",
               message: "Jarvis could not continue because \(failure.activitySentence).",
@@ -120,8 +95,6 @@ public extension UserFacingError {
               sessionEndReason: .transcriptionStopped(failure: failure))
     }
 
-    /// The system-audio ("them") endpoint gave up. The mic still works, so this is a graceful
-    /// degrade — a non-blocking notice, NOT a session-ending alert.
     static var systemAudioStopped: UserFacingError {
         .init(title: "System audio stopped",
               message: "Stopped transcribing the other side's audio; your microphone is still active.",

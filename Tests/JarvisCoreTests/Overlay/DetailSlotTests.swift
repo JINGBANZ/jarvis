@@ -59,7 +59,6 @@ import Testing
         #expect(!slot.isRolled)
     }
 
-    /// A held box stays rolled: the user dismissed it and asked for it to stay put.
     @Test func aHeldRolledBoxStaysRolled() {
         var slot = DetailSlot()
         slot.received(0)

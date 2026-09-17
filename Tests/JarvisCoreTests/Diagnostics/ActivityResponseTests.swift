@@ -28,7 +28,6 @@ import Testing
         #expect(reloaded.response?.code == nil)
         #expect(reloaded.message.contains("\n\nDetail\n"))
 
-        // Mixed sessions take a separate path that strips incomplete chronology metadata.
         let file = dir.appendingPathComponent(ActivityLog.filename)
         var data = try Data(contentsOf: file)
         data.append(Data(#"{"t":"00:00:01","m":"💬 legacy hint"}"#.utf8))
@@ -57,7 +56,6 @@ import Testing
         #expect(markdown.contains("### Hint\n"))
         #expect(markdown.contains("### Detail\n"))
         #expect(!markdown.contains("### Explanation\n"))
-        // Markdown passes the detail through verbatim; its fence is already a code block.
         #expect(markdown.contains("```html\n  <script>literal()</script>\n```"))
         let text = export(.plainText)
         #expect(text.contains("\n\nDetail\n"))
@@ -68,7 +66,6 @@ import Testing
         #expect(!html.contains("<script>"))
     }
 
-    /// A row written before the detail box still decodes and still exports both of its sections.
     @Test func aRowWrittenBeforeTheDetailBoxStillExportsItsOwnSections() throws {
         let legacy = try JSONDecoder().decode(ActivityResponse.self, from: Data("""
             {"lines":["Return the values."],

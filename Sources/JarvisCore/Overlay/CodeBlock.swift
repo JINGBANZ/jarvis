@@ -1,15 +1,11 @@
 import Foundation
 
-/// A complete small component, taken from one fenced block in a reply's `detail`. Oversized code is
-/// rejected rather than cut into an invalid fragment: half a function coaches nobody.
+/// Oversized code is rejected, never truncated: half a function coaches nobody.
 public struct CodeBlock: Sendable, Equatable {
-    /// The fence's info string, lowercased. `text` when the fence named no language, which is what
-    /// the box labels it.
+    /// Lowercased; `text` when the fence named none.
     public let language: String
     public let code: String
 
-    /// A `diff` block is how a reply corrects code the candidate wrote: `-` for their line, `+` for
-    /// the fix. The box tints and strikes those lines rather than carrying separate indices.
     public var isDiff: Bool { language == "diff" }
 
     public init?(language: String, code: String) {
@@ -27,8 +23,7 @@ public struct CodeBlock: Sendable, Equatable {
         self.code = normalized
     }
 
-    /// The bounds the `coding` skill quotes to the model, so the limit it is told is the limit the
-    /// box enforces.
+    /// The `coding` skill's SKILL.md quotes these limits; change both together.
     public static let lineLimit = 24
     public static let characterLimit = 2400
 }

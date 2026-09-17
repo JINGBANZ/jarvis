@@ -3,7 +3,6 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct ScreenCapturePreferencesTests {
-    /// A fresh, isolated UserDefaults suite per test so nothing touches the real app domain.
     private func freshDefaults() -> UserDefaults {
         let suite = "ScreenCapturePreferencesTests.\(UUID().uuidString)"
         let d = UserDefaults(suiteName: suite)!
@@ -12,8 +11,6 @@ import Foundation
     }
 
     @Test func defaultsToMainDisplayWhenUnset() {
-        // Against the registry, not a literal: an absent key must return the *declared* default, so
-        // that changing it in one place actually changes what a new install gets.
         #expect(ScreenCapturePreferences(defaults: freshDefaults()).displayIndex
             == Defaults.Screen.displayIndex)
     }
@@ -25,7 +22,6 @@ import Foundation
     }
 
     @Test func invalidStoredValueFallsBackToMainDisplay() {
-        // A hand-edited or corrupted value must never reach `screencapture -D` as 0 or negative.
         let d = freshDefaults()
         d.set(-3, forKey: "screen.captureDisplayIndex")
         #expect(ScreenCapturePreferences(defaults: d).displayIndex == 1)
@@ -50,7 +46,6 @@ import Foundation
     }
 
     @Test func unrecognizedStoredScopeFallsBackToActiveWindow() {
-        // A hand-edited or stale value must never crash or silently mean "entire display".
         let d = freshDefaults()
         d.set("holographic", forKey: "screen.captureScope")
         #expect(ScreenCapturePreferences(defaults: d).scope == .activeWindow)
@@ -64,7 +59,6 @@ import Foundation
     }
 
     @Test func mainDisplayNeedsNoExplicitTargeting() {
-        // A plain capture IS the main display, so index 1 never produces a -D.
         let p = ScreenCapturePreferences(defaults: freshDefaults())
         p.scope = .entireDisplay
         p.displayIndex = 1
@@ -72,7 +66,6 @@ import Foundation
     }
 
     @Test func activeWindowFallbacksIgnoreAStaleDisplayIndex() {
-        // An index left over from an old entire-display selection must not steer fallbacks.
         let p = ScreenCapturePreferences(defaults: freshDefaults())
         p.scope = .activeWindow
         p.displayIndex = 3

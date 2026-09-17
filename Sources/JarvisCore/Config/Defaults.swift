@@ -1,28 +1,17 @@
 import Foundation
 
-/// Every user-facing setting's UserDefaults key, default value, and valid range — in one place.
-///
-/// Adding a setting means editing this file plus the one accessor that exposes it; nothing else in
-/// the codebase should spell a preference key or a default value literally. The accessor types
-/// (`BrainPreferences`, `TranscriptionPreferences`, `ScreenCapturePreferences`,
-/// `OverlayAppearance`) own validation, clamping, and persistence policy, but hold no literals.
-///
-/// This is deliberately separate from `Config`, which holds runtime tunables the user never sees
-/// (silence backoff, VAD windows, overlay reading-time math). If a value appears in the Settings
-/// window it belongs here; if it only shapes the harness's own behavior it belongs in `Config`.
+/// Every user-facing setting's UserDefaults key, default value, and valid range. Harness tunables
+/// the user never sees belong in `Config`.
 public enum Defaults {
 
     // MARK: - Brain
 
-    /// Which provider/model answers a coaching attempt, and how hard it thinks.
     public enum Brain {
         public static let providerKey = "brain.provider"
-        /// The direct OpenAI API. Also the transcription default, so a first run needs one
-        /// credential rather than two unrelated setup decisions.
+        /// Matches the transcription default, so a first run needs only one credential.
         public static let provider: BrainProvider = .openAI
 
         public static let fallbackTargetsKey = "brain.fallbackTargets"
-        /// No fallbacks until the user adds them; failover is opt-in, never inferred.
         public static let fallbackTargets: [BrainTarget] = []
 
         public static let effortKey = "brain.reasoningEffort"
@@ -30,21 +19,16 @@ public enum Defaults {
         public static let effort: ReasoningEffort = .low
 
         public static let disabledToolsKey = "brain.disabledTools"
-        /// Every composable tool is on until the user switches one off.
         public static let disabledTools: [String] = []
 
         public static let disabledSkillsKey = "brain.disabledSkills"
-        /// Every bundled skill is on until the user switches one off.
         public static let disabledSkills: [String] = []
 
-        /// The OpenAI model keeps the pre-provider key ("brain.model") so existing installs keep
-        /// their selection; every other provider stores under a suffixed key of its own.
+        /// OpenAI keeps the unsuffixed "brain.model" key so saved selections survive.
         public static func modelKey(for provider: BrainProvider) -> String {
             provider == .openAI ? "brain.model" : "brain.model.\(provider.rawValue)"
         }
 
-        /// Per-provider model defaults are the first entry of that provider's curated list, so they
-        /// live with the list itself — see `BrainModelCatalog.defaultModel(for:)`.
         public static func model(for provider: BrainProvider) -> BrainModel {
             BrainModelCatalog.defaultModel(for: provider)
         }
@@ -52,7 +36,6 @@ public enum Defaults {
 
     // MARK: - Transcription
 
-    /// What turns captured audio into the conversation text. Independent of the brain route.
     public enum Transcription {
         public static let providerKey = "transcription.provider"
         public static let provider: TranscriptionProvider = .openAI
@@ -61,41 +44,35 @@ public enum Defaults {
         public static let openAIModel: OpenAITranscriptionModel = .gpt4oTranscribe
 
         public static let openAIExpectedLanguagesKey = "transcription.openai.expected-languages"
-        /// Empty means automatic detection — Jarvis never silently assumes English.
+        /// Empty means automatic detection. Never assume English.
         public static let openAIExpectedLanguages: [TranscriptionLanguage] = []
 
         public static let openAIVocabularyKeywordsKey = "transcription.openai.vocabulary-keywords"
-        /// Empty until the user adds terms; only GPT Transcribe and GPT Live send them.
         public static let openAIVocabularyKeywords: [String] = []
 
         public static let appleSpeechLocaleKey = "transcription.apple-speech.locale"
-        /// A visible initial suggestion only; Settings resolves and displays the supported
-        /// equivalent so the user can correct it before Start. Computed, not stored, because the
-        /// machine's locale is the starting point rather than a fixed value.
         public static var appleSpeechLocaleIdentifier: String { Locale.current.identifier }
 
         public static let geminiModelKey = "transcription.gemini.model"
         public static let geminiModel: GeminiTranscriptionModel = .geminiTranscribeLive
 
         public static let geminiExpectedLanguagesKey = "transcription.gemini.expected-languages"
-        /// Empty means automatic detection across every language Gemini supports.
+        /// Empty means automatic detection.
         public static let geminiExpectedLanguages: [TranscriptionLanguage] = []
 
         public static let geminiVocabularyKeywordsKey = "transcription.gemini.vocabulary-keywords"
-        /// Empty until the user adds terms; Gemini accepts up to 1,000.
         public static let geminiVocabularyKeywords: [String] = []
 
         public static let geminiModeKey = "transcription.gemini.mode"
-        /// Verbatim by default: coaching reasons about what was actually said.
+        /// Verbatim, because coaching reasons about what was actually said.
         public static let geminiMode: GeminiTranscriptionMode = .verbatim
     }
 
     // MARK: - Screen capture
 
-    /// What `capture_screen` shoots when the brain asks for visual context.
     public enum Screen {
         public static let scopeKey = "screen.captureScope"
-        /// The frontmost window — the most private option, and the only one with text evidence.
+        /// The most private scope, and the only one with text evidence.
         public static let scope: ScreenCaptureScope = .activeWindow
 
         public static let displayIndexKey = "screen.captureDisplayIndex"
@@ -104,29 +81,27 @@ public enum Defaults {
         public static let displayIndexMinimum = 1
 
         public static let browserTextEnabledKey = "screen.browserTextEnabled"
-        /// Accessibility is a broad optional grant and therefore starts disabled.
+        /// Accessibility is a broad optional grant, so it starts disabled.
         public static let browserTextEnabled = false
     }
 
     // MARK: - Hotkey
 
-    /// Independent shortcuts for an immediate hint or explanation mid-session.
     public enum Hotkey {
         public static let codeKeyCodeKey = "hotkey.code.keyCode"
         public static let codeModifiersKey = "hotkey.code.modifiers"
-        /// kVK_ANSI_K. Code is requested only by this explicit shortcut.
+        /// kVK_ANSI_K.
         public static let codeCombination = HotkeyCombination(keyCode: 40, modifiers: [.command, .option])
         public static let explanationKeyCodeKey = "hotkey.explanation.keyCode"
         public static let explanationModifiersKey = "hotkey.explanation.modifiers"
-        /// kVK_ANSI_E, with the same modifiers as the hint shortcut.
+        /// kVK_ANSI_E.
         public static let explanationCombination = HotkeyCombination(
             keyCode: 14, modifiers: [.command, .option])
         public static let keyCodeKey = "hotkey.keyCode"
         public static let modifiersKey = "hotkey.modifiers"
 
-        /// kVK_ANSI_J — the original hardcoded binding, so existing installs see no behavior change
-        /// until they opt to rebind. Carbon virtual key codes are layout-independent (a fixed
-        /// physical key position), so this constant needs no keyboard-layout awareness.
+        /// kVK_ANSI_J. Carbon key codes are physical key positions, so no layout handling is
+        /// needed.
         public static let keyCode: UInt32 = 38
         public static let modifiers: HotkeyModifiers = [.command, .option]
         public static var combination: HotkeyCombination {
@@ -136,43 +111,26 @@ public enum Defaults {
 
     // MARK: - Prep material
 
-    /// Local files/folders of interview notes the user has pointed Jarvis at, so the coach can draw
-    /// on prepared answers. Referenced in place — Jarvis never copies or edits the user's notes.
     public enum PrepMaterial {
         public static let sourcesKey = "prepMaterial.sources"
-        /// No material until the user adds it.
         public static let sources: [PrepMaterialSource] = []
     }
 
     // MARK: - Permissions
 
-    /// The one thing Jarvis remembers about macOS permissions. Not a user-editable setting, and
-    /// deliberately not a record of any *grant*: a stored grant cannot be told apart from a current
-    /// one, so grants are proved live instead. This records something Jarvis did, which stays true.
+    /// Never store a permission grant here: a stored grant can't be told apart from a current one,
+    /// so grants are checked live.
     public enum Permissions {
         public static let screenRecordingAskedKey = "permissions.screenRecordingAsked"
-        /// Nobody has asked macOS for Screen Recording yet. Set once the gate has, which is what
-        /// lets a later launch read a still-missing grant as a refusal rather than a pending one.
         public static let screenRecordingAsked = false
 
     }
 
     // MARK: - Overlay
 
-    /// The two capture-invisible coaching surfaces. Each has an on/off flag, a font size in points,
-    /// and an opacity; the ranges are the clamp bounds applied on every read and write.
-    ///
-    /// Opacity governs only the background fill, so 0 means a text-only surface with no backdrop,
-    /// not a hidden one — what takes a surface off screen is its enabled flag, and for the box the end
-    /// of a session. Both surfaces share one range because the Overlay tab presents their sliders
-    /// identically.
-    ///
-    /// The surfaces default opposite ways — the caption off, the box on — so a first run shows the
-    /// durable history rather than a flashing caption. The box is a session surface: switched on, it
-    /// appears on Start and goes away on Stop.
+    /// Opacity is the background fill only, so 0 is a text-only surface, not a hidden one.
     public enum Overlay {
-        /// Appearance of the detail box within the persistent box. The stored keys keep their
-        /// `overlayCode` spelling so a saved size and opacity survive the rename.
+        /// Keys keep the `overlayCode` spelling so existing saved values still load.
         public enum Detail {
             public static let fontSizeKey = "overlayCode.fontSize"
             public static let fontSize: Double = 18
@@ -183,7 +141,6 @@ public enum Defaults {
         }
 
 
-        /// The transient on-screen tip that fades after each response.
         public enum Caption {
             public static let enabledKey = "overlayCaption.enabled"
             public static let enabled = false
@@ -197,7 +154,6 @@ public enum Defaults {
             public static let opacityRange: ClosedRange<Double> = 0...1.0
         }
 
-        /// The persistent, movable history of recent responses.
         public enum Box {
             public static let enabledKey = "overlayBox.enabled"
             public static let enabled = true
@@ -206,15 +162,12 @@ public enum Defaults {
             public static let fontSize: Double = 25
             public static let fontSizeRange: ClosedRange<Double> = 12...32
 
-            /// Dimmed rather than opaque, so the box sits over a busy screen without dominating it.
             public static let opacityKey = "overlayBox.opacity"
             public static let opacity: Double = 0.45
             public static let opacityRange: ClosedRange<Double> = 0...1.0
 
-            // The box is the one surface the user sizes directly, by dragging its edges. The lower
-            // bounds are the panel's own `minSize`, so the drag floor and the persisted floor cannot
-            // drift apart. The upper bounds only reject a corrupted plist value: 4096 pt clears any
-            // display's logical size (a 6K XDR is 3008 pt wide), so it never limits a real drag.
+            // Lower bounds are the panel's `minSize`. 4096 pt only rejects a corrupt plist value;
+            // it exceeds any display's logical width (a 6K XDR is 3008 pt).
             public static let widthKey = "overlayBox.width"
             public static let width: Double = 520
             public static let widthRange: ClosedRange<Double> = 240...4096

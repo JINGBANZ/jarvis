@@ -52,9 +52,8 @@ final class TranscriptionBenchmarkRunner {
             base: options.outputDirectory.deletingLastPathComponent(),
             current: options.outputDirectory
         ).pruneToMostRecent(TranscriptionBenchmark.retainedRunCount)
-        // The run directory is this benchmark's session directory: one evidence handle owns its
-        // jarvis-debug.log, and `scripts/transcription-benchmark.sh` reads that file when a run
-        // fails. Sealed on both exits so the health marker never lies about an unfinished close.
+        // `scripts/transcription-benchmark.sh` reads this run's jarvis-debug.log on failure. Close
+        // on both exits so the health marker never claims an unfinished close.
         let evidence = FileSessionAudit(directory: options.outputDirectory)
         JarvisLog.attach(to: evidence)
         do {
@@ -167,8 +166,7 @@ final class TranscriptionBenchmarkRunner {
             openAIModel: arm.model ?? .gpt4oTranscribe,
             openAIExpectedLanguages: arm.languageProfile?.expectedLanguages ?? [],
             appleSpeechLocaleIdentifier: arm.localeIdentifier ?? "en_US")
-        // Keep production ping/pong timing. The benchmark trips the transport failure path directly;
-        // accelerated probes can add a second artificial fault while the provider processes replay.
+        // Keep production ping/pong timing: faster probes can add a second fault during replay.
         let config = Config(
             silenceTimeoutSeconds: 120,
             silenceMaxIntervalSeconds: 960,
@@ -185,9 +183,8 @@ final class TranscriptionBenchmarkRunner {
         let sessionStart = clock.now()
         let session = TranscriptionSessionFactory.make(
             configuration: configuration,
-            // `apiKey` above is `.openAIAPIKey`-scoped. No arm can select `.gemini` today, so this is
-            // unreachable — but a future Gemini benchmark arm must resolve its key via
-            // `arm.provider.ownCredential` instead of reusing this OpenAI-scoped one.
+            // `apiKey` is OpenAI-scoped. A future Gemini arm must resolve its key via
+            // `arm.provider.ownCredential`.
             apiKey: apiKey ?? "",
             appleSpeechLocale: appleLocale,
             speaker: .them,

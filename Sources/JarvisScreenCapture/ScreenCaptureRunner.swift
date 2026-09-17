@@ -6,18 +6,10 @@ import Darwin
 import Glibc
 #endif
 
-/// Owns one cancellable `screencapture` helper and its transient session-local JPEG.
+/// Cleanup must be proven before a capture returns. An unprovable cleanup latches this runner, so
+/// no later capture starts while a screen-derived file is unaccounted for.
 ///
-/// This is the macOS edge behind Core's `ScreenCapturing` port: the helper process, the transient
-/// file, and the cleanup-verification latch live here so `JarvisCore`'s screen logic stays
-/// Foundation-only. The privacy contract is unchanged — cancellation owns helper teardown and file
-/// cleanup, cleanup must be proven before the capture returns, and an unprovable cleanup latches
-/// this runner so no later capture or display fallback starts while a screen-derived file is
-/// unaccounted for (see wiki/decisions.md, "Screen-capture cancellation owns helper and file
-/// cleanup").
-///
-/// `@unchecked Sendable` is justified because `lock` guards `activeCommand` and `cleanupFailed`;
-/// each command separately guards its process lifecycle.
+/// `@unchecked Sendable`: `lock` guards `activeCommand` and `cleanupFailed`.
 public final class ScreenCaptureRunner: @unchecked Sendable {
     public enum Outcome: Sendable {
         case captured(Data)
@@ -27,12 +19,8 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
         case cancelled
     }
 
-    /// `@unchecked Sendable` is justified because `lock` guards `started`, `finished`, `cancelled`,
-    /// and `identity` — the whole mutable process lifecycle this command owns.
-    // Module-visible rather than private so the cancel-after-exit contract below can be driven
-    // directly. Through `capture(arguments:)` that state is only reachable inside the window where
-    // the helper has exited and the transient JPEG is still being read and deleted, which a test
-    // can aim at but never be sure of entering.
+    /// `@unchecked Sendable`: `lock` guards `started`, `finished`, `cancelled`, and `identity`.
+    // Not private: tests drive the cancel-after-exit race, which `capture` can't reliably hit.
     final class Command: @unchecked Sendable {
         enum Result {
             case exited(Int32)
@@ -51,15 +39,10 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
 
         init(executable: URL, arguments: [String], output: URL) {
             let process = Process()
-            // Launch through `sh -c 'umask 077; exec "$0" "$@"'` so the JPEG is owner-only from its
-            // first write rather than only from cleanup — a crash mid-capture must not leave a
-            // screenshot readable by anyone but the owner. Pre-creating the path `0600` does not
-            // work: `screencapture` unlinks and recreates its output file, so the new inode takes
-            // the umask (measured on macOS 26.5). The umask has to be the child's, and setting it
-            // process-wide would leak into every other thread for the helper's lifetime.
-            // Arguments ride as argv via "$0"/"$@" — never interpolated into the script text — so
-            // no path can be reinterpreted as shell syntax, and `exec` keeps the pid the
-            // cancellation identity checks below rely on.
+            // The child's umask makes the JPEG owner-only from its first write: `screencapture`
+            // recreates its output, so pre-creating it 0600 fails, and a process-wide umask would
+            // leak to other threads. Paths ride as argv, never script text, and `exec` keeps the
+            // pid the cancellation checks rely on.
             process.executableURL = URL(fileURLWithPath: "/bin/sh")
             process.arguments =
                 ["-c", "umask 077; exec \"$0\" \"$@\"", executable.path]
@@ -96,10 +79,7 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
             return wasCancelled ? .cancelled : .exited(status)
         }
 
-        /// True once cancellation has been requested, whether or not there was still a helper to
-        /// signal. The `capture(arguments:)` call that registered this command reads it on the way
-        /// out, so a request that loses the race with the helper's exit is still reported by the
-        /// capture it belongs to.
+        /// True once cancellation was requested, even if the helper had already exited.
         var wasCancelled: Bool {
             lock.lock()
             defer { lock.unlock() }
@@ -109,8 +89,7 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
         func cancel() {
             lock.lock()
             cancelled = true
-            // Nothing to signal: the helper either has not launched yet — `run()` checks
-            // `cancelled` before spawning — or has already exited.
+            // Nothing to signal: the helper hasn't launched (`run()` checks first) or has exited.
             guard started, !finished else {
                 lock.unlock()
                 return
@@ -126,9 +105,8 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
             if let identity, Self.isCurrent(identity) {
                 kill(processIdentifier, SIGTERM)
             } else if process.isRunning {
-                // A process that exited before either identity read will make `isRunning` false.
-                // Otherwise Foundation still owns this exact launched child, so cancellation must
-                // not silently become unbounded just because proc_pidinfo was temporarily absent.
+                // `proc_pidinfo` can fail transiently; Foundation still owns this exact child, so
+                // cancellation must not become unbounded.
                 process.terminate()
             }
             #else
@@ -252,37 +230,31 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
 
         let removedOutput = removeTransientOutput(output)
         lock.lock()
-        // Deregister and read the cancellation flag under one lock hold, so a concurrent
-        // `cancelCapture()` either lands first — and is reported here — or finds no active command
-        // and is a no-op. It can never survive as a request against some later capture.
+        // One lock hold, so a concurrent `cancelCapture()` either lands first and is reported here,
+        // or finds no active command. It can never leak into a later capture.
         if activeCommand === command {
             activeCommand = nil
         }
         let wasCancelled = command.wasCancelled
         if !removedOutput {
-            // Keep this session-local runner poisoned. Even if permissions later change, no future
-            // caller may create another screen file while an earlier one remains unaccounted for.
+            // Stay poisoned even if permissions later change.
             cleanupFailed = true
         }
         lock.unlock()
         guard removedOutput else { return .cleanupFailed }
-        // A request that arrived after the helper had already exited still belongs to this capture:
-        // reporting it here is what stops a caller's fallback shot from starting after a Stop.
+        // A cancel after the helper exited still counts, so no fallback shot starts after a Stop.
         return wasCancelled ? .cancelled : outcome
     }
 
-    /// Requests cancellation of the capture that is currently registered. There is deliberately no
-    /// pending-request latch: a request can only ever be consumed by the capture it was issued
-    /// against, so a request that arrives with nothing in flight is a no-op rather than something a
-    /// later, unrelated capture would silently answer with `.cancelled`.
+    /// A no-op with nothing in flight. There is deliberately no pending-request latch, which would
+    /// cancel a later, unrelated capture.
     public func cancelCapture() {
         lock.lock()
         activeCommand?.cancel()
         lock.unlock()
     }
 
-    /// Deletion is part of capture completion, not best-effort deferred work. Verify absence before
-    /// the detached producer can release its conversation/session drain boundary.
+    /// Returns whether the file is proven absent. Deletion is part of the capture, not best-effort.
     private func removeTransientOutput(_ output: URL) -> Bool {
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: output.path) else { return true }

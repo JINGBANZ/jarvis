@@ -1,14 +1,7 @@
 import AppKit
 import JarvisCore
 
-/// The detail box: the lower section of the Overlay Box panel. Its title strip says which reply the
-/// detail came from and where it sits in the session, and carries the controls that move and hold
-/// it; the body below scrolls independently, so new coaching history never moves a diagram or a code
-/// block under the user's eyes.
-///
-/// None of the controls carries a `toolTip`: AppKit draws one in a window of its own, which does not
-/// inherit the panel's capture exclusion. They carry accessibility labels instead, the same rule the
-/// header buttons follow.
+/// Never give a control a `toolTip`: AppKit draws it in its own window, outside capture exclusion.
 @MainActor
 final class DetailView: NSView {
     static let background = NSColor(srgbRed: 0.055, green: 0.07, blue: 0.10, alpha: 1)
@@ -32,14 +25,8 @@ final class DetailView: NSView {
     private var preferredFontSize: CGFloat = 18
     private(set) var detail: ReplyDetail?
     private(set) var isRolled = false
-    /// The same geometry the header strip uses, so the two strips of one panel read as one surface:
-    /// same icon size, same button square, same edge inset, same title size, all scaling with the box
-    /// the user dragged. Fixed sizes here made the detail strip's controls noticeably smaller than
-    /// the header's and left them unchanged as the box grew.
     private var chrome: OverlayBoxChrome
-    /// The strip's height: the title, the position, and the four controls sit in it.
     var stripHeight: CGFloat { chrome.height }
-    /// Read back by the panel test that pins the two strips to one geometry.
     var iconPointSize: CGFloat { chrome.iconPointSize }
     var titlePointSize: CGFloat { chrome.titlePointSize }
 
@@ -49,15 +36,11 @@ final class DetailView: NSView {
     var titleText: String { title.stringValue }
     var positionText: String { position.stringValue }
 
-    /// - Parameter chrome: the panel's own header geometry. It defaults to the box's default height
-    ///   for callers that stand a detail box up on its own; the panel passes its live chrome and
-    ///   re-applies it on every resize.
     init(frame: NSRect,
          chrome: OverlayBoxChrome = OverlayBoxChrome(contentHeight: CGFloat(Defaults.Overlay.Box.height))) {
         self.chrome = chrome
         super.init(frame: frame)
         wantsLayer = true
-        // The detail backdrop has its own opacity, independent of the history fill.
         layer?.backgroundColor = Self.background.cgColor
         title.textColor = NSColor(white: 0.86, alpha: 1)
         title.lineBreakMode = .byTruncatingTail
@@ -86,9 +69,6 @@ final class DetailView: NSView {
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
 
-    /// Rebuilding both fonts and four symbol images on every frame of a resize drag would be work for
-    /// nothing: the chrome only steps when the box crosses a rounding boundary. Mirrors
-    /// `OverlayBoxHeaderView.apply`.
     func apply(_ chrome: OverlayBoxChrome) {
         guard chrome != self.chrome else { return }
         self.chrome = chrome
@@ -130,7 +110,6 @@ final class DetailView: NSView {
                                   width: max(0, bounds.width - chrome.inset * 2),
                                   height: max(0, top - 16))
         guard let detail, !isRolled else { return }
-        // Keep the largest readable size that fits; a small box can still scroll vertically.
         var size = preferredFontSize
         while true {
             document.show(detail, fontSize: size)
@@ -141,10 +120,7 @@ final class DetailView: NSView {
         }
     }
 
-    /// - Parameters:
-    ///   - stamp: the time of the reply this detail came from, so the strip names its hint.
-    ///   - position: one-based place in the session's details, and how many there are.
-    ///   - isHeld: whether the box is pinned or parked, which the pin control reflects.
+    /// `position.index` is zero-based.
     func show(_ detail: ReplyDetail?, stamp: String, position slot: (index: Int, count: Int)?,
               isHeld: Bool, isRolled: Bool, fontSize: CGFloat, enabled: Bool = true) {
         preferredFontSize = min(18, max(12, fontSize))
@@ -174,11 +150,7 @@ final class DetailView: NSView {
         if changed { scroll.contentView.scroll(to: .zero) }
     }
 
-    /// Measure wrapped content at the preferred size before allocating the box's bounded height.
-    ///
-    /// - Parameter viewportHeight: the tallest body the panel would grant. A diagram scales into
-    ///   what the text leaves inside it, so the panel has to say how much that is before it can ask
-    ///   how tall the box wants to be.
+    /// `viewportHeight` is the tallest body the panel would grant; a diagram scales into it.
     func preferredHeight(viewportWidth: CGFloat, viewportHeight: CGFloat) -> CGFloat {
         guard let detail, !isRolled else { return stripHeight }
         document.show(detail, fontSize: preferredFontSize)

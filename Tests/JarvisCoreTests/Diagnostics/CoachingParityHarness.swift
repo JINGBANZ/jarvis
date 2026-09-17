@@ -3,43 +3,20 @@ import Foundation
 import FoundationNetworking
 #endif
 @testable import JarvisCore
-// The real OpenAI adapter (over scripted transports) drives the scenario, so parity covers the
-// adapter's classification and traffic recording feeding the route — not a fake's imitation.
+// Uses the real OpenAI adapter so parity covers its failure classification and traffic recording.
 import JarvisBrainProviders
 
-/// Drives one fixed, fully deterministic coaching scenario and captures everything optional
-/// evidence must never change: terminal coaching outcomes, the provider request sequence, overlay
-/// output events, and route transitions (advance, skip, exhaustion).
-///
-/// The scenario walks the whole route-health surface in two triggers over a three-target route:
-///
-/// 1. The primary target fails three temporary transport attempts and exhausts, the preflight-proven
-///    unavailable middle target is skipped, and the route advances to the final target, which
-///    delivers one tip (`.spoke`).
-/// 2. The final target fails two temporary attempts, then a proven permanent failure exhausts
-///    the route (`.brainError`).
-///
-/// The harness is evidence-agnostic: a variant hands its observer wiring to `run` and gets back a
-/// `Snapshot` to compare against the absent-evidence baseline. A later slice that adds a new
-/// evidence category extends `EvidenceObservers` with an absent-by-default field rather than
-/// building a new harness or editing the scenario. Everything is driven by deterministic fakes —
-/// scripted transports, `ManualClock`, and a no-op attempt delay — never by wall-clock thresholds.
+/// Trigger 1: the primary fails three transport attempts, the unavailable target is skipped, and
+/// the final target speaks. Trigger 2: the final target fails twice, then fails permanently.
 enum CoachingParityHarness {
     static let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
     static let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
     static let finalTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5-mini")
 
-    /// The optional evidence wiring for one parity variant. Every field defaults to absent so a
-    /// later evidence category joins as a new field without touching existing call sites.
     struct EvidenceObservers {
         var brainTraffic: (any BrainTrafficAuditing)?
         var coachingAttempts: (any CoachingAttemptAuditing)?
-        /// The session handle `jlog` is attributed to for the run. Concrete because `JarvisLog`'s
-        /// attachment is a per-session evidence handle, not a narrow producer port — the kernel
-        /// still calls the free `jlog` function from inside the attempt path.
         var diagnostics: FileSessionAudit?
-        /// The human-facing evidence port. Absent means the scenario shows no Activity at all,
-        /// which is one of the states parity has to prove indistinguishable.
         var activity: (any ActivityEventRecording)?
 
         init(
@@ -55,22 +32,18 @@ enum CoachingParityHarness {
         }
     }
 
-    /// One route-health event as the App edge would observe it. Failure detail stays out: raw
-    /// provider errors are diagnostics, never product behavior, so parity compares target identity.
+    /// Omits failure detail on purpose: raw provider errors are diagnostics, not coaching behavior.
     enum RouteTransition: Equatable {
         case advanced(from: BrainTarget, to: BrainTarget)
         case skipped(BrainTarget)
         case exhausted(BrainTarget)
     }
 
-    /// One `render` call as the overlay port received it.
     struct OverlayEvent: Equatable {
         let lines: [String]
         let perLineSeconds: [TimeInterval]
     }
 
-    /// The complete observable coaching behavior of one scenario run. Two variants behave
-    /// identically exactly when their snapshots are equal.
     struct Snapshot: Equatable {
         let outcomes: [TurnOutcome]
         let providerRequests: [Data]
@@ -79,10 +52,6 @@ enum CoachingParityHarness {
     }
 
     static func run(observers: EvidenceObservers = EvidenceObservers()) async -> Snapshot {
-        // `JarvisLog`'s attachment is process-global, so a diagnostics variant must run in a
-        // serialized suite — and, since swift-testing still runs distinct suites concurrently,
-        // exclusively across suites too (`JarvisLogAttachmentLock`). Detached/released again on the
-        // way out.
         guard let diagnostics = observers.diagnostics else {
             return await runScenario(observers: observers)
         }
@@ -173,8 +142,7 @@ enum CoachingParityHarness {
     }
 }
 
-/// Captures every provider request body in send order, re-serialized with sorted keys so two runs
-/// produce byte-comparable data. `@unchecked Sendable`: the lock guards the captured requests.
+/// @unchecked: the lock guards `storage`. Sorted keys make two runs' bodies byte-comparable.
 private final class RequestCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [Data] = []
@@ -192,8 +160,7 @@ private final class RequestCapture: @unchecked Sendable {
     }
 }
 
-/// Records route transitions in delivery order. `@unchecked Sendable`: the lock guards the
-/// recorded events, appended from the driver's main-actor callbacks and read after the run.
+/// @unchecked: the lock guards `storage`.
 private final class TransitionCapture: @unchecked Sendable {
     private let lock = NSLock()
     private var storage: [CoachingParityHarness.RouteTransition] = []
@@ -207,8 +174,7 @@ private final class TransitionCapture: @unchecked Sendable {
     }
 }
 
-/// Serial call counter for the succeed-once-then-fail transport script. `@unchecked Sendable`: the
-/// lock guards the count.
+/// @unchecked: the lock guards `count`.
 private final class CallCounter: @unchecked Sendable {
     private let lock = NSLock()
     private var count = 0

@@ -96,8 +96,7 @@ abort_run() {
 }
 trap abort_run INT TERM
 
-# `open -W` keeps a waitable launcher alive until the hidden app exits. Both modes observe the abort
-# marker; the signal trap then reaps this waiter so capture cannot outlive the command.
+# `open -W` gives a waitable launcher, so the trap can reap it after the app sees the abort marker.
 open -W -n "./$APP" --args "${COMMON_ARGS[@]}" &
 APP_WAITER_PID=$!
 wait "$APP_WAITER_PID"

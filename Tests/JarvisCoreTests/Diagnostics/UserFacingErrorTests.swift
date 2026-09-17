@@ -8,7 +8,6 @@ import Testing
     }
 
     @Test func warningAlertsWithoutStopping() {
-        // The preflight severity: the failed thing never started, so a live session must survive.
         #expect(UserFacingError.Severity.warning.showsAlert)
         #expect(!UserFacingError.Severity.warning.stopsSession)
     }

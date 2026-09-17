@@ -1,20 +1,13 @@
 name: CI
 
-# CI runs the repository gate: compile every target, then run all test targets and static guards.
-# It deliberately does not launch or sign the .app bundle because a hosted runner cannot grant the
-# interactive TCC permissions or exercise the live capture pipeline.
-
-# PR-only on purpose: every change lands through a PR (already tested here), and a release merge
-# is re-tested by release.yml's publish gate — a push-to-main trigger would run the same suite a
-# second time on the same commit, at the 10x macOS minute multiplier. The cost of this choice:
-# a direct push to main isn't tested until the next PR or release touches it.
+# PR-only on purpose: release.yml re-runs the Gate on a release merge, and a push-to-main trigger
+# would repeat this suite at the 10x macOS minute multiplier.
 on:
   pull_request:
 
 permissions:
   contents: read
 
-# Cancel superseded runs on the same ref so a quick succession of pushes doesn't pile up.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -22,9 +15,7 @@ concurrency:
 jobs:
   test:
     runs-on: macos-15
-    # Backstop, not a tuning knob: the default job timeout is 6 hours, and one hung run at the
-    # 10x macOS multiplier would burn 3600 multiplied minutes — nearly double the monthly free
-    # tier. Normal runs finish in ~1 minute.
+    # Backstop: a hung run at the 6-hour default would burn about twice the monthly free tier.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

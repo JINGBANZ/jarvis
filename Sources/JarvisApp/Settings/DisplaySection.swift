@@ -1,15 +1,12 @@
 import AppKit
 import JarvisCore
 
-/// Settings panel for what the coach screenshots when `capture_screen` fires.
 @MainActor
 final class DisplaySection: NSObject, SettingsSection {
     let title = "Screen"
     let fillsTab = true
 
     private let preferences: ScreenCapturePreferences
-    /// Called after an edit is persisted so the host can freeze a fresh control-plane revision for
-    /// the next attempt. A turn already running keeps the revision it snapshotted.
     private let onChange: () -> Void
     private let isSessionStopped: () -> Bool
     private var popup: NSPopUpButton?
@@ -159,8 +156,7 @@ final class DisplaySection: NSObject, SettingsSection {
         activationObserver = nil
     }
 
-    /// Row 0 is the active-window scope; on rows 1…n the row number is the display's
-    /// `screencapture -D` index.
+    /// Row 0 is the active window; on rows 1…n the row number is the `screencapture -D` index.
     private func reloadItems() {
         guard let popup else { return }
         popup.removeAllItems()
@@ -197,8 +193,8 @@ final class DisplaySection: NSObject, SettingsSection {
             onChange()
         }
         browserTextSwitch.state = preferences.browserTextEnabled ? .on : .off
-        // Turning access off is immediate and cannot expose more data. Enabling remains a stopped-
-        // session operation because it may present macOS privacy UI.
+        // Turning off is always allowed. Turning on waits for a stopped session because it may
+        // present macOS privacy UI.
         browserTextSwitch.isEnabled = isSessionStopped() || preferences.browserTextEnabled
         if preferences.browserTextEnabled, BrowserAccessibilityPermission.isGranted {
             browserTextSwitch.toolTip = "Enabled for foreground Chrome tabs"
@@ -223,8 +219,7 @@ final class DisplaySection: NSObject, SettingsSection {
         if !BrowserAccessibilityPermission.isGranted {
             BrowserAccessibilityPermission.request()
         }
-        // A request may be denied or deferred to System Settings. Persist only a live grant so the
-        // switch never claims that unavailable page text is enabled.
+        // The request may be denied or deferred to System Settings, so persist only a live grant.
         preferences.browserTextEnabled = BrowserAccessibilityPermission.isGranted
         onChange()
         reloadBrowserTextControl()

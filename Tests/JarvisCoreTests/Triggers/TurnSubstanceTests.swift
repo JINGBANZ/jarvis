@@ -2,7 +2,6 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct TurnSubstanceTests {
-    /// Only clear vocal hesitation sounds in the shipped languages are discarded.
     @Test func clearHesitationSoundsAreFiller() {
         for text in ["Hmm", "hm", "uh", "Um...", "er", "erm", "oh", "Ah",
                      "嗯", "啊", "哦", "噢", "呃"] {
@@ -10,23 +9,18 @@ import Testing
         }
     }
 
-    /// Elongation/repetition variants normalize onto their base form — the reason the closed-class
-    /// list doesn't need to enumerate "hmmm", "mmmm", "嗯嗯", …
     @Test func elongationsCollapseOntoTheList() {
         for text in ["Hmmmm.", "mmm", "uhhh", "ummmm", "ohhh", "ahhh", "嗯嗯嗯"] {
             #expect(!TurnSubstance.isSubstantive(text), "expected filler: \(text)")
         }
     }
 
-    /// One transcription completion can contain several separated hesitation sounds.
     @Test func compositeHesitationSoundsAreFiller() {
         for text in ["Oh. Hmm.", "Uh. Hmm. Oh, oh.", "uh um hmm", "Hmm. 嗯，呃。"] {
             #expect(!TurnSubstance.isSubstantive(text), "expected filler: \(text)")
         }
     }
 
-    /// Short replies can change the conversation. Preserve them for either speaker and let the
-    /// model interpret their meaning from context.
     @Test func contextDependentTerseRepliesFailOpenForEitherSpeaker() {
         let replies = [
             "OK", "Okay", "Yes", "Yeah", "No", "Nope", "Right", "Sure", "So", "Wow",
@@ -42,8 +36,6 @@ import Testing
         }
     }
 
-    /// Unknown short fragments fail open. A length rule would discard technical terms and terse
-    /// answers merely because they are short; pure punctuation remains content-free.
     @Test func unknownShortFragmentsFailOpen() {
         for text in ["の", "え", "네", "ja", "R", "Go", "C++", "B.F.S."] {
             #expect(TurnSubstance.isSubstantive(text), "expected substance: \(text)")
@@ -53,8 +45,6 @@ import Testing
         }
     }
 
-    /// Capitalization can distinguish a technical identifier from an otherwise identical vocal
-    /// sound. Ambiguous all-uppercase forms fail open; normal sentence-cased fillers stay filtered.
     @Test func acronymLikeSoundSpellingsFailOpen() {
         for text in ["M", "ER", "UM", "OH", "U.M.", "UM. Oh."] {
             #expect(TurnSubstance.isSubstantive(text), "expected acronym-like substance: \(text)")
@@ -64,16 +54,12 @@ import Testing
         }
     }
 
-    /// Questions and addresses punch through, whoever said them — including interviewer questions
-    /// that should draw a proactive tip, and even a bare "ok?" that would otherwise be filler.
     @Test func questionsAndAddressesAlwaysSubstantive() {
         for text in ["那你是怎么做的?", "ok?", "嗯？", "Jarvis", "jarvis help me", "Hey Jarvis..."] {
             #expect(TurnSubstance.isSubstantive(text), "expected substance: \(text)")
         }
     }
 
-    /// Fail open: anything not provably filler reaches the brain — real sentences, and even unknown
-    /// words that merely LOOK like filler ("melon" is not on any list).
     @Test func realSpeechFailsOpenToTheBrain() {
         for text in ["I'll brute-force two-sum with a double loop",
                      "我理解的这个题目就是像一个俄罗斯方块",

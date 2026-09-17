@@ -1,8 +1,6 @@
 import Testing
 @testable import JarvisCore
 
-/// One test per row of the routing table: what the box shows, what its text keeps, and what the
-/// model reads back.
 @Suite struct ReplyDetailTests {
     private func detail(_ markdown: String) -> ReplyDetail {
         ReplyDetail(markdown: markdown)!
@@ -35,7 +33,6 @@ import Testing
         #expect(!String(d.prose.characters).contains("flowchart LR"))
         #expect(String(d.prose.characters).contains("A first sketch of the read path."))
         #expect(d.dropped.isEmpty)
-        // As sent: the model reads back the block it wrote, because the box drew it.
         #expect(d.deliveredMarkdown.contains("```mermaid"))
     }
 
@@ -118,8 +115,6 @@ import Testing
         #expect(d.deliveredMarkdown == "Try this.\n\n```python\na = 1\nb = 2")
     }
 
-    /// Links and images are inert in a capture-excluded panel: the text survives, the destination
-    /// does not.
     @Test func linksAndImagesBecomePlainText() {
         let d = detail("See [the docs](https://example.com) and ![a chart](https://example.com/c.png).")
         let text = String(d.prose.characters)
@@ -131,8 +126,6 @@ import Testing
         }
     }
 
-    /// The box shows the first diagram that parses, not merely the first one written: a rejected
-    /// candidate is dropped and reported, and the search goes on.
     @Test func aDiagramThatParsesAfterOneThatDoesNotStillRenders() {
         let d = detail("""
             ```mermaid
@@ -152,7 +145,6 @@ import Testing
         #expect(!String(d.prose.characters).contains("flowchart LR"))
     }
 
-    /// The same for code: the first block within bounds is the one the box shows.
     @Test func aCodeBlockWithinBoundsAfterAnOversizedOneStillRenders() {
         let body = (1...30).map { "line \($0)" }.joined(separator: "\n")
         let d = detail("```python\n\(body)\n```\n\n```python\ntotal = 0\n```")
@@ -162,7 +154,6 @@ import Testing
         #expect(d.deliveredMarkdown.contains("total = 0"))
     }
 
-    /// Once a kind has been shown, a later fence of that kind stays in the prose whatever its size.
     @Test func aFenceAfterTheShownOneOfItsKindStaysInTheProse() {
         let body = (1...30).map { "line \($0)" }.joined(separator: "\n")
         let d = detail("```python\ntotal = 0\n```\n\n```python\n\(body)\n```")
@@ -171,7 +162,6 @@ import Testing
         #expect(String(d.prose.characters).contains("line 30"))
     }
 
-    /// A tilde fence closes only on tildes, and a longer opener needs an equally long closer.
     @Test func fencesFollowCommonMarkDelimiters() {
         let tildes = ReplyDetail.fences(in: "~~~js\nlet a = 1\n~~~")
         #expect(tildes.map(\.language) == ["js"])
@@ -182,8 +172,6 @@ import Testing
         #expect(longer.first?.body == "```\ninner\n```")
     }
 
-    /// The box drew nothing and the prose is empty, so the model must not read the block back as
-    /// delivered.
     @Test func aDetailOfNothingButABadDiagramHasNoContent() {
         let d = detail("```mermaid\nsequenceDiagram\nA->>B: x\n```")
         #expect(!d.hasContent)

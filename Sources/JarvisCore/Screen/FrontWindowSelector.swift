@@ -1,20 +1,12 @@
 import Foundation
 
-/// Picks the window a window-scoped `capture_screen` should shoot: the frontmost ordinary window
-/// that isn't Jarvis's own.
-///
-/// macOS keeps ONE z-order across all displays, and exactly one window system-wide is the key
-/// window receiving keystrokes — so "first eligible window in the front-to-back list" is the
-/// window the user last clicked or typed into, whichever monitor it lives on. When Jarvis itself
-/// is frontmost (its Settings window), the own-PID filter lands on the user's previously active
-/// window — which is what a hint is about.
+/// macOS keeps one z-order across all displays, so the first eligible window is the one the user
+/// last used on any monitor. Skipping Jarvis's PID lands on the user's window behind Settings.
 public enum FrontWindowSelector {
-    /// Skips layer-0 sub-window droppings (status bubbles, 1-pt helper windows) that would make a
-    /// useless screenshot. Points, not pixels — window-server bounds are in points.
+    /// Points, not pixels. Skips layer-0 helper windows too small to be a useful screenshot.
     private static let minimumDimension: Double = 100
 
-    /// `candidates` must be in front-to-back z-order (as `CGWindowListCopyWindowInfo` returns).
-    /// Returns nil when nothing eligible is on screen — callers fall back to full-display capture.
+    /// `candidates` must be in front-to-back order. Nil when nothing on screen is eligible.
     public static func frontWindow(in candidates: [WindowCandidate], ownPID: Int) -> WindowCandidate? {
         candidates.first {
             $0.layer == 0 && $0.ownerPID != ownPID

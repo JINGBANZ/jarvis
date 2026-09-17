@@ -1,8 +1,5 @@
 import Foundation
 
-/// Persisted transcription choices; every key and default comes from `Defaults.Transcription`.
-/// Unknown values retain the established provider/model defaults; language expectations default to
-/// automatic so Jarvis never silently assumes English.
 public final class TranscriptionPreferences {
     private let defaults: UserDefaults
 
@@ -36,7 +33,7 @@ public final class TranscriptionPreferences {
         }
     }
 
-    /// Every language speakers may use. An empty list means automatic detection.
+    /// Empty means automatic detection.
     public var openAIExpectedLanguages: [TranscriptionLanguage] {
         get {
             guard let stored = defaults.stringArray(
@@ -54,8 +51,7 @@ public final class TranscriptionPreferences {
         }
     }
 
-    /// Literal terms (jargon, names) that bias GPT Transcribe / GPT Live recognition. GPT-4o Transcribe
-    /// does not accept them, so they are inert until the user also picks one of those models.
+    /// Only GPT Transcribe and GPT Live accept these; GPT-4o Transcribe does not.
     public var openAIVocabularyKeywords: [String] {
         get {
             guard let stored = defaults.stringArray(
@@ -72,9 +68,7 @@ public final class TranscriptionPreferences {
         }
     }
 
-    /// Apple Speech requires one locale for the complete session. The current macOS locale is a
-    /// visible initial suggestion only; Settings resolves and displays the supported equivalent so
-    /// the user can correct it before Start.
+    /// Apple Speech requires one locale for the whole session.
     public var appleSpeechLocaleIdentifier: String {
         get {
             guard let identifier = defaults.string(
@@ -102,7 +96,7 @@ public final class TranscriptionPreferences {
         }
     }
 
-    /// Every language speakers may use. An empty list means automatic detection.
+    /// Empty means automatic detection.
     public var geminiExpectedLanguages: [TranscriptionLanguage] {
         get {
             guard let stored = defaults.stringArray(
@@ -120,7 +114,6 @@ public final class TranscriptionPreferences {
         }
     }
 
-    /// Literal terms (jargon, names) that bias Gemini recognition; the API accepts up to 1,000.
     public var geminiVocabularyKeywords: [String] {
         get {
             guard let stored = defaults.stringArray(
@@ -151,7 +144,6 @@ public final class TranscriptionPreferences {
         }
     }
 
-    /// One atomic value for Start-time snapshotting and stale-preparation detection.
     public var configuration: TranscriptionConfiguration {
         TranscriptionConfiguration(
             provider: provider,

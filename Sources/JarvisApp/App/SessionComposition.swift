@@ -3,39 +3,24 @@ import JarvisBrainProviders
 import JarvisCore
 import JarvisOverlay
 
-/// Owns one coaching session's runtime, from an accepted Start to coaching ready and back to Stop.
-///
-/// The caller validates a Start (permissions, credentials, provider preflight) and hands the frozen
-/// result to `start`. Everything after that lives here: the fresh transcript and session directory,
-/// the capability set and route, the coach driver, both transcription endpoints, the audio source,
-/// capture readiness, and the matching teardown. The audio source is the one piece a caller must
-/// choose, through `makeAudioSource`. Screen capture and attempt auditing default to production and
-/// may be replaced; every other object is built here the same way for every caller.
-///
-/// It presents nothing. Readiness status, shortcut registration, and the Settings and Activity
-/// surfaces stay with the caller, fed by `onReadinessStatusChanged` and `onCoachingStateChanged`.
 @MainActor
 final class SessionComposition {
-    /// What a Start froze for this session. Route topology, capability switches, and effort are read
-    /// from `brain.preferences`, their one authority, while the session is installed.
     struct Inputs {
         let transcription: TranscriptionConfiguration
-        /// Whichever credential the transcription provider owns; "" for Apple Speech.
+        /// "" when the transcription provider needs no credential (Apple Speech).
         let transcriptionKey: String
-        /// The brain's key stays OpenAI-only; "" when no OpenAI target needs it.
+        /// OpenAI key only; "" when no OpenAI target needs it.
         let brainAPIKey: String
         let brainRoute: BrainRoute
         let appleSpeechLocale: Locale?
         let screen: ScreenCaptureSelection
-        /// Configured prep sources, not a finished index: the index lands later and must not change
-        /// what the session offers (#273).
+        /// Sources, not a finished index: the index lands later and must not change what the
+        /// session offers.
         let prepSources: [PrepMaterialSource]
         let detailEnabled: Bool
     }
 
-    /// Every readiness status the session's observations produce, for the caller to render.
     var onReadinessStatusChanged: ((JarvisReadiness.Status) -> Void)?
-    /// Whether coaching runs may have changed: a session went live, stopped, or finished draining.
     var onCoachingStateChanged: (() -> Void)?
 
     private let clock = SystemClock()
@@ -43,56 +28,35 @@ final class SessionComposition {
     private let networkDiagnostics = NetworkPathDiagnostics()
     private let brain: BrainComposition
     private let artifacts: SessionArtifacts
-    private let overlayCaption: OverlayCaptionPanel   // transient on-screen tip
-    private let overlayBox: OverlayBoxPanel            // persistent, movable history of every spoken response
+    private let overlayCaption: OverlayCaptionPanel
+    private let overlayBox: OverlayBoxPanel
     private let readiness: JarvisReadiness
     private let errorReporter: ErrorReporter
     private let makeAttemptAuditing: (FileSessionAudit) -> any CoachingAttemptAuditing
     private let makeScreenCapture: (URL) -> any ScreenCapturing
     private let makeAudioSource: MakeAudioSource
 
-    /// Recreated on every `start`: the transcript must live and die with the driver/transcriber
-    /// pair built there — they carry its [mm:ss] clock base and the driver's sent-index into it.
     private var transcript = RollingTranscript()
-    /// Two provider sessions feeding one shared transcript: mic → `.me`, system audio → `.them`.
     private var transcriber: (any TranscriptionSession)?       // "me" (mic)
     private var themTranscriber: (any TranscriptionSession)?   // "them" (system audio)
     private var micConnectionState: TranscriptionConnectionState = .stopped
     private var systemConnectionState: TranscriptionConnectionState = .stopped
     private var reportedTranscriptionFailure = false
-    /// Proves audio frames are actually flowing before Jarvis claims readiness, and turns a sustained
-    /// capture stall into a typed consequence. Recreated per session; observations and its poll clock
-    /// are session-relative to `captureReadinessStart`. See `CaptureReadinessMonitor`.
     private var captureReadiness: CaptureReadinessMonitor?
     private var captureReadinessStart: TimeInterval = 0
     private var captureReadinessTimer: Timer?
-    /// Resource allocation begins before audio capture can prove startup succeeded. Keep that
-    /// provisional state separate so tearing it down cannot look like the end of a live session.
+    /// Separate from `hasAllocatedPipeline`, so tearing down a Start that never went live doesn't
+    /// record a session end.
     private var sessionIsLive = false
-    /// The session's producer of both speech streams, built by `makeAudioSource`.
     private var audioSource: (any AudioSource)?
-    /// In-flight coaching turns, so Stop can cancel one mid-brain-call (otherwise it could speak
-    /// after the user pressed Stop).
     private var turns: TurnTaskBox?
-    /// The running session's event loop. Stored so Brain Settings can replace only its model clients
-    /// without restarting transcription or discarding the session's transcript/history.
     private(set) var coachDriver: CoachDriver?
-    /// Reads prep-material files and can shell out to `textutil`; cancelled on Stop like compaction
-    /// is, so it never outlives the session it was built for.
     private var prepMaterialIndexTask: Task<Void, Never>?
-    /// Fires an on-demand request for the running session. Non-nil only while running — set in
-    /// `start`, cleared in `stop`. Captures the Sendable driver + turn box, like the transcriber
-    /// callbacks do.
     private var requestManualHint: ((CoachingShortcut) -> Void)?
-    /// Only cancelled coaching work extends the global ghost lifecycle. Audit persistence is scoped
-    /// to its own session: Activity can use closed history while an unrelated audit drains.
+    /// Only cancelled coaching turns hold the ghost lifecycle open; an audit drain alone doesn't.
     private var pendingTurnDrainIDs: Set<UUID> = []
-    /// Whether this session's replies may carry a `detail`, which is whether the Overlay Box is on.
-    /// Both optional shortcuts answer into the detail box, so it is also what decides whether they
-    /// may fire — `requestShortcut` bypasses the hotkeys, and the live runner calls it directly.
     private var sessionDetailEnabled = false
-    /// Monotonic revision stamped on each control-plane snapshot. Bumped at Start and whenever an
-    /// explicit Settings edit installs a fresh plan; never by runtime health.
+    /// Bumped only by Start and explicit Settings edits, never by runtime health.
     private var planRevision: UInt = 0
 
     init(
@@ -102,12 +66,7 @@ final class SessionComposition {
         overlayBox: OverlayBoxPanel,
         readiness: JarvisReadiness,
         errorReporter: ErrorReporter,
-        // The port a session's coach records attempts through, built from the session's evidence
-        // handle once Start has created it. Production records straight into that handle; a caller
-        // that must watch attempts start and finish wraps it.
         makeAttemptAuditing: @escaping (FileSessionAudit) -> any CoachingAttemptAuditing = { $0 },
-        // The session's screen capture, built with the session directory its transient shots use.
-        // Production shoots the front window; a caller that must control what is on screen injects it.
         makeScreenCapture: @escaping (URL) -> any ScreenCapturing = {
             WindowScopedScreenCapture(captureDirectory: $0)
         },
@@ -125,12 +84,9 @@ final class SessionComposition {
         networkDiagnostics.start()
     }
 
-    /// Whether transcription endpoints are allocated, live or still proving startup.
     var hasAllocatedPipeline: Bool { transcriber != nil || themTranscriber != nil }
     var isTranscriptionLive: Bool { transcriber != nil }
-    /// Whether a session accepts shortcut requests.
     var isLive: Bool { requestManualHint != nil }
-    /// Coaching is running, or a cancelled turn is still draining.
     var isCoachingRunning: Bool { transcriber != nil || !pendingTurnDrainIDs.isEmpty }
 
     func allows(_ shortcut: CoachingShortcut) -> Bool {
@@ -140,15 +96,13 @@ final class SessionComposition {
         }
     }
 
-    /// Screenshot and ask for a guaranteed response, routed through the same turn box as audio
-    /// triggers (so Stop cancels it and rapid presses coalesce). Ignored when no session runs.
+    /// Ignored when no session is live.
     func requestShortcut(_ shortcut: CoachingShortcut) {
         requestManualHint?(shortcut)
     }
 
-    /// Install a prepared session. The caller has already stopped any previous one. Returns false
-    /// when the audio source cannot start, after reporting that through the error reporter with
-    /// `reportContext`.
+    /// The caller must already have stopped any previous session. Returns false, after reporting
+    /// with `reportContext`, when the audio source can't start.
     func start(
         _ inputs: Inputs,
         proxy: LocalProxySupervisor.Readiness?,
@@ -159,13 +113,12 @@ final class SessionComposition {
         let transcriptionKey = inputs.transcriptionKey
         let appleSpeechLocale = inputs.appleSpeechLocale
         reportedTranscriptionFailure = false
-        // A fresh transcript for the fresh pipeline. Reusing the old one would re-send a dead run's
-        // lines as "new since last turn" — their [mm:ss] stamps minted against the previous
-        // transcriber's clock — and anchor silence math to old speech.
+        // Fresh per pipeline: a reused transcript would re-send a dead run's lines, stamped on the
+        // old clock, and anchor silence math to old speech.
         transcript = RollingTranscript()
-        let audit = artifacts.beginNewSession()  // rotate to a fresh session dir + activity/debug log
+        let audit = artifacts.beginNewSession()
         let attemptAuditing = makeAttemptAuditing(audit)
-        overlayBox.clear() // …and a fresh response history for the new conversation
+        overlayBox.clear()
         switch transcriptionConfiguration.provider {
         case .openAI:
             jlog(
@@ -184,14 +137,8 @@ final class SessionComposition {
             jlog("Jarvis transcription: provider=Gemini")
         }
 
-        // Each target's coach and summarizer share the session traffic log. Every fresh attempt is a
-        // distinct audit-visible request; no transport wrapper replays a failed request.
         let sessionDirectory = artifacts.currentSessionDir!
-        // Fixed for the whole session.
         sessionDetailEnabled = inputs.detailEnabled
-        // One capability set for the session, handed to the driver that sends it. Prep material
-        // counts as configured sources, not a finished index: the index lands later and must not
-        // change what the session offers (#273).
         let prepMaterialSources = inputs.prepSources
         let bundledSkills = SkillCatalog.bundled()
         let capabilities = CoachCapabilities.compose(
@@ -200,9 +147,8 @@ final class SessionComposition {
             prepSourcesConfigured: !prepMaterialSources.isEmpty,
             skills: bundledSkills,
             detailEnabled: inputs.detailEnabled)
-        // The one place a switched-off capability is visible: Activity never mentions what was not
-        // offered. Read from the persisted names, so a name that matched nothing is reported as
-        // nothing and a loader — which is synthesized, not switchable — is never named here.
+        // This log line is the only place switched-off capabilities appear. It lists only saved
+        // names that match a real, switchable capability.
         let everything = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty,
             skills: bundledSkills, detailEnabled: inputs.detailEnabled)
@@ -228,10 +174,8 @@ final class SessionComposition {
             effort: brain.preferences.effort,
             sessionDirectory: sessionDirectory)
         observeReadiness(.brainPreparation(.ready), for: readinessSession)
-        // One time origin makes mic/system timestamps directly comparable. Each provider may finish
-        // independently, but neither gets its own definition of "seconds since session start."
+        // One shared origin keeps mic and system timestamps comparable.
         let conversationStart = clock.now()
-        // Fan each spoken tip out to both the Overlay Caption and the persistent Overlay Box.
         let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(
             config: config,
@@ -246,14 +190,8 @@ final class SessionComposition {
             activity: artifacts.sessionAudit,
             capabilities: capabilities)
 
-        // Building the index reads files and can shell out to `textutil`, so it runs off the Start
-        // path entirely rather than delaying it — a search that fires before this lands finds no
-        // index for that one attempt. The tool itself was catalogued from Start, with the rest of
-        // the session's fixed set. Tracked and cancelled in `stop()` for the same reason compaction
-        // is: an untracked task would keep reading files and spawning textutil subprocesses after
-        // the session it belongs to has already torn down. Skipped entirely when the session does
-        // not offer the search, so switching the capability off also stops its file work rather
-        // than building a port nothing can reach.
+        // Off the Start path: it reads files and may spawn `textutil`, and a search before it lands
+        // just finds no index. `stop()` cancels it so it can't outlive the session.
         if capabilities.tool(named: searchPrepNotesTool.name) != nil {
             prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
                 let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
@@ -263,10 +201,8 @@ final class SessionComposition {
         }
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
-        // Route turns through TurnTaskBox so Stop can cancel an in-flight one. Concurrent triggers are
-        // coalesced inside CoachDriver (the running turn batches them in), so we don't cancel here.
+        // CoachDriver coalesces triggers, so a new one doesn't cancel the running turn.
         let turns = TurnTaskBox()
-        // "Me" side: the mic. Drives turn-end and the backing-off silence check ("are you stuck?").
         let transcriber = TranscriptionSessionFactory.make(
             configuration: transcriptionConfiguration,
             apiKey: transcriptionKey,
@@ -290,9 +226,8 @@ final class SessionComposition {
             driver.updateTranscriptionWork($0, for: .me)
         }
 
-        // "Them" side: system audio (remote participants). Drives turn-end so Jarvis can react when the
-        // other side finishes (e.g. asks you something), but NOT the silence check — the "are you
-        // stuck?" prompt is about the *user*, so only the mic owns that timer.
+        // No onSilence here: the "are you stuck?" check is about the user, so only the mic drives
+        // it.
         let themTranscriber = TranscriptionSessionFactory.make(
             configuration: transcriptionConfiguration,
             apiKey: transcriptionKey,
@@ -314,8 +249,8 @@ final class SessionComposition {
         themTranscriber.onTranscriptionWorkChanged = {
             driver.updateTranscriptionWork($0, for: .them)
         }
-        // Bind terminal callbacks to the transcriber that emitted them. A callback already queued
-        // across Stop → Start must not report against or tear down the replacement session.
+        // The identity checks keep a callback queued across Stop and Start away from the
+        // replacement session.
         transcriber.onTerminalFailure = { [weak self, weak transcriber] failure in
             guard let transcriber else { return }
             Task { @MainActor [weak self] in
@@ -327,21 +262,16 @@ final class SessionComposition {
             guard let themTranscriber else { return }
             Task { @MainActor [weak self] in
                 guard let self, self.themTranscriber === themTranscriber else { return }
-                // Key on the failure, not the provider: a socket transcriber (unlike Apple Speech)
-                // can hit a rejected key, a denied region, or a connection that never came up on the
-                // system-audio side too, and each of those threatens the mic side identically — see
-                // `ProviderFailure.endsEverySession` for why degrading on one of those would hide
-                // the real cause behind a misleading system-audio notice.
+                // Key on the failure, not the provider: a rejected key or denied region on this
+                // side threatens the mic side too.
                 if failure.endsEverySession {
                     self.reportTranscriptionFailure(failure)
                     return
                 }
-                // A system-audio transport loss or local analyzer failure degrades gracefully: stop
-                // that endpoint while microphone coaching continues. The shared capture drops tap audio.
                 themTranscriber.stop()
                 self.themTranscriber = nil
-                // The transcriber's asynchronous `.stopped` callback is identity-guarded and will
-                // be ignored after nil-ing it, so commit the degraded state explicitly here.
+                // The async `.stopped` callback is ignored once this is nil, so record the state
+                // here.
                 self.systemConnectionState = .failed
                 // Stop expecting system frames so a capture first-frame/stall timeout can't also fire.
                 self.captureReadiness?.systemBecameUnavailable()
@@ -352,9 +282,6 @@ final class SessionComposition {
             }
         }
 
-        // The audio source feeds the mic stream to the "me" socket and the system stream to the
-        // "them" socket. If it can't be built, the whole capture is gone, so treat it as a full
-        // (mic-side) terminal failure.
         let localTurnDetectionSilenceDuration: TimeInterval? =
             transcriptionConfiguration.turnDetectionStrategy == .clientCommit
             ? TimeInterval(config.localEndpointSilenceDurationMs) / 1_000
@@ -387,9 +314,6 @@ final class SessionComposition {
                     themTranscriber?.recordLocalSpeechEvent(
                         event, throughSequenceNumber: sequence)
                 }))
-        // Like the transcriber callbacks above, bind the failure to the source that emitted it. A
-        // final retry from an old source may arrive after Stop → Start; it must not tear down the
-        // replacement session through ErrorReporter's global `onFatal`.
         source.onUnavailable = { [weak self, weak source] reason in
             guard let source else { return }
             Task { @MainActor [weak self] in
@@ -456,9 +380,6 @@ final class SessionComposition {
                     state, for: .system, readinessSession: readinessSession)
             }
         }
-        // Arm the shortcuts for this session: capture the screen and ask for a guaranteed response,
-        // routed through the same turn box as audio triggers (so Stop cancels it and rapid presses
-        // coalesce).
         self.requestManualHint = { shortcut in
             turns.run { await driver.handleTrigger(shortcut.triggerReason) }
         }
@@ -470,28 +391,20 @@ final class SessionComposition {
                 .captureFailed(failure: Self.captureFailure(reason)), context: reportContext)
             return false
         }
-        // Capture setup is synchronous and can legitimately take longer than the first-frame
-        // deadline. Arm that deadline only after the source starts; callbacks were installed
-        // above, so any frame already queued on the main actor is still observed by this monitor.
+        // Armed only after the synchronous source start, which can outlast the first-frame
+        // deadline. Frames queued meanwhile still reach the monitor.
         startCaptureReadiness(readinessSession: readinessSession)
         sessionIsLive = true
-        // Show the (already cleared) history box, from the one place that declares the session live —
-        // every earlier `return false` leaves the desktop untouched.
+        // Only after every early return, so a failed Start leaves the desktop untouched.
         overlayBox.setSessionLive(true)
         jlog("Jarvis: coaching starting — verifying transcription endpoints.")
         jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
-        onCoachingStateChanged?()   // the live session is no longer evaluable
+        onCoachingStateChanged?()
         return true
     }
 
-    /// Stop and tear down the audio source and BOTH transcription endpoints (mic/"me" and
-    /// system-audio/"them"). Safe to call when already stopped. The source and both transcribers must
-    /// go: otherwise a turn-end trigger from a still-live socket could drive a coaching turn on a
-    /// torn-down driver — the exact "speak after Stop" failure the turns box exists to prevent — and
-    /// a subsequent Start would leak the orphaned endpoints.
-    ///
-    /// Returns the background drain that seals this session's evidence, for a caller that must wait
-    /// for `audit-health.json`; nil when there was nothing to drain.
+    /// Safe to call when already stopped. Returns the drain that seals this session's evidence
+    /// (`audit-health.json`), or nil when there was nothing to drain.
     @discardableResult
     func stop(reason: SessionEndReason) -> Task<Void, Never>? {
         prepMaterialIndexTask?.cancel()
@@ -499,22 +412,20 @@ final class SessionComposition {
         let hadAllocatedPipeline = hasAllocatedPipeline
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
-        overlayBox.setSessionLive(false)     // the history box goes away with the session
-        requestManualHint = nil              // shortcuts stop reaching a session
+        overlayBox.setSessionLive(false)
+        requestManualHint = nil
         sessionDetailEnabled = false
-        // Capture and clear this session handle before a quick Start installs another. The cancelled
-        // tasks retain only its observer ports and can finish enqueueing into the old session.
+        // Take the handle before a quick Start can install another; cancelled turns still write to
+        // the old session.
         let (audit, auditDirectory) = artifacts.takeCurrentSession()
-        let cancelled = turns?.cancelAll() ?? []; turns = nil   // cancel any in-flight coaching turn
-        // History compaction runs off the attempt path, so `turns` does not own it. Cancel it here
-        // and drain it below, or a summary keeps a provider process alive and billing after Stop and
-        // can still be writing when the audit seals.
+        let cancelled = turns?.cancelAll() ?? []; turns = nil
+        // `turns` doesn't own compaction. Cancel and drain it, or a summary keeps billing after
+        // Stop and can still be writing when the audit seals.
         let compaction = coachDriver?.cancelBackgroundWork()
         coachDriver = nil
         brain.sessionDidStop()
-        // Mark both delivery endpoints stopped before draining the source. It hands chunks off
-        // asynchronously, so callbacks already queued during teardown must see the transcribers'
-        // stopped guards and become no-ops.
+        // Stop the transcribers before the source, so its queued async chunks hit their stopped
+        // guards.
         transcriber?.stop()
         themTranscriber?.stop()
         audioSource?.stop(); audioSource = nil
@@ -527,15 +438,11 @@ final class SessionComposition {
             jlog("Jarvis: stopped.")
         }
         if endedLiveSession {
-            // `sessionAudit` was already cleared above; record against the handle teardown holds so
-            // the marker still reaches this session's evidence rather than the next one's.
+            // `artifacts.sessionAudit` is already cleared, so record on the taken handle.
             audit?.record(.sessionEnded(reason: reason))
         }
-        // Activity is no longer a privileged failure domain: its rows ride the one bounded evidence
-        // stack, so Stop drains this session's producers and evidence in the background and a
-        // replacement Start stays instant. Quit seals best-effort and returns immediately —
-        // evidence never owns app termination, so a last row may be lost and the session is then
-        // honestly marked partial.
+        // Quit abandons instead of draining: evidence never delays termination, so a last row may
+        // be lost and the session marked partial.
         var drain: Task<Void, Never>?
         if reason == .applicationQuit {
             audit?.abandon()
@@ -548,8 +455,8 @@ final class SessionComposition {
                 await compaction?.value
                 self?.pendingTurnDrainIDs.remove(drainID)
                 self?.onCoachingStateChanged?()
-                // Closing the handle is the barrier now: it waits for every accepted row, Activity
-                // included, so a just-recorded outcome cannot race the evaluator.
+                // close() waits for every accepted row, so a just-recorded outcome can't race the
+                // evaluator.
                 _ = await audit?.close()
                 if let auditDirectory { self?.artifacts.endClosing(auditDirectory) }
                 self?.onCoachingStateChanged?()
@@ -559,15 +466,8 @@ final class SessionComposition {
         return drain
     }
 
-    /// Keep a healthy live conversation intact when the credential file changes. Existing Realtime
-    /// sockets are already authenticated; retain them and use the new key only if either socket later
-    /// reconnects. The transcription half is session runtime and stays here; the brain half is
-    /// composition's, and it installs fresh OpenAI target clients between coaching attempts without
-    /// replacing subscription clients, changing route policy, or restarting transcription.
-    ///
-    /// Guarded by credential: a saved OpenAI key must never reach a Gemini-backed session (or vice
-    /// versa). Each session applies only the credential it authenticates with and ignores the rest,
-    /// so this passes the credential along rather than deciding on their behalf.
+    /// Live sockets stay authenticated and use the new key only on reconnect. Each session applies
+    /// only the credential it authenticates with, so an OpenAI key never reaches a Gemini session.
     func applySavedAPIKey(_ key: String, for credential: Credential) {
         guard let transcriber else { return }
         transcriber.updateAPIKey(key, for: credential)
@@ -575,8 +475,7 @@ final class SessionComposition {
         if credential == .openAIAPIKey { brain.applySavedAPIKey(key) }
     }
 
-    /// An explicit Settings edit takes effect at the next attempt. A turn already running keeps the
-    /// revision it snapshotted, and nothing here rewrites a persisted preference.
+    /// Takes effect at the next attempt; a running turn keeps its snapshot.
     func updateScreenSelection(_ selection: ScreenCaptureSelection) {
         coachDriver?.updatePlan(freshSessionPlan(screen: selection))
     }
@@ -610,8 +509,6 @@ final class SessionComposition {
         applyReadinessEffects(readiness.observe(observations, for: session))
     }
 
-    /// The one funnel for readiness effects, whoever observed them: status goes to the caller to
-    /// render, and the readiness milestone is logged here so every caller writes the same line.
     func applyReadinessEffects(_ effects: [JarvisReadiness.Effect]) {
         for effect in effects {
             switch effect {
@@ -625,29 +522,22 @@ final class SessionComposition {
         }
     }
 
-    /// Wrap a capture cause in the one failure record Activity and the session lifecycle read. The
-    /// capture is local, so there is no provider identity to carry: the sentence the capture layer
-    /// already wrote is the whole evidence.
+    /// Capture is local, so the failure carries no provider identity.
     private static func captureFailure(_ reason: String) -> ProviderFailure {
         ProviderFailure(
             source: .capture, stage: .local, category: .unavailable, disposition: .permanent,
             identity: .init(), message: reason)
     }
 
-    /// Deduplicate endpoint failures: either side can fail first, but Activity should show one reason
-    /// and teardown should run once.
+    /// Either side may fail first; report one reason and tear down once.
     private func reportTranscriptionFailure(_ failure: ProviderFailure) {
         guard !reportedTranscriptionFailure, transcriber != nil || themTranscriber != nil else { return }
         reportedTranscriptionFailure = true
-        // This method already runs on the main actor after checking the emitting transcriber's
-        // identity. Deliver synchronously so Stop → Start cannot slip between that check and the
-        // terminal lifecycle consequence and let a stale failure stop the replacement session.
+        // Synchronous, so Stop and Start can't slip in after the caller's identity check.
         errorReporter.reportImmediately(
             .transcriptionStopped(failure: failure), context: .runtime)
     }
 
-    /// Keep endpoint connection bookkeeping focused on seeding `CaptureReadinessMonitor`; Core owns
-    /// every cross-subsystem status decision and both UI surfaces consume that result.
     private func handleTranscriptionConnectionState(
         _ state: TranscriptionConnectionState,
         for stream: CaptureReadinessMonitor.Stream,
@@ -679,9 +569,7 @@ final class SessionComposition {
         observeReadiness(observations, for: session)
     }
 
-    /// Begin capture-frame readiness tracking for the session being installed. The 1s poll owns the
-    /// initial first-frame deadline and the sustained-stall deadline after frame flow begins;
-    /// observations arrive through `handleCaptureHeartbeat`.
+    /// The 1 s poll enforces the first-frame and sustained-stall deadlines.
     private func startCaptureReadiness(readinessSession: JarvisReadiness.Session) {
         captureReadinessTimer?.invalidate()
         captureReadinessStart = clock.now()
@@ -709,9 +597,7 @@ final class SessionComposition {
         captureReadiness = nil
     }
 
-    /// Fold one capture heartbeat into the focused monitor, then publish only its typed output to
-    /// the overall composition reducer. This is the critical branch: everything here is in-memory
-    /// policy over the heartbeat value, with no read of the evidence queue or a persisted file.
+    /// Hot path: stays in memory, with no read of the evidence queue or a persisted file.
     private func handleCaptureHeartbeat(
         _ heartbeat: CaptureHeartbeat,
         for stream: CaptureReadinessMonitor.Stream,
@@ -732,9 +618,6 @@ final class SessionComposition {
         applyCaptureReadinessEffects(effects, readinessSession: readinessSession)
     }
 
-    /// Turn readiness consequences into lifecycle effects. A microphone capture failure is terminal; a
-    /// system capture failure degrades to microphone-only. Fixed copy goes to Activity; the cause and
-    /// counters stay in `jarvis-debug.log`.
     private func applyCaptureReadinessEffects(
         _ effects: [CaptureReadinessMonitor.Effect],
         readinessSession: JarvisReadiness.Session
@@ -764,11 +647,7 @@ final class SessionComposition {
         }
     }
 
-    /// Freeze the control plane as the next revision.
-    ///
-    /// This is the only place preferences reach a coaching attempt. Everything a turn needs is
-    /// resolved here, at Start or at an explicit Settings boundary, so no attempt reads storage
-    /// (wiki/lean-coaching-core.md, Phase 4).
+    /// The only path from preferences to an attempt, so no attempt reads storage.
     private func freshSessionPlan(screen: ScreenCaptureSelection) -> SessionPlan {
         planRevision &+= 1
         return SessionPlan(revision: planRevision, screen: screen)

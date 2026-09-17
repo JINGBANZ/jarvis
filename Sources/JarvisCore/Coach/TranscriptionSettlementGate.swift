@@ -1,10 +1,7 @@
 import Foundation
 
-/// A synchronous bridge from provider transcription state to automatic coaching admission.
-/// Automatic attempts suspend without polling while either side owns unfinished transcription work.
-///
-/// `@unchecked Sendable` is safe because `lock` guards all mutable state, and continuations are
-/// removed under that lock before they are resumed.
+/// @unchecked Sendable: `lock` guards all mutable state, and continuations are removed under it
+/// before they are resumed.
 final class TranscriptionSettlementGate: @unchecked Sendable {
     private let lock = NSLock()
     private var unsettledSpeakers: Set<Speaker> = []
@@ -29,8 +26,7 @@ final class TranscriptionSettlementGate: @unchecked Sendable {
         continuations.forEach { $0.resume() }
     }
 
-    /// Wake the attempts currently parked on transcription without changing provider state.
-    /// A manual hint uses this explicit exception; later automatic attempts still see unsettled work.
+    /// Wakes current waiters only; later waiters still see unsettled work.
     func interruptWaiters() {
         let continuations: [CheckedContinuation<Void, Never>]
         lock.lock()
@@ -45,8 +41,7 @@ final class TranscriptionSettlementGate: @unchecked Sendable {
         lock.withLock { interruptGeneration }
     }
 
-    /// Wait until both providers are settled unless an explicit interruption occurred after the
-    /// supplied generation. The generation comparison closes the manual-hint lost-wakeup window.
+    /// Returns at once if interrupted after `generation`, which closes the lost-wakeup window.
     func waitUntilSettled(unlessInterruptedAfter generation: UInt) async {
         let id = UUID()
         await withTaskCancellationHandler {

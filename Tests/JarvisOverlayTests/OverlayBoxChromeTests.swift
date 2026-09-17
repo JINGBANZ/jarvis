@@ -2,9 +2,6 @@ import Testing
 import AppKit
 @testable import JarvisOverlay
 
-/// The header's geometry is derived from the box's content height rather than fixed, so the strip
-/// stays proportionate over the whole range the user can drag the box to: readable and aimable at the
-/// 140 pt floor, and not a banner on a box dragged to fill a display.
 @Suite struct OverlayBoxChromeTests {
 
     @Test
@@ -33,8 +30,6 @@ import AppKit
         #expect(chrome.titlePointSize == 19)
     }
 
-    /// Every derived size has to stay inside the strip it is laid out in, at every height the user can
-    /// reach — otherwise a button clips at one end of the range and floats at the other.
     @Test
     func everyPartFitsInsideTheStripAtEveryHeight() {
         for height in stride(from: CGFloat(140), through: 4096, by: 37) {

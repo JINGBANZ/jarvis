@@ -1,8 +1,5 @@
 import Foundation
 
-/// Plain text and Markdown pass `detail` through verbatim — it is Markdown as the model wrote it —
-/// and HTML escapes it inside a `<pre>`. Explanation and Code appear only for a row written before
-/// the detail box existed, so a past session exports with the sections it was recorded with.
 extension ActivityResponse {
     var plainText: String {
         var parts = ["Hint\n\(lines.joined(separator: "\n"))"]

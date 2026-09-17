@@ -42,8 +42,6 @@ import Testing
             appleSpeechLocaleIdentifier: "zh-CN"))
     }
 
-    /// Blank and whitespace-only entries are dropped, and surrounding whitespace is trimmed, so a
-    /// trailing comma from a comma-separated text field doesn't persist a stray empty term.
     @Test func vocabularyKeywordsTrimAndDropBlankEntries() {
         let defaults = freshDefaults()
         let preferences = TranscriptionPreferences(defaults: defaults)
@@ -158,7 +156,6 @@ import Testing
         #expect(TranscriptionProvider.gemini.requiredCredentials(for: cliOnly) == [.geminiAPIKey])
     }
 
-    /// The combination the old single-Bool gate could not express: Gemini ears, OpenAI brain.
     @Test func geminiEarsWithAnOpenAIBrainNeedBothKeys() {
         let openAIRoute = BrainRoute(
             primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
@@ -194,15 +191,12 @@ import Testing
         preferences.geminiVocabularyKeywords = [" gRPC ", "", "Kubernetes"]
         preferences.geminiMode = .smart
 
-        // Canonicalized to declaration order; blank keywords dropped and trimmed.
         #expect(preferences.geminiExpectedLanguages == [.english, .mandarinChinese])
         #expect(preferences.geminiVocabularyKeywords == ["gRPC", "Kubernetes"])
         #expect(preferences.geminiMode == .smart)
     }
 
-    /// Google's Live API rejects a `customVocabulary` list longer than 1,000 terms, which would fail
-    /// Start. The setter caps at that limit, keeping the first 1,000 (the user's priority order); a
-    /// normal small list is untouched.
+    /// Google's Live API rejects a `customVocabulary` list longer than 1,000 terms.
     @Test func vocabularyKeywordsAreCappedAtTheAPILimit() {
         let defaults = freshDefaults()
         let preferences = TranscriptionPreferences(defaults: defaults)

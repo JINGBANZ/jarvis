@@ -2,11 +2,6 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// The runner reads every reply against the tool choice its own request sent, whatever the
-/// transport did with that choice. A call outside a press's set, or a call whose arguments do not
-/// parse, is answered and the model asked again in the same attempt; a press whose reply is prose
-/// with no usable call speaks the prose; an extra parallel call is answered as not executed. Only
-/// the forced response at the cap still fails the attempt, and the route retries.
 @Suite struct CoachDriverReplyRecoveryTests {
     private func makeDriver(brain: BrainClient, screen: ScreenCapturing = FakeScreen(),
                             overlay: OverlayRendering = FakeOverlay(),
@@ -27,8 +22,6 @@ import Testing
         return (driver, transcript)
     }
 
-    /// One attempt on the runner itself, where a failure is the attempt's own result rather than
-    /// the start of the route's retries.
     private func runAttempt(
         _ reason: TriggerReason, brain: BrainClient, overlay: FakeOverlay = FakeOverlay()
     ) async -> CoachAttemptRunner.AttemptResult {
@@ -47,7 +40,6 @@ import Testing
             prepMaterial: nil)).result
     }
 
-    /// A reply as a transport reports it: every call raw, and parsed where its arguments parse.
     private func reply(_ calls: RawToolCall..., text: String? = nil) -> BrainResponse {
         BrainResponse(
             toolCalls: calls.compactMap {
@@ -69,8 +61,6 @@ import Testing
         request.first { $0.role == .tool && $0.toolCallId == id }
     }
 
-    /// #319: a press whose reply is only a call it may not make is told so, then speaks, all in one
-    /// attempt, and the press never captures again.
     @Test(arguments: ["stay_silent", "capture_screen"])
     func aPressIsToldACallItMayNotMakeAndSpeaksInTheSameAttempt(_ name: String) async throws {
         let brain = ScriptedBrain(script: [reply(call(name, id: "q1")), speak])
@@ -81,7 +71,7 @@ import Testing
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
         #expect(brain.calls.count == 2)
-        #expect(screen.captureCount == 1)   // the press's own capture only
+        #expect(screen.captureCount == 1)
         let second = brain.calls[1]
         let answer = try #require(second.firstIndex { $0.role == .tool && $0.toolCallId == "q1" })
         #expect(second[answer].text == JarvisPrompts.Coach.notPermittedOnShortcut(name))
@@ -89,8 +79,6 @@ import Testing
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 
-    /// Prose beside a call the press may not make is not a shortcut past the round trip: the call is
-    /// answered and the model asked again, and the hint it then gives is what commits.
     @Test func aPressWithProseBesideACallItMayNotMakeIsStillAskedAgain() async throws {
         let brain = ScriptedBrain(script: [
             reply(call("stay_silent", id: "q1"), text: "Try a hash map.\n"),
@@ -116,9 +104,6 @@ import Testing
         #expect(!followUp.contains { $0.toolCalls?.contains { $0.name == "stay_silent" } == true })
     }
 
-    /// A call the press was told it may not make is not memory: the next turn replays the hint, never
-    /// the `stay_silent` call or its refusal, so a later automatic turn is not told it may not stay
-    /// silent.
     @Test func aRefusedStaySilentLeavesNoTraceInHistory() async throws {
         let brain = ScriptedBrain(script: [reply(call("stay_silent", id: "q1")), speak, speak])
         let (driver, transcript) = makeDriver(brain: brain)
@@ -134,8 +119,6 @@ import Testing
         #expect(toolResult("q1", in: followUp) == nil)
     }
 
-    /// Plain text is not an action: the press is told so once, and the call the model then makes is
-    /// what coaches.
     @Test func aPressWhoseReplyIsOnlyProseIsRefusedOnceAndAsksAgain() async throws {
         let brain = ScriptedBrain(script: [reply(text: "Name the invariant."), speak])
         let overlay = FakeOverlay()
@@ -152,8 +135,6 @@ import Testing
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 
-    /// The refusal belongs to the attempt that spent it: kept in memory, the nudge would replay on
-    /// every later request and reach the summarizer.
     @Test func aRefusedProseReplyLeavesNoTraceInHistory() async throws {
         let brain = ScriptedBrain(script: [reply(text: "Name the invariant."), speak, speak])
         let (driver, transcript) = makeDriver(brain: brain)
@@ -169,8 +150,6 @@ import Testing
         })
     }
 
-    /// One refusal per attempt: a second prose reply becomes the coaching itself, its first line the
-    /// hint and the rest the detail, so a press that answered in prose still delivers what it wrote.
     @Test func aSecondProseReplyBecomesTheHintAndItsDetail() async throws {
         let prose = "Name the invariant.\n\nKeep a running sum.\n\n```python\ntotal = 0\n```"
         let brain = ScriptedBrain(script: [reply(text: prose), reply(text: prose)])
@@ -185,7 +164,6 @@ import Testing
         #expect(overlay.rendered == [["Name the invariant."]])
     }
 
-    /// Only a press speaks prose: an automatic turn must choose to speak or stay silent.
     @Test func anAutomaticTurnWhoseReplyIsOnlyProseStillFails() async {
         let brain = ScriptedBrain(script: [reply(text: "Try a hash map.")])
 
@@ -196,8 +174,7 @@ import Testing
         #expect(brain.calls.count == 1)
     }
 
-    /// The double-encoded `lines` a Claude model sends without strict tools: answered with the
-    /// schema, and the model's next call coaches in the same attempt.
+    /// Claude without strict tools can double-encode `lines` as a JSON string.
     @Test func aCallWhoseArgumentsDoNotParseIsAnsweredWithItsSchema() async throws {
         let brain = ScriptedBrain(script: [
             reply(call("speak", id: "m1", arguments: #"{"lines":"[\"a\"]"}"#)),
@@ -226,8 +203,7 @@ import Testing
             == JarvisPrompts.Coach.toolUnavailable("read_my_email"))
     }
 
-    /// A provider that forces parallel calls can return two. The first runs; the second is answered
-    /// so the replayed output never carries a call without a result.
+    /// A provider that forces parallel calls can return two in one reply.
     @Test func anExtraParallelCallIsAnsweredAsNotExecuted() async throws {
         let brain = ScriptedBrain(script: [
             reply(call("capture_screen", id: "c1"),
@@ -248,8 +224,6 @@ import Testing
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 
-    /// The parsed list skips a call whose arguments did not parse, so a valid later call must not
-    /// stand in for the malformed first one: the first is answered with its schema and nothing runs.
     @Test func aMalformedFirstCallIsJudgedBeforeAParsedLaterOne() async throws {
         let brain = ScriptedBrain(script: [
             reply(call("speak", id: "m1", arguments: #"{"lines":"[\"a\"]"}"#),
@@ -269,7 +243,6 @@ import Testing
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 
-    /// Recovery is bounded by the attempt's response cap, with no counter of its own.
     @Test func aPressThatNeverSpeaksFailsAtTheCap() async {
         let brain = ScriptedBrain(script: (1...7).map { reply(call("stay_silent", id: "q\($0)")) })
 
@@ -281,8 +254,6 @@ import Testing
         #expect(brain.calls.count == 7)
     }
 
-    /// Nothing follows the response at the cap, so prose beside a call that cannot run is the hint
-    /// there instead of a failed attempt.
     @Test func aPressSpeaksTheProseBesideAMalformedCallAtTheCap() async {
         let silences = (1...6).map { reply(call("stay_silent", id: "q\($0)")) }
         let malformed = reply(call("speak", id: "m7", arguments: #"{"lines":"[\"a\"]"}"#),

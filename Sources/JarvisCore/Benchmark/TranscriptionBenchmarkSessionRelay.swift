@@ -1,10 +1,8 @@
 import Foundation
 
-/// Atomically switches one capture stream between benchmark repetitions without rebuilding the tap.
-/// Enqueued chunks and target installations share one serial queue, so every chunk submitted before
-/// a repetition switch reaches the old target before that target is stopped. `@unchecked Sendable`:
-/// `lock` guards both mutable callback references and they are copied before invocation, so client
-/// code never runs while the relay is locked.
+/// Chunks and installs share one serial queue, so a chunk queued before a switch reaches the old
+/// target before it stops. `@unchecked Sendable`: `lock` guards both callback references, which are
+/// copied before invocation so client code never runs under the lock.
 public final class TranscriptionBenchmarkSessionRelay: @unchecked Sendable {
     private let lock = NSLock()
     private let deliveryQueue = DispatchQueue(
@@ -51,8 +49,7 @@ public final class TranscriptionBenchmarkSessionRelay: @unchecked Sendable {
         capturedAt: TimeInterval,
         speechEvents: [LocalSpeechEvent]
     ) {
-        // One lock snapshot keeps continuity evidence, PCM, and speech edges on the same session
-        // even when the runner installs the next repetition concurrently.
+        // One snapshot keeps evidence, PCM, and speech edges on the same session during an install.
         lock.lock(); let session = session; let onCapture = onCapture; lock.unlock()
         onCapture?(sequence, samples)
         session?.recordCapturedAudio(

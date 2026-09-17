@@ -1,8 +1,5 @@
 import Foundation
 
-/// A bounded exponential retry schedule shared by long-lived runtime infrastructure. The caller
-/// owns the work and lifecycle; this type only makes "temporary failure gets retries before a
-/// terminal consequence" a small, deterministic, unit-tested rule.
 public struct RetrySchedule: Sendable, Equatable {
     public let maximumRetries: Int
     public let initialDelay: TimeInterval

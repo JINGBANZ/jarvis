@@ -1,30 +1,17 @@
 import AppKit
 import JarvisCore
 
-/// The launch gate. Jarvis needs Microphone, System Audio Recording, and Screen Recording to coach
-/// at all, so it asks for them at launch and stays closed until it holds all three.
-///
-/// Two reasons it is a gate rather than a prompt. A TCC dialog is system UI that no
-/// capture-exclusion trick hides, so one arriving at the first Start lands in the middle of an
-/// interview, over a shared screen. And a half-granted install is not a usable product — it would
-/// only fail later, further from the cause.
-///
-/// The window's close button quits Jarvis: grant or quit is the whole choice. Nothing records that
-/// the gate has run, because it is shown exactly when the grants are incomplete — a refusal simply
-/// brings it back next launch, which is also the only way back in, since macOS never re-prompts.
+// Design: wiki/architecture.md#permissions
 @MainActor
 final class PermissionGate: NSObject, NSWindowDelegate {
-    /// Every grant Jarvis requires before it will run.
     static let required = Set(JarvisReadiness.Permission.allCases)
 
-    /// Called once Jarvis holds every grant and the user has asked to get on with it. The host
-    /// builds the rest of the app then, and not before.
+    /// The host builds the rest of the app only after this fires.
     var onSatisfied: (() -> Void)?
 
     private let preferences: PermissionPreferences
     private var window: NSWindow?
     private var checklist: PermissionsChecklistView?
-    /// Set once the user has finished, so closing the window stops meaning "quit".
     private var isSatisfied = false
 
     private static let contentSize = NSSize(width: 560, height: 404)
@@ -33,17 +20,9 @@ final class PermissionGate: NSObject, NSWindowDelegate {
         self.preferences = preferences
     }
 
-    /// Whether macOS holds every required grant, proving the one that cannot be read.
-    ///
-    /// Nothing is remembered between launches, so this is evidence rather than recollection: a
-    /// grant the user withdrew since the last launch is simply not proved here.
+    /// Runs the system-audio probe, which may prompt, only once the readable grants are held.
     func holdsEveryGrant() async -> Bool {
-        // The two readable grants first, because they cost nothing and cannot prompt. If either is
-        // missing the gate is opening anyway, so the walk proves system audio with the window on
-        // screen to explain any dialog it raises.
-        // Holding the grant proves we were not refused, so the asked-marker has served its purpose.
-        // Left set, a later reset would make the gate call a fresh, undetermined grant a refusal and
-        // label the row while its dialog is still on screen.
+        // Clear the asked marker once granted, or a later TCC reset would read as a refusal.
         if Permissions.isGranted(.screenRecording) {
             preferences.screenRecordingAsked = false
         }
@@ -52,8 +31,6 @@ final class PermissionGate: NSObject, NSWindowDelegate {
         return await Permissions.request(.systemAudio, remembering: preferences)
     }
 
-    /// Puts the gate on screen. The caller checks `isOpen` first; there is no menu bar, overlay, or
-    /// session runtime behind this window until it closes satisfied.
     func present() {
         NSApp.setActivationPolicy(.regular) // ghost-mode-allowed: launch permission gate
         if window == nil { build() }
@@ -90,8 +67,7 @@ final class PermissionGate: NSObject, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: restoring the menu-bar-only app
         guard isSatisfied else {
-            // Closing an unsatisfied gate is the user declining to grant. Jarvis cannot coach
-            // without these, so it leaves rather than lurking in the menu bar unable to start.
+            // Closing unsatisfied is declining, and Jarvis cannot coach without the grants.
             NSApp.terminate(nil)
             return
         }

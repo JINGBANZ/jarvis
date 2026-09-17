@@ -1,7 +1,6 @@
 import Foundation
 
-/// Separates routine bounded replay-window aging from eviction that can affect active recovery.
-/// Healthy delivery reports the first expiry once; recovery loss remains periodically visible.
+/// Routine replay-window aging is reported once; eviction during recovery keeps being reported.
 public struct ReplayBufferEvictionAccumulator: Sendable {
     public enum Report: Equatable, Sendable {
         case boundedReplayWindowReached([UInt64])

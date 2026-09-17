@@ -4,12 +4,8 @@ import JarvisCore
 import JarvisEvaluation
 import Testing
 
-/// Launches the signed development app in its live e2e mode for one scenario file and hands back
-/// what the session left.
-///
-/// Only `scripts/run-live-tests.sh` supplies the handshake variables: the run directory it created
-/// and the app it just built. Without them nothing launches, so the target cannot reach a provider
-/// by accident when someone runs `swift test` directly.
+/// Launches only with the handshake variables `scripts/run-live-tests.sh` sets, so a direct
+/// `swift test` never reaches a provider.
 struct LiveE2ELauncher {
     let scenarioID: String
     let scenarioFile: String
@@ -25,20 +21,16 @@ struct LiveE2ELauncher {
         .appendingPathComponent("Tests/JarvisLiveTests/Fixtures", isDirectory: true)
     static let scenariosDirectory = repository
         .appendingPathComponent("Tests/JarvisLiveTests/Scenarios", isDirectory: true)
-    /// Written by `finish` when a scenario failed, so later scenarios skip unless `--keep-going`.
     private static let stopMarker = "stop-after-failure"
     private static let appProcessPattern = "/Jarvis Dev[.]app/Contents/MacOS/JarvisApp"
     private static let launchTimeout: TimeInterval = 22 * 60
 
-    /// The subscription helper bundled in this app, the one child a session may leave running.
     private var helperProcessPattern: String {
         NSRegularExpression.escapedPattern(
             for: app.appendingPathComponent("Contents/MacOS/cliproxyapi").path)
     }
 
-    /// Everything a scenario test needs before launching, or nil when it must not launch: the
-    /// script's handshake or the preflight is missing (an issue is recorded), or an earlier scenario
-    /// failed without `--keep-going` (a skipped line is written).
+    /// Nil when the scenario must not launch; the issue or skipped line is already recorded.
     static func begin(scenario scenarioID: String, file: String? = nil) async -> LiveE2ELauncher? {
         let environment = ProcessInfo.processInfo.environment
         guard let run = environment["JARVIS_LIVE_E2E_RUN_DIR"],
@@ -65,9 +57,8 @@ struct LiveE2ELauncher {
             keepGoing: keepGoing)
     }
 
-    /// Launch the app on this scenario and wait for it to exit. On timeout the app is asked to abort,
-    /// then killed. A launch that throws never reaches `finish`, so it kills the app and stops later
-    /// scenarios itself before rethrowing.
+    /// A throwing launch never reaches `finish`, so it kills the app and stops later scenarios
+    /// itself.
     func launch(secretsDirectory: URL? = nil) async throws -> LiveE2ELaunch {
         do {
             return try await launchAndWait(secretsDirectory: secretsDirectory)
@@ -78,8 +69,6 @@ struct LiveE2ELauncher {
         }
     }
 
-    /// Write this scenario's results lines, and stop later scenarios after a failure unless the run
-    /// keeps going.
     func finish(_ results: LiveE2EResults) throws {
         if results.hasFailure { stopLaterScenarios() }
         try Self.write(results, to: directory)
@@ -132,15 +121,14 @@ struct LiveE2ELauncher {
             try await Task.sleep(for: .milliseconds(200))
         }
 
-        // The app signals its helper as it exits; give the helper a moment before calling it leftover.
+        // The app signals its helper on exit; give the helper up to 5s before calling it leftover.
         var leftovers = Self.processIDs(matching: helperProcessPattern).subtracting(processesBefore)
         for _ in 0..<25 where !leftovers.isEmpty {
             try await Task.sleep(for: .milliseconds(200))
             leftovers = Self.processIDs(matching: helperProcessPattern).subtracting(processesBefore)
         }
-        // A forced teardown killed the app before it could signal its helper, so this run owns what
-        // survives. G08 still reports the leftover and still fails, but the process does not outlive
-        // the run, and `--keep-going` cannot hide it inside the next scenario's baseline.
+        // A forced teardown never signalled the helper. G08 still fails on it, but killing it keeps
+        // it out of the next scenario's baseline.
         if timedOut, !leftovers.isEmpty {
             Self.run("/bin/kill", leftovers.sorted().map(String.init))
         }
@@ -163,7 +151,6 @@ struct LiveE2ELauncher {
             leftoverHelperIDs: leftovers.sorted())
     }
 
-    /// A run-local secrets directory holding an obviously invalid OpenAI key, for F02.
     func makeInvalidKeyDirectory() throws -> URL {
         let secrets = runDirectory.appendingPathComponent("\(scenarioID)-secrets", isDirectory: true)
         try FileManager.default.createDirectory(
@@ -229,7 +216,6 @@ struct LiveE2ELauncher {
     }
 }
 
-/// What one scenario launch left behind.
 struct LiveE2ELaunch {
     let scenario: LiveE2EScenario
     let directory: URL
@@ -238,9 +224,8 @@ struct LiveE2ELaunch {
     let sessionCount: Int
     let sessionDirectory: URL?
     let evidence: LiveSessionEvidence?
-    /// Step index to attempt id, from the runner's `steps.jsonl`.
+    /// Step index to attempt id.
     let stepAttempts: [Int: Int]
-    /// Subscription helpers from this app still running after it exited.
     let leftoverHelperIDs: [Int32]
 
     func stepIndices(_ isIncluded: (LiveE2EScenario.Step) -> Bool) -> [Int] {
@@ -252,20 +237,18 @@ struct LiveE2ELaunch {
         return evidence?.attempt(id: id)
     }
 
-    /// The step's attempt followed by the retries its provider stalls caused; empty when the step
-    /// matched no attempt. A step's cases are judged on this chain and its last attempt.
+    /// Empty when the step matched no attempt.
     func attemptChain(forStep step: Int?) -> [LiveSessionEvidence.Attempt] {
         guard let first = attempt(forStep: step), let evidence else { return [] }
         return evidence.retryChain(from: first)
     }
 }
 
-/// The run's one preflight: the OpenAI key resolves and both subscriptions hold a saved sign-in.
-/// It reads files only, so it never starts a second helper beside the one the app runs.
+/// Reads files only, so it never starts a second helper beside the app's.
 enum LiveE2EPreflight {
     static let failure: String? = {
-        // The app is launched through LaunchServices, which does not hand it this shell's
-        // environment, so only the owner-only key file can serve the run.
+        // LaunchServices does not pass this shell's environment, so only the key file serves the
+        // run.
         guard FileSecretStore().apiKey(for: .openAIAPIKey)?.isEmpty == false else {
             return "No OpenAI API key in Jarvis's key file: save one in Jarvis Settings → Connections. "
                 + "OPENAI_API_KEY does not reach an app launched with open."

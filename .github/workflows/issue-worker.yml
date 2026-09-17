@@ -1,6 +1,4 @@
-# The shared workflow's main branch gates every opened issue before its agent job: only an author
-# with admin, maintain, or write permission — or the pipeline's own GitHub App, which files issues
-# via Issue Opener — can proceed. Its runner default is `ubuntu-latest`.
+# The shared workflow runs the agent only for authors with write access or the pipeline's own App.
 name: Issue Worker
 
 on:

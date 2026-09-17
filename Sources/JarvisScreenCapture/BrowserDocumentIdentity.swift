@@ -1,5 +1,5 @@
-/// Stable Chrome tab state sampled before the screenshot. Read deadlines belong to each AX pass,
-/// so synchronous screenshot latency cannot expire a later semantic-text read.
+/// Sampled before the screenshot. Each later AX pass takes its own deadline, so screenshot latency
+/// cannot expire the text read.
 public struct BrowserDocumentIdentity: Sendable, Equatable {
     let value: String
 

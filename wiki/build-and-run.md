@@ -125,7 +125,9 @@ Releases are cut by `.github/workflows/release.yml`, not by hand: on every push 
 **release-please** maintains a standing Release PR from the conventional-commit history (bumping both
 version keys in `Resources/Info.plist` via `x-release-please-version` annotations, plus the
 CHANGELOG — config in `release-please-config.json`). Merging that PR is the manual release approval:
-it creates the GitHub Release **as a draft**, with no second deployment approval. An Apple-silicon
+it creates the GitHub Release **as a draft**, with no second deployment approval. `force-tag-creation`
+tags that draft immediately: GitHub otherwise defers tagging a draft until publish, and an untagged
+draft makes the next release-please run miss the previous release and garble the changelog. An Apple-silicon
 `macos-26` job then runs the test gate, installs only the hash-pinned pure-Python wheels in
 `scripts/requirements-release.txt` into an ephemeral environment, and signs/notarizes with secrets
 scoped to the main-only `release` environment (the base64 `.p12` certificate and an App Store Connect

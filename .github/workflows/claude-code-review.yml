@@ -1,26 +1,20 @@
 name: Claude Code Review
 
-# Review logic follows the shared workflow's main branch. Automatic reviews remain limited to
-# branches in this repository: a fork `pull_request` run cannot read CLAUDE_CODE_OAUTH_TOKEN, and a
-# `pull_request_target` caller would hand fork-authored input to a credential-bearing reviewer (the
-# read-only `permissions:` block bounds only GITHUB_TOKEN, not the App token the action posts with).
-# CodeRabbit reviews forks. The reusable workflow defaults to `ubuntu-latest`.
+# Same-repo branches only. Never switch to `pull_request_target`: it would hand fork-authored input
+# to a reviewer holding the App token, which `permissions:` does not bound. CodeRabbit reviews forks.
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review, reopened]
 
 jobs:
   review:
-    # release-please's standing Release PR carries only generated version bumps (CHANGELOG,
-    # Info.plist, manifest) — nothing an author wrote and nothing a review can improve.
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository
       && github.actor != 'dependabot[bot]'
       && !startsWith(github.head_ref, 'release-please--')
     uses: JINGBANZ/workflows/.github/workflows/claude-code-review.yml@main
     with:
-      # The issue-worker opens PRs as the pipeline's GitHub App; without this allow-list entry the
-      # review action rejects bot-initiated runs, so agent PRs would land unreviewed-by-Claude.
+      # Issue Worker opens PRs as this App; without it the action skips agent PRs.
       allowed-bots: jingbanz-agent
     permissions:
       contents: read

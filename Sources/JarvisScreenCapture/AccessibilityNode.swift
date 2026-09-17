@@ -1,7 +1,6 @@
 import Foundation
 
-/// Value-only snapshot of the small Accessibility subtree the extractor needs. AX objects stay at
-/// the macOS edge and never cross into parsing tests or asynchronous state.
+/// Value-only: AX objects stay at the macOS edge and never cross into parsing or async state.
 struct AccessibilityNode: Sendable, Equatable {
     let role: String
     let text: String?

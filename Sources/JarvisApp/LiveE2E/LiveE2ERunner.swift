@@ -4,20 +4,7 @@ import JarvisBrainProviders
 import JarvisCore
 import JarvisOverlay
 
-/// Runs one live e2e scenario through the production session composition in a hidden process.
-///
-/// Everything a menu Start builds is built here by the same `SessionComposition`. The scenario
-/// chooses only what a person would: the brain route and capability switches (written to a private
-/// defaults suite, never the developer's own), the audio source (synthesized speech on both streams,
-/// or the real capture device), and when a line is spoken, a shortcut pressed, a brain switched, or
-/// the session stopped.
-///
-/// Steps wait on the app's own coaching-attempt records, never on timers, so chronology and
-/// in-flight cases run against real state. A spoken step matches the next `turn_end` attempt and a
-/// press matches its manual attempt; the automatic silence check can start attempts of its own in
-/// between, so each match is written to `steps.jsonl` for the checker instead of being inferred from
-/// order. The screen is the scenario's fixture image, handed to the composition's screen capture in
-/// place of the Mac's front window, so a developer can keep using the Mac during a run.
+// Design: wiki/live-e2e-tests.md
 @MainActor
 final class LiveE2ERunner: BrainCompositionHost {
     enum Failure: Error, CustomStringConvertible {
@@ -72,8 +59,7 @@ final class LiveE2ERunner: BrainCompositionHost {
     private var brain: BrainComposition!
     private var composition: SessionComposition!
     private var fixtureSource: FixtureAudioSource?
-    /// The same helper a menu Start uses, with the developer's own sign-ins. The run stops it when
-    /// the scenario ends, so no launch leaves one behind.
+    /// Uses the developer's own sign-ins, not the run-local secrets directory.
     private let supervisor = LocalProxySupervisor(
         executable: LocalProxySupervisor.bundledExecutable(),
         home: FileSecretStore().directoryURL.appendingPathComponent("proxy", isDirectory: true))
@@ -82,8 +68,7 @@ final class LiveE2ERunner: BrainCompositionHost {
     private var expectsSessionEnd = false
     private var drain: Task<Void, Never>?
     private var attemptEvents: [AttemptEvent] = []
-    /// Where in `attemptEvents` a line scheduled ahead of its own step was started, so that step
-    /// matches only attempts after its speech began.
+    /// The `attemptEvents` index where a step's line began playing early, keyed by step.
     private var earlyClipMarks: [Int: Int] = [:]
     private var stepAttemptLines: [String] = []
     private var currentStep: Int?
@@ -91,7 +76,7 @@ final class LiveE2ERunner: BrainCompositionHost {
 
     init(options: LiveE2EOptions) {
         self.options = options
-        // F02 points the file half of the store at a run-local directory holding an invalid key.
+        // A run-local secrets directory lets a scenario supply an invalid key.
         secrets = ChainedSecretStore([
             FileSecretStore(directoryURL: options.secretsDirectory), EnvSecretStore(),
         ])
@@ -101,8 +86,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             directory: options.outputDirectory.appendingPathComponent("fixtures", isDirectory: true))
     }
 
-    /// Run the scenario, then leave `live-e2e-finished` only after the session's evidence is sealed,
-    /// or `live-e2e-error.json` naming the step that failed.
+    /// Writes `live-e2e-finished` only after the session evidence is sealed.
     func run() async {
         runDeadline = Date().addingTimeInterval(Self.scenarioTimeout)
         do {
@@ -130,7 +114,6 @@ final class LiveE2ERunner: BrainCompositionHost {
         try speech.removeDirectory()
     }
 
-    /// Signals the subscription helper as the process exits, so no launch leaves one running.
     func terminateProxyHelper() {
         supervisor.terminateNow()
     }
@@ -181,8 +164,7 @@ final class LiveE2ERunner: BrainCompositionHost {
                     mark = attemptEvents.count
                     play(spoken, line: line, overlap: overlap)
                 }
-                // A following line marked `whileAttemptRunning` starts as soon as this step's
-                // attempt does, so it lands while that attempt is in flight.
+                // A next line marked `whileAttemptRunning` plays once this attempt starts.
                 var onStart: (() -> Void)?
                 let next = index + 1
                 if next < steps.count, case .say(let nextLine, let nextOverlap, true) = steps[next],
@@ -199,8 +181,6 @@ final class LiveE2ERunner: BrainCompositionHost {
             case .switchBrain(let provider):
                 brain.preferences.route = BrainRoute(
                     primary: Self.defaultTarget(for: provider), fallbackTargets: [])
-                // Applied the way a Settings topology edit is: on the next attempt, with the
-                // session's transcript, history, and loaded capabilities intact.
                 await brain.applyBrainPreferencesToRunningSession(
                     update: .topologyEdit)
             case .stop:
@@ -215,9 +195,8 @@ final class LiveE2ERunner: BrainCompositionHost {
         let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
         guard !key.isEmpty else { throw Failure.credentialUnavailable }
         let route = brain.preferences.route
-        // The readiness requirements of a menu Start. Its system-audio tone probe is skipped: fixture
-        // sources never open the tap, and the device scenario fails at the capture's own start when
-        // that grant is gone.
+        // No system-audio probe: fixtures never open the tap, and the device scenario fails at
+        // capture start when that grant is gone.
         let begun = readiness.begin(configuration: JarvisReadiness.Configuration(
             requiredPermissions: PermissionGate.required.subtracting([.systemAudio]),
             requiredCredentials: TranscriptionProvider.openAI.requiredCredentials(for: route)))
@@ -250,10 +229,9 @@ final class LiveE2ERunner: BrainCompositionHost {
             brainAPIKey: key,
             brainRoute: route,
             appleSpeechLocale: nil,
-            // The fixture capture shows the scenario's image whatever the selection names.
             screen: SessionPlan.default.screen,
             prepSources: prepSources,
-            // The scenarios press Show code and Explain more, which both answer into the box.
+            // Scenarios press Show code and Explain more, which both answer into the box.
             detailEnabled: true)
         guard composition.start(
             inputs, proxy: proxy, readinessSession: readinessSession,
@@ -313,8 +291,7 @@ final class LiveE2ERunner: BrainCompositionHost {
                 self?.fixtureSource = source
                 return source
             })
-        // The one lifecycle consequence a failure has here: stop so the evidence seals. Runtime
-        // context everywhere, so no alert can ever block this process.
+        // Stop so the evidence seals. Runtime context only, so no alert can block this process.
         errorReporter.onFatal = { [weak self] reason in
             guard let self else { return }
             self.sessionEnd = reason
@@ -324,8 +301,8 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     private func makePreferences(for scenario: LiveE2EScenario) throws -> BrainPreferences {
-        // A private suite, cleared first, so the developer's own route and switches are never read
-        // or written. It holds only route and switch settings, never a secret.
+        // Cleared private suite, so the developer's own settings are never read or written.
+        // It never holds a secret.
         guard let defaults = UserDefaults(suiteName: Self.defaultsSuite) else {
             throw Failure.defaultsSuiteUnavailable
         }
@@ -368,8 +345,6 @@ final class LiveE2ERunner: BrainCompositionHost {
 
     // MARK: - Waits
 
-    /// Wait for the first attempt after `mark` whose trigger matches, then for it to finish, then for
-    /// anything it queued to finish, so the next step starts from a settled conversation.
     private func awaitAttempt(
         step: Int,
         since mark: Int,

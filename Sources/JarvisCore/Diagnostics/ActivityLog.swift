@@ -1,42 +1,23 @@
 import Foundation
 
-/// The model behind the human-facing activity viewer. It records the coaching exchange — heard
-/// speech, manual hint requests, every brain action (screen view, tip, or deliberate silence), and
-/// fixed non-sensitive notices when a brain change succeeds, a route advances, degrades, or stops,
-/// and one typed reason whenever the live session ends. It pushes those entries into an in-app
-/// `WKWebView` window (see `ActivityViewer` in JarvisApp) and persists them so past sessions can be
-/// browsed later. Detailed diagnostics belong exclusively in `JarvisLog`.
-///
-/// This type is UI-free (Foundation only): it generates the page HTML and the per-row JS as plain
-/// strings; the WebView lives in JarvisApp. See wiki/build-and-run.md.
-///
-/// It is the terminal *projection* of the session-evidence stack, not a recorder: producers
-/// admit one `SessionEvent` through `FileSessionAudit`, the one bounded worker persists the row and
-/// its attachment, and this type renders and retains what the worker hands back
-/// (wiki/lean-coaching-core.md, Phase 2).
+// @unchecked Sendable: every mutable field is read and written under `lock`.
 public final class ActivityLog: @unchecked Sendable {
     public static let shared = ActivityLog()
     public static let filename = "jarvis-activity.jsonl"
-    /// The fixed, human-safe notice shown when a session's evidence is known to be incomplete. It
-    /// says the record has holes and nothing else: no transport, retry, timing, lifecycle, or raw
-    /// error detail — that stays in the owner-only session folder. Not an `ActivityEvent`, because
-    /// nothing happened in the coaching exchange; it is a property of the session's record.
+    /// Fixed text only. Never carries transport, retry, timing, lifecycle, or raw error detail.
     public static let incompleteEvidenceNotice = "incomplete record"
     public static let incompleteEvidenceDetail =
         "Some of this session's activity could not be saved." 
-    /// Shared live/history backstop. Both paths retain insertion identities first, then ask
-    /// `ConversationChronology` to display those retained entries by event time.
+    /// Runaway backstop only, sized so a multi-hour session still replays whole.
     public static let retainedEntryLimit = 10_000
 
-    /// One recorded line. `imageFile` is the relative `shot-N.jpg` name on disk (the bytes the DOM
-    /// renders are passed separately as base64), or nil for a plain text line.
     public struct Entry: Sendable, Equatable {
         public let time: String
         public let message: String
+        /// Relative `shot-N.jpg` name on disk, or nil for a text line.
         public let imageFile: String?
         public let response: ActivityResponse?
-        /// Numeric event time and stable insertion tie-breaker. Both are nil for old or mixed
-        /// sessions that cannot be reordered safely.
+        /// Both nil for old or mixed sessions that cannot be reordered safely.
         public let occurredAt: TimeInterval?
         public let insertionOrder: UInt64?
         public init(
@@ -56,21 +37,16 @@ public final class ActivityLog: @unchecked Sendable {
         }
     }
 
-    /// The atomic cut point returned by `attach`: the empty page shell plus the current entries
-    /// already encoded as `appendRow(...)` snippets to replay. `shown` = rows in the snapshot
-    /// (capped at `retainedEntryLimit`); `total` = everything recorded this session (for
-    /// "showing last N of M").
     public struct Snapshot: Sendable {
         public let shellHTML: String
         public let rows: [String]
+        /// Rows in the snapshot, capped at `retainedEntryLimit`.
         public let shown: Int
+        /// Everything recorded this session, including rows past the cap.
         public let total: Int
-        /// False when this session is known to have lost evidence, so the window can say so
-        /// instead of presenting an apparently complete story.
         public let evidenceIsComplete: Bool
     }
 
-    /// On-disk line format for `jarvis-activity.jsonl` (one JSON object per line).
     private struct PersistedEntry: Codable {
         let t: String       // time, HH:mm:ss
         let response: ActivityResponse? // absent in legacy, unstructured rows
@@ -82,69 +58,43 @@ public final class ActivityLog: @unchecked Sendable {
         let r: TimeInterval? // record/completion time (Unix seconds), for chronology diagnosis
     }
 
-    /// Why a row did not become a persistable row, so the worker can tell an intended drop from a
-    /// lost one. A session that already ended refuses later rows by design; a projection that has
-    /// rotated to the next session cannot give this row a chronology entry, and that loss is real.
     enum Admission {
         case row(AdmittedRow)
-        /// This session's terminal marker was already recorded. Dropping later rows is the contract.
+        /// The terminal marker was already recorded, so dropping later rows is intended.
         case sessionEnded
-        /// The window moved on to another session before the worker drained this row.
+        /// The window rotated to another session before the worker drained this row. A real loss.
         case notCurrent
     }
 
-    /// One row that has been given its place in the session's chronology and is ready to be
-    /// persisted and pushed. Building it is the projection's decision; writing it is the evidence
-    /// worker's job.
     struct AdmittedRow {
         /// The `jarvis-activity.jsonl` line, without its trailing newline.
         let line: Data
-        /// The live `appendRow(...)` payload for an attached viewer.
         let script: String
     }
 
-    /// In-memory replay cap for a late-attaching viewer. Sized for hours of coaching (an hour-long
-    /// session logs a few thousand lines) — a cap this high exists only as a runaway backstop, so the
-    /// viewer shows the WHOLE session, not just its tail. Entries are small (text + a filename; shot
-    /// bytes stay on disk), so memory is not a concern.
-    ///
-    /// The lock replaces this type's former private serial queue. Admission and publication run on
-    /// the one evidence worker; `attach`/`detach` run on the viewer's thread. It is held only across
-    /// in-memory bookkeeping — no disk access happens behind it any more.
+    // Held only across in-memory bookkeeping, never disk access.
     private let lock = NSLock()
     private var entries = ConversationChronology<Entry>()
-    private var totalCount = 0    // everything recorded this session (survives the retained-entry cap)
-    private var shotSeq = 0       // monotonic id for saved screenshot files this session
+    private var totalCount = 0    // survives the retained-entry cap
+    private var shotSeq = 0
     private var sessionHasEnded = false
     private let df: DateFormatter
     private var dir: URL?         // nil ⇒ disabled (no observer pushes)
-    /// Which session is on screen. The worker drains asynchronously, so a stopped session's rows
-    /// and its close can arrive after a replacement Start has rotated this projection. Every entry
-    /// point below is scoped by this identity: late work from the old session reaches its own
-    /// files, never the new session's window (wiki/lean-coaching-core.md, "A New Session After
-    /// Stop → Start").
+    /// The worker drains asynchronously, so a stopped session's rows and close can arrive after a
+    /// new Start. Every entry point is scoped by this identity to keep them off the new window.
     private var sessionID: UUID?
     private var onAppend: ((String) -> Void)?
-    /// Last completeness the evidence worker reported for this session. Health counters are
-    /// monotonic, so this only ever moves from true to false — one notice, never a flicker.
+    /// Health is monotonic, so this only moves from true to false: one notice, never a flicker.
     private var evidenceIsComplete = true
 
-    /// Internal so tests can spin up an isolated instance; the app uses `.shared`.
     init() {
         df = DateFormatter()
-        // Fixed-format formatter: pin to en_US_POSIX + Gregorian so output is stable regardless of
-        // the user's locale or system calendar (Apple QA1480).
+        // Fixed-format formatter: pin locale and calendar so output ignores user settings (QA1480).
         df.locale = Locale(identifier: "en_US_POSIX")
         df.calendar = Calendar(identifier: .gregorian)
         df.dateFormat = "HH:mm:ss"
     }
 
-    /// Turn on the viewer for a session. `directory` is this session's dir, used to re-read
-    /// screenshot bytes when a viewer attaches late, and `session` is the evidence handle's
-    /// identity, which scopes every later call from the worker. The empty owner-only
-    /// `jarvis-activity.jsonl` that makes the session discoverable by `SessionStore.listSessions()`
-    /// is created by the evidence worker when it opens the session, alongside every other evidence
-    /// file.
     public func enable(directory: URL, session: UUID) {
         lock.withLock {
             dir = directory
@@ -154,7 +104,6 @@ public final class ActivityLog: @unchecked Sendable {
         }
     }
 
-    /// Turn the viewer back off (no further pushes).
     public func disable() {
         lock.withLock {
             dir = nil
@@ -168,13 +117,6 @@ public final class ActivityLog: @unchecked Sendable {
         }
     }
 
-    /// The evidence worker's verdict on this session's record, reported when it persists a row and
-    /// again when it seals the session. The signal is the existing monotonic health record — there
-    /// is no second counter — so the notice appears once, on the transition, and never retracts.
-    ///
-    /// A stopped session's close routinely lands after a replacement Start (Stop drains cancelled
-    /// turns and compaction first), so this is scoped by session: a partial old session never puts
-    /// an incomplete-record notice on the new session's healthy window.
     func noteEvidence(isComplete: Bool, for session: UUID) {
         let observer = lock.withLock { () -> ((String) -> Void)? in
             guard sessionID == session, !isComplete, evidenceIsComplete else { return nil }
@@ -184,17 +126,11 @@ public final class ActivityLog: @unchecked Sendable {
         observer?(Self.evidenceScript(isComplete: false))
     }
 
-    /// Whether this projection is showing `session` and it has not yet ended. The worker checks it
-    /// before decoding and writing a screenshot, so a row that will be refused leaves no orphan
-    /// `shot-N.jpg` behind.
     func isRecording(for session: UUID) -> Bool {
         lock.withLock { dir != nil && sessionID == session && !sessionHasEnded }
     }
 
-    /// Reserve the next owner-only screenshot filename for this session. The worker writes the
-    /// bytes; the sequence belongs here because it is per-session viewer state. Returns nil once
-    /// this projection has moved on, so a stopped session cannot consume the live session's
-    /// numbering.
+    /// Nil once this projection has moved on to another session.
     func nextShotFilename(for session: UUID) -> String? {
         lock.withLock {
             guard sessionID == session else { return nil }
@@ -203,10 +139,7 @@ public final class ActivityLog: @unchecked Sendable {
         }
     }
 
-    /// Give one occurrence its place in the session chronology and build what to persist and push.
-    ///
-    /// Teardown can race a coaching task that is finishing cancellation. Once the typed end marker
-    /// is admitted, it is the final event for this session by definition.
+    /// Once the end marker is admitted, later rows are refused even if a cancelled task races it.
     func admit(
         _ event: ActivityEvent,
         at date: Date,
@@ -239,7 +172,6 @@ public final class ActivityLog: @unchecked Sendable {
             guard let line = Self.persistedLine(
                 entry, kind: rendered.kind, recordedAt: recordedAt)
             else { return .notCurrent }
-            // Push with the live bytes in hand (no disk read on the hot path).
             return .row(AdmittedRow(
                 line: line,
                 script: Self.rowScript(
@@ -253,18 +185,13 @@ public final class ActivityLog: @unchecked Sendable {
         }
     }
 
-    /// Push an admitted row to the live viewer. Called after persistence is attempted: a failed
-    /// write costs the row its place in history, not its place on screen. Only `admit` can produce
-    /// a row, and only for the session on screen, so the identity check here is belt-and-braces
-    /// against a rotation landing between the two calls.
+    /// The identity check guards against a session rotation between `admit` and `publish`.
     func publish(_ row: AdmittedRow, for session: UUID) {
         let observer = lock.withLock { sessionID == session ? onAppend : nil }
         observer?(row.script)
     }
 
-    /// Atomically register the live observer and capture the current snapshot, so every subsequent
-    /// entry arrives via `onAppend` exactly once — never double-rendered or missed. Snapshot rows
-    /// re-read their screenshot bytes from disk (a rare, one-shot cost when the viewer opens).
+    /// Registers the observer and snapshots under one lock, so no later row is missed or doubled.
     public func attach(_ onAppend: @escaping (String) -> Void) -> Snapshot {
         lock.withLock {
             self.onAppend = onAppend
@@ -289,10 +216,8 @@ public final class ActivityLog: @unchecked Sendable {
         }
     }
 
-    /// Stop pushing to the observer (e.g. while the viewer shows a *past* session).
     public func detach() { lock.withLock { onAppend = nil } }
 
-    /// Encode one `jarvis-activity.jsonl` line. Pure — the worker owns the write.
     private static func persistedLine(
         _ entry: Entry,
         kind: ActivityEvent.Kind,
@@ -311,11 +236,7 @@ public final class ActivityLog: @unchecked Sendable {
 
     // MARK: - Pure rendering (testable without a WebView)
 
-    /// The JS call that renders one row. Pushed to `evaluateJavaScript` (live) or replayed from a
-    /// snapshot. The payload is a JSON object literal; the page's JS sets text via `textContent` and
-    /// the image via `img.src`, so the message is XSS-safe by construction and no HTML escaping is
-    /// needed here. `imageBase64`, when present, becomes an in-memory `data:` URI. A live row's
-    /// insertion index is computed by `ConversationChronology`; the WebView only applies it.
+    /// No HTML escaping needed: the page sets text via `textContent` and the image via `img.src`.
     public static func rowScript(
         time: String,
         message: String,
@@ -351,15 +272,12 @@ public final class ActivityLog: @unchecked Sendable {
         return "appendRow(\(json));"
     }
 
-    /// The JS call that shows or clears the incomplete-record notice. Both strings are fixed and
-    /// human-safe; the page sets them with `textContent`/`title`, so nothing here can inject markup.
     public static func evidenceScript(isComplete: Bool) -> String {
         let label = isComplete ? "" : incompleteEvidenceNotice
         let detail = isComplete ? "" : incompleteEvidenceDetail
         return "setEvidence(\(jsString(label)),\(jsString(detail)));"
     }
 
-    /// JSON-encode one string for embedding in a `evaluateJavaScript` call.
     private static func jsString(_ value: String) -> String {
         guard let data = try? JSONEncoder().encode(value),
               let json = String(data: data, encoding: .utf8)
@@ -367,9 +285,7 @@ public final class ActivityLog: @unchecked Sendable {
         return json
     }
 
-    /// Colour class keyed on the line's **leading marker** (the intentional emoji prefix), not a
-    /// substring match anywhere — so a coaching tip that happens to contain "failed" isn't
-    /// mis-coloured as an error.
+    /// Keyed on the leading marker, not a substring, so a tip saying "failed" isn't an error.
     static func cssClass(for message: String) -> String {
         let m = message.trimmingCharacters(in: .whitespaces)
         if m.hasPrefix("💬") { return "say" }
@@ -386,15 +302,12 @@ public final class ActivityLog: @unchecked Sendable {
         return ""
     }
 
-    /// Whether a persisted row belongs in the human-facing viewer. New rows are guaranteed by the
-    /// typed `Event` API; this also hides diagnostic rows from sessions written by older builds.
     static func isHumanFacing(
         message: String,
         imageFile: String?,
         kind: ActivityEvent.Kind? = nil
     ) -> Bool {
-        // Current builds persist a stable kind only for typed, human-facing events. Prefix matching
-        // remains the compatibility path for logs created before event kinds were added.
+        // Prefix matching hides diagnostic rows in persisted logs that predate event kinds.
         if kind != nil { return true }
         if imageFile != nil { return true }
         let m = message.trimmingCharacters(in: .whitespaces)
@@ -402,8 +315,7 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("👁 looking at your screen") || m.hasPrefix("👁 couldn't view your screen")
             || m.hasPrefix("💬") || m.hasPrefix("🤫 stayed silent")
             || m.hasPrefix("⏹ session ended")
-            // The retry notice's cause is now the failure's own sentence, so this keys on the fixed
-            // frame instead of the wording in front of it; both older wordings end the same way.
+            // The retry notice's cause text varies, so this keys on its fixed suffix.
             || (m.hasPrefix("⚠️") && m.hasSuffix("listening continues"))
             || m.hasPrefix("⚠️ system audio stopped")
             || m.hasPrefix("⚠️ settings change wasn't applied")
@@ -413,10 +325,7 @@ public final class ActivityLog: @unchecked Sendable {
             || m.hasPrefix("⚠️ brain change failed")
     }
 
-    /// The empty page shell: an adaptive Settings-style activity feed, a header with a live count and
-    /// non-persisted readiness badge, the lightbox overlay, and the JS that the App viewer drives.
-    /// Rows are injected at runtime via `evaluateJavaScript`; no row HTML is rendered server-side, so
-    /// the page never embeds untrusted text and there is no reload.
+    /// Rows are injected at runtime, so the shell never embeds untrusted text.
     public static func htmlShell() -> String {
         """
         <!doctype html><html lang="en"><head>

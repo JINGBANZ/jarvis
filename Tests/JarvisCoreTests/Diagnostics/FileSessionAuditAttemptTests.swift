@@ -62,8 +62,7 @@ import Testing
             transcriptStartIndex: 4,
             transcriptLines: [line],
             classifications: [.compositeFiller],
-            // Simulate a gate regression: diagnostics must retain the actual inclusion fact rather
-            // than recomputing it from the classification under audit.
+            // Deliberately contradicts the classification, as a gate regression would.
             brainFacingTranscriptIndices: [4])
         _ = await log.closeForTesting()
 

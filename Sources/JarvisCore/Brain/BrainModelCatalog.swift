@@ -1,11 +1,6 @@
 import Foundation
 
-/// The curated brain models the user can pick from, per provider — the single source of truth for
-/// the Settings model dropdown and the defaults. Bump a list when a provider ships a new model — a
-/// one-line edit. (Transcription models are a separate concern and are NOT listed here.)
 public enum BrainModelCatalog {
-    /// The curated OpenAI model ids shared by the OpenAI API and Codex pickers,
-    /// confirmed against OpenAI's official model docs (September 2026).
     public static let all: [BrainModel] = [
         BrainModel(id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol"),
         BrainModel(id: "gpt-6-astra", displayName: "GPT-6 Astra"),
@@ -20,7 +15,6 @@ public enum BrainModelCatalog {
         all.first { $0.id == id }
     }
 
-    /// The curated Claude model ids shared by every Claude provider.
     private static let claude: [BrainModel] = [
         BrainModel(id: "claude-opus-5", displayName: "Claude Opus 5"),
         BrainModel(id: "claude-sonnet-5", displayName: "Claude Sonnet 5"),
@@ -29,11 +23,8 @@ public enum BrainModelCatalog {
         BrainModel(id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5"),
     ]
 
-    /// Concrete models per provider. Every OpenAI-family provider intentionally shares one list, and
-    /// every Claude provider the other. Older concrete releases remain selectable so catalog
-    /// additions do not invalidate saved routes; one Codex does not serve fails at
-    /// request time with the helper's `model_not_found`. Invitation-only Mythos releases and rolling
-    /// aliases are excluded.
+    /// Older releases stay listed so saved routes stay valid; a model Codex doesn't serve fails
+    /// with `model_not_found`. Invitation-only Mythos releases and rolling aliases are excluded.
     public static func models(for provider: BrainProvider) -> [BrainModel] {
         switch provider {
         case .openAI, .codexSubscription:
@@ -43,7 +34,6 @@ public enum BrainModelCatalog {
         }
     }
 
-    /// The first curated model is the provider default when nothing valid is persisted.
     public static func defaultModel(for provider: BrainProvider) -> BrainModel {
         models(for: provider).first!
     }
@@ -52,8 +42,7 @@ public enum BrainModelCatalog {
         models(for: provider).first { $0.id == id }
     }
 
-    /// The cheap verified model each provider uses for history-compaction summaries. Empty means
-    /// the target's own model: Codex serves neither mini model.
+    /// Empty means the target's own model: Codex serves neither mini model.
     public static func summarizerModelID(for provider: BrainProvider) -> String {
         switch provider {
         case .openAI: return "gpt-5.4-mini"

@@ -1,8 +1,7 @@
 @preconcurrency import ApplicationServices
 import Foundation
 
-/// Optional browser-text grant. Live capture only reads `isGranted`; the prompt path is reachable
-/// solely from the explicit Screen Settings control while the session lifecycle is stopped.
+/// Live capture only reads `isGranted`; `request` is reachable only from Settings while stopped.
 @MainActor
 enum BrowserAccessibilityPermission {
     static var isGranted: Bool { AXIsProcessTrusted() }

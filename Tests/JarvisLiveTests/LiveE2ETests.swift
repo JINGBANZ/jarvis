@@ -3,12 +3,8 @@ import JarvisCore
 import JarvisEvaluation
 import Testing
 
-/// The live e2e cases, asserted on what each scenario's session left behind.
-///
-/// Steps live in `Scenarios/*.json`; the case index and the reasoning live in
-/// wiki/live-e2e-tests.md. Every assertion is an order or a count, never a wording or a duration,
-/// because model phrasing and provider latency vary between runs. Where the outcome is the model's
-/// choice, the case records a note instead of asserting.
+/// Assert orders and counts, never wording or durations: model phrasing and provider latency vary.
+/// Design: wiki/live-e2e-tests.md
 @Suite(.serialized)
 struct LiveE2ETests {
     typealias Evidence = LiveSessionEvidence
@@ -108,13 +104,13 @@ struct LiveE2ETests {
                 try launcher.finish(results)
                 return
             }
-            let b1 = launch.attemptChain(forStep: presses[0])      // Show code, on a cold session
-            let b3 = launch.attemptChain(forStep: presses[1])      // Explain more
+            let b1 = launch.attemptChain(forStep: presses[0])
+            let b3 = launch.attemptChain(forStep: presses[1])
             let b2 = launch.attemptChain(forStep: says[0])
             Self.noteStalls([("B1", b1), ("B3", b3), ("B2", b2)], evidence, &results)
             let b1Rows = evidence.rows(inChain: b1)
-            // Committed loads only: a retried press preloads again, exactly as a model load behaves,
-            // so a provider stall must not read as two loads (the rule C10 counts by).
+            // Committed only: a retried press preloads again, so a stall must not read as two
+            // loads.
             let b1Loads = b1.filter(\.isCommitted)
                 .flatMap { evidence.rows(in: $0).compactMap { $0.loadedCapability?.name } }
             let b1Screens = b1Rows.filter { $0.kind == "screenViewed" }.count
@@ -122,16 +118,12 @@ struct LiveE2ETests {
             let b1Summary = "B1 Show code on Claude Code: \(b1Screens) screen view(s), "
                 + "loads \(b1Loads), " + (b1Tip ? "a tip" : "no tip")
             results.note("C01", b1Summary)
-            // The preload puts `coding` in the press's own request, so these are checks now.
             results.check("C09", b1Loads == ["coding"], "B1 loads exactly coding (saw \(b1Loads))")
             results.check("C17", b1Loads == ["coding"], "B1's chain loads nothing else (saw \(b1Loads))")
             results.time("B1 press-to-tip", seconds: Self.pressToTip(evidence, b1))
             results.time("B3 press-to-tip", seconds: Self.pressToTip(evidence, b3))
 
-            // C22: the preload is a replayed `load_skill` call the runner wrote, ahead of the
-            // press's own user messages, and it costs no round trip. Read from the attempt that
-            // answered: a stalled attempt's retry preloads again by design, and `noteStalls` already
-            // records the stall, so the chain as a whole would count it twice.
+            // Answering attempt only: a stalled attempt's retry preloads again by design.
             let answeredRequests = b1.filter(\.isCommitted)
                 .flatMap { evidence.traffic(for: $0) }
                 .filter { $0.tag == "coach" }
@@ -147,15 +139,13 @@ struct LiveE2ETests {
                  "B1's answering attempt replays one runner-written load_skill for coding "
                     + "(saw \(preloads.count))"),
                 (Self.precedes(loadRow, tipRow), "B1's load row precedes its tip"),
-                // Only speak remains permitted on a press once the skill is in hand.
                 (answeredRequests.count == 1,
                  "B1's answering attempt made one request (saw \(answeredRequests.count))"),
             ])
 
-            // C24: the Show code reply's own block. The coding skill may legitimately answer with
-            // no code when the approach itself is wrong, so this is recorded, not required.
+            // A note, not a check: the coding skill may rightly answer with no code when the
+            // approach is wrong.
             results.note("C24", "B1 delivered \(Self.describeDetail(evidence, b1))")
-            // C25: Explain more always has something to say, and Activity is where it is read from.
             let b3Detail = Self.deliveredDetail(evidence, b3)
             results.check("C25", b3Detail?.isEmpty == false,
                           "B3's Explain more delivered a detail (saw \(Self.describeDetail(evidence, b3)))")
@@ -201,8 +191,6 @@ struct LiveE2ETests {
             try launcher.finish(results)
             return
         }
-        // Each step is its attempt chain: the attempt it started plus any retries a provider stall
-        // caused. Rows come from the whole chain, and the last attempt is the one that answered.
         let a1 = launch.attemptChain(forStep: presses[0])
         let a7 = [launch.attemptChain(forStep: presses[1]), launch.attemptChain(forStep: presses[2])]
         let a2 = launch.attemptChain(forStep: says[0])
@@ -221,7 +209,6 @@ struct LiveE2ETests {
         func loads(_ chain: [Attempt]) -> [String] { rows(chain).compactMap { $0.loadedCapability?.name } }
         func count(_ kind: String, in chain: [Attempt]) -> Int { rows(chain).filter { $0.kind == kind }.count }
         func tip(_ chain: [Attempt]) -> Row? { rows(chain).last { $0.kind == "tip" } }
-        /// The rows a case reasons about, in order: loads by name, searches, screen views, endings.
         func sequence(_ chain: [Attempt]) -> [String] {
             rows(chain).compactMap { row -> String? in
                 switch row.kind {
@@ -235,7 +222,6 @@ struct LiveE2ETests {
             }
         }
 
-        // C01: a press loads what its screen needs and still ends in one clean tip.
         func pressChecks(_ chain: [Attempt], _ label: String) -> [LiveE2EResults.Check] {
             let loadRows = rows(chain).filter { $0.kind == "capabilityLoaded" }
             let tipRow = tip(chain)
@@ -321,8 +307,6 @@ struct LiveE2ETests {
         results.note("C13", unexpectedDiagrams.isEmpty
             ? "no diagram outside the architecture stage" : "diagram at \(unexpectedDiagrams)")
 
-        // C14: loaded state survives both switches. OpenAI replays the load pairs the Claude
-        // subscription made.
         let loadsBeforeSwitch = a4.first.map { switchAttempt in
             evidence.attempts
                 .filter { $0.id < switchAttempt.id && $0.isCommitted }
@@ -368,11 +352,8 @@ struct LiveE2ETests {
             (evidence.activity.contains { $0.message.hasPrefix("🗣 heard (me)") }, "the me stream transcribed"),
         ])
 
-        // G02: an earlier-started question stays ahead of a reply that finalized first. Activity rows
-        // and attempt transcripts are stored in insertion order on purpose, and ConversationChronology
-        // orders them by speech time for the viewer and the model. So the case needs a reply stored
-        // before the question but spoken after it started, in both places. The reply is found by
-        // speaker and time, never by wording: a one-word overlap is often mistranscribed.
+        // The reply is matched by speaker and time, never wording: a one-word overlap is often
+        // mistranscribed.
         let questionRow = evidence.activity.last {
             $0.message.hasPrefix("🗣 heard (them)") && Self.normalized($0.message).contains("endpoint")
         }
@@ -433,7 +414,6 @@ struct LiveE2ETests {
             (tip(a1) != nil && tip(a1)?.message != tip(a7[0])?.message, "A7's first hint differs from A1's"),
         ])
 
-        // C22: a press made after `coding` is already loaded preloads nothing.
         let warmPreloads = a7[1].flatMap { evidence.traffic(for: $0) }
             .flatMap { $0.replayedFunctionCalls }
             .filter { $0.callID.hasPrefix("runner_") && $0.name == "load_skill" }
@@ -442,7 +422,6 @@ struct LiveE2ETests {
             (loads(a7[1]).isEmpty, "A7's Show code press records no load row"),
         ])
 
-        // C23: every coach request in this scenario declares the session's one composed schema.
         let coachRequests = evidence.traffic.filter { $0.tag == "coach" }
         let schemas = Set(coachRequests.compactMap(\.speakParameters))
         results.check("C23", [
@@ -452,7 +431,6 @@ struct LiveE2ETests {
              "every coach request's instructions carry the Detail section"),
         ])
 
-        // C24: the Show code press's own block, recorded rather than required.
         results.note("C24", "A7's Show code press delivered \(Self.describeDetail(evidence, a7[1]))")
         Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         try launcher.finish(results)
@@ -460,7 +438,6 @@ struct LiveE2ETests {
 
     // MARK: - Shared checks
 
-    /// The scenario's own line: the app finished and left exactly one session.
     static func requireEvidence(_ launch: LiveE2ELaunch, _ results: inout LiveE2EResults) -> Evidence? {
         results.check(launch.scenario.id, [
             (launch.finished, "the app finished its scenario" + (launch.failure.map { ": \($0)" } ?? "")),
@@ -469,12 +446,10 @@ struct LiveE2ETests {
         return launch.evidence
     }
 
-    /// The coach requests one target made, in file order.
     static func coachTraffic(_ evidence: Evidence, on provider: BrainProvider) -> [Evidence.TrafficRecord] {
         evidence.traffic.filter { $0.tag == "coach" && $0.provider == provider.rawValue }
     }
 
-    /// G08: the session ends last, its evidence seals, and no subscription helper outlives the app.
     static func checkCleanEnd(
         _ launch: LiveE2ELaunch, _ evidence: Evidence, endedByUser: Bool,
         _ results: inout LiveE2EResults
@@ -491,7 +466,6 @@ struct LiveE2ETests {
         results.check("G08", checks)
     }
 
-    /// C20: a reply the runner answered instead of running, on any brain, is reported, never failed.
     static func noteReplyRecoveries(_ evidence: Evidence, _ results: inout LiveE2EResults) {
         let needles = ["isn't allowed on a shortcut", "didn't match its schema", "had no tool call",
                        "couldn't run on the last response", "isn't available in this session"]
@@ -502,8 +476,6 @@ struct LiveE2ETests {
         results.note("C20", sightings.isEmpty ? "no reply recoveries" : sightings.joined(separator: ", "))
     }
 
-    /// A step whose provider stalled is judged through its retry (see `retryChain`); each stall is
-    /// recorded so it stays visible beside the slower time it causes.
     static func noteStalls(
         _ steps: [(label: String, chain: [Attempt])], _ evidence: Evidence,
         _ results: inout LiveE2EResults
@@ -537,20 +509,18 @@ struct LiveE2ETests {
         return tipAt - heardAt
     }
 
-    /// The `detail` of the speak call the attempt's last answering request carried.
     static func detail(_ evidence: Evidence, _ attempt: Attempt?) -> LiveSessionEvidence.SpeakDetail {
         guard let attempt else { return .noSpeakCall }
         return evidence.traffic(for: attempt).last { $0.speakDetail != .noSpeakCall }?.speakDetail
             ?? .noSpeakCall
     }
 
-    /// What the overlay actually delivered, read from Activity rather than the response body: a
-    /// refused-then-recovered reply on a `filteredAuto` target may carry no speak call at all.
+    /// Read from Activity, not the response body: a recovered `filteredAuto` reply may carry no
+    /// speak call.
     static func deliveredDetail(_ evidence: Evidence, _ chain: [Attempt]) -> String? {
         evidence.rows(inChain: chain).last { $0.kind == "tip" }?.response?.detail
     }
 
-    /// Whether the delivered detail carries a fence of this kind, using the app's own parser.
     static func deliveredFences(_ evidence: Evidence, _ chain: [Attempt]) -> [String] {
         deliveredDetail(evidence, chain).map { ReplyDetail.fences(in: $0).map(\.language) } ?? []
     }
@@ -565,7 +535,6 @@ struct LiveE2ETests {
         return fences.isEmpty ? "prose only" : "fences \(fences)"
     }
 
-    /// Skill names listed under the catalog heading of a system prompt.
     static func skillCatalog(in instructions: String) -> [String] {
         guard let heading = instructions.range(of: "# Skills you can load") else { return [] }
         var names: [String] = []

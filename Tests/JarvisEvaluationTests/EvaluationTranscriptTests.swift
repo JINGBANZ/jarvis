@@ -4,7 +4,6 @@ import JarvisCore
 @testable import JarvisEvaluation
 
 @Suite struct EvaluationTranscriptTests {
-    /// One traffic line in the on-disk shape `FileSessionAudit` writes.
     private func line(tag: String = "coach", request: [String: Any],
                       response: [String: Any]? = nil, error: String? = nil,
                       coachAttempt: [String: Any]? = nil,
@@ -43,15 +42,11 @@ import JarvisCore
         #expect(out.contains("instructions: (unchanged — 3 chars)"))
         #expect(out.contains("[items 1–1 unchanged from the previous coach call"))
         #expect(out.contains("tools: (unchanged — 1 defs)"))
-        // The shared first item renders exactly once; the second call shows only its delta.
         #expect(out.ranges(of: "user: turn one").count == 1)
         #expect(out.contains("user: turn two"))
         #expect(out.contains(#""input_tokens":100"#))
     }
 
-    /// Different tags never share an elision baseline: a summarizer call between two coach calls
-    /// must not break the coach's unchanged-prefix detection (or claim the summarizer's input as
-    /// its own baseline).
     @Test func transcriptTracksElisionPerTag() throws {
         let coach1 = try line(request: ["model": "gpt-5.5", "input": [userItem("coach turn")]])
         let sum = try line(tag: "summarizer",
@@ -82,14 +77,11 @@ import JarvisCore
         #expect(out.contains("assistant → function_call capture_screen({})"))
         #expect(out.contains("tool result: screenshot captured"))
         #expect(out.contains(#"→ function_call speak({"lines":["tip"]})"#))
-        #expect(!out.contains("reasoning"))                    // empty reasoning stubs carry no signal
+        #expect(!out.contains("reasoning"))
         #expect(out.contains("TRANSPORT ERROR: timed out"))
         #expect(out.contains("=== call #2"))
     }
 
-    /// Replayed reasoning items on the INPUT side (the tool loop's verbatim passthrough) render as a
-    /// one-line stub — the bytes are opaque (ids, possibly a large `encrypted_content` blob) and
-    /// would only bloat the audit transcript.
     @Test func transcriptStubsReplayedReasoningInputItems() throws {
         let blob = String(repeating: "A", count: 256)
         let items: [[String: Any]] = [
@@ -102,11 +94,10 @@ import JarvisCore
                                                                         "input": items]))
         #expect(out.contains("assistant reasoning (replayed verbatim — "))
         #expect(out.contains("chars)"))
-        #expect(!out.contains(blob))                              // the opaque payload never renders
+        #expect(!out.contains(blob))
         #expect(out.contains("assistant → function_call capture_screen({})"))
     }
 
-    /// The transcript leads with neutral evidence tools before the first compact traffic block.
     @Test func transcriptLeadsWithEvidenceIndexAndProviderTelemetry() throws {
         let call = try line(request: ["model": "gpt-5.5", "input": [userItem("hi")]],
                             response: ["status": "completed", "output": [],

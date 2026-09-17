@@ -1,7 +1,5 @@
 import AppKit
 
-/// The common full-tab shell: one page title, one short explanation, an optional status badge, and
-/// a content region with identical outer spacing on every Settings page.
 @MainActor
 final class SettingsPageView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")

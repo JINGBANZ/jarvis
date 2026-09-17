@@ -1,8 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Settings panel that embeds the live activity viewer inside the common page and card shell.
-/// The viewer still owns all WKWebView/session/live-append logic and lifecycle.
 @MainActor
 final class ActivitySection: NSObject, SettingsSection {
     let title = "Activity"
@@ -31,6 +29,5 @@ final class ActivitySection: NSObject, SettingsSection {
     func didBecomeActive() { viewer.didBecomeActive() }
     func windowWillClose() { viewer.teardown() }
 
-    /// The embedded viewer stretches with the window, unlike the fixed-form panels.
     var fillsTab: Bool { true }
 }

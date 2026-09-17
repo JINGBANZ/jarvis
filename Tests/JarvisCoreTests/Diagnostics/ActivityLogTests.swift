@@ -17,7 +17,6 @@ import Foundation
             for: "⏹ session ended by error — check jarvis-debug.log") == "err")
         #expect(ActivityLog.cssClass(for: "Jarvis realtime error event: oops") == "err")
         #expect(ActivityLog.cssClass(for: "Jarvis: coaching started.") == "")
-        // A spoken tip can legitimately contain "failed"; it must stay a 💬 say line.
         #expect(ActivityLog.cssClass(for: "💬 your test failed because the loop is off-by-one") == "say")
     }
 
@@ -25,14 +24,13 @@ import Foundation
         let js = ActivityLog.rowScript(time: "10:00:00", message: "a < b & \"c\" </script>", imageBase64: nil)
         #expect(js.hasPrefix("appendRow("))
         #expect(js.hasSuffix(");"))
-        #expect(!js.contains("data:image"))            // no image payload when nil
-        // The object inside appendRow(...) must be valid JSON with the raw (JSON-escaped) message.
+        #expect(!js.contains("data:image"))
         let inner = String(js.dropFirst("appendRow(".count).dropLast(");".count))
         let obj = try #require(try JSONSerialization.jsonObject(with: Data(inner.utf8)) as? [String: Any])
         #expect(obj["message"] as? String == "a < b & \"c\" </script>")
         #expect(obj["time"] as? String == "10:00:00")
-        #expect(obj["cls"] as? String == "")           // no leading marker
-        #expect(obj["img"] == nil)                      // key omitted, not null
+        #expect(obj["cls"] as? String == "")
+        #expect(obj["img"] == nil)
     }
 
     @Test func rowScriptBuildsDataURIWhenImagePresent() {
@@ -47,12 +45,12 @@ import Foundation
         let pushedLock = NSLock()
         var pushedRows: [String] = []
         let snap = log.attach { row in pushedLock.withLock { pushedRows.append(row) } }
-        #expect(snap.rows.isEmpty)                       // empty session
+        #expect(snap.rows.isEmpty)
         #expect(snap.total == 0)
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
         evidence.record(.screenViewed(imageBase64JPEG: pixel))
         evidence.record(.tip(lines: ["tip"]))
-        _ = await evidence.close()                       // barrier: drains the evidence worker
+        _ = await evidence.close()
 
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         #expect(jsonl.split(separator: "\n").count == 2)
@@ -103,16 +101,14 @@ import Foundation
         evidence.record(.screenViewed(imageBase64JPEG: pixel))
         evidence.record(.tip(lines: ["tip"]))
         _ = await evidence.close()
-        let snap = log.attach { _ in }                   // late attach: snapshot must contain prior rows
+        let snap = log.attach { _ in }
         #expect(snap.rows.count == 2)
         #expect(snap.shown == 2)
         #expect(snap.total == 2)
-        #expect(snap.rows[0].contains("data:image/jpeg;base64,"))   // image bytes re-read from disk
-        #expect(snap.shellHTML.contains("appendRow"))               // shell carries the JS
+        #expect(snap.rows[0].contains("data:image/jpeg;base64,"))
+        #expect(snap.shellHTML.contains("appendRow"))
     }
 
-    /// The empty owner-only file exists before the first row so `SessionStore.listSessions()`
-    /// can discover the session. The evidence worker creates it when it opens the session.
     @Test func openingTheSessionCreatesJsonlImmediately() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (_, evidence) = ActivityLog.recordingSession(in: dir)
@@ -125,7 +121,7 @@ import Foundation
 
     @Test func recordIsNoOpWhenTheProjectionIsDisabled() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
-        let log = ActivityLog()                          // never enabled
+        let log = ActivityLog()
         let evidence = FileSessionAudit(
             directory: dir,
             worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
@@ -225,8 +221,6 @@ import Foundation
             == "think")
     }
 
-    /// One row per load, and a distinct row for notes that were not there to search — never a
-    /// zero-match search, which would claim the notes were read and found wanting.
     @Test func capabilityLoadsAndMissingPrepNotesEachGetTheirOwnRow() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
@@ -239,8 +233,6 @@ import Foundation
         #expect(snapshot.rows.count == 3)
         #expect(snapshot.rows[0].contains("loaded the search_prep_notes tool"))
         #expect(snapshot.rows[1].contains("loaded the behavioral skill"))
-        // A degradation notice, not a progress report: the row says coaching went ahead without
-        // the notes, and never which of "still building" or "nothing usable" caused it.
         #expect(snapshot.rows[2].contains("couldn't check your prep notes"))
         #expect(snapshot.rows[2].contains("coaching without them"))
         #expect(!snapshot.rows[2].contains("yet"))
@@ -249,7 +241,6 @@ import Foundation
             for: "📎 couldn't check your prep notes — coaching without them") == "think")
     }
 
-    /// `Kind` is on-disk identity: a tool reading a complete log matches these strings.
     @Test func theNewCapabilityKindsKeepTheirPersistedNames() {
         #expect(ActivityEvent.Kind.capabilityLoaded.rawValue == "capabilityLoaded")
         #expect(ActivityEvent.Kind.prepNotesUnavailable.rawValue == "prepNotesUnavailable")
@@ -257,8 +248,6 @@ import Foundation
         #expect(ActivityEvent.CapabilityKind.skill.rawValue == "skill")
     }
 
-    /// The retry frame is fixed; the cause in front of it is the failure's own sentence, so a
-    /// screenshot of Activity diagnoses a turn that failed for a reason nobody has classified yet.
     @Test func temporaryProviderFailureQuotesTheProviderInsideTheRetryFrame() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
@@ -276,8 +265,7 @@ import Foundation
             + "(no response within 60s) — coaching failed; listening continues")
         #expect(persisted[0].kind == ActivityEvent.Kind.coachingCycleFailed.rawValue)
         #expect(ActivityLog.isHumanFacing(message: persisted[0].message, imageFile: nil))
-        // Rows written before event kinds existed carry the two older wordings; the legacy filter
-        // keys on the frame, so they stay visible alongside the sentence above.
+        // Persisted rows from before event kinds still pass the frame-keyed legacy filter.
         #expect(ActivityLog.isHumanFacing(
             message: "⚠️ Codex CLI couldn't finish the response — coaching cycle failed; listening continues",
             imageFile: nil
@@ -288,9 +276,6 @@ import Foundation
         ))
     }
 
-    /// A frame that says what Jarvis is doing about the failure puts the advice after it, so the
-    /// row does not read as two instructions on either side of the dash. New rows carry a kind, so
-    /// the legacy suffix filter (which the advice now follows) never has to judge one.
     @Test func adviceFollowsTheFrameRatherThanSplittingIt() async throws {
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (_, evidence) = ActivityLog.recordingSession(in: dir)
@@ -371,9 +356,6 @@ import Foundation
         ])
     }
 
-    /// Failure notices keep their fixed frames, which row styling and the legacy human-facing filter
-    /// key on, and quote the provider's identity and redacted message after the frame, so a
-    /// screenshot of Activity is enough to diagnose a failure nobody has classified yet.
     @Test func runtimeFailureNoticesKeepTheirFramesAndQuoteTheProvider() {
         let leaky = ProviderFailure(
             source: .brain(.codexSubscription), stage: .process, category: .unknown,
@@ -409,8 +391,6 @@ import Foundation
         #expect(messages[3] == "⚠️ Codex failed (exit 1: OAuth token expired; Authorization: Bearer …) — coaching failed; listening continues")
         #expect(messages[4] == "⚠️ system audio stopped — the transcription connection to OpenAI was lost (close 1006); microphone coaching continues")
         #expect(messages[5].contains("current coaching session continues"))
-        // Provider text reaches a row only after redaction, so a quoted message can never carry a
-        // credential.
         #expect(messages.allSatisfy { !$0.contains("abc123token") })
         for message in messages {
             #expect(ActivityLog.isHumanFacing(message: message, imageFile: nil))
@@ -482,9 +462,7 @@ import Foundation
         ))
     }
 
-    /// The message and event kind of each persisted `jarvis-activity.jsonl` row, in file order.
-    /// Reading the file is how a row's exact copy is asserted: `Snapshot.rows` are `appendRow(...)`
-    /// scripts, not messages. Malformed lines are dropped, so tests assert the count they expect.
+    /// Drops malformed lines, so callers assert the row count they expect.
     static func persistedRows(in directory: URL) throws -> [(message: String, kind: String?)] {
         let jsonl = try String(
             contentsOf: directory.appendingPathComponent(ActivityLog.filename), encoding: .utf8)
@@ -497,7 +475,6 @@ import Foundation
         }
     }
 
-    /// Shared temp-dir helper (also used by SessionStoreTests). Owner-only dir, like the real app.
     static func tmp() -> URL {
         let d = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("jarvis-test-\(ProcessInfo.processInfo.globallyUniqueString)")

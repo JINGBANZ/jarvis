@@ -1,22 +1,17 @@
 import AppKit
 
-/// One window hosting all settings sections as tabs. Non-modal: it promotes the accessory app to
-/// `.regular` while open (so secure/text fields can become first responder and accept paste) and
-/// drops back to `.accessory` on close — the lesson the old API-key dialog and activity viewer
-/// both learned. The lightweight window/tab shell is retained between opens, while section views are
-/// rebuilt lazily so controls start fresh without constructing hidden tabs before presentation.
+// Design: wiki/settings-window.md
+/// Promotes the accessory app to `.regular` while open, because text fields in an accessory app
+/// can't become first responder or accept paste.
 @MainActor
 final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
     private let sections: [SettingsSection]
     private var window: NSWindow?
     private var tabView: NSTabView?
     private var loadedSectionIndexes: Set<Int> = []
-    /// The section whose tab is currently selected, so we can pair `didBecomeActive`/`didResignActive`.
     private var activeSection: SettingsSection?
 
-    /// One size for every tab — switching tabs must never resize the window (per-tab sizes made it
-    /// jump on each switch). The user can still resize freely down to `minContentSize`, which keeps
-    /// the shared page shell and responsive trailing controls usable.
+    /// Shared by every tab, because per-tab sizes made the window jump on each tab switch.
     private static let defaultContentSize = NSSize(width: 820, height: 600)
     private static let minContentSize = NSSize(width: 560, height: 460)
 
@@ -55,11 +50,9 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         self.tabView = tabView
     }
 
-    /// Compatibility wrapper for a future compact fixed-layout section. Built-in sections fill the
-    /// tab through `SettingsPageView`.
     private static func topPinned(_ view: NSView) -> NSView {
         let container = NSView(frame: view.frame)
-        // Flexible bottom + equal flexible side margins: pinned top, centered horizontally.
+        // Flexible bottom and side margins: pinned top, centered horizontally.
         view.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
         container.addSubview(view)
         return container
@@ -69,7 +62,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
         activate(tabViewItem)
     }
 
-    /// Pair the active/resign hooks for the newly selected tab.
     private func activate(_ item: NSTabViewItem?) {
         guard let item, let tabView else { return }
         let idx = tabView.indexOfTabViewItem(item)
@@ -86,11 +78,11 @@ final class SettingsWindow: NSObject, NSWindowDelegate, NSTabViewDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
-        activeSection?.didResignActive()        // e.g. turn the overlay preview off if Overlay was open
+        activeSection?.didResignActive()
         activeSection = nil
         for section in sections { section.windowWillClose() }
-        // Preserve the cheap NSWindow/NSTabView shell, but release every section view so controls and
-        // Activity's WebView still get their established fresh-on-open lifecycle.
+        // Keep the window shell but release every section view, so controls and Activity's WebView
+        // start fresh on the next open.
         tabView?.delegate = nil
         for item in tabView?.tabViewItems ?? [] { item.view = NSView() }
         loadedSectionIndexes.removeAll()

@@ -8,15 +8,11 @@ import Glibc
 @testable import JarvisBrainProviders
 import JarvisCore
 
-/// Detection runs against a real, throwaway home-directory fixture: executables are actual 0755
-/// shell scripts, so Claude auth tests exercise the production subprocess + JSON parsing path.
-// Detection deliberately exercises real status-command subprocesses and watchdog teardown. Keep
-// those probes sequential so their tight timeout cases do not saturate the process scheduler used by
-// other integration suites; the throwaway homes already isolate their filesystem state.
+// Serialized: real status-probe subprocesses with tight timeouts would saturate the process
+// scheduler.
 @Suite(.serialized) struct AgentCLIDetectorTests {
     private let fm = FileManager.default
 
-    /// A fresh fake home directory per test.
     private func makeHome() throws -> URL {
         let url = fm.temporaryDirectory
             .appendingPathComponent("AgentCLIDetectorTests-\(UUID().uuidString)")
@@ -24,8 +20,7 @@ import JarvisCore
         return url
     }
 
-    /// Create a real executable file at `dir/name`. The default exits without a status document,
-    /// which represents an installed CLI whose sign-in state cannot be checked.
+    /// The default script prints no status document, so its sign-in state reads as unknown.
     private func installBinary(_ name: String, in dir: URL,
                                script: String = "#!/bin/sh\nexit 2\n") throws {
         try fm.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -39,9 +34,8 @@ import JarvisCore
         try Data(text.utf8).write(to: url)
     }
 
-    /// Detector fixtures themselves live under the real system temporary directory. Give each test
-    /// a separate synthetic system-temp root so ordinary fake installs remain eligible while tests
-    /// can explicitly place a transient wrapper under the rejected root.
+    /// Fixtures live under the real system temp directory, which the detector rejects, so each test
+    /// gets a synthetic temp root instead.
     private func detector(home: URL, pathVariable: String?,
                           authStatusTimeout: TimeInterval = 2,
                           temporaryDirectory: URL? = nil) -> AgentCLIDetector {
@@ -55,9 +49,7 @@ import JarvisCore
         )
     }
 
-    /// True when a machine-wide claude/codex lives in the absolute fallback dirs the detector
-    /// consults regardless of the fixture home. The negative-detection tests adapt by returning
-    /// early — on such a machine, detecting that install is correct behavior, not a failure.
+    /// The detector always checks these dirs, so negative tests skip when a real CLI lives there.
     private var systemWideCLIInstalled: Bool {
         ["/opt/homebrew/bin", "/usr/local/bin"].contains {
             fm.isExecutableFile(atPath: "\($0)/claude") || fm.isExecutableFile(atPath: "\($0)/codex")
@@ -75,8 +67,7 @@ import JarvisCore
     }
 
     @Test func fallsBackToKnownInstallDirsWhenPATHIsMinimal() throws {
-        // The app is launched via `open` with launchd's bare PATH — the CLI must still be found in
-        // its self-managed install location under the home directory.
+        // An app launched via `open` gets launchd's bare PATH.
         let home = try makeHome()
         try installBinary("claude", in: home.appendingPathComponent(".claude/local"))
         let d = detector(home: home, pathVariable: "/nonexistent")
@@ -111,7 +102,7 @@ import JarvisCore
         defer { try? fm.removeItem(at: home) }
         let older = home.appendingPathComponent(".nvm/versions/node/v9.9.0/bin")
         let newer = home.appendingPathComponent(".nvm/versions/node/v20.18.3/bin")
-        // An incomplete newer install and unrelated directories must not hide a usable CLI.
+        // An incomplete newer install and a non-version directory must not hide a usable CLI.
         try write("not executable", to: home.appendingPathComponent(".nvm/versions/node/v30.0.0/bin/claude"))
         try installBinary("claude", in: home.appendingPathComponent(".nvm/versions/node/invalid/bin"))
         try installBinary("claude", in: older)
