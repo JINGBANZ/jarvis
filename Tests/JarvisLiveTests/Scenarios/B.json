@@ -10,7 +10,9 @@
     { "screen": "coding-problem.jpg" },
     { "press": "showCode" },
     { "press": "explainMore" },
+    { "switchBrain": "gemini" },
     { "say": { "speaker": "them", "text": "Tell me about a time you disagreed with a teammate." } },
+    { "press": "hint" },
     { "stop": true }
   ]
 }

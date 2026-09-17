@@ -115,6 +115,7 @@ struct LiveE2EScenarioTests {
         #expect(b.capabilities == .init(
             disabledTools: ["search_prep_notes"],
             disabledSkills: ["behavioral", "system-design", "coding-with-ai"]))
+        #expect(b.steps.contains(.switchBrain(.gemini)))
     }
 
     @Test("every field and step kind decodes into the model")
