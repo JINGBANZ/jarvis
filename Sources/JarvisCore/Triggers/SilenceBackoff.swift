@@ -3,7 +3,9 @@ import Foundation
 /// Schedules the proactive "are you stuck?" silence check with exponential backoff.
 ///
 /// The first check fires after `base` seconds of quiet; while the user stays silent each successive
-/// check doubles the wait (`base`, `2·base`, `4·base`, …), capped at `maxInterval`. Hearing speech
+/// check waits `growth` times longer (`base`, `4·base`, `16·base`, …), capped at `maxInterval`.
+/// The steep growth keeps the second check well clear of the early first one (see
+/// wiki/architecture.md, The turn). Hearing speech
 /// calls `reset()`, so the next quiet gap starts from `base` again. This avoids both over-nudging
 /// (a flat short timer firing every few seconds) and under-nudging (a single one-shot timer that
 /// never checks again through a long silence).
@@ -13,6 +15,8 @@ import Foundation
 /// probe is suppressed — the caller keeps its (free, local) check running, so probing resumes as
 /// soon as speech from either side restarts the quiet stretch.
 public struct SilenceBackoff {
+    static let growth: Double = 4
+
     private let base: TimeInterval
     private let maxInterval: TimeInterval
     private let idleCutoff: TimeInterval
@@ -26,7 +30,7 @@ public struct SilenceBackoff {
 
     /// The interval to wait before the next silence check, then advance the backoff one step.
     public mutating func next() -> TimeInterval {
-        let interval = min(base * pow(2, Double(step)), maxInterval)
+        let interval = min(base * pow(Self.growth, Double(step)), maxInterval)
         step += 1
         return interval
     }

@@ -8,19 +8,20 @@ import Testing
         #expect(b.next() == 30)
     }
 
-    /// While the user stays quiet, each successive check doubles the wait.
-    @Test func doublesEachStepWhileQuiet() {
-        var b = SilenceBackoff(base: 30, maxInterval: 240)
+    /// While the user stays quiet, each successive check waits four times longer, so the second
+    /// check sits well clear of the first.
+    @Test func quadruplesEachStepWhileQuiet() {
+        var b = SilenceBackoff(base: 30, maxInterval: 1_000)
         #expect(b.next() == 30)
-        #expect(b.next() == 60)
         #expect(b.next() == 120)
-        #expect(b.next() == 240)
+        #expect(b.next() == 480)
+        #expect(b.next() == 1_000)
     }
 
     /// The interval never grows past the cap, no matter how long the silence lasts.
     @Test func capsAtMaxInterval() {
         var b = SilenceBackoff(base: 30, maxInterval: 240)
-        for _ in 0..<4 { _ = b.next() }   // advance past the cap (30,60,120,240)
+        for _ in 0..<3 { _ = b.next() }   // advance past the cap (30, 120, 240)
         #expect(b.next() == 240)
         #expect(b.next() == 240)
     }
@@ -28,7 +29,7 @@ import Testing
     /// Hearing speech resets the backoff, so the next quiet gap starts from the base again.
     @Test func resetReturnsToBase() {
         var b = SilenceBackoff(base: 30, maxInterval: 240)
-        _ = b.next(); _ = b.next()    // advance to 120
+        _ = b.next(); _ = b.next()    // advance to 240
         b.reset()
         #expect(b.next() == 30)
     }
