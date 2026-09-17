@@ -14,16 +14,14 @@ public struct LocalProxyAccountFile: Sendable, Equatable {
         let name = url.lastPathComponent
         guard name.hasSuffix(".json") else { return nil }
         let stem = name.dropLast(".json".count)
-        let rest: Substring
-        if stem.hasPrefix("claude-") {
-            provider = .claudeSubscription
-            rest = stem.dropFirst("claude-".count)
-        } else if stem.hasPrefix("codex-") {
-            provider = .codexSubscription
-            rest = stem.dropFirst("codex-".count)
-        } else {
-            return nil
-        }
+        let match = BrainProvider.allCases.lazy.compactMap { candidate -> (BrainProvider, String)? in
+            guard case .localProxy(_, _, let prefix) = candidate.descriptor.access,
+                  stem.hasPrefix(prefix) else { return nil }
+            return (candidate, prefix)
+        }.first
+        guard let match else { return nil }
+        provider = match.0
+        let rest = stem.dropFirst(match.1.count)
         self.url = url
         let afterHash = rest.split(separator: "-", maxSplits: 1).dropFirst().first.map(String.init)
         var account = afterHash ?? ""
