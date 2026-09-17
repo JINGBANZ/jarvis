@@ -5,20 +5,25 @@ public enum CoachingShortcut: UInt32, CaseIterable, Sendable {
     case hint = 1
     case explainMore = 2
     case showCode = 3
+    case previousDetail = 4
+    case nextDetail = 5
 
     public var title: String {
         switch self {
         case .hint: "Give me a hint"
         case .explainMore: "Explain more"
         case .showCode: "Show code"
+        case .previousDetail: "Previous detail"
+        case .nextDetail: "Next detail"
         }
     }
 
-    public var triggerReason: TriggerReason {
+    public var triggerReason: TriggerReason? {
         switch self {
         case .hint: .manualHint
         case .explainMore: .manualExplanation
         case .showCode: .manualCode
+        case .previousDetail, .nextDetail: nil
         }
     }
 }

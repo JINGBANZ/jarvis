@@ -10,6 +10,23 @@ import Foundation
         return d
     }
 
+    @Test func navigationBindingsPersistIndependentlyFromCoachingBindings() {
+        let defaults = freshDefaults()
+        let previous = HotkeyPreferences(defaults: defaults, shortcut: .previousDetail)
+        let next = HotkeyPreferences(defaults: defaults, shortcut: .nextDetail)
+        #expect(previous.combination == HotkeyCombination(keyCode: 123, modifiers: [.command, .option]))
+        #expect(next.combination == HotkeyCombination(keyCode: 124, modifiers: [.command, .option]))
+        previous.combination = HotkeyCombination(keyCode: 5, modifiers: [.command, .shift])
+        next.combination = HotkeyCombination(keyCode: 6, modifiers: [.command, .shift])
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .previousDetail).combination
+            == HotkeyCombination(keyCode: 5, modifiers: [.command, .shift]))
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .nextDetail).combination
+            == HotkeyCombination(keyCode: 6, modifiers: [.command, .shift]))
+        #expect(HotkeyPreferences(defaults: defaults).combination == Defaults.Hotkey.combination)
+        #expect(CoachingShortcut.previousDetail.triggerReason == nil)
+        #expect(CoachingShortcut.nextDetail.triggerReason == nil)
+    }
+
     @Test func defaultsToShippedCombinationWhenUnset() {
         #expect(HotkeyPreferences(defaults: freshDefaults()).combination == Defaults.Hotkey.combination)
     }

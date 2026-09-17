@@ -241,6 +241,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         return Self.sampleDetail.map { [(stamp: Self.sampleEntries[1].stamp, detail: $0)] } ?? []
     }
 
+    public func showPreviousDetail() {
+        guard isSessionLive, isEnabled, !isCollapsed, display == .log else { return }
+        detailView.previousButton.performClick(nil)
+    }
+
+    public func showNextDetail() {
+        guard isSessionLive, isEnabled, !isCollapsed, display == .log else { return }
+        detailView.nextButton.performClick(nil)
+    }
+
     private func step(by offset: Int) {
         guard display == .log else { return }
         let available = shownDetails

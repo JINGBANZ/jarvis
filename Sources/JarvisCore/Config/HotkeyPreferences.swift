@@ -9,6 +9,8 @@ public final class HotkeyPreferences: @unchecked Sendable {
         case .hint: Defaults.Hotkey.keyCodeKey
         case .explainMore: Defaults.Hotkey.explanationKeyCodeKey
         case .showCode: Defaults.Hotkey.codeKeyCodeKey
+        case .previousDetail: Defaults.Hotkey.previousDetailKeyCodeKey
+        case .nextDetail: Defaults.Hotkey.nextDetailKeyCodeKey
         }
     }
     private var modifiersKey: String {
@@ -16,6 +18,8 @@ public final class HotkeyPreferences: @unchecked Sendable {
         case .hint: Defaults.Hotkey.modifiersKey
         case .explainMore: Defaults.Hotkey.explanationModifiersKey
         case .showCode: Defaults.Hotkey.codeModifiersKey
+        case .previousDetail: Defaults.Hotkey.previousDetailModifiersKey
+        case .nextDetail: Defaults.Hotkey.nextDetailModifiersKey
         }
     }
     private var defaultCombination: HotkeyCombination {
@@ -23,6 +27,8 @@ public final class HotkeyPreferences: @unchecked Sendable {
         case .hint: Defaults.Hotkey.combination
         case .explainMore: Defaults.Hotkey.explanationCombination
         case .showCode: Defaults.Hotkey.codeCombination
+        case .previousDetail: Defaults.Hotkey.previousDetailCombination
+        case .nextDetail: Defaults.Hotkey.nextDetailCombination
         }
     }
 
