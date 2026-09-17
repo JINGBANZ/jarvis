@@ -157,6 +157,8 @@ public final class PCMBuffer: @unchecked Sendable {
             sentByteCount -= removed.data.count
             discarded.append(removed)
         }
+        // Reconnect requeues sent audio, so the boundary can cover queued chunks too. A claimed
+        // chunk is left to its send callback, which applies the boundary itself.
         if activeClaim == nil {
             trimServerConfirmedQueuedPrefixLocked()
         }

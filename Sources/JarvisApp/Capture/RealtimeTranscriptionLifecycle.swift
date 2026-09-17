@@ -1,8 +1,8 @@
 import Foundation
 import JarvisCore
 
-/// `@unchecked Sendable`: every mutable field is guarded by `lock`; timer creation and invalidation
-/// are dispatched to the main queue.
+/// `@unchecked Sendable`: `lock` guards every mutable field except `replayRecoveryTimer`, which is
+/// read and written only on the main queue.
 final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     struct ReplacementReadyOutcome {
         let unresolvedItems: Int
@@ -65,8 +65,6 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     func stop() {
         lock.lock()
         stopped = true
-        let replayRecoveryTimer = self.replayRecoveryTimer
-        self.replayRecoveryTimer = nil
         ledger.clear()
         reconnectRecovery.clear()
         localSpeechActive = false
@@ -75,7 +73,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         lock.unlock()
         coachingCoordinator.stop()
         DispatchQueue.main.async {
-            replayRecoveryTimer?.invalidate()
+            self.replayRecoveryTimer?.invalidate()
+            self.replayRecoveryTimer = nil
         }
     }
 

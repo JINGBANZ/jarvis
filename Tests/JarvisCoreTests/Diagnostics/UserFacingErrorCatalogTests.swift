@@ -17,7 +17,7 @@ import Testing
         #expect(geminiOnly.message.contains("Connections"))
         #expect(geminiOnly.severity == .fatal)
         #expect(geminiOnly.severity.showsAlert)
-        #expect(geminiOnly.sessionEndReason == .openAIAPIKeyMissing)
+        #expect(geminiOnly.sessionEndReason == .apiKeyMissing)
     }
 
     @Test func appleSpeechPreflightFailuresAlertWithoutStopping() {

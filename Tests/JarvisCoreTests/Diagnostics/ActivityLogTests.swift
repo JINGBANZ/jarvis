@@ -426,7 +426,7 @@ import Foundation
             .stoppedByUser,
             .applicationQuit,
             .replacedByNewSession,
-            .openAIAPIKeyMissing,
+            .apiKeyMissing,
             .permissionsMissing,
             .brainRouteExhausted(last: leaky),
             .transcriptionStopped(failure: region),

@@ -8,7 +8,8 @@ public struct AgenticEvaluator: Sendable {
         case noAgentCLI
         case preferredAgentUnavailable(String)
         case agentSignedOut(String)
-        case agentFailed(String)
+        /// `reason` is already redacted.
+        case agentFailed(cli: String, reason: String)
 
         public var errorDescription: String? {
             switch self {
@@ -18,8 +19,8 @@ public struct AgenticEvaluator: Sendable {
                 "\(cli) was requested, but its CLI is not installed."
             case .agentSignedOut(let cli):
                 "\(cli) is signed out. Sign in, then try evaluating again."
-            case .agentFailed(let cli):
-                "\(cli) couldn't finish the evaluation. Check jarvis-debug.log for details."
+            case .agentFailed(let cli, let reason):
+                "\(cli) couldn't finish the evaluation: \(reason)"
             }
         }
     }
@@ -82,14 +83,17 @@ public struct AgenticEvaluator: Sendable {
             throw CancellationError()
         } catch {
             jlog("Jarvis: \(cli.cli.displayName) evaluator process failed — \(error.localizedDescription)")
-            throw EvaluationError.agentFailed(cli.cli.displayName)
+            throw EvaluationError.agentFailed(
+                cli: cli.cli.displayName,
+                reason: ProviderMessageRedaction.redact(error.localizedDescription))
         }
 
         guard output.exitCode == 0 else {
             let diagnostic = output.stderr.isEmpty ? output.stdout : output.stderr
             jlog("Jarvis: \(cli.cli.displayName) evaluator exited \(output.exitCode) — "
                  + String(diagnostic.suffix(2_000)))
-            throw EvaluationError.agentFailed(cli.cli.displayName)
+            throw EvaluationError.agentFailed(
+                cli: cli.cli.displayName, reason: Self.failureReason(output))
         }
         try Task.checkCancellation()
         return try AgenticEvaluation.saveReport(
@@ -107,6 +111,18 @@ public struct AgenticEvaluator: Sendable {
                 })
             }
         }
+    }
+
+    /// Claude Code prints a failed run's error last on stdout, with warnings on stderr; Codex prints
+    /// it last on stderr and nothing on stdout.
+    static func failureReason(_ output: AgentCLIOutput) -> String {
+        let lastLine = [output.stdout, output.stderr].lazy.compactMap { stream in
+            stream.split(whereSeparator: \.isNewline).last { !$0.allSatisfy(\.isWhitespace) }
+        }.first
+        guard let lastLine else {
+            return "it exited with status \(output.exitCode) and printed no error."
+        }
+        return "\(ProviderMessageRedaction.redact(String(lastLine))) (exit status \(output.exitCode))"
     }
 
     /// A requested CLI is never swapped for another. An unconfirmed sign-in is tried, not refused.

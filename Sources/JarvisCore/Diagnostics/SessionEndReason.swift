@@ -5,8 +5,8 @@ public enum SessionEndReason: Sendable, Equatable {
     case stoppedByUser
     case applicationQuit
     case replacedByNewSession
-    /// Any missing transcription or brain credential, not only OpenAI's.
-    case openAIAPIKeyMissing
+    /// Any provider's missing transcription or brain credential.
+    case apiKeyMissing
     case permissionsMissing
     case brainRouteExhausted(last: ProviderFailure)
     case brainRecoveryExpired(last: ProviderFailure)
@@ -23,7 +23,7 @@ public enum SessionEndReason: Sendable, Equatable {
             "session ended because Jarvis quit"
         case .replacedByNewSession:
             "session ended because a new session started"
-        case .openAIAPIKeyMissing:
+        case .apiKeyMissing:
             "session ended by error — an API key is missing; check Settings → Connections"
         case .permissionsMissing:
             "session ended by error — a required permission is missing; check System Settings → Privacy & Security"

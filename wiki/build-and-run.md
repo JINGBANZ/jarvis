@@ -297,7 +297,9 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   absence) and the actual source used, and require source-based findings to acknowledge the mismatch.
   The saved report also carries this provenance directly, independently of the agent's output.
   Codex accepts the release workspace without requiring `.git`. Unrecoverable source failures give
-  next steps in the dialog; raw errors stay in debug logs. Cancellation reaches both the download and
+  next steps in the dialog; raw download errors stay in debug logs. A failed agent CLI run shows the
+  CLI's own last error line, redacted, with its exit status, because a screenshot of that dialog is
+  often the only evidence a user sends. Cancellation reaches both the download and
   subprocess, and failures preserve any saved report. Quit remains immediate: a run abandoned
   mid-download leaves only a per-user temporary directory the OS reclaims, so there is no staging,
   publication, or retention bookkeeping. Activity admits one evaluation at a time; the terminal
