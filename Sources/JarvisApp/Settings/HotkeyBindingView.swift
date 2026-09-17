@@ -123,6 +123,8 @@ final class HotkeyBindingView: NSObject {
         case .hint: "I look at your screen and the conversation, then answer now."
         case .explainMore: "I go deeper on the last hint in the Overlay Box."
         case .showCode: "I write the code for the current step in the Overlay Box."
+        case .previousDetail: "I show my previous detail in the Overlay Box."
+        case .nextDetail: "I show my next detail in the Overlay Box."
         }
     }
 }

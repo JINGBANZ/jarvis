@@ -192,7 +192,7 @@ pages it moves.
 | `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts what is ready. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | Prep notes search, with its switch and its list of local note files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
-| `HotkeySection` | **Shortcuts**: "Ask me for help without waiting." | One card with a row each for **Give me a hint**, **Explain more**, and **Show code**: keycaps, a **Record** button, and per-row failure feedback ([Shortcuts](#shortcuts)). |
+| `HotkeySection` | **Shortcuts**: "Ask me for help, or step through my details." | One card with a row each for **Give me a hint**, **Explain more**, **Show code**, **Previous detail**, and **Next detail**: keycaps, a **Record** button, and per-row failure feedback ([Shortcuts](#shortcuts)). |
 | `ActivitySection` | **Activity**: "What I heard and said, session by session." | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
 `AppDelegate` builds the hub model, the hub, and the section list at launch and passes them to
@@ -299,29 +299,37 @@ preview is running. The plain setters
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
 They work during a session. All three are fallbacks for proactive coaching;
 [architecture.md](./architecture.md#on-demand-coaching-shortcuts) defines their context, output, and
-scheduling behavior. The page is one card with a row per shortcut (`HotkeyBindingView`): the
-shortcut's name and what it does, its keys drawn as keycaps (`ShortcutKeycapsView`), and a
-**Record** button (`HotkeyRecorderButton`). While recording, the row asks for a combination with
-Command or Option, which the recorder requires, and Escape cancels. A successful rebind takes effect
-immediately and persists only that shortcut through `HotkeyPreferences`; defaults and storage keys
-live in `Defaults.Hotkey`.
+scheduling behavior.
 
-**Explain more** and **Show code** both answer into the detail box, so the Overlay Box switch is the
-only thing that decides whether they can be bound: with the box off, their Record buttons are
-disabled, their keycaps dim, and their rows say the Overlay Box is needed and that it is switched on
-in Mouth. Neither has a switch of
-its own, and the **Give me a hint** shortcut is unconditional. Whether a session can use them is
-fixed at Start: a session that started with the box off never registers them, even if the box is
-switched on mid-session, while a session that started with it on releases them when the box is
-switched off and registers them again when it is switched back on.
+**Previous detail** and **Next detail** navigate the existing detail history with **⌥⌘←** and
+**⌥⌘→**. They mirror the arrow buttons without activating Jarvis or requesting coaching. At either end
+of history, while stopped, or with the box disabled or collapsed, they silently do nothing. Stepping
+back holds the chosen detail; reaching the newest resumes following incoming details.
+
+The page is one card with a row for each of the five shortcuts (`HotkeyBindingView`): the shortcut's
+name and what it does, its keys drawn as keycaps (`ShortcutKeycapsView`), and a **Record** button
+(`HotkeyRecorderButton`). While recording, the row asks for a combination with Command or Option,
+which the recorder requires, and Escape cancels. A successful rebind takes effect immediately and
+persists only that shortcut through `HotkeyPreferences`; defaults and storage keys live in
+`Defaults.Hotkey`.
+
+**Explain more**, **Show code**, and the two navigation shortcuts all act on the detail box, so the
+Overlay Box switch is the only thing that decides whether they can be bound: with the box off, their
+Record buttons are disabled, their keycaps dim, and their rows say the Overlay Box is needed and that
+it is switched on in Mouth. None has a switch of its own, and the **Give me a hint** shortcut is
+unconditional. Whether a session can use them is fixed at Start: a session that started with the box
+off never registers them, even if the box is switched on mid-session, while a session that started
+with it on releases them when the box is switched off and registers them again when it is switched
+back on.
 
 A collision with another application or another Jarvis shortcut leaves the old working binding
 active, and that row's detail turns into an amber warning until the page is visited again. If no
 binding could be registered at launch, its warning shows on every visit. Warnings live in the row
-rather than in a box under it, so the page stays one card at a fixed height. The Overlay Box shows semibold hints in its upper section and the
-reply's detail in the lower one; a hint whose reply carried a detail ends with a dim marker. Both use
-the configured text size, and the appearance preview shows an example. Neither surface's visibility
-preference changes. No shortcut enables the master box.
+rather than in a box under it, so the page stays one card at a fixed height. The Overlay Box shows
+semibold hints in its upper section and the reply's detail in the lower one; a hint whose reply
+carried a detail ends with a dim marker. Both use the configured text size, and the appearance
+preview shows an example. Neither surface's visibility preference changes. No shortcut enables the
+master box.
 
 ## Activity response sections
 

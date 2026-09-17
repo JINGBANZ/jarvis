@@ -92,7 +92,7 @@ final class SessionComposition {
     func allows(_ shortcut: CoachingShortcut) -> Bool {
         switch shortcut {
         case .hint: true
-        case .explainMore, .showCode: sessionDetailEnabled
+        case .explainMore, .showCode, .previousDetail, .nextDetail: sessionDetailEnabled
         }
     }
 
@@ -381,7 +381,8 @@ final class SessionComposition {
             }
         }
         self.requestManualHint = { shortcut in
-            turns.run { await driver.handleTrigger(shortcut.triggerReason) }
+            guard let reason = shortcut.triggerReason else { return }
+            turns.run { await driver.handleTrigger(reason) }
         }
         transcriber.connect()
         themTranscriber.connect()

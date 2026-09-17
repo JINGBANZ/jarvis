@@ -87,7 +87,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|R|F01|F02|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|R|F01|F02|all] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -145,6 +145,7 @@ layout in the Gate.
 |---|---|---|
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
 | B | Claude Code | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen, an Explain more press after it, then a behavioral question. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. |
+| C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
@@ -196,6 +197,11 @@ is enough to keep that subscription covered.
   about the model's response, and a retried timeout is the design working. Only timeouts count:
   any other failure, or a chain that times out until the target's failure budget is spent, still
   fails the step's cases. `LiveSessionEvidence.retryChain` implements the rule.
+
+C26 checks the delivered Activity response, after overlay acceptance, for both nonempty hint lines
+and a code block accepted by `ReplyDetail`. The candidate already understands a viable approach
+and is stuck implementing it, so code accompanies these actionable hints. A missing block is a
+regression failure, not a note; conceptual orientation is covered by other scenarios.
 
 ## Notes and the rerun rule
 
@@ -261,6 +267,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C23 | Every coach request declares the session's one composed `speak` schema | A: every coach request |
 | C24 | A Show code reply delivers a code block in its detail | A and B: their Show code presses |
 | C25 | Explain more delivers a detail, even when the model first answers in prose | B: the Explain more press |
+| C26 | Ordinary hint presses deliver hint and code in the same reply without Show code | C: both hint presses |
 
 ### General coaching flow
 

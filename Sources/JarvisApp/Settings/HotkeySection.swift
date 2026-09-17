@@ -40,7 +40,7 @@ final class HotkeySection: NSObject, SettingsSection {
         self.stack = stack
         return SettingsPageView(
             title: "Shortcuts",
-            summary: "Ask me for help without waiting.",
+            summary: "Ask me for help, or step through my details.",
             chip: .neutral("Works during a session"),
             bodyView: stack.scrollView)
     }

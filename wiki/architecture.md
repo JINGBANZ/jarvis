@@ -311,6 +311,11 @@ block rules and the `diff` correction shape, the `system-design` skill the merma
 the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
 a session that never loads the skill never pays for it in its cached prefix.
 
+The general detail default defers to the loaded skill so brevity does not make the user press
+Show code for every implementation step. The pairing rules and exceptions live in the
+[`coding` skill](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md); the core keeps no second
+copy of that domain policy.
+
 [`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into what the box
 shows: the prose, the first fenced block the code bounds accept, and the first `mermaid` fence the
 renderer accepts. A candidate the box rejects on the way to that one is removed from the prose, from
@@ -392,7 +397,8 @@ while stopped, an explicit shortcut only beeps. Activity records which shortcut 
 Explain more and Show code answer into the detail box, so the Overlay Box switch is the one thing that
 decides whether they exist: with the box off they are not registered, and `SessionComposition.allows`
 refuses them even when a runner calls `requestShortcut` directly. There is no separate switch for
-either, because the model judges when an explanation or a code block helps.
+either; the model follows the [detail guidance](#the-detail-box) and the loaded skill to supply
+the content alongside the hint.
 
 A Show code press preloads the `coding` skill. Moving the code rules into that skill would otherwise
 cost the press two round trips: one for the model to call `load_skill`, one to answer. Instead the
@@ -402,6 +408,12 @@ The pair commits, replays, and survives compaction like any load; a failed attem
 retry preloads again. It is skipped when `coding` is switched off or already loaded, and on every
 other trigger. An automatic turn loads `coding` only when the model chooses to, so proactive code
 depends on that choice, while a Show code press never does.
+
+The two detail-navigation shortcuts route directly to `OverlayBoxPanel`'s arrow actions. They
+carry no `TriggerReason`, so browsing history never enters the coach loop, captures the screen,
+or writes a manual-hint Activity entry. They use the same session detail availability as the
+other detail shortcuts; unavailable navigation is silent. Their bindings and boundary behavior
+are defined in [Settings → Shortcuts](./settings-window.md#shortcuts).
 
 Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
@@ -428,7 +440,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box; the caption remains text-only. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
-| **HotkeyController** | Register the independent hint, explanation, and code shortcuts and route each press to its manual coaching request while a session runs (beep otherwise). See [§2 On-demand coaching shortcuts](#on-demand-coaching-shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
+| **HotkeyController** | Register the coaching and detail-navigation shortcuts; AppDelegate routes coaching to the session and navigation to the overlay. See [§2 On-demand coaching shortcuts](#on-demand-coaching-shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
 | **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the

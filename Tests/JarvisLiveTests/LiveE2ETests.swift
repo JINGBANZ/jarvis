@@ -176,6 +176,41 @@ struct LiveE2ETests {
         try launcher.finish(results)
     }
 
+    @Test func scenarioC() async throws {
+        guard let launcher = await LiveE2ELauncher.begin(scenario: "C") else { return }
+        let launch = try await launcher.launch()
+        var results = LiveE2EResults(scenario: "C")
+        if let evidence = Self.requireEvidence(launch, &results) {
+            let presses = launch.stepIndices(Self.isPress)
+            results.check("C26", [
+                (presses.count == 2, "two ordinary hint presses ran"),
+                (evidence.activity.filter { $0.kind == "manualHint" }.count == 2,
+                 "both requests were ordinary hints"),
+                (!evidence.activity.contains { $0.kind == "manualCode" },
+                 "no Show code request primed the session"),
+                (evidence.activity.contains { $0.loadedCapability?.name == "coding" },
+                 "the model loaded the coding skill"),
+            ])
+            for (index, step) in presses.enumerated() {
+                let chain = launch.attemptChain(forStep: step)
+                let label = "C hint \(index + 1)"
+                Self.noteStalls([(label, chain)], evidence, &results)
+                let reply = evidence.rows(inChain: chain).last { $0.kind == "tip" }?.response
+                let code = reply?.detail.flatMap { ReplyDetail(markdown: $0)?.code }
+                results.check("C26", [
+                    (chain.last?.isCommitted == true, "\(label) committed a reply"),
+                    (reply?.lines.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } == true,
+                     "\(label) delivered hint text"),
+                    (code != nil, "\(label) delivered usable code in the same reply "
+                        + "(saw \(Self.describeDetail(evidence, chain)))"),
+                ])
+                results.time("\(label) press-to-tip", seconds: Self.pressToTip(evidence, chain))
+            }
+            Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
+        }
+        try launcher.finish(results)
+    }
+
     @Test func scenarioA() async throws {
         guard let launcher = await LiveE2ELauncher.begin(scenario: "A") else { return }
         let launch = try await launcher.launch()
