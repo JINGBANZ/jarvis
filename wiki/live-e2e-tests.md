@@ -8,9 +8,9 @@
 
 `./scripts/run-live-tests.sh` launches `Jarvis Dev.app` once per scenario in an explicit live e2e
 mode. Interviewer and candidate lines are synthesized at run time and fed as audio into real OpenAI
-transcription. The real coach loads skills and tools on demand, switches between all three brains,
-views a fixture screenshot when it asks for the screen, delivers to the real overlay panels, and
-writes a normal session directory. A test target then reads that directory and records one result per case ID.
+transcription. The real coach loads skills and tools on demand, switches between the brains
+(Claude Code, OpenAI, Codex, and Gemini), views a fixture screenshot when it asks for the screen,
+delivers to the real overlay panels, and writes a normal session directory. A test target then reads that directory and records one result per case ID.
 
 The mode is a sibling of the [transcription benchmark](./transcription-benchmark.md) and follows its
 conventions: `--live-e2e` in `Sources/JarvisApp/App/main.swift` selects `LiveE2EAppDelegate`
@@ -69,9 +69,10 @@ Set up once per machine:
 - **An OpenAI key** saved in Settings, which writes the owner-only secrets file. Every scenario
   transcribes through OpenAI. `OPENAI_API_KEY` does not serve the run: the app is launched through
   `open`, and LaunchServices does not pass the shell's environment.
-- **Codex and Claude Code**, the coaching targets, signed in from Settings → Connections. The launcher's
-  preflight checks the key and a saved sign-in for both subscriptions before the first launch, so a
-  missing login stops the run in seconds instead of surfacing as a failed scenario.
+- **A Gemini key** saved in Settings; Scenario B's second half coaches on it.
+- **Codex and Claude Code**, the subscription coaching targets, signed in from Settings → Connections. The launcher's
+  preflight checks both keys and a saved sign-in for both subscriptions before the first launch, so a
+  missing key or login stops the run in seconds instead of surfacing as a failed scenario.
 - **The `claude` CLI**, installed and signed in, for `--evaluate` only. It writes the report; it is
   not the coaching target of the same name, which the bundled helper serves.
 
@@ -103,8 +104,8 @@ with its scenario, waits for the app to exit, and asserts on the session folder.
   plan, and adds a G09 line. It is off by default because evaluation is an agentic run of its own, not part
   of coaching.
 
-Scenario A's one OpenAI turn holds the only metered coaching requests; every other brain response
-runs on a subscription.
+Scenario A's one OpenAI turn and Scenario B's Gemini turns hold the only metered coaching requests;
+every other brain response runs on a subscription.
 
 ## Run directory and results
 
@@ -144,16 +145,16 @@ layout in the Gate.
 | Scenario | Brain | What it drives |
 |---|---|---|
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
-| B | Claude Code | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen, an Explain more press after it, then a behavioral question. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. |
+| B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
 
-Only Scenario A's second half runs on Codex; every other scenario and the
-evaluation run on Claude. The ChatGPT plan's usage limit is the one a day of runs exhausts, and A's
-Codex stretch (a behavioral search, a spoken screen question, two presses, and a design follow-up)
-is enough to keep that subscription covered.
+Only Scenario A's second half runs on Codex, and B's second half runs on the Gemini API, a few Flash
+calls; every other scenario and the evaluation run on Claude. The ChatGPT plan's usage limit is the
+one a day of runs exhausts, and A's Codex stretch (a behavioral search, a spoken screen question, two
+presses, and a design follow-up) is enough to keep that subscription covered.
 
 ## How a scenario runs
 
@@ -257,7 +258,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C13 | No diagram outside that stage | A: the coding and behavioral turns |
 | C14 | A brain switch keeps loaded state, in both directions | A: Claude Code to OpenAI, then OpenAI to Codex |
 | C15 | Coaching continues after loads on both subscriptions | A |
-| C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question |
+| C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question, on Gemini |
 | C17 | The remaining skill still loads when others are off | B: the Show code press |
 | C18 | Prep search off leaves no tool and no catalog line | B: Claude Code instructions |
 | C19 | Switched-off capabilities apply as configured | B: Claude Code instructions list only coding |
@@ -268,6 +269,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C24 | A Show code reply delivers a code block in its detail | A and B: their Show code presses |
 | C25 | Explain more delivers a detail, even when the model first answers in prose | B: the Explain more press |
 | C26 | Ordinary hint presses deliver hint and code in the same reply without Show code | C: both hint presses |
+| C27 | A keyed target coaches after a switch, replaying another provider's calls | B: the behavioral question and the hint press, on Gemini |
 
 ### General coaching flow
 
@@ -283,6 +285,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | G08 | Stop ends cleanly, the evidence seals, and no subscription helper outlives the app | Every scenario |
 | G09 | Evaluate works on the stopped session | `--evaluate`, on A's session, with Claude Code |
 | G10 | The development menu has no update item | Dropped; `build-app.sh` strips the feed |
+| G11 | Recorded traffic holds no screenshot bytes for any provider | A and B |
 
 ### Faults and change-triggered checks
 
@@ -324,14 +327,14 @@ it as unverified in its description.
 - **Provider failure with Wi-Fi off,** because the run never takes the network away. With a valid key
   and Wi-Fi off, confirm Start ends the session within about fifteen seconds naming the network cause,
   with no system-audio degradation row before it.
-- **Gemini,** because it needs a second provider key. Confirm that selecting Gemini with no Gemini key
-  saved refuses Start and names the missing credential, and that switching back to OpenAI starts
-  cleanly. Leave a Gemini session past ten minutes and confirm the `goAway` rotation replaces the
+- **Gemini transcription,** because the run transcribes only through OpenAI. Confirm that selecting
+  Gemini with no Gemini key saved refuses Start and names the missing credential, and that switching
+  back to OpenAI starts cleanly. Leave a Gemini session past ten minutes and confirm the `goAway` rotation replaces the
   socket with no user-visible notice.
 - **Transcription configuration,** when credential requirements or transcription provider selection
   change, because it needs Settings and Apple Speech on macOS 26. Confirm Apple Speech with a
-  subscription-only brain route starts without an API key while any OpenAI transcription or brain target still requires
-  one, a transcription setting changed mid-session leaves the running snapshot active until the next
+  subscription-only brain route starts without an API key while any OpenAI or Gemini transcription or brain target still
+  requires its key, a transcription setting changed mid-session leaves the running snapshot active until the next
   Start, and a forced Apple analyzer failure never sends audio to OpenAI as a fallback.
 - **Shortcut bindings and the detail box's controls,** because the run requests shortcuts without
   the global hotkeys and never clicks the box. Press all three shortcuts from another app and confirm

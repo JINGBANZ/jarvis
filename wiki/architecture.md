@@ -265,9 +265,9 @@ when it speaks, like any attempt's. What a press may call is narrowed on each re
 callable tool except `stay_silent` and `capture_screen`, since its screen is already in the first
 request, and the response at the cap is forced to `speak`. A press therefore always ends in a tip and
 never runs out of responses. When `speak` is the only tool left, the request is the plain forced
-`speak`, one round trip. On the OpenAI API and Codex the narrowing is an
+`speak`, one round trip. On the OpenAI API, Codex, and the Gemini API the narrowing is an
 `allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
-attempts (`ResponsesWireFormat`). Claude Code can neither force nor narrow a call, so
+attempts (`ResponsesWireFormat`, `InteractionsWireFormat`). Claude Code can neither force nor narrow a call, so
 its request declares only the permitted tools under `tool_choice: auto`
 ([Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy)).
 The accepted cost is a round trip for each first load and each search, and the client resends the
@@ -433,7 +433,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API, or a subscription through the bundled helper, all on the OpenAI Responses wire shape; see [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or a subscription through the bundled helper, both on the OpenAI Responses wire shape, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
 | **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
@@ -712,6 +712,8 @@ rather than a per-turn screenshot.
   every target shares, and one `BrainWireFormat` per API family holds the JSON. Every format replays
   an assistant message by one rule: its raw items when present, otherwise its parsed calls,
   otherwise its text.
+- **Gemini brain: the selected Gemini Flash model via Google's Interactions API.** See
+  [Gemini API target](#gemini-api-target).
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
@@ -735,7 +737,7 @@ rather than a per-turn screenshot.
   summary leaves the full history intact for a later attempt. Server-side memory (a Conversations
   API conversation, or `previous_response_id` threading) is deliberately not used: it can only grow,
   so every screenshot and reply is re-billed as input on every later turn of a long session, and its
-  single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Requests are sent `store:true`
+  single-writer lock turns one slow turn into minutes of `conversation_locked` silence. OpenAI API requests are sent `store:true`
   so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
   documented in [sandbox.md](./sandbox.md).
 - **Coaching guidance is loaded on demand, not chosen at Start** (see
@@ -861,7 +863,7 @@ ChatGPT or Claude plan pay for coaching instead of a metered API key. Both are s
 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT, Go), shipped inside the app at
 `Contents/MacOS/cliproxyapi` from the pinned, checksum-verified release in
 [`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh). The helper holds the OAuth sign-ins
-and serves them as an OpenAI Responses endpoint on 127.0.0.1, so every target goes through the one
+and serves them as an OpenAI Responses endpoint on 127.0.0.1, so both subscriptions go through the one
 [`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) and the attempt runner
 reads one wire shape. Only the endpoint, the key, and the target's tool policy differ, and each
 provider's [`BrainProviderDescriptor`](../Sources/JarvisCore/Brain/BrainProviderDescriptor.swift)
@@ -980,6 +982,63 @@ where terminal launchers leave short-lived wrappers. Claude's sign-in comes from
 `auth status --json` under a short timeout, because account metadata can outlive an expired OAuth
 session; Codex's comes from its auth file. See
 [build-and-run.md → The live activity viewer](./build-and-run.md#the-live-activity-viewer).
+
+### Gemini API target
+
+The **Gemini API** target (`BrainProvider.gemini`, chosen in [Settings → Brain](./settings-window.md#brain))
+sends coaching to Google's Interactions API at `generativelanguage.googleapis.com/v1/interactions`
+with the Gemini key saved in Connections. The key rides only in the `x-goog-api-key` header. Brain
+requests never follow a redirect, so the key never leaves in a URL or goes to a 3xx target. Requests
+are stateless (`store: false`) and carry the whole conversation, as every target's do.
+
+Jarvis calls Google directly rather than through a gateway. The bundled helper would need the key
+copied into its configuration file, drops Gemini's narrowed tool choice, and marks every
+non-streaming reply complete. Bifrost would add a second helper of about 122 MB that fetches pricing
+data from its vendor by default. Google's OpenAI-compatible layer offers only Chat Completions.
+
+- **One wire format per API family.**
+  [`InteractionsWireFormat`](../Sources/JarvisBrainProviders/Accessor/InteractionsWireFormat.swift)
+  uses the same transport, replay rule, and session memory as every other target. The provider
+  descriptor names its endpoint, header, and failure table.
+- **Rules the live API enforces beyond its reference.**
+  - A function call must follow a thought step that carries a signature. So any call Gemini did not
+    just return (committed memory, a runner-written preload, another provider's call before a
+    switch) goes behind the placeholder signature Google documents for injected calls on
+    `generateContent`. That keeps memory provider-neutral, so a switch works in either direction.
+  - A call must follow a user step or a function result. Input that would open with the Show code
+    preload therefore opens with a short user step.
+  - A function result must name its call.
+  - Returned call ids (`call_` plus up to six digits) get a per-reply suffix, so a long session
+    never repeats one.
+
+  The placeholder is the one undocumented dependency. A 400 on any request that carries history
+  would signal that Google stopped accepting it, and the [live e2e run](./live-e2e-tests.md) replays
+  a Claude Code preload to Gemini on every run.
+- **Tool policy `providerEnforced`.** `required` becomes `any`. A narrowed or forced choice becomes
+  `allowed_tools` in mode `any`, inside `generation_config`. Tools keep their schemas and drop
+  `strict`, which Gemini doesn't support; the runner's own check covers the difference. Gemini has
+  no parallel-call switch, so the runner runs the first call, as it does for Codex.
+- **Effort.** Low, medium, and high keep their names, and `none` becomes `minimal`. Gemini 3.8 and
+  3.7 Flash reject `minimal`, so their catalog entries floor at low. `max_output_tokens` counts
+  thought tokens, as the Responses cap does, so the effort budgets carry over.
+- **Replies.** `requires_action` (calls) and `completed` (text) finish a reply. Any other status is
+  truncation, including `incomplete` at the output cap; a `failed` reply's `errors` are quoted into
+  the Activity row. Usage reports thought tokens separately from output, and the evaluator adds them
+  so every provider's output column includes reasoning. Implicit caching is documented only above
+  4,096 tokens and showed no hit in testing even above that, so no cache discount is assumed;
+  `total_cached_tokens` is logged, so a real session shows whether it ever applies.
+- **Models.** Gemini 3.8 Flash is the default. 3.7, 3.6, and 3.5 Flash are also offered, and 3.5
+  Flash-Lite, which also writes compaction summaries. Preview models and the 2.5 family, whose
+  thinking control differs, are left out.
+- **Failures** read through
+  [`GeminiFailureClassifier`](../Sources/JarvisCore/Providers/Gemini/GeminiFailureClassifier.swift),
+  which transcription shares.
+  - A rejected key arrives as HTTP 400 with Google's older error body inside a list
+    (`API_KEY_INVALID`), and is a permanent authentication failure.
+  - Interactions errors carry a snake_case `code`, which Activity quotes.
+  - A safety block (`content_blocked`) stays temporary, because a later turn may pass. Google warns
+    it can fire on safe coding and security questions.
+  - 429 and 5xx stay temporary.
 
 ### Latency
 
@@ -1162,8 +1221,8 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   is the owner-only, bounded per-session record: Activity (spoken tips, deliberate-silence outcomes,
   failed-action and stop/degrade notices carrying the provider's redacted message, transcribed
   lines, and the screenshots the model saw), the coaching-attempt provenance needed to attribute those finalized lines, and redacted wire
-  traffic. Raw mic audio and a separate live-transcript archive are never persisted. Requests
-  are sent `store:true`, so what the model saw does remain inspectable (and retained) server-side at
+  traffic. Raw mic audio and a separate live-transcript archive are never persisted. OpenAI API
+  requests are sent `store:true`, so what the model saw does remain inspectable (and retained) server-side at
   OpenAI for debugging (see [sandbox.md](./sandbox.md)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap during healthy operation**. Every
   substantive utterance — from either speaker; only clear non-semantic hesitation sounds are removed

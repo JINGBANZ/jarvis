@@ -134,10 +134,11 @@ hub header shows a four-segment readiness meter in part order that reads **SYSTE
 with the reason. The rules judge saved settings and grants the way a Start would meet them, and name
 only what Settings can fix or explain:
 
-- **Brain** needs an OpenAI key whenever any target in the route uses the OpenAI API and no key is
-  saved. Start refuses in that case, so the hub asks for the key rather than promising to skip that
-  target. Otherwise Brain needs attention when the primary is a subscription proven signed out; the
-  notice says whether the next brain in the route will answer instead, or whether none can.
+- **Brain** needs a target's API key whenever any target in the route calls its provider with a key
+  (the OpenAI API or the Gemini API) and that key is not saved. Start refuses in that case, so the
+  hub asks for the key rather than promising to skip that target. Otherwise Brain needs attention
+  when the primary is a subscription proven signed out; the notice says whether the next brain in
+  the route will answer instead, or whether none can.
 - **Ear** needs its transcription provider's own key first, then microphone access.
 - **Eye** needs Screen Recording.
 - **Mouth** needs at least one of the caption and the box switched on.
@@ -359,10 +360,11 @@ explanatory paragraphs. Fallback rows expand the outer document instead of hidin
 scroll area. While coaching runs, a compact teal **In use** tag exposes the runtime cursor without
 moving or rewriting any saved target.
 
-**Primary.** The first row selects a provider and model: the **OpenAI API** (metered by the key), the
-**Codex** (the user's ChatGPT plan), or **Claude Code** (the user's Claude
-plan). Both subscriptions are served by the helper bundled in the app and signed in from
-[Connections](#connections); see
+**Primary.** The first row selects a provider and model: the **OpenAI API** (metered by its key), the
+**Gemini API** (metered by its key), the **Codex** (the user's ChatGPT plan), or **Claude Code** (the
+user's Claude plan). The Gemini API is called directly; see
+[architecture.md → Gemini API target](./architecture.md#gemini-api-target). Both subscriptions are
+served by the helper bundled in the app and signed in from [Connections](#connections); see
 [architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy).
 A subscription can be chosen for a new row only while the helper's last answer proved it signed in,
 so the menu omits a signed-out one; an existing saved row stays visible so the user can repair or
@@ -412,7 +414,8 @@ saved list. Stop → Start begins at the saved primary again.
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
 The OpenAI API and Codex share one concrete model list; Claude Code
 exposes the current concrete Claude releases, including the latest in each supported family and
-older choices needed to preserve saved routes. A listed model Codex does not serve
+older choices needed to preserve saved routes; the Gemini API offers Gemini 3.8, 3.7, 3.6, and 3.5
+Flash and 3.5 Flash-Lite. A listed model Codex does not serve
 fails at request time with the helper's `model_not_found`, which reads as a configuration failure.
 Adding a model keeps provider defaults and existing selections stable. Concrete releases, never
 rolling aliases such as `sonnet` or `opus`: a saved route must keep naming the release the user
@@ -427,8 +430,9 @@ applies uniformly to whichever provider is active; its default lives with the ot
 [`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). The brain client raises None to Low,
 and the output budget to at least the Low budget, for Claude Code, whose provider descriptor carries
 that floor because None disables thinking on that path and Claude Fable 5.1 rejects it, and for
-GPT-6 Astra, whose catalog entry carries it because Astra requires reasoning. The stored effort
-remains unchanged, and every other target keeps the selected effort.
+GPT-6 Astra, whose catalog entry carries it because Astra requires reasoning, and for Gemini 3.8 and
+3.7 Flash, whose catalog entries carry it because they reject Gemini's lowest level. The stored
+effort remains unchanged, and every other target keeps the selected effort.
 
 Reads are validated: a persisted primary model id no longer in that provider's catalog uses the
 provider default without rewriting the invalid value, while invalid fallback rows are removed during
@@ -449,10 +453,10 @@ the next attempt.
 An edit to a route that names a subscription reads the helper first, so it meets the sign-ins
 Settings showed. A route edit in which no target can serve is refused: the running route stays
 intact, Activity records fixed settings-not-applied copy, and the same alert as a refused Start
-names the next step. An edit whose route names the OpenAI API while no key is saved is refused the
-same way, without the alert. Provider-specific partial tool-loop state from a failed attempt is
-discarded, while provider-neutral pending conversation follows the newly installed route on its next
-attempt. While stopped, persisted changes apply on the **next Start**. The helper's later state is
+names the next step. An edit whose route names the OpenAI API or the Gemini API while that key is not
+saved is refused the same way, without the alert. Provider-specific partial tool-loop state from a
+failed attempt is discarded, while provider-neutral pending conversation follows the newly installed
+route on its next attempt. While stopped, persisted changes apply on the **next Start**. The helper's later state is
 not a routing signal: if it stops or a subscription is signed out mid-session, that target's attempt
 fails and follows the normal fresh-attempt route policy.
 
@@ -557,8 +561,8 @@ The Connections page owns authentication shared across Brain and Ear. Its three 
 cards are **OpenAI API**, **Gemini API**, and **Subscriptions**. The OpenAI and Gemini
 cards each report and edit only their own Jarvis-managed owner-only file through `APIKeyControls`
 (one instance per `Credential`, keyed by `credential.rawValue` so their accessibility labels,
-identifiers, and saved-key state never collide); each card's header says what the key is used for,
-and its action is **Add API key** or **Edit**. The row reads **Saved** in teal once a key is saved.
+identifiers, and saved-key state never collide); each card's header says the key serves the brain
+and transcription, and its action is **Add API key** or **Edit**. The row reads **Saved** in teal once a key is saved.
 The `OPENAI_API_KEY` fallback remains usable by Start but is deliberately not presented as a
 Jarvis-managed saved key; Gemini has the same headless fallback in `GEMINI_API_KEY`
 (`Credential.geminiAPIKey.environmentVariable`, read by `EnvSecretStore`), also not presented as a
@@ -608,14 +612,13 @@ secrets file ([sandbox.md](./sandbox.md) says where, and what a login reaches). 
 chip counts every managed API key that is saved and every subscription the last probe proved signed
 in.
 
-An OpenAI key is required only when OpenAI is selected for transcription or appears anywhere in the
-brain route; a Gemini key is required only when Gemini is selected for transcription — Gemini is not
-a brain provider. Apple Speech plus a subscription-only route can start without either key. Saving a
-managed key while a session runs preserves route health: an OpenAI save refreshes both the OpenAI
-brain clients and a live OpenAI transcription socket's future reconnect credential, while a Gemini
-save refreshes only a live Gemini transcription socket's future reconnect credential. Neither ever
-replaces a subscription client, and a saved credential only ever reaches the transcriber built for
-that same provider.
+An API key is required when its provider is selected for transcription or appears anywhere in the
+brain route: the OpenAI key for OpenAI, the Gemini key for Gemini. Apple Speech with a
+subscription-only route can start without either key. Saving a managed key while a session runs
+preserves route health: it refreshes the brain clients of every route target that uses that key, and
+the future reconnect credential of a live transcription socket for the same provider. Neither ever
+replaces a subscription client, and a saved credential only ever reaches the clients built for its
+own provider.
 
 ## Capture Scope
 
@@ -731,7 +734,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/HotkeyRecorderButton.swift`, `ShortcutKeycapsView.swift` | The Record button and the drawn keycaps |
 | `Sources/JarvisApp/Settings/NSView+PixelGrid.swift` | Rounds centered text to the screen's pixel grid |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity page |
-| `Sources/JarvisCore/Brain/BrainProvider.swift` | The three providers: the OpenAI API and the two subscriptions |
+| `Sources/JarvisCore/Brain/BrainProvider.swift` | The four providers: the OpenAI and Gemini APIs and the two subscriptions |
 | `Sources/JarvisBrainProviders/LocalAgent/AgentCLIDetector.swift` | The evaluator's CLI binary discovery + bounded authentication-status detection |
 | `Sources/JarvisCore/Brain/BrainModelCatalog.swift` | Curated per-provider model lists (`BrainModel`) |
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
