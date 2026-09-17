@@ -1,8 +1,8 @@
 import AppKit
 
-/// One of the hub's bottom buttons: a chamfered tile with a symbol above its title. It draws its
-/// frame in `draw(_:)` before the cell draws the symbol and title, because a sublayer would cover
-/// the button's own content.
+/// One of the hub's bottom buttons: a chamfered tile with a symbol above its title. It draws the
+/// frame, symbol, and title itself: the button cell's image-above layout pins the symbol to the top
+/// edge of a tall tile, and a sublayer would cover the cell's own drawing.
 @MainActor
 final class HomeDockButton: NSButton {
     let destination: SettingsDestination
@@ -12,21 +12,24 @@ final class HomeDockButton: NSButton {
         didSet { if oldValue != isHovered { needsDisplay = true } }
     }
     private var trackingArea: NSTrackingArea?
+    private let symbol: NSImage?
+    private let label: NSAttributedString
 
     override var isFlipped: Bool { true }
     override var focusRingMaskBounds: NSRect { bounds }
 
     init(destination: SettingsDestination, title: String, symbolName: String) {
         self.destination = destination
-        super.init(frame: NSRect(x: 0, y: 0, width: 138, height: 84))
-        isBordered = false
-        imagePosition = .imageAbove
-        image = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 20, weight: .regular))
-        contentTintColor = SettingsTheme.purple
-        attributedTitle = NSAttributedString(string: title, attributes: [
+        symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+                .applying(NSImage.SymbolConfiguration(paletteColors: [SettingsTheme.purple])))
+        label = NSAttributedString(string: title, attributes: [
             .font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: SettingsTheme.text,
         ])
+        super.init(frame: NSRect(x: 0, y: 0, width: 138, height: 84))
+        isBordered = false
+        self.title = ""
+        imagePosition = .noImage
         setAccessibilityLabel(title)
         target = self
         action = #selector(open)
@@ -64,7 +67,18 @@ final class HomeDockButton: NSButton {
         (lit ? SettingsTheme.teal : SettingsTheme.purple.withAlphaComponent(0.5)).setStroke()
         path.lineWidth = 1
         path.stroke()
-        super.draw(dirtyRect)
+
+        // The symbol above the title, centered together.
+        let gap: CGFloat = 6
+        let symbolSize = symbol?.size ?? .zero
+        let labelSize = label.size()
+        var top = floor((bounds.height - symbolSize.height - gap - labelSize.height) / 2)
+        symbol?.draw(
+            in: NSRect(x: floor((bounds.width - symbolSize.width) / 2), y: top,
+                       width: symbolSize.width, height: symbolSize.height),
+            from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        top += symbolSize.height + gap
+        label.draw(at: NSPoint(x: floor((bounds.width - labelSize.width) / 2), y: top))
     }
 
     override func drawFocusRingMask() {

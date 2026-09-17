@@ -30,6 +30,9 @@ final class SettingsCardStack {
             let height = item.view.heightAnchor.constraint(equalToConstant: item.height)
             height.isActive = true
             stack.addArrangedSubview(item.view)
+            // The stack's width alignment is only a low-priority preference, which a wrapping label's
+            // intrinsic width outranks; a callout would then hug its text instead of filling the column.
+            item.view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
             cards.append((item.view, height))
         }
         // The flexible tail absorbs the space below short content.

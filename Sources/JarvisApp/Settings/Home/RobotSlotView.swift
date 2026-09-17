@@ -81,9 +81,14 @@ final class RobotSlotView: NSView {
         case .attention: SettingsTheme.amber
         }
         // Theme colors are dynamic, so the attributed string follows appearance changes when it draws.
+        // An attributed value carries its own line breaking, so truncation is set here as well.
+        let truncating = NSMutableParagraphStyle()
+        truncating.lineBreakMode = .byTruncatingTail
         detailLabel.attributedStringValue = NSAttributedString(string: state.detail, attributes: [
             .kern: 1.5, .font: NSFont.systemFont(ofSize: 9.5), .foregroundColor: color,
+            .paragraphStyle: truncating,
         ])
+        toolTip = "\(state.value)\n\(state.detail)"
         setAccessibilityValue("\(state.value), \(state.detail.lowercased())")
         needsDisplay = true
     }
