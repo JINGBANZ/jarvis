@@ -77,8 +77,8 @@ import Testing
         #expect(object["detail"] is NSNull)
     }
 
-    @Test func aSuppressedDetailIsNotReplayedAsDelivered() async throws {
-        let args = #"{"lines":["Keep this hint."],"detail":"Hidden explanation."}"#
+    @Test func aPlanEditKeepsDeliveredDetailInHistory() async throws {
+        let args = #"{"lines":["Keep this hint."],"detail":"Delivered explanation."}"#
         let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(
             callId: "s", name: "speak", argumentsJSON: args))],
             rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
@@ -96,7 +96,7 @@ import Testing
         let messages = try #require(brain.calls.last)
         let call = try #require(messages.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
         let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
-        #expect(object["detail"] as? String == "Hidden explanation.")
+        #expect(object["detail"] as? String == "Delivered explanation.")
         #expect(object["lines"] as? [String] == ["Keep this hint."])
     }
 }
