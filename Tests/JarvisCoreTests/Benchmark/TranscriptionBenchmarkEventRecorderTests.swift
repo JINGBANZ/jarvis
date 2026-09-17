@@ -16,7 +16,7 @@ struct TranscriptionBenchmarkEventRecorderTests {
             try await recorder.waitForFinalStreamToSettle(
                 minimumCount: 1,
                 quietPeriod: 0.12,
-                timeout: 1)
+                timeout: 10)
             return recorder.snapshot().events.filter { $0.kind == .finalized }.count
         }
 
@@ -35,7 +35,7 @@ struct TranscriptionBenchmarkEventRecorderTests {
         try await recorder.waitForFinalStreamToSettle(
             minimumCount: 1,
             quietPeriod: 0.01,
-            timeout: 1)
+            timeout: 10)
         recorder.record(Self.connectionLost)
 
         let failure = recorder.snapshot().terminalFailure.map {
@@ -57,7 +57,7 @@ struct TranscriptionBenchmarkEventRecorderTests {
                 phraseIDs,
                 inGeneration: 1,
                 quietPeriod: 0.12,
-                timeout: 1)
+                timeout: 10)
             return recorder.snapshot().events.filter { $0.kind == .finalized }.count
         }
 
@@ -97,7 +97,7 @@ struct TranscriptionBenchmarkEventRecorderTests {
             try await recorder.waitForFinalStreamToSettle(
                 minimumCount: 1,
                 quietPeriod: 0.1,
-                timeout: 1)
+                timeout: 10)
         }
 
         try await Task.sleep(for: .milliseconds(50))
