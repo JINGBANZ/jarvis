@@ -52,6 +52,16 @@ import Testing
             fix: .openConnections))
     }
 
+    @Test func aGeminiTargetNeedsTheGeminiKey() {
+        let gemini = BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash")
+        let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [gemini]))
+        #expect(health(.brain, inputs, .fixture(credentials: [.openAIAPIKey])) == .needsAttention(
+            reason: "ADD A GEMINI KEY",
+            advice: "I need a Gemini key to start, because Fallback 1 uses the Gemini API. Add it in Connections.",
+            fix: .openConnections))
+        #expect(health(.brain, inputs, .fixture(credentials: [.geminiAPIKey])) == .ready)
+    }
+
     @Test func aSignedOutFallbackAloneKeepsTheBrainReady() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: openAI, fallbackTargets: [codex]))
         #expect(health(.brain, inputs, .fixture(signedOut: [.codexSubscription])) == .ready)

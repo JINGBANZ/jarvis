@@ -624,6 +624,26 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(entry["response"] == nil)
         #expect((entry["request"] as? [String: Any])?["model"] as? String == "gpt-5.5")
     }
+
+    @Test func geminiTargetsSendTheKeyInItsHeaderOnly() async throws {
+        let captured = CapturedRequests()
+        let client = BrainAccessor(
+            provider: .gemini, apiKey: "AIzaTestKey", model: "gemini-3.8-flash",
+            endpoint: BrainProviderDescriptor.geminiInteractionsEndpoint,
+            send: { request in
+                captured.append(request)
+                return (Data(#"{"status":"completed","steps":[]}"#.utf8), http(200))
+            })
+        _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
+        let request = try #require(captured.values.first)
+        #expect(request.url == BrainProviderDescriptor.geminiInteractionsEndpoint)
+        #expect(request.url?.query == nil)
+        #expect(request.value(forHTTPHeaderField: "x-goog-api-key") == "AIzaTestKey")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == nil)
+        let body = try #require(try JSONSerialization.jsonObject(with: request.httpBody ?? Data()) as? [String: Any])
+        #expect(body["store"] as? Bool == false)
+        #expect(body["generation_config"] != nil)
+    }
 }
 
 // @unchecked: all mutable state is guarded by lock.

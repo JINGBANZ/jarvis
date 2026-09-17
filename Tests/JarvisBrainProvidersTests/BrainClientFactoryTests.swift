@@ -60,4 +60,17 @@ import JarvisCore
         #expect(try body(codex.coach)["tool_choice"] as? String == "required")
         #expect(try body(codex.summarizer)["model"] as? String == "gpt-5.5")
     }
+
+    @Test func geminiTargetsCallGoogleWithTheGeminiKey() async throws {
+        let sent = try await requests(
+            for: BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash"),
+            keys: [.openAIAPIKey: "sk-openai", .geminiAPIKey: "AIzaTestKey"])
+        #expect(sent.coach.url == BrainProviderDescriptor.geminiInteractionsEndpoint)
+        #expect(sent.coach.value(forHTTPHeaderField: "x-goog-api-key") == "AIzaTestKey")
+        #expect(sent.coach.value(forHTTPHeaderField: "Authorization") == nil)
+        let config = try body(sent.coach)["generation_config"] as? [String: Any]
+        #expect(config?["thinking_level"] as? String == "low")   // 3.8 rejects `minimal`
+        #expect(try body(sent.summarizer)["model"] as? String == "gemini-3.5-flash-lite")
+        #expect(try body(sent.summarizer)["tools"] == nil)
+    }
 }

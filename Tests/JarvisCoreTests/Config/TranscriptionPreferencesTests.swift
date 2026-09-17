@@ -141,6 +141,15 @@ import Testing
             == [.openAIAPIKey])
     }
 
+    @Test func aGeminiBrainNeedsTheGeminiKey() {
+        let route = BrainRoute(
+            primary: BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash"), fallbackTargets: [])
+        #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: route) == [.geminiAPIKey])
+        #expect(TranscriptionProvider.gemini.requiredCredentials(for: route) == [.geminiAPIKey])
+        #expect(TranscriptionProvider.openAI.requiredCredentials(for: route)
+            == [.geminiAPIKey, .openAIAPIKey])
+    }
+
     @Test func openAITranscriptionAlwaysNeedsItsOwnKey() {
         #expect(TranscriptionProvider.openAI.requiredCredentials(for: nil) == [.openAIAPIKey])
     }
