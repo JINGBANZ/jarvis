@@ -36,7 +36,8 @@ import Testing
         #expect(tool.parametersJSON.contains(
             "Markdown shown under the hint in the box. Null for an ordinary hint."))
         #expect(tool.description.contains(
-            "Put a code block or a diagram in detail as Markdown; null for an ordinary hint."))
+            "Put a code block, a diagram, or a short explanation in detail as Markdown; "
+                + "null for an ordinary hint."))
         #expect(tool.guidance.contains("# Detail"))
         #expect(!speakTool(detailEnabled: false).guidance.contains("# Detail"))
         #expect(!tool.guidance.contains("mermaid"))
@@ -192,6 +193,45 @@ import Testing
             .contains("Give a full solution only when \"me\" explicitly asks"))
         #expect(!speakTool(detailEnabled: true).guidance.contains("never the whole answer"))
         #expect(!JarvisPrompts.Coach.system.contains("never the whole answer"))
+    }
+
+    /// Once an approach is underway the tip style prefers a pointed question, but when the
+    /// interviewer asks for a better approach the candidate lacks, the tip names it. The rule sits in
+    /// the tip style, so a boxless session follows it too.
+    @Test func tipStyleNamesTheBetterApproachTheInterviewerAskedFor() {
+        let style = speakTool(detailEnabled: false).guidance
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(style.contains("When \"them\" asks for a better approach and \"me\" has not offered one"))
+        #expect(style.contains("The shape of an approach is not a full solution."))
+    }
+
+    /// Mid-interview "me" is talking to the interviewer, so a rule that waits for "me" to ask Jarvis
+    /// why never fires. The need is read from the conversation, and the answer stays short.
+    @Test func detailExplanationsAreTriggeredByTheConversationAndStayShort() {
+        let detail = speakTool(detailEnabled: true).guidance
+            .split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(detail.contains("cannot stop to ask you why"))
+        #expect(detail.contains("\"them\" pushes past what \"me\" gave, such as asking for a better approach"))
+        // Filler never reaches the model (`TurnSubstance`), so the signals are ones a transcript shows.
+        #expect(detail.contains("\"me\" asks for time, stops mid-sentence, or restates something wrongly"))
+        #expect(detail.contains("A new question or quiet alone does not show it, and you hear transcripts, not tone."))
+        #expect(detail.contains("No headings, background, or alternatives."))
+        #expect(!detail.contains("only when the user asks you to explain"))
+    }
+
+    /// The better approach's sketch is a coding rule: it lives in the skill, ordered so the model
+    /// writes the reason and the trace before the pseudo-code rather than the block alone.
+    @Test func codingSkillSketchesABetterApproachInOrder() throws {
+        let skill = try #require(SkillCatalog.bundled().first { $0.name == "coding" })
+        let body = skill.body.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        #expect(body.contains("asks for a better approach than the candidate's and speak offers detail"))
+        let reason = try #require(body.range(of: "1. Why it works, in one everyday sentence"))
+        let trace = try #require(body.range(of: "2. A one-line trace"))
+        let sketch = try #require(body.range(of: "3. Pseudo-code for the whole approach"))
+        #expect(reason.lowerBound < trace.lowerBound && trace.lowerBound < sketch.lowerBound)
+        #expect(body.contains("A better approach's sketch, above, is the one exception."))
+        // A wrong approach otherwise gets no code; the interviewer's request is what licenses the sketch.
+        #expect(body.contains("add no code, unless the interviewer asked for a better approach: then give its sketch."))
     }
 
     /// A live session shipped "compare left spine height vs right spine height" — inside the line
