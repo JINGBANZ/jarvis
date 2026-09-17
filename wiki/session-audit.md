@@ -119,8 +119,9 @@ absence rather than counts.
 ## Privacy and Verification
 
 Evidence stays in the owner-only session directory under the existing retention policy. Request
-images are redacted from traffic JSON because captured pixels already exist as owner-only screenshot
-files there. Screenshot attachments for Activity are written owner-only inside that same directory,
+images are redacted from traffic JSON on the audit worker, both a string that starts with
+`data:image/` and the `data` of any object whose `mime_type` names an image, because captured pixels
+already exist as owner-only screenshot files there. Screenshot attachments for Activity are written owner-only inside that same directory,
 before the row that references them. Nothing archives raw microphone audio or a separate live
 transcript, and the capture heartbeat carries content-free frame progress only.
 

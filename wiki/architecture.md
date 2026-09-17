@@ -267,7 +267,7 @@ request, and the response at the cap is forced to `speak`. A press therefore alw
 never runs out of responses. When `speak` is the only tool left, the request is the plain forced
 `speak`, one round trip. On the OpenAI API and Codex the narrowing is an
 `allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
-attempts (`BrainAccessor.encodeBody`). Claude Code can neither force nor narrow a call, so
+attempts (`ResponsesWireFormat`). Claude Code can neither force nor narrow a call, so
 its request declares only the permitted tools under `tool_choice: auto`
 ([Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy)).
 The accepted cost is a round trip for each first load and each search, and the client resends the
@@ -570,11 +570,11 @@ presentation matrix is unit-tested, and `scripts/check-ghost-mode.sh` rejects un
 API calls from the normal test gate. Realtime health remains visible through the menu and current
 Activity badge; `ErrorReporter` owns failure lifecycle and permitted startup surfacing.
 
-OpenAI transport diagnostics use per-task URLSession metrics while preserving the shared connection
-pool. DNS/connect/TLS/upload/response durations and connection reuse/proxy counts enter the existing
-`BrainTrafficAuditEvent.phases` on the same provider-call record the evaluator reads. Missing endpoints
-are omitted, not reported as zero. No parallel correlation stream is emitted; diagnostic fields
-exclude URLs, headers, payloads, and arbitrary error text.
+Brain transport diagnostics (`BrainRequestDelegate`) use per-task URLSession metrics while
+preserving the shared connection pool. DNS/connect/TLS/upload/response durations and connection
+reuse/proxy counts enter the existing `BrainTrafficAuditEvent.phases` on the same provider-call record
+the evaluator reads. Missing endpoints are omitted, not reported as zero. No parallel correlation
+stream is emitted; diagnostic fields exclude URLs, headers, payloads, and arbitrary error text.
 
 ### Ordered provider route
 
@@ -682,7 +682,7 @@ The implementation keeps orchestration, route policy, and OS edges separate:
 | Route state machine (`JarvisCore/Coach`) | Count attempt outcomes, move forward, and emit pure transition commands. | Call providers, read preferences, or own timers. |
 | Attempt scheduler (`JarvisCore/Coach`) | Own finite cycle retries, trigger coalescing, single-flight, and transcription-settlement admission. | Classify provider payloads or mutate the route directly. |
 | Attempt runner (`CoachAttemptRunner`) | Run one snapshotted target's tool loop, normalize completed provider-neutral effects, commit history, and report one outcome. | Retry a failed request, choose another target mid-attempt, or schedule anything. |
-| Client factory (`JarvisCore/Brain`) | Build a `BrainClient` for an explicit target and surface preflight availability. | Select or reorder targets. |
+| Client factory (`BrainClientFactory`, JarvisBrainProviders) | Build a `BrainClient` for an explicit target and surface preflight availability. | Select or reorder targets. |
 | Preferences (`JarvisCore/Config`) | Persist primary, ordered fallbacks, per-provider models, and shared effort. | Store the live route cursor or failure counts. |
 | App adapters (`JarvisApp`) | Render the list editor and feed provider transcription-work/timer events into Core. | Contain retry or failover policy. |
 
@@ -708,6 +708,10 @@ rather than a per-turn screenshot.
   Responses. The tool loop is threaded with `function_call` / `function_call_output` items, with the
   model's `reasoning` items replayed verbatim ahead of the call — OpenAI's requirement for the model
   to continue its chain of thought over a tool result instead of re-reasoning from scratch.
+  [`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) is the transport
+  every target shares, and one `BrainWireFormat` per API family holds the JSON. Every format replays
+  an assistant message by one rule: its raw items when present, otherwise its parsed calls,
+  otherwise its text.
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
   itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
@@ -715,7 +719,9 @@ rather than a per-turn screenshot.
   cache can reuse stable prefixes); a `stay_silent` call leaves no trace, even one a turn was refused
   or went past, so its refusal never tells a later turn that silence is off-limits, while useful
   speech and the newest screen observation survive. At conversation commit, pixels become neutral
-  stubs; a newer capture supersedes older screen text, and reasoning items are dropped. Screen text
+  stubs; a newer capture supersedes older screen text, and a turn's raw provider items are dropped
+  while the calls parsed beside them stay (`ChatMessage.rawItems(_:calls:)`), so memory never parses
+  a vendor's items. Screen text
   carries the `[mm:ss]` session time it was captured, the transcript's own clock, and says the screen
   may have changed since, so a later turn reads it as evidence from then: text that still called
   itself the current viewport let a "how do I solve this" minutes later skip the fresh look the
