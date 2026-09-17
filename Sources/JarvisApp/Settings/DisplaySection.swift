@@ -1,11 +1,10 @@
 import AppKit
 import JarvisCore
 
-/// Settings panel for what the coach screenshots when `capture_screen` fires.
+/// Settings → Eye: what the coach screenshots when `capture_screen` fires.
 @MainActor
 final class DisplaySection: NSObject, SettingsSection {
-    let title = "Screen"
-    let fillsTab = true
+    let destination = SettingsDestination.eye
 
     private let preferences: ScreenCapturePreferences
     /// Called after an edit is persisted so the host can freeze a fresh control-plane revision for
@@ -27,7 +26,7 @@ final class DisplaySection: NSObject, SettingsSection {
         self.onChange = onChange
     }
 
-    func makeView() -> NSView {
+    func makePage() -> SettingsPageView {
         let body = NSView(frame: NSRect(x: 0, y: 0, width: 712, height: 432))
 
         let popup = NSPopUpButton()
@@ -48,17 +47,17 @@ final class DisplaySection: NSObject, SettingsSection {
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
         card.translatesAutoresizingMaskIntoConstraints = false
-        card.setHeader(title: "Screen capture", detail: "Applied to the next coaching turn")
+        card.setHeader(title: "Screen capture")
         let row = SettingsRowView(
-            title: "Capture scope",
-            detail: "Active window is the most private option",
+            title: "What I capture",
+            detail: "The window you last clicked or typed in.",
             controlView: popup,
             controlSize: NSSize(width: 300, height: 32),
             preferredHeight: 64,
             showsSeparator: true)
         let browserTextRow = SettingsRowView(
             title: "Read Chrome page text",
-            detail: "Optional Accessibility access; may include off-screen text",
+            detail: "Needs Accessibility permission. You can switch it on only while I'm stopped.",
             controlView: browserTextSwitch,
             controlSize: NSSize(width: 46, height: 28),
             preferredHeight: 64,
@@ -74,7 +73,8 @@ final class DisplaySection: NSObject, SettingsSection {
                                           width: body.width, height: body.height / 2)
         }
 
-        let callout = makeCallout()
+        let callout = SettingsCalloutView(text: "I skip my own windows. If nothing fits, I capture your "
+            + "main display instead. Screenshots stay in this Mac's session folder.")
         callout.translatesAutoresizingMaskIntoConstraints = false
         body.addSubview(card)
         body.addSubview(callout)
@@ -86,51 +86,15 @@ final class DisplaySection: NSObject, SettingsSection {
             callout.topAnchor.constraint(equalTo: card.bottomAnchor, constant: SettingsStyle.sectionSpacing),
             callout.leadingAnchor.constraint(equalTo: body.leadingAnchor),
             callout.trailingAnchor.constraint(equalTo: body.trailingAnchor),
-            callout.heightAnchor.constraint(equalToConstant: 68),
+            callout.heightAnchor.constraint(equalToConstant: SettingsCalloutView.preferredHeight),
         ])
 
         return SettingsPageView(
-            title: "Screen",
-            summary: "Control what Jarvis can see when it needs visual context.",
+            title: "Eye",
+            summary: "What I look at when I check your screen.",
+            chip: .neutral("Applies next capture"),
+            part: .eye,
             bodyView: body)
-    }
-
-    private func makeCallout() -> NSBox {
-        let callout = NSBox()
-        callout.boxType = .custom
-        callout.borderWidth = 1
-        callout.cornerRadius = 10
-        callout.borderColor = NSColor.systemBlue.withAlphaComponent(0.18)
-        callout.fillColor = NSColor.systemBlue.withAlphaComponent(0.07)
-        callout.contentViewMargins = .zero
-
-        guard let content = callout.contentView else { return callout }
-        let icon = NSImageView()
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.image = NSImage(systemSymbolName: "info.circle.fill", accessibilityDescription: nil)
-        icon.contentTintColor = .systemBlue
-        content.addSubview(icon)
-
-        let note = NSTextField(wrappingLabelWithString:
-            "Jarvis captures only when the brain requests visual context. If the active window "
-            + "is Chrome, page text is enabled, and permission is available, semantic text is "
-            + "added alongside OCR. "
-            + "Screenshots still carry images and diagrams.")
-        note.translatesAutoresizingMaskIntoConstraints = false
-        note.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        note.textColor = .secondaryLabelColor
-        content.addSubview(note)
-
-        NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            icon.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
-            icon.widthAnchor.constraint(equalToConstant: 22),
-            icon.heightAnchor.constraint(equalToConstant: 22),
-            note.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            note.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-            note.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-        ])
-        return callout
     }
 
     func didBecomeActive() {
@@ -165,7 +129,7 @@ final class DisplaySection: NSObject, SettingsSection {
         guard let popup else { return }
         popup.removeAllItems()
         popup.addItem(withTitle: "Active window (recommended)")
-        popup.addItems(withTitles: NSScreen.displayTitles.map { "Entire display — \($0)" })
+        popup.addItems(withTitles: NSScreen.displayTitles.map { "Entire display: \($0)" })
         switch preferences.scope {
         case .activeWindow:
             popup.selectItem(at: 0)
@@ -200,13 +164,10 @@ final class DisplaySection: NSObject, SettingsSection {
         // Turning access off is immediate and cannot expose more data. Enabling remains a stopped-
         // session operation because it may present macOS privacy UI.
         browserTextSwitch.isEnabled = isSessionStopped() || preferences.browserTextEnabled
-        if preferences.browserTextEnabled, BrowserAccessibilityPermission.isGranted {
-            browserTextSwitch.toolTip = "Enabled for foreground Chrome tabs"
-        } else if preferences.browserTextEnabled {
-            browserTextSwitch.toolTip = "Accessibility permission is missing; captures use OCR"
-        } else {
-            browserTextSwitch.toolTip = "Off; captures use current-window OCR"
-        }
+        // The reconcile above switches page text off without a live grant, so On implies one.
+        browserTextSwitch.toolTip = preferences.browserTextEnabled
+            ? "On for the Chrome tab in front"
+            : "Off. I read the window's text from the screenshot."
     }
 
     @objc private func browserTextChanged(_ sender: NSSwitch) {

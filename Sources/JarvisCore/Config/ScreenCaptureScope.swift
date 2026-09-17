@@ -1,6 +1,6 @@
 import Foundation
 
-/// What `capture_screen` shoots. Chosen in Settings → Screen — one dropdown whose entire-display
+/// What `capture_screen` shoots. Chosen in Settings → Eye — one dropdown whose entire-display
 /// entries also carry the display choice (`DisplaySection`); persisted via
 /// `ScreenCapturePreferences` and read at capture time.
 public enum ScreenCaptureScope: String, Sendable {

@@ -6,7 +6,7 @@ import JarvisCore
 /// two content toggles — then a destination-folder panel, then writes one file (plus an
 /// `images/` subfolder when applicable) per selected session. The picker window and both panels
 /// run as blocking modal loops, the same explicit-user-action style as
-/// `PrepMaterialSection.addSource()` and `ActivityViewer`'s own `clearHistoryTapped()`.
+/// `ToolsSection.addSource()` and `ActivityViewer`'s own `clearHistoryTapped()`.
 @MainActor
 enum ActivityExportSheet {
     static func present(sessions: [SessionStore.Session], store: SessionStore) {

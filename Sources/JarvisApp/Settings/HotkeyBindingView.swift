@@ -5,7 +5,7 @@ import JarvisCore
 /// callout when a user-chosen combination can't be registered (e.g. another app already owns it) —
 /// see #229. A rejected rebind always leaves the previous, still-working combination live, so that
 /// stays displayed and the failure is only flashed as immediate feedback on the attempt itself
-/// (`recorded(_:)`); it does not persist across a tab revisit, since the previous shortcut is still
+/// (`recorded(_:)`); it does not persist across a page revisit, since the previous shortcut is still
 /// fine. The one case that *is* persistent — the shipped default itself colliding with another app at
 /// launch, so nothing is registered at all — keeps showing the callout on every revisit instead of
 /// going quiet on a stale success.
@@ -20,6 +20,7 @@ final class HotkeyBindingView: NSObject {
     /// Show code and Explain more both answer into the detail box, so the Overlay Box switch is the
     /// one thing that decides whether they can be bound at all. The hint shortcut is unconditional.
     private var isEnabled: Bool { preferences.shortcut == .hint || boxEnabled() }
+    private static let shortcutDetail = "Use ⌘ or ⌥ in the combination."
     private var cardHeight: CGFloat {
         SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
     }
@@ -35,11 +36,10 @@ final class HotkeyBindingView: NSObject {
     private let applyCombination: (HotkeyCombination) -> HotkeyRegistrationOutcome
 
     private var recorder: HotkeyRecorderButton?
-    private var callout: NSBox?
-    private var calloutLabel: NSTextField?
+    private var callout: SettingsCalloutView?
     private var calloutHeightConstraint: NSLayoutConstraint?
 
-    private static let calloutHeight: CGFloat = 60
+    private static let calloutHeight = SettingsCalloutView.preferredHeight
     var onHeightChanged: (() -> Void)?
     var preferredHeight: CGFloat {
         cardHeight + SettingsStyle.sectionSpacing
@@ -71,10 +71,10 @@ final class HotkeyBindingView: NSObject {
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
         card.translatesAutoresizingMaskIntoConstraints = false
         card.setHeader(title: preferences.shortcut.title,
-                       detail: "Works only while a session is running")
+                       detail: Self.summary(of: preferences.shortcut))
         let row = SettingsRowView(
             title: "Shortcut",
-            detail: "Requires ⌘ or ⌥",
+            detail: Self.shortcutDetail,
             controlView: recorder,
             controlSize: NSSize(width: 170, height: 32),
             preferredHeight: SettingsStyle.rowHeight,
@@ -86,7 +86,8 @@ final class HotkeyBindingView: NSObject {
             row.frame = card.bodyFrame
         }
 
-        let callout = makeCallout()
+        let callout = SettingsCalloutView(text: "", tone: .warning)
+        callout.isHidden = true
         callout.translatesAutoresizingMaskIntoConstraints = false
         self.callout = callout
 
@@ -136,7 +137,7 @@ final class HotkeyBindingView: NSObject {
 
     /// `outcome` is the immediate result of one `recorded(_:)` attempt — pass it right after a
     /// rebind to flash honest feedback about *that* attempt. Passing nothing (`makeView()` opening
-    /// the tab, `didBecomeActive()` revisiting it) must not replay that transient result: a rejected
+    /// the page, `didBecomeActive()` revisiting it) must not replay that transient result: a rejected
     /// rebind whose previous combination is still active is not an ongoing problem, so on a revisit
     /// the callout shows only for the one state that *is* persistent — nothing registered at all.
     private func renderOutcome(_ outcome: HotkeyRegistrationOutcome? = nil) {
@@ -144,8 +145,8 @@ final class HotkeyBindingView: NSObject {
         recorder?.isEnabled = isEnabled
         cardHeightConstraint?.constant = cardHeight
         shortcutRow?.setDetail(isEnabled
-            ? "Requires ⌘ or ⌥"
-            : "Requires Overlay Box · enable it in Overlay settings")
+            ? Self.shortcutDetail
+            : "Needs the Overlay Box. Switch it on in Mouth.")
         let showsFailure: Bool
         switch outcome {
         case .registered: showsFailure = false
@@ -157,48 +158,20 @@ final class HotkeyBindingView: NSObject {
             callout?.isHidden = true
             return
         }
-        calloutLabel?.stringValue = hasActiveHotkey()
+        callout?.setText(hasActiveHotkey()
             ? "That shortcut is already in use. Your previous shortcut is unchanged."
             : "That shortcut is already in use, and this shortcut is not "
-                + "currently active."
+                + "currently active.")
         calloutHeightConstraint?.constant = Self.calloutHeight
         callout?.isHidden = false
     }
 
-    private func makeCallout() -> NSBox {
-        let callout = NSBox()
-        callout.boxType = .custom
-        callout.borderWidth = 1
-        callout.cornerRadius = 10
-        callout.borderColor = NSColor.systemOrange.withAlphaComponent(0.25)
-        callout.fillColor = NSColor.systemOrange.withAlphaComponent(0.08)
-        callout.contentViewMargins = .zero
-        callout.isHidden = true
-
-        guard let content = callout.contentView else { return callout }
-        let icon = NSImageView()
-        icon.translatesAutoresizingMaskIntoConstraints = false
-        icon.image = NSImage(
-            systemSymbolName: "exclamationmark.triangle.fill", accessibilityDescription: nil)
-        icon.contentTintColor = .systemOrange
-        content.addSubview(icon)
-
-        let label = NSTextField(wrappingLabelWithString: "")
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        label.textColor = .secondaryLabelColor
-        content.addSubview(label)
-        calloutLabel = label
-
-        NSLayoutConstraint.activate([
-            icon.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
-            icon.topAnchor.constraint(equalTo: content.topAnchor, constant: 14),
-            icon.widthAnchor.constraint(equalToConstant: 22),
-            icon.heightAnchor.constraint(equalToConstant: 22),
-            label.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 10),
-            label.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
-            label.centerYAnchor.constraint(equalTo: content.centerYAnchor),
-        ])
-        return callout
+    /// What the shortcut does, in the card header.
+    private static func summary(of shortcut: CoachingShortcut) -> String {
+        switch shortcut {
+        case .hint: "I look at your screen and the conversation, then answer now."
+        case .explainMore: "I go deeper on the last hint in the Overlay Box."
+        case .showCode: "I write the code for the current step in the Overlay Box."
+        }
     }
 }

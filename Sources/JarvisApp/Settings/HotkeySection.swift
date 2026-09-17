@@ -1,11 +1,11 @@
 import AppKit
 import JarvisCore
 
-/// Independent bindings share the same recorder and honest registration-failure behavior.
+/// Settings → Shortcuts. Independent bindings share the same recorder and honest
+/// registration-failure behavior.
 @MainActor
 final class HotkeySection: NSObject, SettingsSection {
-    let title = "Shortcuts"
-    let fillsTab = true
+    let destination = SettingsDestination.shortcuts
     private let bindings: [HotkeyBindingView]
 
     init(preferences: [HotkeyPreferences],
@@ -22,7 +22,7 @@ final class HotkeySection: NSObject, SettingsSection {
 
     /// Builds the scrollable shortcut page with cards constrained to the viewport width.
     /// Resizing the viewport or a binding card preserves the reading offset from the top.
-    func makeView() -> NSView {
+    func makePage() -> SettingsPageView {
         let scroll = SettingsScrollView(frame: NSRect(x: 0, y: 0, width: 712, height: 432))
         scroll.autoresizingMask = [.width, .height]
         let stack = NSStackView(frame: scroll.bounds)
@@ -65,8 +65,11 @@ final class HotkeySection: NSObject, SettingsSection {
         bindings.forEach { $0.onHeightChanged = relayout }
         scroll.onViewportChanged = relayout
         relayout()
-        return SettingsPageView(title: title,
-            summary: "Request a hint, an explanation, or the next code block.", bodyView: scroll)
+        return SettingsPageView(
+            title: "Shortcuts",
+            summary: "Ask me for help without waiting.",
+            chip: .neutral("Works during a session"),
+            bodyView: scroll)
     }
 
     func didBecomeActive() {

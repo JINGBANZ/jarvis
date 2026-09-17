@@ -1,0 +1,82 @@
+import AppKit
+
+/// A top-aligned column of fixed-height cards inside a Settings scroll view.
+///
+/// Owners keep each card's height current through `setHeight(_:for:)`. The document is never shorter
+/// than the viewport, because AppKit anchors a short document at the bottom and would leave an empty
+/// band above the first card. A height change keeps the reader's distance from the top.
+@MainActor
+final class SettingsCardStack {
+    let scrollView = SettingsScrollView(frame: NSRect(x: 0, y: 0, width: 760, height: 560))
+
+    private let stack = NSStackView(frame: NSRect(x: 0, y: 0, width: 760, height: 560))
+    private var cards: [(view: NSView, height: NSLayoutConstraint)] = []
+
+    init() {
+        scrollView.autoresizingMask = [.width, .height]
+        stack.orientation = .vertical
+        stack.alignment = .width
+        stack.distribution = .fill
+        stack.spacing = SettingsStyle.sectionSpacing
+        stack.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        stack.autoresizingMask = [.width]
+    }
+
+    /// Adds every card and only then attaches the document: attaching a partly built stack makes
+    /// AppKit briefly solve an impossible intermediate layout.
+    func install(_ items: [(view: NSView, height: CGFloat)]) {
+        for item in items {
+            item.view.translatesAutoresizingMaskIntoConstraints = false
+            let height = item.view.heightAnchor.constraint(equalToConstant: item.height)
+            height.isActive = true
+            stack.addArrangedSubview(item.view)
+            cards.append((item.view, height))
+        }
+        // The flexible tail absorbs the space below short content.
+        let tail = NSView()
+        tail.setContentHuggingPriority(.defaultLow, for: .vertical)
+        tail.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+        tail.heightAnchor.constraint(greaterThanOrEqualToConstant: 0).isActive = true
+        if let last = cards.last?.view { stack.setCustomSpacing(0, after: last) }
+        stack.addArrangedSubview(tail)
+
+        scrollView.documentView = stack
+        scrollView.onViewportChanged = { [weak self] in
+            self?.recalculate()
+            self?.revealTop()
+        }
+        recalculate()
+        revealTop()
+    }
+
+    func setHeight(_ height: CGFloat, for view: NSView) {
+        guard let card = cards.first(where: { $0.view === view }) else { return }
+        card.height.constant = height
+        recalculate()
+    }
+
+    func revealTop() {
+        scrollView.contentView.scroll(to: NSPoint(
+            x: 0,
+            y: max(0, stack.bounds.height - scrollView.contentView.bounds.height)))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    private func recalculate() {
+        let heights = cards.map(\.height.constant)
+        let contentHeight = heights.reduce(0, +)
+            + CGFloat(max(0, heights.count - 1)) * SettingsStyle.sectionSpacing
+        let viewportHeight = scrollView.contentView.bounds.height
+        let height = max(contentHeight, viewportHeight)
+        let oldHeight = stack.frame.height
+        let oldOrigin = scrollView.contentView.bounds.origin.y
+        let distanceFromTop = max(0, oldHeight - oldOrigin - viewportHeight)
+
+        stack.frame.size.height = height
+        stack.needsLayout = true
+        stack.layoutSubtreeIfNeeded()
+        scrollView.contentView.scroll(to: NSPoint(
+            x: 0, y: max(0, height - viewportHeight - distanceFromTop)))
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+}

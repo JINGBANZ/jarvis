@@ -18,6 +18,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var updates: UpdateController?
     private var settingsWindow: SettingsWindow!
     private var brainSection: BrainSection!
+    /// What the Settings hub shows; it follows the live brain target even while Settings is closed.
+    private var settingsHub: SettingsHubModel!
+    private var settingsHome: SettingsHome!
     private let appearance = OverlayAppearance()
     /// Provider preflight, brain-client construction, route construction, and live reapply.
     /// See `BrainComposition` for the boundary; this delegate is its host.
@@ -36,7 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// Whether the app's own surfaces exist yet. Nothing is built while the permission gate is up.
     private var didStartApp = false
     private let hotkeyPreferences = CoachingShortcut.allCases.map { HotkeyPreferences(shortcut: $0) }
-    private var activityViewer: ActivityViewer!    // embedded as the Settings Activity tab
+    private var activityViewer: ActivityViewer!    // embedded as the Settings Activity page
     /// Overall readiness is composed in Core. Its `activeSession` is the one token for the attempt
     /// being started or run; the App feeds it OS and provider observations.
     private let readiness = JarvisReadiness()
@@ -178,26 +181,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             $0.shortcut == .hint || appearance.boxEnabled
         })
 
-        // Unified Settings window: Brain owns behavior; Connections owns shared authentication.
-        // A pasted key is stored but does not auto-start. While running, it updates future Realtime
-        // connections and transactionally replaces only an OpenAI brain—never the capture/transcript
-        // pipeline.
+        // Unified Settings window: the hub opens one page per concern; Connections owns shared
+        // authentication. A pasted key is stored but does not auto-start. While running, it updates
+        // future Realtime connections and transactionally replaces only an OpenAI brain—never the
+        // capture/transcript pipeline.
+        let signIns = SubscriptionSignIns(supervisor: supervisor)
         brainSection = BrainSection(
             preferences: brain.preferences,
-            supervisor: supervisor,
+            signIns: signIns,
             onPreferencesChanged: { [weak self] change in
                 Task {
                     await self?.brain.applyBrainPreferencesToRunningSession(
                         update: change == .topology ? .topologyEdit : .effortEdit)
                 }
-            },
-            transcriptionPreferences: transcriptionPreferences,
-            prepMaterialPreferences: prepMaterialPreferences)
+            })
         let connectionsSection = ConnectionsSection(
             supervisor: supervisor,
             keyStore: secretFile,
+            signIns: signIns,
             onKeySaved: { [weak self] credential, key in
                 self?.composition.applySavedAPIKey(key, for: credential)
+                // A saved key writes a file, not UserDefaults, so nothing else would re-judge the hub.
+                self?.settingsHub.refresh(probe: false)
             })
         let hotkeySection = HotkeySection(
                 preferences: hotkeyPreferences,
@@ -222,15 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 })
         let sections: [SettingsSection] = [
             brainSection,
-            connectionsSection,
-            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
-                // Both optional shortcuts answer into the detail box, so the box switch is what
-                // binds or releases them.
-                onBoxEnabledChanged: { [weak self] _ in
-                    guard let self else { return }
-                    self.refreshOptionalShortcut(.explainMore)
-                    self.refreshOptionalShortcut(.showCode)
-                }),
+            TranscriptionSection(preferences: transcriptionPreferences),
             DisplaySection(
                 preferences: screenPreferences,
                 isSessionStopped: { [weak self] in
@@ -243,11 +240,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     guard let self else { return }
                     self.composition.updateScreenSelection(self.screenPreferences.selection)
                 }),
-            PrepMaterialSection(preferences: prepMaterialPreferences),
+            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
+                // Both optional shortcuts answer into the detail box, so the box switch is what
+                // binds or releases them.
+                onBoxEnabledChanged: { [weak self] _ in
+                    guard let self else { return }
+                    self.refreshOptionalShortcut(.explainMore)
+                    self.refreshOptionalShortcut(.showCode)
+                }),
+            connectionsSection,
+            ToolsSection(brainPreferences: brain.preferences, prepPreferences: prepMaterialPreferences),
+            SkillsSection(preferences: brain.preferences),
             hotkeySection,
             ActivitySection(viewer: activityViewer),
         ]
-        settingsWindow = SettingsWindow(sections: sections)
+        settingsHub = SettingsHubModel(
+            brainPreferences: brain.preferences,
+            transcriptionPreferences: transcriptionPreferences,
+            screenPreferences: screenPreferences,
+            appearance: appearance,
+            secrets: secrets,
+            signIns: signIns)
+        settingsHome = SettingsHome(model: settingsHub)
+        settingsWindow = SettingsWindow(home: settingsHome, sections: sections, hub: settingsHub)
         menuBar.onOpenSettings = { [weak self] in self?.settingsWindow.show() }
 
         // The menu drives the pipeline lifecycle. Jarvis does NOT auto-start; the user presses Start.
@@ -540,7 +555,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         // A signed-out or unserved primary is skipped when the route reaches it, so naming it in use
         // would be a claim no request backs. The route's first selection fills this in instead.
-        brainSection.setActiveTarget(
+        showActiveBrainTarget(
             brain.unavailability(for: brainRoute.primary, proxy: proxy) == nil ? brainRoute.primary : nil)
         return composition.start(
             SessionComposition.Inputs(
@@ -572,7 +587,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             && reason != .applicationQuit
             && readiness.status.isBlocked
         composition.stop(reason: reason)
-        brainSection?.setActiveTarget(nil)
+        showActiveBrainTarget(nil)
         if !preservesStartupBlock,
            let readinessSession = readiness.activeSession,
            readinessSession != readinessToPreserve {
@@ -604,7 +619,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     func brainTargetDidChange(_ target: BrainTarget?) {
-        brainSection.setActiveTarget(target)
+        showActiveBrainTarget(target)
+    }
+
+    /// The brain the running session is using, shown on the Brain page and on the hub.
+    private func showActiveBrainTarget(_ target: BrainTarget?) {
+        brainSection?.setActiveTarget(target)
+        settingsHub?.setActiveTarget(target)
     }
 
     private func renderReadinessStatus(_ status: JarvisReadiness.Status) {

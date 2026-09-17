@@ -35,13 +35,20 @@ final class APIKeyControls: NSObject {
             }
         }
 
-        var color: NSColor {
+        @MainActor var color: NSColor {
             switch self {
-            case .checking: .secondaryLabelColor
-            case .answered(.accepted, _): .systemGreen
-            case .answered(.rejected, _): .systemRed
-            case .answered(.inconclusive, _): .systemOrange
+            case .checking: SettingsTheme.mutedText
+            case .answered(.accepted, _): SettingsTheme.teal
+            case .answered(.rejected, _), .answered(.inconclusive, _): SettingsTheme.amber
             }
+        }
+    }
+
+    /// What the card's key is for, in the card header.
+    private static func headerDetail(for credential: Credential) -> String {
+        switch credential {
+        case .openAIAPIKey: "Brain and transcription"
+        case .geminiAPIKey: "Transcription only"
         }
     }
 
@@ -67,15 +74,22 @@ final class APIKeyControls: NSObject {
 
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
-        card.setHeader(title: credential.displayName, detail: "Jarvis-managed credential")
+        card.setHeader(title: credential.displayName, detail: Self.headerDetail(for: credential))
         card.onLayout = { [weak self] in self?.layout() }
         self.card = card
         guard let content = card.contentView else { return card }
 
-        let statusBadge = NSTextField(labelWithString: "Key saved")
+        let statusBadge = NSTextField(labelWithString: "Saved")
         statusBadge.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
-        statusBadge.textColor = .systemGreen
-        statusBadge.alignment = .right
+        statusBadge.widthAnchor.constraint(
+            equalToConstant: ceil(statusBadge.intrinsicContentSize.width) + 12).isActive = true
+        statusBadge.textColor = SettingsTheme.teal
+        statusBadge.alignment = .center
+        statusBadge.drawsBackground = true
+        statusBadge.backgroundColor = SettingsTheme.calloutFill
+        statusBadge.wantsLayer = true
+        statusBadge.layer?.cornerRadius = 5
+        statusBadge.layer?.masksToBounds = true
         statusBadge.setAccessibilityLabel("\(credential.displayName) key saved")
         self.statusBadge = statusBadge
 
@@ -130,7 +144,7 @@ final class APIKeyControls: NSObject {
         saveButton = save
 
         let error = NSTextField(labelWithString: "")
-        error.textColor = .systemRed
+        error.textColor = SettingsTheme.amber
         error.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-key-error")
         content.addSubview(error)
         errorLabel = error
@@ -209,7 +223,7 @@ final class APIKeyControls: NSObject {
         errorLabel?.isHidden = !editing
         verdictLabel?.isHidden = verdict == nil
         verdictLabel?.stringValue = verdict?.text ?? ""
-        verdictLabel?.textColor = verdict?.color ?? .secondaryLabelColor
+        verdictLabel?.textColor = verdict?.color ?? SettingsTheme.mutedText
         card?.frame.size.height = preferredHeight
         card?.needsLayout = true
         layout()

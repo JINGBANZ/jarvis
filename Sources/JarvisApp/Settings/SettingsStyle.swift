@@ -2,7 +2,7 @@ import AppKit
 
 /// Shared visual tokens for every Settings section.
 ///
-/// Keeping these values in one place prevents the tabs from drifting back into separate spacing,
+/// Keeping these values in one place prevents the pages from drifting back into separate spacing,
 /// typography, and control-alignment systems as their content evolves independently.
 @MainActor
 enum SettingsStyle {
@@ -21,7 +21,10 @@ enum SettingsStyle {
 
     static func separator() -> NSBox {
         let separator = NSBox()
-        separator.boxType = .separator
+        separator.boxType = .custom
+        separator.borderWidth = 0
+        separator.fillColor = SettingsTheme.lineSoft
+        separator.contentViewMargins = .zero
         return separator
     }
 }

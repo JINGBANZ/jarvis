@@ -29,6 +29,9 @@ final class SubscriptionControls: NSObject {
     /// Called whenever a row changes, so the page badge can recount.
     var onStatusChanged: (() -> Void)?
 
+    /// The helper's last answer, for `SubscriptionSignIns`; nil while a probe is pending.
+    var lastReadiness: LocalProxySupervisor.Readiness? { readiness }
+
     /// Subscriptions the last probe proved signed in; nil before the first probe answers.
     var signedIn: Set<BrainProvider>? {
         switch readiness {
@@ -45,14 +48,14 @@ final class SubscriptionControls: NSObject {
     func makeView() -> NSView {
         rows.removeAll()
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
-        card.setHeader(title: "Subscriptions", detail: "Sign in once; tokens stay on this Mac")
+        card.setHeader(title: "Subscriptions", detail: "Use your ChatGPT or Claude plan as my brain")
         guard let content = card.contentView else { return card }
 
         for (index, provider) in Self.providers.enumerated() {
             let status = NSTextField(labelWithString: "Checking…")
             status.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize)
             status.alignment = .right
-            status.textColor = .secondaryLabelColor
+            status.textColor = SettingsTheme.mutedText
             let button = NSButton(title: "Sign in", target: self, action: #selector(buttonPressed(_:)))
             button.bezelStyle = .rounded
             button.tag = index
@@ -209,10 +212,10 @@ final class SubscriptionControls: NSObject {
         status: String, color: NSColor, detail: String?, button: String, buttonEnabled: Bool
     ) {
         if signIns[provider] != nil {
-            return ("Signing in…", .secondaryLabelColor, "Finish in your browser", "Cancel", true)
+            return ("Signing in…", SettingsTheme.mutedText, "Finish in your browser", "Cancel", true)
         }
         guard let readiness else {
-            return ("Checking…", .secondaryLabelColor, Self.accountHint(provider), "Sign in", false)
+            return ("Checking…", SettingsTheme.mutedText, Self.accountHint(provider), "Sign in", false)
         }
         let account = supervisor.accountFiles(for: provider).first
         let who = account.map { file in
@@ -220,15 +223,15 @@ final class SubscriptionControls: NSObject {
         }.flatMap { $0.isEmpty ? nil : $0 }
         switch readiness {
         case .unavailable(let reason):
-            return ("Not running", .systemOrange, "The sign-in service \(reason)", "Try again", true)
+            return ("Not running", SettingsTheme.amber, "The sign-in service \(reason)", "Try again", true)
         case .ready(_, let signedIn) where signedIn.contains(provider):
-            return ("Signed in", .systemGreen, who.map { "As \($0)" }, "Sign out", true)
+            return ("Signed in", SettingsTheme.teal, who.map { "As \($0)" }, "Sign out", true)
         case .ready where account != nil:
-            return ("Not usable", .systemOrange,
+            return ("Not usable", SettingsTheme.amber,
                     "\(who.map { "\($0) is" } ?? "The account is") saved but not usable right now; sign in again",
                     "Sign in", true)
         case .ready:
-            return ("Signed out", .secondaryLabelColor, Self.accountHint(provider), "Sign in", true)
+            return ("Signed out", SettingsTheme.mutedText, Self.accountHint(provider), "Sign in", true)
         }
     }
 

@@ -25,7 +25,7 @@ final class ProviderRouteEditor: NSObject {
 
     var preferredHeight: CGFloat {
         Self.headerHeight
-            + (primaryRow?.preferredHeight ?? 54)
+            + (primaryRow?.preferredHeight ?? 84)
             + fallbackRows.map(\.preferredHeight).reduce(0, +)
             + Self.addHeight
     }
@@ -70,6 +70,12 @@ final class ProviderRouteEditor: NSObject {
                 return candidate == primaryTarget
                     || !preferences.fallbackTargets.contains(candidate)
             },
+            actions: BrainTargetRowView.Actions(
+                canMoveUp: false,
+                canMoveDown: !preferences.fallbackTargets.isEmpty,
+                moveUp: {},
+                moveDown: { [weak self] in self?.move(routeIndex: 0, offset: 1) },
+                remove: nil),
             onProviderChanged: { [weak self] provider in
                 self?.primaryProviderChanged(to: provider)
             },
@@ -95,10 +101,10 @@ final class ProviderRouteEditor: NSObject {
                         replacingTargetAt: index)
                 },
                 actions: BrainTargetRowView.Actions(
-                    canMoveUp: index > 0,
+                    canMoveUp: true,
                     canMoveDown: index < preferences.fallbackTargets.count - 1,
-                    moveUp: { [weak self] in self?.move(from: index, offset: -1) },
-                    moveDown: { [weak self] in self?.move(from: index, offset: 1) },
+                    moveUp: { [weak self] in self?.move(routeIndex: index + 1, offset: -1) },
+                    moveDown: { [weak self] in self?.move(routeIndex: index + 1, offset: 1) },
                     remove: { [weak self] in self?.remove(at: index) }),
                 onProviderChanged: { [weak self] provider in
                     self?.changeProvider(at: index, to: provider)
@@ -122,7 +128,7 @@ final class ProviderRouteEditor: NSObject {
     }
 
     private func build() {
-        view.setHeader(title: "Provider route", detail: "Used top to bottom")
+        view.setHeader(title: "Provider route", detail: "I try these in order")
 
         addButton.target = self
         addButton.action = #selector(addFallback)
@@ -291,12 +297,13 @@ final class ProviderRouteEditor: NSObject {
         save(targets)
     }
 
-    private func move(from index: Int, offset: Int) {
-        var targets = preferences.fallbackTargets
-        let destination = index + offset
-        guard targets.indices.contains(index), targets.indices.contains(destination) else { return }
-        targets.swapAt(index, destination)
-        save(targets)
+    /// Swaps a target with its neighbor anywhere in the route, the primary included. This is a
+    /// topology edit, so a running session restarts the route at the new primary on its next attempt.
+    private func move(routeIndex: Int, offset: Int) {
+        guard let moved = preferences.route.movingTarget(at: routeIndex, by: offset) else { return }
+        preferences.route = moved
+        render(signedInSubscriptions: signedInSubscriptions, activeTarget: activeTarget)
+        onChange()
     }
 
     private func remove(at index: Int) {

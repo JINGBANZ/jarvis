@@ -12,7 +12,8 @@ final class BrainTargetRowView: NSView {
         let canMoveDown: Bool
         let moveUp: () -> Void
         let moveDown: () -> Void
-        let remove: () -> Void
+        /// Nil for the primary: a route always has one.
+        let remove: (() -> Void)?
     }
 
     private let titleLabel: NSTextField
@@ -20,8 +21,7 @@ final class BrainTargetRowView: NSView {
     private let providerPopup: NSPopUpButton
     private let providers: [BrainProvider]
     private let modelPopup: NSPopUpButton
-    private let trailingView: NSView?
-    private let placesActionsBelow: Bool
+    private let actionsView: NSView?
     private let models: [BrainModel]
     private let onProviderChanged: (BrainProvider) -> Void
     private let onModelChanged: (BrainModel) -> Void
@@ -34,22 +34,26 @@ final class BrainTargetRowView: NSView {
         target: BrainTarget,
         canSelectProvider: (BrainProvider) -> Bool,
         canSelectModel: (BrainModel) -> Bool,
-        trailingBadge: String? = nil,
         actions: Actions? = nil,
         onProviderChanged: @escaping (BrainProvider) -> Void,
         onModelChanged: @escaping (BrainModel) -> Void
     ) {
-        precondition(trailingBadge == nil || actions == nil)
-
         let titleLabel = NSTextField(labelWithString: title)
         titleLabel.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+        titleLabel.textColor = SettingsTheme.text
         titleLabel.alignment = .left
         self.titleLabel = titleLabel
 
         if let status {
+            // A bordered teal tag; its layer border is set once the row is built and again on every
+            // appearance change, because a layer color does not follow the appearance by itself.
             let label = NSTextField(labelWithString: status.uppercased())
             label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize - 1)
-            label.textColor = .controlAccentColor
+            label.textColor = SettingsTheme.teal
+            label.alignment = .center
+            label.wantsLayer = true
+            label.layer?.cornerRadius = 5
+            label.layer?.borderWidth = 1
             self.statusLabel = label
         } else {
             self.statusLabel = nil
@@ -87,21 +91,7 @@ final class BrainTargetRowView: NSView {
         }
         self.modelPopup = modelPopup
 
-        if let trailingBadge {
-            let badge = NSTextField(labelWithString: trailingBadge)
-            badge.alignment = .center
-            badge.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize - 1)
-            badge.textColor = .controlAccentColor
-            badge.drawsBackground = true
-            badge.backgroundColor = NSColor.controlAccentColor.withAlphaComponent(0.10)
-            badge.wantsLayer = true
-            badge.layer?.cornerRadius = 9
-            badge.layer?.masksToBounds = true
-            badge.setAccessibilityLabel(trailingBadge)
-            self.trailingView = badge
-            self.placesActionsBelow = false
-            self.preferredHeight = 54
-        } else if let actions {
+        if let actions {
             // Start at its final frame size so AppKit never solves the button constraints against
             // a transient zero-sized stack while the Provider card is being assembled.
             let controls = NSStackView(
@@ -118,16 +108,17 @@ final class BrainTargetRowView: NSView {
                 enabled: actions.canMoveDown, action: actions.moveDown)
             let remove = Self.actionButton(
                 title: "×", label: "Remove \(title)",
-                enabled: true, action: actions.remove)
+                enabled: actions.remove != nil, action: actions.remove ?? {})
+            // The primary has no ×, but keeps its slot so its ↑ and ↓ line up with the fallbacks'.
+            remove.isHidden = actions.remove == nil
+            controls.detachesHiddenViews = false
             controls.addArrangedSubview(moveUp)
             controls.addArrangedSubview(moveDown)
             controls.addArrangedSubview(remove)
-            self.trailingView = controls
-            self.placesActionsBelow = true
+            self.actionsView = controls
             self.preferredHeight = 84
         } else {
-            self.trailingView = nil
-            self.placesActionsBelow = false
+            self.actionsView = nil
             self.preferredHeight = 54
         }
 
@@ -145,7 +136,8 @@ final class BrainTargetRowView: NSView {
         if let statusLabel { addSubview(statusLabel) }
         addSubview(providerPopup)
         addSubview(modelPopup)
-        if let trailingView { addSubview(trailingView) }
+        if let actionsView { addSubview(actionsView) }
+        applyStatusBorder()
     }
 
     @available(*, unavailable)
@@ -156,27 +148,23 @@ final class BrainTargetRowView: NSView {
     override func layout() {
         super.layout()
 
-        // Every target uses the same full-width provider/model columns. Fallback actions occupy a
+        // Every target uses the same full-width provider/model columns. Row actions occupy a
         // separate compact line below, so adding controls never changes either popup's width.
         let labelWidth: CGFloat = 92
         let gap: CGFloat = 9
-        let trailingBadgeWidth: CGFloat =
-            trailingView != nil && !placesActionsBelow ? 98 : 0
-        let trailingBadgeGap: CGFloat = trailingBadgeWidth > 0 ? gap : 0
-        let selectionWidth = max(
-            225,
-            bounds.width - labelWidth - gap - trailingBadgeWidth - trailingBadgeGap)
+        let selectionWidth = max(225, bounds.width - labelWidth - gap)
         let popupWidth = max(108, (selectionWidth - gap) / 2)
         let selectionY = bounds.height - 42
 
-        if statusLabel == nil {
-            titleLabel.frame = NSRect(
-                x: 0, y: selectionY + 6, width: labelWidth, height: 20)
-        } else {
+        if let statusLabel {
             titleLabel.frame = NSRect(
                 x: 0, y: selectionY + 14, width: labelWidth, height: 18)
-            statusLabel?.frame = NSRect(
-                x: 0, y: selectionY, width: labelWidth, height: 14)
+            let tagWidth = min(labelWidth, ceil(statusLabel.fittingSize.width) + 4)
+            statusLabel.frame = NSRect(
+                x: 0, y: selectionY - 1, width: tagWidth, height: 15)
+        } else {
+            titleLabel.frame = NSRect(
+                x: 0, y: selectionY + 6, width: labelWidth, height: 20)
         }
 
         let providerX = labelWidth + gap
@@ -186,16 +174,16 @@ final class BrainTargetRowView: NSView {
         modelPopup.frame = NSRect(
             x: modelX, y: selectionY, width: popupWidth, height: 32)
 
-        if placesActionsBelow {
-            trailingView?.frame = NSRect(
-                x: bounds.width - 98, y: 3, width: 98, height: 32)
-        } else if trailingView != nil {
-            trailingView?.frame = NSRect(
-                x: bounds.width - trailingBadgeWidth,
-                y: selectionY,
-                width: trailingBadgeWidth,
-                height: 32)
-        }
+        actionsView?.frame = NSRect(x: bounds.width - 98, y: 3, width: 98, height: 32)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        applyStatusBorder()
+    }
+
+    private func applyStatusBorder() {
+        statusLabel?.layer?.borderColor = themedCGColor(SettingsTheme.teal)
     }
 
     private static func actionButton(

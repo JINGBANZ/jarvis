@@ -1,27 +1,21 @@
 import AppKit
 
-/// One panel in the unified Settings window. Each section is self-contained: it knows its tab
-/// title, builds its own content view, reacts to becoming the visible tab, and cleans up when the
-/// window closes.
+/// One page in the Settings window. A section knows its destination, builds its page, reacts to
+/// becoming the visible page, and cleans up when the window closes. The hub is not a section.
 @MainActor
 protocol SettingsSection: AnyObject {
-    var title: String { get }
-    func makeView() -> NSView
-    /// This section's tab became the selected one. Default: no-op.
+    var destination: SettingsDestination { get }
+    func makePage() -> SettingsPageView
+    /// This page became the visible one. Default: no-op.
     func didBecomeActive()
-    /// This section's tab stopped being selected (another tab chosen, or the window is closing).
-    /// Default: no-op.
+    /// Another page was chosen, or the window is closing. Default: no-op.
     func didResignActive()
-    /// Called when the Settings window closes. Default: no-op.
+    /// The Settings window is closing. Default: no-op.
     func windowWillClose()
-    /// Whether this section's view should stretch to fill the whole tab. Default: false for a future
-    /// compact fixed-form panel; every built-in section uses the shared full-tab page shell.
-    var fillsTab: Bool { get }
 }
 
 extension SettingsSection {
     func didBecomeActive() {}
     func didResignActive() {}
     func windowWillClose() {}
-    var fillsTab: Bool { false }
 }
