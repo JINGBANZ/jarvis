@@ -9,8 +9,8 @@ final class SessionComposition {
         let transcription: TranscriptionConfiguration
         /// "" when the transcription provider needs no credential (Apple Speech).
         let transcriptionKey: String
-        /// OpenAI key only; "" when no OpenAI target needs it.
-        let brainAPIKey: String
+        /// Only keyed route targets appear; a subscription needs none.
+        let brainKeys: [Credential: String]
         let brainRoute: BrainRoute
         let appleSpeechLocale: Locale?
         let screen: ScreenCaptureSelection
@@ -170,7 +170,7 @@ final class SessionComposition {
         let configuredRoute = brain.makeConfiguredRoute(
             inputs.brainRoute,
             proxy: proxy,
-            apiKey: inputs.brainAPIKey,
+            keys: inputs.brainKeys,
             effort: brain.preferences.effort,
             sessionDirectory: sessionDirectory)
         observeReadiness(.brainPreparation(.ready), for: readinessSession)
@@ -473,7 +473,7 @@ final class SessionComposition {
         guard let transcriber else { return }
         transcriber.updateAPIKey(key, for: credential)
         themTranscriber?.updateAPIKey(key, for: credential)
-        if credential == .openAIAPIKey { brain.applySavedAPIKey(key) }
+        brain.applySavedKey(key, for: credential)
     }
 
     /// Takes effect at the next attempt; a running turn keeps its snapshot.

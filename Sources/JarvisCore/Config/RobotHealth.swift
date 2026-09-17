@@ -14,14 +14,18 @@ public enum RobotHealth {
     }
 
     private static func brain(_ route: BrainRoute, _ readiness: RobotReadiness) -> RobotPartHealth {
-        // Start requires the OpenAI key whenever any target uses the OpenAI API
-        // (`TranscriptionProvider.requiredCredentials(for:)`), so a missing key is never skipped.
-        if let index = route.targets.firstIndex(where: { $0.provider == .openAI }),
-           !readiness.availableCredentials.contains(.openAIAPIKey) {
+        // Start requires every keyed target's key (`BrainRoute.requiredCredentials`), so a missing
+        // key is never skipped.
+        for (index, target) in route.targets.enumerated() {
+            guard let credential = target.provider.credential,
+                  !readiness.availableCredentials.contains(credential) else { continue }
             let user = index == 0 ? "my primary brain" : "Fallback \(index)"
+            let vendor = credential.vendorName
+            let key = "\(article(for: vendor)) \(vendor) key"
             return .needsAttention(
-                reason: "ADD AN OPENAI KEY",
-                advice: "I need an OpenAI key to start, because \(user) uses the OpenAI API. Add it in Connections.",
+                reason: "ADD \(key.uppercased())",
+                advice: "I need \(key) to start, because \(user) uses the "
+                    + "\(target.provider.displayName). Add it in Connections.",
                 fix: .openConnections)
         }
         // Past the key check, only a signed-out subscription can't serve, and the route skips it.
@@ -43,9 +47,8 @@ public enum RobotHealth {
     private static func ear(_ provider: TranscriptionProvider, _ readiness: RobotReadiness) -> RobotPartHealth {
         if let credential = provider.ownCredential, !readiness.availableCredentials.contains(credential) {
             let vendor = credential.vendorName
-            let article = "AEIOU".contains(vendor.prefix(1).uppercased()) ? "AN" : "A"
             return .needsAttention(
-                reason: "ADD \(article) \(vendor.uppercased()) KEY",
+                reason: "ADD \(article(for: vendor).uppercased()) \(vendor.uppercased()) KEY",
                 advice: "I need your \(vendor) key to hear the conversation. Add it in Connections.",
                 fix: .openConnections)
         }
@@ -77,5 +80,9 @@ public enum RobotHealth {
                 fix: nil)
         }
         return .ready
+    }
+
+    private static func article(for vendor: String) -> String {
+        "AEIOU".contains(vendor.prefix(1).uppercased()) ? "an" : "a"
     }
 }

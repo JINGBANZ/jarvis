@@ -7,8 +7,6 @@ import FoundationNetworking   // URLSession/URLRequest live here on non-Darwin (
 public struct BrainAccessor: BrainClient, Sendable {
     public typealias Sender = @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
 
-    public static let openAIEndpoint = URL(string: "https://api.openai.com/v1/responses")!
-
     private let provider: BrainProvider
     private let apiKey: String
     private let model: String
@@ -26,7 +24,7 @@ public struct BrainAccessor: BrainClient, Sendable {
                 apiKey: String,
                 model: String,
                 reasoningEffort: String = Defaults.Brain.effort.rawValue,
-                endpoint: URL = BrainAccessor.openAIEndpoint,
+                endpoint: URL = BrainProviderDescriptor.openAIResponsesEndpoint,
                 timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
                 // Reasoning plus output budget: it must track the effort or the run truncates.
                 maxOutputTokens: Int = Defaults.Brain.effort.maxOutputTokens,
@@ -39,9 +37,10 @@ public struct BrainAccessor: BrainClient, Sendable {
         self.provider = provider
         self.apiKey = apiKey
         self.model = model
-        // GPT-6 Astra's effort floor is low. Raise to the floor here without rewriting the user's
-        // shared preference, which other models may still use to disable reasoning.
-        let floor = [minimumReasoningEffort, model == "gpt-6-astra" ? ReasoningEffort.low : nil]
+        // Raise to the floor without rewriting the user's shared preference, which other models may
+        // still use to disable reasoning.
+        let floor = [minimumReasoningEffort,
+                     BrainModelCatalog.model(id: model, for: provider)?.reasoningEffortFloor]
             .compactMap { $0 }.max()
         if let floor, let selected = ReasoningEffort(rawValue: reasoningEffort), selected < floor {
             self.reasoningEffort = floor.rawValue

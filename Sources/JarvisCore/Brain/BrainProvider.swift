@@ -5,42 +5,56 @@ public enum BrainProvider: String, CaseIterable, Sendable {
     case codexSubscription = "codex-subscription"
     case claudeSubscription = "claude-subscription"
 
-    public var displayName: String {
+    public var descriptor: BrainProviderDescriptor {
         switch self {
-        case .openAI: return "OpenAI API"
+        case .openAI:
+            BrainProviderDescriptor(
+                displayName: "OpenAI API",
+                access: .apiKey(
+                    credential: .openAIAPIKey,
+                    endpoint: BrainProviderDescriptor.openAIResponsesEndpoint,
+                    auth: .bearer),
+                wire: .responses,
+                failureTable: .openAI,
+                toolChoicePolicy: .providerEnforced,
+                reasoningEffortFloor: nil)
         // Raw values keep `-subscription`: they are persisted route ids, so renaming them would
-        // drop saved routes.
-        case .codexSubscription: return "Codex"
-        case .claudeSubscription: return "Claude Code"
+        // drop saved routes. The helper returns each vendor's own error body, in OpenAI's shape.
+        case .codexSubscription:
+            BrainProviderDescriptor(
+                displayName: "Codex",
+                access: .localProxy(
+                    modelOwner: "openai", loginFlag: "-codex-login", accountFilePrefix: "codex-"),
+                wire: .responses,
+                failureTable: .openAI,
+                toolChoicePolicy: .providerEnforced,
+                reasoningEffortFloor: nil)
+        // Through the helper, a forced Claude tool is a 400 on Fable 5.1 and strips thinking on
+        // Opus 5, and a narrowed choice is dropped. `none` disables thinking, which Fable 5.1
+        // rejects.
+        case .claudeSubscription:
+            BrainProviderDescriptor(
+                displayName: "Claude Code",
+                access: .localProxy(
+                    modelOwner: "anthropic", loginFlag: "-claude-login", accountFilePrefix: "claude-"),
+                wire: .responses,
+                failureTable: .openAI,
+                toolChoicePolicy: .filteredAuto,
+                reasoningEffortFloor: .low)
         }
     }
 
-    public var servedByLocalProxy: Bool { proxyModelOwner != nil }
+    public var displayName: String { descriptor.displayName }
 
-    /// The helper lists a vendor's models only while signed in, so this `owned_by` proves sign-in.
+    public var servedByLocalProxy: Bool { descriptor.servedByLocalProxy }
+
     public var proxyModelOwner: String? {
-        switch self {
-        case .codexSubscription: return "openai"
-        case .claudeSubscription: return "anthropic"
-        case .openAI: return nil
-        }
+        if case .localProxy(let owner, _, _) = descriptor.access { owner } else { nil }
     }
 
-    /// Through the helper, a forced Claude tool is a 400 on Fable 5.1 and strips thinking on Opus
-    /// 5, and a narrowed choice is dropped.
-    public var toolChoicePolicy: ToolChoicePolicy {
-        switch self {
-        case .claudeSubscription: return .filteredAuto
-        case .openAI, .codexSubscription: return .providerEnforced
-        }
-    }
+    public var credential: Credential? { descriptor.credential }
 
-    /// Applied without rewriting the saved preference; nil when every level is accepted. `none`
-    /// disables thinking on the Claude path, which Fable 5.1 rejects.
-    public var reasoningEffortFloor: ReasoningEffort? {
-        switch self {
-        case .claudeSubscription: return .low
-        case .openAI, .codexSubscription: return nil
-        }
-    }
+    public var toolChoicePolicy: ToolChoicePolicy { descriptor.toolChoicePolicy }
+
+    public var reasoningEffortFloor: ReasoningEffort? { descriptor.reasoningEffortFloor }
 }

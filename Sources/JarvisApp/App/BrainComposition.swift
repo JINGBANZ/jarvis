@@ -63,19 +63,40 @@ final class BrainComposition {
         return await supervisor.readiness()
     }
 
+    func savedKeys(for route: BrainRoute) -> [Credential: String] {
+        var keys: [Credential: String] = [:]
+        for credential in route.requiredCredentials {
+            if let key = secrets.apiKey(for: credential), !key.isEmpty { keys[credential] = key }
+        }
+        return keys
+    }
+
     private func makeBrainRuntime(
-        apiKey key: String,
+        keys: [Credential: String],
         target: BrainTarget,
         effort: ReasoningEffort,
         proxyEndpoint: LocalProxySupervisor.Endpoint?
     ) -> BrainRuntime {
-        let endpoint = target.provider.servedByLocalProxy ? proxyEndpoint : nil
+        let endpoint: URL
+        let key: String
+        switch target.provider.descriptor.access {
+        case .apiKey(let credential, let url, _):
+            endpoint = url
+            key = keys[credential] ?? ""
+        case .localProxy:
+            // `unavailability(for:proxy:)` admits a helper target only once the helper answered.
+            guard let proxyEndpoint else {
+                preconditionFailure("\(target.provider.displayName) was composed without the helper's endpoint")
+            }
+            endpoint = proxyEndpoint.responsesURL
+            key = proxyEndpoint.key
+        }
         let summaryModel = BrainModelCatalog.summarizerModelID(for: target.provider)
         let coach = BrainAccessor(
             provider: target.provider,
-            apiKey: endpoint?.key ?? key, model: target.modelID,
+            apiKey: key, model: target.modelID,
             reasoningEffort: effort.rawValue,
-            endpoint: endpoint?.responsesURL ?? BrainAccessor.openAIEndpoint,
+            endpoint: endpoint,
             timeout: BrainWorkloadTimeout.liveCoaching,
             maxOutputTokens: effort.maxOutputTokens,
             toolChoicePolicy: target.provider.toolChoicePolicy,
@@ -83,10 +104,10 @@ final class BrainComposition {
             traffic: host.liveSessionEvidence, trafficTag: "coach")
         let summarizer = BrainAccessor(
             provider: target.provider,
-            apiKey: endpoint?.key ?? key,
+            apiKey: key,
             model: summaryModel.isEmpty ? target.modelID : summaryModel,
             reasoningEffort: ReasoningEffort.low.rawValue,
-            endpoint: endpoint?.responsesURL ?? BrainAccessor.openAIEndpoint,
+            endpoint: endpoint,
             timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
             toolChoicePolicy: target.provider.toolChoicePolicy,
             minimumReasoningEffort: target.provider.reasoningEffortFloor,
@@ -114,7 +135,7 @@ final class BrainComposition {
     func makeConfiguredRoute(
         _ route: BrainRoute,
         proxy: LocalProxySupervisor.Readiness?,
-        apiKey key: String,
+        keys: [Credential: String],
         effort: ReasoningEffort,
         sessionDirectory: URL
     ) -> ConfiguredBrainRoute {
@@ -123,7 +144,7 @@ final class BrainComposition {
                 return ConfiguredBrainTarget(unavailable: target, failure: failure)
             }
             let runtime = makeBrainRuntime(
-                apiKey: key, target: target, effort: effort, proxyEndpoint: proxy?.endpoint)
+                keys: keys, target: target, effort: effort, proxyEndpoint: proxy?.endpoint)
             return ConfiguredBrainTarget(
                 target: target, brain: runtime.coach, summarizer: runtime.summarizer)
         }
@@ -196,7 +217,7 @@ final class BrainComposition {
     }
 
     func applyBrainPreferencesToRunningSession(
-        apiKeyOverride: String? = nil,
+        savedKey: (credential: Credential, key: String)? = nil,
         update: RunningBrainUpdate
     ) async {
         guard host.liveCoachDriver != nil, host.isTranscriptionLive,
@@ -213,16 +234,19 @@ final class BrainComposition {
               revision == brainUpdateRevision
         else { return }
         let route = preferences.route
-        let key = apiKeyOverride ?? secrets.apiKey(for: .openAIAPIKey) ?? ""
-        guard !route.targets.contains(where: { $0.provider == .openAI }) || !key.isEmpty else {
-            jlog("Jarvis: can't apply brain settings — an OpenAI target has no API key.")
+        var keys = savedKeys(for: route)
+        if let savedKey { keys[savedKey.credential] = savedKey.key.isEmpty ? nil : savedKey.key }
+        let missing = route.requiredCredentials.subtracting(keys.keys)
+        guard missing.isEmpty else {
+            jlog("Jarvis: can't apply brain settings: no saved key for "
+                 + missing.map(\.displayName).sorted().joined(separator: ", ") + ".")
             host.liveSessionEvidence?.record(.settingsChangeNotApplied)
             return
         }
         let provider = route.primary.provider
         // Refuse only an effort edit: rebuilding on a failed probe would retire working
-        // subscription clients. A credential refresh swaps only OpenAI clients, so refusing it
-        // would drop the key.
+        // subscription clients. A credential refresh swaps only the clients that use the saved
+        // key, so refusing it would drop the key.
         let servesSubscription = route.targets.contains { $0.provider.servedByLocalProxy }
         if update == .effortEdit, servesSubscription, proxy?.endpoint == nil {
             jlog("Jarvis: skipped a brain refresh — the sign-in service didn't answer; "
@@ -251,7 +275,7 @@ final class BrainComposition {
         let configuredRoute = makeConfiguredRoute(
             route,
             proxy: availability,
-            apiKey: key,
+            keys: keys,
             effort: preferences.effort,
             sessionDirectory: sessionDirectory)
         switch update {
@@ -270,21 +294,26 @@ final class BrainComposition {
             }
             jlog("Jarvis: reasoning effort will apply on the next coaching attempt.")
         case .credentialRefresh:
-            guard coachDriver.refreshBrainRouteClients(configuredRoute, for: [.openAI]) else {
-                jlog("Jarvis: skipped stale API-key brain refresh after the route topology changed.")
+            guard let credential = savedKey?.credential else { return }
+            let refreshed = Set(BrainProvider.allCases.filter { $0.credential == credential })
+            guard coachDriver.refreshBrainRouteClients(configuredRoute, for: refreshed) else {
+                jlog("Jarvis: skipped a stale key refresh after the route topology changed.")
                 return
             }
-            jlog("Jarvis: saved API key will apply to OpenAI on the next coaching attempt.")
+            jlog("Jarvis: the saved \(credential.displayName) key will apply to "
+                 + refreshed.map(\.displayName).sorted().joined(separator: ", ")
+                 + " on the next coaching attempt.")
         }
     }
 
-    func applySavedAPIKey(_ key: String) {
-        guard preferences.route.targets.contains(where: { $0.provider == .openAI }) else {
-            jlog("Jarvis: saved API key will apply to future OpenAI transcription connections.")
+    func applySavedKey(_ key: String, for credential: Credential) {
+        guard preferences.route.targets.contains(where: { $0.provider.credential == credential }) else {
+            jlog("Jarvis: the saved \(credential.displayName) key applies to future transcription connections only.")
             return
         }
         Task {
-            await applyBrainPreferencesToRunningSession(apiKeyOverride: key, update: .credentialRefresh)
+            await applyBrainPreferencesToRunningSession(
+                savedKey: (credential, key), update: .credentialRefresh)
         }
     }
 }

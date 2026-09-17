@@ -270,7 +270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
         let detailEnabled = appearance.boxEnabled
-        let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
+        let brainKeys = brain.savedKeys(for: brainRoute)
         let transcriptionKey = transcriptionProvider.ownCredential
             .flatMap { secrets.apiKey(for: $0) } ?? ""
         let requiredCredentials = transcriptionProvider.requiredCredentials(for: brainRoute)
@@ -388,12 +388,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                   self.readiness.activeSession == readinessSession else {
                 return
             }
-            let credentialIsCurrent = !requiredCredentials.contains(.openAIAPIKey)
-                || (self.secrets.apiKey(for: .openAIAPIKey) ?? "") == key
+            // A key saved while Start was preparing makes the prepared keys stale.
+            let brainKeysAreCurrent = self.brain.savedKeys(for: brainRoute) == brainKeys
             let transcriptionCredentialIsCurrent = transcriptionProvider.ownCredential.map {
                 (self.secrets.apiKey(for: $0) ?? "") == transcriptionKey
             } ?? true
-            guard credentialIsCurrent, transcriptionCredentialIsCurrent,
+            guard brainKeysAreCurrent, transcriptionCredentialIsCurrent,
                   self.transcriptionPreferences.configuration == transcriptionConfiguration,
                   self.brain.preferences.route == brainRoute else {
                 self.pendingStartTask = nil
@@ -402,7 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             }
             self.pendingStartTask = nil
             _ = self.installPreparedStart(
-                apiKey: key,
+                brainKeys: brainKeys,
                 transcriptionKey: transcriptionKey,
                 brainRoute: brainRoute,
                 detailEnabled: detailEnabled,
@@ -458,7 +458,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
     /// Refuses a route with no usable target before stopping the running pipeline.
     private func installPreparedStart(
-        apiKey key: String,
+        brainKeys: [Credential: String],
         transcriptionKey: String,
         brainRoute: BrainRoute,
         detailEnabled: Bool,
@@ -498,7 +498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             SessionComposition.Inputs(
                 transcription: transcriptionConfiguration,
                 transcriptionKey: transcriptionKey,
-                brainAPIKey: key,
+                brainKeys: brainKeys,
                 brainRoute: brainRoute,
                 appleSpeechLocale: appleSpeechLocale,
                 screen: screenPreferences.selection,

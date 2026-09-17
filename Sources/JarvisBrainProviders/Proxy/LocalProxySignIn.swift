@@ -46,11 +46,7 @@ public struct LocalProxySignIn: Sendable {
 
     private func perform(_ provider: BrainProvider, _ events: AsyncStream<Event>.Continuation) async {
         defer { events.finish() }
-        let flag: String
-        switch provider {
-        case .codexSubscription: flag = "-codex-login"
-        case .claudeSubscription: flag = "-claude-login"
-        case .openAI:
+        guard case .localProxy(_, let flag, _) = provider.descriptor.access else {
             events.yield(.failed(message: "\(provider.displayName) has no sign-in"))
             return
         }

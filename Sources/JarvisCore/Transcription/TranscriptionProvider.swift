@@ -25,10 +25,8 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
     }
 
     public func requiredCredentials(for brainRoute: BrainRoute?) -> Set<Credential> {
-        var required = Set(ownCredential.map { [$0] } ?? [])
-        if brainRoute?.targets.contains(where: { $0.provider == .openAI }) == true {
-            required.insert(.openAIAPIKey)
-        }
+        var required = brainRoute?.requiredCredentials ?? []
+        if let ownCredential { required.insert(ownCredential) }
         return required
     }
 

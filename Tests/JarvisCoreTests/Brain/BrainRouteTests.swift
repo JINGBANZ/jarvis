@@ -78,4 +78,19 @@ import Testing
         #expect(route.movingTarget(at: 5, by: -1) == nil)
         #expect(route.movingTarget(at: 1, by: .max) == nil)
     }
+
+    @Test func requiredCredentialsNameEachKeyOnceAndNoneForSubscriptions() {
+        let mixed = BrainRoute(
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
+            fallbackTargets: [
+                BrainTarget(provider: .openAI, modelID: "gpt-5.5"),
+                BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5"),
+                BrainTarget(provider: .openAI, modelID: "gpt-5.4"),
+            ])
+        #expect(mixed.requiredCredentials == [.openAIAPIKey])
+        let subscriptionsOnly = BrainRoute(
+            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5"),
+            fallbackTargets: [BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5")])
+        #expect(subscriptionsOnly.requiredCredentials.isEmpty)
+    }
 }

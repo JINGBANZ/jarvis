@@ -72,4 +72,14 @@ import Testing
         #expect(BrainModelCatalog.summarizerModelID(for: .claudeSubscription) == "claude-haiku-4-5-20251001")
         #expect(BrainModelCatalog.summarizerModelID(for: .codexSubscription) == "")
     }
+
+    @Test func effortFloorsAreModelData() {
+        let floored: Set<String> = ["gpt-6-astra"]
+        for provider in BrainProvider.allCases {
+            for model in BrainModelCatalog.models(for: provider) {
+                #expect(model.reasoningEffortFloor == (floored.contains(model.id) ? .low : nil),
+                        "\(provider.rawValue) \(model.id)")
+            }
+        }
+    }
 }
