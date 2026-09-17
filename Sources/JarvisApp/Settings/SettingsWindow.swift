@@ -42,9 +42,13 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         NSApp.setActivationPolicy(.regular) // ghost-mode-allowed: explicit Settings action
         if window == nil { build() }
         hub.beginObservingSettings()
-        if !isShowingCurrent { present(current) }
+        let isOpening = !isShowingCurrent
+        if isOpening { present(current) }
         NSApp.activate(ignoringOtherApps: true) // ghost-mode-allowed: explicit Settings action
         window?.makeKeyAndOrderFront(nil) // ghost-mode-allowed: explicit Settings action
+        // With keyboard navigation on, AppKit focuses the first key view as the window appears,
+        // which would open the hub with the Brain slot lit. Focus starts when the user presses Tab.
+        if isOpening { window?.makeFirstResponder(nil) }
     }
 
     /// `point` is in window coordinates.

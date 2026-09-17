@@ -14,7 +14,7 @@ final class ReadinessMeterView: NSView {
         super.init(frame: NSRect(x: 0, y: 0, width: 190, height: 34))
         wantsLayer = true
         isHidden = true
-        label.alignment = .right
+        label.alignment = .left
         addSubview(label)
         for segment in segments {
             segment.cornerRadius = 2
@@ -53,11 +53,11 @@ final class ReadinessMeterView: NSView {
         label.frame = NSRect(x: 0, y: 0, width: bounds.width, height: 14)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        let width: CGFloat = 36
         let gap: CGFloat = 6
-        let start = bounds.width - CGFloat(segments.count) * width - CGFloat(segments.count - 1) * gap
+        let count = CGFloat(segments.count)
+        let width = (bounds.width - (count - 1) * gap) / count
         for (index, segment) in segments.enumerated() {
-            segment.frame = CGRect(x: start + CGFloat(index) * (width + gap), y: 22, width: width, height: 8)
+            segment.frame = CGRect(x: CGFloat(index) * (width + gap), y: 22, width: width, height: 8)
         }
         CATransaction.commit()
     }

@@ -11,6 +11,7 @@ final class RobotSlotView: NSView {
     }
 
     private let statusLight = CALayer()
+    private let tint = CALayer()
     private let iconWell = CALayer()
     private let icon = NSImageView()
     private let nameLabel = NSTextField(labelWithString: "")
@@ -26,7 +27,8 @@ final class RobotSlotView: NSView {
     override var isFlipped: Bool { true }
     override var wantsUpdateLayer: Bool { true }
     override var acceptsFirstResponder: Bool { true }
-    override var canBecomeKeyView: Bool { true }
+    /// Matches native buttons, which join the key view loop only with keyboard navigation on.
+    override var canBecomeKeyView: Bool { NSApp.isFullKeyboardAccessEnabled }
     override var focusRingMaskBounds: NSRect { bounds }
 
     init(part: RobotPart) {
@@ -36,7 +38,9 @@ final class RobotSlotView: NSView {
         layer?.cornerRadius = 12
         layer?.borderWidth = 1.4
         layer?.shadowOffset = .zero
-        layer?.shadowRadius = 6
+        layer?.shadowRadius = 10
+        tint.cornerRadius = 12
+        layer?.addSublayer(tint)
         iconWell.cornerRadius = 10
         layer?.addSublayer(iconWell)
         bars.forEach {
@@ -94,6 +98,7 @@ final class RobotSlotView: NSView {
         super.layout()
         CATransaction.begin()
         CATransaction.setDisableActions(true)
+        tint.frame = bounds
         iconWell.frame = CGRect(x: 12, y: 14, width: 46, height: 46)
         icon.frame = NSRect(x: 12, y: 14, width: 46, height: 46)
         nameLabel.frame = NSRect(x: 70, y: 12, width: 90, height: 14)
@@ -117,8 +122,10 @@ final class RobotSlotView: NSView {
         let border = slot?.tone == .attention ? SettingsTheme.amber
             : lit ? SettingsTheme.teal : SettingsTheme.purple.withAlphaComponent(0.55)
         layer.borderColor = border.cgColor
+        layer.borderWidth = lit ? 2 : 1.4
         layer.shadowColor = SettingsTheme.slotGlow.cgColor
         layer.shadowOpacity = lit ? 1 : 0
+        tint.backgroundColor = (lit ? SettingsTheme.highlightFill : NSColor.clear).cgColor
         iconWell.backgroundColor = SettingsTheme.iconWell.cgColor
         let level = slot?.level
         for (index, bar) in bars.enumerated() {

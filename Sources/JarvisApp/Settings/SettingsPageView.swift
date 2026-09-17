@@ -23,6 +23,9 @@ final class SettingsPageView: NSView {
     private let badge: RobotHeadView?
     private let titleLabel = NSTextField(labelWithString: "")
     private let summaryLabel = NSTextField(labelWithString: "")
+    private static let chipFont = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+    private static let chipHeight: CGFloat = 22
+
     private let chipBox = NSBox()
     private let chipLabel = NSTextField(labelWithString: "")
     private var noticeView: SettingsNoticeView?
@@ -73,7 +76,7 @@ final class SettingsPageView: NSView {
         if let chip {
             let color = chip.tone == .live ? SettingsTheme.teal : SettingsTheme.mutedText
             chipLabel.attributedStringValue = NSAttributedString(string: chip.text.uppercased(), attributes: [
-                .kern: 1.6, .font: NSFont.systemFont(ofSize: 10.5, weight: .semibold), .foregroundColor: color,
+                .kern: 1.6, .font: Self.chipFont, .foregroundColor: color,
             ])
             chipBox.borderColor = chip.tone == .live ? SettingsTheme.teal : SettingsTheme.line
         }
@@ -114,8 +117,16 @@ final class SettingsPageView: NSView {
         if !chipBox.isHidden {
             chipWidth = ceil(chipLabel.fittingSize.width) + 22
             chipBox.frame = NSRect(x: bounds.width - inset - chipWidth, y: headerTop - 34,
-                                   width: chipWidth, height: 22)
-            chipLabel.frame = NSRect(x: 11, y: 3, width: chipWidth - 22, height: 15)
+                                   width: chipWidth, height: Self.chipHeight)
+            // A label draws from the top of its frame, and all-capitals text has no descenders, so a
+            // centered label would sit the capitals high. Center the capitals themselves.
+            let font = Self.chipFont
+            let contentHeight = chipBox.contentView?.bounds.height ?? Self.chipHeight
+            let labelHeight = ceil(chipLabel.fittingSize.height)
+            let capsBottom = (contentHeight - font.capHeight) / 2
+            chipLabel.frame = NSRect(
+                x: 11, y: ((capsBottom + font.ascender - labelHeight) * 2).rounded() / 2,
+                width: chipWidth - 22, height: labelHeight)
         }
         let textWidth = max(0, bounds.width - inset - x - chipWidth - 12)
         titleLabel.frame = NSRect(x: x, y: headerTop - 26, width: textWidth, height: 26)

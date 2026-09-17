@@ -21,7 +21,7 @@ final class ProviderRouteEditor: NSObject {
 
     var preferredHeight: CGFloat {
         Self.headerHeight
-            + (primaryRow?.preferredHeight ?? 84)
+            + (primaryRow?.preferredHeight ?? 54)
             + fallbackRows.map(\.preferredHeight).reduce(0, +)
             + Self.addHeight
     }
@@ -147,7 +147,7 @@ final class ProviderRouteEditor: NSObject {
             row.frame = rowFrame(
                 top: nextTop, width: width, rowHeight: row.preferredHeight)
         }
-        addButton.frame = NSRect(x: 12, y: 5, width: 132, height: 32)
+        addButton.frame = NSRect(x: width - 16 - 132, y: 5, width: 132, height: 32)
     }
 
     private func rowFrame(top: CGFloat, width: CGFloat, rowHeight: CGFloat) -> NSRect {

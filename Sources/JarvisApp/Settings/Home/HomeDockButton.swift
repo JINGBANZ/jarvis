@@ -12,6 +12,7 @@ final class HomeDockButton: NSButton {
     }
     private var trackingArea: NSTrackingArea?
     private let symbol: NSImage?
+    private let litSymbol: NSImage?
     private let label: NSAttributedString
 
     override var isFlipped: Bool { true }
@@ -19,9 +20,12 @@ final class HomeDockButton: NSButton {
 
     init(destination: SettingsDestination, title: String, symbolName: String) {
         self.destination = destination
-        symbol = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
-                .applying(NSImage.SymbolConfiguration(paletteColors: [SettingsTheme.purple])))
+        let base = NSImage(systemSymbolName: symbolName, accessibilityDescription: nil)
+        let size = NSImage.SymbolConfiguration(pointSize: 20, weight: .regular)
+        symbol = base?.withSymbolConfiguration(
+            size.applying(NSImage.SymbolConfiguration(paletteColors: [SettingsTheme.purple])))
+        litSymbol = base?.withSymbolConfiguration(
+            size.applying(NSImage.SymbolConfiguration(paletteColors: [SettingsTheme.teal])))
         label = NSAttributedString(string: title, attributes: [
             .font: NSFont.systemFont(ofSize: 12.5), .foregroundColor: SettingsTheme.text,
         ])
@@ -39,39 +43,55 @@ final class HomeDockButton: NSButton {
         fatalError("init(coder:) has not been implemented")
     }
 
-    /// Inset half a point so the stroke stays inside the bounds.
+    /// Inset a point so the 2-point hover stroke stays inside the bounds.
     private func chamferPath() -> NSBezierPath {
-        let w = bounds.width - 1
-        let h = bounds.height - 1
+        let rect = bounds.insetBy(dx: 1, dy: 1)
+        let (x0, y0, x1, y1) = (rect.minX, rect.minY, rect.maxX, rect.maxY)
         let path = NSBezierPath()
-        path.move(to: NSPoint(x: 16.5, y: 0.5))
-        path.line(to: NSPoint(x: w - 15.5, y: 0.5))
-        path.line(to: NSPoint(x: w + 0.5, y: 16.5))
-        path.line(to: NSPoint(x: w + 0.5, y: h + 0.5))
-        path.line(to: NSPoint(x: 16.5, y: h + 0.5))
-        path.line(to: NSPoint(x: 0.5, y: h - 15.5))
-        path.line(to: NSPoint(x: 0.5, y: 0.5))
+        path.move(to: NSPoint(x: x0 + 16, y: y0))
+        path.line(to: NSPoint(x: x1 - 16, y: y0))
+        path.line(to: NSPoint(x: x1, y: y0 + 16))
+        path.line(to: NSPoint(x: x1, y: y1))
+        path.line(to: NSPoint(x: x0 + 16, y: y1))
+        path.line(to: NSPoint(x: x0, y: y1 - 16))
+        path.line(to: NSPoint(x: x0, y: y0))
         path.close()
         return path
     }
 
     override func draw(_ dirtyRect: NSRect) {
         let path = chamferPath()
+        let lit = isHovered || window?.firstResponder === self
         let fill = isHighlighted
             ? (SettingsTheme.cardFill.blended(withFraction: 0.1, of: .black) ?? SettingsTheme.cardFill)
             : SettingsTheme.cardFill
         fill.setFill()
         path.fill()
-        let lit = isHovered || window?.firstResponder === self
-        (lit ? SettingsTheme.teal : SettingsTheme.purple.withAlphaComponent(0.5)).setStroke()
-        path.lineWidth = 1
-        path.stroke()
+        if lit {
+            SettingsTheme.highlightFill.setFill()
+            path.fill()
+            NSGraphicsContext.saveGraphicsState()
+            let glow = NSShadow()
+            glow.shadowColor = SettingsTheme.slotGlow
+            glow.shadowBlurRadius = 8
+            glow.shadowOffset = .zero
+            glow.set()
+            SettingsTheme.teal.setStroke()
+            path.lineWidth = 2
+            path.stroke()
+            NSGraphicsContext.restoreGraphicsState()
+        } else {
+            SettingsTheme.purple.withAlphaComponent(0.5).setStroke()
+            path.lineWidth = 1
+            path.stroke()
+        }
 
         let gap: CGFloat = 6
-        let symbolSize = symbol?.size ?? .zero
+        let icon = lit ? litSymbol : symbol
+        let symbolSize = icon?.size ?? .zero
         let labelSize = label.size()
         var top = floor((bounds.height - symbolSize.height - gap - labelSize.height) / 2)
-        symbol?.draw(
+        icon?.draw(
             in: NSRect(x: floor((bounds.width - symbolSize.width) / 2), y: top,
                        width: symbolSize.width, height: symbolSize.height),
             from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)

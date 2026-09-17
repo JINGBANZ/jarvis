@@ -37,7 +37,9 @@ it is visible** rather than for the whole time the window is open. A section ret
 parts map to their pages. The hub opens pages; every page header has a **‹ JARVIS** back button,
 also bound to ⌘[. Esc closes the window. A page notice's **Open Connections** button moves straight
 to Connections. Pages are added to and removed from the window while it is open, so the window
-recalculates its key view loop automatically rather than each view wiring `nextKeyView`.
+recalculates its key view loop automatically rather than each view wiring `nextKeyView`. Opening
+the window focuses nothing, even with keyboard navigation on, so the hub never opens with a slot
+lit; the first Tab starts keyboard focus.
 
 ### Window sizing
 

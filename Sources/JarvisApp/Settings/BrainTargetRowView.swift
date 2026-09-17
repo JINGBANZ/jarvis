@@ -14,6 +14,7 @@ final class BrainTargetRowView: NSView {
 
     private let titleLabel: NSTextField
     private let statusLabel: NSTextField?
+    private let statusTag: NSView?
     private let providerPopup: NSPopUpButton
     private let providers: [BrainProvider]
     private let modelPopup: NSPopUpButton
@@ -22,7 +23,8 @@ final class BrainTargetRowView: NSView {
     private let onProviderChanged: (BrainProvider) -> Void
     private let onModelChanged: (BrainModel) -> Void
 
-    let preferredHeight: CGFloat
+    private static let height: CGFloat = 54
+    let preferredHeight = BrainTargetRowView.height
 
     init(
         title: String,
@@ -41,17 +43,20 @@ final class BrainTargetRowView: NSView {
         self.titleLabel = titleLabel
 
         if let status {
-            // A layer border doesn't follow the appearance, so `applyStatusBorder()` reapplies it.
             let label = NSTextField(labelWithString: status.uppercased())
             label.font = .boldSystemFont(ofSize: NSFont.smallSystemFontSize - 1)
             label.textColor = SettingsTheme.teal
-            label.alignment = .center
-            label.wantsLayer = true
-            label.layer?.cornerRadius = 5
-            label.layer?.borderWidth = 1
+            // A layer border doesn't follow the appearance, so `applyStatusBorder()` reapplies it.
+            let tag = NSView()
+            tag.wantsLayer = true
+            tag.layer?.cornerRadius = 5
+            tag.layer?.borderWidth = 1
+            tag.addSubview(label)
             self.statusLabel = label
+            self.statusTag = tag
         } else {
             self.statusLabel = nil
+            self.statusTag = nil
         }
 
         let providerPopup = NSPopUpButton()
@@ -111,16 +116,14 @@ final class BrainTargetRowView: NSView {
             controls.addArrangedSubview(moveDown)
             controls.addArrangedSubview(remove)
             self.actionsView = controls
-            self.preferredHeight = 84
         } else {
             self.actionsView = nil
-            self.preferredHeight = 54
         }
 
         self.onProviderChanged = onProviderChanged
         self.onModelChanged = onModelChanged
 
-        super.init(frame: NSRect(x: 0, y: 0, width: 680, height: preferredHeight))
+        super.init(frame: NSRect(x: 0, y: 0, width: 680, height: Self.height))
 
         providerPopup.target = self
         providerPopup.action = #selector(providerChanged)
@@ -128,7 +131,7 @@ final class BrainTargetRowView: NSView {
         modelPopup.action = #selector(modelChanged)
 
         addSubview(titleLabel)
-        if let statusLabel { addSubview(statusLabel) }
+        if let statusTag { addSubview(statusTag) }
         addSubview(providerPopup)
         addSubview(modelPopup)
         if let actionsView { addSubview(actionsView) }
@@ -145,16 +148,26 @@ final class BrainTargetRowView: NSView {
 
         let labelWidth: CGFloat = 92
         let gap: CGFloat = 9
-        let selectionWidth = max(225, bounds.width - labelWidth - gap)
+        let actionsWidth: CGFloat = 98
+        let actionsSpace = actionsView == nil ? 0 : actionsWidth + gap
+        let selectionWidth = max(225, bounds.width - labelWidth - gap - actionsSpace)
         let popupWidth = max(108, (selectionWidth - gap) / 2)
         let selectionY = bounds.height - 42
 
-        if let statusLabel {
+        if let statusLabel, let statusTag, let font = statusLabel.font {
             titleLabel.frame = NSRect(
                 x: 0, y: selectionY + 14, width: labelWidth, height: 18)
-            let tagWidth = min(labelWidth, ceil(statusLabel.fittingSize.width) + 4)
+            let tagHeight: CGFloat = 16
+            let labelSize = statusLabel.fittingSize
+            statusTag.frame = NSRect(
+                x: 0, y: selectionY - 2, width: min(labelWidth, ceil(labelSize.width) + 10),
+                height: tagHeight)
+            // A label draws its capitals a fixed distance below its top edge, and they have no
+            // descenders, so the label is placed to center the capitals rather than its own frame.
+            let capsBottom = (tagHeight - font.capHeight) / 2
             statusLabel.frame = NSRect(
-                x: 0, y: selectionY - 1, width: tagWidth, height: 15)
+                x: 5, y: ((capsBottom + font.ascender - ceil(labelSize.height)) * 2).rounded() / 2,
+                width: ceil(labelSize.width), height: ceil(labelSize.height))
         } else {
             titleLabel.frame = NSRect(
                 x: 0, y: selectionY + 6, width: labelWidth, height: 20)
@@ -167,7 +180,8 @@ final class BrainTargetRowView: NSView {
         modelPopup.frame = NSRect(
             x: modelX, y: selectionY, width: popupWidth, height: 32)
 
-        actionsView?.frame = NSRect(x: bounds.width - 98, y: 3, width: 98, height: 32)
+        actionsView?.frame = NSRect(
+            x: bounds.width - actionsWidth, y: selectionY, width: actionsWidth, height: 32)
     }
 
     override func viewDidChangeEffectiveAppearance() {
@@ -176,7 +190,7 @@ final class BrainTargetRowView: NSView {
     }
 
     private func applyStatusBorder() {
-        statusLabel?.layer?.borderColor = themedCGColor(SettingsTheme.teal)
+        statusTag?.layer?.borderColor = themedCGColor(SettingsTheme.teal)
     }
 
     private static func actionButton(

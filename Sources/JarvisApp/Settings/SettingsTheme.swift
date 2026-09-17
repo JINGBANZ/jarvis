@@ -22,7 +22,7 @@ enum SettingsTheme {
     static let circuit = dynamic(light: 0x7C4DFF, dark: 0xD9C6FF)
     static let highlightFill = dynamic(light: 0x0E9F87, dark: 0x36E2C5, alpha: (0.18, 0.16))
     static let glow = dynamic(light: 0x0E9F87, dark: 0x36E2C5, alpha: (0.75, 0.9))
-    static let slotGlow = dynamic(light: 0x0E9F87, dark: 0x36E2C5, alpha: (0.35, 0.55))
+    static let slotGlow = dynamic(light: 0x0E9F87, dark: 0x36E2C5, alpha: (0.6, 0.8))
     static let calloutFill = dynamic(light: 0x0E9F87, dark: 0x36E2C5, alpha: (0.07, 0.06))
     static let noticeFill = dynamic(light: 0xFFAA28, dark: 0xFFB547, alpha: (0.12, 0.08))
     static let eyeGlow = rgb(0x36E2C5)
