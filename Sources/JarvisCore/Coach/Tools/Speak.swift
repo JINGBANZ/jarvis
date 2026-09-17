@@ -55,9 +55,11 @@ private let detailGuidance = """
     The lines are the coaching. Keep the hint and its brief rationale there. Include detail when a
     loaded skill calls for supporting content or an explanation is warranted; otherwise leave it null.
     detail is Markdown shown under the hint in the persistent box. Use it for what a line cannot
-    hold: a code block, diagram, or ready-to-use AI prompt a loaded skill calls for. A warranted
+    hold: a code block, diagram, or short AI prompt suggestion a loaded skill calls for. A warranted
     AI prompt does not require the user to request a prompt, ask for an explanation, or be confused.
-    For explanatory paragraphs, the user should have asked you to explain or be clearly lost:
+    A loaded skill may also call for a focused explanation of unfamiliar AI-generated code before
+    adoption; that does not require an explicit explanation request or evidence of confusion.
+    Otherwise, for explanatory paragraphs, the user should have asked you to explain or be clearly lost:
     they ask why, they restate something wrongly, or
     they say they can't follow earlier advice. Silence or unchanged work is not confusion, and you
     hear transcripts, not tone.
