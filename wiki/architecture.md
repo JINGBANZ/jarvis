@@ -70,7 +70,11 @@ moments the model judges worthwhile.
    long* you've been quiet and backs off across a long silence (the interval
    doubles each step up to a cap — see `Config`), resetting on speech; past an idle cutoff it stops
    probing entirely (you've stepped away — a nudge into an empty room still bills a request) until
-   speech re-arms it.
+   speech re-arms it. The first check comes after well under a minute of quiet, not two minutes: a
+   stuck candidate is rarely silent that long, because a muttered "okay", a request for a moment, or
+   a half sentence each restart the wait, and a two-minute wait lets a whole stuck stretch pass
+   unchecked. Speech from either side defers a check, and the backoff keeps a long quiet stretch to
+   a handful of requests.
 2. Before an automatic attempt, `TranscriptionSettlementGate` waits until both provider streams say
    that no active speech, finalization, or recovery can still produce an earlier transcript line.
    OpenAI reconnect-buffered audio remains unsettled even before replay creates a server item; Apple

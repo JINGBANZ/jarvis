@@ -4,7 +4,8 @@ import Foundation
 public struct Config: Sendable {
     /// Base quiet interval before the first proactive "are you stuck?" silence check. Subsequent
     /// checks back off exponentially (see `silenceMaxIntervalSeconds` and `SilenceBackoff`); any
-    /// speech resets to this base.
+    /// speech resets to this base. Kept short because a stuck candidate's fragments keep restarting
+    /// it (see wiki/architecture.md, The turn).
     public var silenceTimeoutSeconds: TimeInterval
     /// Upper bound on the silence-check interval as it backs off, so a long silence still gets an
     /// occasional gentle check rather than going dark forever.
@@ -64,7 +65,7 @@ public struct Config: Sendable {
     public var realtimePongTimeoutSeconds: TimeInterval
 
     public init(
-        silenceTimeoutSeconds: TimeInterval = 120,
+        silenceTimeoutSeconds: TimeInterval = 45,
         silenceMaxIntervalSeconds: TimeInterval = 960,
         silenceIdleCutoffSeconds: TimeInterval = 1_800,
         historyCompactionTokenThreshold: Int = 10_000,
