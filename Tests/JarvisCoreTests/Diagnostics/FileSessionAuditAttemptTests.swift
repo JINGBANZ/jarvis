@@ -12,21 +12,18 @@ import Testing
             TranscriptLine(speaker: .them, text: "Explain the tradeoff", at: 2),
         ]
         let url = dir.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename)
-        #expect(await log.recordForTesting(file: url, expectedLineCount: 1) {
-            log.recordStarted(
-                attemptID: 3,
-                wake: .trigger,
-                reason: .silence(secondsQuiet: 45),
-                target: target,
-                transcriptStartIndex: 8,
-                transcriptLines: transcript,
-                classifications: transcript.map { TurnSubstance.classification(of: $0.text) },
-                brainFacingTranscriptIndices: [9])
-        })
-        #expect(await log.recordForTesting(file: url, expectedLineCount: 2) {
-            log.recordFinished(attemptID: 3, terminal: .staySilent, outcome: .silentByModel)
-        })
-        _ = await log.closeForTesting()
+        log.recordStarted(
+            attemptID: 3,
+            wake: .trigger,
+            reason: .silence(secondsQuiet: 45),
+            target: target,
+            transcriptStartIndex: 8,
+            transcriptLines: transcript,
+            classifications: transcript.map { TurnSubstance.classification(of: $0.text) },
+            brainFacingTranscriptIndices: [9])
+        log.recordFinished(attemptID: 3, terminal: .staySilent, outcome: .silentByModel)
+        // Close queues behind both records, so it returns only after they are written.
+        #expect(await log.closeForTesting() == .complete)
 
         let permissions = try FileManager.default.attributesOfItem(
             atPath: url.path)[.posixPermissions] as? NSNumber
