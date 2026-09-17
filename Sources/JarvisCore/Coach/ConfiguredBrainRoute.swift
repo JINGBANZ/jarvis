@@ -1,10 +1,6 @@
 import Foundation
 
-/// Runtime-ready route plus typed provider-level transition callbacks.
-///
-/// Raw provider errors never enter these callbacks: each transition carries the classified
-/// `ProviderFailure` that caused it, and the raw text stays in `jarvis-debug.log`. The App edge
-/// uses target identity plus that record to write Activity copy or stop after route exhaustion.
+/// Callbacks carry the classified `ProviderFailure`, never raw provider error text.
 public struct ConfiguredBrainRoute: Sendable {
     let targets: [ConfiguredBrainTarget]
     let onSelected: (@MainActor @Sendable (BrainTarget) -> Void)?
@@ -12,10 +8,9 @@ public struct ConfiguredBrainRoute: Sendable {
     let onSkipped: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
     let onRecoveryChanged: (@MainActor @Sendable (BrainProvider?) -> Void)?
     let onExhausted: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
-    /// Every configured target is permanently unavailable; carries the last target proven so.
+    /// Every target is permanently unavailable; carries the last one proven so.
     let onTerminated: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
-    /// A failure streak reached `BrainCycleRecovery.ceiling` without a success; carries the most
-    /// recent cycle's failure.
+    /// A failure streak reached `BrainCycleRecovery.ceiling`; carries the latest failure.
     let onRecoveryExpired: (@MainActor @Sendable (ProviderFailure) -> Void)?
 
     public init(

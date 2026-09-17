@@ -1,19 +1,14 @@
 import Foundation
 
-/// Reads, lists, prunes, and deletes past session directories so the activity viewer can browse history.
-/// Foundation-only and stateless beyond its two URLs. All operations are bounded to immediate
-/// subdirectories of `base` whose name matches the session-id shape, so a malformed persisted
-/// filename can't make it touch anything outside the log tree. See
-/// wiki/build-and-run.md.
+/// Every operation is bounded to immediate session-shaped subdirectories of `base`, so a malformed
+/// persisted name can't touch anything outside the log tree.
 public struct SessionStore: Sendable {
     public struct Session: Sendable, Equatable {
         public let id: String        // directory name, e.g. "2026-06-16_10-00-00_aaaa"
         public let label: String     // human label, e.g. "2026-06-16 10:00:00"
         public let url: URL
         public let isCurrent: Bool
-        /// Whether this session's evidence record is known to be complete. `nil` means unknown —
-        /// a session written before the health record existed, or an unreadable marker. Unknown is
-        /// not the same as incomplete, so it shows no notice.
+        /// Nil means unknown (an older session or an unreadable marker), which shows no notice.
         public let evidenceIsComplete: Bool?
     }
 
@@ -30,8 +25,6 @@ public struct SessionStore: Sendable {
         self.current = current
     }
 
-    /// Choose session storage without I/O: each development bundle owns its containing worktree's
-    /// history, regardless of launch method; releases keep the established per-user history.
     public static func baseDirectory(isDevelopmentBuild: Bool, bundleURL: URL,
                                      appDataDirectory: URL) -> URL {
         if isDevelopmentBuild {
@@ -40,7 +33,7 @@ public struct SessionStore: Sendable {
         return appDataDirectory.appendingPathComponent("sessions", isDirectory: true)
     }
 
-    /// Terminal evaluation uses the same chronology as Activity, including contentless sessions.
+    /// Includes contentless sessions, which `listSessions()` hides.
     public func newestSessionDirectory() -> URL? {
         let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
         return names.filter { Self.isSessionID($0) }
@@ -51,11 +44,10 @@ public struct SessionStore: Sendable {
             .sorted { Self.isNewer($0, than: $1) }.first.map { base.appendingPathComponent($0) }
     }
 
-    /// The shared parser also accepts older sessions without a build prefix.
     private static func isSessionID(_ s: String) -> Bool {
         SessionDirectoryID(s) != nil
     }
-    /// A bare `shot-N.jpg` filename — anything with slashes or `..` is rejected (path-traversal guard).
+    /// Path-traversal guard: anything with slashes or `..` is rejected.
     private static func isShotName(_ s: String) -> Bool {
         s.wholeMatch(of: /^shot-[0-9]+\.jpg$/) != nil
     }
@@ -65,8 +57,7 @@ public struct SessionStore: Sendable {
         let m: String
         let response: ActivityResponse?
         let s: String?
-        /// A raw value lets this build distinguish current typed events from unknown kinds; only
-        /// current kinds bypass the human-copy classifier.
+        /// Raw, so a kind this build doesn't know still decodes and goes through the classifier.
         let k: String?
         let o: TimeInterval?
         let q: UInt64?
@@ -79,11 +70,7 @@ public struct SessionStore: Sendable {
         let occurredAt: TimeInterval?
     }
 
-    /// Immediate subdirectories of `base` that look like a session and hold a `jarvis-activity.jsonl`,
-    /// newest-first. The current session always appears (so the live run shows in the picker even
-    /// before it records anything); a PAST session appears only if it has coaching content — a Start
-    /// that produced nothing but lifecycle breadcrumbs (failed/instantly-stopped run) is hidden rather
-    /// than cluttering history. (`enable` creates an empty `.jsonl` so the live session is discoverable.)
+    /// Newest first. Past sessions without coaching content are hidden; the current one never is.
     public func listSessions() -> [Session] {
         let curPath = current?.standardizedFileURL.path
         let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
@@ -105,10 +92,6 @@ public struct SessionStore: Sendable {
             .sorted { Self.isNewer($0.id, than: $1.id) }
     }
 
-    /// Read the session's monotonic health record. `complete` means every accepted record reached
-    /// disk and the session sealed cleanly; `partial` means something was dropped or failed;
-    /// `in_progress` means the close never finished. Anything else — a session written before the
-    /// record existed, or an unreadable marker — is unknown, and unknown shows no notice.
     private static func evidenceIsComplete(in sessionURL: URL) -> Bool? {
         let url = sessionURL.appendingPathComponent(FileSessionAudit.healthFilename)
         guard let data = try? Data(contentsOf: url),
@@ -122,8 +105,7 @@ public struct SessionStore: Sendable {
         }
     }
 
-    /// Whether a session's log holds at least one human-facing coaching event. A terminal marker is
-    /// visible inside a retained session, but does not make an otherwise empty run worth retaining.
+    /// A terminal marker alone does not make an otherwise empty run worth listing.
     private static func hasCoachingContent(_ sessionURL: URL) -> Bool {
         let url = sessionURL.appendingPathComponent("jarvis-activity.jsonl")
         guard let text = try? String(contentsOf: url, encoding: .utf8) else { return false }
@@ -149,15 +131,12 @@ public struct SessionStore: Sendable {
         return false
     }
 
-    /// Decode a session's `.jsonl` into entries paired with their screenshot bytes (when the `s`
-    /// filename is a valid, present `shot-N.jpg`). Malformed lines are skipped; an invalid or missing
-    /// shot degrades to a text-only row (`nil` bytes).
+    /// Malformed lines are skipped; an invalid or missing shot gives a text-only row (`nil` bytes).
     public func entries(for session: Session) -> [(ActivityLog.Entry, Data?)] {
         loadEntrySnapshot(for: session, retainingMostRecentInsertions: nil).entries
     }
 
-    /// Decode a bounded history snapshot using the same identity policy as live Activity: retain the
-    /// newest insertions first, then display that retained set in event-time order.
+    /// Like live Activity: keeps the newest insertions, then orders them by event time.
     public func entrySnapshot(
         for session: Session,
         retainingMostRecentInsertions maximumCount: Int
@@ -205,12 +184,9 @@ public struct SessionStore: Sendable {
         if let maximumCount, out.count > maximumCount {
             out = Array(out.suffix(maximumCount))
         }
-        // A session created by an older build has no event-time metadata. Preserve its file order
-        // rather than guessing chronology from second-resolution display strings. New sessions have
-        // metadata on every typed row and use the same ordering component as live Activity/model data.
+        // Older sessions lack event times: keep file order, don't guess from display strings.
         guard out.allSatisfy({ $0.occurredAt?.isFinite == true }) else {
-            // Strip partial metadata too. The viewer's live insertion routine must append every row
-            // in file order for a mixed/old session instead of moving only the upgraded rows.
+            // Strip partial metadata too, so the viewer keeps a mixed session in file order.
             let entries = out.map { loaded in
                 let entry = loaded.entry
                 return (
@@ -232,16 +208,14 @@ public struct SessionStore: Sendable {
         return EntrySnapshot(entries: entries, total: total)
     }
 
-    /// Delete every past session directory (immediate, session-shaped subdir of `base`), sparing the
-    /// current session, caller-protected sessions, and symlinks. Never removes `base` itself or
-    /// anything outside it.
+    /// Never removes `base`, anything outside it, the current or protected sessions, or symlinks.
     public func clearHistory(preserving protectedDirectories: Set<URL> = []) {
         let curPath = current?.standardizedFileURL.path
         let protectedPaths = Set(protectedDirectories.map { $0.standardizedFileURL.path })
         let names = (try? FileManager.default.contentsOfDirectory(atPath: base.path)) ?? []
         for name in names where Self.isSessionID(name) {
             let url = base.appendingPathComponent(name)
-            if url.standardizedFileURL.path == curPath { continue }                 // spare current
+            if url.standardizedFileURL.path == curPath { continue }
             if protectedPaths.contains(url.standardizedFileURL.path) { continue }
             let vals = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
             if vals?.isSymbolicLink == true { continue }                            // don't follow symlinks
@@ -249,12 +223,8 @@ public struct SessionStore: Sendable {
         }
     }
 
-    /// Keep only the `keep` newest session directories, deleting the rest — so the always-on activity
-    /// log can't grow without bound across launches. Counts EVERY session-shaped subdir (including
-    /// content-less aborted runs that `listSessions` hides), spares the current session, and skips
-    /// symlinks; bounded to immediate children of `base` exactly like `clearHistory`. A non-positive
-    /// `keep` is treated as 1 so a run never deletes the session it's about to write into. Protected
-    /// sessions outside the newest `keep` are additional survivors until their caller releases them.
+    /// Counts contentless sessions too. `keep` is at least 1 so a run never deletes the session it
+    /// is about to write into; protected sessions survive beyond `keep`.
     public func pruneToMostRecent(
         _ keep: Int,
         preserving protectedDirectories: Set<URL> = []
@@ -267,7 +237,7 @@ public struct SessionStore: Sendable {
             .sorted { Self.isNewer($0, than: $1) }
         for name in names.dropFirst(keep) {
             let url = base.appendingPathComponent(name)
-            if url.standardizedFileURL.path == curPath { continue }                 // spare current
+            if url.standardizedFileURL.path == curPath { continue }
             if protectedPaths.contains(url.standardizedFileURL.path) { continue }
             let vals = try? url.resourceValues(forKeys: [.isSymbolicLinkKey])
             if vals?.isSymbolicLink == true { continue }                            // don't follow symlinks
@@ -275,7 +245,6 @@ public struct SessionStore: Sendable {
         }
     }
 
-    /// "2026-06-16_10-00-00_aaaa" → "2026-06-16 10:00:00".
     private static func label(from id: String) -> String {
         SessionDirectoryID(id)?.label ?? id
     }

@@ -1,22 +1,10 @@
 import Foundation
 import JarvisCore
 
-/// Renders a saved evaluation report (`eval-report.md`) as a self-contained HTML page so "Open
-/// report" can hand it to the user's browser. The markdown stays the on-disk source of truth — it's
-/// what the agentic evaluator produces and what an agent consumes when the user pastes the report
-/// into a fix-it chat — so the page embeds the raw markdown verbatim behind a **Copy as Markdown**
-/// button, and the HTML is a derived view regenerated from the markdown on every open.
-///
-/// The renderer is a deliberate subset of markdown — headings, lists, tables, fenced code,
-/// blockquotes, bold / inline code / links — which covers the report skeleton `AgenticEvaluation`
-/// prescribes. Anything it renders imperfectly is still recoverable via the embedded raw markdown.
 /// All report content is HTML-escaped: the report is LLM output and must not inject script.
 public enum EvalReportPage {
-    /// Written beside `eval-report.md` in the session directory, owner-only like everything there.
     public static let filename = "eval-report.html"
 
-    /// Render `markdown` and write the page into the session directory (owner-only). Returns the
-    /// page's URL for handing to the browser.
     @discardableResult
     public static func write(markdown: String, in sessionDir: URL, title: String) throws -> URL {
         let url = sessionDir.appendingPathComponent(filename)
@@ -115,7 +103,6 @@ public enum EvalReportPage {
             var rows = tableRows
             tableRows = []
             var out = ["<table>"]
-            // A dashes-only second row is the markdown header separator.
             let hasHeader = rows.count >= 2
                 && rows[1].allSatisfy { $0.allSatisfy { "-: ".contains($0) } && $0.contains("-") }
             if hasHeader {
@@ -185,7 +172,7 @@ public enum EvalReportPage {
             }
         }
         flushBlocks()
-        if inCode {   // unclosed fence: still show what was collected
+        if inCode {
             html.append("<pre><code>\(escape(codeLines.joined(separator: "\n")))</code></pre>")
         }
         return html.joined(separator: "\n")
@@ -208,16 +195,15 @@ public enum EvalReportPage {
         return nil
     }
 
-    /// Inline markdown on already block-split text: escape first (LLM output must never reach the
-    /// page unescaped), then code spans, bold, and links.
+    /// Escape first: LLM output must never reach the page unescaped.
     private static func inline(_ text: String) -> String {
         var s = escape(text)
         s = s.replacingOccurrences(of: "`([^`]+)`", with: "<code>$1</code>",
                                    options: .regularExpression)
         s = s.replacingOccurrences(of: "\\*\\*([^*]+)\\*\\*", with: "<strong>$1</strong>",
                                    options: .regularExpression)
-        // http(s) only: the report is LLM output, so an active scheme (javascript:, data:,
-        // file:) must never become a live href — anything else stays escaped literal text.
+        // http(s) only: an active scheme (javascript:, data:, file:) from LLM output must never
+        // become a live href.
         s = s.replacingOccurrences(of: "\\[([^\\]]+)\\]\\((https?://[^)\\s\"]+)\\)",
                                    with: "<a href=\"$2\">$1</a>",
                                    options: .regularExpression)

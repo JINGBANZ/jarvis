@@ -1,11 +1,7 @@
 import Foundation
 import Testing
 
-/// One scenario's results lines: `<case> <pass|fail|note|skipped> [detail]`, plus `time` lines.
-///
-/// `pass` and `fail` come from `#expect`, labelled with the case ID so a failure names its case.
-/// `note` records what the model chose where the outcome is the model's to decide; it never fails
-/// the run, and no assertion is ever turned into a note to make a run pass.
+/// A `note` never fails the run; never turn an assertion into a note to make a run pass.
 struct LiveE2EResults {
     typealias Check = (passed: Bool, label: String)
 

@@ -1,20 +1,8 @@
 import Foundation
 
-/// One failure observed at a provider boundary, classified where it was observed and carried
-/// unchanged to the route policy, the session lifecycle, Activity, and the debug log.
-///
-/// Two kinds of consumer read two different parts and nothing else. Policy (route advance, socket
-/// retry, session end) reads `disposition` and `endsEverySession`. People read `category` for the
-/// fixed sentence and advice, and `identity` plus `message` for what the provider actually said.
-/// Every provider-supplied string this type holds is redacted: the initializer redacts `message`
-/// and the identity's own strings unconditionally, so no adapter can carry raw text past it.
-///
-/// Unknown failures deliberately classify as `.temporary`: losing one coaching turn, or spending a
-/// bounded retry budget on a socket, is safer than exhausting a target because a new provider
-/// error was not yet in the table. A vendor classifier creates `.permanent` only from reviewed
-/// proof that this target cannot recover.
+/// The initializer redacts every provider string, so no adapter can carry raw text past it.
+/// Unknown failures stay `.temporary` on purpose; `.permanent` needs reviewed proof.
 public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
-    /// Which boundary produced the failure. The provider enums carry the display names.
     public enum Source: Sendable, Equatable {
         case brain(BrainProvider)
         case transcription(TranscriptionProvider)
@@ -29,7 +17,6 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
             }
         }
 
-        /// The noun the sentence uses for what the provider was doing for Jarvis.
         public var surfaceNoun: String {
             switch self {
             case .brain: "coaching"
@@ -39,34 +26,30 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
         }
     }
 
-    /// Where in the exchange the failure surfaced.
     public enum Stage: String, Sendable {
         /// DNS, TCP, TLS, or proxy failure before any HTTP response.
         case connect
         /// The HTTP response to a WebSocket upgrade was not 101.
         case handshake
-        /// A plain HTTP request and response (a brain call, a credential check).
         case request
         /// An in-band error event on an open socket.
         case session
-        /// The server closed the socket.
         case close
         /// A send or receive on an open socket failed.
         case transport
         /// The socket opened but the provider never acknowledged the session configuration.
         case readiness
-        /// A ping/pong liveness probe failed on a ready socket.
+        /// A ping/pong probe failed on a ready socket.
         case liveness
-        /// A local process Jarvis runs for the provider, the bundled sign-in helper, could not serve.
+        /// The bundled sign-in helper could not serve.
         case process
-        /// The provider answered but the answer was unusable (incomplete, no tool call, tool loop).
+        /// The answer was unusable (incomplete, no tool call, tool loop).
         case response
-        /// A local analyzer (Apple Speech) or capture device stopped.
+        /// Apple Speech or a capture device stopped.
         case local
     }
 
-    /// Selects the fixed sentence and advice Activity shows. `unknown` still renders identity and
-    /// message, so an unclassified failure is never reduced to the word "unknown".
+    /// `unknown` still renders identity and message, never just the word "unknown".
     public enum Category: String, Sendable, CaseIterable {
         case authentication
         case quota
@@ -76,12 +59,11 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
         case unreachable
         /// A connection lost after it was ready, with the retry budget spent.
         case disconnected
-        /// The provider refused for a reason outside the table; the message explains.
+        /// Refused for a reason outside the table; the message explains.
         case rejected
-        /// The provider or a local resource is unavailable (5xx, helper not running, analyzer gone).
+        /// 5xx, helper not running, or analyzer gone.
         case unavailable
         case timeout
-        /// The provider's response could not be used.
         case response
         case unknown
     }
@@ -91,8 +73,6 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
         case permanent
     }
 
-    /// Structured, grep-able identity. Each stage exposes a different subset, so every field is
-    /// optional; `summary` renders whichever are present.
     public struct Identity: Sendable, Equatable {
         public var httpStatus: Int?
         public var closeCode: Int?
@@ -116,8 +96,8 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
             self.exitStatus = exitStatus
         }
 
-        /// "HTTP 403, unsupported_country_region_territory", "close 3000, insufficient_permissions",
-        /// "network -1004", "errno 32", "code 500", "exit 1", or "" when nothing structured is known.
+        /// For example "HTTP 403, unsupported_country_region_territory" or "network -1004"; "" when
+        /// nothing structured is known.
         public var summary: String {
             var parts: [String] = []
             if let httpStatus { parts.append("HTTP \(httpStatus)") }
@@ -128,10 +108,7 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
             return parts.joined(separator: ", ")
         }
 
-        /// A number means nothing without saying which numbering it belongs to. Only URL loading
-        /// codes are "network"; an errno and an adapter's own code are different scales entirely,
-        /// and calling all three "network" sent a person to check their Wi-Fi over a process that
-        /// exited badly.
+        /// Only URL loading codes are "network"; an errno labeled so sends people to check Wi-Fi.
         private static func scale(of domain: String?) -> String {
             switch domain {
             case NSURLErrorDomain: return "network"
@@ -140,9 +117,7 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
             }
         }
 
-        /// Every string an identity can render, put through the one redaction the record applies to
-        /// its message. Uniform rather than exempting the fields that happen to be vendor-controlled
-        /// today: an exception is a rule someone has to remember, and this one guards a credential.
+        /// Redacts every rendered string, not only vendor-controlled ones: this guards a key.
         func redacted() -> Self {
             var copy = self
             copy.errorType = errorType.map(ProviderMessageRedaction.redact)
@@ -157,7 +132,7 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
     public let category: Category
     public let disposition: Disposition
     public let identity: Identity
-    /// Provider text after `ProviderMessageRedaction.redact`; empty when the provider said nothing.
+    /// Redacted provider text; empty when the provider said nothing.
     public let message: String
 
     public init(
@@ -168,18 +143,13 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
         self.stage = stage
         self.category = category
         self.disposition = disposition
-        // An identity's strings render into a row through `summary` exactly as the message does, so
-        // they take the same path. A vendor's error code is normally a fixed enum value with nothing
-        // to redact, but a WebSocket close reason is free text the server chose, and redacting only
-        // the message would have let that text reach a row beside its own redacted copy.
+        // A WebSocket close reason is free text the server chose, so identity is redacted too.
         self.identity = identity.redacted()
         self.message = ProviderMessageRedaction.redact(message)
     }
 
-    /// Every adapter's entry point for an error it has not proven anything about: a decoding fault,
-    /// a process exit, an unknown future error. Keeps the NSError identity, stays temporary, and routes
-    /// transport errors through the fixed-description table so a failing URL (which for Gemini
-    /// carries the API key) never becomes the message.
+    /// For errors nothing is proven about. Stays temporary, and transport errors use the fixed
+    /// descriptions so a failing URL (Gemini's carries the API key) never becomes the message.
     public init(unclassified error: any Error, source: Source, stage: Stage) {
         if let failure = error as? ProviderFailure {
             self = failure
@@ -187,8 +157,7 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
         }
         let nsError = error as NSError
         if TransportFailureClassifier.isTransportDomain(nsError.domain) {
-            // Callers that know a socket was ready use the classifier directly; anything reaching
-            // this default path is a request or first connection that could not be reached.
+            // Callers that know a socket was ready use the classifier directly.
             self = TransportFailureClassifier.classify(error: error, source: source, everReady: false)
             return
         }
@@ -198,12 +167,8 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
             message: nsError.localizedDescription)
     }
 
-    /// Whether a system-audio-side failure must end the whole session rather than degrade to
-    /// microphone-only. Both transcription sockets share one key and one network, so a permanent
-    /// account/access/configuration rejection or a connection that never came up will repeat on
-    /// the mic side seconds later; degrading first would hide the cause behind a system-audio
-    /// notice. A socket lost after it was ready is a transport blip local to that stream, and a
-    /// `.local` failure (Apple Speech, capture) has no shared account or network surface.
+    /// Both transcription sockets share one key and network, so a permanent or unreachable failure
+    /// would repeat on the mic side. Post-ready drops and `.local` failures stay stream-local.
     public var endsEverySession: Bool {
         guard stage != .local else { return false }
         return disposition == .permanent || category == .unreachable

@@ -1,12 +1,8 @@
 import AppKit
 import JarvisCore
 
-/// Turns a parsed `detail`'s prose into what a text view can draw.
-///
-/// `AttributedString(markdown:)` records structure as presentation intents rather than styling, so
-/// a straight bridge to `NSAttributedString` would run every paragraph and list item together. This
-/// maps the few intents the box needs and nothing more: a blank line between blocks, a bullet in
-/// front of a list item, monospace for inline code and for a code block the box left in the prose.
+/// `AttributedString(markdown:)` records blocks as presentation intents, not styling, so a plain
+/// bridge to `NSAttributedString` would run every paragraph and list item together.
 @MainActor
 enum DetailProseFormatting {
     static func render(_ prose: AttributedString, fontSize: CGFloat) -> NSAttributedString {
@@ -42,7 +38,6 @@ enum DetailProseFormatting {
                 attributes[.font] = NSFontManager.shared.convert(
                     NSFont.systemFont(ofSize: fontSize), toHaveTrait: .italicFontMask)
             }
-            // A code block keeps its own newlines; elsewhere a soft break is just a space.
             out.append(NSAttributedString(
                 string: isCodeBlock ? text : text.replacingOccurrences(of: "\n", with: " "),
                 attributes: attributes))

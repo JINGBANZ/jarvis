@@ -1,19 +1,9 @@
 import Foundation
 
-/// The closed set of human-visible occurrences in the coaching exchange.
-///
-/// Keeping this set typed and closed is what stops transport, retry, timing, and lifecycle detail
-/// from reaching the Activity window through a generic logging call. Sharing one evidence stack
-/// (wiki/lean-coaching-core.md, "One Event, Two Projections") does not relax that: a producer
-/// chooses from these cases or it has no human-facing copy at all. A failure case carries a
-/// `ProviderFailure`, whose message is redacted provider text, so what the provider said is quoted
-/// inside copy this file owns rather than authored by the producer.
-///
-/// It lives apart from `ActivityLog` so the coaching kernel can name the human-safe vocabulary
-/// without holding the concrete persistence type behind it.
+/// Closed on purpose, so transport, retry, timing, and lifecycle detail can never reach Activity
+/// through a generic call. Producers never author copy; provider text is quoted redacted.
 public enum ActivityEvent: Sendable {
-    /// Stable on-disk identity for each typed Activity event. Human copy and emoji may evolve; tools
-    /// reading the complete log can use this value instead of reverse-parsing prose.
+    /// Persisted identity: a shipped raw value never changes.
     public enum Kind: String, Codable, CaseIterable, Sendable {
         case heard
         case manualHint
@@ -35,60 +25,36 @@ public enum ActivityEvent: Sendable {
         case prepNotesUnavailable
     }
 
-    /// What kind of thing a load brought in. Persisted inside the event, so it is part of the
-    /// on-disk vocabulary.
+    /// Persisted inside the event, so part of the on-disk vocabulary.
     public enum CapabilityKind: String, Codable, Sendable {
         case tool
         case skill
     }
 
-    /// A finalized utterance from the user (`me`) or interviewer (`them`).
     case heard(speaker: Speaker, text: String)
-    /// The user explicitly requested help through the manual-hint shortcut.
     case manualHint(prompt: String)
     case manualExplanation(prompt: String)
     case manualCode(prompt: String)
-    /// Jarvis captured and viewed the screen while preparing a coaching response.
     case screenViewed(imageBase64JPEG: String)
-    /// The brain chose to view the screen, but capture failed. Activity gets fixed recovery
-    /// guidance while raw failure detail stays in debug.
+    /// Fixed recovery guidance only; raw failure detail stays in the debug log.
     case screenViewFailed
-    /// Jarvis displayed these coaching lines to the user.
     case tip(lines: [String], detail: String? = nil)
-    /// The brain explicitly chose `stay_silent` for this turn.
     case stayedSilent
-    /// The single terminal lifecycle event for a live coaching session. The reason is a closed set,
-    /// so a producer cannot author copy; a provider-caused end carries the classified failure and
-    /// Activity renders its sentence.
+    /// The single terminal event. A closed reason set, so a producer cannot author copy.
     case sessionEnded(reason: SessionEndReason)
-    /// One coaching cycle exhausted its finite route budget while capture and transcription remain live. The failure carries its own sentence: the frame is fixed, and
-    /// what the provider said (already redacted) is quoted inside it.
     case coachingCycleFailed(failure: ProviderFailure)
-    /// The secondary system-audio transcription stopped while microphone coaching continued. The
-    /// failure that stopped it is quoted, so a degraded session still says why it degraded.
     case systemAudioStopped(failure: ProviderFailure)
-    /// An explicit Settings reapply failed its preflight while the existing session continued.
     case settingsChangeNotApplied
-    /// A live brain replacement completed its first non-truncated terminal turn. Provider
-    /// identities are enough for a fixed human-facing success notice; model transport details
-    /// remain in jlog.
+    /// Sent after the replacement's first non-truncated terminal turn.
     case brainChangeApplied(previous: BrainProvider, current: BrainProvider)
-    /// A failed target was exhausted and the next user-authorized route target became active. The
-    /// failure that exhausted the old target is quoted; the frame names the new one.
     case brainRouteAdvanced(
         previous: BrainProvider, current: BrainProvider, failure: ProviderFailure)
-    /// A route target was proven unavailable before a provider request could be constructed.
     case brainRouteTargetSkipped(failure: ProviderFailure)
-    /// The brain looked up the user's prepared interview notes for `query`. `matchCount` is how
-    /// many relevant chunks came back, 0 meaning nothing scored usefully.
+    /// `matchCount` 0 means nothing scored usefully.
     case prepNotesSearched(query: String, matchCount: Int)
-    /// The brain pulled in a capability it was offered but had not loaded yet.
     case capabilityLoaded(kind: CapabilityKind, name: String)
-    /// The brain looked for prepared notes in a session that offers them and they were not there to
-    /// search. A fixed degradation notice: the tip that follows is not informed by the user's own
-    /// material, which is worth seeing. It is not a zero-match search, which would claim the notes
-    /// were read and found wanting, and it states no timing — whether the index is still building
-    /// or finished with nothing usable belongs in `jlog`.
+    /// Not a zero-match search, which would claim the notes were read. States no timing; whether
+    /// the index is still building belongs in `jlog`.
     case prepNotesUnavailable
 
     var response: ActivityResponse? {
@@ -96,8 +62,7 @@ public enum ActivityEvent: Sendable {
         return ActivityResponse(lines: lines, detail: detail)
     }
 
-    /// Keep persisted identity, human copy, and the optional screenshot payload in one exhaustive
-    /// mapping so adding or editing an event cannot make its `k` disagree with what Activity shows.
+    /// One exhaustive mapping, so an event's persisted kind can't disagree with its copy.
     var rendered: (kind: Kind, message: String, imageBase64: String?) {
         switch self {
         case .heard(let speaker, let text):
@@ -150,8 +115,7 @@ public enum ActivityEvent: Sendable {
             }
             return (.brainChangeApplied, message, nil)
         case .brainRouteAdvanced(let previous, let current, let failure):
-            // This frame supplies its own verb, so it quotes the evidence alone rather than the
-            // failure's whole sentence.
+            // This frame supplies its own verb, so it quotes the evidence, not the whole sentence.
             let detail = failure.activityDetail
             let message = if previous == current {
                 "⚠️ \(previous.displayName) target couldn't respond\(detail) — continuing with the next \(current.displayName) model"

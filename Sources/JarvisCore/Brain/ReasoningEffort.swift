@@ -1,22 +1,16 @@
 import Foundation
 
-/// How hard the brain model thinks before answering, passed to the Responses API as
-/// `reasoning.effort`. One global setting applied to whichever `BrainModel` is selected — the four
-/// levels below express the preference for every brain target. `BrainAccessor` clamps when the
-/// selected model or provider has a higher floor. Lower effort favors speed and fewer
-/// tokens; higher effort thinks more completely. `rawValue` is the exact API string.
+/// `rawValue` is the exact Responses API `reasoning.effort` string.
 public enum ReasoningEffort: String, CaseIterable, Sendable, Comparable {
     case none
     case low
     case medium
     case high
 
-    /// Declaration order, so a provider floor is `max(selected, floor)`.
     public static func < (lhs: ReasoningEffort, rhs: ReasoningEffort) -> Bool {
         allCases.firstIndex(of: lhs)! < allCases.firstIndex(of: rhs)!
     }
 
-    /// Title-case label for the settings picker.
     public var displayName: String {
         switch self {
         case .none: return "None"
@@ -26,14 +20,9 @@ public enum ReasoningEffort: String, CaseIterable, Sendable, Comparable {
         }
     }
 
-    /// The combined `max_output_tokens` budget to pair with this effort. On the Responses API this
-    /// cap covers reasoning + visible output + formatting tokens *together*, so it must clear the
-    /// whole reasoning pass before any tip is emitted — otherwise the run comes back
-    /// `status:"incomplete"` with reason `max_output_tokens` and zero output (what a flat 768 did at
-    /// `high`). These are runaway guards set well above expected consumption and scaled with effort;
-    /// `high` matches OpenAI's recommended ≥25k reserve for reasoning + outputs. The visible tip
-    /// itself is only ~100–200 tokens, so the budget is almost entirely reasoning headroom. Tune
-    /// down using the per-turn reasoning-token usage the brain client logs.
+    /// The cap covers reasoning and output together, so a low cap returns incomplete with no
+    /// output. Runaway guards scaled with effort; `high` is OpenAI's recommended 25k reasoning
+    /// reserve.
     public var maxOutputTokens: Int {
         switch self {
         case .none: return 1_024

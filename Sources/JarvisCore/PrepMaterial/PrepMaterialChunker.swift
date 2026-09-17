@@ -1,19 +1,14 @@
 import Foundation
 
-/// Splits extracted prep text into searchable chunks without interpreting non-Markdown sources.
 public enum PrepMaterialChunker {
-    /// Keeps prose paragraphs intact. Markdown sections start fresh; fenced code remains intact,
-    /// and recognized pipe tables split between rows with their column headers repeated.
-    /// Oversized paragraphs, code blocks, and individual table rows can exceed the target.
-    /// Pending headings stay with their following content even when that exceeds the target.
-    /// Trailing headings without supporting content are omitted from the search index.
+    /// Paragraphs, fences, and table rows are never split, so a chunk can exceed the target.
+    /// Trailing headings with no content are dropped.
     public static func chunk(
         text: String,
         sourceDisplayName: String,
         targetWordCount: Int = 400
     ) -> [PrepMaterialChunk] {
-        // The index builder supplies the original filename, including the source format. Extracted
-        // PDF/Word text can contain literal # and | characters without any Markdown semantics.
+        // Extracted PDF and Word text can contain literal # and | with no Markdown meaning.
         let isMarkdown = (sourceDisplayName as NSString).pathExtension.lowercased() == "md"
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
         let paragraphs = isMarkdown ? markdownParagraphs(normalized) : normalized
@@ -43,8 +38,7 @@ public enum PrepMaterialChunker {
                 }
                 continue
             }
-            // A heading-only hit has no evidence for retrieval. Keep consecutive headings with
-            // their first content block rather than emitting them at section or budget boundaries.
+            // A heading-only hit is useless, so headings stay with their first content block.
             if isMarkdown, isMarkdownHeading(paragraph), currentHasContent { flush() }
             let wordCount = paragraph.split(whereSeparator: \.isWhitespace).count
             if currentWordCount + wordCount > targetWordCount, currentHasContent { flush() }

@@ -5,9 +5,8 @@ struct AccessibleTextExtraction: Sendable, Equatable {
     let truncated: Bool
 }
 
-/// Converts a value-only web-area tree into bounded text without changing punctuation, case, or
-/// identifier spelling. Limits are enforced during traversal so a hostile page cannot grow an
-/// unbounded intermediate string.
+/// Keeps punctuation, case, and identifier spelling verbatim. Limits apply during traversal so a
+/// hostile page cannot grow an unbounded intermediate string.
 struct AccessibleTextExtractor: Sendable {
     private let byteLimit: Int
     private let nodeLimit: Int

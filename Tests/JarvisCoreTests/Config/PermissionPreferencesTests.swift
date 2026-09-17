@@ -3,7 +3,6 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct PermissionPreferencesTests {
-    /// A fresh, isolated UserDefaults suite per test so nothing touches the real app domain.
     private func freshDefaults() -> UserDefaults {
         let suite = "PermissionPreferencesTests.\(UUID().uuidString)"
         let d = UserDefaults(suiteName: suite)!
@@ -17,8 +16,6 @@ import Foundation
     }
 
     @Test func askingIsRememberedAcrossLaunches() {
-        // The only permission fact worth persisting: a later launch that still lacks the grant is
-        // looking at a refusal rather than one waiting for a relaunch.
         let d = freshDefaults()
         PermissionPreferences(defaults: d).screenRecordingAsked = true
 

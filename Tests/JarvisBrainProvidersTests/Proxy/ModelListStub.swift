@@ -3,8 +3,6 @@ import Foundation
 import Darwin
 #endif
 
-/// Answers every HTTP request on 127.0.0.1 with one fixed JSON body, standing in for the helper's
-/// model list. The listening descriptor is the only state, so the value is freely shareable.
 struct ModelListStub: Sendable {
     private let descriptor: Int32
 

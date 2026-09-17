@@ -2,11 +2,6 @@ import Testing
 import AppKit
 @testable import JarvisOverlay
 
-/// The box has always been resizable, but a borderless window gives no sign of it. macOS refuses to
-/// let an inactive app set the cursor, and Jarvis is a background app for all of an interview, so the
-/// panel draws the affordance itself: the edge or corner under the pointer lights up. That view also
-/// owns the drag on those edges, so the region it lights and the region that resizes are one region.
-///
 /// AppKit views are not flipped, so y grows upward: the top edge is `maxY`.
 @Suite(.serialized) struct OverlayBoxResizeAffordanceTests {
     private let bounds = NSRect(x: 0, y: 0, width: 520, height: 440)
@@ -25,10 +20,8 @@ import AppKit
         return view
     }
 
-    /// A drag is computed from the window's frame, so the view cannot start one until it is in a
-    /// window — a bare view returns from `beginResize` without arming anything. Anything covering the
-    /// drag has to be hosted, the way the box hosts it. No delegate is set: assigning one blocks
-    /// AppKit on a runner with no GUI session and hangs the whole main-actor suite.
+    /// A bare view's `beginResize` arms nothing, since a drag needs the window's frame.
+    /// Never set a delegate here: it blocks AppKit on a GUI-less runner and hangs the suite.
     @MainActor
     private func withHostedView(_ body: (OverlayBoxResizeAffordanceView) -> Void) {
         let host = NSPanel(contentRect: bounds, styleMask: [.nonactivatingPanel, .borderless],
@@ -62,16 +55,12 @@ import AppKit
         #expect(zone(517, 3) == .bottomRight)
     }
 
-    /// A corner is reachable from along either edge, not only where the two meet. A 6 pt square would
-    /// be hard to hit and would flicker between three runs as the pointer crossed it.
     @MainActor @Test
     func aCornerIsReachableFromAlongEitherEdge() {
         #expect(zone(2, 430) == .topLeft, "sliding up the left edge into the corner reads as the corner")
         #expect(zone(10, 438) == .topLeft, "sliding left along the top edge into the corner reads as the corner")
     }
 
-    /// Collapsed, the box's height is the header's, so a vertical drag has nothing to do. The
-    /// horizontal edges stay live and the corners degrade to them rather than going dead.
     @MainActor @Test
     func aCollapsedBoxOffersOnlyItsHorizontalEdges() {
         #expect(zone(260, 438, vertical: false) == nil, "the top edge goes dead while collapsed")
@@ -82,14 +71,12 @@ import AppKit
 
     // MARK: - What gets drawn
 
-    /// Only the edges draw. The box's interior stays exactly as it was, so nothing appears over the
-    /// log while the pointer crosses it.
     @MainActor @Test
     func theInteriorDrawsNothing() {
         let view = view()
         #expect(!view.isRunShown, "an untouched box draws nothing")
 
-        view.pointerMoved(to: NSPoint(x: 260, y: 220))   // deep interior
+        view.pointerMoved(to: NSPoint(x: 260, y: 220))
 
         #expect(!view.isRunShown)
         #expect(view.highlightedZone == nil)
@@ -106,10 +93,8 @@ import AppKit
         #expect(!view.drawsRun(for: .right))
     }
 
-    /// The run is drawn by a sublayer added by hand, which AppKit does not shield from CoreAnimation's
-    /// implicit actions the way it shields a view's own backing layer. Left alone, each new path would
-    /// animate over a quarter second: the run would lag the edge through a drag, and an edge-to-corner
-    /// swap would morph between paths of different element counts, which is undefined.
+    /// AppKit shields only a view's own backing layer from CoreAnimation's implicit actions, not a
+    /// hand-added sublayer, so an unsuppressed `path` change animates.
     @MainActor @Test
     func aNewRunIsDrawnAtOnceRatherThanAnimatedInto() {
         let view = view()
@@ -119,9 +104,7 @@ import AppKit
                 "and only `path`: the fade is deliberate")
     }
 
-    /// `CGRect.contains` is half-open where `zone` tests its edges closed, so guarding the lighting
-    /// path on it left the outermost row of the top and right edges dark while `hitTest` still routed
-    /// it into a resize drag.
+    /// `CGRect.contains` is half-open while `zone` tests its edges closed.
     @MainActor @Test
     func theOutermostRowOfALitEdgeLightsToo() {
         let view = view()
@@ -132,9 +115,7 @@ import AppKit
         #expect(view.drawsRun(for: .right), "so must the outermost column")
     }
 
-    /// A manually added sublayer keeps `contentsScale` at 1.0 unless told otherwise: AppKit hands the
-    /// window's backing scale to a view's own layer and stops there, which would rasterize the run at
-    /// half resolution on a Retina display.
+    /// AppKit sets `contentsScale` only on a view's own layer; a hand-added sublayer stays at 1.0.
     @MainActor @Test
     func theRunRasterizesAtTheWindowsBackingScale() {
         withHostedView { view in
@@ -152,8 +133,6 @@ import AppKit
         #expect(view.highlightedZone == nil)
     }
 
-    /// The affordance only exists where a drag can do something, so a collapsed box draws two runs,
-    /// not eight.
     @MainActor @Test
     func aCollapsedBoxDrawsOnlyItsSideRuns() {
         #expect(view(collapsed: false).drawableZones
@@ -161,8 +140,6 @@ import AppKit
         #expect(view(collapsed: true).drawableZones == [.left, .right])
     }
 
-    /// Collapsing while the pointer sits on the top edge must not leave a run lit over an axis that
-    /// can no longer be dragged.
     @MainActor @Test
     func collapsingClearsARunThatJustWentDead() {
         let view = view()
@@ -176,10 +153,8 @@ import AppKit
 
     // MARK: - Owning the drag
 
-    /// The bug this fixes: `isMovableByWindowBackground` and AppKit's borderless edge-resize both
-    /// claimed a drag on an edge, and AppKit's resize region is thinner than the run this view lights,
-    /// so the same edge sometimes moved the box and sometimes resized it. Claiming the zones makes
-    /// what lights up and what drags the same region.
+    /// Unclaimed, an edge drag goes to either `isMovableByWindowBackground` or AppKit's thinner
+    /// borderless edge-resize.
     @MainActor @Test
     func itClaimsTheZonesItLightsAndNothingElse() {
         let view = view()
@@ -189,9 +164,8 @@ import AppKit
                 "the interior must fall through, so a drag still moves the box")
     }
 
-    /// The regression that made the box impossible to move: AppKit applies
-    /// `mouseDownCanMoveWindow == false` to a view's whole frame, not to what it hit-tests, so this
-    /// full-size view refusing the drag froze the entire box. Only the edge strips may refuse it.
+    /// AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame, not to what it
+    /// hit-tests.
     @MainActor @Test
     func nothingWiderThanAnEdgeStripRefusesTheWindowDrag() {
         let view = view()
@@ -205,9 +179,7 @@ import AppKit
         }
     }
 
-    /// `zone` tests its edges closed while `NSRect.contains` is half-open, so picking the grip by
-    /// frame containment left exactly one lit column on the left and bottom that fell through and
-    /// moved the box instead of resizing it.
+    /// `NSRect.contains` is half-open while `zone` tests its edges closed.
     @MainActor @Test
     func theLastColumnOfALitEdgeStillResizes() {
         let view = view()
@@ -218,9 +190,8 @@ import AppKit
         #expect(view.hitTest(NSPoint(x: 260, y: reach)) != nil)
     }
 
-    /// The tracking area has no `.enabledDuringMouseDrag`, so AppKit reports the pointer leaving
-    /// mid-drag but not entering again until mouse-up. An outward drag would go dark the moment the
-    /// pointer outran the frame while an inward one stayed lit.
+    /// Without `.enabledDuringMouseDrag`, AppKit reports the pointer leaving mid-drag but not
+    /// re-entering until mouse-up.
     @MainActor @Test
     func aDragKeepsItsRunLitEvenWhenThePointerOutrunsTheBox() {
         withHostedView { view in
@@ -229,7 +200,7 @@ import AppKit
             view.beginResize(at: edge)
             #expect(view.drawsRun(for: .right), "the drag must actually arm before this proves anything")
 
-            view.pointerMoved(to: nil)           // what AppKit sends as the pointer overtakes the frame
+            view.pointerMoved(to: nil)
 
             #expect(view.drawsRun(for: .right), "the run must stay lit for the whole drag")
 
@@ -279,7 +250,6 @@ import AppKit
         #expect(frame.maxX == 620, "the right edge must stay put while the left one moves")
     }
 
-    /// Screen coordinates are y-up, so dragging the top edge upward is a positive delta.
     @MainActor @Test
     func draggingTheTopEdgeGrowsTheBoxUpward() {
         let frame = dragged(.top, by: CGSize(width: 0, height: 50))
@@ -303,8 +273,6 @@ import AppKit
         #expect(frame.minX == 100, "the untouched left edge stays put")
     }
 
-    /// The window's declared limits stay the single source of the floor, so a drag cannot take the box
-    /// below the size its preference can hold.
     @MainActor @Test
     func aDragStopsAtTheDeclaredFloorInsteadOfInvertingTheBox() {
         let frame = dragged(.right, by: CGSize(width: -900, height: 0))

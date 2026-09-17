@@ -1,10 +1,6 @@
 #if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import Foundation
 
-/// Launch arguments for the live e2e mode, validated before the app touches a session.
-///
-/// Mirrors `TranscriptionBenchmarkOptions`: an injectable argument array, a repository that must hold
-/// `Package.swift`, and an output directory that cannot escape the repository through a symlink.
 public struct LiveE2EOptions: Sendable {
     public enum Failure: Error, CustomStringConvertible {
         case missing(String)
@@ -76,8 +72,7 @@ public struct LiveE2EOptions: Sendable {
             .appendingPathComponent("live-e2e", isDirectory: true)
             .resolvingSymlinksInPath()
             .standardizedFileURL
-        // Exactly two levels, where the benchmark allows one: a run directory holds one directory
-        // per scenario launch, and each launch owns only its own `<run>/<id>` directory.
+        // Two levels: each launch owns only its own `<run>/<id>` directory.
         let runDirectory = output.deletingLastPathComponent()
         guard runDirectory.deletingLastPathComponent().pathComponents == liveE2EBase.pathComponents,
               !runDirectory.lastPathComponent.isEmpty,
@@ -93,8 +88,7 @@ public struct LiveE2EOptions: Sendable {
         guard Self.isDirectory(output) else {
             throw Failure.invalid("output directory does not exist: \(output.path)")
         }
-        // The launcher creates the directory and may place the scenario copy in it; anything else
-        // would be evidence from an earlier launch that this one could be confused with.
+        // Anything besides the scenario copy would be stale evidence from an earlier launch.
         let contents = (try? FileManager.default.contentsOfDirectory(atPath: output.path)) ?? []
         guard contents.allSatisfy({ $0 == "scenario.json" }) else {
             throw Failure.invalid("output directory must be empty except for scenario.json")

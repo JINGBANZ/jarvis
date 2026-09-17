@@ -19,8 +19,8 @@ import JarvisBrainProviders
         try await writeSessionInputs(to: session)
         let sourceRoot = root.appendingPathComponent("runs")
         let actualVersion = scenario == "matching" ? "0.2.1" : "0.2.2"
-        // Release source lands in a per-run directory with an unpredictable name, so the fake CLI
-        // identifies its workspace by the version its Package.swift names rather than by path.
+        // The per-run source directory name is unpredictable, so the fake CLI checks Package.swift
+        // instead.
         let marker = isRelease ? actualVersion : "dev"
         let archive = isRelease
             ? try await releaseArchive(actualVersion, in: root.appendingPathComponent("fixtures"))
@@ -73,7 +73,6 @@ import JarvisBrainProviders
         let report = try await evaluator.evaluate(sessionDirectory: session)
 
         if isRelease {
-            // The run's source tree is discarded once evaluation returns, not left for the next one.
             #expect(try FileManager.default.contentsOfDirectory(atPath: sourceRoot.path).isEmpty)
         }
 
@@ -108,7 +107,6 @@ import JarvisBrainProviders
         }
     }
 
-    /// Without a request the first CLI not proven signed out runs, Codex before Claude Code.
     @Test func withoutARequestTheFirstUsableCLIRuns() throws {
         #expect(AgenticEvaluator.searchOrder == [.codex, .claude])
         #expect(try AgenticEvaluator.selectCLI(

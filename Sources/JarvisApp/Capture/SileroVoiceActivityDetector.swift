@@ -2,18 +2,9 @@ import CoreML
 import Foundation
 import JarvisCore
 
-/// Silero VAD (16 kHz path) over Core ML: turns streamed PCM16 into one speech probability per
-/// 32 ms frame. Content-free by construction, and it never persists audio.
-///
-/// Streaming contract, fixed by the model and mirrored from upstream's `OnnxWrapper`: 512-sample
-/// chunks, each prefixed with the trailing 64 samples of the previous window, with LSTM state
-/// (2, 1, 128) threaded call to call. State and context are what make consecutive calls a *stream*
-/// rather than independent guesses, so both are owned here and reset together.
-///
-/// Not thread-safe by design: `AggregateEchoCapture` confines one instance per speaker to its
-/// delivery queue, which is also what keeps probabilities in capture order.
+/// The streaming contract mirrors upstream's `OnnxWrapper`: 512-sample chunks, each prefixed with
+/// the previous window's last 64 samples, with (2, 1, 128) LSTM state threaded call to call.
 final class SileroVoiceActivityDetector {
-    /// 32 ms at 16 kHz. The endpointer needs this to convert frame counts into durations.
     static let frameDuration: TimeInterval = Double(chunkSamples) / Double(sampleRate)
     static let sampleRate = 16_000
 
@@ -25,7 +16,6 @@ final class SileroVoiceActivityDetector {
     private let model: MLModel
     private let audioInput: MLMultiArray
     private let stateInput: MLMultiArray
-    /// Samples carried over when a delivered chunk does not divide evenly into 512.
     private var pending: [Float] = []
     private var context = [Float](repeating: 0, count: contextSamples)
 
@@ -37,13 +27,8 @@ final class SileroVoiceActivityDetector {
         self.init(modelURL: url)
     }
 
-    /// Locate the committed model without `Bundle.module`.
-    ///
-    /// SwiftPM's generated accessor looks only beside `Bundle.main.bundleURL` (the `.app` root for a
-    /// bundled app) or at the absolute build path baked in at compile time, and **`fatalError`s**
-    /// when neither exists. Both are wrong for an installed release, and a crash is the wrong answer
-    /// besides: this initializer is failable precisely so a missing model degrades instead of
-    /// killing the app. Search the two real layouts and return nil if neither has it.
+    /// Not `Bundle.module`: its generated accessor looks in the wrong places for an installed
+    /// release and calls `fatalError` when the bundle is missing.
     private static func bundledModelURL() -> URL? {
         let resourceBundle = "Jarvis_JarvisApp.bundle"
         let model = "SileroVAD.mlmodelc"
@@ -61,8 +46,7 @@ final class SileroVoiceActivityDetector {
 
     init?(modelURL url: URL) {
         let configuration = MLModelConfiguration()
-        // CPU only: measured fastest to load and well under budget at ~0.1 ms per frame, and it keeps
-        // per-frame latency free of ANE dispatch variance on a path that runs continuously.
+        // CPU only: measured fastest to load, ~0.1 ms per frame, and free of ANE dispatch variance.
         configuration.computeUnits = .cpuOnly
         do {
             model = try MLModel(contentsOf: url, configuration: configuration)
@@ -79,14 +63,12 @@ final class SileroVoiceActivityDetector {
 
     struct Frame {
         let probability: Double
-        /// Where this frame starts, in 16 kHz samples relative to the first sample of the `pcm16`
-        /// passed to `classify`. Negative when the frame opened in audio carried over from an
-        /// earlier call, which is the common case: one delivered chunk is shorter than a frame.
+        /// In 16 kHz samples from the first sample passed to `classify`. Usually negative, because
+        /// a frame often begins in audio carried over from an earlier call.
         let startOffsetSamples: Int
     }
 
-    /// Classify as many whole 32 ms frames as `pcm16` completes. Leftover samples stay buffered for
-    /// the next call, so frames are emitted on the model's cadence rather than the caller's.
+    /// Leftover samples stay buffered for the next call.
     func classify(_ pcm16: [Int16]) -> [Frame] {
         guard !pcm16.isEmpty else { return [] }
         let carried = pending.count
@@ -101,12 +83,8 @@ final class SileroVoiceActivityDetector {
             let chunk = pending[consumed..<(consumed + Self.chunkSamples)]
             let offset = consumed - carried
             consumed += Self.chunkSamples
-            // Score a failed prediction as silence rather than dropping the frame. Dropping it stalls
-            // the endpoint policy instead of feeding it: an already-open turn would stop accruing
-            // silence and never emit `.ended`, so `localSpeechActive` would stay set and every
-            // automatic coaching attempt would park on a turn that can no longer settle. Silence ends
-            // the open turn normally and opens no new one, so a persistent failure degrades to "no
-            // further turns" instead of a silent hang. `predict` logs the cause once.
+            // Score a failed prediction as silence, not a dropped frame: dropping it would leave an
+            // open turn that never ends, while silence closes it normally.
             frames.append(Frame(
                 probability: predict(chunk: chunk) ?? 0, startOffsetSamples: offset))
         }
@@ -114,17 +92,12 @@ final class SileroVoiceActivityDetector {
         return frames
     }
 
-    /// Drop stream continuity. Callers use this when the audio timeline breaks, so stale LSTM state
-    /// cannot colour the probabilities for unrelated audio.
     func reset() {
         pending.removeAll(keepingCapacity: true)
         resetModelContinuity()
     }
 
-    /// Zero the two halves of the model's stream state together. They must always describe the same
-    /// point in the audio: the carried context is the tail of the last window fed in, and the LSTM
-    /// state is what the model derived from it. Clearing one without the other pairs a window with
-    /// recurrent state from a different moment.
+    /// Context and LSTM state must describe the same point in the audio, so reset them together.
     private func resetModelContinuity() {
         context = [Float](repeating: 0, count: Self.contextSamples)
         let pointer = stateInput.dataPointer.bindMemory(to: Float.self, capacity: Self.stateCount)
@@ -141,7 +114,6 @@ final class SileroVoiceActivityDetector {
             (audio + Self.contextSamples).update(
                 from: source.baseAddress!, count: Self.chunkSamples)
         }
-        // Next window's context is this window's tail, exactly as upstream carries it.
         context = Array(
             UnsafeBufferPointer(start: audio + Self.chunkSamples, count: Self.contextSamples))
 
@@ -166,9 +138,8 @@ final class SileroVoiceActivityDetector {
         }
     }
 
-    /// Give up on one frame. `context` has already advanced past the chunk the model never consumed,
-    /// so the carried window and the LSTM state now describe different moments. Start a fresh stream
-    /// rather than pairing them; Silero reconverges within a few frames once predictions recover.
+    /// `context` already advanced past the chunk the model never consumed, so reset to keep the
+    /// window and LSTM state paired. Silero reconverges within a few frames.
     private func failed(_ detail: String) -> Double? {
         reportPredictionFailure(detail)
         resetModelContinuity()

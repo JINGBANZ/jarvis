@@ -1,9 +1,7 @@
 import Foundation
 import JarvisCore
 
-/// A neutral inventory of the persisted inputs available to the session evaluator. It exposes
-/// record health, categorical distributions, and correlation-field coverage without encoding an
-/// opinion about which combinations are correct or which incidents the evaluator should find.
+/// Descriptive only: never encode which values are correct or which incidents to find.
 enum SessionEvidenceIndex {
     private struct Dimension {
         let source: String

@@ -1,10 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// One provider/model target row shared by Primary and fallbacks in the unified Provider card.
-///
-/// The row owns only presentation and discrete control callbacks. Primary-route persistence,
-/// fallback-list mutation, availability policy, and runtime state remain with their existing owners.
 @MainActor
 final class BrainTargetRowView: NSView {
     struct Actions {
@@ -102,8 +98,8 @@ final class BrainTargetRowView: NSView {
             self.placesActionsBelow = false
             self.preferredHeight = 54
         } else if let actions {
-            // Start at its final frame size so AppKit never solves the button constraints against
-            // a transient zero-sized stack while the Provider card is being assembled.
+            // Start at the final size so AppKit never solves the button constraints against a
+            // transient zero-sized stack.
             let controls = NSStackView(
                 frame: NSRect(x: 0, y: 0, width: 98, height: 32))
             controls.orientation = .horizontal
@@ -156,8 +152,6 @@ final class BrainTargetRowView: NSView {
     override func layout() {
         super.layout()
 
-        // Every target uses the same full-width provider/model columns. Fallback actions occupy a
-        // separate compact line below, so adding controls never changes either popup's width.
         let labelWidth: CGFloat = 92
         let gap: CGFloat = 9
         let trailingBadgeWidth: CGFloat =

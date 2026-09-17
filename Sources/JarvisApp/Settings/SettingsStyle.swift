@@ -1,9 +1,5 @@
 import AppKit
 
-/// Shared visual tokens for every Settings section.
-///
-/// Keeping these values in one place prevents the tabs from drifting back into separate spacing,
-/// typography, and control-alignment systems as their content evolves independently.
 @MainActor
 enum SettingsStyle {
     static let pageHorizontalInset: CGFloat = 24

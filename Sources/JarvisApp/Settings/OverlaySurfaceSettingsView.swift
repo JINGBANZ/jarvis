@@ -1,6 +1,5 @@
 import AppKit
 
-/// One Overlay Settings card: surface identity/toggle plus the shared size and opacity rows.
 @MainActor
 final class OverlaySurfaceSettingsView: NSView {
     private static let headerHeight: CGFloat = 62
@@ -41,9 +40,6 @@ final class OverlaySurfaceSettingsView: NSView {
         }
     }
 
-    /// The size and opacity of a second, subordinate surface shown in the same card. The Overlay
-    /// Box uses it for the detail box, which has no switch of its own: the box's switch is the one
-    /// that decides whether a reply may carry a detail at all.
     struct SubordinateSliders {
         let title: String
         let sizeTitle: String

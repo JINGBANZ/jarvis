@@ -44,7 +44,7 @@ import Testing
         #expect(history.map(\.id) == ["shown"])
         let call = try #require(history.first)
         let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
-        // A capability set without the box declares no `detail`, so none is replayed either.
+        // The default capabilities declare no `detail`, so none is replayed.
         #expect(object["detail"] == nil)
         #expect(object["lines"] as? [String] == ["Shown hint."])
     }
@@ -77,7 +77,6 @@ import Testing
         #expect(object["detail"] is NSNull)
     }
 
-    /// A detail the box never showed is not replayed as delivered.
     @Test func aSuppressedDetailIsNotReplayedAsDelivered() async throws {
         let args = #"{"lines":["Keep this hint."],"detail":"Hidden explanation."}"#
         let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(
@@ -90,7 +89,7 @@ import Testing
             screen: ReviewScreen(succeeds: true), overlay: ReviewDetailSink(), clock: ManualClock(now: 100),
             capabilities: CoachCapabilities.compose(
                 disabledTools: [], prepSourcesConfigured: false, detailEnabled: true))
-        // A plan edit cannot change what the session offers (#273): the box is fixed at Start.
+        // A plan edit cannot change the detail capability fixed at Start.
         driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen))
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)

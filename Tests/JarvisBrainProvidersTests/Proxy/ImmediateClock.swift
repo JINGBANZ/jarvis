@@ -1,6 +1,5 @@
 import Foundation
 
-/// A clock whose sleeps return at once, so the helper's restart backoff runs without waiting.
 struct ImmediateClock: _Concurrency.Clock {
     typealias Duration = Swift.Duration
 

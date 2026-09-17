@@ -1,45 +1,28 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
-# Reference: https://docs.coderabbit.ai/reference/configuration
-#
-# CodeRabbit reviews every pull request, including those from forks. It is a GitHub App rather than
-# a workflow, so it never needs repository secrets on a fork pull request and is not subject to the
-# fork-workflow approval gate — which is why review feedback arrives while CI is still waiting for a
-# maintainer to approve the run.
-#
-# This file only takes effect from the default branch. `@coderabbitai configuration` in a pull
-# request comment prints the effective config with defaults resolved.
+# Takes effect only from the default branch.
 language: "en-US"
 
-# Max 250 characters. The repository's own review posture, condensed: AGENTS.md asks reviewers to
-# act on contract, security, and privacy violations and to leave scope expansion alone.
+# Max 250 characters.
 tone_instructions: >-
   Jarvis has strict audio, screen, credential, and ghost-mode boundaries — flag violations of them
   plainly. Do not propose speculative abstractions, extra lifecycle state, retries, or timers the
   change did not ask for.
 
 reviews:
-  # `chill` over `assertive` on purpose: AGENTS.md says not to optimize for zero comments, and an
-  # assertive reviewer buries the contract violations that matter under nitpicks.
+  # `assertive` buries the contract violations that matter under nitpicks.
   profile: chill
 
   auto_review:
     enabled: true
-    # A draft is work in progress; reviewing every push to one wastes the contributor's attention.
     drafts: false
-    # No bot exclusion. A title filter would let any fork opt out of review by naming its pull
-    # request after a release, and `github-actions[bot]` also authors the shared-rules sync, whose
-    # diffs change repository-wide security and review guidance. Reviewing the generated Release PR
-    # is cheap noise; leaving the rules sync unreviewed is not.
+    # No bot or title exclusion: `github-actions[bot]` also authors the shared-rules sync, which must
+    # be reviewed, and a title filter would let a fork opt out of review.
 
-  # Generated output only, and the bar is "inert". `Package.resolved` and
-  # `.release-please-manifest.json` are deliberately NOT filtered: SwiftPM consumes the first during
-  # `swift build` and release.yml feeds the second to release-please, so each is executable input
-  # whose diff is exactly what review exists to catch.
+  # Only inert generated output. Package.resolved and .release-please-manifest.json are build inputs.
   path_filters:
     - "!.build/**"
     - "!CHANGELOG.md"
 
-  # The architectural boundaries from AGENTS.md that a reviewer unfamiliar with the repo would miss.
   path_instructions:
     - path: "Sources/JarvisCore/**"
       instructions: >-

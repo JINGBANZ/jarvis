@@ -4,8 +4,6 @@ import JarvisCore
 @preconcurrency import Speech
 #endif
 
-/// Provider behavior for the Transcription card. Shared credentials are displayed and edited by
-/// `ConnectionsSection`; this controller owns only Start-time transcription choices.
 @MainActor
 final class TranscriptionControls: NSObject {
     private let preferences: TranscriptionPreferences
@@ -26,8 +24,7 @@ final class TranscriptionControls: NSObject {
     private var localePopup: NSPopUpButton?
     private var localeLoadTask: Task<Void, Never>?
 
-    /// The rows one provider shows, top to bottom. The provider row is always first. Read before
-    /// `makeView` runs (rows are still nil), so `compactMap` naturally yields the header-only list.
+    /// Empty before `makeView` creates the rows, so the card starts header-only.
     private var visibleRows: [SettingsRowView] {
         switch preferences.provider {
         case .openAI:

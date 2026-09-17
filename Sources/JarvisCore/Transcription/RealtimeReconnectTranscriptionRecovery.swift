@@ -1,10 +1,8 @@
 import Foundation
 
-/// Holds transcription fallback evidence while a replacement Realtime socket replays audio.
-///
-/// Already-delivered items whose end timing was missing must be suppressed if replay creates them
-/// again. Interrupted items remain a turn barrier until replacement terminal events arrive; their
-/// streamed deltas are used only if exact replay coverage is lost or the replacement never settles.
+/// Replay can recreate delivered items that lacked an end time, so those are suppressed.
+/// Interrupted items block turns until replaced; their deltas are used only if replay coverage is
+/// lost or the replacement never settles.
 public struct RealtimeReconnectTranscriptionRecovery: Sendable {
     public enum ReplacementAction: Equatable, Sendable {
         case appendReplacement
@@ -17,8 +15,8 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
     private var replayAvailable = false
     private var replacementReady = false
     private var coverageLost = false
-    /// Audio captured without a server item has no terminal-event identity to count. Keep one
-    /// conservative barrier until replay is abandoned or its bounded recovery deadline expires.
+    /// Audio without a server item has no identity to count, so it holds one barrier until replay
+    /// ends.
     private var hasUntrackedReplayAudio = false
 
     public init() {}
@@ -42,8 +40,7 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
         replayAvailable: Bool,
         hasUntrackedReplayAudio: Bool = false
     ) {
-        // A replacement can itself fail before the prior recovery settles. Preserve every
-        // generation's evidence so a later coverage loss or deadline can still publish its fallback.
+        // Accumulate: a replacement can fail before the prior recovery settles.
         duplicateRiskCount += max(0, duplicateRiskItemCount)
         interruptedFallbackItems.append(contentsOf: interruptedItems)
         self.replayAvailable = replayAvailable
@@ -51,8 +48,7 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
         replacementReady = false
     }
 
-    /// Audio accepted while a replacement connection is unavailable can later create an earlier
-    /// transcript even though no server VAD item exists yet. It must therefore hold coaching.
+    /// Audio sent while disconnected can later produce an earlier transcript, so it holds coaching.
     public mutating func recordUntrackedReplayAudio() {
         hasUntrackedReplayAudio = true
         replayAvailable = true
@@ -65,8 +61,8 @@ public struct RealtimeReconnectTranscriptionRecovery: Sendable {
         return abandonReplay()
     }
 
-    /// Records loss of any part of the bounded replay window. If the replacement is already ready,
-    /// release retained deltas now instead of waiting for terminal events whose PCM was evicted.
+    /// Once the replacement is ready, releases the fallbacks now: their evicted PCM can't produce
+    /// terminal events.
     public mutating func recordCoverageLoss() -> [RealtimeTranscriptionLedger.FinalizedItem] {
         guard isActive else { return [] }
         coverageLost = true

@@ -4,7 +4,6 @@ import Testing
 import Darwin
 #endif
 
-/// A shell script standing in for the helper, written owner-only into `directory`.
 func proxyStubExecutable(in directory: URL, named name: String = "helper", script: String) throws -> URL {
     let url = directory.appendingPathComponent(name)
     guard FileManager.default.createFile(
@@ -14,7 +13,6 @@ func proxyStubExecutable(in directory: URL, named name: String = "helper", scrip
     return url
 }
 
-/// Polls until `condition` holds or `timeout` passes; the helper runs on its own schedule.
 func eventually(
     timeout: Duration = .seconds(20), _ condition: @Sendable () async -> Bool
 ) async -> Bool {
@@ -26,7 +24,6 @@ func eventually(
     return await condition()
 }
 
-/// Whether a process with this id still exists.
 func processExists(_ pid: Int32) -> Bool {
     kill(pid, 0) == 0 || errno != ESRCH
 }

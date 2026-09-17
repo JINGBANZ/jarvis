@@ -34,8 +34,7 @@ import JarvisBrainProviders
         await #expect(throws: ReleaseSourceStore.Failure.fetchFailed("0.2.1")) {
             _ = try await store.fetch(version: "0.2.1", fallbackVersion: "0.2.2")
         }
-        // The running release lives behind the same unreachable network, so retrying it could only
-        // fail again while renaming the failure after a version the user never selected.
+        // The fallback sits behind the same unreachable network, so it is never tried.
         #expect(await requested.all == ["v0.2.1.tar.gz"])
     }
 

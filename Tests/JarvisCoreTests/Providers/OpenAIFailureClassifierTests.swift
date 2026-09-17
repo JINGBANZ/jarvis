@@ -3,8 +3,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct OpenAIFailureClassifierTests {
-    /// `<type>.<code>` is the documented shape, but a reason arriving as a bare code still names a
-    /// rejection. Reading it as a transport close spent the whole retry budget on a refused key.
+    /// The documented reason shape is <type>.<code>, but a bare code still names a rejection.
     @Test func aDotlessCloseReasonIsStillAnErrorCode() {
         let failure = OpenAIFailureClassifier.classify(
             closeCode: 3000, reason: "invalid_api_key", source: .transcription(.openAI))
@@ -14,10 +13,6 @@ import Testing
         #expect(failure.identity.errorType == nil)
     }
 
-    /// An unrecognized dotless reason is still the server refusing, so the row quotes what it said
-    /// rather than claiming the connection was merely lost. It stays temporary either way, and prose
-    /// stays out of the identity: a sentence is not a code, and putting one there would print the
-    /// message back beside itself.
     @Test func anUnrecognizedDotlessCloseReasonIsQuotedAsARejection() {
         let failure = OpenAIFailureClassifier.classify(
             closeCode: 3000, reason: "session ended by policy", source: .transcription(.openAI))
@@ -29,9 +24,6 @@ import Testing
         #expect(failure.activityDetail == " (close 3000: session ended by policy)")
     }
 
-    /// A close reason is free text the server chose, so it is the one identity input that can carry
-    /// a credential. Both the guard above and the record's own redaction have to hold: a key must
-    /// not reach the row through `errorCode` the way it cannot through `message`.
     @Test func aCredentialInACloseReasonNeverReachesTheRow() {
         let prose = OpenAIFailureClassifier.classify(
             closeCode: 3000, reason: "rejected: key sk-live-9f3ab27c is invalid",
@@ -40,22 +32,18 @@ import Testing
         #expect(!prose.activitySentence.contains("sk-live-9f3ab27c"))
         #expect(prose.activitySentence.contains("sk-…"))
 
-        // A bare token with no spaces passes the identifier guard, so the record's redaction is what
-        // stops it. Both layers are load-bearing; neither alone closes this.
+        // A bare token passes the identifier guard, so only the record's redaction stops it.
         let bare = ProviderFailure(
             source: .transcription(.openAI), stage: .close, category: .rejected,
             disposition: .temporary,
             identity: .init(closeCode: 3000, errorType: "sk-live-9f3ab27c", errorCode: "AIzaSyRealKey123"),
             message: "")
-        // `summary` renders the code and falls back to the type, so assert on the stored fields as
-        // well: both are redacted, whichever one a row happens to show.
         #expect(bare.identity.errorType == "sk-…")
         #expect(bare.identity.errorCode == "AIza…")
         #expect(!bare.identity.summary.contains("AIzaSyRealKey123"))
         #expect(bare.activitySentence == "OpenAI refused the transcription request (close 3000, AIza…)")
     }
 
-    /// An empty reason has nothing to read, so 3000 falls through to the transport path.
     @Test func anEmptyCloseReasonStaysTransport() {
         let failure = OpenAIFailureClassifier.classify(
             closeCode: 3000, reason: "  ", source: .transcription(.openAI))
@@ -75,8 +63,6 @@ import Testing
         return try! JSONSerialization.data(withJSONObject: ["error": error])
     }
 
-    /// Mirrors the brain adapter's proof: only authentication, billing, and access statuses are
-    /// permanent on a plain request; request-local and unknown 4xx stay temporary.
     @Test func requestStatusesFollowTheBrainTable() {
         for status in [408, 409, 500, 503, 599] {
             #expect(OpenAIFailureClassifier.classify(httpStatus: status, body: nil, source: brain, stage: .request).disposition == .temporary)
@@ -106,7 +92,7 @@ import Testing
         #expect(rate.category == .rejected && rate.disposition == .temporary)
         let model = OpenAIFailureClassifier.classify(httpStatus: 404, body: body(code: "model_not_found"), source: brain, stage: .request)
         #expect(model.category == .configuration && model.disposition == .permanent)
-        // The bundled subscription helper, once every credential for the model's vendor is gone.
+        // CLIProxyAPI returns this once every credential for the model's vendor is gone.
         let signedOut = OpenAIFailureClassifier.classify(httpStatus: 503, body: body(code: "upstream_authentication_required"), source: brain, stage: .request)
         #expect(signedOut.category == .authentication && signedOut.disposition == .permanent)
         let auth = OpenAIFailureClassifier.classify(httpStatus: 429, body: body(type: "authentication_error"), source: brain, stage: .request)
@@ -115,10 +101,6 @@ import Testing
         #expect(region.category == .access && region.disposition == .permanent)
     }
 
-    /// A refused WebSocket upgrade has no body to read, so the status is the whole evidence. It is
-    /// permanent only where the status itself says the request cannot succeed as sent; a status that
-    /// describes a moment keeps the bounded first-connect budget rather than ending the session on
-    /// the first attempt.
     @Test func refusedHandshakesArePermanentOnlyWhereTheStatusProvesIt() {
         let forbidden = OpenAIFailureClassifier.classify(httpStatus: 403, body: nil, source: transcription, stage: .handshake)
         #expect(forbidden.category == .access && forbidden.disposition == .permanent && forbidden.stage == .handshake)
@@ -132,9 +114,6 @@ import Testing
         #expect(down.category == .unavailable && down.disposition == .temporary)
     }
 
-    /// An edge or proxy answering a WebSocket upgrade with a timeout is a moment, not a contract.
-    /// Marking it permanent ended the whole session on the first attempt, spending none of the
-    /// three-attempt budget that exists precisely for a connection that has not come up yet.
     @Test func transientHandshakeStatusesKeepTheirRetries() {
         for status in [408, 409, 423, 425] {
             let failure = OpenAIFailureClassifier.classify(
@@ -142,7 +121,6 @@ import Testing
             #expect(failure.disposition == .temporary, "HTTP \(status) at a handshake must stay retryable")
             #expect(!failure.endsEverySession)
         }
-        // The same status on a plain request was always temporary and stays so.
         let request = OpenAIFailureClassifier.classify(
             httpStatus: 408, body: nil, source: .brain(.openAI), stage: .request)
         #expect(request.disposition == .temporary)
@@ -161,7 +139,6 @@ import Testing
         #expect(OpenAIFailureClassifier.classify(event: event(failed, code: "invalid_api_key"), source: transcription)?.disposition == .permanent)
         #expect(OpenAIFailureClassifier.classify(event: event(failed, errorType: "permission_error"), source: transcription)?.category == .access)
         #expect(OpenAIFailureClassifier.classify(event: event("error", code: "invalid_value", param: "session.audio.input.turn_detection"), source: transcription)?.category == .configuration)
-        // Utterance-local and transient errors stay temporary so one bad item never ends a session.
         #expect(OpenAIFailureClassifier.classify(event: event(failed, code: "audio_unintelligible"), source: transcription)?.disposition == .temporary)
         #expect(OpenAIFailureClassifier.classify(event: event(failed, code: "rate_limit_exceeded"), source: transcription)?.disposition == .temporary)
         #expect(OpenAIFailureClassifier.classify(event: event("error", code: "invalid_value", param: "item.audio"), source: transcription)?.disposition == .temporary)
@@ -172,8 +149,7 @@ import Testing
         #expect(stage?.identity.errorCode == "invalid_api_key")
     }
 
-    /// Captured 2026-09-08 with a throwaway key: OpenAI accepts the upgrade, sends the error event,
-    /// then closes with code 3000 and reason "invalid_request_error.invalid_api_key".
+    /// Real capture: OpenAI rejects a bad key with close 3000 and a type.code reason.
     @Test func closeReasonsCarryTypeDotCode() {
         let rejected = OpenAIFailureClassifier.classify(closeCode: 3000, reason: "invalid_request_error.invalid_api_key", source: transcription)
         #expect(rejected.stage == .close)

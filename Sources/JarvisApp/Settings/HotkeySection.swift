@@ -1,7 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Independent bindings share the same recorder and honest registration-failure behavior.
 @MainActor
 final class HotkeySection: NSObject, SettingsSection {
     let title = "Shortcuts"
@@ -20,8 +19,6 @@ final class HotkeySection: NSObject, SettingsSection {
         }
     }
 
-    /// Builds the scrollable shortcut page with cards constrained to the viewport width.
-    /// Resizing the viewport or a binding card preserves the reading offset from the top.
     func makeView() -> NSView {
         let scroll = SettingsScrollView(frame: NSRect(x: 0, y: 0, width: 712, height: 432))
         scroll.autoresizingMask = [.width, .height]
@@ -34,8 +31,8 @@ final class HotkeySection: NSObject, SettingsSection {
         for binding in bindings {
             let view = binding.makeView()
             stack.addArrangedSubview(view)
-            // These containers have no intrinsic width; pin them to the viewport-sized stack
-            // so AppKit cannot collapse the cards to their callouts' minimum fitting width.
+            // These containers have no intrinsic width, so AppKit would collapse them to the
+            // callout's minimum fitting width.
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         let spacer = NSView()

@@ -1,11 +1,7 @@
 import Foundation
 
-/// The one reviewed table of what an OpenAI failure means, shared by the brain HTTP adapter, the
-/// Realtime transcriber (handshake status, in-band events, close reasons), and the credential
-/// check. Statuses alone are permanent only when they prove authentication, billing, or access
-/// cannot recover. A WebSocket upgrade refused with one of the statuses in `HandshakeRefusal` is
-/// equally permanent because the request cannot succeed as sent, while the rest of the 4xx range,
-/// at a handshake or on a plain request, deliberately stays temporary.
+/// A status alone is permanent only when it proves authentication, billing, or access can't
+/// recover, or matches `HandshakeRefusal`. The rest of the 4xx range stays temporary on purpose.
 public enum OpenAIFailureClassifier {
     public static func classify(
         httpStatus: Int, body: Data?, source: ProviderFailure.Source, stage: ProviderFailure.Stage
@@ -24,17 +20,15 @@ public enum OpenAIFailureClassifier {
             message: message)
     }
 
-    /// In-band Realtime errors. Realtime also uses the failed-transcription event for item-local
-    /// failures such as `audio_unintelligible`, so an unrecognized code stays temporary rather than
-    /// tearing down an otherwise usable session. Returns nil for any other event type.
+    /// Realtime also uses the failed-transcription event for item-local failures such as
+    /// `audio_unintelligible`, so an unrecognized code stays temporary. Nil for other event types.
     public static func classify(event: [String: Any], source: ProviderFailure.Source) -> ProviderFailure? {
         guard let eventType = event["type"] as? String,
               eventType == RealtimeSession.failedTranscriptionType || eventType == "error",
               let error = event["error"] as? [String: Any] else { return nil }
         let code = error["code"] as? String
         let type = error["type"] as? String
-        // Only a session-level rejection of a `session.*` parameter is a configuration failure; the
-        // same code on an item is utterance-local.
+        // A `session.*` rejection is configuration only at session level; on an item it is local.
         let param = eventType == "error" ? error["param"] as? String : nil
         let (category, disposition) = categorize(status: nil, code: code, type: type, param: param, stage: .session)
         return ProviderFailure(
@@ -48,14 +42,8 @@ public enum OpenAIFailureClassifier {
     public static func classify(closeCode: Int, reason: String?, source: ProviderFailure.Source) -> ProviderFailure {
         let trimmed = reason?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if closeCode == 3000, !trimmed.isEmpty {
-            // `<type>.<code>` is the documented shape, but a reason arriving as a bare code still
-            // names a rejection. Reading it as a transport close instead would spend the whole
-            // retry budget on a key the server has already refused.
-            //
-            // A close reason is free text the server chose, so only the halves that actually look
-            // like codes become identity. A sentence is not an identifier, and rendering one in the
-            // identity would repeat the message back beside itself in the row; the message already
-            // carries whatever the server said.
+            // A bare code still names a rejection; treating it as transport would burn the retry
+            // budget. The reason is free text, so only code-shaped halves become identity.
             let separator = trimmed.firstIndex(of: ".")
             let type = separator.flatMap { Self.errorCodeIfIdentifier(String(trimmed[..<$0])) }
             let code = Self.errorCodeIfIdentifier(
@@ -91,8 +79,7 @@ public enum OpenAIFailureClassifier {
              "unsupported_country_region_territory":
             return (.access, .permanent)
         case "upstream_authentication_required":
-            // The bundled CLIProxyAPI helper's answer when it holds no signed-in credential for the
-            // requested model's vendor.
+            // CLIProxyAPI's answer when it holds no credential for the model's vendor.
             return (.authentication, .permanent)
         case "model_not_found":
             return (.configuration, .permanent)
@@ -113,9 +100,6 @@ public enum OpenAIFailureClassifier {
         case "insufficient_quota": return (.quota, .permanent)
         default: break
         }
-        // In-band events and close reasons carry no HTTP status, and the status ranges below cannot
-        // be matched against an optional. A missing status leaves the failure unknown, same as an
-        // unrecognized one.
         guard let status else { return (.unknown, .temporary) }
         switch status {
         case 401: return (.authentication, .permanent)
@@ -129,9 +113,7 @@ public enum OpenAIFailureClassifier {
         }
     }
 
-    /// The text back if it is shaped like a vendor error code, otherwise nil. OpenAI's codes are
-    /// short ASCII identifiers (`invalid_api_key`, `insufficient_quota`); anything with a space or a
-    /// colon in it is the server explaining itself, which belongs in the message alone.
+    /// Nil unless shaped like an OpenAI code; a sentence belongs in the message alone.
     private static func errorCodeIfIdentifier(_ text: String) -> String? {
         guard !text.isEmpty, text.count <= 64,
               text.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") })

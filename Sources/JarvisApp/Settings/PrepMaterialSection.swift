@@ -2,12 +2,7 @@ import AppKit
 import JarvisCore
 import UniformTypeIdentifiers
 
-/// Settings panel for the local files/folders of prepared interview notes the coach can reference.
-///
-/// Jarvis stores only these paths, never a copy of their contents, and reads them fresh when needed —
-/// so removing a source here only forgets it; the underlying file is untouched. Nothing here is ever
-/// uploaded: the list is persisted the same way every other setting is, in this macOS account's own
-/// UserDefaults domain.
+/// Persists only source paths, never a copy of the files' contents.
 @MainActor
 final class PrepMaterialSection: NSObject, SettingsSection {
     let title = "Prep Material"
@@ -23,8 +18,7 @@ final class PrepMaterialSection: NSObject, SettingsSection {
     private var rows: [SettingsRowView] = []
     private var rowsBySourceID: [UUID: SettingsRowView] = [:]
     private var emptyLabel: NSTextField?
-    /// Guards a background existence check against a stale result landing after a newer `render()`
-    /// (a fast add/remove, or leaving and returning to the tab) already rebuilt the row list.
+    /// Drops a background existence check that finishes after a newer `render()`.
     private var renderGeneration = 0
 
     init(preferences: PrepMaterialPreferences) {
@@ -160,9 +154,8 @@ final class PrepMaterialSection: NSObject, SettingsSection {
         card.frame.size.height = preferredHeight
         layoutRows()
 
-        // Existence is a stat() per source, which can block on an unresponsive network volume or a
-        // sleeping external disk — never do it on the main thread. Rows show their plain path until
-        // this resolves, then a still-current render applies the ⚠️ warning to whichever are missing.
+        // stat() can block on an unresponsive network volume or a sleeping disk, so stay off the
+        // main thread.
         guard !sources.isEmpty else { return }
         Task.detached(priority: .utility) { [sources] in
             let missing = sources.filter { !$0.exists() }
@@ -194,11 +187,8 @@ final class PrepMaterialSection: NSObject, SettingsSection {
         addButton.frame = NSRect(x: 16, y: 5, width: 220, height: 32)
     }
 
-    /// Formats the indexing slice will actually be able to read: plain text/Markdown directly, PDF
-    /// via PDFKit, and Word documents via the stock `textutil` CLI. `UTType(filenameExtension:)`
-    /// synthesizes a type for ".md"/".docx", which have no dedicated system UTI, so the filter still
-    /// matches them by extension. Folders are unfiltered — their contents are filtered by the same
-    /// list at indexing time instead.
+    /// `.md` and `.docx` have no system UTI; `UTType(filenameExtension:)` synthesizes one that
+    /// still matches by extension.
     private static let allowedContentTypes: [UTType] = [
         .plainText, .pdf, UTType(filenameExtension: "md"), UTType(filenameExtension: "docx"),
     ].compactMap { $0 }

@@ -19,8 +19,7 @@ import Testing
         view.layoutSubtreeIfNeeded()
         let scroll = try #require(view.subviews.compactMap { $0 as? NSScrollView }.first)
         let document = try #require(scroll.documentView)
-        // The code block, by name: this detail is a fence alone, so the prose view above it is
-        // empty and hidden, and measuring it would report no wrapping at all.
+        // Find the code view by label: the prose view is also an NSTextView, hidden and empty here.
         let views = document.subviews.compactMap { $0 as? NSTextView }
         let text = try #require(views.first { $0.accessibilityLabel() == "Code block" })
         #expect(views.first { $0.accessibilityLabel() == "Detail" }?.isHidden == true)
@@ -93,7 +92,6 @@ import Testing
         #expect(view.codeText.string == code)
     }
 
-    /// The hint box keeps a usable slice whatever the detail asks for.
     @Test func theHintBoxKeepsSpaceAtTheMinimumPanelSize() throws {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
         box.setEnabled(true)

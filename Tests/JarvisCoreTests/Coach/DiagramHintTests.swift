@@ -43,8 +43,6 @@ import Testing
         #expect(DiagramHint(mermaid: "flowchart LR\nA[" + String(repeating: "x", count: 9000) + "]") == nil)
     }
 
-    /// A graph now travels as a fenced block inside `detail`, and a field no session declares is
-    /// ignored rather than allowed to cost the hint.
     @Test func aDiagramTravelsInDetailAndAnUndeclaredFieldIsIgnored() {
         let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
             #"{"lines":["Sketch the request path."],"detail":"```mermaid\nflowchart LR\nA[API]\n```"}"#)

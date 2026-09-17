@@ -25,8 +25,6 @@ import Testing
         #expect(b.flush().fragments == 1)
     }
 
-    /// The point of coalescing: fragments of one spoken sentence join into a single utterance, so a
-    /// sentence split across VAD fragments drives one turn, not several.
     @Test func joinsAcrossFragments() {
         let b = UtteranceBuffer()
         b.append("hey")

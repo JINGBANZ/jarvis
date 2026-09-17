@@ -4,7 +4,7 @@ import Testing
 @Suite struct PrepMaterialChunkerCompatibilityTests {
     @Test(arguments: ["md", "txt", "pdf", "docx"])
     func everySupportedFormatCanSupplyEveryInterviewTopic(_ fileExtension: String) throws {
-        // PDF/Word fixtures represent extracted text: format decoding precedes this shared index.
+        // PDF and Word fixtures are already-extracted text; decoding happens before this index.
         let materials = [
             ("behavioral", "mentoring", "Mentoring: I coached an apprentice into an engineering role."),
             ("coding", "binary", "Binary search: halve the remaining sorted range each iteration."),

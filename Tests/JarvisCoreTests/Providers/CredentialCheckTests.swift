@@ -8,8 +8,6 @@ import Testing
         #expect(CredentialCheck.verdict(for: .geminiAPIKey, httpStatus: 200, body: nil) == .accepted)
     }
 
-    /// The verdict is the vendor's own table, not a second opinion about status codes, so Settings
-    /// and a failed session agree about what a key did.
     @Test func rejectionsUseTheVendorTable() throws {
         let body = try JSONSerialization.data(withJSONObject: [
             "error": ["code": "invalid_api_key", "type": "invalid_request_error",
@@ -38,7 +36,6 @@ import Testing
                 == "Gemini refused the key (HTTP 400, API_KEY_INVALID: API key not valid.).")
     }
 
-    /// A 5xx is not a verdict on the key.
     @Test func serverTroubleIsInconclusiveNotRejected() {
         guard case .inconclusive(let failure) =
             CredentialCheck.verdict(for: .openAIAPIKey, httpStatus: 503, body: nil) else {
@@ -49,9 +46,6 @@ import Testing
                 == "I couldn't check the key with OpenAI (HTTP 503).")
     }
 
-    /// A rate limit reaches the provider and comes back over a connection that plainly worked, but it
-    /// says nothing about the key. Calling it a refusal would send a user to rotate a valid key and
-    /// hit the same limit on the replacement, so the disposition decides, not the status range.
     @Test func rateLimitsAndExhaustedQuotasAreInconclusive() throws {
         let openAI = try JSONSerialization.data(withJSONObject: [
             "error": ["code": "rate_limit_exceeded", "type": "requests",
@@ -77,9 +71,6 @@ import Testing
                 == "I couldn't check the key with Gemini (HTTP 429, RESOURCE_EXHAUSTED: Quota exceeded for requests).")
     }
 
-    /// A permanent failure that is not about the key is still not a refusal of it. An exhausted
-    /// quota and a blocked region are real problems the row names, but rotating the key fixes
-    /// neither, and "refused the key" is the one sentence that sends a user to do exactly that.
     @Test func permanentFailuresThatAreNotAboutTheKeyStayInconclusive() throws {
         let noCredit = try JSONSerialization.data(withJSONObject: [
             "error": ["code": "insufficient_quota", "type": "insufficient_quota",
@@ -89,8 +80,7 @@ import Testing
             CredentialCheck.verdict(for: .openAIAPIKey, httpStatus: 429, body: noCredit) else {
             Issue.record("expected inconclusive"); return
         }
-        // Permanent for a live session, where the route must exhaust this target and move on. That
-        // is a different question from whether the saved key is valid, which it is.
+        // Permanent for a live session, yet the saved key is still valid.
         #expect(quota.disposition == .permanent)
         #expect(quota.category == .quota)
         #expect(CredentialCheck.statusText(.inconclusive(quota), for: .openAIAPIKey)
@@ -117,8 +107,6 @@ import Testing
         #expect(CredentialCheck.statusText(.accepted, for: .geminiAPIKey) == "Gemini accepted the key.")
     }
 
-    /// The verdict line is provider text like any other, so a key echoed back in a message is masked
-    /// before it can be rendered under the field the user just typed it into.
     @Test func theVerdictNeverEchoesTheKey() throws {
         let body = try JSONSerialization.data(withJSONObject: [
             "error": ["code": "invalid_api_key",

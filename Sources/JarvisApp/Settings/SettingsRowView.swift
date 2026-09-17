@@ -1,9 +1,5 @@
 import AppKit
 
-/// One standard label/help/control row used inside Settings cards.
-///
-/// Owners still create the real AppKit control and keep its target/action behavior; this view owns
-/// only the shared row rhythm and responsive trailing alignment.
 @MainActor
 final class SettingsRowView: NSView {
     let controlView: NSView

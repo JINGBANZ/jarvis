@@ -13,17 +13,8 @@ concurrency:
 permissions: {}
 
 jobs:
-  # Runs on every push to main. Reads conventional commits and maintains the standing Release PR
-  # (bumps the version in Resources/Info.plist + CHANGELOG). It does not execute repo code.
-  # release_created flips true only on the push that merges the Release PR — that push creates
-  # the tag and the GitHub Release, and gates the publish job below.
-  #
-  # Note: the Release PR is authored by GITHUB_TOKEN, whose PRs don't trigger ci.yml. `test` is now
-  # a required check on `main`, so the Release PR carries no such check and cannot merge through the
-  # normal path: a repository admin merges it on the ruleset's pull-request bypass
-  # (`gh pr merge <n> --squash --admin`). Switching this step to a GitHub App token restores the
-  # `pull_request` trigger and retires that standing manual override (see the evolving repo's
-  # release.yml for the worked example, and #178 for the App the issue pipeline is adopting).
+  # The Release PR is authored by GITHUB_TOKEN, so ci.yml never runs on it and the required `test`
+  # check stays missing: an admin merges it with `gh pr merge <n> --squash --admin`.
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -41,26 +32,17 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-  # Build, sign, notarize, and attach Jarvis.dmg to the Release just created. Gate
-  # (tests) and publish share one job — macOS minutes bill at 10x, and re-running the Swift build
-  # in a second job would double the cost for no extra safety: any failing step here still aborts
-  # before the upload. This deliberately lives in the same workflow rather than a tag-triggered
-  # one: tags created with GITHUB_TOKEN never trigger other workflows.
+  # Same job as the Gate so the macOS build runs once, and same workflow because tags created with
+  # GITHUB_TOKEN never trigger other workflows.
   publish:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
-    # AppKit selects the macOS 26 control design from the linked SDK. Pin the release runner instead
-    # of following macos-latest so distributed and local macOS 26 builds cannot silently diverge.
+    # Pinned, not macos-latest: AppKit picks the control design from the linked SDK.
     runs-on: macos-26
-    # Keep signing and notarization secrets scoped to the main-only release environment. Merging the
-    # release-please PR is the manual release approval, so the environment has no second reviewer gate.
+    # Merging the Release PR is the release approval, so this environment has no reviewer gate.
     environment: release
-    # Notarization occasionally stalls on Apple's side; without a cap, a stalled run rides the
-    # 6-hour default timeout at the 10x macOS minute multiplier. Normal publishes finish well
-    # under this. The cap must clear package-app.sh's two sequential
-    # `notarytool --wait --timeout 30m` calls PLUS checkout/test/build/sign work — otherwise the job
-    # could be killed during the outer-container wait, leaving a draft release without its asset.
-    # 75m keeps the backstop while giving both submissions their full bounded windows.
+    # Must clear package-app.sh's two sequential 30-minute notarytool waits plus the build, or a
+    # stalled notarization leaves a draft release without its asset.
     timeout-minutes: 75
     permissions:
       contents: write # upload the release asset
@@ -70,8 +52,6 @@ jobs:
       - name: Run repository gate
         run: swift build && ./scripts/run-tests.sh
 
-      # dmgbuild writes the curated Finder layout without opening Finder, so the release remains
-      # deterministic on a headless runner. Install only hash-pinned wheels into an ephemeral venv.
       - name: Install DMG layout tool
         run: |
           RELEASE_TOOLS="$RUNNER_TEMP/release-tools"
@@ -81,10 +61,7 @@ jobs:
             --requirement scripts/requirements-release.txt
           echo "DMGBUILD_PYTHON=$RELEASE_TOOLS/bin/python" >> "$GITHUB_ENV"
 
-      # GitHub's documented recipe for signing on a hosted runner: decode the Developer ID
-      # certificate into a fresh temporary keychain. set-key-partition-list is what lets codesign
-      # use the key without a GUI prompt (which would hang forever headless); the keychain
-      # password is throwaway, so it's generated here rather than stored as a secret.
+      # set-key-partition-list lets codesign use the key without a GUI prompt, which would hang headless.
       - name: Import Developer ID certificate
         env:
           MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
@@ -117,10 +94,8 @@ jobs:
           export NOTARY_KEY_PATH
           ./scripts/package-app.sh
 
-      # Sparkle's feed. Signed here rather than in package-app.sh because stapling rewrites the disk
-      # image: the EdDSA signature has to cover the exact bytes the release serves. The release notes
-      # are rendered through GitHub's own Markdown API so the update dialog shows the same text as
-      # the Release page, without adding a Markdown converter to the toolchain.
+      # Signed after package-app.sh because stapling rewrites the disk image, and the EdDSA
+      # signature must cover the exact bytes the release serves.
       - name: Sign the update and render the appcast
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -130,8 +105,6 @@ jobs:
           NOTES_MD="$RUNNER_TEMP/appcast-notes.md"
           NOTES_HTML="$RUNNER_TEMP/appcast-notes.html"
           gh release view "$TAG" --json body --jq .body > "$NOTES_MD"
-          # A release with an empty body is publishable, so it must not fail the feed: the appcast
-          # simply carries no description and Sparkle shows the update without notes.
           if [[ -s "$NOTES_MD" ]]; then
             gh api --method POST /markdown -f mode=gfm -f text="$(cat "$NOTES_MD")" > "$NOTES_HTML"
             ./scripts/generate-appcast.sh Jarvis.dmg "$TAG" "$NOTES_HTML"
@@ -139,20 +112,13 @@ jobs:
             ./scripts/generate-appcast.sh Jarvis.dmg "$TAG"
           fi
 
-      # The Release is created as a draft (release-please-config.json), so a failed build/sign/
-      # notarize/verify run never leaves a public Release without its app — publishing happens only
-      # after the assets and user-facing install notes are ready. force-tag-creation makes
-      # release-please create the git tag immediately (GitHub otherwise defers tagging drafts until
-      # publish, and a lingering untagged draft would make later release-please runs miss the previous
-      # release and garble changelogs).
+      # release-please creates a draft, so a failed run never leaves a public Release without its app.
       - name: Attach the app and publish the Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ needs.release-please.outputs.tag_name }}
         run: |
-          # Two assets, both load-bearing: the disk image users install, and the Sparkle feed the
-          # installed app reads to find its successor. macOS ships bash 3.2, so labels come from a
-          # case statement rather than an associative array.
+          # macOS ships bash 3.2, which has no associative arrays.
           APP_ASSET="Jarvis.dmg"
           APPCAST_ASSET="appcast.xml"
           ASSETS=("$APP_ASSET" "$APPCAST_ASSET")
@@ -221,8 +187,6 @@ jobs:
           done
           gh release edit "$TAG" --notes-file "$RELEASE_NOTES" --draft=false --latest
 
-      # Hosted runners are ephemeral, but scrubbing the signing key is cheap insurance (and
-      # required hygiene if this ever moves to a self-hosted runner).
       - name: Delete temporary keychain
         if: ${{ always() }}
         run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true

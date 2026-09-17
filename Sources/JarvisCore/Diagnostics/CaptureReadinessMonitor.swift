@@ -1,26 +1,12 @@
 import Foundation
 
-/// Foundation-only authority that combines provider readiness with captured audio *frame* health.
-/// Both required streams must have a ready provider and at least one positive-sample callback before
-/// full listening is reported. A stream that never delivers samples (an initial first-frame timeout)
-/// or stops delivering after frame flow begins (a sustained stall) is converted into the appropriate
-/// typed lifecycle consequence: the microphone is terminal, while the system stream degrades to
-/// microphone-only.
-///
-/// Readiness is based purely on callback/frame arrival, never signal amplitude — valid digital silence
-/// still counts as healthy capture. Its one input is the `CaptureHeartbeat` — content-free frame
-/// progress derived from `AudioContinuityWitness`, not a second competing counter — and the caller
-/// supplies every timestamp so the policy is deterministic and unit-testable with no timer of its
-/// own.
+/// Readiness counts frame arrival, never amplitude, so digital silence is healthy capture.
 public final class CaptureReadinessMonitor {
-    /// The two independent capture paths fed by the one-clock aggregate device.
     public enum Stream: String, Sendable, Equatable, CaseIterable {
         case microphone
         case system
     }
 
-    /// Capture-aware readiness for the app to render. Connection attempt details remain app-owned,
-    /// but the rule that provider readiness and frame health are both required stays in Core.
     public enum Readiness: Sendable, Equatable {
         case waitingForMicrophone
         case waitingForSystem
@@ -29,14 +15,11 @@ public final class CaptureReadinessMonitor {
         case stopped
     }
 
-    /// Why a stream's capture path was ruled unhealthy — kept for the debug log; Activity copy is fixed.
     public enum FailureCause: String, Sendable, Equatable {
         case firstFrameTimeout
         case sustainedStall
 
-        /// What a person reads inside the capture failure's Activity row. The raw values are
-        /// grep-able identifiers for the debug log, not prose, and quoting one inside the row's own
-        /// parentheses nested a second pair inside them.
+        /// Activity copy. The raw values are debug-log identifiers, not prose.
         public var summary: String {
             switch self {
             case .firstFrameTimeout: return "it never started arriving"
@@ -45,19 +28,15 @@ public final class CaptureReadinessMonitor {
         }
     }
 
-    /// A lifecycle consequence the caller must apply. Both are silent, ghost-safe outcomes.
+    /// The caller must apply these. Both are silent, ghost-safe outcomes.
     public enum Effect: Sendable, Equatable {
-        /// The microphone capture path failed; coaching must stop. Terminal.
+        /// Terminal: coaching must stop.
         case microphoneCaptureFailed(FailureCause)
-        /// The system capture path can't stay healthy; degrade to microphone-only. Non-terminal.
         case degradeToMicrophoneOnly(FailureCause)
     }
 
     public struct Configuration: Sendable, Equatable {
-        /// How long a required stream may go without its first frame before its path is ruled failed.
         public let firstFrameTimeout: TimeInterval
-        /// How long an established stream may stay stalled while no capture recovery is active before
-        /// its path is ruled failed.
         public let sustainedStallTimeout: TimeInterval
 
         public init(firstFrameTimeout: TimeInterval = 6, sustainedStallTimeout: TimeInterval = 12) {
@@ -73,21 +52,17 @@ public final class CaptureReadinessMonitor {
         var providerReady = false
         var firstFrame = false
         var stalledSince: TimeInterval?
-        /// A consequence was already applied, or the stream was declared unavailable. Sticky: no later
-        /// or duplicate observation can re-arm it or resurrect readiness.
+        /// Sticky: no later or duplicate observation can re-arm it or resurrect readiness.
         var resolved = false
     }
 
     private let configuration: Configuration
     private var streams: [Stream: StreamState]
-    /// A route rebuild already has its own bounded retry owner. While that recovery is active, this
-    /// monitor must not race it with an independent lifecycle consequence.
+    /// A route rebuild has its own bounded retry owner, so no consequence may race it.
     private var recoveryStartedAt: TimeInterval?
-    /// Set once the microphone fails: the session is ending, so every subsequent observation is inert.
     private var stopped = false
 
-    /// `startedAt` is the session-relative origin the first-frame deadline is measured from; all later
-    /// timestamps must share that monotonic clock.
+    /// `startedAt` and every later timestamp must share one monotonic clock.
     public init(configuration: Configuration = .init(),
                 requiresSystemAudio: Bool = true,
                 startedAt: TimeInterval) {
@@ -99,21 +74,17 @@ public final class CaptureReadinessMonitor {
         ]
     }
 
-    /// Whether this stream has delivered at least one positive-sample callback.
     public func hasFirstFrame(_ stream: Stream) -> Bool {
         streams[stream]?.firstFrame == true
     }
 
-    /// Fold app-owned provider connection state into the Core readiness decision. Reconnects can make
-    /// a provider temporarily unready without discarding already-proven capture health.
+    /// A reconnect can unready a provider without discarding proven capture health.
     public func setProviderReady(_ ready: Bool, for stream: Stream) {
         guard !stopped, var state = streams[stream], !state.resolved else { return }
         state.providerReady = ready
         streams[stream] = state
     }
 
-    /// Full listening requires both ready providers and both healthy frame paths. Once the system
-    /// stream is explicitly unavailable, a healthy ready microphone remains usable in degraded mode.
     public var readiness: Readiness {
         guard !stopped else { return .stopped }
         guard let microphone = streams[.microphone],
@@ -125,16 +96,11 @@ public final class CaptureReadinessMonitor {
         return system.providerReady && system.firstFrame ? .ready : .waitingForSystem
     }
 
-    /// Whether the system stream has been ruled unavailable (a capture consequence or an out-of-band
-    /// degrade), so the caller shows microphone-only rather than waiting on system audio.
     public var isSystemUnavailable: Bool {
         streams[.system]?.resolved == true
     }
 
-    /// Fold one capture heartbeat into this stream's health and advance time-based policy. This is
-    /// the critical, in-memory branch: it reads the heartbeat value directly and never reads the
-    /// evidence queue or a persisted file. Late or duplicate heartbeats after a stream is resolved
-    /// (or after the microphone failed) are inert.
+    /// Stays in memory: never reads the evidence queue or a persisted file.
     @discardableResult
     public func note(
         _ heartbeat: CaptureHeartbeat, for stream: Stream, at time: TimeInterval
@@ -154,10 +120,7 @@ public final class CaptureReadinessMonitor {
         return poll(at: time)
     }
 
-    /// Suspend capture consequences while the aggregate device owns a bounded route-rebuild
-    /// incident. A pending first-frame deadline or a witness-confirmed stall gets a complete window
-    /// after recovery finishes rather than firing immediately from the pre-rebuild gap. Short rebuilds
-    /// do not invent a stall; the witness remains the authority for whether established flow stopped.
+    /// After recovery, a pending deadline or stall restarts its full window instead of firing.
     public func setCaptureRecoveryInProgress(_ inProgress: Bool, at time: TimeInterval) {
         guard !stopped else { return }
         if inProgress {
@@ -178,8 +141,6 @@ public final class CaptureReadinessMonitor {
         }
     }
 
-    /// Declare the system stream unavailable for a reason outside capture (e.g. its transcription
-    /// endpoint gave up). Stops any pending capture timeout from also firing for it.
     public func systemBecameUnavailable() {
         guard var state = streams[.system], !state.resolved else { return }
         state.resolved = true
@@ -188,9 +149,7 @@ public final class CaptureReadinessMonitor {
         streams[.system] = state
     }
 
-    /// Advance the initial first-frame deadline and the sustained-stall deadline after frame flow has
-    /// begun. Returns at most one effect; a microphone failure supersedes any system degradation on
-    /// the same tick.
+    /// Returns at most one effect; a microphone failure supersedes system degradation.
     @discardableResult
     public func poll(at time: TimeInterval) -> [Effect] {
         guard !stopped else { return [] }

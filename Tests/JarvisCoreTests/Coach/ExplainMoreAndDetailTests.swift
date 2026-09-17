@@ -103,8 +103,6 @@ import Testing
         #expect(screen.captureCount == 1)
     }
 
-    /// A session without the box keeps its hints and never delivers a detail; only a new Start can
-    /// change that, because the capability set is fixed at Start (#273).
     @Test(arguments: [TriggerReason.manualHint, .turnEnd])
     func aBoxlessSessionKeepsHintsAndRequiresANewStartToEnableDetail(_ hintReason: TriggerReason) async {
         let brain = ScriptedBrain(script: [.init(toolCalls: [
@@ -157,7 +155,7 @@ import Testing
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 2)
         guard brain.calls.count == 2 else { return }
-        // A continuation keeps the exact prior message prefix, which the provider's prompt cache needs.
+        // The provider's prompt cache needs a continuation to keep the exact prior message prefix.
         let first = brain.calls[0].map { $0.role.rawValue + ":" + ($0.text ?? "") }
         let continuedPrefix = brain.calls[1].prefix(first.count).map { $0.role.rawValue + ":" + ($0.text ?? "") }
         #expect(continuedPrefix == first)

@@ -4,8 +4,6 @@ import Testing
 
 @Suite("Live e2e scenarios")
 struct LiveE2EScenarioTests {
-    /// The only cross-target path in this suite: the scenario files ship with the live e2e test
-    /// target, and the Gate must reject a broken one before a live run is ever attempted.
     private static let liveTests = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .appendingPathComponent("../../JarvisLiveTests", isDirectory: true)
@@ -64,10 +62,8 @@ struct LiveE2EScenarioTests {
         ])
     }
 
-    /// Each behavioral search in scenario A must return its whole story. The behavioral skill searches
-    /// again when a result only points at a story, which C07's one-search chain would count, and C08
-    /// asserts that the manager question searches, so the teammate search must not already return
-    /// the manager story.
+    /// Live checks C07 and C08 count searches, so each story must come back whole to its own query
+    /// and the teammate search must not already return the manager story.
     @Test("scenario A's prep notes return each behavioral story whole to its own search")
     func prepNotesReturnEachStoryWholeToItsOwnSearch() throws {
         let notes = try String(
@@ -185,7 +181,7 @@ struct LiveE2EScenarioTests {
     struct RejectedCase: Sendable, CustomTestStringConvertible {
         let name: String
         let json: String
-        /// A piece of the failure description that proves the intended rule fired, and where.
+        /// Text the rejection description must contain.
         let fragment: String
 
         var testDescription: String { name }
@@ -339,7 +335,6 @@ struct LiveE2EScenarioTests {
         #expect(description.contains(rejected.fragment), "\(description)")
     }
 
-    /// A valid scenario with one field overridable per rejecting case.
     private static func scenario(
         id: String = "T-1",
         audio: String = "fixture",

@@ -88,9 +88,6 @@ if ! /usr/bin/grep -Fq -- '--only-binary=:all:' "$release_requirements" \
   echo "Release workflow must install the hash-pinned DMG layout tool in its own environment." >&2
   exit 1
 fi
-# The updater is only as trustworthy as the signature over what it downloads. Hold the whole chain:
-# the sandbox-only helpers are dropped, every nested binary is sealed with the hardened runtime
-# before the app, and the feed is signed over the stapled disk image users actually receive.
 if ! /usr/bin/grep -Fq 'rm -rf "$SPARKLE/Versions/Current/XPCServices"' "$package_script" \
     || ! /usr/bin/grep -Fq \
       'for nested in Versions/Current/Autoupdate Versions/Current/Updater.app; do' \
@@ -114,8 +111,6 @@ if ! /usr/bin/grep -Fq './scripts/generate-appcast.sh Jarvis.dmg "$TAG" "$NOTES_
   echo "Release publication must sign the update feed with the release-scoped Sparkle key." >&2
   exit 1
 fi
-# The signing key must be proven to be the one installed copies verify against, and the notes must be
-# escaped so they cannot break out of the feed's CDATA section into markup.
 if ! /usr/bin/grep -Fq 'if [[ "$DERIVED_PUBLIC_KEY" != "$(plist_value SUPublicEDKey)" ]]; then' \
       "$appcast_script" \
     || ! /usr/bin/grep -Fq "]]]]><![CDATA[>" "$appcast_script" \
@@ -127,8 +122,6 @@ if ! /usr/bin/grep -Fq 'xcrun notarytool submit "$artifact"' "$package_script"; 
   echo "Release packaging must submit each distribution layer through the shared notarization path." >&2
   exit 1
 fi
-# The subscription helper ships inside the notarized app: the pinned, checksum-verified release,
-# sealed with the hardened runtime before the app, and present in the image users mount.
 cliproxyapi_lib="scripts/lib/cliproxyapi.sh"
 if ! /usr/bin/grep -Eq '^CLIPROXYAPI_SHA256_ARM64="[0-9a-f]{64}"$' "$cliproxyapi_lib" \
     || ! /usr/bin/grep -Fq 'if [[ "$actual" != "$CLIPROXYAPI_SHA256_ARM64" ]]; then' "$cliproxyapi_lib" \

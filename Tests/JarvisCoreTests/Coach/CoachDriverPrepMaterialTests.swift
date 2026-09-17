@@ -2,19 +2,12 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// A scripted `PrepMaterialSearching` port that records every query it was asked, so a test can
-/// assert the model's tool-call argument reached the port unchanged.
-///
-/// `@unchecked Sendable` is safe because the only mutable property (`_queries`) is accessed only
-/// under `lock` — the same justification `ScriptedBrain` in `CoachDriverPipelineTests.swift` gives
-/// for its identical pattern.
+/// @unchecked: `lock` guards `_queries`, and `resultsByQuery` is set before any search runs.
 final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
     private let lock = NSLock()
     private var _queries: [String] = []
     var queries: [String] { lock.withLock { _queries } }
     let results: [PrepMaterialSearchResult]
-    /// Overrides `results` for a specific query, so a test can distinguish which of several calls
-    /// produced a given carried observation. Set before the search is exercised; read-only after.
     var resultsByQuery: [String: [PrepMaterialSearchResult]] = [:]
     init(results: [PrepMaterialSearchResult] = []) { self.results = results }
     func search(query: String) -> [PrepMaterialSearchResult] {
@@ -24,8 +17,6 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 }
 
 @Suite(.serialized) struct CoachDriverPrepMaterialTests {
-    /// `capabilities` defaults to the app's own shape: a port exists only where sources were
-    /// configured at Start, so an installed port implies the tool was composed in.
     private func makeDriver(
         brain: BrainClient,
         prepMaterial: (any PrepMaterialSearching)? = nil,
@@ -61,8 +52,6 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         #expect(!brain.offeredTools[0].map(\.name).contains("search_prep_notes"))
     }
 
-    /// Configured means catalogued, not declared: the first request carries the loader and names
-    /// the tool in the prompt, and the tool itself becomes callable only once the model loads it.
     @Test func toolCatalogedButNotDeclaredWhenPrepMaterialConfigured() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "s1")],
@@ -121,8 +110,6 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        // A prompt that names a tool this session does not have invites exactly the call that has
-        // to be refused — neither the catalog line nor the loader may appear.
         #expect(!brain.calls[0].contains {
             $0.role == .system
                 && (($0.text ?? "").contains("search_prep_notes")
@@ -130,8 +117,6 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         })
     }
 
-    /// Configured means the catalog names the tool. Its guidance is not in the prompt at all: that
-    /// arrives as the `load_tool` result, so the model reads it only once it can call the tool.
     @Test func systemPromptCatalogsPrepNotesSearchWhenConfigured() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "s1")],
@@ -157,7 +142,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(
                     id: "p1", name: "search_prep_notes",
                     argumentsJSON: #"{"query":"rate limiter"}"#)]),
-            nil, // fails this attempt — carries work.observations into a fresh retry
+            nil,
             .init(toolCalls: [.speak(callId: "s1", lines: ["done"])],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
                                              argumentsJSON: #"{"lines":["done"]}"#)]),
@@ -179,19 +164,15 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
     }
 
     @Test func secondSearchAcrossRetriesReplacesTheFirstsStaleResult() async {
-        // work carries forward verbatim into a retry after a failure (CoachDriver's
-        // `work = failedWork`), so a search that fires again on that retry must replace the first
-        // search's now-stale result, not pile on top of it — otherwise a long enough failure chain
-        // accumulates every prior query's result in every later request.
         let brain = ScriptedThrowBrain(script: [
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "A")],
                   rawToolCalls: [RawToolCall(id: "p1", name: "search_prep_notes",
                                              argumentsJSON: #"{"query":"A"}"#)]),
-            nil, // fails — carries the "A" result forward into a fresh attempt
+            nil,
             .init(toolCalls: [.searchPrepNotes(callId: "p2", query: "B")],
                   rawToolCalls: [RawToolCall(id: "p2", name: "search_prep_notes",
                                              argumentsJSON: #"{"query":"B"}"#)]),
-            nil, // fails again — the carried result must now be "B" only, not "A" and "B"
+            nil,
             .init(toolCalls: [.speak(callId: "s1", lines: ["done"])],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
                                              argumentsJSON: #"{"lines":["done"]}"#)]),

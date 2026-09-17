@@ -1,20 +1,14 @@
 import AppKit
 import JarvisCore
 
-/// The Overlay Box's header strip: collapse on the left, "Jarvis" in the middle, clear on the right.
-///
-/// Frame layout rather than constraints. Every dimension comes from `OverlayBoxChrome` and changes on
-/// each frame of a resize drag, so placing three rectangles directly is less machinery than restating
-/// the same numbers as constraint constants, and it settles synchronously instead of waiting on a
-/// layout pass an offscreen panel never runs.
+/// Frame layout, not constraints, so it settles synchronously: an offscreen panel never runs a
+/// layout pass.
 final class OverlayBoxHeaderView: NSView {
     let collapseButton = OverlayBoxHeaderButton(symbol: "chevron.down", label: "Collapse")
     let clearButton = OverlayBoxHeaderButton(symbol: "eraser", label: "Clear history")
     private let titleLabel = MovableLabel(labelWithString: "Jarvis")
     private var chrome: OverlayBoxChrome
-    /// Hidden while collapsed: with no log under it, the rule would underline nothing.
     private var showsSeparator = true
-    /// Read back by the panel test that pins this strip and the detail strip to one geometry.
     var iconPointSize: CGFloat { chrome.iconPointSize }
     var titlePointSize: CGFloat { chrome.titlePointSize }
 
@@ -24,7 +18,7 @@ final class OverlayBoxHeaderView: NSView {
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.alignment = .center
         titleLabel.textColor = NSColor(white: 1, alpha: 0.72)
-        clearButton.isHidden = true          // nothing logged yet, so nothing to erase
+        clearButton.isHidden = true
         addSubview(titleLabel)
         addSubview(collapseButton)
         addSubview(clearButton)
@@ -33,11 +27,8 @@ final class OverlayBoxHeaderView: NSView {
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
 
-    /// A drag on the header moves the box, the way it does everywhere else on the panel.
     override var mouseDownCanMoveWindow: Bool { true }
 
-    /// Rebuilding the title font and both symbol images on every frame of a resize drag would be work
-    /// for nothing: the chrome only steps when the box crosses a rounding boundary.
     func apply(_ chrome: OverlayBoxChrome) {
         guard chrome != self.chrome else { return layoutControls() }
         self.chrome = chrome
@@ -52,8 +43,7 @@ final class OverlayBoxHeaderView: NSView {
         layoutControls()
     }
 
-    /// The chevron states where the box is, not where the click will take it — the macOS disclosure
-    /// convention, which is also what the menu bar and Settings use.
+    /// The chevron shows the current state, not the click's result (macOS disclosure convention).
     func setCollapsed(_ collapsed: Bool) {
         collapseButton.setSymbol(collapsed ? "chevron.right" : "chevron.down",
                                  label: collapsed ? "Expand" : "Collapse")
@@ -61,9 +51,6 @@ final class OverlayBoxHeaderView: NSView {
         needsDisplay = true
     }
 
-    /// The clear button exists only when there is something to erase, so an empty box carries no dead
-    /// control. It keeps its space rather than collapsing out, so the title does not shift sideways
-    /// when the first tip lands.
     func setHasContent(_ hasContent: Bool) {
         clearButton.isHidden = !hasContent
     }
@@ -79,10 +66,8 @@ final class OverlayBoxHeaderView: NSView {
                                       width: chrome.button, height: chrome.button)
         clearButton.frame = NSRect(x: bounds.width - chrome.inset - chrome.button, y: buttonY,
                                    width: chrome.button, height: chrome.button)
-        // Centred across the full width rather than in the gap between the buttons, so the name stays
-        // put whether or not the clear button is on screen.
         let titleHeight = titleLabel.intrinsicContentSize.height.rounded(.up)
-        // Reserve both buttons' space so the title stays clear of either control.
+        // Reserve both buttons' space even when clear is hidden, so the title never shifts.
         let titleInset = chrome.inset * 2 + chrome.button
         titleLabel.frame = NSRect(x: titleInset, y: ((bounds.height - titleHeight) / 2).rounded(),
                                   width: max(0, bounds.width - titleInset * 2), height: titleHeight)
@@ -96,8 +81,7 @@ final class OverlayBoxHeaderView: NSView {
     }
 }
 
-/// A label that lets a drag on it move the borderless window, the way `MovableTextView` does for the
-/// log. `NSControl` refuses the drag by default.
+/// `NSControl` refuses the window drag by default.
 private final class MovableLabel: NSTextField {
     override var mouseDownCanMoveWindow: Bool { true }
 }

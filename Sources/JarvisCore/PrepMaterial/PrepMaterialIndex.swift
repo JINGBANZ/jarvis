@@ -1,16 +1,7 @@
 import Foundation
 
-/// A local, in-memory Okapi BM25 index over already-chunked prep-material text.
-///
-/// Deliberately not semantic/embedding search (see the #219 decision log): the corpus is personal
-/// interview notes, not a large external knowledge base, and keyword ranking needs no network call,
-/// no API key, and no dependency — so it works identically regardless of which brain provider is
-/// configured. Building the index is pure, fast, in-memory work with no I/O; reading the user's files
-/// and extracting text from each format happens once, earlier, at the macOS edge in JarvisApp.
+/// Okapi BM25, deliberately not embeddings: it needs no network, API key, or dependency.
 public struct PrepMaterialIndex: PrepMaterialSearching {
-    /// One chunk plus the per-chunk BM25 state derived from it, kept together so a future edit that
-    /// adds/removes a field can't desync it from the chunk it belongs to the way three
-    /// index-aligned parallel arrays could.
     private struct IndexedChunk {
         let chunk: PrepMaterialChunk
         let termFrequency: [String: Int]
@@ -74,8 +65,7 @@ public struct PrepMaterialIndex: PrepMaterialSearching {
         return total
     }
 
-    /// Lowercased alphanumeric runs, length > 1 — a minimal stand-in for a stopword list that at
-    /// least drops single letters ("a", "I") from dominating scores.
+    /// Dropping one-letter tokens ("a", "I") stands in for a stopword list.
     private static func tokenize(_ text: String) -> [String] {
         text.lowercased()
             .components(separatedBy: CharacterSet.alphanumerics.inverted)

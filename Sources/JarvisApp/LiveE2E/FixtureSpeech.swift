@@ -2,10 +2,8 @@
 import AVFoundation
 import Foundation
 
-/// Speech for the live e2e scenarios, synthesized with the system voice at run time so no audio is
-/// ever committed. `say` writes 24 kHz mono PCM16 directly, the transcription wire format, so the
-/// samples need no resampling or downmix. Each file lives only between synthesis and decoding, in
-/// an owner-only directory inside the scenario's run directory.
+/// `say` writes the transcription wire format (24 kHz mono PCM16), so nothing is resampled.
+/// Speech files stay owner-only and are deleted once decoded, so no audio outlives the run.
 struct FixtureSpeech {
     enum Failure: Error, CustomStringConvertible {
         case synthesisFailed(Int32)
@@ -65,7 +63,7 @@ struct FixtureSpeech {
         return Array(UnsafeBufferPointer(start: channel[0], count: Int(buffer.frameLength)))
     }
 
-    /// Throws when synthesized speech could not be removed, so the run cannot finish with audio kept.
+    /// Throws if speech could not be removed, so a run never finishes with audio kept.
     func removeDirectory() throws {
         guard FileManager.default.fileExists(atPath: directory.path) else { return }
         try FileManager.default.removeItem(at: directory)

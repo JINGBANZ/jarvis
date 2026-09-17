@@ -1,12 +1,10 @@
-# The scheduled/manual caller follows the shared workflow's main branch, whose runner default is
-# `ubuntu-latest`. Issues are filed with a short-lived GitHub App installation token (minted from
-# the app credentials below, scoped to this repo) so a filed issue triggers Issue Worker.
+# Issues are filed with a GitHub App token, not GITHUB_TOKEN, so they trigger Issue Worker.
 name: Issue Opener
 
 on:
   schedule:
-    - cron: '7 19 * * *' # daily 03:07 Beijing (UTC+8); off-the-hour minute dodges peak cron delays
-  workflow_dispatch: {} # manual runs; also re-enables the schedule after 60-day repo inactivity
+    - cron: '7 19 * * *' # 03:07 Beijing; off the hour to dodge peak cron delays
+  workflow_dispatch: {} # also re-enables the schedule after 60 days of repo inactivity
 
 jobs:
   open-issue:

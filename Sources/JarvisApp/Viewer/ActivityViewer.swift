@@ -4,25 +4,17 @@ import JarvisCore
 import JarvisEvaluation
 import JarvisBrainProviders
 
-/// The activity viewer view: an in-app `WKWebView` that live-appends log rows pushed from
-/// `ActivityLog` (no reload), shows screenshots in an in-page lightbox, and lets you browse and clear
-/// past sessions via `SessionStore`. Its compact header badge renders the same live
-/// `JarvisReadiness.Status` as the menu without appending an Activity row. Thin by design — the
-/// rendering logic and its tests live in JarvisCore (`htmlShell`/`rowScript`) and
-/// `JarvisViewerTests`. See wiki/build-and-run.md.
 @MainActor
 final class ActivityViewer: NSObject, WKNavigationDelegate {
     private let log: ActivityLog
-    private var store: SessionStore   // rebuilt when a new session opens (see `sessionDidChange`)
+    private var store: SessionStore
 
-    /// Builds the sole agentic evaluation pipeline at click time so it uses the current provider
-    /// selection and the selected session's source. Missing version identity permits fallback.
+    /// Called per click, so the evaluator uses the current provider selection.
     var makeEvaluator: (@MainActor (URL) -> AgenticEvaluator?)?
 
-    /// Whether a coaching session is currently running (wired by AppDelegate). Evaluation and report
-    /// opening are explicit user actions, but their presentation stays outside the ghost lifecycle.
+    /// Ghost mode: nothing here may present while this returns true.
     var isCoachingRunning: (@MainActor () -> Bool)?
-    /// Per-session persistence gate used only while a normal Stop close is still running.
+    /// False while that session's audit is still closing after Stop.
     var isSessionAuditClosed: (@MainActor (URL) -> Bool)?
     /// Directories still owned by background close work must survive Clear history.
     var protectedSessionDirectories: (@MainActor () -> Set<URL>)?
@@ -33,22 +25,19 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var evaluateButton: NSButton?
     private var clearHistoryButton: NSButton?
     private var exportButton: NSButton?
-    /// Survives a Settings close/reopen because the viewer itself lives for the whole app run.
+    /// Not reset by `teardown()`: an evaluation outlives a Settings close.
     private var isEvaluating = false
     private var isFetchingSource = false
-    /// Retained so Quit can cancel the direct CLI child instead of leaving an orphaned paid run.
     private var evaluationTask: Task<Void, Never>?
     private var sessions: [SessionStore.Session] = []
 
-    private var loaded = false             // page navigation finished?
-    private var pending: [String] = []     // rows that arrived before didFinish (main-thread-confined)
-    private var snapshotRows: [String] = [] // rows to inject once the shell has loaded
-    private var pendingMeta = ""           // header text to set after the shell loads
-    /// Completeness of the session currently on screen. False only when its health record says
-    /// evidence was dropped, failed, or never finished closing.
+    private var loaded = false
+    private var pending: [String] = []
+    private var snapshotRows: [String] = []
+    private var pendingMeta = ""
     private var evidenceIsComplete = true
     private var viewingCurrent = true
-    /// Current UI state only. It is injected into the in-memory page and never written to Activity.
+    /// UI state only, never written to Activity.
     private var readinessStatus: JarvisReadiness.Status = .stopped
 
     init(log: ActivityLog, store: SessionStore) {
@@ -58,13 +47,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     // MARK: - Embeddable content view (unified Settings window)
 
-    /// Build the viewer's content (header + WKWebView) as a standalone view for embedding in the
-    /// Settings window's Activity tab. Starts live updates and loads the current session. The host
-    /// window owns lifecycle; call `teardown()` when it closes. Reuses all the loading/session logic
-    /// below unchanged.
+    /// The host must call `teardown()` when its window closes.
     func makeContentView() -> NSView {
-        // Sized to the Settings window's content region (the NSTabView resizes this to fit), not the
-        // old standalone-window dimensions — so the header controls don't overlap.
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 420))
         content.autoresizingMask = [.width, .height]
 
@@ -116,7 +100,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         self.exportButton = export
 
         let preferredPickerWidth = pop.widthAnchor.constraint(equalToConstant: 230)
-        // Prefer the full picker width, but let window resizing compress it.
+        // Below windowSizeStayPut (500), so window resizing can compress the picker.
         preferredPickerWidth.priority = .init(rawValue: 490)
         NSLayoutConstraint.activate([
             pop.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 12),
@@ -153,7 +137,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         return content
     }
 
-    /// Stop receiving live rows and release the WebView. Called by the host when the window closes.
     func teardown() {
         log.detach()
         webView = nil
@@ -167,10 +150,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         snapshotRows = []
     }
 
-    /// A new coaching session opened (a Start rotated the session dir). Re-point the history browser at
-    /// the new current dir; if the viewer is on-screen, refresh the picker and re-attach to the fresh
-    /// live session. `ActivityLog.enable` dropped the previous observer, so without this an open viewer
-    /// would freeze on the old session's rows. No-op when not embedded — the next open reads it fresh.
+    /// An open viewer must re-attach here: `ActivityLog.enable` dropped its previous observer.
     func sessionDidChange(base: URL, current: URL?) {
         store = SessionStore(base: base, current: current)
         guard webView != nil else { return }
@@ -178,11 +158,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         loadCurrent()
     }
 
-    /// The set of past sessions on disk changed underneath the viewer — retention pruning ran.
-    /// Refresh the picker only: the row content on screen is unaffected, so there is nothing to
-    /// reload. No-op when not embedded, and no-op while a past session is on screen —
-    /// `populatePicker` re-selects the current session, which would leave the picker, Copy Session
-    /// ID, and Evaluate pointing at a session the WebView is not showing.
+    /// Skipped while a past session shows: `populatePicker` would reselect the current session.
     func historyDidChange() {
         guard webView != nil, viewingCurrent else { return }
         populatePicker()
@@ -196,7 +172,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         for s in sessions {
             picker?.addItem(withTitle: s.isCurrent ? "\(s.label) (current)" : s.label)
         }
-        // Default-select the current session if present.
         if let idx = sessions.firstIndex(where: { $0.isCurrent }) {
             picker?.selectItem(at: idx)
         }
@@ -226,14 +201,11 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         NSPasteboard.general.setString(sessions[idx].id, forType: .string)
     }
 
-    /// Coaching started or stopped (AppDelegate calls this from Start/Stop): evaluation/report
-    /// presentation is suppressed until the full coaching lifecycle has ended.
     func coachingStateDidChange() {
         refreshEvaluateButtonState()
     }
 
-    /// Render the Core composition result for the current session. Past sessions intentionally show
-    /// only Ended rather than reconstructing transient readiness history that was never persisted.
+    /// Past sessions always show Ended, because readiness history is never persisted.
     func readinessDidChange(_ status: JarvisReadiness.Status) {
         readinessStatus = status
         refreshReadinessBadge()
@@ -244,8 +216,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         refreshEvaluateButtonState()
     }
 
-    /// Evaluate and Clear stay disabled for the full coaching lifecycle and while an evaluation is
-    /// in flight. A completed session with a saved report keeps the established Open report action.
     private func refreshEvaluateButtonState() {
         let coachingRunning = isCoachingRunning?() == true
         clearHistoryButton?.isEnabled = !coachingRunning && !isEvaluating
@@ -303,9 +273,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     private func loadPast(_ session: SessionStore.Session) {
         viewingCurrent = false
-        log.detach()   // a past session is static; stop receiving live rows
-        // Unknown completeness (a session older than the health record) shows no notice: it is
-        // not the same claim as "this record has holes".
+        log.detach()
+        // Unknown completeness, from a session older than the health record, shows no notice.
         evidenceIsComplete = session.evidenceIsComplete ?? true
         let snapshot = store.entrySnapshot(
             for: session,
@@ -326,9 +295,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         webView?.loadHTMLString(shell, baseURL: nil)
     }
 
-    /// A live row arrived (main thread). Inject it now if the page is ready, else buffer it.
     private func onAppend(_ js: String) {
-        guard viewingCurrent else { return }   // ignore stray live rows while viewing a past session
+        guard viewingCurrent else { return }
         if loaded {
             webView?.evaluateJavaScript(js, completionHandler: nil)
         } else {
@@ -338,8 +306,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     // MARK: - WKNavigationDelegate
 
-    /// Deny every navigation except the initial in-memory load — a pushed `data:` image or any link
-    /// click must not be able to navigate the WebView away (defense-in-depth for screen-derived data).
+    /// Security: only the initial in-memory load may navigate, never a `data:` image or a link.
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction,
                  decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void) {
         let url = navigationAction.request.url?.absoluteString
@@ -348,7 +315,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         loaded = true
-        // Snapshot rows first, then anything buffered while loading — both in FIFO order.
+        // Snapshot rows before rows buffered during the load, to keep order.
         for js in snapshotRows { webView.evaluateJavaScript(js, completionHandler: nil) }
         for js in pending { webView.evaluateJavaScript(js, completionHandler: nil) }
         snapshotRows = []
@@ -370,8 +337,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
 
     // MARK: - Session evaluation
 
-    /// One click runs the sole agentic evaluator over the source checkout plus the selected session,
-    /// saves `eval-report.md`, and opens it. An existing report is reopened without re-billing.
     @objc private func evaluateTapped() {
         guard !isEvaluating else { return }
         guard isCoachingRunning?() != true else {
@@ -419,8 +384,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
     }
 
-    /// App termination must propagate cancellation to `AgentCLIProcessRunner`, which kills the
-    /// evaluator subprocess immediately instead of letting it outlive Jarvis and keep using quota.
+    /// Call on quit: cancelling kills the evaluator subprocess so it can't outlive Jarvis.
     func cancelEvaluation() {
         evaluationTask?.cancel()
         evaluationTask = nil
@@ -429,10 +393,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         refreshEvaluateButtonState()
     }
 
-    /// Open the report in the user's browser: render the markdown to `eval-report.html` beside it
-    /// (regenerated every open, so it never goes stale after an agentic re-audit rewrites the `.md`)
-    /// and hand the page to the default browser. The page carries a "Copy as Markdown"
-    /// button so the raw report can be pasted into an agent chat to work on the findings.
+    /// Rewrites the HTML page on every open, so it never lags a re-audited `.md`.
     private func openReport(_ report: String, for session: SessionStore.Session) {
         guard isCoachingRunning?() != true else {
             jlog("Jarvis: suppressed Activity report presentation while coaching is running.")
@@ -493,7 +454,6 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         loadCurrent()   // the viewed session may be gone; fall back to the live one
     }
 
-    /// Encode a Swift string as a JS string literal (for `setMeta`).
     private func jsString(_ s: String) -> String {
         (try? String(data: JSONEncoder().encode(s), encoding: .utf8)) ?? "\"\""
     }

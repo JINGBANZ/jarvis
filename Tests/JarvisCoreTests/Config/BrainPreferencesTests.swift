@@ -3,7 +3,6 @@ import Foundation
 @testable import JarvisCore
 
 @Suite struct BrainPreferencesTests {
-    /// A fresh, isolated UserDefaults suite per test so nothing touches the real app domain.
     private func freshDefaults() -> UserDefaults {
         let suite = "BrainPreferencesTests.\(UUID().uuidString)"
         let d = UserDefaults(suiteName: suite)!
@@ -23,7 +22,7 @@ import Foundation
         #expect(p.primaryTarget.provider == Defaults.Brain.provider)
     }
 
-    /// Storing what is OFF is what makes a tool added in a later version on by default.
+    /// Storing what is off keeps a tool added in a later version on by default.
     @Test func disabledToolsRoundTripAndDefaultToNothingSwitchedOff() {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
@@ -35,7 +34,6 @@ import Foundation
         #expect(d.stringArray(forKey: Defaults.Brain.disabledToolsKey) == ["search_prep_notes"])
     }
 
-    /// Skills switch off the same way, and nothing is required, so nothing is dropped on write.
     @Test func disabledSkillsRoundTripAndDefaultToNothingSwitchedOff() {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
@@ -47,8 +45,6 @@ import Foundation
         #expect(d.stringArray(forKey: Defaults.Brain.disabledSkillsKey) == ["system-design"])
     }
 
-    /// A session cannot run without these, so the preference cannot record them as off — not even
-    /// through a hand-edited plist, which the next write normalizes away.
     @Test func theToolsASessionNeedsAreDroppedOnWrite() {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
@@ -115,9 +111,6 @@ import Foundation
         #expect(BrainPreferences(defaults: d).primaryTarget.provider == .openAI)
     }
 
-    /// A route saved by a build whose providers included `claude-code` and `codex-cli` reads like any
-    /// unknown provider: the primary falls back to the default and the fallback row is dropped, so
-    /// the user picks a subscription target again instead of Jarvis guessing one.
     @Test func savedLocalCLIProvidersReadAsUnknown() {
         let d = freshDefaults()
         d.set("claude-code", forKey: "brain.provider")
@@ -234,8 +227,7 @@ import Foundation
         p.setModel(
             BrainModelCatalog.model(id: "claude-opus-5", for: .claudeSubscription)!,
             for: .claudeSubscription)
-        // Switching providers keeps each one's model; the OpenAI model stays under the legacy
-        // "brain.model" key so pre-provider installs keep their selection.
+        // OpenAI stays on the unscoped key so existing installs keep their selection.
         #expect(p.model(for: .openAI).id == "gpt-5.4-mini")
         #expect(p.model(for: .claudeSubscription).id == "claude-opus-5")
         #expect(d.string(forKey: "brain.model") == "gpt-5.4-mini")
@@ -249,7 +241,6 @@ import Foundation
         p.setModel(
             BrainModelCatalog.model(id: "claude-haiku-4-5-20251001", for: .claudeSubscription)!,
             for: .claudeSubscription)
-        // A Claude model is not a valid Codex/OpenAI model — those providers stay on their defaults.
         #expect(p.model(for: .openAI) == BrainModelCatalog.defaultModel(for: .openAI))
         #expect(p.model(for: .codexSubscription) == BrainModelCatalog.defaultModel(for: .codexSubscription))
     }

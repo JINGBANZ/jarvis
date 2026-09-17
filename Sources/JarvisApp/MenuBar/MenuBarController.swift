@@ -1,37 +1,21 @@
 import AppKit
 import JarvisCore
 
-/// Menu-bar status item: Start/Stop, Settings, Check for Updates, Quit, then a caption naming the
-/// running build — every command in the standard icon+title format (see `NSMenuItem+Standard.swift`).
-/// It renders the same overall `JarvisReadiness.Status` as Activity; no connection/capture policy is
-/// duplicated in this AppKit adapter.
 @MainActor
 final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let startStopItem = NSMenuItem.standard("Start Jarvis", symbol: "play.fill", keyEquivalent: "s")
-    /// Nil in a development bundle, which carries no update feed — see `UpdateController`.
-    /// Not private: `MenuBarController+MenuDelegate.swift` refreshes it when the menu opens.
     let updateItem: NSMenuItem?
     private(set) var status: JarvisReadiness.Status = .stopped
-    /// Whether a pipeline exists, including its startup/reconnect windows.
     var isRunning: Bool { status.keepsSessionActive }
 
-    /// Fired when the user asks to start the pipeline. Returns `true` if it actually started.
     var onStart: (() -> Bool)?
-    /// Fired when the user asks to stop the pipeline.
     var onStop: (() -> Void)?
-    /// Fired when the user picks "Settings". Opens the unified Settings window.
     var onOpenSettings: (() -> Void)?
-    /// Fired when the user picks "Check for Updates". Answers whether Sparkle can start a check, so
-    /// the item can render its own availability without this adapter importing Sparkle.
-    /// Not private for the same reason as `updateItem`.
     let updateAvailability: (() -> Bool)?
     private let onCheckForUpdates: (() -> Void)?
 
-    /// - Parameters:
-    ///   - updateAvailability: whether an update check can start right now, or nil when this build
-    ///     has no updater at all — the item is then omitted rather than shown disabled forever.
-    ///   - onCheckForUpdates: runs the explicit check.
+    /// A nil `updateAvailability` means this build has no updater, so the update item is omitted.
     init(updateAvailability: (() -> Bool)? = nil, onCheckForUpdates: (() -> Void)? = nil) {
         self.updateAvailability = updateAvailability
         self.onCheckForUpdates = onCheckForUpdates
@@ -55,31 +39,20 @@ final class MenuBarController: NSObject {
                       action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
             Self.buildCaptionItem(),
         ])
-        // The item's availability depends on live session state, so resolve it when the menu opens
-        // rather than caching it at build time.
+        // Manual enabling, so menuNeedsUpdate can set the update item from live session state.
         menu.autoenablesItems = false
         menu.delegate = self
         statusItem.menu = menu
         refreshUI()
     }
 
-    /// Render the Core composition result without independently deriving readiness.
     func setStatus(_ status: JarvisReadiness.Status) {
         self.status = status
         refreshUI()
     }
 
-    /// Names the running build, so a user reporting an issue can read it off the menu without opening
-    /// Settings. A release shows its marketing version, whose single source is `Resources/Info.plist`
-    /// (release-please rewrites it). A local build shows a red "Dev": it copies that same plist, where
-    /// the version names whichever release the checkout descends from rather than the code actually
-    /// running, so `scripts/build-app.sh` stamps `JarvisDevelopmentBuild` and the caption says which
-    /// variant this is instead of quoting a version that would misidentify the build.
-    ///
-    /// The one item that skips the icon+title command format: it is a non-interactive footer caption,
-    /// and centering needs the whole item width. A plain title would be drawn after the leading
-    /// state/image column and centered only within what remains, so the caption is a custom view —
-    /// AppKit sizes an item view to the menu's width, and the label spans it.
+    /// Dev builds say "Dev": their copied Info.plist names the last release, not the running code.
+    /// A custom view, since a plain title centers only in the space after the image column.
     private static func buildCaptionItem() -> NSMenuItem {
         let info = Bundle.main.infoDictionary
         let isDevelopmentBuild = info?["JarvisDevelopmentBuild"] as? Bool == true
@@ -93,8 +66,6 @@ final class MenuBarController: NSObject {
         }
         let label = NSTextField(labelWithString: caption)
         label.font = .menuFont(ofSize: NSFont.smallSystemFontSize)
-        // A release version is a quiet footnote; the development marker is a warning, so it takes the
-        // system red, which stays legible in both appearances and against the menu's vibrancy.
         label.textColor = isDevelopmentBuild ? .systemRed : .disabledControlTextColor
         label.alignment = .center
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -110,9 +81,7 @@ final class MenuBarController: NSObject {
 
         let item = NSMenuItem()
         item.view = container
-        // The menu disables automatic validation so the update item can resolve its own availability
-        // when the menu opens, so this caption states the inert state AppKit would otherwise infer
-        // from its missing action.
+        // autoenablesItems is off, so the missing action no longer disables the item by itself.
         item.isEnabled = false
         return item
     }
@@ -129,7 +98,6 @@ final class MenuBarController: NSObject {
         }
     }
 
-    /// Single source of truth for the status icon and the start/stop item.
     private func refreshUI() {
         startStopItem.applyStandard(title: status.keepsSessionActive ? "Stop Jarvis" : "Start Jarvis",
                                     symbol: status.keepsSessionActive ? "stop.fill" : "play.fill")
@@ -137,9 +105,7 @@ final class MenuBarController: NSObject {
         button.image = status.iconSignal.map(MenuBarIcon.live) ?? MenuBarIcon.stopped
         button.title = ""
         button.toolTip = status.menuDescription
-        // The glyph deliberately gives checking and recovering the same reading, and the button has
-        // no title, so without this VoiceOver would call every reconnect a startup. The button is the
-        // accessibility element, so its label — not the image's — is what has to name the real state.
+        // VoiceOver reads the button, and the glyph is shared by checking and recovering.
         button.setAccessibilityLabel(status.menuDescription)
     }
 }
@@ -154,9 +120,6 @@ private extension JarvisReadiness.Status {
         }
     }
 
-    /// How the status item renders this status, or nil for the stopped glyph. Startup and recovery
-    /// both light the icon: they are sessions in progress, and rendering them as stopped told the
-    /// user Jarvis was off for the several seconds it takes to come up.
     var iconSignal: MenuBarIcon.Signal? {
         switch self {
         case .checking, .recovering: .preflight

@@ -5,19 +5,9 @@ import os
 import Darwin
 #endif
 
-/// Runs the CLIProxyAPI helper bundled in Jarvis.app, which holds the user's ChatGPT and Claude
-/// sign-ins and serves them to `BrainAccessor` as an OpenAI Responses endpoint on 127.0.0.1.
-///
-/// One instance lives as long as the app. The helper outlives sessions, because it is idle between
-/// them and a sign-in made in Settings must reach it, and stops at Quit. The key is fresh for each
-/// instance and never persisted outside this launch's owner-only configuration. A helper that exits
-/// while running restarts on the same port with the same key after 1, 5, then 15 seconds, so a
-/// session composed against the endpoint keeps working through a restart; a fourth exit within ten
-/// minutes gives up until the next `ensureRunning()`. A helper that exits before it answers is a
-/// failed start, not a crash, and is not retried until asked.
-///
-/// The helper is one Go process that forks nothing, so plain `Process` launch and signals are
-/// enough: no process group, no escalation beyond one SIGKILL.
+// Design: wiki/architecture.md#subscription-targets-through-the-bundled-proxy
+/// The helper is one Go process that forks nothing, so plain `Process` signals are enough: no
+/// process group, no escalation beyond one SIGKILL.
 public actor LocalProxySupervisor {
     public struct Endpoint: Sendable, Equatable {
         public let baseURL: URL
@@ -30,12 +20,10 @@ public actor LocalProxySupervisor {
         case stopped
         case starting
         case running(Endpoint)
-        /// The helper is missing, would not start, or kept stopping. The reason is written to follow
-        /// "the sign-in service" in a sentence.
+        /// `reason` completes the sentence "the sign-in service ...".
         case failed(reason: String)
     }
 
-    /// What one probe of the helper proves about the subscription targets.
     public enum Readiness: Sendable, Equatable {
         case unavailable(reason: String)
         case ready(Endpoint, signedIn: Set<BrainProvider>)
@@ -44,8 +32,7 @@ public actor LocalProxySupervisor {
             if case .ready(let endpoint, _) = self { endpoint } else { nil }
         }
 
-        /// Why `provider` cannot serve a request now, as the permanent failure a route skips it
-        /// with; nil when it can.
+        /// The permanent failure a route skips `provider` with, or nil when it can serve now.
         public func unavailability(for provider: BrainProvider) -> ProviderFailure? {
             switch self {
             case .unavailable(let reason):
@@ -70,6 +57,7 @@ public actor LocalProxySupervisor {
     public nonisolated let executable: URL?
     public nonisolated let home: URL
     private let clock: any _Concurrency.Clock<Swift.Duration>
+    // Fresh per instance; never persisted outside this launch's owner-only configuration.
     private let key = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }
         .joined()
 
@@ -86,17 +74,14 @@ public actor LocalProxySupervisor {
     private var clearedLeftovers = false
     /// Read by `terminateNow()`, which Quit calls from outside the actor.
     private nonisolated let helperPID = OSAllocatedUnfairLock<Int32?>(initialState: nil)
-    /// Sign-ins the user started and has not finished. They are children of Jarvis like the helper,
-    /// so Quit ends them too rather than leaving a login waiting on a redirect that can no longer
-    /// arrive. Connections can run the Codex and Claude logins at once, so this holds every one:
-    /// a single slot lost whichever child started first, and cleared when either finished.
+    /// Every open sign-in, so Quit ends them too. A set: Codex and Claude can sign in at once.
     private nonisolated let signInPIDs = OSAllocatedUnfairLock<Set<Int32>>(initialState: [])
 
-    /// The helper's credential files, owner-only like the API key file.
+    /// Owner-only: holds the helper's credential files.
     public nonisolated var authDirectory: URL { home.appendingPathComponent("auth", isDirectory: true) }
     private nonisolated var runDirectory: URL { home.appendingPathComponent("run", isDirectory: true) }
-    /// This launch's configuration. Named by Jarvis's own process id, so a development build and a
-    /// release running side by side never rewrite each other's, which the helper would hot-reload.
+    /// Named by Jarvis's process id, so a development build and a release never rewrite each
+    /// other's configuration, which the helper would hot-reload.
     public nonisolated var configURL: URL {
         runDirectory.appendingPathComponent("config-\(ProcessInfo.processInfo.processIdentifier).yaml")
     }
@@ -104,9 +89,7 @@ public actor LocalProxySupervisor {
         runDirectory.appendingPathComponent("helper-\(ProcessInfo.processInfo.processIdentifier).pid")
     }
 
-    /// The helper inside the running app bundle, or, for `swift run` and development tests, the
-    /// executable `JARVIS_PROXY_EXECUTABLE` names. Nil only outside a built app with no override,
-    /// which makes every subscription target read as missing from this build.
+    /// Nil only outside a built app with no `JARVIS_PROXY_EXECUTABLE` override.
     public static func bundledExecutable() -> URL? {
         Bundle.main.url(forAuxiliaryExecutable: "cliproxyapi")
             ?? ProcessInfo.processInfo.environment["JARVIS_PROXY_EXECUTABLE"].map {
@@ -120,9 +103,7 @@ public actor LocalProxySupervisor {
         self.clock = clock
     }
 
-    /// Starts the helper unless it runs, and returns once it answers or has failed. Idempotent: a
-    /// caller that arrives during a start waits for that start. An explicit call clears a crash
-    /// streak that gave up.
+    /// Callers arriving mid-start wait for that start. Clears a crash streak that gave up.
     @discardableResult
     public func ensureRunning() async -> State {
         if case .running = state { return state }
@@ -133,7 +114,7 @@ public actor LocalProxySupervisor {
         return await start()
     }
 
-    /// Starts the helper if needed and reads its model list once: which subscriptions are signed in.
+    /// Starts the helper if needed.
     public func readiness() async -> Readiness {
         switch await ensureRunning() {
         case .running(let endpoint):
@@ -143,21 +124,13 @@ public actor LocalProxySupervisor {
                     $0.proxyModelOwner.map(owners.contains) ?? false
                 }))
             } catch {
-                // A cancelled caller is not a silent helper. The probe throws the moment its task is
-                // cancelled, which Stop, a newer Start, closing Settings, and Sign out all do, and
-                // treating that as silence would kill a helper that is answering fine. The caller
-                // discards this answer anyway.
+                // A cancelled probe throws too; don't mistake it for a mute helper and kill it.
                 guard !Task.isCancelled, !(error is CancellationError) else {
                     return .unavailable(reason: "isn't running")
                 }
-                // The helper is alive but no longer answering. Left `.running`, `ensureRunning`
-                // would accept it forever and no retry could replace it, so end it here: the next
-                // explicit call starts a fresh one.
-                //
-                // `stopping` first, because `terminateHelper` suspends: without it the exit reaches
-                // `helperExited` while the state still reads `.running`, which counts a crash and
-                // arms a restart this method then strands by publishing `.failed`. The port stays,
-                // so that next start reuses the endpoint a live session was composed against.
+                // Left `.running`, a mute helper would never be replaced. Set `stopping` first:
+                // the wait suspends, and `helperExited` would otherwise count a crash. The port
+                // stays, since live sessions were composed against it.
                 jlog("Jarvis proxy: the helper stopped answering — \(error.localizedDescription)")
                 stopping = true
                 if let pid = helperPID.withLock({ $0 }) { await terminateHelper(pid) }
@@ -171,8 +144,7 @@ public actor LocalProxySupervisor {
         }
     }
 
-    /// A sign-in against this launch's configuration, so the credential lands where the running
-    /// helper looks. Nil when the helper cannot start.
+    /// Nil when the helper cannot start.
     public func makeSignIn() async -> LocalProxySignIn? {
         guard case .running = await ensureRunning(), let executable else { return nil }
         return LocalProxySignIn(executable: executable, configURL: configURL,
@@ -183,14 +155,13 @@ public actor LocalProxySupervisor {
         LocalProxyAccountFile.all(in: authDirectory, for: provider)
     }
 
-    /// Deletes that subscription's credential files; the running helper notices and stops serving it.
+    /// The running helper notices the deleted files and stops serving that subscription.
     public nonisolated func signOut(_ provider: BrainProvider) throws {
         for file in accountFiles(for: provider) {
             try FileManager.default.removeItem(at: file.url)
         }
     }
 
-    /// Stops the helper: SIGTERM, then SIGKILL after three seconds.
     public func stop() async {
         stopping = true
         restartTask?.cancel()
@@ -203,12 +174,8 @@ public actor LocalProxySupervisor {
         publish(.stopped)
     }
 
-    /// What the helper and its logins run with: an allowlist, not Jarvis's environment minus a few
-    /// names. The pinned binary reads `PGSTORE_DSN`, `OBJECTSTORE_*` and `MANAGEMENT_STATIC_PATH`,
-    /// any of which would move the OAuth credentials off this Mac, and Go reads `HTTPS_PROXY` and
-    /// friends, which would reroute traffic the configuration pins to the vendors. None of that is
-    /// Jarvis's to inherit, and no API key is either: the helper authenticates with the per-launch
-    /// key in its own configuration.
+    /// An allowlist on purpose: the helper reads `PGSTORE_DSN`, `OBJECTSTORE_*`, and `HTTPS_PROXY`,
+    /// which would move credentials or traffic off this Mac. It needs no inherited API key either.
     static func helperEnvironment() -> [String: String] {
         let inherited = ProcessInfo.processInfo.environment
         return ["HOME", "PATH", "TMPDIR", "LANG"].reduce(into: [:]) { environment, name in
@@ -216,22 +183,18 @@ public actor LocalProxySupervisor {
         }
     }
 
-    /// Ends one helper: a signal, a bounded wait for its exit, then a kill. Every path that gives up
-    /// on a helper goes through here, so none leaves a process holding this launch's port.
+    /// Every path that gives up on a helper goes through here, so none leaves it holding the port.
     private func terminateHelper(_ pid: Int32) async {
         kill(pid, SIGTERM)
         let deadline = ContinuousClock.now + Self.stopGrace
         while helperRunning, ContinuousClock.now < deadline {
-            // A cancelled caller makes this throw without suspending. Spinning on it would hold the
-            // actor that `helperExited` needs to clear `helperRunning`, so the wait would run its
-            // full length and then kill a helper that had already exited. Stop waiting instead.
+            // When cancelled, this throws without suspending. Spinning would starve `helperExited`.
             do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
         if helperRunning { kill(pid, SIGKILL) }
     }
 
-    /// Signals the helper without waiting, for Quit, after which nothing else runs. The next launch
-    /// removes the configuration this leaves.
+    /// For Quit: signals without waiting. The next launch removes the configuration this leaves.
     public nonisolated func terminateNow() {
         if let pid = helperPID.withLock({ $0 }) { kill(pid, SIGTERM) }
         for pid in signInPIDs.withLock({ $0 }) { kill(pid, SIGTERM) }
@@ -286,7 +249,7 @@ public actor LocalProxySupervisor {
         // `-local-model` keeps the model catalog embedded instead of fetched at every start.
         process.arguments = ["-config", configURL.path, "-local-model"]
         process.environment = Self.helperEnvironment()
-        // The helper writes its own rotating logs under its home; nothing reads its console.
+        // The helper writes its own rotating logs; nothing reads its console.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -303,8 +266,6 @@ public actor LocalProxySupervisor {
         try? Data("\(pid)\n".utf8).write(to: pidURL)
     }
 
-    /// Polls the model list until it answers: the helper takes a moment to load its credentials and
-    /// bind the port.
     private func awaitReady(_ endpoint: Endpoint) async -> State {
         let launched = generation
         let deadline = ContinuousClock.now + Self.readinessDeadline
@@ -313,17 +274,15 @@ public actor LocalProxySupervisor {
             guard launched == generation, !stopping else { return state }
             guard helperRunning else {
                 let status = lastExitStatus.map { " with status \($0)" } ?? ""
-                // A start that never bound the port may have lost it to another process; the next
-                // attempt picks a fresh one rather than failing the same way forever.
+                // Another process may hold the port now, so the next start picks a new one.
                 port = nil
                 publish(.failed(reason: "stopped\(status) while starting"))
                 return state
             }
             do {
                 _ = try await Self.modelOwners(at: endpoint)
-                // The helper can exit while this probe is in flight, and `helperExited` leaves a
-                // start in progress alone. Publishing without re-reading it would latch `.running`
-                // on a dead helper, which `ensureRunning` then short-circuits on for the app's life.
+                // The helper can exit mid-probe, and `helperExited` ignores a start in progress.
+                // Without this re-check, `.running` would latch on a dead helper.
                 guard launched == generation, !stopping, helperRunning else { return state }
                 publish(.running(endpoint))
                 return state
@@ -332,8 +291,7 @@ public actor LocalProxySupervisor {
             }
             try? await Task.sleep(for: .milliseconds(250))
         }
-        // A helper that never answered may also ignore the signal; waiting it out here is what keeps
-        // it from holding the port while the next launch tries to bind the same one.
+        // Wait so a helper ignoring the signal can't hold the port the next launch binds.
         if let pid = helperPID.withLock({ $0 }) { await terminateHelper(pid) }
         // Transport detail belongs in the debug log; Activity gets the fixed reason.
         jlog("Jarvis proxy: the helper didn't answer in time — \(problem)")
@@ -379,10 +337,8 @@ public actor LocalProxySupervisor {
 
     // MARK: - Files
 
-    /// The helper creates its own logs directory world-readable, and a build before `commercial-mode`
-    /// left a failed call's body there: the transcript and the captured screen text, outside the
-    /// session that owns them. Every start narrows the directory and removes those dumps, so
-    /// upgrading clears what an older Jarvis wrote.
+    /// The helper creates its logs directory world-readable, and older builds left failed-call
+    /// bodies (transcript and screen text) there. Narrow it and remove those dumps on every start.
     private static func lockHelperLogs(in authDirectory: URL) {
         let logs = authDirectory.appendingPathComponent("logs", isDirectory: true)
         let manager = FileManager.default
@@ -395,8 +351,7 @@ public actor LocalProxySupervisor {
         }
     }
 
-    /// Rewritten at every start. Every value Jarvis depends on is set here rather than left to the
-    /// helper's defaults; see wiki/architecture.md for why each is what it is.
+    /// Every value Jarvis depends on is set here rather than left to the helper's defaults.
     private func writeConfiguration(port: Int) throws {
         let yaml = """
         host: "127.0.0.1"
@@ -430,9 +385,8 @@ public actor LocalProxySupervisor {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: configURL.path)
     }
 
-    /// A Jarvis that ended without Quit (a crash, a force quit) leaves its helper running and its
-    /// configuration behind. Stop such a helper, proven to be this executable before it is signaled,
-    /// and remove files whose Jarvis is gone; a Jarvis still running keeps its own.
+    /// A Jarvis that crashed leaves its helper running. Signal it only once proven to be this
+    /// executable, and keep the files of any Jarvis still running.
     private nonisolated func clearLeftovers(of executable: URL) {
         let files = (try? FileManager.default.contentsOfDirectory(
             at: runDirectory, includingPropertiesForKeys: nil)) ?? []
@@ -444,9 +398,7 @@ public actor LocalProxySupervisor {
                   owner != ownPID, kill(owner, 0) != 0, errno == ESRCH else { return nil }
             return owner
         }
-        // A development build and a release share this directory. A helper started by the other one
-        // is not ours to signal, and its owner's files are how that build finds it again, so both
-        // survive; only a helper this executable started is ended and its files removed.
+        // The other build's helper (dev or release) isn't ours; its files are how it's found.
         var keep: Set<Int32> = []
         for file in files where file.pathExtension == "pid" {
             guard let owner = owner(of: file),
@@ -481,8 +433,7 @@ public actor LocalProxySupervisor {
 
     // MARK: - Network
 
-    /// A port the kernel reports free on the loopback interface. Another process could take it
-    /// before the helper binds; the helper then exits and the start fails with that reason.
+    /// Another process could take the port before the helper binds; that start then fails.
     private static func freePort() throws -> Int {
         let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
         guard socket >= 0 else { throw POSIXError(.init(rawValue: errno) ?? .EIO) }
@@ -520,7 +471,7 @@ public actor LocalProxySupervisor {
         let errorDescription: String?
     }
 
-    /// The vendors the helper lists models for, which are the ones it holds a credential for.
+    /// The helper lists models only for vendors it holds a credential for.
     private static func modelOwners(at endpoint: Endpoint) async throws -> Set<String> {
         var request = URLRequest(url: endpoint.modelsURL, timeoutInterval: 2)
         request.setValue("Bearer \(endpoint.key)", forHTTPHeaderField: "Authorization")

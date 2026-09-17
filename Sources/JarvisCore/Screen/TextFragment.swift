@@ -1,8 +1,7 @@
 import Foundation
 
-/// One OCR'd run of text and its normalized bounding box, top-left origin (y grows downward, so
-/// smaller `minY` = higher on screen). The Vision edge in JarvisApp flips from Vision's
-/// bottom-left origin before handing fragments to `RecognizedTextLayout`.
+/// Normalized box with a top-left origin, so smaller `minY` is higher. Vision's bottom-left origin
+/// must be flipped before building one.
 public struct TextFragment: Sendable, Equatable {
     public let string: String
     public let minX: Double

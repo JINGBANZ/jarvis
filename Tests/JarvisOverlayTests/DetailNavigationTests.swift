@@ -3,8 +3,6 @@ import JarvisCore
 import Testing
 @testable import JarvisOverlay
 
-/// There is one detail box, so a later reply replaces what is in it. These are the controls that
-/// keep a diagram up through the trade-off talk that follows it.
 @Suite struct DetailNavigationTests {
     @MainActor @Test func theBoxFollowsTheNewestReplyWithDetail() throws {
         let box = try makeBox()
@@ -50,7 +48,6 @@ import Testing
         #expect(box.currentDetailPosition == "1 of 2")
         #expect(box.currentDetailProseText.contains("First sketch."))
 
-        // Clear is about the history the user is reading, not the reference they parked.
         box.clickClearButton()
         #expect(box.currentText.isEmpty)
         #expect(box.currentDetailProseText.contains("First sketch."))
@@ -72,7 +69,6 @@ import Testing
         #expect(box.isDetailRolled)
         #expect(box.currentDetailHeight == box.detailStripHeight)
         #expect(!box.showsDiagram)
-        // The arrows and Pin stay reachable, so nothing is stranded behind a dismissed box.
         #expect(box.currentDetailPosition == "1 of 1")
 
         box.clickDetailDismiss()
@@ -96,7 +92,6 @@ import Testing
         #expect(box.currentDetailPosition == "2 of 3")
     }
 
-    /// Collapse hides both boxes; expanding brings the detail back untouched.
     @MainActor @Test func collapseHidesBothBoxesAndExpandRestoresThem() throws {
         let box = try makeBox()
         defer { box.setSessionLive(false) }
@@ -109,8 +104,7 @@ import Testing
         #expect(box.showsDiagram)
     }
 
-    /// The controls carry accessibility labels and never a tooltip: AppKit draws one in a window of
-    /// its own, outside this panel's capture exclusion.
+    /// AppKit draws tooltips in its own window, outside the panel's capture exclusion.
     @MainActor @Test func theDetailControlsAreLabeledAndTooltipFree() throws {
         let box = try makeBox()
         defer { box.setSessionLive(false) }
@@ -120,9 +114,6 @@ import Testing
         #expect(box.currentSharingType == .none)
     }
 
-    /// The hint box's header and the detail box's strip are two pieces of one panel's chrome, so
-    /// they share one geometry and both follow the box the user dragged. Fixed sizes in the detail
-    /// strip made its controls visibly smaller than the header's and left them there as the box grew.
     @MainActor @Test func bothStripsShareOneChromeAndFollowTheBoxSize() throws {
         let box = try makeBox()
         defer { box.setSessionLive(false) }
@@ -139,10 +130,6 @@ import Testing
         #expect(box.detailStripHeight == box.currentHeaderHeight)
     }
 
-    /// The Settings preview stands a sample detail up while stopped, with its Pin and Dismiss live.
-    /// A click there must not reach the session's slot: a pin carried into Start left the slot
-    /// ignoring every reply, hid the box and its controls with nothing to unpin, and still let each
-    /// detail be recorded as shown.
     @MainActor @Test func aClickOnTheSettingsSampleDoesNotReachTheNextSession() throws {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
         box.setEnabled(true)

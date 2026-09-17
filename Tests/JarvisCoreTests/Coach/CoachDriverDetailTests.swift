@@ -2,8 +2,6 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// What `detail` carries is governed by prompt text alone — the speak guidance and whichever skill
-/// the model loaded. The runtime only routes the blocks it can draw, and reports the ones it cannot.
 @Suite struct CoachDriverDetailTests {
     private func makeDriver(brain: BrainClient, overlay: OverlayRendering,
                             detailEnabled: Bool = true) -> CoachDriver {
@@ -35,7 +33,6 @@ import Testing
         #expect(overlay.detail?.diagram == DiagramHint(mermaid: "flowchart LR\nA[Client] --> B[API]"))
         #expect(overlay.detail?.dropped.isEmpty == true)
 
-        // The session composes one speak schema and declares it on every request.
         let speak = try #require(brain.offeredTools.first?.first { $0.name == "speak" })
         let schema = try #require(JSONSerialization.jsonObject(
             with: Data(speak.parametersJSON.utf8)) as? [String: Any])
@@ -44,7 +41,6 @@ import Testing
         #expect(brain.toolChoices.first == .force("speak"))
     }
 
-    /// The replayed call describes what was delivered, so the model builds on what the user saw.
     @Test func replayedArgumentsCarryTheDeliveredDetail() async throws {
         let arguments = #"{"lines":["Sketch the request path."],"detail":"A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
@@ -61,8 +57,6 @@ import Testing
         #expect((object["detail"] as? String)?.contains("```mermaid") == true)
     }
 
-    /// A block the box could not draw is removed from the replay and named in the tool result, so
-    /// the model does not read its own rejected graph back as delivered.
     @Test func aDroppedBlockLeavesTheReplayAndIsReportedToTheModel() async throws {
         let arguments = #"{"lines":["Start with the API."],"detail":"Use a queue.\n\n```mermaid\nsequenceDiagram\nA->>B: write\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
@@ -83,7 +77,6 @@ import Testing
         #expect(result.text?.contains("not a supported graph") == true)
     }
 
-    /// A graph the renderer cannot parse costs the sketch, never the tip.
     @Test func aMalformedDiagramStillDeliversTheHint() async throws {
         let arguments = #"{"lines":["Start with the API."],"detail":"```mermaid\nnot a graph\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments)])
@@ -95,7 +88,6 @@ import Testing
         #expect(overlay.detail?.hasContent != true)
     }
 
-    /// A session without the box declares no `detail`, and scrubs one that arrives anyway.
     @Test func aSessionWithoutTheBoxNeitherDeclaresNorDeliversDetail() async throws {
         let arguments = #"{"lines":["Start with the API."],"detail":"Hidden."}"#
         let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])

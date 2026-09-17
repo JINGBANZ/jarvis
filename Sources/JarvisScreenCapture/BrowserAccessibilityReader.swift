@@ -3,9 +3,8 @@ import ApplicationServices
 import Foundation
 import JarvisCore
 
-/// Read-only macOS Accessibility adapter for the exact foreground Chrome window selected for the
-/// screenshot. It never prompts, performs actions, changes attributes, or reads another Chrome
-/// window when the selected window cannot be matched.
+/// Read-only: never prompts, performs actions, or changes attributes, and never reads a Chrome
+/// window other than the one matched to the screenshot.
 public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable {
     private enum Role {
         static let webArea = "AXWebArea"
@@ -30,8 +29,7 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
     private static let searchableNodeLimit = 512
     private static let primedProcesses = PrimedProcesses()
 
-    /// `@unchecked Sendable`: `lock` serializes every access to `pids`; any future mutable state
-    /// must use the same lock.
+    /// `@unchecked Sendable`: `lock` guards `pids` and must guard any future mutable state.
     private final class PrimedProcesses: @unchecked Sendable {
         private let lock = NSLock()
         private var pids: Set<pid_t> = []
@@ -149,9 +147,8 @@ public struct BrowserAccessibilityReader: BrowserAccessibilityReading, Sendable 
         let pid = pid_t(window.ownerPID)
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, Self.messagingTimeout)
-        // Chromium creates its web accessibility tree lazily after the first application-level AX
-        // read. This read-only probe is the supported trigger; never write the manual-accessibility
-        // or enhanced-interface attributes.
+        // Chromium builds its web AX tree lazily after the first app-level AX read. This read-only
+        // probe is the trigger; never write `AXManualAccessibility` or `AXEnhancedUserInterface`.
         if Self.primedProcesses.claim(pid) {
             let primingBudget = AccessibilityReadBudget(
                 deadline: ProcessInfo.processInfo.systemUptime + Self.primingDeadline,

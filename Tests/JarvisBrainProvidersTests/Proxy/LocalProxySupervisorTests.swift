@@ -3,13 +3,11 @@ import JarvisBrainProviders
 import JarvisCore
 import Testing
 
-/// The supervisor against stub helpers: shell scripts that stay up or exit, with the model list
-/// served by the test on the port the supervisor wrote into its configuration. The test serves that
-/// list itself, so a stub script may still be starting when the supervisor reports it running.
+/// The test serves the model list itself, so a stub script may still be starting when the
+/// supervisor reports it running.
 @Suite struct LocalProxySupervisorTests {
     private static let openAIModels = #"{"data":[{"id":"gpt-5.6-sol","owned_by":"openai"}]}"#
 
-    /// The port from this launch's configuration, once the supervisor has written it.
     private func configuredPort(_ supervisor: LocalProxySupervisor) async throws -> Int {
         let config = supervisor.configURL
         #expect(await eventually { FileManager.default.fileExists(atPath: config.path) })
@@ -18,8 +16,7 @@ import Testing
         return try #require(Int(line.dropFirst("port: ".count)))
     }
 
-    /// Runs `body` against a supervisor whose helper is `script`, serving `models` on its port, and
-    /// always stops the helper afterwards so a failed expectation never leaves a stub running.
+    /// Records errors instead of rethrowing so the stub helper is always stopped.
     private func withSupervisor(
         script: String,
         clock: any _Concurrency.Clock<Swift.Duration> = ContinuousClock(),
@@ -66,11 +63,10 @@ import Testing
             #expect(config.contains("auth-dir: \"\(supervisor.authDirectory.path)\""))
             #expect(config.contains("disable-image-generation: true"))
             #expect(config.contains("disable-control-panel: true"))
-            // Without this the helper writes a failed call's body, transcript and screen text
-            // included, to its own logs directory, outside the session that owns that data.
+            // Without it the helper logs failed-call bodies (transcript, screen text) to its own
+            // directory.
             #expect(config.contains("commercial-mode: true"))
-            // A pin bump must not quietly turn these back on: nothing reports usage, nothing listens
-            // off this Mac, and the helper's own error logs stay bounded.
+            // Privacy settings a helper version bump must not silently re-enable.
             #expect(config.contains("usage-statistics-enabled: false"))
             #expect(config.contains("allow-remote: false"))
             #expect(config.contains("error-logs-max-files: 2"))
@@ -84,9 +80,8 @@ import Testing
         }
     }
 
-    /// A build before `commercial-mode` let the helper dump a failed call's body, transcript and
-    /// captured screen text included, into its own world-readable logs directory. Upgrading clears
-    /// what that build wrote and narrows the directory; the helper's own log survives.
+    /// Dumps written without `commercial-mode` hold transcript and screen text in a world-readable
+    /// directory.
     @Test func startPrunesAndNarrowsTheHelperLogDirectory() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
@@ -153,8 +148,7 @@ import Testing
         #expect(await supervisor.ensureRunning() == .failed(reason: "is missing from this build"))
     }
 
-    /// A helper that stops after it answered restarts on the same port with the same key, until a
-    /// fourth stop within the window gives up.
+    /// The supervisor gives up at the fourth stop within its window.
     @Test func aHelperThatKeepsStoppingRestartsThenGivesUp() async throws {
         try await withSupervisor(
             script: "echo launched >> \"$(dirname \"$0\")/launches\"\nexec /bin/sleep 0.4",
@@ -195,8 +189,6 @@ import Testing
         }
     }
 
-    /// Quit has to reach every login, not only the last one started: both subscriptions can be
-    /// signing in at once, each holding its own callback port and its own browser tab.
     @Test func terminateNowEndsEveryRunningSignIn() async throws {
         try await withSupervisor(script: """
             case "$1" in
@@ -233,9 +225,6 @@ import Testing
         }
     }
 
-    /// A helper can stay up and stop serving. The readiness that finds it silent ends it, and the
-    /// next one gets a replacement on the same port and key, so the session composed against that
-    /// endpoint keeps working.
     @Test func aSilentHelperIsReplacedOnTheSameEndpoint() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
@@ -256,7 +245,6 @@ import Testing
         let text = await contents(of: home.appendingPathComponent("pid")) ?? ""
         let silentPID = try #require(Int32(text.trimmingCharacters(in: .whitespacesAndNewlines)))
 
-        // The process stays up; only its answers stop.
         stub?.stop()
         let silent = await supervisor.readiness()
         guard case .unavailable(let reason) = silent else {
@@ -278,9 +266,8 @@ import Testing
         stub?.stop()
     }
 
-    /// The helper is a third-party binary that reads database, object-store and proxy variables, any
-    /// of which would move a credential off this Mac or reroute pinned traffic. It gets an allowlist,
-    /// so a variable Jarvis holds must not reach it.
+    /// The third-party helper reads database, object-store and proxy variables that could move a
+    /// credential off this Mac or reroute pinned traffic.
     @Test func theHelperInheritsOnlyTheAllowlistedEnvironment() async throws {
         setenv("JARVIS_PROXY_ENV_PROBE", "leaked", 1)
         defer { unsetenv("JARVIS_PROXY_ENV_PROBE") }
@@ -303,8 +290,6 @@ import Testing
         }
     }
 
-    /// A cancelled probe says nothing about the helper. Reading it as silence ended a helper that was
-    /// answering fine, and because the stop was Jarvis's own no restart was armed to replace it.
     @Test func aCancelledProbeLeavesTheHelperRunning() async throws {
         try await withSupervisor(script: """
             echo $$ > "$(dirname "$0")/pid.partial"

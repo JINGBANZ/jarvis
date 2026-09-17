@@ -1,8 +1,7 @@
 import Testing
 @testable import JarvisCore
 
-// `#expect` cannot call a mutating method on its operand, so every `schedule` result is taken into a
-// local before it is asserted.
+// `#expect` cannot call a mutating method on its operand, so results go through a local first.
 @Suite("Live e2e audio timeline")
 struct AudioTimelineTests {
     private static let silence = [Int16](repeating: 0, count: AudioTimeline.chunkSampleCount)
@@ -169,8 +168,8 @@ struct AudioTimelineTests {
         #expect(timeline.isIdle)
     }
 
-    /// Distinct non-zero samples, so a misplaced or misordered slice cannot pass as silence or as the
-    /// right audio.
+    /// Distinct non-zero samples, so a misplaced slice cannot pass as silence or as the right
+    /// audio.
     private func ramp(_ count: Int, from start: Int16 = 1) -> [Int16] {
         (0..<count).map { start + Int16($0) }
     }

@@ -2,16 +2,12 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// Records every Activity event a coaching attempt produced, in order.
-///
-/// `@unchecked Sendable` is safe for the same reason as `ScriptedBrain`: the only mutable state is
-/// accessed under `lock`.
+/// @unchecked: all mutable state is guarded by `lock`.
 final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
     private let lock = NSLock()
     private var _events: [ActivityEvent] = []
     var events: [ActivityEvent] { lock.withLock { _events } }
     var kinds: [ActivityEvent.Kind] { events.map(\.rendered.kind) }
-    /// The skills Activity was told were loaded, in order — what a live run counts.
     var loadedSkillNames: [String] {
         events.compactMap {
             guard case .capabilityLoaded(let kind, let name) = $0, kind == .skill else { return nil }
@@ -23,8 +19,6 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
     }
 }
 
-/// A deferred tool becomes callable when — and only when — the model asks for it, and a load is
-/// remembered only by an attempt that finished a turn.
 @Suite(.serialized) struct CoachToolLoadingTests {
     private let prepConfigured = CoachCapabilities.compose(
         disabledTools: [], prepSourcesConfigured: true)
@@ -86,7 +80,6 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             prepMaterial: prepMaterial)).result
     }
 
-    /// The whole point of the step: catalog, load, use, coach — one attempt, one turn.
     @Test func aLoadedToolIsUsableInTheSameAttempt() async throws {
         let search = FakePrepMaterialSearch(results: [PrepMaterialSearchResult(
             sourceDisplayName: "system-design.md", text: "token bucket notes")])
@@ -104,11 +97,9 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
-        // The load's result carries the schema and the guidance the prompt no longer holds.
         let result = try #require(brain.calls[1].first { $0.toolCallId == "l1" })
         #expect(result.text?.contains(searchPrepNotesTool.parametersJSON) == true)
         #expect(result.text?.contains("# Prep material") == true)
-        // Declared only after the load: the first request offered the loader, not the tool.
         #expect(!brain.offeredTools[0].map(\.name).contains("search_prep_notes"))
         #expect(brain.offeredTools[1].map(\.name).contains("search_prep_notes"))
         #expect(search.queries == ["rate limiter"])
@@ -117,7 +108,6 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             == [.initial, .loadToolContinuation, .searchPrepNotesContinuation])
     }
 
-    /// Loading twice returns a pointer to the conversation, never the body again.
     @Test func aSecondLoadIsAnsweredWithoutRepeatingTheGuidance() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [
@@ -136,7 +126,6 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(activity.kinds == [.capabilityLoaded, .tip])
     }
 
-    /// An unknown name is a plain answer, never an attempt failure: the turn still coaches.
     @Test func anUnknownLoadNameIsAnsweredAndTheTurnContinues() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [loadCall("read_my_email"), speak])
@@ -152,8 +141,6 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(activity.kinds == [.tip])
     }
 
-    /// A load belongs to the attempt that made it. An attempt that never commits leaves nothing
-    /// behind, so "already loaded" always points at a conversation the model can actually see.
     @Test func aLoadInAFailedAttemptIsMadeAgainByTheNext() async throws {
         let runner = makeRunner(capabilities: prepConfigured)
         let brain = ScriptedBrain(script: [
@@ -176,7 +163,6 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(result.text?.contains(searchPrepNotesTool.parametersJSON) == true)
     }
 
-    /// A committed load stays loaded: the next attempt does not spend a round trip on it.
     @Test func aCommittedLoadIsRememberedByTheNextAttempt() async throws {
         let runner = makeRunner(capabilities: prepConfigured)
         let brain = ScriptedBrain(script: [
@@ -188,11 +174,9 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
 
         let second = try #require(brain.calls[3].first { $0.toolCallId == "l2" })
         #expect(second.text == JarvisPrompts.Coach.loadToolAlreadyLoaded("search_prep_notes"))
-        // The tool was declared from this attempt's first request, without loading again.
         #expect(brain.offeredTools[2].map(\.name).contains("search_prep_notes"))
     }
 
-    /// A switched-off tool stays switched off, whatever name a model emits.
     @Test func aCallToAToolTheSessionDoesNotOfferIsRefused() async throws {
         let search = FakePrepMaterialSearch()
         let activity = RecordingActivity()
@@ -217,8 +201,6 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(activity.kinds == [.tip])
     }
 
-    /// Offered but called before loading: a model can name a catalog tool the request did not
-    /// declare, and the call is honest, so it runs rather than costing the turn a round trip.
     @Test func aDeferredToolCalledBeforeLoadingStillRuns() async throws {
         let search = FakePrepMaterialSearch(results: [PrepMaterialSearchResult(
             sourceDisplayName: "system-design.md", text: "token bucket notes")])
@@ -239,9 +221,6 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(result.text?.contains("token bucket notes") == true)
     }
 
-    /// No port means the index is still building, or finished with nothing usable in any source.
-    /// Both answer the same way: the model was told the notes exist, so it is told plainly that they
-    /// are not there — not that they were read and found wanting, and not by failing the attempt.
     @Test func searchingWithNoIndexAnswersAndKeepsCoaching() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [
@@ -261,7 +240,6 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(activity.kinds == [.prepNotesUnavailable, .tip])
     }
 
-    /// Room for the longest sensible chain plus two spare responses, and a hard stop after that.
     @Test(arguments: [(6, true), (7, false)])
     func theToolLoopAllowsSevenResponses(captures: Int, commits: Bool) async {
         let capture = BrainResponse(

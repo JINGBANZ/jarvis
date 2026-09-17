@@ -1,8 +1,6 @@
 import Foundation
 import JarvisCore
 
-/// Constructs the two provider endpoints from one immutable Start snapshot. Provider selection is
-/// resolved before capture begins and never changes inside the live session.
 enum TranscriptionSessionFactory {
     static func make(
         configuration: TranscriptionConfiguration,
@@ -44,9 +42,7 @@ enum TranscriptionSessionFactory {
                 activity: activity,
                 benchmark: benchmark)
         case .appleSpeech:
-            // Reaching here means preparation already succeeded, which only happens on the macOS 26
-            // SDK path. On older SDKs `AppleSpeechModelPreparation.prepare` reports the provider
-            // unavailable, so the start is rejected before construction and this case is unreachable.
+            // Preparation already succeeded. On older SDKs `prepare` rejects the start before this.
             #if compiler(>=6.2) && canImport(FoundationModels) && canImport(Speech) && !JARVIS_FORCE_APPLE_SPEECH_FALLBACK
             if #available(macOS 26.0, *), let appleSpeechLocale {
                 AppleSpeechTranscriber(

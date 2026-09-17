@@ -61,8 +61,6 @@ import Testing
         #expect(finished.attemptID == 3)
     }
 
-    /// The expand-step pin: admitting through the typed producer views and admitting the same
-    /// occurrences as envelopes must leave the persisted session folder byte-for-byte identical.
     @Test func typedViewsAndEnvelopeAdmissionPersistByteIdenticalRecords() async throws {
         let viewDirectory = ActivityLogTests.tmp()
         let envelopeDirectory = ActivityLogTests.tmp()
@@ -125,9 +123,6 @@ import Testing
         }
     }
 
-    /// The retained-byte bound covers the human projection too: a screen-view row retains a base64
-    /// JPEG, by far the largest thing Activity ever carries. An oversize one is dropped and later
-    /// admission continues independently.
     @Test func anOversizeActivityPresentationCountsAgainstTheByteBound() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }

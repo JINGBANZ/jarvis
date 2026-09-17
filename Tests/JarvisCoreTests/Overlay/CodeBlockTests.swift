@@ -24,13 +24,11 @@ import Testing
         #expect(CodeBlock(language: "", code: " \n ") == nil)
     }
 
-    /// An unlabeled fence still renders; the box calls it `text`.
     @Test func anUnnamedLanguageBecomesText() throws {
         #expect(try #require(CodeBlock(language: "", code: "x = 1")).language == "text")
         #expect(CodeBlock(language: String(repeating: "x", count: 41), code: "x = 1") == nil)
     }
 
-    /// A correction arrives as a diff block, which the box tints and strikes.
     @Test func aDiffBlockIsRecognized() throws {
         let block = try #require(CodeBlock(language: "diff", code: "-  if ch in seen:\n+  if ch in seen and seen[ch] >= left:"))
         #expect(block.isDiff)

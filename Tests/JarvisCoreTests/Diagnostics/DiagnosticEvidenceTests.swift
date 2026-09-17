@@ -2,23 +2,9 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// Phase 1 of the lean coaching core: agent-facing diagnostics ride the one shared evidence
-/// transport, and nothing about them runs on the caller.
-///
-/// Every case here is driven by deterministic fakes — a parked writer, a one-slot mailbox, a
-/// byte-starved mailbox, an injected write failure, an explicit session rotation. None asserts on
-/// elapsed wall-clock time.
-///
 /// Serialized because several cases park the worker's serial queue.
-///
-/// Only the two cases whose claim is `jlog`'s own routing install the process-global `JarvisLog`
-/// attachment, under `JarvisLogAttachmentLock` so no other attaching suite can re-point it. Every
-/// transport-contract case admits diagnostics through `FileSessionAudit.recordDiagnostic` directly
-/// instead: with the attachment installed, any `jlog` from a concurrently running suite lands in
-/// the same mailbox, and the exact-count cases below then flaked in CI (#239). The lock cannot
-/// prevent that, since the emitting suites never take it.
 @Suite(.serialized) struct DiagnosticEvidenceTests {
-    /// Records what reached the Console edge and can park the worker on demand.
+    /// @unchecked: mutable state is guarded by `lock`, and the semaphores are thread-safe.
     private final class RecordingWriter: SessionAuditWriting, @unchecked Sendable {
         enum Failure: Error { case injectedAppend }
 
@@ -72,9 +58,8 @@ import Testing
         func releaseOpen() { openRelease.signal() }
     }
 
-    /// The core Phase 1 claim: `jlog` returns without the Console call, the file open, or the write
-    /// having happened. The worker is parked in its first open for the whole emission burst, so a
-    /// caller that still did any of that work would deadlock instead of failing an assertion.
+    /// The worker stays parked through the burst, so a caller doing the work hangs instead of
+    /// failing.
     @Test func jlogPerformsNoConsoleOrFileWorkOnTheCaller() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -89,7 +74,6 @@ import Testing
 
             for index in 0..<32 { jlog("parked-caller-diagnostic-\(index)") }
 
-            // The worker has not moved, so nothing reached Console and no debug log exists yet.
             #expect(writer.console.isEmpty)
             #expect(!FileManager.default.fileExists(
                 atPath: directory.appendingPathComponent(
@@ -106,8 +90,6 @@ import Testing
         }
     }
 
-    /// The persisted artifact is unchanged by the move: same filename, owner-only mode, and one
-    /// `HH:mm:ss.SSS`-stamped line per diagnostic, in admission order.
     @Test func diagnosticsPersistToTheSessionDebugLogOwnerOnlyAndInOrder() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -126,7 +108,7 @@ import Testing
         #expect(lines.count == 2)
         #expect(lines[0].hasSuffix("ordered-diagnostic-first"))
         #expect(lines[1].hasSuffix("ordered-diagnostic-second"))
-        // "HH:mm:ss.SSS " — the millisecond stamp the agent-facing log has always carried.
+        // A 12-character "HH:mm:ss.SSS" stamp, then a space.
         #expect(lines[0].prefix(12).allSatisfy { $0.isNumber || $0 == ":" || $0 == "." })
         #expect(String(lines[0].dropFirst(12).prefix(1)) == " ")
 
@@ -135,8 +117,6 @@ import Testing
         #expect(mode?.int16Value == 0o600)
     }
 
-    /// A diagnostic emitted with no attachment reaches the asynchronous process log and stops
-    /// there. It has no session, so it can never be written into one.
     @Test func anUnattributedDiagnosticReachesTheProcessLogOnly() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -146,15 +126,13 @@ import Testing
 
         worker.recordProcessDiagnostic(
             DiagnosticAuditEvent(message: "unattributed-diagnostic"))
-        // Closing the live session drains the shared queue past the unattributed envelope.
+        // Closing drains the shared queue past the unattributed envelope.
         #expect(await evidence.close() == .complete)
 
         #expect(writer.console == ["unattributed-diagnostic"])
         #expect(try debugLog(in: directory).isEmpty)
     }
 
-    /// Session rotation: a diagnostic emitted after session A is sealed must not land in A's log,
-    /// and must not be guessed into the session that replaced it.
     @Test func aDiagnosticAfterCloseIsNeverGuessedIntoTheNextSession() async throws {
         let first = ActivityLogTests.tmp()
         let second = ActivityLogTests.tmp()
@@ -171,7 +149,6 @@ import Testing
             jlog("belongs-to-session-a")
             #expect(await sessionA.close() == .complete)
 
-            // Session B exists and is live, but `JarvisLog` still points at the sealed handle A.
             let sessionB = FileSessionAudit(directory: second, worker: worker)
             jlog("emitted-after-a-was-sealed")
             #expect(await sessionB.close() == .complete)
@@ -183,8 +160,6 @@ import Testing
         }
     }
 
-    /// Capacity loss is uniform and honest: the dropped line marks the session partial, and the
-    /// next diagnostic is admitted on its own merits.
     @Test func aFullMailboxDropsOneDiagnosticAndKeepsAdmittingLaterOnes() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -195,7 +170,7 @@ import Testing
         let evidence = FileSessionAudit(directory: directory, worker: worker)
         wait(for: writer.openEntered)
 
-        admit("accepted-before-capacity", into: evidence)   // fills the second of two slots
+        admit("accepted-before-capacity", into: evidence)   // the session open holds the first slot
         admit("dropped-at-capacity", into: evidence)
 
         writer.releaseOpen()
@@ -210,8 +185,6 @@ import Testing
         #expect(try healthMarker(in: directory)["queue_overflow"] as? Int == 1)
     }
 
-    /// An oversize diagnostic is refused outright and marks the session partial; the next one is
-    /// unaffected.
     @Test func anOversizeDiagnosticIsDroppedAndMarkedWithoutBlockingTheNext() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -231,8 +204,6 @@ import Testing
         #expect(try healthMarker(in: directory)["oversize_record"] as? Int == 1)
     }
 
-    /// A failed debug-log write marks the session partial and leaves later diagnostics working —
-    /// the same best-effort contract every other evidence category is under.
     @Test func aFailedDiagnosticWriteMarksPartialAndLaterLinesStillPersist() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -248,13 +219,10 @@ import Testing
         let log = try debugLog(in: directory)
         #expect(!log.contains("write-fails-for-this-line"))
         #expect(log.contains("write-succeeds-for-this-line"))
-        // Console is ahead of the file on purpose, so a file failure still leaves the line visible.
         #expect(writer.console.contains("write-fails-for-this-line"))
         #expect(try healthMarker(in: directory)["write_failure"] as? Int == 1)
     }
 
-    /// Diagnostics get no priority over audit records and grant none: a diagnostics-heavy session
-    /// that overflows loses whichever records lost the race, and the coaching side is untouched.
     @Test func diagnosticsAndAuditRecordsShareOneUniformLossContract() async throws {
         let directory = ActivityLogTests.tmp()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -287,8 +255,7 @@ import Testing
 
     // MARK: - helpers
 
-    /// The admission `JarvisLog.emit` performs for an attached session, made on the handle itself
-    /// so the process-global attachment stays untouched.
+    /// Admits on the handle, not via `jlog`, so other suites' diagnostics can't skew exact counts.
     private func admit(_ message: String, into evidence: FileSessionAudit) {
         _ = evidence.recordDiagnostic(DiagnosticAuditEvent(message: message))
     }
@@ -309,8 +276,8 @@ import Testing
         #expect(semaphore.wait(timeout: .now() + 10) == .success)
     }
 
-    /// Progress barrier, not a latency assertion: yield until the worker has drained far enough for
-    /// the named line to exist, so the next admission is known to face a free slot.
+    /// A progress barrier, not a latency check: once the line exists, the next admission has a
+    /// slot.
     private func waitForDebugLine(_ needle: String, in directory: URL) async {
         let deadline = ContinuousClock.now.advanced(by: .seconds(10))
         while ContinuousClock.now < deadline {

@@ -1,7 +1,7 @@
 import Foundation
 
-/// State for one bounded temporary-failure incident. Repeated signals may accelerate the next
-/// attempt, but cannot reset its budget; only a successful recovery starts a fresh future incident.
+/// Repeated signals within an incident never restore its budget; only `succeeded()` or `reset()`
+/// do.
 public struct RetryIncident: Sendable {
     public enum FailureAction: Sendable, Equatable {
         case retry(attempt: Int, maximum: Int, delay: TimeInterval)
@@ -24,8 +24,7 @@ public struct RetryIncident: Sendable {
         self.schedule = schedule
     }
 
-    /// Start an incident or join the one already in progress. False means exhaustion or explicit
-    /// teardown already made later signals irrelevant.
+    /// False once exhausted or stopped.
     public mutating func beginOrContinue() -> Bool {
         switch state {
         case .idle:
@@ -39,7 +38,7 @@ public struct RetryIncident: Sendable {
         }
     }
 
-    /// Consume one failure. Exhaustion is emitted exactly once; all later callbacks are ignored.
+    /// Returns `.exhausted` exactly once; later calls return `.ignore`.
     public mutating func failed() -> FailureAction {
         guard state == .active else { return .ignore }
         guard let delay = schedule.delay(forRetry: nextRetry) else {
@@ -50,19 +49,16 @@ public struct RetryIncident: Sendable {
         return .retry(attempt: nextRetry, maximum: schedule.maximumRetries, delay: delay)
     }
 
-    /// A successful rebuild closes the incident and restores a full budget for a later route change.
     public mutating func succeeded() {
         guard state != .stopped else { return }
         state = .idle
         nextRetry = 0
     }
 
-    /// Permanently suppress work retained by callbacks from a capture that has been stopped.
     public mutating func stop() {
         state = .stopped
     }
 
-    /// Prepare a retained owner for a new lifecycle.
     public mutating func reset() {
         state = .idle
         nextRetry = 0

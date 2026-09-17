@@ -1,22 +1,18 @@
 import Foundation
 
-/// The reason a live coaching session ended. This closed set keeps *unclassified* text out of the
-/// lifecycle while still making every terminal transition explicit: a provider-caused end carries
-/// the failure that caused it, and Activity renders that failure's fixed sentence.
+/// A closed set, so unclassified text never enters the lifecycle.
 public enum SessionEndReason: Sendable, Equatable {
     case stoppedByUser
     case applicationQuit
     case replacedByNewSession
-    /// Name kept even though the trigger is now provider-neutral: any missing transcription or
-    /// brain credential, not only OpenAI's.
+    /// Any missing transcription or brain credential, not only OpenAI's.
     case openAIAPIKeyMissing
     case permissionsMissing
     case brainRouteExhausted(last: ProviderFailure)
-    /// Coaching kept failing for `BrainCycleRecovery.ceiling`; carries the most recent failure.
     case brainRecoveryExpired(last: ProviderFailure)
     case transcriptionStopped(failure: ProviderFailure)
     case audioCaptureUnavailable(failure: ProviderFailure)
-    /// Jarvis-authored copy from the error catalog for a stop with no provider behind it.
+    /// Jarvis-authored catalog copy only, never provider text.
     case unexpectedError(detail: String)
 
     var activityMessage: String {
@@ -40,8 +36,7 @@ public enum SessionEndReason: Sendable, Equatable {
         case .audioCaptureUnavailable(let failure):
             "session ended by error — \(failure.activitySentence)"
         case .unexpectedError(let detail):
-            // Catalog copy is Jarvis-authored and already safe; redacting anyway keeps the rule
-            // "nothing reaches a row unredacted" free of exceptions.
+            // Already safe, but redacted anyway so nothing reaches a row unredacted, no exceptions.
             "session ended by error — \(ProviderMessageRedaction.redact(detail))"
         }
     }

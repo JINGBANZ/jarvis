@@ -1,15 +1,11 @@
 import Foundation
 
-/// Disk and Console edge owned exclusively by `SessionAuditWorker`.
-///
-/// Console emission lives here rather than at the `jlog` call site because it is persistence-grade
-/// work: `NSLog` formats, takes a process-wide lock, and writes to the unified log. Behind this
-/// protocol it runs on the worker, and a test can observe it deterministically.
+/// Console emission lives here, not at the `jlog` call site, because `NSLog` takes a process-wide
+/// lock. Behind this protocol it runs on the worker.
 protocol SessionAuditWriting: Sendable {
     func openSession(at directory: URL, initialHealth: Data) throws
     func append(_ data: Data, filename: String, in directory: URL) throws
-    /// Create one owner-only file with exactly these bytes. Used for a screenshot attachment, which
-    /// is written whole rather than appended to.
+    /// Creates one owner-only file with exactly these bytes.
     func write(_ data: Data, filename: String, in directory: URL) throws
     func replaceHealth(_ data: Data, in directory: URL) throws
     func emitToConsole(_ message: String)

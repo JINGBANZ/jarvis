@@ -1,6 +1,5 @@
 import Foundation
 
-/// Provider-neutral attribution for one request inside a coaching attempt.
 public struct CoachingRequestContext: Sendable {
     public let attemptID: Int
     public let trigger: String
@@ -13,7 +12,6 @@ public struct CoachingRequestContext: Sendable {
     }
 }
 
-/// The task-local scope is part of the neutral audit boundary, not a concrete file recorder.
 enum CoachingRequestAttribution {
     @TaskLocal static var current: CoachingRequestContext?
 

@@ -1,29 +1,9 @@
 import Foundation
 
 extension JarvisPrompts {
-    /// The coaching system prompt, all of it, in the order the model reads it:
-    ///
-    /// 1. Identity, context, loading, and the action policy.
-    /// 2. The guidance of each tool offered from the first request. It lives on the tool, in
-    ///    `Coach/Tools/`, so the prompt can never describe a tool this session does not have. `speak`
-    ///    is always offered, so its tip style is always here, and its detail rules when the box is on.
-    /// 3. The tools, then the skills, this session can load.
-    ///
-    /// Domain rules are not here: a coding question's code-block rules are in the `coding` skill and
-    /// a design question's diagram rules in `system-design`, so the model reads them only after it
-    /// loads that skill, instead of every session paying for them in its cached prefix.
-    ///
-    /// What the harness sends later in the conversation lives elsewhere: each tool's result text in
-    /// its file under `Coach/Tools/`, and the per-turn messages in `JarvisPrompts+CoachTurn.swift`.
+    /// Domain rules live in skills (`coding`, `system-design`), not here, so sessions don't pay for
+    /// them in the cached prefix.
     public enum Coach {
-        /// The complete coaching system prompt. `CoachAttemptRunner` assembles it here for every
-        /// request from the session's one capability set, so a session's instructions stay identical
-        /// from its first request to its last, whichever target serves them.
-        ///
-        /// - `capabilities`: the session's switched-on tools and skills, resolved once at Start.
-        ///   Each hot tool contributes its own guidance, each deferred tool and each skill one
-        ///   catalog line, so the prompt describes exactly what this session has — no more, no
-        ///   fewer. A skill's body is never here: it arrives as a `load_skill` result.
         public static func system(capabilities: CoachCapabilities) -> String {
             let deferred = capabilities.deferredTools
             let skills = capabilities.skills
@@ -34,17 +14,12 @@ extension JarvisPrompts {
                 + (skills.isEmpty ? "" : "\n\n" + skillCatalog(skills))
         }
 
-        /// Section 1 alone, as a session with nothing to load sends it: the only place response
-        /// behavior is governed (no code-side guardrail).
         public static var system: String { base(loadableSkills: false, loadableTools: false) }
 
         // MARK: - 1. Identity, context, loading, and action policy
 
-        /// With something to load, a `# Loading` section precedes the action policy. It is its own
-        /// section rather than a numbered item so the policy's numbering is fixed at 1 to 6, whatever
-        /// the session offers, and the loaders are described once instead of in three places. A
-        /// prompt must never name a loader the session does not offer, which is why that text is
-        /// assembled per catalog.
+        /// Loading is its own section so the policy stays numbered 1 to 6, and it names only the
+        /// loaders the session offers.
         private static func base(loadableSkills: Bool, loadableTools: Bool) -> String {
             let loading = loadableSkills || loadableTools
                 ? "\n" + loadingSection(skills: loadableSkills, tools: loadableTools) + "\n"
@@ -96,7 +71,6 @@ extension JarvisPrompts {
             """
         }
 
-        /// The loading section, naming only the loaders present.
         private static func loadingSection(skills: Bool, tools: Bool) -> String {
             let loaders = [
                 skills ? "a skill listed under \"Skills you can load\" with load_skill" : nil,
@@ -115,8 +89,6 @@ extension JarvisPrompts {
 
         // MARK: - 3. What this session can load
 
-        /// One line per entry, its own description verbatim, so the model chooses from the same
-        /// sentence it would read after loading.
         private static func toolCatalog(_ tools: [ToolDef]) -> String {
             ("""
             # Tools you can load

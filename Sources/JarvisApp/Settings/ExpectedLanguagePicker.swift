@@ -1,7 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Compact multi-select control for the expected-language list in Transcription Settings.
 @MainActor
 final class ExpectedLanguagePicker: NSView {
     private var selectedLanguages: [TranscriptionLanguage]

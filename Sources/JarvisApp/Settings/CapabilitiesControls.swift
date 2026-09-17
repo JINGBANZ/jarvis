@@ -1,19 +1,12 @@
 import AppKit
 import JarvisCore
 
-/// The Capabilities card in Brain Settings: what the coach can do, and which parts of it the user
-/// wants offered.
-///
-/// Writes go straight to `preferences.disabledTools` / `preferences.disabledSkills` and nothing
-/// else. A session resolves its capabilities once at Start and builds its instructions and tool set
-/// from that one value, so a mid-session change would contradict what the model was told earlier in
-/// the conversation — which is why this card never calls the reapply path and says so in its header.
+/// Never triggers a live reapply: a session fixes its tools and instructions at Start, so a
+/// mid-session change would contradict what the model was already told.
 @MainActor
 final class CapabilitiesControls: NSObject {
     private let preferences: BrainPreferences
     private let prepMaterialPreferences: PrepMaterialPreferences
-    /// Read once, with the rest of the card's inputs: the same granularity as the Start the
-    /// switches apply at.
     private let skills = SkillCatalog.bundled()
 
     private var card: SettingsCardView?
@@ -24,9 +17,8 @@ final class CapabilitiesControls: NSObject {
             * SettingsStyle.rowHeight
     }
 
-    /// Three always-on tools, prep-notes search, and one row per bundled skill. Read before
-    /// `makeView` runs, when `rows` is still empty, so the card reserves its real height from the
-    /// first layout pass.
+    /// Three always-on tools and prep-notes search, plus one row per skill. Valid before `makeView`
+    /// fills `rows`, so the card reserves its real height from the first layout pass.
     private var rowCount: Int { 4 + skills.count }
 
     init(preferences: BrainPreferences, prepMaterialPreferences: PrepMaterialPreferences) {
@@ -43,10 +35,8 @@ final class CapabilitiesControls: NSObject {
         guard let content = card.contentView else { return card }
 
         rows = []
-        // Names only: `speak` is composed per session, and this card lists what is always on, not
-        // what any one session's schema looks like.
+        // Names only, because `speak` is composed per session.
         for toolName in [captureScreenTool.name, speakToolName, staySilentTool.name] {
-            // A control-less row still needs a control view; the shared row type owns the rhythm.
             let row = SettingsRowView(
                 title: Self.title(for: toolName),
                 detail: "Always on",
@@ -64,22 +54,19 @@ final class CapabilitiesControls: NSObject {
         prepSwitch.action = #selector(prepNotesSearchChanged)
         prepSwitch.setAccessibilityLabel("Prep notes search")
         prepSwitch.identifier = NSUserInterfaceItemIdentifier("capability-search-prep-notes")
-        // Read once, when the card is built: adding a source in Prep material enables the switch
-        // the next time Settings opens, which is the same granularity as the Start it applies at.
+        // Read only when the card is built; a newly added source enables the switch on the next
+        // open.
         let prepRow = SettingsRowView(
             title: Self.title(for: searchPrepNotesTool.name),
             detail: hasPrepSource
                 ? "Loads on demand when a prepared topic comes up"
                 : "Add a prep material source to enable",
             controlView: prepSwitch,
-            // The row stretches its control to `controlWidth`; a switch keeps its own size and sits
-            // at the trailing edge, as the Shortcuts toggles do.
             controlSize: NSSize(width: 44, height: 26),
             showsSeparator: !skills.isEmpty)
         content.addSubview(prepRow)
         rows.append(prepRow)
 
-        // A switched-off skill keeps its row: nothing is hidden, so it can be switched back on.
         for (index, skill) in skills.enumerated() {
             let toggle = NSSwitch()
             toggle.state = preferences.disabledSkills.contains(skill.name) ? .off : .on
@@ -102,7 +89,6 @@ final class CapabilitiesControls: NSObject {
         return card
     }
 
-    /// "system-design" reads as "System design": the skill's own name, in sentence case.
     private static func title(for skill: Skill) -> String {
         skill.name.replacingOccurrences(of: "-", with: " ").prefix(1).uppercased()
             + skill.name.replacingOccurrences(of: "-", with: " ").dropFirst()

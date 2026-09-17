@@ -1,18 +1,13 @@
 import AppKit
 
-/// A borderless icon button that lights up under the pointer, the way window chrome does.
-///
-/// AppKit has no borderless button style that highlights on hover, and the box is a nonactivating
-/// panel, so the highlight is drawn from a tracking area here.
+/// AppKit has no borderless button style that highlights on hover, so a tracking area draws it.
 final class OverlayBoxHeaderButton: NSButton {
     private static let idleTint = NSColor(white: 1, alpha: 0.55)
     private static let hoverTint = NSColor(white: 1, alpha: 1)
     private static let hoverFill = NSColor(white: 1, alpha: 0.14).cgColor
 
     private var symbolName: String
-    /// What the control does, for VoiceOver and for the symbol's accessibility description. It is
-    /// deliberately never a `toolTip`: AppKit draws a tooltip in a window of its own, which does not
-    /// inherit the box's capture exclusion and would put Jarvis on the interviewer's screen share.
+    /// Never a `toolTip`: AppKit draws one in its own window, outside the box's capture exclusion.
     private var label: String = ""
     private var iconPointSize: CGFloat = 16
     private var hoverTracking: NSTrackingArea?
@@ -67,9 +62,7 @@ final class OverlayBoxHeaderButton: NSButton {
 
     override func mouseExited(with event: NSEvent) { clearHover() }
 
-    /// AppKit sends no `mouseExited` to a view that is hidden out from under the pointer, and clearing
-    /// the log hides this button while the pointer is still on it. Without this the hover fill would
-    /// be baked in, and the button would come back looking hovered when the next tip lands.
+    /// AppKit sends no `mouseExited` to a view hidden under the pointer, so clear the hover here.
     override func viewDidHide() {
         super.viewDidHide()
         clearHover()

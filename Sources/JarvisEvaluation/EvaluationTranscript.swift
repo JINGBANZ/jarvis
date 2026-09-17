@@ -1,15 +1,11 @@
 import Foundation
 import JarvisCore
 
-/// Delta-aware rendering of a session's wire traffic for `AgenticEvaluation`. The harness rebuilds
-/// every request as `[system] + history + turn`, so consecutive requests repeat almost all of their
-/// input. Unchanged instructions, tools, and input prefixes are elided and explicitly marked; the
-/// complete un-elided `brain-traffic.jsonl` remains available to the agent for exact counts.
+/// Request content unchanged since the previous call on the same stream is elided with a marker;
+/// the agent still has the full `brain-traffic.jsonl`.
 enum EvaluationTranscript {
 
-    /// Render the recorded traffic as a readable transcript, one block per traffic record, eliding
-    /// request content that is byte-identical to the previous call with the same tag (see the type
-    /// comment). Malformed and pre-request records stay explicit; an empty/blank file renders as "".
+    /// An empty or blank file renders as "".
     static func render(
         jsonl: String,
         attemptsJSONL: String? = nil,
@@ -17,7 +13,6 @@ enum EvaluationTranscript {
         healthJSON: String? = nil
     ) -> String {
         var blocks: [String] = []
-        // Elision state, per logical client and provider/model destination.
         var prevInstructions: [String: String] = [:]
         var prevTools: [String: String] = [:]
         var prevInput: [String: [String]] = [:]
@@ -37,9 +32,7 @@ enum EvaluationTranscript {
                 provider: entry["provider"] as? String, request: request, response: response)
             let isPreRequestFailure = entry["record_kind"] as? String
                 == BrainTrafficAuditEvent.Kind.preRequestFailure.rawValue
-            // A session can fail over while keeping the same logical client tag. Prefix-elision state
-            // must not cross provider/model targets: their wire schemas, cache behavior, and
-            // tool-loop state can differ.
+            // A failover keeps the tag, so elision state is keyed by provider and model too.
             let model = request?["model"] as? String ?? "?"
             let streamKey = "\(tag)\u{1F}\(provider)\u{1F}\(model)"
             var lines: [String] = []
@@ -79,9 +72,6 @@ enum EvaluationTranscript {
             blocks.append(lines.joined(separator: "\n"))
         }
         guard !blocks.isEmpty else { return "" }
-        // Lead with neutral, computed evidence surfaces. They expose what was recorded and preserve
-        // unavailable values without encoding a checklist of incidents the evaluator should find.
-        // Empty traffic still renders "" (callers guard on it).
         let body = blocks.joined(separator: "\n\n")
         let auditEvidence = SessionAuditEvidence.assess(
             trafficJSONL: jsonl,
@@ -118,8 +108,6 @@ enum EvaluationTranscript {
         }
         prevInstructions[streamKey] = instructions
 
-        // Printed in full whenever the array changes, which now includes each on-demand load —
-        // one extra block per loaded tool per session, and the change is the point.
         let tools = canonical(request["tools"] ?? [])
         if tools == prevTools[streamKey] {
             let count = (request["tools"] as? [Any])?.count ?? 0
@@ -151,8 +139,7 @@ enum EvaluationTranscript {
         return lines
     }
 
-    /// Flatten one Responses `input` item to a single labelled line: role messages get their text
-    /// (image parts were already redacted at record time), function calls/results get name + payload.
+    /// Image parts were redacted at record time, so `image_url` holds a placeholder.
     private static func renderInputItem(
         _ item: Any,
         previousCLIText: String?,
@@ -171,10 +158,9 @@ enum EvaluationTranscript {
         case "function_call_output":
             return "tool result: \(dict["output"] as? String ?? "")"
         case "reasoning":
-            // The tool loop replays reasoning items verbatim (opaque ids, possibly a large
-            // `encrypted_content` blob) — no audit signal in the bytes, so stub them like images.
+            // Replayed verbatim with a possibly large `encrypted_content` blob and no audit signal.
             return "assistant reasoning (replayed verbatim — \(compact(dict).count) chars)"
-        // Local CLI coaching records, which sessions recorded before the subscription targets hold: plain content blocks, images already stubbed.
+        // Older CLI-provider records: plain content blocks, images already stubbed.
         case "text":
             let text = dict["text"] as? String ?? ""
             return "text: " + renderCLITextDelta(text, previous: previousCLIText, tag: tag)
@@ -211,8 +197,7 @@ enum EvaluationTranscript {
                 lines.append("  → \(compact(item))")
             }
         }
-        // CLI-provider records carry the reply as one string plus the CLI's own envelope metadata
-        // (usage/duration for claude) instead of a Responses `output` array.
+        // CLI-provider records carry the reply as one string instead of an `output` array.
         let reply = (dict["reply"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         if let reply { lines.append("  → text: \(reply)") }
         if let cli = dict["cli"] {
@@ -222,16 +207,13 @@ enum EvaluationTranscript {
             lines.append("  runtime: \(compact(removingDuplicateReply(runtime, reply: reply)))")
         }
         if let stderr = dict["stderr"] as? String, !stderr.isEmpty { lines.append("  stderr: \(stderr)") }
-        // Usage is the quantitative core of the audit: `input_tokens_details.cached_tokens` vs
-        // `input_tokens` is the prompt-cache hit rate, per call.
         if let usage = dict["usage"] { lines.append("  usage: \(compact(usage))") }
         if let error = dict["error"], !(error is NSNull) { lines.append("  API ERROR: \(compact(error))") }
         return lines
     }
 
-    /// A fresh CLI attempt encodes its entire conversation as one growing text item. Item-level
-    /// prefix elision therefore cannot help. Elide a substantial exact character prefix, preferably
-    /// at a line boundary, and keep an explicit marker pointing to the untouched traffic source.
+    /// A CLI attempt sends its whole conversation as one growing text item, so item-level elision
+    /// can't help; elide a shared character prefix instead.
     private static func renderCLITextDelta(_ text: String, previous: String?, tag: String) -> String {
         guard let previous else { return text }
         var currentIndex = text.startIndex
@@ -268,8 +250,7 @@ enum EvaluationTranscript {
         return dict["text"] as? String
     }
 
-    /// Codex's runtime envelope repeats `response.reply` inside `items`/`itemsView`. Preserve the
-    /// envelope metadata but replace any exact duplicate string with an explicit one-line marker.
+    /// Codex's runtime envelope repeats `response.reply` inside `items`/`itemsView`.
     private static func removingDuplicateReply(_ value: Any, reply: String?) -> Any {
         guard let reply else { return value }
         if let string = value as? String {
@@ -284,7 +265,6 @@ enum EvaluationTranscript {
         return value
     }
 
-    /// Deterministic single-line JSON for both display and prefix comparison.
     private static func canonical(_ value: Any) -> String {
         guard let data = try? JSONSerialization.data(withJSONObject: value,
                                                      options: [.sortedKeys, .fragmentsAllowed])

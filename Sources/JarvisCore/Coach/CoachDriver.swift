@@ -1,30 +1,8 @@
 import Foundation
 
-/// The single-flight coaching scheduler, and the session's public face.
-///
-/// A coaching attempt snapshots exactly one route target and owns that target for its complete tool
-/// loop. Failed provider requests are never replayed inside the attempt. Instead, failed conversation
-/// work stays uncommitted and this scheduler starts a fresh attempt from the latest finalized
-/// transcript plus provider-neutral observations completed earlier.
-///
-/// The state-ownership boundary with `CoachAttemptRunner`, which executes those attempts
-/// (wiki/lean-coaching-core.md, Phase 5):
-///
-/// - **This type owns** trigger coalescing and pending-trigger generations, transcription
-///   settlement, the single-flight handling slot, and forward-only route state — selection,
-///   advance, skip, exhaustion, and the delivery tokens that make a terminal transition land
-///   exactly once. All of it lives under this type's one `stateLock`.
-/// - **The runner owns** one attempt's execution: filler classification, the bounded tool loop, the
-///   `capture_screen` continuation, overlay delivery, history commit, off-path compaction, and
-///   attempt identity.
-///
-/// The interface is one call per attempt — an immutable `AttemptBrain` plus the pending work in, an
-/// `AttemptExecution` out — over the shared `CoachTranscriptLedger`, which is the single datum both
-/// halves read: the committed transcript boundary that makes a late turn-end idempotent. Nothing
-/// new coordinates between them.
-///
-/// `@unchecked Sendable` is justified because mutable scheduler state is guarded by `stateLock`;
-/// the ledger, the runner, and injected adapters are independently synchronized.
+/// Design: wiki/lean-coaching-core.md
+/// @unchecked Sendable: scheduler state is guarded by `stateLock`; the ledger, runner, and adapters
+/// synchronize themselves.
 public final class CoachDriver: @unchecked Sendable {
     public typealias AutomaticAttemptDelay =
         @Sendable (_ consecutiveAutomaticAttempt: Int) async throws -> Void
@@ -32,16 +10,8 @@ public final class CoachDriver: @unchecked Sendable {
     private let transcriptionSettlement = TranscriptionSettlementGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
     private let coachingAttempts: (any CoachingAttemptAuditing)?
-    /// Nil until `installPrepMaterial` lands (or forever, when no source produced usable text).
-    /// Building the index is real I/O (reading files, `textutil` subprocesses), so it happens off to
-    /// the side after Session Start returns rather than blocking it; guarded by `stateLock` and
-    /// snapshotted into each attempt's `AttemptBrain` at selection time, the same way `plan` and
-    /// `configuredRoute` are — an attempt keeps whatever was current when it was selected.
     private var _prepMaterial: (any PrepMaterialSearching)?
-    /// The committed transcript boundary shared with the runner. It only grows, so reading it
-    /// inside this type's lock needs no coordination with the runner's.
     private let ledger = CoachTranscriptLedger()
-    /// The attempt half. One per driver, so history and the compaction lifetime match the session's.
     private let transcript: RollingTranscript
     private var failedTranscriptBoundary: Int?
     private let runner: CoachAttemptRunner
@@ -53,44 +23,35 @@ public final class CoachDriver: @unchecked Sendable {
     private var recoveryDeadlineTask: Task<Void, Never>?
     private var sessionTerminated = false
 
-    /// The control-plane snapshot new attempts run against. Installed at Start and at explicit
-    /// between-attempt boundaries only; an attempt keeps the revision it snapshotted for its whole
-    /// tool loop, so a Settings edit can never change what a turn already started doing.
     private var plan: SessionPlan
     private var routeRevision: UInt = 0
-    /// Advances only when an explicit Settings edit replaces route topology. Credential refreshes
-    /// use `routeRevision` for stale attempt gating but must not supersede committed route health.
+    /// Advances only on an explicit topology edit. Credential refreshes bump `routeRevision` alone,
+    /// so they never supersede committed route health.
     private var routeTopologyRevision: UInt = 0
     private var configuredRoute: ConfiguredBrainRoute
     private var routeSession: BrainRouteSession
-    /// Set after a target exhausts, then consumed when the next constructible target is selected.
-    /// This avoids announcing an unavailable intermediate target as active.
+    /// Consumed when the next constructible target is selected, so an unavailable intermediate
+    /// target is never announced as active.
     private var pendingTransitionOrigin: (target: BrainTarget, failure: ProviderFailure)?
     private var routeIsExhausted = false
-    /// A committed terminal transition owns one delivery token independent of client revisions.
-    /// Same-topology client changes preserve it; an explicit replacement route clears it.
+    /// Delivery token for a committed exhaustion. Same-topology client refreshes keep it; an
+    /// explicit replacement route clears it.
     private var exhaustionDeliveryGeneration: UInt = 0
     private var pendingExhaustionDeliveryGeneration: UInt?
     private var isHandling = false
-    /// Natural triggers coalesce while an attempt or automatic pending-work wait owns the slot.
     private var pendingTrigger: PendingTrigger?
-    /// Monotonic pulse used to race the retry pause against a newly coalesced trigger
-    /// without losing a trigger that lands just before the async waiter is installed.
+    /// Lets the retry pause see a trigger that lands before its async waiter is installed.
     private var pendingTriggerGeneration: UInt = 0
     private var pendingTriggerWaiters: [UUID: CheckedContinuation<Void, Never>] = [:]
 
-    /// A turn-end carries the transcript boundary that caused it. This makes a delayed callback
-    /// idempotent after another admitted attempt already committed the same finalized speech.
+    /// The turn-end's transcript boundary makes a delayed callback idempotent once another attempt
+    /// has committed that speech.
     private struct PendingTrigger {
         let reason: TriggerReason
         let transcriptBoundary: Int?
     }
 
-    // Module-visible only because `BrainSelectionStep` carries one; see the note on the route
-    // delivery types below.
     struct AttemptBrain {
-        /// Frozen with the target: every capture in this attempt, including a `capture_screen`
-        /// continuation, runs against this one revision.
         let plan: SessionPlan
         let routeRevision: UInt
         let routeTopologyRevision: UInt
@@ -99,37 +60,23 @@ public final class CoachDriver: @unchecked Sendable {
         let brain: BrainClient
         let summarizer: BrainClient?
         let onSelected: (@MainActor @Sendable (BrainTarget) -> Void)?
-        /// Snapshotted the same way as `plan`: whatever `installPrepMaterial` had landed at
-        /// selection time, frozen for this attempt's whole tool loop.
         let prepMaterial: (any PrepMaterialSearching)?
     }
 
-
-
-
-    // Module-visible only because `BrainSelectionStep` carries one; see the note below.
+    // Selection-step and delivery types stay module-visible so tests can drive the commit (callback
+    // captured under `stateLock`) and the main-actor delivery as separate phases.
     struct RouteExhaustionDelivery {
         let generation: UInt
         let topologyRevision: UInt
         let target: BrainTarget
         let failure: ProviderFailure
-        /// Captured when exhaustion commits. A later same-topology client refresh must neither
-        /// redirect the already-committed event to a second callback nor suppress this one.
+        /// Captured at commit, so a later same-topology client refresh can neither redirect nor
+        /// suppress this event.
         let callback: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
         var terminalCallback: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)? = nil
         var expiredCallback: (@MainActor @Sendable (ProviderFailure) -> Void)? = nil
     }
 
-    // Committing a route notice and delivering it are deliberately separate phases: the commit
-    // captures the callback under `stateLock`, and the delivery replays that captured callback
-    // after crossing to the main actor, so a client refresh in between can neither drop nor
-    // redirect it. The two phases and their delivery types are module-visible rather than private
-    // so a test can drive them in sequence. Through the public async API they are adjacent within
-    // one task with nothing observable in between, which leaves a test only able to guess when the
-    // commit landed — a race that no amount of waiting closes.
-
-    /// A route-health notice committed under the lock and consumed once after crossing to the main
-    /// actor. Client-only refreshes preserve it; an explicit topology edit supersedes it.
     struct RouteSkipDelivery {
         let topologyRevision: UInt
         let target: BrainTarget
@@ -137,12 +84,10 @@ public final class CoachDriver: @unchecked Sendable {
         let callback: (@MainActor @Sendable (BrainTarget, ProviderFailure) -> Void)?
     }
 
-    /// The paired target transition committed when the next constructible target is selected.
     struct RouteAdvanceDelivery {
         let topologyRevision: UInt
         let previous: BrainTarget
         let current: BrainTarget
-        /// The failure that retired `previous`, so the transition notice can name the cause.
         let failure: ProviderFailure
         let callback: (@MainActor @Sendable (BrainTarget, BrainTarget, ProviderFailure) -> Void)?
     }
@@ -156,10 +101,6 @@ public final class CoachDriver: @unchecked Sendable {
         var alreadyExhausted = false
     }
 
-    /// The human-facing evidence port. The kernel names only the port and the closed
-    /// `ActivityEvent` vocabulary; the concrete persistence behind it is composed at the App edge
-    /// (wiki/lean-coaching-core.md, Phase 2). Absent means this session shows no Activity — which,
-    /// like every other optional-evidence state, cannot change a coaching outcome.
     private let activity: (any ActivityEventRecording)?
 
     public init(
@@ -198,7 +139,6 @@ public final class CoachDriver: @unchecked Sendable {
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
-            // The one set resolved at Start; see `CoachCapabilities`.
             capabilities: capabilities)
     }
 
@@ -206,28 +146,21 @@ public final class CoachDriver: @unchecked Sendable {
         try await Task.sleep(for: .milliseconds(500))
     }
 
-    /// Install a fresh control-plane revision for the next attempt. This is the declared
-    /// between-attempt boundary: an attempt already running keeps the revision it snapshotted, so a
-    /// Settings edit never takes effect mid-turn. Runtime health never calls this — only an explicit
-    /// user edit does, and it never rewrites the persisted preference either.
+    /// Takes effect at the next attempt; an attempt in flight keeps the plan it snapshotted.
     public func updatePlan(_ plan: SessionPlan) {
         stateLock.lock()
         self.plan = SessionPlan(revision: plan.revision, screen: plan.screen)
         stateLock.unlock()
     }
 
-    /// Installs the prep-material search port once its index finishes building. The session already
-    /// offers `search_prep_notes` if its sources were configured at Start, so a search that fires
-    /// before this lands returns no matches for that attempt — no gate waits for it, matching
-    /// "coaching always continues," and the offered set never changes mid-session (#273).
+    /// Takes effect at the next attempt. Nothing waits for it; a search before then finds no notes.
     public func installPrepMaterial(_ port: (any PrepMaterialSearching)?) {
         stateLock.lock()
         _prepMaterial = port
         stateLock.unlock()
     }
 
-    /// A valid explicit Settings edit installs a fresh route for the next attempt. It never rolls
-    /// back to the old route and never mutates the persisted preference in response to runtime health.
+    /// Installs a new route topology for the next attempt and resets route health.
     public func updateBrainRoute(_ route: ConfiguredBrainRoute) {
         stateLock.lock()
         routeRevision &+= 1
@@ -241,14 +174,8 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.unlock()
     }
 
-    /// Refresh credential-bound clients for the same ordered route without changing session-local
-    /// health.
-    ///
-    /// An in-flight attempt keeps its old client snapshot. Its failure is ignored because it belongs
-    /// to the superseded credential, while its terminal success still resets route health. The next
-    /// attempt uses replacement clients at the same forward-only cursor and failure count. When
-    /// `providers` is supplied, clients for every other provider stay intact and an in-flight
-    /// attempt on one of those providers keeps normal success/failure accounting.
+    /// Swaps clients for `providers` (all when nil), keeping route health. A refreshed in-flight
+    /// attempt's failure is ignored but its success counts. Returns false if the targets differ.
     @discardableResult
     public func refreshBrainRouteClients(
         _ route: ConfiguredBrainRoute,
@@ -292,12 +219,8 @@ public final class CoachDriver: @unchecked Sendable {
         return true
     }
 
-    /// Reconfigure clients for a non-topology Settings edit without changing route health or
-    /// invalidating the attempt already in flight.
-    ///
-    /// Reasoning-effort changes use this boundary. The current attempt remains a valid attempt on
-    /// the same target: its terminal success resets the failure sequence and its failure counts
-    /// normally. Only a target identity/order change belongs to `updateBrainRoute(_:)`.
+    /// Swaps clients for a non-topology edit (e.g. reasoning effort). The in-flight attempt stays
+    /// valid and its result counts normally. Returns false if the targets differ.
     @discardableResult
     public func reconfigureBrainRouteClients(_ route: ConfiguredBrainRoute) -> Bool {
         stateLock.lock()
@@ -323,27 +246,19 @@ public final class CoachDriver: @unchecked Sendable {
         return true
     }
 
-    /// Cancel background work that must not outlive the session, handing back the task so teardown
-    /// can drain it before sealing the audit.
-    ///
-    /// Compaction runs off the attempt path, so `TurnTaskBox` does not own it. Without this a
-    /// summary keeps a provider process alive and billing after Stop, and can still be writing when
-    /// the session audit closes. The runner owns that lifecycle; this is the session's handle on it.
+    /// Returns the cancelled compaction task so teardown can drain it before sealing the audit.
     @discardableResult
     public func cancelBackgroundWork() -> Task<Void, Never>? {
         stateLock.withLock { recoveryDeadlineTask?.cancel(); recoveryDeadlineTask = nil }
         return runner.cancelBackgroundWork()
     }
 
-    /// Provider state feeds both speakers into one aggregate gate. `hasPendingWork` means the provider
-    /// still owns speech or transcript work, not merely that the audio waveform is non-silent.
+    /// `hasPendingWork` means the provider still owns speech or transcript work, not merely that
+    /// the audio is non-silent.
     public func updateTranscriptionWork(_ hasPendingWork: Bool, for speaker: Speaker) {
         transcriptionSettlement.setUnsettled(hasPendingWork, for: speaker)
     }
 
-    /// Admit one attempt only after both transcription streams are settled. Every automatic path
-    /// reaches this boundary: the first trigger, a trigger queued behind an in-flight model call,
-    /// and a pending-work retry. A manual hint is the explicit immediate exception.
     private func waitForTranscriptionSettlement(
         before work: CoachAttemptRunner.PendingCoachingWork
     ) async -> CoachAttemptRunner.PendingCoachingWork {
@@ -405,15 +320,12 @@ public final class CoachDriver: @unchecked Sendable {
             stateLock.unlock()
             waiters.forEach { $0.resume() }
             if trigger.reason.isManual {
-                // A hint arriving after an automatic attempt has parked on unsettled speech must
-                // wake that exact pending attempt. The trigger stays queued until the fresh-attempt
-                // boundary consumes it together with the newest transcript.
+                // Wake an automatic attempt parked on unsettled speech; the trigger stays queued.
                 transcriptionSettlement.interruptWaiters()
             }
             return .pending
         }
-        // A failed cycle does not poison the next one. Successful fallback selection remains
-        // sticky; after exhausting the whole route, a new cycle starts at the primary again.
+        // Fallback selection stays sticky; only a fully exhausted route restarts at the primary.
         if routeIsExhausted {
             routeSession = BrainRouteSession(targetCount: configuredRoute.targets.count)
             routeIsExhausted = false
@@ -433,11 +345,8 @@ public final class CoachDriver: @unchecked Sendable {
         _ existing: TriggerReason?,
         with incoming: TriggerReason
     ) -> TriggerReason {
-        // Manual intent survives natural wakes; the latest explicit request chooses the help kind.
         if incoming.isManual { return incoming }
         if let existing, existing.isManual { return existing }
-        // For natural wakes, the latest reason best describes the transcript snapshot the next
-        // attempt will actually see (for example, turn-end supersedes an older silence wake).
         return incoming
     }
 
@@ -450,8 +359,8 @@ public final class CoachDriver: @unchecked Sendable {
         let boundary: Int?
         if reason == .turnEnd {
             let turnEnds = [existing, incoming].filter { $0.reason == .turnEnd }
-            // A legacy/provider-less turn has no identity and must stay conservative when mixed
-            // with identified turns; only fully identified callbacks are safe to suppress.
+            // A turn-end without a boundary can't be proven covered, so the merge keeps no
+            // boundary.
             boundary = turnEnds.allSatisfy { $0.transcriptBoundary != nil }
                 ? turnEnds.compactMap(\.transcriptBoundary).max()
                 : nil
@@ -467,8 +376,8 @@ public final class CoachDriver: @unchecked Sendable {
             && trigger.transcriptBoundary.map { $0 <= ledger.committedCount } == true
     }
 
-    /// Atomically take a coalesced trigger and the pulse generation at the same boundary. A later
-    /// generation can then wake the retry pause even if it arrives before the waiter is registered.
+    /// Takes trigger and generation in one step, so a trigger landing before the waiter registers
+    /// still wakes it.
     private func takePendingTriggerSnapshot() -> (trigger: PendingTrigger?, generation: UInt) {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -518,8 +427,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    /// Atomically take the next trigger or release the slot. A trigger arriving at the completion
-    /// boundary can therefore never be orphaned.
+    /// Take-or-release is one locked step, so a trigger arriving at completion is never orphaned.
     private func finishOrTakeNextTrigger() -> PendingTrigger? {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -535,7 +443,7 @@ public final class CoachDriver: @unchecked Sendable {
         return nil
     }
 
-    /// Only input not included in the final failed attempt can start another cycle immediately.
+    /// Only input the failed attempt did not include may start another cycle immediately.
     private func finishFailedCycle(unattemptedManualReason: TriggerReason? = nil) -> TriggerReason? {
         stateLock.lock()
         defer { stateLock.unlock() }
@@ -564,8 +472,6 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.unlock()
     }
 
-    /// Skip preflight-proven unavailable targets and return the next constructible target. Route
-    /// transition callbacks run after the lock is released.
     private func selectBrainForAttempt() async -> AttemptBrain? {
         while true {
             let step = takeBrainSelectionStep()
@@ -617,7 +523,6 @@ public final class CoachDriver: @unchecked Sendable {
                 pendingTransitionOrigin = nil
             }
             step.selected = AttemptBrain(
-                // Snapshotted under the same lock as the target: one attempt, one revision.
                 plan: plan,
                 routeRevision: routeRevision,
                 routeTopologyRevision: routeTopologyRevision,
@@ -680,7 +585,6 @@ public final class CoachDriver: @unchecked Sendable {
         transcriptBoundary: Int
     ) async -> RouteFailureAction {
         let record = applyAttemptFailure(failure, on: attempt, transcriptBoundary: transcriptBoundary)
-        // Targets remain reusable by the next cycle; their owners release them at session teardown.
         if let exhaustion = record.exhaustion {
             return await deliverRouteExhaustion(exhaustion)
                 ? record.action
@@ -736,8 +640,7 @@ public final class CoachDriver: @unchecked Sendable {
 
     private func recordAttemptSuccess(on attempt: AttemptBrain) {
         stateLock.lock()
-        // A committed hint or silence is session progress even if Settings replaced the route
-        // while its snapshotted attempt was running. Only cursor health belongs to that topology.
+        // Recovery counts success on any topology; cursor health only on the attempt's own.
         recovery.succeed()
         recoveryDeadlineTask?.cancel()
         recoveryDeadlineTask = nil
@@ -749,8 +652,6 @@ public final class CoachDriver: @unchecked Sendable {
         stateLock.unlock()
     }
 
-    /// Successful committed coaching clears session failure status; stale failures never change
-    /// the replacement route's status or cursor.
     private func reportBrainRecovery(_ provider: BrainProvider?, on attempt: AttemptBrain) async {
         await MainActor.run {
             let callback = stateLock.withLock {
@@ -765,10 +666,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    /// Deliver one committed terminal transition exactly once.
-    ///
-    /// Client-only refreshes intentionally do not invalidate this token. An explicit route update
-    /// clears it before this main-actor boundary and therefore supersedes the old terminal event.
+    /// Delivers at most once per generation token; an explicit route update clears the token first.
     private func deliverRouteExhaustion(_ delivery: RouteExhaustionDelivery) async -> Bool {
         await MainActor.run {
             stateLock.lock()
@@ -805,9 +703,7 @@ public final class CoachDriver: @unchecked Sendable {
                 }
             }
 
-            // A callback may synchronously install an explicit replacement route. That edit
-            // supersedes terminal teardown and preserves pending work on the new topology. A
-            // same-topology client refresh does not change this revision.
+            // A callback may synchronously install a replacement route, which supersedes teardown.
             stateLock.lock()
             let remainsTerminal = routeIsExhausted
                 && routeTopologyRevision == delivery.topologyRevision
@@ -816,8 +712,8 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    // Keep self weak while sleeping and cancel explicitly on success/teardown. Constructing this
-    // task inside the nested MainActor delivery closure triggers a Swift 6.3 task-allocation trap.
+    // Weak self while sleeping; cancelled explicitly on success and teardown. Building this task
+    // inline in the nested MainActor delivery closure hits a Swift 6.3 task-allocation trap.
     private func makeRecoveryDeadlineTask(after seconds: TimeInterval) -> Task<Void, Never> {
         let delay = recoveryDelay
         return Task.detached { [weak self] in
@@ -827,8 +723,7 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
-    /// The deadline task is created by the streak's first failed cycle, so it reads the streak's
-    /// latest failure when it fires rather than the one it was created with.
+    /// Reads the streak's latest failure at fire time, not the one the task was created with.
     private func terminateExpiredRecovery() async {
         await MainActor.run {
             let expiry = stateLock.withLock {
@@ -919,7 +814,6 @@ public final class CoachDriver: @unchecked Sendable {
 
         var work = CoachAttemptRunner.PendingCoachingWork(reason: reason)
         var automaticSequence = 0
-        // A queued shortcut may be consumed before selection discovers an unavailable route tail.
         var unattemptedManualReason: TriggerReason?
         var latestOutcome: TurnOutcome = .silentByModel
 
@@ -1029,8 +923,7 @@ public final class CoachDriver: @unchecked Sendable {
                 work = failedWork
                 automaticSequence += 1
 
-                // A natural trigger and the automatic wake are the same pending attempt. Without a
-                // natural wake, use a bounded delay so a quiet provider outage cannot spin.
+                // Without a natural wake, a bounded delay keeps a quiet outage from spinning.
                 if wake.trigger == nil && !routeChanged {
                     await waitForAutomaticWakeOrDelay(
                         sequence: automaticSequence,
@@ -1041,9 +934,8 @@ public final class CoachDriver: @unchecked Sendable {
                     return .cancelled
                 }
 
-                // A trigger may arrive while the delay is sleeping. Consume it before the shared
-                // admission boundary so an explicit shortcut keeps its manual semantics: no
-                // settlement wait, and an attempt that always ends in a hint.
+                // Consume a trigger that arrived during the delay here, so a shortcut keeps its
+                // manual semantics (no settlement wait) at the admission boundary.
                 wake = takePendingTriggerSnapshot()
                 if let reason = wake.trigger?.reason {
                     receivedTrigger = true
@@ -1062,8 +954,6 @@ public final class CoachDriver: @unchecked Sendable {
 
 }
 
-/// Observable outcome of the trigger-coordination call. Provider failures may lead to more than one
-/// fresh attempt before this call returns; every attempt still owns exactly one target.
 public enum TurnOutcome: Sendable, Equatable {
     case spoke
     case silentByModel

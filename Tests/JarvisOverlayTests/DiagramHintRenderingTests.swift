@@ -23,8 +23,6 @@ import Testing
         #expect(drawing.image != nil)
         #expect(panel.currentSharingType == .none)
 
-        // The Settings sample only stands in while stopped: during a session the box is already on
-        // screen carrying the real log, which is a better preview than sample text.
         panel.setSessionLive(false)
         #expect(panel.currentDetail == nil, "Stop resets the detail box")
         panel.clear()
@@ -46,7 +44,6 @@ import Testing
         #expect(abs(short.size.width / short.size.height - large.size.width / large.size.height) < 0.01)
     }
 
-    /// A graph the renderer refuses leaves the hint and the rest of the document intact.
     @MainActor @Test func anUnsupportedGraphKeepsTheRestOfTheDocument() async throws {
         let panel = OverlayBoxPanel()
         panel.setEnabled(true)
@@ -90,9 +87,6 @@ import Testing
         #expect(abs(after.width / after.height - before.width / before.height) < 0.01)
     }
 
-    /// The graph scales into the space the box gives it, so a drag on whichever edge is binding
-    /// grows it. Sizing it from the width alone left a tall graph fixed however tall the box was
-    /// dragged, which is not what the pinned diagram area did.
     @MainActor @Test func aVerticalDragGrowsATallGraph() throws {
         let (panel, drawing) = try makeDiagramPanel(
             "flowchart TD\nA[Client] --> B[API]\nB --> C[Database]",
@@ -106,8 +100,6 @@ import Testing
         #expect(abs(taller.width / taller.height - start.width / start.height) < 0.01)
     }
 
-    /// A wide graph in a narrow box is bound by width, so the horizontal drag is the one that moves
-    /// it. That is the proportional fit working, not the sizing bug above.
     @MainActor @Test func aHorizontalDragGrowsAWideGraph() throws {
         let (panel, drawing) = try makeDiagramPanel(
             "flowchart LR\nA[Client] --> B[API]\nB --> C[Database]",
@@ -121,7 +113,6 @@ import Testing
         #expect(abs(wider.width / wider.height - start.width / start.height) < 0.01)
     }
 
-    /// A panel showing one diagram, and the image view drawing it.
     @MainActor private func makeDiagramPanel(
         _ source: String, size: NSSize
     ) throws -> (OverlayBoxPanel, NSImageView) {
@@ -147,9 +138,8 @@ import Testing
         let image = DiagramHintImage.render(graph, fitting: NSSize(width: 500, height: 800))
         let data = try #require(image.tiffRepresentation)
         let bitmap = try #require(NSBitmapImageRep(data: data))
-        // The outside lane is 12 points from the right edge of the 244-point natural layout. At the image's middle row, the
-        // ordinary A→B→C route and the Cache box are centered, leaving this lane transparent
-        // unless the direct A→C connection is routed around Cache.
+        // The bypass lane sits 12pt inside the right edge of the 244pt natural layout. At the
+        // middle row it is transparent unless A→C routes around Cache.
         let x = Int((1 - 12.0 / 244.0) * Double(bitmap.pixelsWide))
         let y = bitmap.pixelsHigh / 2
         #expect((bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5)
@@ -165,7 +155,7 @@ import Testing
         #expect(abs(small.size.height * 2 - image.size.height) < 0.01)
         let data = try #require(image.tiffRepresentation)
         let bitmap = try #require(NSBitmapImageRep(data: data))
-        // An empty/transparent attachment would still have dimensions and an object marker.
+        // A blank image still has dimensions, so count painted pixels.
         var painted = 0
         for y in stride(from: 0, to: bitmap.pixelsHigh, by: 8) {
             for x in stride(from: 0, to: bitmap.pixelsWide, by: 8) {

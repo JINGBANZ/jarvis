@@ -3,9 +3,7 @@ import Foundation
 @testable import JarvisBrainProviders
 import JarvisCore
 
-// Every case owns a real subprocess, pipe drains, and watchdog signals. Running all runner stress
-// cases together only floods that shared OS boundary and can starve unrelated process integration;
-// Swift Testing still runs all non-process suites in parallel.
+// Serialized: concurrent real subprocesses and watchdog signals starve unrelated process tests.
 @Suite(.serialized) struct AgentCLIProcessRunnerTests {
     @Test func capturesStdinFedStdoutStderrAndExitCode() async throws {
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
@@ -20,8 +18,6 @@ import JarvisCore
     }
 
     @Test func cancellingTheTaskKillsTheProcessPromptly() async {
-        // Stop pressed mid-turn: the subprocess must die now (SIGTERM, SIGKILL 2s later), not run
-        // out its full timeout burning the user's quota.
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sleep"),
                               arguments: ["30"], stdin: nil,
                               workingDirectory: FileManager.default.temporaryDirectory,
@@ -32,7 +28,7 @@ import JarvisCore
         #expect(await waitUntil { timings.instant(.processLaunched) != nil })
         task.cancel()
         let result = await task.result
-        #expect(Date().timeIntervalSince(started) < 15)   // nowhere near sleep's 30s or the 60s timeout
+        #expect(Date().timeIntervalSince(started) < 15)   // SIGKILL follows SIGTERM by 2s; sleep runs 30s
         guard case .failure(let error) = result else {
             Issue.record("expected a throw, got \(result)"); return
         }
@@ -40,9 +36,6 @@ import JarvisCore
     }
 
     @Test func stampsPhaseTimingsInMonotonicOrder() async throws {
-        // The fixture controls the two boundaries the runner can't otherwise observe deterministically:
-        // it sleeps, emits its first stdout byte, sleeps again, then exits — so first-output and exit
-        // are separated by real, measurable gaps.
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
                               arguments: ["-c", "sleep 0.2; echo ready; sleep 0.2; exit 0"],
                               stdin: "hi",
@@ -57,21 +50,18 @@ import JarvisCore
         let stdin = try #require(timings.instant(.stdinDelivered))
         let firstOut = try #require(timings.instant(.firstStdoutByte))
         let exited = try #require(timings.instant(.processExited))
-        // Monotonic, in boundary order.
         #expect(entered <= launched)
         #expect(launched <= stdin)
         #expect(stdin <= firstOut)
         #expect(firstOut <= exited)
-        // The two 0.2s sleeps land as real gaps (allow slack for scheduling jitter).
-        #expect(firstOut - launched >= 150_000_000)   // ~0.2s before the first output byte
-        #expect(exited - firstOut >= 150_000_000)      // ~0.2s more before exit
-        // replyParsed is a client-side boundary — the runner never stamps it.
+        // 150ms, not the fixture's 200ms sleeps, to absorb scheduling jitter.
+        #expect(firstOut - launched >= 150_000_000)
+        #expect(exited - firstOut >= 150_000_000)
+        // replyParsed is a client-side boundary the runner never stamps.
         #expect(timings.instant(.replyParsed) == nil)
     }
 
     @Test func firstStdoutByteStaysUnobservedWithoutStdout() async throws {
-        // A run that writes only stderr must leave firstStdoutByte unrecorded (later omitted, not
-        // reported as a zero-length time-to-first-output).
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
                               arguments: ["-c", "echo diag 1>&2; exit 0"], stdin: nil,
                               workingDirectory: FileManager.default.temporaryDirectory,
@@ -84,8 +74,8 @@ import JarvisCore
     }
 
     @Test func shortLivedStdoutIsOrderedBeforeProcessExit() async throws {
-        // A child can write and exit before FileHandle schedules its readability callback. Repeat
-        // the smallest such process so captured stdout never produces a reversed or missing phase.
+        // A child can write and exit before FileHandle schedules its readability callback; repeat
+        // to hit it.
         for _ in 0..<20 {
             let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
                                   arguments: ["-c", "printf ready"], stdin: nil,
@@ -119,8 +109,7 @@ import JarvisCore
     }
 
     @Test func failedStdinWriteDoesNotClaimPromptDelivery() async throws {
-        // Close the child's read end immediately, then make the prompt exceed the pipe buffer so
-        // the parent observes EPIPE instead of reporting delivery from a swallowed write error.
+        // The child closes stdin and the prompt exceeds the pipe buffer, so the write hits EPIPE.
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
                               arguments: ["-c", "exec 0<&-; sleep 0.1; exit 2"],
                               stdin: String(repeating: "x", count: 1_000_000),
@@ -135,7 +124,6 @@ import JarvisCore
     }
 
     @Test func timeoutRetainsPhasesUpToProcessExit() async {
-        // The phases observed before the watchdog kill must survive the timeout throw.
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
                               arguments: ["-c", "echo started; exec /bin/sleep 30"], stdin: nil,
                               workingDirectory: FileManager.default.temporaryDirectory,
@@ -143,12 +131,11 @@ import JarvisCore
         let timings = AgentCLIPhaseTimings()
         _ = try? await AgentCLIProcessRunner.run(run, timings: timings)
         #expect(timings.instant(.processLaunched) != nil)
-        #expect(timings.instant(.firstStdoutByte) != nil)   // "started" arrived before the stall
-        #expect(timings.instant(.processExited) != nil)      // the kill lets waitUntilExit return
+        #expect(timings.instant(.firstStdoutByte) != nil)
+        #expect(timings.instant(.processExited) != nil)
     }
 
     @Test func cancellationRetainsPhasesObservedBeforeTheKill() async {
-        // Stop pressed mid-turn: the recorder still holds every phase completed before the kill.
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sleep"),
                               arguments: ["30"], stdin: nil,
                               workingDirectory: FileManager.default.temporaryDirectory,
@@ -159,13 +146,12 @@ import JarvisCore
         task.cancel()
         _ = await task.result
         #expect(timings.instant(.processLaunched) != nil)
-        #expect(timings.instant(.processExited) != nil)    // killed → waitUntilExit returns
-        #expect(timings.instant(.firstStdoutByte) == nil)   // sleep never writes stdout
+        #expect(timings.instant(.processExited) != nil)
+        #expect(timings.instant(.firstStdoutByte) == nil)
     }
 
     @Test func hungProcessIsTerminatedAtTimeout() async {
-        // `exec` replaces the shell instead of forking sleep, so the timeout tests the watchdog and
-        // also proves partial provider diagnostics survive into the reported error.
+        // `exec` so the watchdog kills sleep itself rather than a parent shell.
         let run = AgentCLIRun(executable: URL(fileURLWithPath: "/bin/sh"),
                               arguments: ["-c", "echo startup-stalled 1>&2; exec /bin/sleep 30"],
                               stdin: nil,

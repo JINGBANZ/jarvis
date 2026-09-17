@@ -2,8 +2,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct BrainProviderTests {
-    /// Only Claude Code can neither force nor narrow a call, and rejects disabled
-    /// reasoning; every other provider's request bodies keep provider-enforced choices.
+    /// Claude Code can neither force nor narrow a tool call, and rejects disabled reasoning.
     @Test func onlyTheClaudeSubscriptionFiltersToolsAndFloorsReasoning() {
         for provider in BrainProvider.allCases {
             #expect(provider.toolChoicePolicy

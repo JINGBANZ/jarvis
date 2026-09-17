@@ -2,9 +2,6 @@ import AppKit
 import JarvisBrainProviders
 import JarvisCore
 
-/// The Subscriptions card in Connections: one row per subscription target, signed in and out
-/// through the helper bundled in Jarvis.app. A row reads the helper's state, its credential files,
-/// and one model-list probe per refresh, so what it says is what a Start would find.
 @MainActor
 final class SubscriptionControls: NSObject {
     static let providers: [BrainProvider] = [.codexSubscription, .claudeSubscription]
@@ -23,13 +20,10 @@ final class SubscriptionControls: NSObject {
     private var readiness: LocalProxySupervisor.Readiness?
     private var refreshTask: Task<Void, Never>?
     private var signIns: [BrainProvider: Task<Void, Never>] = [:]
-    /// The last failed action's row detail, in that action's own words. Pressing either button
-    /// clears it, so a message never outlives the state it described.
     private var actionFailures: [BrainProvider: String] = [:]
-    /// Called whenever a row changes, so the page badge can recount.
     var onStatusChanged: (() -> Void)?
 
-    /// Subscriptions the last probe proved signed in; nil before the first probe answers.
+    /// Subscriptions the last probe proved signed in; `nil` before the first probe answers.
     var signedIn: Set<BrainProvider>? {
         switch readiness {
         case .ready(_, let signedIn): signedIn
@@ -97,14 +91,13 @@ final class SubscriptionControls: NSObject {
         return card
     }
 
-    /// Probe again: the helper starts if it is not running, which is also how a stopped helper is
-    /// retried.
+    /// Also starts the helper if it isn't running, which is how a stopped helper is retried.
     func refresh() {
         guard refreshTask == nil else { return }
         refreshTask = Task { [weak self, supervisor] in
             let readiness = await supervisor.readiness()
-            // A sign-out or a sign-in that finished while this probe was in flight already cleared
-            // the state and started its own; a stale answer would paint over it.
+            // A sign-in or sign-out that finished meanwhile cleared this task and started its own
+            // probe; this stale answer must not paint over it.
             guard !Task.isCancelled, let self, refreshTask != nil else { return }
             self.readiness = readiness
             refreshTask = nil
@@ -115,9 +108,8 @@ final class SubscriptionControls: NSObject {
     func windowWillClose() {
         refreshTask?.cancel()
         refreshTask = nil
-        // A sign-in outlives this window. Cancelling it here would signal the login holding the
-        // OAuth callback port, so the browser's redirect would land on nothing and the row would
-        // read "Signed out" for a sign-in the user never cancelled. Cancel ends it, and so does Quit.
+        // Sign-ins outlive the window on purpose: cancelling one signals the login holding the
+        // OAuth callback port, so the browser's redirect would land on nothing.
     }
 
     @objc private func buttonPressed(_ sender: NSButton) {
@@ -161,8 +153,8 @@ final class SubscriptionControls: NSObject {
                 actionFailures[provider] = "Sign-in failed: \(ProviderMessageRedaction.redact(failure))"
             }
             readiness = nil
-            // A probe started before this sign-in describes the state it replaced, and `refresh()`
-            // would otherwise decline to start a new one while that stale task still holds the gate.
+            // A probe started before this sign-in is stale, and while it holds the gate `refresh()`
+            // won't start a new one.
             refreshTask?.cancel()
             refreshTask = nil
             render()
@@ -176,14 +168,13 @@ final class SubscriptionControls: NSObject {
         do {
             try supervisor.signOut(provider)
         } catch {
-            // Its own verb: this read "Sign-in failed" for a sign-out. The message quotes the
-            // credential's path, which carries the account's address, so it takes the same
-            // redaction the sign-in message does.
+            // Redacted: the message quotes the credential's path, which contains the account's
+            // email.
             actionFailures[provider] = "Sign-out failed: "
                 + ProviderMessageRedaction.redact(error.localizedDescription)
         }
         readiness = nil
-        // The credential is gone; a probe still in flight answers for the account that had it.
+        // A probe still in flight answers for the credential just removed.
         refreshTask?.cancel()
         refreshTask = nil
         render()
@@ -232,8 +223,6 @@ final class SubscriptionControls: NSObject {
         }
     }
 
-    /// A row's title names the coding tool; the sign-in asks for the consumer account that pays for
-    /// it, and the two names differ. A signed-in row says who is signed in instead.
     private static func accountHint(_ provider: BrainProvider) -> String {
         provider == .codexSubscription
             ? "Signs in with your ChatGPT account"

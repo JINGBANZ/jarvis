@@ -1,8 +1,5 @@
 import Foundation
 
-// The messages the harness adds to a coaching conversation as it goes: new speech, the trigger that
-// starts a turn, the summary that replaces condensed history, and the answers to a reply the runner
-// could not run as sent. Tool results live with their tool in `Coach/Tools/`.
 extension JarvisPrompts.Coach {
     static func newSpeech(_ text: String) -> String {
         "New since last turn:\n\(text)"
@@ -18,16 +15,13 @@ extension JarvisPrompts.Coach {
             + "and the recent transcript."
     }
 
-    // Each press says what the user wants, once. How to answer it is the speak guidance's job, and
-    // the domain rules are the loaded skill's, so a trigger that restated them would be a third
-    // copy to keep in step.
+    // A press says only what the user wants; how to answer belongs to the speak guidance and
+    // skills.
     static func manualExplanationTrigger(timestamp: String) -> String {
         "[\(timestamp)] The user pressed Explain more. They don't follow the question, an earlier "
             + "hint, or the approach. Explain that gap in detail, with a short summary in lines."
     }
 
-    /// The skill a Show code press preloads. Its body carries the code-block rules, so the press
-    /// still answers in one round trip.
     static let showCodeSkillName = "coding"
 
     static func manualCodeTrigger(timestamp: String) -> String {
@@ -35,8 +29,6 @@ extension JarvisPrompts.Coach {
             + "sticking point to detail, at most \(CodeBlock.lineLimit) lines."
     }
 
-    /// The answer to a press that replied in plain text. It names `detail` only where the session
-    /// declared one, so a boxless session is never told about a field it does not have.
     static func replyMustCallSpeak(detailEnabled: Bool) -> String {
         "Plain text is not an answer here. Call the speak tool: the short lines are shown to the "
             + (detailEnabled ? "user, and anything longer goes in detail." : "user.")

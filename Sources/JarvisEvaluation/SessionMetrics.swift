@@ -2,28 +2,9 @@ import Foundation
 import JarvisCore
 import JarvisBrainProviders
 
-/// Pure-Swift accounting of a session's provider traffic. It gives the evaluator normalized per-call
-/// and aggregate latency, token, cache, and cost telemetry without deciding whether any value is good
-/// or bad. Missing telemetry stays unavailable — it is never converted to zero or omitted from a
-/// partial total.
-///
-/// Provider records are handled separately because the same session file can mix them:
-///   - **OpenAI Responses** (every current target, the subscriptions included) — `response.usage`: `input_tokens`, `input_tokens_details.cached_tokens`
-///     (the automatic prefix-cache hit), optional `cache_write_tokens`, and `output_tokens`
-///     (reasoning tokens included). No per-call dollar cost is recorded, so cost renders as "—".
-///   - **Claude Code warm query** (sessions recorded before the subscription targets) —
-///     `response.cli`: `total_cost_usd`, a call-level `usage` with Anthropic's `cache_creation_input_tokens` / `cache_read_input_tokens` split, and
-///     a `modelUsage` map that breaks usage + cost out per model — including the CLI's own internal
-///     sidecar models (e.g. its haiku pass), which the call-level `usage` alone would hide.
-///   - **Codex app-server** (sessions recorded before the subscription targets) — the response record has no token, cache, or cost usage, so those
-///     values remain unavailable rather than becoming zero.
-///   - **Codex one-shot `exec`** (those sessions' summarizer) — `response.runtime.usage`, in Codex's own key
-///     names: `input_tokens` (cached input included), `cached_input_tokens`,
-///     `cache_write_input_tokens`, and `output_tokens` (reasoning output included). No cost.
-///     Which Codex transport served a call is read from the request record's `runtime` name.
+/// Missing telemetry stays unavailable: never zero, and never dropped from a partial total.
 enum SessionMetrics {
-    /// One row of the per-call table. `perModel` attributes this call's usage to the concrete
-    /// model(s) that served it (a CLI turn can touch a main model plus a sidecar).
+    /// `perModel` can include a CLI turn's sidecar models besides the requested one.
     struct Call {
         let number: Int
         let tag: String
@@ -40,7 +21,6 @@ enum SessionMetrics {
         var perModel: [String: ModelTotals] = [:]
     }
 
-    /// Accumulated usage for one model, across one or many calls.
     struct ModelTotals {
         var input: Int?
         var cacheRead: Int?
@@ -65,9 +45,8 @@ enum SessionMetrics {
 
     // MARK: - Rendering
 
-    /// The provider telemetry block, or "" when there is no traffic (so callers' empty-transcript
-    /// guards still fire). Record numbering matches `EvaluationTranscript.render` exactly and
-    /// retains gaps for malformed or non-call records in file order.
+    /// Returns "" when there is no traffic, so callers' empty-transcript guards still fire. Record
+    /// numbers match `EvaluationTranscript.render`.
     static func render(
         jsonl: String,
         auditEvidence: SessionAuditEvidence = .legacy
@@ -122,8 +101,8 @@ enum SessionMetrics {
         if providers.count == 1 {
             lines.append("\(totalsLabel): \(callCount) · \(totals(calls))")
         } else {
-            // OpenAI input includes cached input while Anthropic reports uncached input separately.
-            // Do not manufacture a cross-provider token total from fields with different semantics.
+            // OpenAI input includes cached input while Anthropic reports it separately, so never
+            // sum tokens across providers.
             lines.append("\(totalsLabel): \(callCount) · cost \(totalMoney(calls, \.cost))")
             lines.append("")
             lines.append("provider totals (token meanings differ; do not sum across providers):")
@@ -159,8 +138,7 @@ enum SessionMetrics {
 
     // MARK: - Parsing (pure)
 
-    /// Parse every valid record into a `Call`. Record numbers retain gaps for malformed JSONL so the
-    /// metrics table and rendered transcript keep stable anchors into the untouched source file.
+    /// Record numbers keep gaps for malformed lines, so they stay stable anchors into the file.
     static func parse(jsonl: String) -> [Call] {
         parseDetailed(jsonl: jsonl).calls
     }
@@ -217,10 +195,8 @@ enum SessionMetrics {
             } else if request?["runtime"] as? String == "one-shot-exec",
                       let usage = (response?["runtime"] as? [String: Any])?["usage"]
                         as? [String: Any] {
-                // Keyed on the transport, not on the envelope: both Codex transports record their
-                // completed turn under `response.runtime`, and only `codex exec` spells usage this
-                // way. `input_tokens` counts cached input and `output_tokens` includes reasoning
-                // output, as in OpenAI's schema. No per-call cost is reported.
+                // Keyed on the transport: both Codex transports write `response.runtime`, but only
+                // `codex exec` spells usage this way. `input_tokens` includes cached input.
                 call.input = int(usage["input_tokens"])
                 call.cacheRead = int(usage["cached_input_tokens"])
                 call.cacheWrite = int(usage["cache_write_input_tokens"])
@@ -239,8 +215,7 @@ enum SessionMetrics {
                                                    cost: nil, calls: 1)
             }
             if call.perModel.isEmpty {
-                // Errors and Codex calls have no usage envelope. Keep the requested model visible in
-                // the per-model table, but propagate unavailable values through any later aggregate.
+                // No usage envelope: keep the model listed, with its values unavailable.
                 call.perModel[model] = ModelTotals(input: call.input, cacheRead: call.cacheRead,
                                                    cacheWrite: call.cacheWrite, output: call.output,
                                                    cost: call.cost, calls: 1)
@@ -282,13 +257,11 @@ enum SessionMetrics {
         value.map(String.init) ?? "—"
     }
 
-    /// Format a dollar amount to 4 dp, or "—" when no cost was recorded.
     private static func money(_ value: Double?) -> String {
         value.map { String(format: "$%.4f", $0) } ?? "—"
     }
 
-    /// First non-nil value among the given keys — lets one reader handle both camelCase (`modelUsage`)
-    /// and snake_case (`usage`) spellings the CLI envelope mixes.
+    /// The CLI envelope mixes camelCase (`modelUsage`) and snake_case (`usage`) keys.
     private static func first(_ dict: [String: Any], _ keys: String...) -> Any? {
         for key in keys where dict[key] != nil { return dict[key] }
         return nil
@@ -312,8 +285,7 @@ enum SessionMetrics {
         return lhs + rhs
     }
 
-    /// The record's own `provider`. A session recorded before the subscription targets names a CLI
-    /// provider inside its request record instead, and none at all for an OpenAI request.
+    /// Older records name a CLI provider inside `request` instead, and none at all for OpenAI.
     static func providerName(
         provider: String?, request: [String: Any]?, response: [String: Any]?
     ) -> String {

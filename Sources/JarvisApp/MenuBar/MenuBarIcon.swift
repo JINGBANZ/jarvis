@@ -1,41 +1,21 @@
 import AppKit
 
-/// The menu-bar glyph has four readings. Stopped is a closed eye; active is the same eye open.
-/// Both are bare template glyphs, so AppKit supplies the correct monochrome tint for the current
-/// menu-bar appearance. That closed-to-open change carries the normal state transition without a
-/// coloured plate competing with the rest of the menu bar.
-///
-/// Preflight and blocked are the exceptions because they need attention. They keep the open eye on
-/// an amber or red plate. The application icon is a photographic render, but its gradients and glass
-/// detail do not survive at 18 points, so every state uses crisp vector silhouettes instead.
-///
-/// All states render into a 2×-density bitmap at the same logical point size, so switching between
-/// them never changes the glyph's footprint. Each image is rendered once and cached.
-///
-/// OS-bound (AppKit), so it lives in `JarvisApp` rather than Core and is verified by a live run, not
-/// unit tests. Main-actor-isolated: `NSImage` isn't `Sendable`, and the icons are only ever touched
-/// from the `@MainActor` `MenuBarController`.
 @MainActor
 enum MenuBarIcon {
-    /// Checking and recovering share preflight because both mean Jarvis is establishing or
-    /// restoring readiness, while active means it is listening.
     enum Signal: Hashable {
         case active
         case preflight
         case blocked
     }
 
-    /// Logical (point) side of the square status image — comfortable in the ~22pt menu bar.
+    /// In points, to fit the ~22 pt menu bar.
     private static let side: CGFloat = 18
-    /// Render at 2× the logical size so the glyph is crisp on Retina displays.
     private static let scale: CGFloat = 2
     /// The open artwork is authored in a 36-unit square with a two-unit inset.
     private static let artScale: CGFloat = 36.0 / 32.0
 
-    /// The closed, boxless eye shown while stopped.
     static let stopped: NSImage = makeStoppedTemplate()
 
-    /// The icon for a session in progress. Cached per signal.
     static func live(_ signal: Signal) -> NSImage {
         if let cached = liveCache[signal] { return cached }
         let image = signal == .active ? makeActiveTemplate() : makeAttention(signal)
@@ -47,7 +27,6 @@ enum MenuBarIcon {
 
     // MARK: - Stopped
 
-    /// Two opposed eyelids rotated onto the open eye's 45-degree orbital axis.
     private static func makeStoppedTemplate() -> NSImage {
         let rep = bitmap()
         let unit = CGFloat(rep.pixelsWide) / 36
@@ -58,7 +37,6 @@ enum MenuBarIcon {
 
     // MARK: - Active
 
-    /// An active session has nothing exceptional to announce, so the open eye stays monochrome.
     private static func makeActiveTemplate() -> NSImage {
         let rep = bitmap()
         let unit = CGFloat(rep.pixelsWide) / 36
@@ -76,8 +54,6 @@ enum MenuBarIcon {
         return image(from: rep, describedAs: signal.accessibilityDescription)
     }
 
-    /// Upper and lower lids are authored horizontally, then rotated together so the stopped eye
-    /// keeps the same diagonal axis as the open orbital mark. The negative seam is the state cue.
     private static func closedCoolLid(_ unit: CGFloat) -> NSBezierPath {
         let path = NSBezierPath()
         path.move(to: closedPoint(4.5, 17.4, unit))
@@ -118,7 +94,6 @@ enum MenuBarIcon {
         return point(rotatedX, rotatedY, unit)
     }
 
-    /// The upper-left crescent in the open eye.
     private static func coolCrescent(_ unit: CGFloat) -> NSBezierPath {
         let path = NSBezierPath()
         path.move(to: point(26.4, 7.7, unit))
@@ -134,7 +109,6 @@ enum MenuBarIcon {
         return path
     }
 
-    /// The lower-right crescent in the open eye.
     private static func warmCrescent(_ unit: CGFloat) -> NSBezierPath {
         let path = NSBezierPath()
         path.move(to: point(9.6, 28.3, unit))
@@ -150,7 +124,6 @@ enum MenuBarIcon {
         return path
     }
 
-    /// The core visible only while the eye is open.
     private static func core(_ unit: CGFloat) -> NSBezierPath {
         let radius: CGFloat = 4.2
         let topLeft = point(18 - radius, 18 + radius, unit)
@@ -240,8 +213,7 @@ private extension MenuBarIcon.Signal {
         }
     }
 
-    /// The status item's accessibility label carries exact readiness detail. This description names
-    /// only the cached image shared by checking and recovering.
+    /// Generic on purpose: the cached preflight image serves both checking and recovering.
     var accessibilityDescription: String {
         switch self {
         case .active: "Jarvis is active"

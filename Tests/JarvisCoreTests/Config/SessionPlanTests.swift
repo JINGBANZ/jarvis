@@ -2,11 +2,8 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// The control-plane half of the Lean Coaching Path Rule: preferences are read at a revision
-/// boundary, and a coaching turn runs against a frozen snapshot rather than storage.
 @Suite struct SessionPlanTests {
-    /// Records the selection every capture was handed, so a test can see whether a mid-attempt
-    /// change leaked into a turn that had already started.
+    /// @unchecked: lock guards storage.
     private final class RecordingScreen: ScreenCapturing, @unchecked Sendable {
         private let lock = NSLock()
         private var storage: [ScreenCaptureSelection] = []
@@ -21,13 +18,12 @@ import Testing
         var selections: [ScreenCaptureSelection] { lock.withLock { storage } }
     }
 
-    /// Replays a fixed script and lets the test run something between two calls — the only way to
-    /// change the plan while an attempt is genuinely in flight.
+    /// @unchecked: lock guards callCount; beforeReply is set before the driver runs.
     private final class ScriptedBrainWithHook: BrainClient, @unchecked Sendable {
         private let lock = NSLock()
         private var callCount = 0
         private let script: [BrainResponse]
-        /// Called with the 1-based number of the call that just started.
+        /// Receives the 1-based call number.
         var beforeReply: (@Sendable (Int) -> Void)?
 
         init(script: [BrainResponse]) { self.script = script }
@@ -82,8 +78,6 @@ import Testing
         return (driver, transcript)
     }
 
-    /// A revision installed while an attempt is running does not reach that attempt — not even its
-    /// `capture_screen` continuation, which is the one place a second capture happens in one turn.
     @Test func aRevisionInstalledMidAttemptDoesNotReachThatAttempt() async throws {
         let screen = RecordingScreen()
         let started = SessionPlan(
@@ -95,7 +89,6 @@ import Testing
             screen: ScreenCaptureSelection(
                 scope: .entireDisplay, explicitDisplay: 3, browserTextEnabled: true))
 
-        // The brain asks for the screen twice, and the plan changes between the two requests.
         let brain = ScriptedBrainWithHook(script: [
             Self.captureScreenReply("s1"),
             Self.captureScreenReply("s2"),
@@ -113,8 +106,6 @@ import Testing
         #expect(screen.selections.allSatisfy { $0 == started.screen })
     }
 
-    /// The very next attempt runs against the installed revision. Forward-only: the boundary is
-    /// between attempts, not inside one.
     @Test func theNextAttemptRunsAgainstTheInstalledRevision() async throws {
         let screen = RecordingScreen()
         let started = SessionPlan(
@@ -143,7 +134,6 @@ import Testing
         #expect(screen.selections == [started.screen, installed.screen])
     }
 
-    /// The persisted store is read exactly once per revision, at the boundary — never by a capture.
     @Test func theSelectionIsResolvedFromPreferencesAtTheBoundary() throws {
         let suite = "SessionPlanTests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -167,8 +157,6 @@ import Testing
             == ScreenCaptureSelection(
                 scope: .entireDisplay, explicitDisplay: nil, browserTextEnabled: true))
 
-        // A display index left over from an old entire-display selection must not steer
-        // active-window captures.
         preferences.scope = .activeWindow
         preferences.displayIndex = 4
         #expect(preferences.selection

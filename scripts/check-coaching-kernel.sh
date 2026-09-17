@@ -2,67 +2,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-# Dependency guard over the product-critical coaching kernel: finalized transcript admission
-# through overlay delivery (wiki/lean-coaching-core.md, "Product-critical coaching kernel" in the
-# destination diagram; decision record "2026-08-16 — Session evidence uses one shared stack and two
-# projections"). From admission to delivery, coaching depends only on deterministic in-memory policy
-# and explicitly injected critical ports — so the kernel may not reach for the OS or for
-# evaluator/sealed-session machinery directly. Keeping this in the Gate makes a new reach-through
-# fail the normal test run instead of waiting on a future manual audit to notice it.
-#
-# Covered paths — the kernel per the destination diagram:
-#   Coach/          attempt scheduler, forward-only route state, attempt runner, history commit,
-#                   and the coach tools' model-facing definitions (Coach/Tools/)
-#   Transcription/  finalized transcript admission and the transcription ports
-#   Triggers/       trigger and turn-substance policy feeding the scheduler
-#   Overlay/        the enabled overlay output port (delivery itself; the AppKit panels in
-#                   Sources/JarvisOverlay are the deliberately thin OS-bound shell outside Core).
-#                   Overlay *appearance* is a preference store, so it lives in Config/ with the
-#                   others and is control plane, not delivery.
-#   Audio/          capture-side buffering and speech-activity policy ahead of admission
-#   Support/        Clock, retry schedule, and task plumbing the kernel depends on
-#   Config/ is NOT kernel: it is the control plane the kernel is handed a frozen snapshot of.
-#   Brain/          the BrainClient port and route/model types. Core describes brains and never
-#                   runs one: every concrete adapter — the URLSession transport every target uses
-#                   and the Process plumbing of the bundled helper and the evaluator's CLI — lives
-#                   in Sources/JarvisBrainProviders.
-#   Prompts/        predefined model-facing text for the kernel's own prompts. Provider-specific
-#                   prompt text moved out with its adapter, still under the JarvisPrompts name.
-#   Screen/         the ScreenCapturing port, snapshot model, and pure window-selection and
-#                   recognized-text-layout logic. Foundation-only: the screencapture helper
-#                   process, transient JPEG, and cleanup-verification latch live at the macOS edge
-#                   in Sources/JarvisScreenCapture, behind the port.
-#   PrepMaterial/   the PrepMaterialSearching port, chunk model, and pure BM25 index — same shape as
-#                   Screen/: file reading and per-format extraction (PDFKit, textutil) live at the
-#                   macOS edge in Sources/JarvisApp/PrepMaterial, behind the port.
-#   Providers/      the provider-neutral failure record, redaction, and per-vendor classifiers the
-#                   route policy and socket lifecycle consume. Foundation-only: adapters hand in
-#                   status codes, JSON, close reasons, and NSError domain/code, never URLSession types.
-#   Diagnostics/CaptureReadinessMonitor.swift, AudioContinuityWitness*.swift,
-#   AudioContinuityMatcher.swift
-#                   the capture-heartbeat source and capture health policy, which the diagram
-#                   places inside the kernel even though they live beside persistence code
-#
-# Deliberately outside the covered paths today; each joins with the slice that clears it:
-#   Diagnostics/ (rest)
-#                   evidence persistence by definition; only the heartbeat/health files above are
-#                   kernel.
-#   LiveE2E/        the Foundation-only scenario, options, and audio-timeline model of the live e2e
-#                   mode, like Benchmark/; a harness around the kernel, not kernel code.
-#
-# Separately covered (admission_paths below):
-#   Diagnostics/Log.swift
-#                   `jlog` itself. It is not kernel code, but the kernel calls it from inside the
-#                   live attempt path, so what it does on the caller is a kernel concern. Since the
-#                   diagnostics move onto the shared evidence transport it must only build a typed
-#                   event and admit it — no Console call, no file access. It is exempt from the
-#                   persistence-reach-through check below precisely because naming the shared
-#                   transport is its job.
-#
-# Rules a later slice adds — do not read today's set as the finished contract:
-#   - Nothing outstanding for the kernel itself. `Sources/JarvisApp` still records some Activity
-#     notices directly; that is composition, not kernel, and it moves with the Activity persistence
-#     slice.
+# Gate: the coaching kernel may not reach the OS, evaluator/session types, or control-plane storage.
+# Design: wiki/lean-coaching-core.md
 
 kernel_paths=(
     Sources/JarvisCore/Coach
@@ -82,25 +23,17 @@ kernel_paths=(
     Sources/JarvisCore/Diagnostics/AudioContinuityMatcher.swift
 )
 
-# Paths checked for direct OS reach-through only. See the note above.
+# `jlog` is not kernel code but runs inside the attempt path, so it gets the OS check only. It is
+# exempt from the sealed-session check because naming the shared evidence transport is its job.
 admission_paths=(
     Sources/JarvisCore/Diagnostics/Log.swift
 )
 
-# Direct OS reach-through. File, process, network, and Console access belong behind injected ports
-# and the evidence stack, never inline in coaching policy. `\bURLSession\w*` (not `\bURLSession\b`)
-# also catches URLSession-prefixed types like `URLSessionWebSocketTask` and
-# `URLSessionConfiguration`, which have no word boundary after "URLSession" and previously slipped
-# through undetected.
+# `\bURLSession\w*`, not `\b...\b`, so prefixed types like `URLSessionWebSocketTask` match too.
 os_pattern='\bFileManager\b|\bFileHandle\b|\bProcess\b|\bURLSession\w*|\bNSLog\b'
 
-# Evaluator and sealed-session types, plus the concrete evidence-persistence machinery. The kernel
-# may emit through its narrow observer ports (BrainTrafficAuditing, CoachingAttemptAuditing); it may
-# never name the offline analysis surface or the persistence implementation behind those ports.
-# Persistence singletons are included: the kernel may name a port and the closed `ActivityEvent`
-# vocabulary, but never the concrete `ActivityLog` behind it, and never a process-wide `.shared`
-# instance of anything — a singleton makes two live drivers share whichever one happens to be
-# enabled, which is exactly the coupling injected ports exist to remove.
+# The kernel emits through its observer ports only. `.shared` is banned because a singleton makes two
+# live drivers share whichever instance happens to be enabled.
 sealed_pattern='\bAgenticEvaluation\b|\bAgenticEvaluator\b|\bEvaluationTranscript\b|\bEvalReportPage\b|\bSessionEvidenceIndex\b|\bSessionMetrics\b|\bSessionStore\b|\bFileSessionAudit\b|\bSessionAuditWorker\b|\bSessionAuditFileWriter\b|\bActivityLog\b|\.shared\b'
 
 check() {
@@ -118,8 +51,7 @@ check() {
         exit "$scan_status"
     fi
 
-    # A line whose first non-whitespace is `//` is prose about a symbol, not API use, so it does
-    # not weaken the rule. Trailing comments on code lines still count, which errs strict.
+    # Skip whole-line `//` comments; trailing comments on code lines still count, which errs strict.
     local filter_status=0
     local violations
     violations="$(printf '%s' "$matches" | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*//')" \
@@ -135,11 +67,8 @@ check() {
     fi
 }
 
-# Control-plane storage. Preferences, secrets, and provider discovery are read at Start or at an
-# explicit between-attempt boundary and frozen into an immutable `SessionPlan` revision; a coaching
-# turn is handed the frozen value. Reading a preference inside an attempt would let a coaching
-# outcome depend on disk latency and on whichever value happened to be current partway through the
-# turn — exactly the dependency the Lean Coaching Path Rule exists to remove.
+# Preferences and secrets reach the kernel only as a frozen `SessionPlan` revision, so an attempt
+# never depends on disk latency or a value that changed mid-turn.
 storage_pattern='\bUserDefaults\b|\bBrainPreferences\b|\bScreenCapturePreferences\b|\bTranscriptionPreferences\b|\bOverlayAppearance\b|\bSecretStore\b'
 
 check "OS reach-through" "$os_pattern" "${kernel_paths[@]}"

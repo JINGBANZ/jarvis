@@ -1,12 +1,8 @@
 import Foundation
 import JarvisCore
 
-/// Coordinates Realtime item state, recovery fallback, and terminal deadlines.
-/// The WebSocket owner parses events and validates transport generations; this type keeps the
-/// provider-specific lifecycle atomic while the shared Core coordinator owns coaching behavior.
-///
-/// `@unchecked Sendable`: every mutable field is guarded by `lock`; timer creation/invalidation is
-/// dispatched to the main queue.
+/// `@unchecked Sendable`: every mutable field is guarded by `lock`; timer creation and invalidation
+/// are dispatched to the main queue.
 final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     struct ReplacementReadyOutcome {
         let unresolvedItems: Int
@@ -32,8 +28,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     private var stopped = true
     private var localSpeechActive = false
     private var unboundLocalTurnCount = 0
-    /// Local commits have an exact boundary but must keep their PCM replayable until a terminal
-    /// transcript arrives. On reconnect, do not let ledger finalization retire that audio first.
+    /// Local commits keep their PCM replayable until a terminal transcript arrives, so reconnect
+    /// must not let ledger finalization discard that audio first.
     private var locallyCommittedItemIDs: Set<String> = []
 
     init(speaker: Speaker, coachingCoordinator: TranscriptionCoachingCoordinator,
@@ -114,8 +110,6 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Associate an explicit-commit acknowledgement with its local timing boundary. The item then
-    /// follows the same delta/final/deadline lifecycle as a server-VAD item.
     func recordCommittedLocalTurn(
         itemID: String,
         startedAt: TimeInterval,
@@ -156,7 +150,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Returns true when a delta created an item and therefore armed a new active deadline.
+    /// True when the delta created an item and armed a new active deadline.
     func recordDelta(itemID: String, delta: String, socketGeneration: Int) -> Bool {
         lock.lock()
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return false }
@@ -222,8 +216,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let preserveLocalReplayAudio = !locallyCommittedItemIDs.isEmpty
         let duplicateRiskItems = ledger.replayDuplicateRiskItemCount
         let interruptedItems = ledger.resolveAllInterruptedItems(speaker: speaker)
-        // With no server item, buffered PCM is the only evidence that replay can still produce an
-        // earlier line. Known items retain their own counted recovery barriers.
+        // With no server item, buffered PCM is the only evidence replay can still produce a line.
         let hasUntrackedReplayAudio = replayAvailable
             && duplicateRiskItems == 0 && interruptedItems.isEmpty
         if !preserveLocalReplayAudio { discardServerConfirmedAudioLocked() }
@@ -238,8 +231,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         return count
     }
 
-    /// Record PCM captured after the old socket stopped accepting audio. Server-VAD models have no
-    /// item for this audio until the replacement replays it, so the replay itself is pending work.
+    /// Server-VAD models have no item for outage audio until the replacement replays it, so the
+    /// replay itself is pending work.
     func recordBufferedReplayAudio() {
         lock.lock()
         guard !stopped else { lock.unlock(); return }
@@ -253,9 +246,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         hasUntrackedReplayAudio: Bool = false
     ) -> ReplacementReadyOutcome {
         lock.lock()
-        // A producer may have accepted outage audio immediately before readiness and not yet
-        // reached its out-of-lock publication callback. Readiness carries the transcriber's sticky
-        // snapshot so the recovery gate and timer are installed atomically here.
+        // A producer may have accepted outage audio just before readiness without publishing it
+        // yet; the transcriber's sticky snapshot covers that here.
         if hasUntrackedReplayAudio {
             reconnectRecovery.recordUntrackedReplayAudio()
         }
@@ -432,8 +424,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
             source: "item \(item.itemID)\(detail)")
     }
 
-    /// The retry gate represents an unsettled utterance, not only the VAD interval. Publish while
-    /// holding `lock` so concurrent socket and timeout callbacks cannot reorder state transitions.
+    /// Publish under `lock` so concurrent socket and timeout callbacks cannot reorder transitions.
     private func updateCoachingActivityLocked() {
         coachingCoordinator.updateTranscriptionWork(hasPendingWorkLocked)
     }

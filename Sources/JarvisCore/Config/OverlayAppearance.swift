@@ -1,10 +1,5 @@
 import Foundation
 
-/// Persisted overlay appearance for both overlay surfaces — the Overlay Caption (the transient
-/// on-screen tip) and the Overlay Box (the persistent response history). Each surface has a font
-/// size (points), an opacity (0–1), and an on/off enabled flag. Backed by UserDefaults; every key,
-/// default, and clamp bound comes from `Defaults.Overlay`. Foundation-only so it stays unit-testable
-/// in JarvisCore. Inject a `UserDefaults(suiteName:)` in tests.
 public final class OverlayAppearance {
     private let defaults: UserDefaults
 
@@ -54,7 +49,6 @@ public final class OverlayAppearance {
         }
     }
 
-    /// Whether the caption shows coaching tips on screen. Off by default.
     public var captionEnabled: Bool {
         get {
             guard defaults.object(forKey: Defaults.Overlay.Caption.enabledKey) != nil else {
@@ -87,7 +81,6 @@ public final class OverlayAppearance {
         }
     }
 
-    /// Opacity (0–1) of the detail box's background fill.
     public var detailBackgroundOpacity: Double {
         get {
             guard defaults.object(forKey: Defaults.Overlay.Detail.opacityKey) != nil else {
@@ -110,7 +103,6 @@ public final class OverlayAppearance {
 
     // MARK: - Overlay Box (persistent response history)
 
-    /// Point size of the box's response text.
     public var boxFontSize: Double {
         get {
             guard defaults.object(forKey: Defaults.Overlay.Box.fontSizeKey) != nil else {
@@ -131,7 +123,6 @@ public final class OverlayAppearance {
         }
     }
 
-    /// Opacity (0–1) of the box's background fill.
     public var boxOpacity: Double {
         get {
             guard defaults.object(forKey: Defaults.Overlay.Box.opacityKey) != nil else {
@@ -152,7 +143,7 @@ public final class OverlayAppearance {
         }
     }
 
-    /// Width in points of the box, as the user last dragged it.
+    /// In points.
     public var boxWidth: Double {
         get {
             guard defaults.object(forKey: Defaults.Overlay.Box.widthKey) != nil else {
@@ -173,7 +164,7 @@ public final class OverlayAppearance {
         }
     }
 
-    /// Height in points of the box, as the user last dragged it.
+    /// In points.
     public var boxHeight: Double {
         get {
             guard defaults.object(forKey: Defaults.Overlay.Box.heightKey) != nil else {
@@ -194,7 +185,6 @@ public final class OverlayAppearance {
         }
     }
 
-    /// Whether the persistent box is shown. On by default.
     public var boxEnabled: Bool {
         get {
             guard defaults.object(forKey: Defaults.Overlay.Box.enabledKey) != nil else {
@@ -205,10 +195,8 @@ public final class OverlayAppearance {
         set { defaults.set(newValue, forKey: Defaults.Overlay.Box.enabledKey) }
     }
 
-    /// Clamp into `r`. Non-finite input (NaN/±inf — e.g. a corrupted plist value) falls back to the
-    /// setting's own default rather than propagating to `systemFont(ofSize:)` /
-    /// `withAlphaComponent(:)`. The default, not the lower bound: an opacity floor of 0 would turn a
-    /// corrupted value into an invisible backdrop, which reads as breakage rather than a fallback.
+    /// Non-finite input (a corrupt plist value) returns `fallback`, not a bound: clamping it to an
+    /// opacity floor of 0 would make the backdrop invisible.
     private static func clamp(
         _ v: Double,
         to r: ClosedRange<Double>,
@@ -219,34 +207,26 @@ public final class OverlayAppearance {
     }
 }
 
-/// How a settings panel pushes live changes to the Overlay Caption without depending on AppKit. The
-/// real `OverlayCaptionPanel` (in JarvisApp's overlay target) conforms; tests can supply a fake.
 @MainActor
 public protocol OverlayCaptionApplying: AnyObject {
     func setFontSize(_ points: Double)
     func setBackgroundOpacity(_ opacity: Double)
-    /// Turn the caption on or off live. When off, coaching tips are suppressed; the live preview still
-    /// works so size/opacity stay adjustable.
+    /// When off, coaching tips are suppressed but the appearance preview still works.
     func setEnabled(_ enabled: Bool)
-    /// Show a sample tip (on) or clear it (off) so size/opacity changes are visible while the
-    /// settings window is open. Must preserve screen-capture exclusion.
+    /// Must preserve screen-capture exclusion.
     func showAppearancePreview(_ on: Bool)
 }
 
-/// How a settings panel pushes live changes to the Overlay Box, without depending on AppKit. The real
-/// `OverlayBoxPanel` (in the overlay target) conforms; tests can supply a fake.
 @MainActor
 public protocol OverlayBoxApplying: AnyObject {
     func setDetailFontSize(_ points: Double)
     func setDetailBackgroundOpacity(_ opacity: Double)
     func setOpacity(_ opacity: Double)
     func setFontSize(_ points: Double)
-    /// Called once per finished resize drag with the box's new content size, so the app can persist
-    /// it. The restored size is supplied at construction instead, so it never fires for one.
+    /// Content width and height in points, once per finished resize drag. Never fires for the
+    /// restored size, which is supplied at construction.
     var onSizeChanged: ((Double, Double) -> Void)? { get set }
-    /// Show or hide the box live, mirroring the persisted setting.
     func setEnabled(_ enabled: Bool)
-    /// Show the box with sample text (on) or restore the real log and prior visibility (off) so size
-    /// and opacity changes are visible while the settings window is open. Must preserve capture exclusion.
+    /// Off restores the real log and prior visibility. Must preserve screen-capture exclusion.
     func showAppearancePreview(_ on: Bool)
 }

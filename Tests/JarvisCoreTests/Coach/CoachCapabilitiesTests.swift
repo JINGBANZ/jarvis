@@ -2,11 +2,7 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// The one value the system prompt and every request's declared schemas are both built from, so
-/// what a session describes is what it sends (#273).
 @Suite struct CoachCapabilitiesTests {
-    /// The loader sits between the always-on actions and the catalog, and exists only while there
-    /// is something left to load.
     @Test func theThreeCoachingActionsComeFirstAndAlwaysInTheSameOrder() {
         let offered = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
         #expect(offered.tools.map(\.name)
@@ -20,7 +16,6 @@ import Testing
     private let skills = [Skill(name: "system-design", description: "design questions", body: "b1"),
                           Skill(name: "behavioral", description: "STAR questions", body: "b2")]
 
-    /// Skills sit behind their own loader, sorted by name, and never become callable tools.
     @Test func theSkillLoaderIsPresentOnlyWithASwitchedOnSkill() throws {
         let offered = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills)
@@ -40,8 +35,6 @@ import Testing
         #expect(offered.skill(named: "coding") == nil)
     }
 
-    /// A switched-off skill is not in the catalog and cannot be loaded; switching every one off
-    /// takes the loader with them.
     @Test func aSwitchedOffSkillIsNotOffered() {
         let some = CoachCapabilities.compose(
             disabledTools: [], disabledSkills: ["behavioral", "not-a-skill"],
@@ -57,7 +50,6 @@ import Testing
         #expect(none.tools.map(\.name) == ["capture_screen", "speak", "stay_silent"])
     }
 
-    /// A schema-enforcing provider cannot emit a name that is not in the catalog at all.
     @Test func theLoaderOffersExactlyTheCatalogNames() throws {
         let loader = try #require(CoachCapabilities
             .compose(disabledTools: [], prepSourcesConfigured: true)
@@ -71,8 +63,6 @@ import Testing
         #expect(!loader.deferLoading)
     }
 
-    /// Jarvis cannot start without screen capture, and a turn cannot end without speak or stay
-    /// silent — so a hand-edited preference naming one of them changes nothing.
     @Test func fixedToolsIgnoreTheSwitches() {
         let capabilities = CoachCapabilities.compose(
             disabledTools: ["capture_screen", "speak", "stay_silent", "load_tool", "load_skill",
@@ -91,7 +81,6 @@ import Testing
             .tools.map(\.name).contains("search_prep_notes"))
     }
 
-    /// What the model may call right now: every hot tool, plus whatever it has already loaded.
     @Test func callableGrowsOnlyByLoading() {
         let deferred = ToolDef(name: "later", description: "d", parametersJSON: "{}",
                                deferLoading: true)
@@ -99,8 +88,6 @@ import Testing
 
         #expect(capabilities.callable(loaded: []).map(\.name)
             == ["capture_screen", "speak", "stay_silent"])
-        // The loader drops out once nothing is left to load: offering it then invites a call that
-        // can only be refused, and each one spends an iteration of the bounded tool loop.
         #expect(capabilities.callable(loaded: ["later"]).map(\.name)
             == ["capture_screen", "speak", "stay_silent", "later"])
         #expect(capabilities.catalogNames == ["later"])
@@ -108,10 +95,6 @@ import Testing
         #expect(capabilities.tool(named: "nope") == nil)
     }
 
-    /// A loader exists only while something remains for it to load, whether that is because the
-    /// session composed no catalog or because the model has since loaded all of it. Each loader
-    /// answers for its own catalog: loading every skill must not withdraw `load_tool`, or the other
-    /// way round.
     @Test func eachLoaderDisappearsOnceItsOwnCatalogIsLoaded() {
         let capabilities = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills)
@@ -127,7 +110,6 @@ import Testing
             == ["capture_screen", "speak", "stay_silent", "load_skill", "search_prep_notes"])
         #expect(capabilities.callable(loaded: Set(skillKeys + ["search_prep_notes"])).map(\.name)
             == ["capture_screen", "speak", "stay_silent", "search_prep_notes"])
-        // Both stay in `tools`, so a stale call is answered rather than refused as unknown.
         #expect(capabilities.tool(named: CoachCapabilities.loadToolName) != nil)
         #expect(capabilities.tool(named: CoachCapabilities.loadSkillName) != nil)
     }

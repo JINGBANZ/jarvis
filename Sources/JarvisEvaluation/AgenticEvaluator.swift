@@ -2,10 +2,7 @@ import Foundation
 import JarvisCore
 import JarvisBrainProviders
 
-/// Runs the sole session evaluator through a locally installed Claude Code or Codex CLI. The CLI
-/// receives the repository checkout as its working directory plus the complete selected session,
-/// and is constrained to a read-only, non-persisted agent run. This is Foundation-only so the app's
-/// Evaluate button stays thin and the exact invocation remains unit-testable.
+/// The agent CLI run must stay read-only and non-persisted.
 public struct AgenticEvaluator: Sendable {
     public enum EvaluationError: LocalizedError, Equatable {
         case noAgentCLI
@@ -27,7 +24,6 @@ public struct AgenticEvaluator: Sendable {
         }
     }
 
-    /// Without a request, the first of these that is installed and not signed out runs.
     static let searchOrder: [AgentCLI] = [.codex, .claude]
 
     private let source: EvaluationSource
@@ -52,8 +48,7 @@ public struct AgenticEvaluator: Sendable {
         let repositoryDirectory: URL
         let isRelease: Bool
         let provenance: String
-        // Release source is fetched for this run alone. The defer must outlive the CLI invocation
-        // below, so it belongs to the whole function rather than to the case that creates it.
+        // Function-scoped so the discard outlives the CLI invocation below.
         var fetched: ReleaseSourceStore.Checkout?
         defer { fetched?.discard() }
         switch source {
@@ -102,7 +97,7 @@ public struct AgenticEvaluator: Sendable {
             workspaceProvenance: provenance)
     }
 
-    /// Traffic rendering can read a long session, so keep it off the main actor used by Activity.
+    /// Rendering a long session is slow, so keep it off the main actor that Activity uses.
     private func prepare(sessionDirectory: URL, workspaceProvenance: String) async throws -> String {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -114,8 +109,7 @@ public struct AgenticEvaluator: Sendable {
         }
     }
 
-    /// A requested CLI runs or is reported, never swapped for another. Otherwise the first detected
-    /// CLI not proven signed out runs; an unconfirmed sign-in is tried rather than refused.
+    /// A requested CLI is never swapped for another. An unconfirmed sign-in is tried, not refused.
     static func selectCLI(from detected: [DetectedAgentCLI],
                           preferredCLI: AgentCLI?) throws -> DetectedAgentCLI {
         if let preferredCLI {
@@ -140,9 +134,7 @@ public struct AgenticEvaluator: Sendable {
         let arguments: [String]
         switch cli.cli {
         case .claude:
-            // The prompt directly follows `-p`: `--add-dir` accepts multiple values and would
-            // otherwise swallow it. Plan mode and no persistence make this a read-only, stateless
-            // audit while still allowing the agent to inspect the checkout and full session.
+            // The prompt must directly follow `-p`: the variadic `--add-dir` would swallow it.
             arguments = [
                 "-p", prompt,
                 "--no-session-persistence",
@@ -152,7 +144,7 @@ public struct AgenticEvaluator: Sendable {
                 "--add-dir", sessionDirectory.path,
             ]
         case .codex:
-            // Release source is an extracted archive without .git, so Codex must allow that workspace.
+            // Release source is an archive with no `.git`, which Codex refuses by default.
             arguments = [
                 "exec", "--ephemeral", "--sandbox", "read-only",
                 "--ignore-user-config", "--ignore-rules",

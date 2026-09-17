@@ -1,7 +1,6 @@
 import Testing
 @testable import JarvisCore
 
-/// The one builder of the coaching system prompt, which `CoachAttemptRunner` calls for every request.
 @Suite struct CoachSystemPromptTests {
     private let withCatalog = CoachCapabilities(
         tools: coachTools(detailEnabled: false) + [ToolDef(
@@ -11,8 +10,6 @@ import Testing
             guidance: searchPrepNotesTool.guidance,
             deferLoading: true)])
 
-    /// Hot-tool guidance is appended in declared order. A session with nothing to load therefore
-    /// sends the base prompt followed by capture evidence rules and the tip style.
     @Test func bareBuilderIsTheBasePromptPlusTipStyle() {
         #expect(JarvisPrompts.Coach.system(capabilities: .default)
             == [JarvisPrompts.Coach.system, captureScreenTool.guidance,
@@ -20,8 +17,6 @@ import Testing
                 .joined(separator: "\n\n"))
     }
 
-    /// The detail rules travel with `speak`, so a session without the box never reads about a field
-    /// it cannot send.
     @Test func theDetailSectionAppearsOnlyWhenTheBoxIsOn() {
         let without = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: false, detailEnabled: false))
@@ -35,7 +30,6 @@ import Testing
         #expect(with.contains("# Tip style"))
     }
 
-    /// Domain rules live in the skills that own them, never in the prompt every session pays for.
     @Test func theCoreCarriesNoCodeOrDiagramRules() {
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills, detailEnabled: true))
@@ -46,8 +40,6 @@ import Testing
         #expect(!prompt.contains("# Explain when understanding is missing"))
     }
 
-    /// A prompt names a loader only when the session has something to load. The action policy's
-    /// numbering is fixed either way: loading is its own section, not an item that renumbers five.
     @Test func theLoadingSectionAndCatalogAppearOnlyWithADeferredTool() {
         let bare = JarvisPrompts.Coach.system(capabilities: .default)
         #expect(!bare.contains("load_tool"))
@@ -62,8 +54,6 @@ import Testing
         #expect(offered.contains("6. \"me\" is stuck"))
     }
 
-    /// A deferred tool contributes one catalog line, never its guidance: that arrives as the
-    /// `load_tool` result, so the prompt cannot describe how to use a tool the model cannot call.
     @Test func aDeferredToolIsCatalogedButNotExplained() {
         let offered = JarvisPrompts.Coach.system(capabilities: withCatalog)
         #expect(offered.contains(
@@ -71,8 +61,6 @@ import Testing
         #expect(!offered.contains("# Prep material"))
     }
 
-    /// Base prompt, then per-tool guidance, then the tools catalog, then the skills catalog: the
-    /// layout every site sends.
     @Test func theCatalogsFollowTheToolGuidanceInOrder() throws {
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills))
@@ -92,8 +80,6 @@ import Testing
         Skill(name: "system-design", description: "Use when the question is a system design.", body: "Stages."),
     ]
 
-    /// One line per switched-on skill, its own description verbatim — and never its body, which
-    /// arrives as the `load_skill` result.
     @Test func aSkillIsCatalogedButNotExplained() {
         let prompt = JarvisPrompts.Coach.system(
             capabilities: CoachCapabilities.compose(
@@ -105,7 +91,6 @@ import Testing
         #expect(!prompt.contains("STAR."))
     }
 
-    /// The loading section names the loaders the session actually has, and nothing else.
     @Test func theLoadingSectionNamesOnlyTheLoadersPresent() {
         let both = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills))
@@ -125,8 +110,6 @@ import Testing
         #expect(toolsOnly.contains("with load_tool"))
     }
 
-    /// A coaching shortcut may load, and only the response at its cap is forced to `speak`. The
-    /// loading section's last sentence is what describes that one response.
     @Test func theLoadingSectionStillDefersToAForcedSpeak() {
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills))
@@ -134,8 +117,6 @@ import Testing
             "When the turn says you must call speak, skip loading and speak with what you have."))
     }
 
-    /// With every skill switched off and nothing to load, the session is back to the bare prompt —
-    /// the successor of the old "no format selected ⇒ base prompt" invariant.
     @Test func everythingSwitchedOffIsTheBarePrompt() {
         #expect(JarvisPrompts.Coach.system(
             capabilities: CoachCapabilities.compose(

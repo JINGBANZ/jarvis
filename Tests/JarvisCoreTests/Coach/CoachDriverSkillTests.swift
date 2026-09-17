@@ -2,7 +2,6 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// A skill reaches the model only when it asks for one, and only inside the turn that asked.
 @Suite(.serialized) struct CoachDriverSkillTests {
     private let skills = [
         Skill(name: "behavioral", description: "Coaching for behavioral questions.",
@@ -64,8 +63,6 @@ import Testing
             prepMaterial: nil)).result
     }
 
-    /// The whole point of the step: catalog, load, coach — one attempt, one turn. The framing is
-    /// what makes the body read as instructions rather than as data.
     @Test func aLoadedSkillGuidesTheSameAttempt() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [loadCall("behavioral"), speak])
@@ -79,8 +76,7 @@ import Testing
         #expect(result.text?.contains("Organize the answer as STAR.") == true)
         #expect(result.text?.hasPrefix("Loaded skill: behavioral.") == true)
         #expect(result.text?.contains("extension of your action policy") == true)
-        // A skill is guidance, never a callable tool: loading one adds no tool to the array, and
-        // the loader stays only because the other skill is still unloaded.
+        // load_skill stays offered only because system-design is still unloaded.
         #expect(brain.offeredTools[0].map(\.name) == brain.offeredTools[1].map(\.name))
         #expect(!brain.offeredTools[1].map(\.name).contains("behavioral"))
         #expect(brain.offeredTools[1].map(\.name).contains("load_skill"))
@@ -95,7 +91,6 @@ import Testing
             == [.initial, .loadSkillContinuation])
     }
 
-    /// Loading twice returns a pointer to the conversation, never the body again.
     @Test func aSecondLoadIsAnsweredWithoutRepeatingTheGuidance() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [
@@ -113,7 +108,6 @@ import Testing
         #expect(activity.kinds == [.capabilityLoaded, .tip])
     }
 
-    /// An unknown name — including a switched-off skill — is a plain answer, never a failure.
     @Test func anUnknownSkillNameIsAnsweredAndTheTurnContinues() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [loadCall("system-design"), speak])
@@ -131,8 +125,6 @@ import Testing
         #expect(activity.kinds == [.tip])
     }
 
-    /// A load belongs to the attempt that made it, so "already loaded" always points at a
-    /// conversation the model can still read.
     @Test func aLoadInAFailedAttemptIsMadeAgainByTheNext() async throws {
         let runner = makeRunner(capabilities: offered)
         let brain = ScriptedBrain(script: [
@@ -154,8 +146,6 @@ import Testing
         #expect(again.text?.contains("Organize the answer as STAR.") == true)
     }
 
-    /// A committed load stays loaded, and the two namespaces stay apart: a tool and a skill of the
-    /// same name are two separate loads.
     @Test func skillAndToolNamesCannotCollideInTheLoadedSet() async throws {
         let sameName = [Skill(name: "search_prep_notes", description: "d", body: "skill body")]
         let capabilities = CoachCapabilities.compose(

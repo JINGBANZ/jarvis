@@ -1,7 +1,6 @@
 import Foundation
 
-/// A Gemini speech-to-text model Jarvis can select. Only the live/streaming model applies — Jarvis
-/// coaches a conversation as it happens, so the batch `gemini-3.5-transcribe` has no place here.
+/// Streaming models only. The batch `gemini-3.5-transcribe` can't follow a live conversation.
 public enum GeminiTranscriptionModel: String, CaseIterable, Codable, Sendable {
     case geminiTranscribeLive = "gemini-3.5-transcribe-live"
 
@@ -11,7 +10,6 @@ public enum GeminiTranscriptionModel: String, CaseIterable, Codable, Sendable {
         }
     }
 
-    /// The Live API addresses models by resource name, so the wire value carries a `models/` prefix
-    /// the persisted raw value deliberately does not.
+    /// The Live API wants a `models/` resource name; the persisted raw value deliberately has none.
     public var wireModelName: String { "models/\(rawValue)" }
 }

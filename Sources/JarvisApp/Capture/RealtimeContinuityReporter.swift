@@ -1,11 +1,8 @@
 import Foundation
 import JarvisCore
 
-/// Owns privacy-preserving continuity observation, periodic snapshots, overflow aggregation, and
-/// diagnostic logging. It never appends to the transcript or exposes audio content to the coach.
-///
-/// `@unchecked Sendable`: `lock` guards lifecycle and overflow state; `AudioContinuityWitness`
-/// independently guards its state, and timer creation/invalidation is dispatched to the main queue.
+/// `@unchecked Sendable`: `lock` guards lifecycle and overflow state, `AudioContinuityWitness`
+/// guards its own, and timer creation and invalidation are dispatched to the main queue.
 final class RealtimeContinuityReporter: @unchecked Sendable {
     enum Boundary: String {
         case openAIRealtime = "OpenAI Realtime"
@@ -22,13 +19,8 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
     private var timer: Timer?
     private var stopped = true
     private var evictionAccumulator = ReplayBufferEvictionAccumulator()
-    /// Decides which frame arrivals carry new information: the first frame, and the first frame
-    /// after a witness stall. The latch is Core policy, shared by both capture adapters.
     private let heartbeatGate = CaptureHeartbeatGate()
 
-    /// The critical, in-memory consumer of the capture heartbeat: `CaptureReadinessMonitor` in the
-    /// app, which can keep readiness pending, degrade system audio to microphone-only, or stop an
-    /// unusable microphone session. Fired off the witness's own frame evidence — no second counter.
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
     init(
@@ -139,13 +131,8 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
         }
     }
 
-    /// One capture-heartbeat observation, two one-way consumers.
-    ///
-    /// The critical branch runs first and unconditionally: capture health policy reads the value
-    /// directly, in memory, and never reads the evidence queue or a persisted file. The evidence
-    /// copy that follows is a projection of the very same value — losing it can make the session's
-    /// record partial, and can never change a readiness, degradation, or stop decision. Admission is
-    /// nonblocking, so this stays safe on a realtime audio callback.
+    /// Capture health reads the heartbeat in memory, first; the log line is evidence only. `jlog`
+    /// admission is nonblocking, so this is safe on a realtime audio callback.
     private func emit(_ heartbeat: CaptureHeartbeat) {
         onCaptureHeartbeat?(heartbeat)
         jlog("Jarvis capture heartbeat [\(speaker.rawValue), \(boundary.rawValue)]: "
@@ -154,8 +141,7 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
 
     private var now: TimeInterval { clock.now() - sessionStart }
 
-    /// Calls originate on audio, URLSession, and main queues. Preserve the observation at its source
-    /// boundary, but keep logging off the realtime audio callback.
+    /// Called from audio, URLSession, and main queues; keeps logging off the realtime callback.
     private func consume(_ output: AudioContinuityWitness.Output) {
         guard output.snapshot != nil || !output.anomalies.isEmpty else { return }
         DispatchQueue.main.async { [weak self] in

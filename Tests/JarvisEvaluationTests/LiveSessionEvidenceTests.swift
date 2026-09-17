@@ -3,15 +3,14 @@ import JarvisCore
 import JarvisEvaluation
 import Testing
 
-/// Imported without `@testable`: the live test target reads sessions through the public API alone,
-/// so these tests hold that API to the same bar.
+/// No `@testable`: the live test target reads sessions through the public API alone.
 @Suite struct LiveSessionEvidenceTests {
     typealias Evidence = LiveSessionEvidence
 
     // MARK: - Fixtures
 
-    /// Attempt stamps are local clock times, so every expected instant goes through the local
-    /// calendar instead of a hard-coded epoch that holds in only one time zone.
+    /// Attempt stamps are local clock times, so a hard-coded epoch would hold in one time zone
+    /// only.
     static func local(day: Int = 14, _ hour: Int, _ minute: Int, _ second: Int) throws -> Date {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = .current
@@ -35,7 +34,6 @@ import Testing
         return try line(object)
     }
 
-    /// `trigger` defaults to `sourceTrigger`; a `pending_work` trigger is a retry and wakes as one.
     static func started(
         _ id: Int,
         at t: String,
@@ -199,8 +197,6 @@ import Testing
         #expect(crossing.attempts.map(\.startedAt) == starts)
         #expect(crossing.attempts.map(\.finishedAt) == finishes)
 
-        // The session's own start seeds the comparison, so a first stamp already past midnight is
-        // dated to the next day, and an equal stamp is not a rollover.
         let lateFirst = try Self.evidence(
             attempts: [Self.started(1, at: "00:00:02"), Self.finished(1, at: "00:00:02")],
             sessionDate: Self.local(23, 59, 50))
@@ -221,9 +217,8 @@ import Testing
         let base = try Self.unix(10, 0, 0)
         let evidence = try Self.evidence(
             activity: [
-                // 0: before attempt 1.
                 Self.row("heard", "🗣 heard (them): \"Design a feed.\"", at: base - 1.5),
-                // 1, 2, 3: attempt 1; its tip closes it inside the second attempt 2 starts in.
+                // 1, 2, 3: attempt 1; its tip lands in the second attempt 2 starts in.
                 Self.row("manualHint", "⌨️ hint shortcut — help", at: base + 0.1),
                 Self.row("screenViewed", "👁 looking at your screen", at: base + 2),
                 Self.row("tip", "💬 Start with the write path.", at: base + 5.2),
@@ -231,11 +226,8 @@ import Testing
                 Self.row("heard", "🗣 heard (me): \"Okay.\"", at: base + 4),
                 // 5: the shared second; time alone makes it a candidate for both attempts.
                 Self.row("screenViewed", "👁 looking at your screen", at: base + 5.7),
-                // 6: no occurrence time.
                 Self.row("heard", "🗣 heard (them): \"Go on.\"", at: nil),
-                // 7: attempt 2.
                 Self.row("tip", "💬 Add a fan-out cache.", at: base + 8.9),
-                // 8, 9: after every attempt.
                 Self.row("heard", "🗣 heard (them): \"Thanks.\"", at: base + 12),
                 Self.row("sessionEnded", "⏹ session ended by user", at: base + 15),
             ],
@@ -311,8 +303,6 @@ import Testing
 
     // MARK: - Retry chains
 
-    /// Scenario A's first press in live run 2026-09-15_11-49-46: Claude Code stalled on the request
-    /// after loading the coding skill, and the pending-work retry reloaded it and spoke.
     @Test func aStalledAttemptIsJudgedThroughTheRetryThatAnswered() throws {
         let base = try Self.unix(11, 50, 0)
         let evidence = try Self.evidence(
@@ -357,12 +347,12 @@ import Testing
     @Test func aChainFollowsOnlyStallsAndStopsAtTheTurnThatCommits() throws {
         let evidence = try Self.evidence(
             attempts: [
-                // 1, 2: a CLI that exits at once, as F04's stub does; not a stall, so no retry joins.
+                // 1, 2: a CLI that exits at once is not a stall, so no retry joins.
                 Self.started(1, at: "11:32:32", provider: "claude-code"),
                 Self.finished(1, at: "11:32:32", terminal: "failure", outcome: "brain_error"),
                 Self.started(2, at: "11:32:32", trigger: "pending_work", provider: "claude-code"),
                 Self.finished(2, at: "11:32:32", terminal: "failure", outcome: "brain_error"),
-                // 3, 4, 5: an OpenAI request times out three times and exhausts the target.
+                // 3, 4, 5: three timeouts exhaust the target.
                 Self.started(3, at: "11:40:00"),
                 Self.finished(3, at: "11:40:15", terminal: "failure", outcome: "brain_error"),
                 Self.started(4, at: "11:40:15", trigger: "pending_work"),
@@ -532,7 +522,6 @@ import Testing
              "arguments": #"{"lines":["Sketch the write path."],"detail":"```mermaid\ngraph TD\nA-->B\n```"}"#],
         ]))
         #expect(graph == .present("```mermaid\ngraph TD\nA-->B\n```"))
-        // The fences come from the parser the app itself uses.
         #expect(graph.fences.map(\.language) == ["mermaid"])
         #expect(graph.fences.first?.body == "graph TD\nA-->B")
 
@@ -547,7 +536,6 @@ import Testing
         #expect(Evidence.SpeakDetail.noSpeakCall.fences.isEmpty)
     }
 
-    /// The declared schema a request sent, so a checker asserts what the session composed.
     @Test func speakParametersReadTheDeclaredSchema() throws {
         let record = try Self.coachRecord(attempt: 1, request: [
             "model": "gpt-5.6-sol",

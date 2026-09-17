@@ -1,15 +1,13 @@
 import Foundation
 import JarvisCore
 
-/// One sign-in the bundled CLIProxyAPI helper holds: a credential file in its auth directory.
-///
-/// The helper names them `claude-<hash>-<email>.json` and `codex-<hash>-<email>[-<plan>].json`. The
-/// name is parsed rather than the file read, so listing accounts never loads a token into memory.
+/// CLIProxyAPI names these `claude-<hash>-<email>.json` and `codex-<hash>-<email>[-<plan>].json`.
+/// Only the name is parsed, so listing accounts never loads a token into memory.
 public struct LocalProxyAccountFile: Sendable, Equatable {
     public let url: URL
     public let provider: BrainProvider
     public let email: String?
-    /// The ChatGPT plan a Codex file names, such as `plus`; nil for Claude.
+    /// A ChatGPT plan such as `plus`; nil for Claude.
     public let plan: String?
 
     public init?(url: URL) {
@@ -40,7 +38,6 @@ public struct LocalProxyAccountFile: Sendable, Equatable {
         email = account.contains("@") ? account : nil
     }
 
-    /// The account files for `provider` in `directory`, sorted by name so a listing is stable.
     public static func all(in directory: URL, for provider: BrainProvider) -> [LocalProxyAccountFile] {
         let urls = (try? FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: nil)) ?? []

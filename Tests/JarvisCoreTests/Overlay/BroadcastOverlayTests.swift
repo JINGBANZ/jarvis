@@ -2,7 +2,7 @@ import Testing
 import Foundation
 @testable import JarvisCore
 
-/// Records every `render` call so a test can assert the broadcast reached this sink.
+/// @unchecked: render runs synchronously on the test's own task.
 private final class RecordingSink: OverlayRendering, @unchecked Sendable {
     var rendered: [[String]] = []
     var renderedSeconds: [[TimeInterval]] = []
@@ -37,7 +37,6 @@ private final class RecordingSink: OverlayRendering, @unchecked Sendable {
     }
 
     @Test func withNoSinksIsANoOp() {
-        // Empty fan-out must not crash — a degenerate but valid configuration.
         BroadcastOverlay([]).render(["x"], perLineSeconds: [1.0])
     }
 }

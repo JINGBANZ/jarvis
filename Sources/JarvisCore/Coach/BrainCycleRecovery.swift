@@ -1,17 +1,12 @@
 import Foundation
 
-/// Session health survives failed cycle budgets; only successful coaching resets the streak.
 struct BrainCycleRecovery {
-    /// How long a streak of failed cycles may last before the session ends. The clock starts at the
-    /// streak's first failed cycle, not at the last success: a quiet stretch with no coaching is not
-    /// an outage, so it must not end the session on the first failure that follows it.
+    /// Seconds from the streak's first failure, not the last success: quiet time is not an outage.
     static let ceiling: TimeInterval = 600
 
-    /// Consecutive failed cycles since the last success.
     struct Streak {
         let startedAt: TimeInterval
         var cycles: Int
-        /// The most recent cycle's cause, which the ceiling's session end reports.
         var lastFailure: ProviderFailure
     }
 
@@ -34,7 +29,7 @@ struct BrainCycleRecovery {
         nextCycleAt = 0
     }
 
-    /// Seconds before the current streak reaches the ceiling; infinite while no cycle has failed.
+    /// Infinite while no cycle has failed.
     func remainingBeforeCeiling(at now: TimeInterval) -> TimeInterval {
         guard let streak else { return .infinity }
         return max(0, streak.startedAt + Self.ceiling - now)

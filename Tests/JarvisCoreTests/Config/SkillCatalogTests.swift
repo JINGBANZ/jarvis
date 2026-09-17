@@ -2,8 +2,6 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// The bundled skills and the reader that turns them into catalog entries. A skill's description is
-/// all the model sees before deciding to load it, so the format's rules are pinned here.
 @Suite struct SkillCatalogTests {
     private let valid = """
         ---
@@ -58,9 +56,7 @@ import Testing
         #expect(throws: expected) { try SkillCatalog.parse(text, folderName: "behavioral") }
     }
 
-    /// A skill saved with Windows line endings must still load: `CharacterSet.whitespaces` does not
-    /// include `\r`, so an un-normalized reader would see `"---\r"`, reject the fence, and drop the
-    /// whole skill with only a debug-log line to say so.
+    /// `CharacterSet.whitespaces` excludes `\r`, so an unnormalized reader rejects the `---` fence.
     @Test func crlfLineEndingsParseTheSameAsUnixOnes() throws {
         let skill = try SkillCatalog.parse(
             valid.replacingOccurrences(of: "\n", with: "\r\n"), folderName: "behavioral")
@@ -91,8 +87,6 @@ import Testing
         }
     }
 
-    /// The folder is the address the model loads by, so a file that names itself something else is
-    /// rejected rather than silently answering to two names.
     @Test func aNameThatIsNotItsFolderIsRejected() {
         #expect(throws: SkillParseError.nameDoesNotMatchFolder(
             name: "behavioral", folder: "system-design")) {
@@ -100,8 +94,6 @@ import Testing
         }
     }
 
-    /// Every skill this build ships is loadable, and its body is the guidance alone — the reader
-    /// must not hand the model back its own frontmatter.
     @Test func everyBundledSkillParsesAndCarriesGuidance() throws {
         let skills = SkillCatalog.bundled()
 
@@ -140,8 +132,6 @@ import Testing
         #expect(!JarvisPrompts.Coach.system(capabilities: disabled).contains(ai.name))
     }
 
-    /// A build that ships no readable skill is a generic coach, not a broken one: no loader, no
-    /// catalog block, and a prompt that never names either.
     @Test func noSkillsMeansNoLoaderAndNoCatalog() {
         let capabilities = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: false, skills: [])

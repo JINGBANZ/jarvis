@@ -1,15 +1,10 @@
 import Foundation
 
-/// Privacy-preserving evidence that captured audio is continuing through local delivery and into a
-/// Realtime socket. It retains only content-free metadata: sequence/sample counts, timestamps,
-/// counters, socket generations, server audio-clock values, and bounded local activity intervals.
+/// Retains only content-free metadata. PCM passed to `recordDelivery` is reduced to an activity
+/// decision and never stored, returned, logged, or converted to text.
 ///
-/// Callers provide all timestamps and call `poll` while idle, so behavior is deterministic and this
-/// type owns no timer. PCM passed to `recordDelivery` is synchronously reduced to an activity decision
-/// and is never stored, returned, logged, or converted to text.
-///
-/// `@unchecked Sendable`: every mutable field, including the activity detector, is protected by
-/// `lock`; no borrowed PCM escapes the locked `recordDelivery` call.
+/// `@unchecked Sendable`: `lock` guards every mutable field, including the activity detector, and
+/// no borrowed PCM escapes `recordDelivery`.
 public final class AudioContinuityWitness: @unchecked Sendable {
     private struct CapturedChunk {
         let sampleCount: Int
@@ -53,7 +48,7 @@ public final class AudioContinuityWitness: @unchecked Sendable {
     private var captureStallReported = false
     private var deliveryLagReported = false
 
-    /// All subsequent timestamps must use the same session-relative monotonic clock as `startedAt`.
+    /// Every later timestamp must use the same monotonic clock as `startedAt`.
     public init(configuration: Configuration = .init(), startedAt: TimeInterval) {
         self.configuration = configuration
         self.startedAt = startedAt
@@ -90,8 +85,7 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         return finishLocked(at: timestamp, immediate: anomalies)
     }
 
-    /// `pcm16` must be little-endian mono PCM16 for the chunk identified by `sequence`. The bytes are
-    /// inspected synchronously for activity and are not assigned to any retained field.
+    /// `pcm16` must be little-endian mono PCM16. It is inspected synchronously, never retained.
     @discardableResult
     public func recordDelivery(sequence: UInt64, pcm16: Data,
                                at timestamp: TimeInterval) -> Output {
@@ -173,9 +167,7 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         return finishLocked(at: timestamp)
     }
 
-    /// Records intentional bounded-buffer eviction without retaining any PCM. This is the point at
-    /// which exact replay is no longer possible after an unusually long outage, so it must be visible
-    /// in the same continuity evidence as capture, delivery, and transport.
+    /// Replay is no longer exact after an eviction, so it must show in continuity evidence.
     @discardableResult
     public func recordReconnectBufferOverflow(evictedSequences: [UInt64],
                                               at timestamp: TimeInterval) -> Output {
@@ -214,8 +206,7 @@ public final class AudioContinuityWitness: @unchecked Sendable {
         return finishLocked(at: timestamp, immediate: anomalies)
     }
 
-    /// Call while no other observations are arriving so stalls, grace-window anomalies, and periodic
-    /// snapshots still advance. `forceSnapshot` is useful for a final session summary.
+    /// Call while idle so stalls, grace windows, and periodic snapshots still advance.
     public func poll(at timestamp: TimeInterval, forceSnapshot: Bool = false) -> Output {
         lock.lock(); defer { lock.unlock() }
         return finishLocked(at: timestamp, forceSnapshot: forceSnapshot)

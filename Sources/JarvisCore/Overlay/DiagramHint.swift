@@ -1,8 +1,7 @@
 import Foundation
 
-/// A small, inert subset of Mermaid flowcharts for private high-level-design hints. Deliberately
-/// excludes directives, links, HTML, styling, and other diagram types: the overlay needs only boxes
-/// and arrows, so rendering never executes model-supplied code or loads remote resources.
+/// An inert Mermaid flowchart subset. Directives, links, HTML, and styling are excluded on purpose,
+/// so rendering never runs model-supplied code or loads remote resources.
 public struct DiagramHint: Sendable, Equatable {
     public enum Direction: Sendable { case leftToRight, topDown }
     public struct Node: Sendable, Equatable {
@@ -18,8 +17,7 @@ public struct DiagramHint: Sendable, Equatable {
     public let nodes: [Node]
     public let edges: [Edge]
 
-    /// Accepts one declaration or connection per line, with optional inline box declarations.
-    /// Every endpoint must have a box label somewhere in the source; conflicting labels are invalid.
+    /// Nil unless every endpoint has exactly one label somewhere in the source.
     public init?(mermaid: String) {
         guard mermaid.utf8.count <= 8_000 else { return nil }
         let lines = mermaid.components(separatedBy: .newlines)

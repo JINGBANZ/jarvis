@@ -1,16 +1,13 @@
 import Foundation
 
-/// Orders explicit Realtime commits for turns Jarvis manages with local speech detection.
-/// Keeps those boundaries aligned with the audio FIFO and replayable across reconnects.
-/// The socket owner serializes access to this value alongside its connection state.
 public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
     public struct Turn: Equatable, Sendable {
         public let id: UInt64
         public let startedAt: TimeInterval
         public let committedThroughAt: TimeInterval
         public let throughSequenceNumber: UInt64
-        /// True until this logical turn is first associated with a server `item_id`. A replayed turn
-        /// has already consumed the capture-side pending marker and must not consume it twice.
+        /// False once bound to a server `item_id`, so a replayed turn can't consume the
+        /// capture-side pending marker twice.
         public let needsInitialItemBinding: Bool
 
         fileprivate func markingItemBound() -> Turn {
@@ -31,8 +28,7 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
     private var pendingTurns: [Turn] = []
     private var awaitingAcknowledgement: [Turn] = []
     private var acknowledgedTurns: [AcknowledgedTurn] = []
-    /// Server events share one ordered socket in normal operation, but retaining an early terminal ID
-    /// makes the coordinator safe even if a provider delivers completion before the commit acknowledgement.
+    /// Covers a provider delivering completion before the commit acknowledgement.
     private var itemsFinishedBeforeAcknowledgement: Set<String> = []
 
     public init() {}
@@ -57,9 +53,8 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
         lastSentSequenceNumber = max(lastSentSequenceNumber ?? sequenceNumber, sequenceNumber)
     }
 
-    /// Returns the next boundary only after every append through it has completed locally. Moving the
-    /// turn into the acknowledgement queue before the async send also makes an unusually fast server
-    /// acknowledgement safe.
+    /// Returns a boundary only once every append through it has completed locally. It joins the
+    /// acknowledgement queue before the async send, so a fast acknowledgement is safe.
     public mutating func takeReadyCommit() -> Turn? {
         guard commitSendInFlightID == nil,
               let sentThrough = lastSentSequenceNumber,
@@ -71,7 +66,7 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
         return first
     }
 
-    /// A commit must remain ahead of audio belonging to the next turn on the ordered WebSocket.
+    /// A commit must stay ahead of the next turn's audio on the ordered WebSocket.
     public func allowsSendingAudio(sequenceNumber: UInt64) -> Bool {
         guard commitSendInFlightID == nil else { return false }
         guard let boundary = pendingTurns.first?.throughSequenceNumber else { return true }
@@ -82,9 +77,8 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
         if commitSendInFlightID == turnID { commitSendInFlightID = nil }
     }
 
-    /// Match the server's ordered commit acknowledgement to the local boundary and retain it until
-    /// the transcription item becomes terminal. That lets a socket loss replay committed-but-unfinished
-    /// audio instead of losing a spoken turn.
+    /// Retains the turn until its item is terminal, so a socket loss can replay committed but
+    /// unfinished audio.
     public mutating func acknowledgeCommittedItem(itemID: String) -> Turn? {
         guard !itemID.isEmpty, !awaitingAcknowledgement.isEmpty else { return nil }
         let turn = awaitingAcknowledgement.removeFirst()
@@ -104,8 +98,8 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
         }
     }
 
-    /// Requeue every unresolved boundary after the audio FIFO has prepared its matching replay tail.
-    /// Boundaries entirely older than the retained audio are returned to the caller as unrecoverable.
+    /// Call after the audio FIFO has prepared its replay tail. Returns the boundaries older than
+    /// the retained audio, which are unrecoverable.
     @discardableResult
     public mutating func prepareForReconnect(
         oldestAvailableSequenceNumber: UInt64?
@@ -128,8 +122,7 @@ public struct RealtimeJarvisManagedTurnCoordinator: Sendable {
         return discardPendingTurns(before: oldestAvailableSequenceNumber)
     }
 
-    /// Drop boundaries whose final audio chunk is absent, preventing a later append from accidentally
-    /// being committed as the missing turn.
+    /// Otherwise a later append could be committed as the missing turn.
     @discardableResult
     public mutating func discardPendingTurns(before sequenceNumber: UInt64) -> [Turn] {
         var dropped: [Turn] = []

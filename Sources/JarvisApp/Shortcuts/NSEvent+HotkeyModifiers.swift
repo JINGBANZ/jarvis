@@ -2,8 +2,7 @@ import AppKit
 import JarvisCore
 
 extension NSEvent.ModifierFlags {
-    /// Maps the four modifier keys the hotkey recorder cares about. NSEvent's flag bits don't match
-    /// Carbon's masks, so this is an explicit translation rather than a `rawValue` reinterpretation.
+    /// NSEvent flag bits differ from Carbon masks, so translate rather than reuse `rawValue`.
     var hotkeyModifiers: HotkeyModifiers {
         var result: HotkeyModifiers = []
         if contains(.control) { result.insert(.control) }

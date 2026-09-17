@@ -1,12 +1,8 @@
 import AppKit
 
-/// The shared rounded Settings group, with an optional standardized title/detail header.
-///
-/// AppKit does not notify a controller when an `NSStackView` changes an arranged view's width. This
-/// small outer-edge adapter keeps layout responsibility with the card owner instead of teaching the
-/// shared Settings window about any section's internal geometry.
 @MainActor
 final class SettingsCardView: NSBox {
+    /// Runs on every layout: AppKit doesn't tell the owner when an `NSStackView` resizes the card.
     var onLayout: (() -> Void)?
 
     private let headingLabel = NSTextField(labelWithString: "")
@@ -53,7 +49,6 @@ final class SettingsCardView: NSBox {
         needsLayout = true
     }
 
-    /// The owner-controlled region below the optional group header.
     var bodyFrame: NSRect {
         NSRect(
             x: 0,

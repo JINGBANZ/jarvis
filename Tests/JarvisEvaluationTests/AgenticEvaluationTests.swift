@@ -4,8 +4,6 @@ import JarvisCore
 @testable import JarvisEvaluation
 
 @Suite struct AgenticEvaluationTests {
-    /// `prepare` renders the traffic to an owner-only transcript file beside it and returns a prompt
-    /// that points the agent at the session dir + repo.
     @Test func prepareWritesOwnerOnlyTranscriptAndReturnsPrompt() async throws {
         let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
@@ -24,7 +22,6 @@ import JarvisCore
 
         let prompt = try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
 
-        // The compact transcript is written beside the traffic, owner-only, with the rendered content.
         let transcriptURL = dir.appendingPathComponent(AgenticEvaluation.transcriptFilename)
         let transcript = try String(contentsOf: transcriptURL, encoding: .utf8)
         #expect(transcript.contains("=== call #1 · coach"))
@@ -33,10 +30,8 @@ import JarvisCore
         #expect(!transcript.contains("session ended by error"))
         let perms = try FileManager.default.attributesOfItem(atPath: transcriptURL.path)[.posixPermissions] as? NSNumber
         #expect(perms?.int16Value == 0o600)
-        // Preparation never rewrites or filters Activity; the agent receives the complete source file.
         #expect(try String(contentsOf: activityURL, encoding: .utf8) == activityJSONL)
 
-        // The prompt names the session inputs and gives the agent a generic evidence workflow.
         #expect(prompt.contains(dir.path))
         #expect(prompt.contains(AgenticEvaluation.transcriptFilename))
         #expect(prompt.contains("## Summary"))
@@ -80,7 +75,6 @@ import JarvisCore
         #expect(permissions?.int16Value == 0o600)
     }
 
-    /// The evaluator receives neutral measurements and tools, not a growing list of known defects.
     @Test func promptProvidesGenericEvidenceWorkflowWithoutIncidentChecklist() {
         let prompt = AgenticEvaluation.prompt(sessionDirPath: "/tmp/session", workspaceProvenance: "Development test checkout.")
         #expect(prompt.contains("neutral evidence index"))
@@ -104,7 +98,6 @@ import JarvisCore
         #expect(!prompt.contains("## Coaching quality"))
     }
 
-    /// `savedReport` is the Activity viewer's discovery gate: an empty or absent file is not a report.
     @Test func savedReportReturnsOnlyPersistedAgenticReport() throws {
         let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         #expect(AgenticEvaluation.savedReport(in: dir) == nil)
@@ -150,7 +143,6 @@ import JarvisCore
         #expect(throws: AgenticEvaluation.EvaluationError.noTraffic) {
             try AgenticEvaluation.prepare(sessionDir: dir, workspaceProvenance: "Development test checkout.")
         }
-        // No transcript file is left behind on the empty-traffic path.
         #expect(!FileManager.default.fileExists(
             atPath: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
     }
@@ -178,9 +170,8 @@ import JarvisCore
                        response: Data(#"{"status":"completed","output":[]}"#.utf8),
                        status: 200, latencyMs: 300)
         _ = await traffic.closeForTesting()
-        // Opening a session now creates the empty owner-only Activity file alongside the other
-        // evidence files, so the missing-Activity condition has to be made explicitly: a session
-        // directory whose human record was deleted, or never written, cannot be evaluated.
+        // Opening the session created an empty Activity file, so remove it to simulate a missing
+        // one.
         try FileManager.default.removeItem(
             at: dir.appendingPathComponent(ActivityLog.filename))
 
@@ -191,8 +182,6 @@ import JarvisCore
             atPath: dir.appendingPathComponent(AgenticEvaluation.transcriptFilename).path))
     }
 
-    /// A transcript that can't be written must abort the audit — the prompt promises the agent the
-    /// transcript exists, so proceeding would spend an agentic run on a missing/stale file.
     @Test func prepareThrowsWhenTranscriptCannotBeWritten() async throws {
         let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)

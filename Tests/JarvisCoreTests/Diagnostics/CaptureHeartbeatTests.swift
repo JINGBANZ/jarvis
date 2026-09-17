@@ -2,27 +2,15 @@ import Foundation
 import Testing
 @testable import JarvisCore
 
-/// Capture heartbeat: one content-free observation, two one-way consumers.
-///
-/// The rename is not the point. The point is the asymmetry — losing, blocking, or failing the
-/// optional evidence copy may make a session's record partial, and can never change a readiness,
-/// microphone-only degradation, or stop decision.
-///
-/// Serialized because the evidence-pressure cases install a process-global `JarvisLog` attachment —
-/// `JarvisLogAttachmentLock` additionally guards it against the other suites that do the same, since
-/// `.serialized` only covers cases within this one suite.
+/// Serialized because the evidence-pressure cases install the process-global `JarvisLog`
+/// attachment.
 @Suite(.serialized) struct CaptureHeartbeatTests {
-    /// The complete observable output of the critical branch for one heartbeat script: what the app
-    /// would render, and every lifecycle consequence it would apply, in order.
     private struct CriticalOutcome: Equatable {
         var readiness: [CaptureReadinessMonitor.Readiness] = []
         var effects: [CaptureReadinessMonitor.Effect] = []
         var systemUnavailable: [Bool] = []
     }
 
-    /// One fixed script that walks the whole capture-health surface: both streams reach first frame
-    /// and go ready, the system stream stalls long enough to degrade to microphone-only, then the
-    /// microphone stalls long enough to stop the session.
     private func runCriticalBranch(emittingEvidence: Bool = false) -> CriticalOutcome {
         let monitor = CaptureReadinessMonitor(
             configuration: .init(firstFrameTimeout: 6, sustainedStallTimeout: 12),
@@ -38,15 +26,14 @@ import Testing
             outcome.systemUnavailable.append(monitor.isSystemUnavailable)
         }
 
-        /// The capture edge's fan-out, exactly as `RealtimeContinuityReporter.emit` performs it:
-        /// the critical branch runs first and unconditionally, the evidence copy second.
+        /// Mirrors `RealtimeContinuityReporter.emit`: critical branch first, evidence copy second.
         func beat(
             _ promoted: CaptureHeartbeat?,
             for stream: CaptureReadinessMonitor.Stream,
             at time: TimeInterval
         ) {
             guard let promoted else {
-                record { [] }   // nothing promoted; policy still observes the passage of time
+                record { [] }   // still samples readiness when nothing is promoted
                 return
             }
             record { monitor.note(promoted, for: stream, at: time) }
@@ -58,11 +45,9 @@ import Testing
 
         record { monitor.setProviderReady(true, for: .microphone); return [] }
         record { monitor.setProviderReady(true, for: .system); return [] }
-        // A zero-length callback is not health: the gate refuses to promote it at all.
         beat(gates[.microphone]!.frames(sampleCount: 0), for: .microphone, at: 1)
         beat(gates[.microphone]!.frames(sampleCount: 512), for: .microphone, at: 1)
         beat(gates[.system]!.frames(sampleCount: 512), for: .system, at: 1)
-        // Steady flow promotes nothing, so it cannot re-arm anything either.
         beat(gates[.system]!.frames(sampleCount: 512), for: .system, at: 1)
         beat(gates[.system]!.stalled(), for: .system, at: 2)
         beat(gates[.system]!.stalled(), for: .system, at: 3)
@@ -73,35 +58,27 @@ import Testing
         return outcome
     }
 
-    /// The gate promotes only the moments that carry new information, and never a zero-length
-    /// callback. It is the same frame evidence the witness already holds, not a second counter.
     @Test func theGatePromotesOnlyTheFirstFrameAndTheFirstFrameAfterAStall() {
         let gate = CaptureHeartbeatGate()
-        #expect(gate.frames(sampleCount: 0) == nil)          // zero-length callback: not health
+        #expect(gate.frames(sampleCount: 0) == nil)
         #expect(gate.frames(sampleCount: 512) == .frames(sampleCount: 512))
-        #expect(gate.frames(sampleCount: 512) == nil)        // steady flow says nothing new
+        #expect(gate.frames(sampleCount: 512) == nil)
         #expect(gate.stalled() == .stalled)
-        #expect(gate.stalled() == nil)                       // the same gap, warned about twice
-        #expect(gate.frames(sampleCount: 256) == .frames(sampleCount: 256))   // recovery
+        #expect(gate.stalled() == nil)
+        #expect(gate.frames(sampleCount: 256) == .frames(sampleCount: 256))
         #expect(gate.frames(sampleCount: 256) == nil)
 
         gate.reset()
         #expect(gate.frames(sampleCount: 128) == .frames(sampleCount: 128))
     }
 
-    /// The heartbeat carries frame progress and nothing else — no amplitude, no PCM, no transcript.
     @Test func theEvidenceCopyIsContentFree() {
         #expect(CaptureHeartbeat.frames(sampleCount: 480).evidenceDescription == "frames=480")
         #expect(CaptureHeartbeat.stalled.evidenceDescription == "stalled")
     }
 
-    /// The deliverable: capture health decisions are byte-identical whether the evidence copy has
-    /// nowhere to go, is blocked behind a parked writer, overflows a one-slot mailbox, or fails
-    /// every write.
     @Test func evidencePressureCannotChangeReadinessDegradationOrStop() async throws {
         let baseline = runCriticalBranch()
-        // Pin the baseline so the invariant is not vacuous: the script really does reach ready,
-        // degrade to microphone-only, and then stop.
         #expect(baseline.readiness.contains(.ready))
         #expect(baseline.effects == [
             .degradeToMicrophoneOnly(.sustainedStall),
@@ -132,7 +109,6 @@ import Testing
         let release: (() -> Void)?
     }
 
-    /// Blocked, full, and failing evidence destinations, plus one healthy control.
     private func evidenceVariants() throws -> [EvidenceVariant] {
         let healthyDirectory = ActivityLogTests.tmp()
         let fullDirectory = ActivityLogTests.tmp()
@@ -174,7 +150,7 @@ import Testing
         ]
     }
 
-    /// Parks the worker in its first open so admission overflows a one-slot mailbox.
+    /// @unchecked: its only state is two thread-safe semaphores.
     private final class BlockingWriter: SessionAuditWriting, @unchecked Sendable {
         let openEntered = DispatchSemaphore(value: 0)
         private let release = DispatchSemaphore(value: 0)
@@ -203,7 +179,6 @@ import Testing
         func releaseOpen() { release.signal() }
     }
 
-    /// Every record write fails; the session's health record is the only trace.
     private struct FailingAppendWriter: SessionAuditWriting {
         enum Failure: Error { case injected }
         private let backing = SessionAuditFileWriter()

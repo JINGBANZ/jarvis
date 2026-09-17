@@ -2,11 +2,6 @@ import AppKit
 import JarvisCore
 import JarvisBrainProviders
 
-/// Minimal Brain Settings surface: one provider route, one reasoning-effort row, and transcription.
-///
-/// Provider/model ordering is edited by `ProviderRouteEditor`; shared authentication lives in the
-/// Connections tab. This section composes behavior controls, refreshes which subscriptions are signed
-/// in, and hands completed preference edits to the running session.
 @MainActor
 final class BrainSection: NSObject, SettingsSection {
     enum PreferenceChange: Equatable {
@@ -32,11 +27,9 @@ final class BrainSection: NSObject, SettingsSection {
     private var providerEditor: ProviderRouteEditor?
     private var providerHeightConstraint: NSLayoutConstraint?
     private var transcriptionHeightConstraint: NSLayoutConstraint?
-    /// Subscriptions the helper proved signed in on the latest probe; a subscription can be chosen
-    /// only when it is here. Nil until the first probe answers.
+    /// `nil` until the first probe answers.
     private var signedInSubscriptions: Set<BrainProvider>?
     private var signInTask: Task<Void, Never>?
-    /// Session-local runtime state only. This marker never writes preferences or reorders the route.
     private var activeTarget: BrainTarget?
 
     init(
@@ -105,9 +98,8 @@ final class BrainSection: NSObject, SettingsSection {
         transcriptionHeightConstraint = transcriptionHeight
         stack.addArrangedSubview(transcriptionCard)
 
-        // When the cards are shorter than the viewport, this flexible tail absorbs the remaining
-        // height below them. Without it, AppKit anchors the short document at the bottom and leaves
-        // a large empty band above Provider.
+        // Without this flexible tail, AppKit anchors a document shorter than the viewport at the
+        // bottom and leaves an empty band above the cards.
         let bottomSpacer = NSView()
         bottomSpacer.setContentHuggingPriority(.defaultLow, for: .vertical)
         bottomSpacer.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
@@ -115,8 +107,7 @@ final class BrainSection: NSObject, SettingsSection {
         stack.setCustomSpacing(0, after: transcriptionCard)
         stack.addArrangedSubview(bottomSpacer)
 
-        // Attach only after every fixed-height card and the flexible tail exist. Attaching the
-        // partially assembled stack makes AppKit briefly solve an impossible intermediate layout.
+        // Attach only the complete stack: a partial one makes AppKit solve an impossible layout.
         scrollView.documentView = stack
         scrollView.onViewportChanged = { [weak self] in
             self?.recalculateDocumentHeight()
@@ -134,7 +125,7 @@ final class BrainSection: NSObject, SettingsSection {
         return page
     }
 
-    /// Reflect the driver's selected runtime target without mutating the saved route.
+    /// Display only: never writes preferences or reorders the saved route.
     func setActiveTarget(_ target: BrainTarget?) {
         activeTarget = target
         pageView?.setStatus(target.map { "\($0.provider.displayName) in use" })
@@ -180,8 +171,8 @@ final class BrainSection: NSObject, SettingsSection {
         guard signInTask == nil else { return }
         let supervisor = supervisor
         signInTask = Task { [weak self] in
-            // Only a saved sign-in is worth starting the helper for; with none, no subscription can
-            // be chosen and the helper stays unstarted.
+            // Start the helper only when a sign-in is saved; without one no subscription is
+            // choosable.
             let hasAccount = SubscriptionControls.providers.contains {
                 !supervisor.accountFiles(for: $0).isEmpty
             }

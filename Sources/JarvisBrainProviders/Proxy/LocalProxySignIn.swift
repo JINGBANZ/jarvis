@@ -5,17 +5,11 @@ import os
 import Darwin
 #endif
 
-/// Signs the user in to one subscription through the bundled helper's own login command.
-///
-/// The command prints the OAuth page and waits for the provider's redirect on the helper's fixed
-/// callback port (1455 for Codex, 54545 for Claude), then writes the credential into the auth
-/// directory the running helper watches, which picks it up without a restart. Jarvis passes
-/// `-no-browser` and opens the page itself, so the one browser open stays in Jarvis code behind
-/// the user's Sign in click. In that mode the command also asks public IP services for this Mac's
-/// address to print SSH tunnel hints, which Jarvis ignores.
+/// `-no-browser` keeps the one browser open in Jarvis code, behind the user's Sign in click.
+/// That mode also queries public IP services for SSH tunnel hints, which Jarvis ignores.
 public struct LocalProxySignIn: Sendable {
     public enum Event: Sendable, Equatable {
-        /// The OAuth page to open; the caller opens it.
+        /// The caller opens the OAuth page.
         case openURL(URL)
         case finished(accountFiles: [LocalProxyAccountFile])
         case failed(message: String)
@@ -23,9 +17,7 @@ public struct LocalProxySignIn: Sendable {
 
     private static let deadline: Duration = .seconds(10 * 60)
 
-    /// Hosts Jarvis will open a login page on. The helper prints the URL on its stdout and Jarvis
-    /// opens it, so without this any line the pinned binary printed could send the user's browser
-    /// anywhere. These are the authorize hosts that binary builds its login URLs from.
+    /// The binary's authorize hosts; otherwise any line it prints could send the browser anywhere.
     private static let signInHosts: Set<String> = [
         "auth.openai.com", "claude.ai", "console.anthropic.com",
     ]
@@ -33,8 +25,7 @@ public struct LocalProxySignIn: Sendable {
     private let executable: URL
     private let configURL: URL
     private let authDirectory: URL
-    /// Where every running login publishes its process id, so Quit can end them from outside. Codex
-    /// and Claude can be signing in at the same time, so this is a set rather than one slot.
+    /// Lets Quit end every running login. A set because Codex and Claude can sign in at once.
     private let signInPIDs: OSAllocatedUnfairLock<Set<Int32>>
 
     public init(executable: URL, configURL: URL, authDirectory: URL,
@@ -45,8 +36,7 @@ public struct LocalProxySignIn: Sendable {
         self.signInPIDs = signInPIDs
     }
 
-    /// Runs the login for `provider`. Cancelling the consuming task, or dropping the stream,
-    /// terminates the command.
+    /// Cancelling the consuming task, or dropping the stream, terminates the command.
     public func run(_ provider: BrainProvider) -> AsyncStream<Event> {
         let (stream, continuation) = AsyncStream.makeStream(of: Event.self)
         let task = Task { await perform(provider, continuation) }
@@ -68,11 +58,10 @@ public struct LocalProxySignIn: Sendable {
         let process = Process()
         process.executableURL = executable
         process.arguments = [flag, "-no-browser", "-config", configURL.path]
-        // After 15 seconds the command offers to read a pasted callback URL. End of input keeps it
-        // waiting for the browser's redirect, which is the only path Jarvis uses.
+        // After 15 s the command offers to read a pasted callback URL; end of input keeps it
+        // waiting for the browser's redirect.
         process.standardInput = FileHandle.nullDevice
-        // The same allowlist the helper runs with: this login writes the credential, so an inherited
-        // `PGSTORE_DSN` or `OBJECTSTORE_*` would decide where it lands.
+        // An inherited `PGSTORE_DSN` or `OBJECTSTORE_*` would decide where the credential lands.
         process.environment = LocalProxySupervisor.helperEnvironment()
         let output = Pipe()
         process.standardOutput = output
@@ -110,8 +99,7 @@ public struct LocalProxySignIn: Sendable {
                     let trimmed = line.trimmingCharacters(in: .whitespaces)
                     if !opened, trimmed.hasPrefix("https://"), let url = URL(string: trimmed) {
                         guard Self.signInHosts.contains(url.host()?.lowercased() ?? "") else {
-                            // Letting it run would end in the ten-minute timeout, which says nothing
-                            // about why no page ever opened.
+                            // Otherwise it times out without saying why no page opened.
                             kill(pid, SIGTERM)
                             events.yield(.failed(
                                 message: "the sign-in service printed an address Jarvis won't open"))
@@ -144,8 +132,7 @@ public struct LocalProxySignIn: Sendable {
         }
     }
 
-    /// The helper writes credentials with its own mode; they hold tokens, so they get the API key
-    /// file's owner-only mode.
+    /// The helper picks its own file mode, but these hold tokens, so force owner-only.
     private func protectCredentials() {
         let urls = (try? FileManager.default.contentsOfDirectory(
             at: authDirectory, includingPropertiesForKeys: [.isRegularFileKey])) ?? []

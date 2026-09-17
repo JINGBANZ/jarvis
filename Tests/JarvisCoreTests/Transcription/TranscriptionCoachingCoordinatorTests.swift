@@ -106,7 +106,7 @@ import Testing
     }
 }
 
-/// `@unchecked Sendable`: `lock` guards every read and write of the recorded callback values.
+/// @unchecked: lock guards every recorded value.
 private final class CoachingEvents: @unchecked Sendable {
     private let lock = NSLock()
     private var turns = 0
@@ -171,9 +171,8 @@ private func waitUntil(
     return condition()
 }
 
-/// Production scheduled its transcript batch before this later-deadline marker on the same queue.
-/// Reaching the marker proves the invalidated `publishTranscriptBatch` callback ran first, even when
-/// parallel test load delays both callbacks beyond their deadlines.
+/// Queued after the batch's deadline on the same queue, so reaching it proves the invalidated
+/// batch callback already ran, even under parallel test load.
 private func waitForMainQueue(after delay: TimeInterval) async {
     await withCheckedContinuation { continuation in
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -182,9 +181,9 @@ private func waitForMainQueue(after delay: TimeInterval) async {
     }
 }
 
-/// `publishTranscriptBatch` has no externally visible callback while transcription remains active. This
-/// test-local probe observes the exact `UtteranceBuffer` transition instead of adding a production
-/// hook, then restores the state so `updateTranscriptionWork(false)` exercises the resume path.
+/// The batch has no visible callback while transcription is active, so this reads the private
+/// buffer. It restores the waiting state so `updateTranscriptionWork(false)` still exercises the
+/// resume path.
 private struct PendingTurnProbe: Sendable {
     private let pending: UtteranceBuffer
 
@@ -203,8 +202,7 @@ private struct PendingTurnProbe: Sendable {
     }
 }
 
-/// Running the complete start/record/stop sequence in one main-actor turn guarantees the batch callback
-/// is genuinely queued but cannot execute until after `stop()` invalidates it.
+/// One main-actor turn keeps the batch callback queued until `stop()` invalidates it.
 @MainActor
 private func recordAndStopBeforeQueuedBatchRuns(
     _ coordinator: TranscriptionCoachingCoordinator

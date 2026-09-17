@@ -3,7 +3,6 @@ import Foundation
 extension CoachCapabilities {
     public static let loadToolName = "load_tool"
 
-    /// Built per Start from the deferred tools actually present; see `loaderParametersJSON`.
     static func loadTool(catalogNames: [String]) -> ToolDef {
         ToolDef(
             name: loadToolName,
@@ -14,7 +13,6 @@ extension CoachCapabilities {
     }
 }
 
-// The tool results the harness sends for a load.
 extension JarvisPrompts.Coach {
     static func loadToolResult(_ tool: ToolDef) -> String {
         "Loaded \(tool.name).\nArguments JSON Schema: \(tool.parametersJSON)\n\n\(tool.guidance)"
@@ -25,9 +23,6 @@ extension JarvisPrompts.Coach {
             + "Do not load it again."
     }
 
-    /// Answers both an unknown load name and a call to a tool this session does not offer. The
-    /// model is told plainly rather than failing the attempt: a model can emit a name no request
-    /// declared, and a refusal it can read is what stops it repeating the call.
     static func toolUnavailable(_ name: String) -> String {
         "No tool named \(name) is available."
     }

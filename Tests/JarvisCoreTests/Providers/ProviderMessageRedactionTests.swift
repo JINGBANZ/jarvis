@@ -2,7 +2,6 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ProviderMessageRedactionTests {
-    /// A CLI prints credentials in prose, not in a URL, so the query-parameter rule never sees them.
     @Test func maskesACredentialAssignedInProse() {
         #expect(ProviderMessageRedaction.redact("refresh failed: token=9f3ab27c5d1e4a80")
                 == "refresh failed: token=\u{2026}")
@@ -12,7 +11,6 @@ import Testing
                 == "secret: \u{2026}")
     }
 
-    /// The commonest shapes a CLI actually prints all carry an underscore in front of the name.
     @Test func maskesTheUnderscoredNamesACLIActuallyPrints() {
         #expect(ProviderMessageRedaction.redact("refresh_token=9f3ab27c5d1e4a80 expired")
                 == "refresh_token=\u{2026} expired")
@@ -22,8 +20,6 @@ import Testing
                 == "OPENAI_API_KEY=\u{2026}")
     }
 
-    /// A short value after one of those names is a setting, not a credential, and losing it would
-    /// make the evidence worse.
     @Test func keepsAShortValueThatCannotBeACredential() {
         #expect(ProviderMessageRedaction.redact("token=3") == "token=3")
         #expect(ProviderMessageRedaction.redact("retries=8675309") == "retries=8675309")
@@ -36,7 +32,7 @@ import Testing
         #expect(redacted == "Codex CLI: expired eyJ\u{2026} for this account")
     }
 
-    /// The exact wording OpenAI returned for a bad key on 2026-09-08 (captured with a throwaway key).
+    /// Real OpenAI wording for a bad key.
     @Test func masksOpenAIKeyFragments() {
         let raw = "Incorrect API key provided: sk-inval***********-000. You can find your API key at https://platform.openai.com/account/api-keys."
         let redacted = ProviderMessageRedaction.redact(raw)
@@ -66,10 +62,6 @@ import Testing
         #expect(redacted.hasSuffix("…"))
     }
 
-    /// Redaction has to leave the evidence intact: `message` is the only place a provider's own
-    /// wording survives, so a pattern that eats an ordinary word is a silent corruption. `sk-` only
-    /// starts a key at a word boundary (not inside "task-force" or "disk-image"), and "bearer" only
-    /// precedes a token when something token-shaped and long follows it.
     @Test func leavesOrdinaryTextAlone() {
         #expect(ProviderMessageRedaction.redact("Country, region, or territory not supported")
                 == "Country, region, or territory not supported")

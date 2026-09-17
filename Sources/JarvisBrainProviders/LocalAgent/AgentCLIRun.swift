@@ -1,9 +1,6 @@
 import Foundation
 import JarvisCore
 
-/// One fully-described CLI invocation the session evaluator runs, injectable in tests so no real
-/// process is spawned there. Executed by `AgentCLIProcessRunner`; its result is an
-/// `AgentCLIOutput`.
 public struct AgentCLIRun: Sendable {
     public let executable: URL
     public let arguments: [String]

@@ -1,9 +1,5 @@
 import Foundation
 
-/// Pure session-local cursor and health policy for an ordered provider route.
-///
-/// Within one cycle the route only moves forward. Three temporary failures or one proven
-/// permanent failure exhaust a target. The driver owns the new-cycle reset after route exhaustion.
 struct BrainRouteSession: Sendable, Equatable {
     static let failuresPerTarget = 3
 
@@ -38,7 +34,6 @@ struct BrainRouteSession: Sendable, Equatable {
         return advance()
     }
 
-    /// Skip a target that cannot be constructed without charging a synthetic provider attempt.
     mutating func skipUnavailable() -> FailureTransition {
         advance()
     }

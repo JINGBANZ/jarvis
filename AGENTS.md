@@ -32,7 +32,10 @@
   or improve nearby code and remove pre-existing dead code where there's clear room for improvement.
 - **Goal-driven execution.** Turn the request into verifiable success criteria, state a brief plan
   for complex tasks, then loop until the criteria are met.
-- **Document non-obvious decisions in comments** — explain *why*, not *what*.
+- **Comment only what the code can't say.** Make code explain itself through names and structure.
+  Add a comment only for a tool directive, a required marker, or a short *why* a reader couldn't get
+  from the code, such as a hidden constraint, a platform quirk, or the race a lock prevents. Never
+  restate what the code does, narrate its history, or copy a design doc; link the doc instead.
 
 ## Workflow
 

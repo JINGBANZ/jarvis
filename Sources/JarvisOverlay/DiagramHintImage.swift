@@ -1,7 +1,6 @@
 import AppKit
 import JarvisCore
 
-/// Native, memory-only rendering for the box-and-arrow Mermaid subset in the pinned design area.
 @MainActor
 enum DiagramHintImage {
     static func render(_ graph: DiagramHint, fitting available: NSSize) -> NSImage {
@@ -29,8 +28,6 @@ enum DiagramHintImage {
                 frames[node.id] = NSRect(origin: NSPoint(x: x, y: y), size: boxSize)
             }
         }
-        // Keep one stable layout and scale the whole sketch uniformly, including text and arrows.
-        // Both window dimensions constrain it, so a short window never gets a tall graph.
         let scale = min(max(1, available.width) / natural.width, max(1, available.height) / natural.height)
         let image = NSImage(size: NSSize(width: natural.width * scale, height: natural.height * scale))
         image.lockFocusFlipped(true)
@@ -63,8 +60,6 @@ enum DiagramHintImage {
                     ? NSPoint(x: middle, y: end.y - 20)
                     : NSPoint(x: end.x, y: middle)
             } else {
-                // Feedback and bypass arrows travel around the outside, avoiding every
-                // intervening box.
                 if horizontal {
                     path.line(to: NSPoint(x: start.x + 16, y: start.y))
                     path.line(to: NSPoint(x: start.x + 16, y: natural.height - 12))
@@ -130,8 +125,7 @@ enum DiagramHintImage {
         var remaining = graph.nodes.map(\.id)
         var ranks: [String: Int] = [:]
         while !remaining.isEmpty {
-            // Layer a DAG by its longest incoming path. For a cycle, break the layout tie in
-            // declaration order; the unbroken graph still renders its feedback arrow.
+            // `?? remaining[0]` breaks a cycle in declaration order; its back edge still renders.
             let ready = remaining.first { id in
                 graph.edges.filter { $0.to == id }.allSatisfy { ranks[$0.from] != nil }
             } ?? remaining[0]

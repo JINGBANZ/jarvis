@@ -1,7 +1,6 @@
 import Foundation
 
-/// Small, stateful PCM16 activity detector for continuity diagnostics. It keeps only an adaptive
-/// RMS noise floor and a hysteresis bit; input samples never escape `observe`.
+/// Keeps only a noise floor and a hysteresis bit; samples never escape `observe`.
 struct AdaptiveAudioActivityDetector {
     struct Observation {
         let sampleCount: Int
@@ -37,8 +36,7 @@ struct AdaptiveAudioActivityDetector {
         }
 
         if !isActive {
-            // Let the floor follow ordinary background changes, but cap one observation's upward
-            // influence so a voice onset cannot immediately redefine itself as noise.
+            // Cap one observation's upward pull so a voice onset can't redefine itself as noise.
             let cappedRMS = min(levels.rms, max(configuration.minimumNoiseFloorRMS,
                                                 noiseFloorRMS * 1.5))
             noiseFloorRMS += configuration.noiseAdaptationRate * (cappedRMS - noiseFloorRMS)

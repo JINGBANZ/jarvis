@@ -3,7 +3,7 @@ import Testing
 import JarvisBrainProviders
 import JarvisCore
 #if canImport(FoundationNetworking)
-import FoundationNetworking   // HTTPURLResponse lives here on non-Darwin (Core tests on Linux)
+import FoundationNetworking   // HTTPURLResponse lives here off Darwin
 #endif
 
 private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLResponse {
@@ -11,9 +11,6 @@ private func http(_ code: Int, headers: [String: String]? = nil) -> HTTPURLRespo
                     statusCode: code, httpVersion: nil, headerFields: headers)!
 }
 
-/// Build a Responses body carrying one `speak` function_call whose raw `arguments` string is exactly
-/// `arguments`. JSONSerialization handles the wire-escaping, so the test can pass `{}` / `not json`
-/// verbatim without hand-escaping quotes.
 private func speakResponseBody(arguments: String) -> Data {
     let item: [String: Any] = ["type": "function_call", "id": "f", "call_id": "c",
                                "name": "speak", "arguments": arguments]
@@ -21,9 +18,6 @@ private func speakResponseBody(arguments: String) -> Data {
 }
 
 @Suite struct BrainAccessorTests {
-    /// The model returns the overlay lines already split, in a `lines` array — so a line that contains
-    /// internal periods/code (e.g. `Array.from(...)`) survives intact as ONE element. This is the
-    /// regression that motivated the schema change: client-side sentence splitting used to shatter it.
     @Test func decodesSpeakToolCallWithLinesArray() async throws {
         let json = """
         {"output":[
@@ -50,9 +44,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.rawToolCalls == [RawToolCall(id: "call_9", name: "capture_screen", argumentsJSON: "{}")])
     }
 
-    /// The decoder surfaces the response's ENTIRE `output` array verbatim, so the tool loop can
-    /// replay it whole with the tool result (`input.push(...response.output)`) — reasoning id,
-    /// encrypted payload, and the function_call's own item id must all survive untouched.
     @Test func decodeSurfacesWholeOutputVerbatim() async throws {
         let json = """
         {"output":[
@@ -69,12 +60,10 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(reasoning.contains(#""id":"rs_1""#))
         #expect(reasoning.contains(#""encrypted_content":"opaque-blob""#))
         let call = resp.outputItemsJSON.last ?? ""
-        #expect(call.contains(#""id":"fc_9""#))       // the item id rides along, unlike a rebuilt call
+        #expect(call.contains(#""id":"fc_9""#))
         #expect(call.contains(#""call_id":"call_9""#))
     }
 
-    /// `.rawItems` passthrough is re-emitted into `input` exactly as recorded — reasoning before the
-    /// function_call it belongs to, the call keeping its item id — the shape the API requires.
     @Test func encodesRawItemsVerbatimBeforeFunctionCallOutput() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -93,7 +82,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let kinds = input.map { ($0["type"] as? String) ?? ($0["role"] as? String) ?? "?" }
         #expect(kinds == ["user", "reasoning", "function_call", "function_call_output"])
         #expect(input.count == 4 && input[1]["id"] as? String == "rs_1")
-        #expect(input.count == 4 && input[2]["id"] as? String == "fc_1")   // verbatim, id preserved
+        #expect(input.count == 4 && input[2]["id"] as? String == "fc_1")
     }
 
     @Test func decodesStaySilentToolCall() async throws {
@@ -116,11 +105,7 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.toolCalls.isEmpty)
     }
 
-    /// `strict:true` makes malformed `speak` arguments unlikely, but the decode must still degrade
-    /// gracefully — and an off-contract shape (missing key, non-array value, empty array, broken
-    /// JSON) is DROPPED, never accepted as a speak with empty lines: an empty overlay would still
-    /// count as a spoken turn (history, counter). The driver treats the empty tool-call list as
-    /// silence. Pin that fallback so a future refactor can't silently change it.
+    /// Dropped, not decoded as an empty speak: an empty overlay would still count as a spoken turn.
     @Test func speakDecodeDropsOffContractArgumentsAsSilence() async throws {
         for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, #"{"lines":["  "]}"#, "not json"] {
             let body = speakResponseBody(arguments: args)
@@ -131,8 +116,6 @@ private func speakResponseBody(arguments: String) -> Data {
         }
     }
 
-    /// A token-truncated response (status=incomplete, max_output_tokens) must surface its reason
-    /// so an empty tool-call list isn't mistaken for deliberate silence.
     @Test func decodeFlagsIncompleteResponse() async throws {
         let json = #"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}"#
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -142,7 +125,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.incompleteReason == "max_output_tokens")
     }
 
-    /// A normal completed response carries no incomplete reason.
     @Test func decodeCompletedResponseHasNoIncompleteReason() async throws {
         let json = #"{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}"#
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -151,8 +133,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(resp.incompleteReason == nil)
     }
 
-    /// Plain text output is surfaced (`outputText`) — the whole payload of a tool-less summarizer
-    /// call — and multiple text parts are joined.
     @Test func decodesOutputTextForToollessCalls() async throws {
         let json = #"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the "},{"type":"output_text","text":"summary"}]}]}"#
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.4-mini",
@@ -192,9 +172,6 @@ private func speakResponseBody(arguments: String) -> Data {
         ])
     }
 
-    /// Any non-2xx fails fast — there is no in-request retry. A failure throws to the driver, which
-    /// recovers on the next trigger by re-sending the (still-uncommitted) backlog — fresher than
-    /// retrying a stale body in place.
     @Test func httpErrorThrowsWithoutRetry() async {
         let attempts = Counter()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -202,7 +179,7 @@ private func speakResponseBody(arguments: String) -> Data {
         await #expect(throws: (any Error).self) {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         }
-        #expect(attempts.value == 1) // single attempt, no retry
+        #expect(attempts.value == 1)
     }
 
     @Test func httpErrorIsClassifiedAtProviderBoundary() async {
@@ -272,8 +249,7 @@ private func speakResponseBody(arguments: String) -> Data {
         }
     }
 
-    /// A transport error never reaches the message: `URLError.localizedDescription` embeds the
-    /// failing URL, so the fixed table describes it and the identity keeps the code.
+    /// `URLError.localizedDescription` embeds the failing URL, so it must never reach the message.
     @Test func transportFailuresCarryTheCodeAndNoURL() async {
         let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-5.5",
@@ -291,7 +267,6 @@ private func speakResponseBody(arguments: String) -> Data {
         }
     }
 
-    /// Request body uses the Responses shape + hardening flags.
     @Test func encodesResponsesRequestShape() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5", reasoningEffort: "low",
@@ -311,14 +286,13 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"call_id\":\"call_1\""))
         #expect(body.contains("\"input_image\""))
         #expect(body.contains("\"reasoning\""))
-        #expect(body.contains("\"store\":true"))   // requests stay inspectable in the OpenAI logs (debugging)
+        #expect(body.contains("\"store\":true"))   // keeps requests inspectable in the OpenAI dashboard
         #expect(body.contains("\"max_output_tokens\""))
         #expect(body.contains("\"parallel_tool_calls\":false"))
         #expect(body.contains("\"name\":\"capture_screen\""))
     }
 
-    /// A subscription runs on the user's own consumer plan, where no dashboard exists to inspect
-    /// what was retained, so nothing asks the vendor to keep it.
+    /// A consumer subscription has no dashboard to inspect retained requests, so none are stored.
     @Test func aSubscriptionTargetAsksForNoRetention() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(
@@ -330,9 +304,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"store\":false"))
     }
 
-    /// A subscription reaches the model only through the helper on loopback, carrying that launch's
-    /// key. Nothing else in this suite reads the URL or the header, so a hardcoded endpoint would
-    /// pass every other test and only fail against a real provider.
     @Test func aTargetSendsToItsOwnEndpointWithItsOwnKey() async throws {
         let box = CapturedRequest()
         let endpoint = URL(string: "http://127.0.0.1:52001/v1/responses")!
@@ -345,8 +316,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(box.get()?.value(forHTTPHeaderField: "Authorization") == "Bearer proxy-key")
     }
 
-    /// Activity names the target that failed, so a subscription's failure must not arrive wearing
-    /// the default provider's name.
     @Test func aSubscriptionFailureNamesItsOwnProvider() async {
         let client = BrainAccessor(
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
@@ -406,8 +375,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(request["max_output_tokens"] as? Int == 25_000)
     }
 
-    /// The caller's `max_output_tokens` budget is encoded verbatim — this is what carries the
-    /// per-effort cap (high → 25k) so high-effort reasoning isn't truncated before the tip.
     @Test func encodesProvidedMaxOutputTokens() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5", maxOutputTokens: 25_000,
@@ -417,9 +384,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"max_output_tokens\":25000"))
     }
 
-    /// A default-constructed client encodes the *default effort's* budget, not a magic number — this
-    /// pins the single source of truth (`Defaults.Brain.effort.maxOutputTokens`) so the client
-    /// default can't silently drift back to a hardcoded value.
     @Test func defaultMaxOutputTokensTracksDefaultEffort() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -429,9 +393,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"max_output_tokens\":\(Defaults.Brain.effort.maxOutputTokens)"))
     }
 
-    /// Tools are sent with `strict:true` so the model's function-call arguments are schema-guaranteed
-    /// (Structured Outputs via function calling) — that's what lets `speak` return a typed `lines`
-    /// array instead of a free-form string the client has to split.
     @Test func encodesStrictToolsForStructuredOutput() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -441,8 +402,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"strict\":true"))
     }
 
-    /// A deferred tool is undeclared until the model loads it, so the only array the provider ever
-    /// sees is what the session may call right now — loader included, with its catalog enum.
     @Test func encodesTheLoaderAndDeclaresADeferredToolOnlyOnceLoaded() async throws {
         let capabilities = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true)
@@ -464,8 +423,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(after.contains("\"name\":\"search_prep_notes\""))
     }
 
-    /// A skill is never a declared tool — only its loader is, with the switched-on names as an
-    /// enum, so a schema-enforcing provider cannot be asked for one that is not offered.
     @Test func encodesTheSkillLoaderWithItsCatalogEnum() async throws {
         let capabilities = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: false,
@@ -484,9 +441,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(!body.contains("\"load_tool\""))
     }
 
-    /// The load and the use happen in one attempt, which is one `BrainConversation`. Each request
-    /// inside it must declare the array it was handed, or a tool loaded in one iteration would not
-    /// be callable in the next.
     @Test func aConversationDeclaresEachRequestsOwnTools() async throws {
         let capabilities = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true)
@@ -509,7 +463,6 @@ private func speakResponseBody(arguments: String) -> Data {
         await conversation.finish()
     }
 
-    /// Default tool choice is "auto".
     @Test func defaultToolChoiceIsAuto() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -519,8 +472,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"tool_choice\":\"auto\""))
     }
 
-    /// `.required` (what audio-driven coach turns use) encodes the Responses "required" string — some
-    /// tool call, the model's pick — so a stay-quiet decision must be the stay_silent tool, not text.
     @Test func requiredToolChoiceEncodesRequiredString() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -530,7 +481,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"tool_choice\":\"required\""))
     }
 
-    /// Forcing a specific function encodes the Responses tool_choice object shape.
     @Test func forceToolChoiceEncodesFunctionObject() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -542,8 +492,8 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"name\":\"speak\""))
     }
 
-    /// A coaching shortcut narrows what may be called through tool_choice alone. The declared array
-    /// is the one a `.required` request carries, which keeps the cached prefix the same.
+    /// The declared array must match the `.required` request's so the prompt-cache prefix is
+    /// unchanged.
     @Test func allowedToolChoiceEncodesAllowedToolsOverTheSameDeclaredArray() async throws {
         let tools = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: false,
@@ -597,9 +547,8 @@ private func speakResponseBody(arguments: String) -> Data {
         (body["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
     }
 
-    /// A `filteredAuto` target cannot narrow a call, so the permitted set is the declared array
-    /// itself, in catalog order whatever order the choice named, and the choice is `auto`. Strict
-    /// tools and one call per response still go out; the proxy strips what it cannot forward.
+    /// Strict tools and `parallel_tool_calls` still go out; the proxy strips what it cannot
+    /// forward.
     @Test func filteredAutoDeclaresOnlyTheAllowedToolsInCatalogOrder() async throws {
         let tools = fiveTools
         #expect(tools.count == 5)
@@ -624,8 +573,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body["tool_choice"] as? String == "auto")
     }
 
-    /// A target's effort floor raises the effort and its budget; a deeper selection passes through
-    /// with the caller's budget.
     @Test func aReasoningFloorRaisesOnlyAShallowerEffort() async throws {
         let raised = try await encodedBody(
             policy: .filteredAuto, tools: fiveTools, choice: .required,
@@ -640,8 +587,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(kept["max_output_tokens"] as? Int == 8_192)
     }
 
-    /// With a traffic log wired, a successful round trip lands in `brain-traffic.jsonl` — the raw
-    /// eval pipeline input — tagged, with the request body and response body both present.
     @Test func successfulRoundTripIsRecordedToTrafficLog() async throws {
         let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
@@ -661,7 +606,6 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(entry["response"] != nil)
     }
 
-    /// A transport failure still records the attempt (request + error, no response) and rethrows.
     @Test func transportErrorIsRecordedToTrafficLogAndRethrown() async throws {
         let dir = tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
@@ -682,7 +626,7 @@ private func speakResponseBody(arguments: String) -> Data {
     }
 }
 
-/// Thread-safe capture box for inspecting the whole request from a @Sendable send closure.
+// @unchecked: all mutable state is guarded by lock.
 final class CapturedRequest: @unchecked Sendable {
     private var request: URLRequest?
     private let lock = NSLock()
@@ -690,7 +634,7 @@ final class CapturedRequest: @unchecked Sendable {
     func get() -> URLRequest? { lock.lock(); defer { lock.unlock() }; return request }
 }
 
-/// Thread-safe capture box for inspecting the request body from a @Sendable send closure.
+// @unchecked: all mutable state is guarded by lock.
 final class CapturedBody: @unchecked Sendable {
     private var data: Data?
     private let lock = NSLock()
@@ -698,7 +642,7 @@ final class CapturedBody: @unchecked Sendable {
     func get() -> Data? { lock.lock(); defer { lock.unlock() }; return data }
 }
 
-/// Thread-safe timeout recorder for request-policy tests.
+// @unchecked: all mutable state is guarded by lock.
 final class CapturedTimeouts: @unchecked Sendable {
     private var recorded: [TimeInterval] = []
     private let lock = NSLock()
@@ -706,7 +650,7 @@ final class CapturedTimeouts: @unchecked Sendable {
     var values: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return recorded }
 }
 
-/// Thread-safe call counter for retry tests.
+// @unchecked: all mutable state is guarded by lock.
 final class Counter: @unchecked Sendable {
     private var n = 0
     private let lock = NSLock()
