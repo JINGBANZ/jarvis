@@ -9,7 +9,7 @@ public extension UserFacingError {
             message: "An API key is missing for \(sentenceList(named)). Open \u{201C}Settings\u{2026}\u{201D} "
                 + "\u{2192} Connections, paste the missing key, then press Start.",
             severity: .fatal,
-            sessionEndReason: .openAIAPIKeyMissing)
+            sessionEndReason: .apiKeyMissing)
     }
 
     /// A preflight refusal, so a running session remains intact.
