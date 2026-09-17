@@ -156,6 +156,11 @@ import JarvisCore
         #expect(response.outputText == "ok")
     }
 
+    @Test func echoedInputStepsAreNotRecordedAsOutput() throws {
+        let response = try #require(try JSONSerialization.jsonObject(with: Data(#"{"status":"completed","steps":[{"type":"user_input","content":[{"type":"text","text":"hi"}]},{"type":"function_result","call_id":"c1","name":"speak","result":"shown"},{"type":"model_output","content":[{"type":"text","text":"ok"}]}]}"#.utf8)) as? [String: Any])
+        #expect(InteractionsWireFormat.readRecorded(request: nil, response: response).outputs == [.text("ok")])
+    }
+
     @Test func aRecordedExchangeReadsIntoTheSharedView() {
         func json(_ text: String) -> [String: Any] {
             (try? JSONSerialization.jsonObject(with: Data(text.utf8))) as? [String: Any] ?? [:]

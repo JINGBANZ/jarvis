@@ -11,6 +11,8 @@ struct InteractionsWireFormat: BrainWireFormat {
     /// A call may only follow a user step or a function result, so input can't open with one.
     static let sessionStart = "Session start."
     static let finishedStatuses: Set<String> = ["completed", "requires_action"]
+    /// A reply may echo these; they are never the model's output.
+    static let inputStepTypes: Set<String> = ["user_input", "function_result"]
 
     let model: String
     let reasoningEffort: String
@@ -119,9 +121,9 @@ struct InteractionsWireFormat: BrainWireFormat {
         var invocations: [ToolInvocation] = []
         var text = ""
         for var step in interaction["steps"] as? [[String: Any]] ?? [] {
-            switch step["type"] as? String {
-            case "user_input", "function_result":
-                continue
+            let type = step["type"] as? String ?? ""
+            guard !Self.inputStepTypes.contains(type) else { continue }
+            switch type {
             case "function_call":
                 guard let id = step["id"] as? String, let name = step["name"] as? String else { continue }
                 let unique = id + suffix

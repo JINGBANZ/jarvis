@@ -26,7 +26,9 @@ extension InteractionsWireFormat {
         }
         if let response {
             exchange.status = response["status"] as? String
-            exchange.outputs = (response["steps"] as? [[String: Any]] ?? []).map(output)
+            exchange.outputs = (response["steps"] as? [[String: Any]] ?? [])
+                .filter { !inputStepTypes.contains($0["type"] as? String ?? "") }
+                .map(output)
             if let usage = response["usage"] {
                 let fields = usage as? [String: Any]
                 let visible = RecordedExchange.int(fields?["total_output_tokens"])
