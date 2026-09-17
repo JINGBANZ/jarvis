@@ -26,4 +26,17 @@ public struct BrainRoute: Sendable, Equatable {
     public var targets: [BrainTarget] {
         [primary] + fallbackTargets
     }
+
+    /// The same targets with the one at `index` swapped with its neighbor `offset` away, where index 0
+    /// is the primary. Nil when either position is outside the route. Rebuilding through `init` keeps
+    /// the result normalized like any other route.
+    public func movingTarget(at index: Int, by offset: Int) -> BrainRoute? {
+        var reordered = targets
+        let destination = index + offset
+        guard reordered.indices.contains(index), reordered.indices.contains(destination) else {
+            return nil
+        }
+        reordered.swapAt(index, destination)
+        return BrainRoute(primary: reordered[0], fallbackTargets: Array(reordered.dropFirst()))
+    }
 }
