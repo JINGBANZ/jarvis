@@ -80,7 +80,9 @@ final class ToolsSection: NSObject, SettingsSection {
             detail: "",
             controlView: prepSwitch,
             controlSize: NSSize(width: 44, height: 26),
-            preferredHeight: Self.switchRowHeight)
+            preferredHeight: Self.switchRowHeight,
+            // The card header already draws the line above the first row.
+            showsSeparator: false)
         card.contentView?.addSubview(switchRow)
         self.switchRow = switchRow
 

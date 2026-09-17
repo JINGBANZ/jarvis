@@ -29,8 +29,9 @@ final class SubscriptionControls: NSObject {
     /// Called whenever a row changes, so the page badge can recount.
     var onStatusChanged: (() -> Void)?
 
-    /// The helper's last answer, for `SubscriptionSignIns`; nil while a probe is pending.
-    var lastReadiness: LocalProxySupervisor.Readiness? { readiness }
+    /// Called with each answer a probe of this card brings back, and only then: a stored answer
+    /// replayed when the page is rebuilt would be older than a check already under way elsewhere.
+    var onProbeAnswered: ((LocalProxySupervisor.Readiness) -> Void)?
 
     /// Subscriptions the last probe proved signed in; nil before the first probe answers.
     var signedIn: Set<BrainProvider>? {
@@ -111,6 +112,7 @@ final class SubscriptionControls: NSObject {
             guard !Task.isCancelled, let self, refreshTask != nil else { return }
             self.readiness = readiness
             refreshTask = nil
+            onProbeAnswered?(readiness)
             render()
         }
     }

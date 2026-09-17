@@ -19,7 +19,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     private let sections: [SettingsDestination: SettingsSection]
     private let hub: SettingsHubModel
     private var window: NSWindow?
-    private var container: NSView?
+    private var container: SettingsPageContainer?
     private var homeView: NSView?
     private var pages: [SettingsDestination: SettingsPageView] = [:]
     private var current = SettingsDestination.home
@@ -79,6 +79,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         let center = NSPoint(x: container.bounds.midX, y: container.bounds.midY)
         let origin = destination == .home || current == .home ? (returnOrigin ?? center) : center
         current = destination
+        container.currentView = incoming
         isShowingCurrent = true
         if destination == .home {
             home.didBecomeActive()
@@ -117,7 +118,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         let background = SettingsBackgroundView(frame: content.bounds)
         background.autoresizingMask = [.width, .height]
         content.addSubview(background)
-        let container = NSView(frame: content.bounds)
+        let container = SettingsPageContainer(frame: content.bounds)
         container.autoresizingMask = [.width, .height]
         container.wantsLayer = true
         content.addSubview(container)
@@ -150,6 +151,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         view.autoresizingMask = [.width, .height]
         view.wantsLayer = true
         container.addSubview(view)
+        container.currentView = view
         SettingsPageTransition.reset(view)
         isShowingCurrent = true
         if destination == .home {

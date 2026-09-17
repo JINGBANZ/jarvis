@@ -29,6 +29,7 @@ final class SettingsPageView: NSView {
     private let chipBox = NSBox()
     private let chipLabel = NSTextField(labelWithString: "")
     private var noticeView: SettingsNoticeView?
+    private var noticeContent: (text: String, actionTitle: String?)?
     private let bodyView: NSView
 
     init(title: String, summary: String, chip: Chip? = nil, part: RobotPart? = nil, bodyView: NSView) {
@@ -58,7 +59,9 @@ final class SettingsPageView: NSView {
         chipBox.contentViewMargins = .zero
         chipBox.contentView?.addSubview(chipLabel)
 
-        [backButton, titleLabel, summaryLabel, chipBox, bodyView].forEach(addSubview)
+        // The body comes first: AppKit offers a key equivalent to subviews in order, and the back
+        // button's ⌘[ must not pre-empt a shortcut recorder inside the body.
+        [bodyView, backButton, titleLabel, summaryLabel, chipBox].forEach(addSubview)
         if let badge { addSubview(badge) }
         setChip(chip)
     }
@@ -80,8 +83,13 @@ final class SettingsPageView: NSView {
         needsLayout = true
     }
 
-    /// Shows or clears the amber note above the page body.
+    /// Shows or clears the amber note above the page body. The same note is kept rather than
+    /// rebuilt, so its button keeps focus and VoiceOver doesn't read it again.
     func setNotice(text: String?, actionTitle: String? = nil, action: (() -> Void)? = nil) {
+        let content = text.map { (text: $0, actionTitle: actionTitle) }
+        guard content?.text != noticeContent?.text || content?.actionTitle != noticeContent?.actionTitle
+        else { return }
+        noticeContent = content
         noticeView?.removeFromSuperview()
         noticeView = nil
         if let text {

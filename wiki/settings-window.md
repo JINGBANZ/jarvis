@@ -182,7 +182,9 @@ the dock button) while the hub swells slightly and fades; Back shrinks the page 
 point. A move from one page to another (a notice's fix button) grows from the center, and Back from
 there still returns to the hub's original point. Both use a critically damped spring with a 0.38 s
 response, and a move that starts mid-animation begins from what is on screen, so reversing never
-jumps. Under Reduce Motion pages cross-fade instead. The origin tells the user where a page came from
+jumps. While a page animates away only the current view takes clicks (`SettingsPageContainer`),
+because AppKit hit-tests by frame and would otherwise hand a click to a page that has faded out.
+Under Reduce Motion pages cross-fade instead. The origin tells the user where a page came from
 and how to get back to it. `SettingsPageTransition` owns the animation and knows nothing about which
 pages it moves.
 
@@ -664,6 +666,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SettingsWindow.swift` | Host window: hub and page container, navigation, notices, settings observation |
 | `Sources/JarvisApp/Settings/SettingsDestination.swift` | Every page's identity and the head-part-to-page map |
 | `Sources/JarvisApp/Settings/SettingsPageTransition.swift` | The grow-from-origin page animation and its Reduce Motion cross-fade |
+| `Sources/JarvisApp/Settings/SettingsPageContainer.swift` | Holds the hub and pages; only the current one takes clicks |
 | `Sources/JarvisApp/Settings/SettingsTheme.swift` | Every Settings color, per appearance and contrast |
 | `Sources/JarvisApp/Settings/NSView+SettingsTheme.swift` | Resolves a theme color for a layer property |
 | `Sources/JarvisApp/Settings/SettingsBackgroundView.swift` | The radial window backdrop |
