@@ -986,10 +986,13 @@ session; Codex's comes from its auth file. See
 ### Gemini API target
 
 The **Gemini API** target (`BrainProvider.gemini`, chosen in [Settings → Brain](./settings-window.md#brain))
-sends coaching to Google's Interactions API at `generativelanguage.googleapis.com/v1/interactions`
-with the Gemini key saved in Connections. The key rides only in the `x-goog-api-key` header. Brain
-requests never follow a redirect, so the key never leaves in a URL or goes to a 3xx target. Requests
-are stateless (`store: false`) and carry the whole conversation, as every target's do.
+sends coaching to the stable version of Google's Interactions API
+(`BrainProviderDescriptor.geminiInteractionsEndpoint`) with the Gemini key saved in Connections. The
+key rides only in a request header, which the descriptor's auth scheme names and
+[`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) sets. Brain requests
+never follow a redirect, so the key never leaves in a URL or goes to a 3xx target. Requests are
+stateless, so Google keeps no interaction for later reads, and carry the whole conversation, as every
+target's do.
 
 Jarvis calls Google directly rather than through a gateway. The bundled helper would need the key
 copied into its configuration file, drops Gemini's narrowed tool choice, and marks every
