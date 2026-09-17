@@ -295,16 +295,17 @@ for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/Co
 ### The detail box
 
 A reply is short lines plus one optional Markdown `detail`. The lines are the coaching; `detail` is
-for what a line cannot hold: a code block, a diagram, or the paragraphs an explanation needs.
+for what a line cannot hold: a code block, a diagram, or a short explanation.
 `CoachCapabilities.compose` builds the `speak` definition once per session and declares `detail` only
 when the Overlay Box can show one, so no session promises a field the box would throw away. `detail`
 is nullable rather than absent, which is what makes a field optional under strict Structured Outputs.
 
 Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
 all, and the skill that owns a domain says what its blocks are: the `coding` skill carries the code
-block rules and the `diff` correction shape, the `system-design` skill the mermaid block. That is why
-the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
-a session that never loads the skill never pays for it in its cached prefix.
+block rules, the pseudo-code sketch of a better approach, and the `diff` correction shape, the
+`system-design` skill the mermaid block. That is why the core prompt names neither. A rule only the
+model can apply belongs where the model reads it, and a session that never loads the skill never
+pays for it in its cached prefix.
 
 [`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into what the box
 shows: the prose, the first fenced block the code bounds accept, and the first `mermaid` fence the
@@ -364,11 +365,16 @@ Markdown, diagram source included, is persisted with the tip in the owner-only s
 ### On-demand coaching shortcuts
 
 Hints, explanations, code, and diagrams are all proactive. The shared coach prompt distinguishes
-needing a next step from not understanding the question, earlier guidance, or the overall approach
-using the available session history, newest speech, and current screen. Clear confusion warrants an
-explanation; silence or unchanged code alone does not. Repeated confusion calls for simpler framing or
-a smaller example, while productive progress calls for silence. This policy applies to every kind of
-question without a separate classifier, timer, or model request.
+needing a next step from needing an idea the user does not have, using the available session
+history, newest speech, and current screen. It reads that need from the conversation, never from a
+request to Jarvis, because mid-interview the user is talking to the interviewer and cannot stop to
+ask why. The interviewer pushing past the user's answer, such as asking for a better approach the
+user has not offered, or the user hesitating, trailing off, or restating something wrongly, warrants
+an explanation; a new question, silence, or unchanged code alone does not. The explanation is read in
+seconds under stress, so it is a few plain lines: the key idea, a tiny example on the case in play,
+and any block the loaded skill asks for. Repeated confusion calls for simpler framing or a smaller
+example, while productive progress calls for silence. This policy applies to every kind of question
+without a separate classifier, timer, or model request.
 
 Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
 **⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
