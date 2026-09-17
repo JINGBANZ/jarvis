@@ -281,9 +281,10 @@ public actor LocalProxySupervisor {
             }
             do {
                 _ = try await Self.modelOwners(at: endpoint)
-                // The helper can exit mid-probe, and `helperExited` ignores a start in progress.
-                // Without this re-check, `.running` would latch on a dead helper.
-                guard launched == generation, !stopping, helperRunning else { return state }
+                guard launched == generation, !stopping else { return state }
+                // `helperExited` leaves an exit during a start to the start, so an exit during the
+                // probe must fail it at the loop's top rather than publish `.running` or nothing.
+                guard helperRunning else { continue }
                 publish(.running(endpoint))
                 return state
             } catch {

@@ -141,6 +141,57 @@ import Testing
         #expect(unavailable?.message.hasPrefix("the sign-in service ") == true)
     }
 
+    /// Whether the exit reaches the supervisor before or after the probe's answer is a race:
+    /// before, the start fails; after, the helper was running and the crash path restarts it.
+    /// Either way the start must end rather than stay `.starting` with nothing running.
+    @Test func aHelperThatExitsDuringTheProbeEndsTheStart() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let pidURL = home.appendingPathComponent("pid")
+        let exitURL = home.appendingPathComponent("exit")
+        let supervisor = LocalProxySupervisor(
+            executable: try proxyStubExecutable(in: home, script: """
+                dir="$(dirname "$0")"
+                [ -e "$dir/pid" ] && exec /bin/sleep 600
+                echo $$ > "$dir/pid.partial"
+                mv "$dir/pid.partial" "$dir/pid"
+                until [ -e "$dir/exit" ]; do sleep 0.05; done
+                """),
+            home: home, clock: ImmediateClock())
+        let starting = Task { await supervisor.ensureRunning() }
+        let stub = try ModelListStub(
+            port: try await configuredPort(supervisor), body: Self.openAIModels
+        ) {
+            guard !FileManager.default.fileExists(atPath: exitURL.path) else { return }
+            let deadline = Date().addingTimeInterval(20)
+            var pid: Int32?
+            while pid == nil, Date() < deadline {
+                pid = (try? String(contentsOf: pidURL, encoding: .utf8))
+                    .flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+                if pid == nil { Thread.sleep(forTimeInterval: 0.01) }
+            }
+            FileManager.default.createFile(atPath: exitURL.path, contents: nil)
+            while let pid, processExists(pid), Date() < deadline {
+                Thread.sleep(forTimeInterval: 0.01)
+            }
+            // Lets the exit reach the supervisor first, the order that used to leave it stuck.
+            Thread.sleep(forTimeInterval: 0.2)
+        }
+
+        let started = await starting.value
+        switch started {
+        case .failed(let reason):
+            #expect(reason == "stopped with status 0 while starting")
+        case .running:
+            #expect(await eventually { await supervisor.state == started })
+        case .stopped, .starting:
+            Issue.record("the start ended \(started)")
+        }
+        #expect(await supervisor.state != .starting)
+        await supervisor.stop()
+        stub.stop()
+    }
+
     @Test func aBuildWithoutTheHelperFailsWithoutLaunching() async {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
@@ -149,8 +200,8 @@ import Testing
     }
 
     /// The supervisor gives up at the fourth stop within its window. Each helper exits only once the
-    /// test has seen it answer: a helper that exits mid-probe leaves the start unfinished with no
-    /// restart, so a fixed lifetime flakes on a slow runner.
+    /// test has seen it answer: a helper that exits mid-probe can fail its start instead of
+    /// crashing, so a fixed lifetime flakes on a slow runner.
     @Test func aHelperThatKeepsStoppingRestartsThenGivesUp() async throws {
         try await withSupervisor(
             script: """
