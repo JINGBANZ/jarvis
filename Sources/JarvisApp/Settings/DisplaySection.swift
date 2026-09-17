@@ -71,7 +71,8 @@ final class DisplaySection: NSObject, SettingsSection {
         }
 
         let callout = SettingsCalloutView(text: "I skip my own windows. If nothing fits, I capture your "
-            + "main display instead. Screenshots stay in this Mac's session folder.")
+            + "main display instead. Screenshots go to my Brain provider, and a copy stays in this "
+            + "Mac's session folder.")
         callout.translatesAutoresizingMaskIntoConstraints = false
         body.addSubview(card)
         body.addSubview(callout)

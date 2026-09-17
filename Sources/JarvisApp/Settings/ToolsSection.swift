@@ -63,7 +63,7 @@ final class ToolsSection: NSObject, SettingsSection {
 
     func makePage() -> SettingsPageView {
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
-        card.setHeader(title: "Prep notes search", detail: "Local only, never uploaded")
+        card.setHeader(title: "Prep notes search", detail: "Searched on this Mac")
         card.onLayout = { [weak self] in self?.layoutCard() }
         self.card = card
         let switchRow = SettingsRowView(
@@ -77,8 +77,9 @@ final class ToolsSection: NSObject, SettingsSection {
         card.contentView?.addSubview(switchRow)
         self.switchRow = switchRow
 
-        let callout = SettingsCalloutView(text: "I only read these files. I never copy, edit, or "
-            + "upload them, and removing one here doesn't delete it.")
+        let callout = SettingsCalloutView(text: "I read these files where they are and never change "
+            + "them. When a search finds a match, I send those passages to my Brain provider. "
+            + "Removing a file here doesn't delete it.")
         let stack = SettingsCardStack()
         stack.install([(card, cardHeight), (callout, SettingsCalloutView.preferredHeight)])
         self.stack = stack
