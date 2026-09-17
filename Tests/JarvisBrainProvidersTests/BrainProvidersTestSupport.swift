@@ -10,6 +10,14 @@ func tmp() -> URL {
     return d
 }
 
+/// @unchecked Sendable: `lock` guards `requests`, which the sender closure appends to from any task.
+final class CapturedRequests: @unchecked Sendable {
+    private var requests: [URLRequest] = []
+    private let lock = NSLock()
+    func append(_ request: URLRequest) { lock.withLock { requests.append(request) } }
+    var values: [URLRequest] { lock.withLock { requests } }
+}
+
 extension FileSessionAudit {
     /// Bounded, so a worker that never opens the session fails here instead of at CI's job timeout.
     static func readyForTesting(directory: URL) async -> FileSessionAudit {

@@ -52,11 +52,6 @@ final class BrainComposition {
     private var pendingBrainChangeFrom: BrainTarget?
     private var brainUpdateRevision = 0
 
-    private struct BrainRuntime {
-        let coach: BrainClient
-        let summarizer: BrainClient
-    }
-
     /// Nil when the route has no subscription target, so such a route never starts the helper.
     func proxyReadiness(for route: BrainRoute) async -> LocalProxySupervisor.Readiness? {
         guard route.targets.contains(where: { $0.provider.servedByLocalProxy }) else { return nil }
@@ -69,50 +64,6 @@ final class BrainComposition {
             if let key = secrets.apiKey(for: credential), !key.isEmpty { keys[credential] = key }
         }
         return keys
-    }
-
-    private func makeBrainRuntime(
-        keys: [Credential: String],
-        target: BrainTarget,
-        effort: ReasoningEffort,
-        proxyEndpoint: LocalProxySupervisor.Endpoint?
-    ) -> BrainRuntime {
-        let endpoint: URL
-        let key: String
-        switch target.provider.descriptor.access {
-        case .apiKey(let credential, let url, _):
-            endpoint = url
-            key = keys[credential] ?? ""
-        case .localProxy:
-            // `unavailability(for:proxy:)` admits a helper target only once the helper answered.
-            guard let proxyEndpoint else {
-                preconditionFailure("\(target.provider.displayName) was composed without the helper's endpoint")
-            }
-            endpoint = proxyEndpoint.responsesURL
-            key = proxyEndpoint.key
-        }
-        let summaryModel = BrainModelCatalog.summarizerModelID(for: target.provider)
-        let coach = BrainAccessor(
-            provider: target.provider,
-            apiKey: key, model: target.modelID,
-            reasoningEffort: effort.rawValue,
-            endpoint: endpoint,
-            timeout: BrainWorkloadTimeout.liveCoaching,
-            maxOutputTokens: effort.maxOutputTokens,
-            toolChoicePolicy: target.provider.toolChoicePolicy,
-            minimumReasoningEffort: target.provider.reasoningEffortFloor,
-            traffic: host.liveSessionEvidence, trafficTag: "coach")
-        let summarizer = BrainAccessor(
-            provider: target.provider,
-            apiKey: key,
-            model: summaryModel.isEmpty ? target.modelID : summaryModel,
-            reasoningEffort: ReasoningEffort.low.rawValue,
-            endpoint: endpoint,
-            timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
-            toolChoicePolicy: target.provider.toolChoicePolicy,
-            minimumReasoningEffort: target.provider.reasoningEffortFloor,
-            traffic: host.liveSessionEvidence, trafficTag: "summarizer")
-        return BrainRuntime(coach: coach, summarizer: summarizer)
     }
 
     func unavailability(
@@ -139,14 +90,15 @@ final class BrainComposition {
         effort: ReasoningEffort,
         sessionDirectory: URL
     ) -> ConfiguredBrainRoute {
+        let factory = BrainClientFactory(
+            keys: keys, proxyEndpoint: proxy?.endpoint, traffic: host.liveSessionEvidence)
         let targets = route.targets.map { target -> ConfiguredBrainTarget in
             if let failure = unavailability(for: target, proxy: proxy) {
                 return ConfiguredBrainTarget(unavailable: target, failure: failure)
             }
-            let runtime = makeBrainRuntime(
-                keys: keys, target: target, effort: effort, proxyEndpoint: proxy?.endpoint)
+            let clients = factory.makeClients(for: target, effort: effort)
             return ConfiguredBrainTarget(
-                target: target, brain: runtime.coach, summarizer: runtime.summarizer)
+                target: target, brain: clients.coach, summarizer: clients.summarizer)
         }
 
         return ConfiguredBrainRoute(
