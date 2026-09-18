@@ -239,7 +239,9 @@ wrong file names, whitespace changes, OCR-only captures, truncation, and exclude
 
 Results and the supplied expectation stay owner-only under the main workspace's `.jarvis/browser-capture`,
 even when the source worktree is temporary. Capture-check directories are outside the ten-run live
-e2e retention pool and are retained until the operator removes them. Live-test pruning selects only
+e2e retention pool and are retained until the operator removes them. `LiveE2EOptions` selects this
+base only for `--browser-capture-check`; ordinary scenarios still require `.jarvis/live-e2e`.
+Both modes require exactly two output-directory levels and reject symbolic links and stale evidence. Live-test pruning selects only
 date-named runs, excluding any older `chrome-*` directories in that pool. A launch failure reports
 its exit status and diagnostic directory. The check writes no raw captured text or image archive. Successful capture removes its temporary
 image through the production runner. A failed or unacknowledged cleanup can leave a transient image
