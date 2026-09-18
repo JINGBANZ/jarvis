@@ -316,13 +316,16 @@ Show code for every implementation step. The pairing rules and exceptions live i
 [`coding` skill](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md); the core keeps no second
 copy of that domain policy.
 
-[`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into what the box
-shows: the prose, the first fenced block the code bounds accept, and the first `mermaid` fence the
-renderer accepts. A candidate the box rejects on the way to that one is removed from the prose, from
-the replayed arguments, and from Activity, and the tool result names it, so the model reads back what
-the user actually saw rather than assuming its block landed; the search then goes on, so a valid block
-written after a broken one still reaches the box. Everything else stays in the prose and renders
-inline, including a fence written after the shown one of its kind.
+[`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into an ordered
+list of segments: the first fenced block the code bounds accept, the first `mermaid` fence the
+renderer accepts, and the prose before, between, and after them. The segments keep the order the
+model wrote them, so a sentence written after a block reads after it and a line that introduces a
+block sits directly above it. A candidate the box rejects on the way to the accepted one is removed
+from the prose, from the replayed arguments, and from Activity, and the tool result names it, so the
+model reads back what the user actually saw rather than assuming its block landed; the search then
+goes on, so a valid block written after a broken one still reaches the box. Everything else stays in
+the prose and renders inline where it was written, including a fence written after the shown one of
+its kind.
 [`CodeBlock`](../Sources/JarvisCore/Overlay/CodeBlock.swift) rejects oversized code rather than
 cutting it into an invalid fragment. [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift)
 accepts a bounded Mermaid subset of rectangular labeled boxes and directed connections; the parser
@@ -338,6 +341,11 @@ hint whose reply carried a detail ends with a dim marker in the same text, not a
 renders the whole document in [`DetailView`](../Sources/JarvisOverlay/DetailView.swift): paragraphs,
 lists, and inline code as attributed text, a code block in monospace with `diff` lines tinted and
 struck, and a mermaid block drawn in place.
+[`DetailDocumentView`](../Sources/JarvisOverlay/DetailDocumentView.swift) stacks one view per
+segment, top to bottom in document order, rather than one text view with the diagram attached
+inline. Apple's Markdown parser gives no syntax coloring or diff tinting and cannot draw a diagram, so
+the code block and the diagram keep their own formatters, and a diagram in its own view scales into
+the height the text segments leave, wherever it sits, down to a legible floor.
 
 There is one detail box, so a later reply replaces what is in it. Its title strip names the hint the
 detail came from and carries the recovery: back and forward arrows step through the session's details

@@ -71,7 +71,7 @@ import Testing
         #expect(box.detail == nil)
         box.acceptsDetail = true
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(String(box.detail?.prose.characters ?? .init()) == "Hidden explanation.")
+        #expect(box.detail?.deliveredMarkdown == "Hidden explanation.")
         let prior = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
         let object = try #require(JSONSerialization.jsonObject(with: Data(prior.argumentsJSON.utf8)) as? [String: Any])
         #expect(object["detail"] is NSNull)
