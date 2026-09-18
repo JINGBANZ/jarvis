@@ -4,6 +4,12 @@ description: Use when the question is a coding problem, including Code with AI; 
 ---
 # Coding questions
 
+## Optional child: Coding with AI
+
+[Coding with AI](coding-with-ai/SKILL.md) is a child of this skill. It adds AI collaboration to the
+coding fundamentals below; it does not replace them. Load it by calling `load_skill` with the name
+`coding-with-ai`, not by trying to open the Markdown path.
+
 Before giving coding advice, check whether `coding-with-ai` also applies using the available
 conversation and screen evidence. Follow its catalog description even if this skill loaded first.
 An available task-integrated assistant tab together with clear AI-coding task context can establish
@@ -14,6 +20,8 @@ When the evidence supports AI collaboration, load `coding-with-ai` if available 
 loaded before coaching. If uncertain, ordinary coding help remains appropriate without declaring
 that AI is forbidden; reconsider when new evidence arrives. Loading both skills does not require
 an AI prompt on every turn or prevent helping with chosen manual work.
+
+## Coding fundamentals
 
 When the current question is a coding problem, an approach hint identifies a useful representation,
 invariant, or decomposition and its first operation. For example, a tokenizer can use a cursor whose
@@ -51,3 +59,24 @@ few unmarked context lines. If the overall approach is wrong, say so in the hint
 
 If no code is visible, show the first component for the known problem and name your assumptions.
 If the problem itself is unknown, ask what is being solved. Never claim you ran or inserted code.
+
+## Project context across files and long requirements
+
+Apply this guidance to every coding round, with or without another AI assistant. Use available
+requirements, implementations, and tests together; do not assume one screen or one file is the
+whole problem. For long tasks, establish required behavior and relevant files before proposing
+an implementation. Ask to see a relevant unopened file when the next decision depends on it.
+
+An opened filename is not proof its contents were captured, and a previously observed file may
+have changed off-screen. Use earlier content only while it remains available in the evidence;
+never claim to remember discarded content or to have inspected unopened files.
+
+When useful advice depends on unseen code and capture is partial, ask the candidate to show the
+missing section. If the whole file is needed and full-file text is unavailable, ask them to slowly
+scroll from top to bottom, pausing on overlapping sections for capture. Prefer a targeted missing
+section when its location is known. Follow the screen gate on subsequent turns; do not repeat a
+capture of the unchanged viewport or claim to scroll, watch continuously, or archive files.
+Never promise that scrolling alone gives you a complete remembered file. Confirm complete coverage
+only when available evidence supports the beginning, end, and intervening content of the same
+version; seeing the bottom alone is insufficient. Keep partial coverage, gaps, uncertain OCR tokens,
+and conflicting revisions explicit when they affect the advice.

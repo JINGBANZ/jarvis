@@ -20,7 +20,7 @@ let package = Package(
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
     ],
     targets: [
-        // `.copy`, not `.process`: SkillCatalog enumerates the `<name>/SKILL.md` folders.
+        // `.copy`, not `.process`: SkillCatalog recursively discovers parent and child `SKILL.md` folders.
         .target(
             name: "JarvisCore", resources: [.copy("Resources/Skills")], swiftSettings: liveE2ESettings),
         .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore"]),
