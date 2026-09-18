@@ -60,6 +60,11 @@ import Testing
                                "code: total = 0"])
     }
 
+    @Test func aBlankLineBetweenTwoBlocksIsNotAProseSegment() {
+        let d = detail("```mermaid\nflowchart LR\na[Client] --> b[API]\n```\n\n   \n```python\ntotal = 0\n```\n")
+        #expect(outline(d) == ["diagram: Client, API", "code: total = 0"])
+    }
+
     @Test func aDroppedFenceDoesNotSplitTheProseAroundIt() {
         let body = (1...30).map { "line \($0)" }.joined(separator: "\n")
         let d = detail("Before it.\n\n```python\n\(body)\n```\n\nAfter it.")
