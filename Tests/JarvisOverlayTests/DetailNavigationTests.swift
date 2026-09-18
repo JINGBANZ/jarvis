@@ -117,6 +117,7 @@ import Testing
     @MainActor @Test func bothStripsShareOneChromeAndFollowTheBoxSize() throws {
         let box = try makeBox()
         defer { box.setSessionLive(false) }
+        box.endLiveResize()
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         #expect(box.detailIconPointSize == box.headerIconPointSize)
         #expect(box.detailTitlePointSize == box.headerTitlePointSize)

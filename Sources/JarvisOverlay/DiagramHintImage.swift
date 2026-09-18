@@ -28,7 +28,8 @@ enum DiagramHintImage {
                 frames[node.id] = NSRect(origin: NSPoint(x: x, y: y), size: boxSize)
             }
         }
-        let scale = min(max(1, available.width) / natural.width, max(1, available.height) / natural.height)
+        // Preserve the native 15pt node and 12pt edge labels; the detail view scrolls overflow.
+        let scale = max(1, min(max(1, available.width) / natural.width, max(1, available.height) / natural.height))
         let image = NSImage(size: NSSize(width: natural.width * scale, height: natural.height * scale))
         image.lockFocusFlipped(true)
         let transform = NSAffineTransform()

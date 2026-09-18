@@ -115,7 +115,7 @@ final class DetailView: NSView {
             document.show(detail, fontSize: size)
             document.fit(viewportWidth: scroll.contentSize.width,
                          viewportHeight: scroll.contentSize.height)
-            if document.frame.height <= scroll.contentSize.height || size <= 12 { break }
+            if detail.diagram != nil || document.frame.height <= scroll.contentSize.height || size <= 12 { break }
             size = max(12, size - 1)
         }
     }
@@ -142,6 +142,7 @@ final class DetailView: NSView {
                                 label: isRolled ? "Show detail" : "Dismiss detail")
         emptyLabel.isHidden = detail != nil || isRolled
         scroll.isHidden = detail == nil || isRolled
+        scroll.hasHorizontalScroller = detail?.diagram != nil
         needsLayout = true
         guard let detail, !isRolled else { return }
         document.show(detail, fontSize: preferredFontSize)
@@ -150,7 +151,7 @@ final class DetailView: NSView {
         if changed { scroll.contentView.scroll(to: .zero) }
     }
 
-    /// `viewportHeight` is the tallest body the panel would grant; a diagram scales into it.
+    /// `viewportHeight` is the tallest body the panel would grant; readable overflow scrolls.
     func preferredHeight(viewportWidth: CGFloat, viewportHeight: CGFloat) -> CGFloat {
         guard let detail, !isRolled else { return stripHeight }
         document.show(detail, fontSize: preferredFontSize)

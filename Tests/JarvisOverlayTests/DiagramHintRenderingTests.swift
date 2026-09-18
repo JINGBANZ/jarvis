@@ -30,17 +30,16 @@ import Testing
         #expect(!panel.isPanelVisible)
     }
 
-    @MainActor @Test func longGraphScalesProportionallyWithinBothWindowDimensions() throws {
+    @MainActor @Test func longGraphPreservesReadableScaleInSmallViewports() throws {
         let source = "flowchart LR\n" + (0..<7).map { "N\($0)[Service \($0)] --> N\($0 + 1)[Service \($0 + 1)]" }.joined(separator: "\n")
         let graph = try #require(DiagramHint(mermaid: source))
         let large = DiagramHintImage.render(graph, fitting: NSSize(width: 600, height: 300))
         let small = DiagramHintImage.render(graph, fitting: NSSize(width: 300, height: 150))
-        #expect(large.size.width <= 600 && large.size.height <= 300)
-        #expect(abs(small.size.width * 2 - large.size.width) < 0.01)
-        #expect(abs(small.size.height * 2 - large.size.height) < 0.01)
+        #expect(large.size == NSSize(width: 2148, height: 160))
+        #expect(small.size == large.size)
         #expect(large.size.width > large.size.height, "resizing preserves the LR layout")
         let short = DiagramHintImage.render(graph, fitting: NSSize(width: 600, height: 20))
-        #expect(short.size.height <= 20)
+        #expect(short.size == large.size)
         #expect(abs(short.size.width / short.size.height - large.size.width / large.size.height) < 0.01)
     }
 
@@ -63,7 +62,7 @@ import Testing
         #expect(panel.entryCount == 1)
     }
 
-    @MainActor @Test func resizingPanelImmediatelyResizesItsPinnedDiagram() async throws {
+    @MainActor @Test func resizingPanelKeepsItsDiagramReadableBelowNativeSize() async throws {
         let previousWindows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
         let window = try #require(NSApplication.shared.windows.first { !previousWindows.contains($0.windowNumber) })
@@ -83,7 +82,7 @@ import Testing
         panel.setContentSize(NSSize(width: 260, height: 220))
         let after = try imageSize()
         #expect(after.height <= drawing.bounds.height, "the graph fits inside the detail box")
-        #expect(after.width < before.width && after.height < before.height)
+        #expect(after == before, "small panels scroll instead of reducing label size")
         #expect(abs(after.width / after.height - before.width / before.height) < 0.01)
     }
 
@@ -123,6 +122,7 @@ import Testing
         })
         panel.setEnabled(true)
         panel.setSessionLive(true)
+        panel.endLiveResize()
         let detail = try #require(ReplyDetail(markdown: "```mermaid\n\(source)\n```"))
         _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
         let content = try #require(window.contentView)
@@ -145,13 +145,13 @@ import Testing
         #expect((bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5)
     }
 
-    @MainActor @Test func rendersReadableImageAndResizesToFit() throws {
+    @MainActor @Test func rendersReadableImageAndGrowsWhenSpacePermits() throws {
         let graph = try #require(DiagramHint(mermaid: "flowchart TD\nA[Client] --> B[API]\nB --> C[Database]\nB --> D[Cache]"))
-        let image = DiagramHintImage.render(graph, fitting: NSSize(width: 500, height: 800))
-        #expect(image.size.width <= 500)
+        let image = DiagramHintImage.render(graph, fitting: NSSize(width: 1032, height: 1072))
+        #expect(image.size.width <= 1032)
         #expect(image.size.height > 150)
-        let small = DiagramHintImage.render(graph, fitting: NSSize(width: 250, height: 400))
-        #expect(small.size.width <= 250)
+        let small = DiagramHintImage.render(graph, fitting: NSSize(width: 516, height: 536))
+        #expect(small.size.width <= 516)
         #expect(abs(small.size.height * 2 - image.size.height) < 0.01)
         let data = try #require(image.tiffRepresentation)
         let bitmap = try #require(NSBitmapImageRep(data: data))
