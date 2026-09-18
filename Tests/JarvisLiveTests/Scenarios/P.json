@@ -1,0 +1,56 @@
+{
+  "id": "P",
+  "audio": "fixture",
+  "brain": {
+    "primary": "codex-subscription",
+    "fallbacks": []
+  },
+  "capabilities": {
+    "disabledTools": [],
+    "disabledSkills": []
+  },
+  "prepNotes": "shared-prep-notes.md",
+  "transcription": {
+    "model": "gpt-4o-transcribe",
+    "key": "standard"
+  },
+  "voices": {
+    "them": "Samantha",
+    "me": "Daniel"
+  },
+  "steps": [
+    {
+      "screen": "coding-problem.jpg"
+    },
+    {
+      "press": "hint"
+    },
+    {
+      "say": {
+        "speaker": "me",
+        "text": "Jarvis, we are now designing a calendar. Recurring events and reliable reminders are required. My architecture is a calendar API, event database, and a scheduler that sends due reminders. I am stuck on whether that background path is complete. What is the most important missing part?"
+      }
+    },
+    {
+      "say": {
+        "speaker": "me",
+        "text": "Jarvis, explain that same reminder generation path a little more. How do I know the future jobs were actually generated?"
+      }
+    },
+    {
+      "say": {
+        "speaker": "me",
+        "text": "Jarvis, a new calendar topic: recurring meetings at two thirty in the morning during daylight saving transitions. What should happen when the local time does not exist or happens twice?"
+      }
+    },
+    {
+      "say": {
+        "speaker": "me",
+        "text": "Jarvis, switching to a different coding question. How can Bellman Ford detect a negative cycle reachable from the source?"
+      }
+    },
+    {
+      "stop": true
+    }
+  ]
+}

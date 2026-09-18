@@ -88,7 +88,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|C|R|F01|F02|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|P|R|F01|F02|all] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -136,7 +136,9 @@ after decoding, and no audio is archived.
 Capabilities are fixed at Start, so each switch configuration is its own scenario; brain switches
 happen inside a scenario, applied the way a Settings edit applies them. Steps live in
 `Tests/JarvisLiveTests/Scenarios/`; fixtures in `Tests/JarvisLiveTests/Fixtures/` are the coding
-screenshot `coding-problem.jpg` and fictional `prep-notes.md`. Each story is one section with no
+screenshot `coding-problem.jpg`, fictional behavioral `prep-notes.md`, and the partial technical
+`shared-prep-notes.md` for Scenario P. Its unavailable-index variant uses `empty-prep-notes.md`,
+whose heading has no indexable content. Each behavioral story is one section with no
 sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
 again. The manager story stays out of everything a teammate query returns, so the first behavioral
 search never already answers the second and C08 stays a real check; `LiveE2EScenarioTests` pins that
@@ -147,12 +149,13 @@ layout in the Gate.
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
 | B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
+| P | Codex | A cold coding hint with prep notes, a calendar reminder architecture question, reuse of that evidence, a daylight-saving question with partial coverage, and an unrelated graph question; a separate P-unavailable launch checks an empty prep index. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
 
-Only Scenario A's second half runs on Codex, and B's second half runs on the Gemini API, a few Flash
-calls; every other scenario and the evaluation run on Claude. The ChatGPT plan's usage limit is the
+Scenario A's second half and the focused prep scenario P run on Codex; B's second half runs on the
+Gemini API, a few Flash calls. The remaining scenarios and evaluation run on Claude. The ChatGPT plan's usage limit is the
 one a day of runs exhausts, and A's Codex stretch (a behavioral search, a spoken screen question, two
 presses, and a design follow-up) is enough to keep that subscription covered.
 
@@ -247,7 +250,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C02 | Small talk loads nothing | A: the interviewer's logistics line |
 | C03 | The first behavioral question picks the behavioral skill | A: the first behavioral question |
 | C04 | An already-loaded kind never reloads | A: every turn on Codex |
-| C05 | Prep search loads on demand and stays callable on every brain | A: the first behavioral question and the OpenAI design question |
+| C05 | Prep search loads on demand and stays callable on every brain | A: the cold coding press and the OpenAI design question |
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
 | C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the OpenAI design question |
 | C08 | A second prepared question searches without loading, on another brain | A: the second behavioral question, on Codex |
@@ -270,6 +273,17 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C25 | Explain more delivers a detail, even when the model first answers in prose | B: the Explain more press |
 | C26 | Ordinary hint presses deliver hint and code in the same reply without Show code | C: both hint presses |
 | C27 | A keyed target coaches after a switch, replaying another provider's calls | B: the behavioral question and the hint press, on Gemini |
+| C28 | Prep retrieval precedes the first reply on a cold shortcut and each new topic | P |
+| C29 | A follow-up covered by retrieved evidence does not search again | P: reminder progress follow-up |
+| C30 | Relevant evidence informs the answer; uncovered topics still receive grounded guidance | P: recorded replies and search results, manual content review |
+| C31 | An unavailable prep index is tried once and still yields a hint | P-unavailable: cold shortcut |
+
+C28 and C29 assert actual retrieval order and reuse in Scenario P. C30 records the replies for
+semantic review: the calendar answer must connect authoritative rules to durable reminder jobs and
+periodic replenishment, preserve the proposed status of the fixture's horizon, and use independent
+reasoning for its uncovered DST topic and unrelated graph question. Search counts alone do not prove
+that an answer used relevant evidence. Review the search results and delivered replies together;
+this content check is manual and is not reported as an automated pass.
 
 ### General coaching flow
 

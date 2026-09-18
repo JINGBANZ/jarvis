@@ -114,7 +114,20 @@ import Testing
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills))
         #expect(prompt.contains(
-            "When the turn says you must call speak, skip loading and speak with what you have."))
+            "Only when speak is the sole permitted tool, speak with what you have."))
+    }
+
+    @Test func prepDiscoveryIsAvailableBeforeLoadingAndOnlyWhenSearchIsOffered() {
+        for configured in [false, true] {
+            for disabled in [false, true] {
+                let capabilities = CoachCapabilities.compose(
+                    disabledTools: disabled ? ["search_prep_notes"] : [],
+                    prepSourcesConfigured: configured)
+                let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
+                #expect(prompt.contains("# Prepared references") == (configured && !disabled))
+                #expect(!capabilities.callable(loaded: []).contains { $0.name == "search_prep_notes" })
+            }
+        }
     }
 
     @Test func everythingSwitchedOffIsTheBarePrompt() {

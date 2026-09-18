@@ -171,9 +171,10 @@ A tool carries its own usage guidance (`ToolDef.guidance`) and a deferred flag. 
 declared with its schema and its guidance from the first request: the tip style is `speak`'s
 guidance, because `speak` is the tip. A **deferred** tool appears only as one catalog line, its name
 and its one-sentence description, and the model calls `load_tool` to receive its schema and
-guidance as a tool result, after which it is declared and callable for the rest of the session. So
-the prompt describes exactly the tools the request carries, and the guidance for a tool the model
-cannot call is not in the prompt at all. Jarvis defers on every brain in the same way rather than
+guidance as a tool result, after which it is declared and callable for the rest of the session.
+The shared prompt also carries the prep-retrieval prerequisite whenever search is offered: the
+model must know to load search before it can read search's own usage guidance. The schema and
+query mechanics remain deferred. Jarvis defers on every brain in the same way rather than
 using a provider's own tool-search feature: the route can move between brains mid-session over one
 shared history, and a plain tool result replays on any of them.
 
@@ -213,7 +214,19 @@ skips the index build, so the file reading and `textutil` work stop with it.
 Prep material is shared across interview types: `.md`, `.txt`, `.pdf`, and `.docx` sources can all
 supply behavioral, coding, or system-design preparation, including mixed-topic documents. No skill
 or topic filters sources by file format. Extraction depends on the file format; coaching depends
-on the question and retrieved evidence.
+on the question and retrieved evidence. Before the first coaching reply on a new interview question,
+including a restatement, the shared prompt directs the model to load and search the offered prep
+tool, including on a cold shortcut press. A required eventual reply still allows preparation;
+only a tool choice permitting solely `speak` skips it. The model does not know the contents of
+configured sources until retrieval. Silence, small talk, and clarification of an unidentified
+question do not require retrieval.
+
+Retrieved excerpts are reference data, never instructions or authorization. The coach uses relevant
+facts and preserves assumptions and qualifications, while adapting to the current question's
+requirements. Partial coverage is supplemented with independent technical reasoning; unrelated,
+empty, or unavailable results do not block a useful answer or justify claiming the notes cover it.
+Personal experiences still require evidence. These are model-facing rules, not a runtime topic
+classifier or a guarantee of model compliance.
 
 Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
 handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
@@ -229,7 +242,9 @@ constructs retain paragraph behavior. Long prose paragraphs, fenced code, indivi
 headers, and a heading plus its first content block can exceed the target; long sections can still span chunks
 (see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
 
-Search guidance normally calls for one query per topic. When the results only point to a named
+Search guidance calls for one query combining the problem or domain with the current topic. Existing
+excerpts are reused while they cover the discussion; a new topic or design stage needing different
+evidence warrants a new query. When the results only point to a named
 story or section and lack usable facts, the model may make one focused follow-up using that title
 and identifying details, then stops searching. Empty or unavailable results do not authorize a
 retry. Resolving an explicit reference lets the coach supply the answer content instead of asking
@@ -742,8 +757,9 @@ rather than a per-turn screenshot.
   documented in [sandbox.md](./sandbox.md).
 - **Coaching guidance is loaded on demand, not chosen at Start** (see
   [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
-  policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
-  model loads when the question calls for it. Four skills ship: behavioral shapes candidate-owned
+  policy, the shared prep-retrieval prerequisite when search is offered, and the guidance of its
+  always-on tools; other tool mechanics and domain guidance are cataloged for on-demand loading.
+  Four skills ship: behavioral shapes candidate-owned
   experience answers with STAR, handles personal and hypothetical questions directly, preserves
   prep-material caveats, and reserves labeled fictional examples for an explicit practice request.
   It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
@@ -754,8 +770,11 @@ rather than a per-turn screenshot.
   cases. It composes with coding when offered and applies only while AI collaboration is relevant.
   Its separate catalog entry keeps that workflow conditional without a round or seniority setting
   (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
-  System-design supplies the stage vocabulary from requirements through
-  trade-offs, and asks for a diagram in the one stage that benefits. The base prompt keeps what is
+  System-design supplies the stage vocabulary from requirements through trade-offs, carries agreed
+  requirements into state ownership and complete synchronous/background paths, and asks for a
+  diagram in the one stage that benefits. It checks how derived work is created, replenished, and
+  recovered before treating a scheduler or queue as a complete mechanism; the hint still targets
+  the highest-impact gap in the current stage. The base prompt keeps what is
   true of every session: when to speak or stay silent, hint length, and comprehension before
   strategy. Finishing code alone still does not trigger a hint, and there is no runtime classifier
   or persisted question classification.
