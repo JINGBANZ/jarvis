@@ -502,7 +502,10 @@ taking precedence. Its coaching covers orientation, bounded delegation, understa
 AI output, and correcting it when needed. It identifies the coding assistant by its role and
 available actions, regardless of its name. When the candidate is already delegating edits and is
 stuck choosing the next task, the skill supplies a bounded prompt without requiring an explicit
-prompt request; chosen manual work still receives direct help. A suggested prompt uses the existing
+prompt request; chosen manual work still receives direct help. Prompts name one task and its approach,
+with additional constraints only where needed. When coaching review of meaningful generated code,
+the child provides a brief walkthrough the candidate can explain to the interviewer, alongside its
+correctness assessment, without waiting for expressed confusion. A suggested prompt uses the existing
 Markdown detail area when available, separately from the short hint, without requiring confusion. When needed source is missing,
 the parent skill can ask the candidate to show or slowly scroll through it; this does not add continuous
 capture or a file archive. [Capture Scope](#capture-scope) defines the actual evidence limits.

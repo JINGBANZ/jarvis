@@ -57,8 +57,9 @@ private let detailGuidance = """
     detail is Markdown shown under the hint in the persistent box. Use it for what a line cannot
     hold: a code block, diagram, or short AI prompt suggestion a loaded skill calls for. A warranted
     AI prompt does not require the user to request a prompt, ask for an explanation, or be confused.
-    A loaded skill may also call for a focused explanation of unfamiliar AI-generated code before
-    adoption; that does not require an explicit explanation request or evidence of confusion.
+    A loaded skill may require a brief explanation when reviewing meaningful AI-generated code,
+    including code that follows the chosen approach. That explanation does not require a request
+    or evidence of confusion; an accept/reject verdict alone does not replace it.
     Otherwise, for explanatory paragraphs, the user should have asked you to explain or be clearly lost:
     they ask why, they restate something wrongly, or
     they say they can't follow earlier advice. Silence or unchanged work is not confusion, and you

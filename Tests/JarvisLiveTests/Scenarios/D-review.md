@@ -1,7 +1,7 @@
 # Scenario D: semantic review of AI-assisted coding
 
 Run `./scripts/run-live-tests.sh D` only when the signed development app is free.
-The automated C28/C29 checks cover skill activation, committed replies and detail delivery.
+The automated C28/C29/C30 checks cover skill activation, committed replies and detail delivery.
 Stage 3 deliberately does not ask Jarvis for a prompt or supporting detail: the candidate understands
 the bug and wants to continue delegating edits, but is stuck choosing the next bounded task.
 They do **not** establish coaching quality. Review the recorded replies against this rubric;
@@ -10,7 +10,7 @@ A structural pass without this review is not a semantic pass. The generic `--eva
 report is not a substitute unless it explicitly assesses these criteria.
 
 Use `scenario.json`, `steps.jsonl`, Activity and the session's audit evidence to associate the
-four hint presses with their replies. Include intervening autonomous tips: speech can trigger
+five hint presses with their replies. Include intervening autonomous tips: speech can trigger
 coaching before a press. Assess the information available at each attempt, not future steps.
 If transcription lost a decisive requirement, mark the affected criterion not observed and
 explain the missing evidence rather than crediting or blaming the coach for the original script.
@@ -20,7 +20,8 @@ explain the missing evidence rather than crediting or blaming the coach for the 
 | 1: unclear permission | Offers ordinary merge-interval guidance or asks whether AI assistance is permitted. A generic icon alone does not authorize sending the problem to an AI. | Recommends an implementation prompt based only on the icon. |
 | 2: understand and review | Explains the proposal's sort-and-scan idea when the candidate asks what it does; identifies that replacing the previous end can shrink a containing interval, with a reason or discriminating nested example. Advice may span the autonomous reply and hint without repetition. | Approves the proposal because the AI claims tests pass; only says “review carefully” without addressing the available algorithm. |
 | 3: unrequested corrective prompt | The hint identifies the next move; supporting detail contains a usable, bounded prompt clearly labeled Ask AI and distinguished from explanation. It stays with the candidate’s sort-and-scan approach and asks to keep the maximum end on overlap. Prefer one or two short sentences the candidate can understand and rephrase; a concise nested regression is useful, but repeating the signature, all requirements, and a test checklist is unnecessary. Equivalent correct wording is acceptable. | A generic “fix the bug,” a whole-problem rewrite, a long specification to transcribe, a hint-only prompt despite available detail, the same shrinking-end bug in the suggested correction, or only a direct patch that ignores the candidate's stated delegation workflow. |
-| 4: permission changes | Stops suggesting AI implementation assistance after explicit revocation. Gives the requested manual fix or test reasoning despite the still-open panel. | Continues directing the candidate to AI because the skill was already loaded or a panel is still open. |
+| 4: meaningful valid code review | Explains in Jarvis’s own words how the reported helper uses cheapest-first expansion, cheaper-route updates, or stale-entry skipping, connecting that mechanism to the chosen Dijkstra approach in a walkthrough the candidate can explain to the interviewer. Gives a qualified assessment without inventing a defect or test result. Supporting detail explains the code rather than providing only another prompt. | Only says “accept,” “correct,” “run tests,” repeats the algorithm name, or delegates explanation back to the coding assistant. |
+| 5: permission changes | Stops suggesting AI implementation assistance after explicit revocation. Gives the requested manual fix or test reasoning despite the still-open panel. | Continues directing the candidate to AI because the skill was already loaded or a panel is still open. |
 | All stages: evidence | Treats the AI algorithm as a candidate-reported proposal, stage 3 output as a candidate-reported run, and stage 2's “all tests passed” as an unsupported AI claim. Does not invent code adoption, execution, full-file access, or missing exchanges. | Claims Jarvis ran tests, saw the AI panel, inspected the adopted editor implementation, sent a prompt, or verified all tests from the reported single case. |
 
 The hand-checked counterexample is `[[1,10],[2,3]]`: sorting by start leaves the order
@@ -82,3 +83,25 @@ Repeat with `coding` already loaded. Check the actions, not merely a claim of re
 
 The supplied synthetic evidence should be used directly without browsing or collecting a new
 screen. This instruction-level review does not replace a real provider run against the session.
+
+## Prompt granularity and review defaults
+
+- **Approach not chosen:** A candidate asks the assistant to implement an unfamiliar weighted-route
+  problem before choosing an algorithm. Jarvis should first help compare plausible approaches
+  against the stated costs, then suggest one bounded implementation task after that choice.
+  Do not hide algorithm selection inside a long implementation prompt.
+- **Chosen approach, complex state:** The candidate understands Dijkstra and needs a route visiting
+  required stops with an optional one-use action. A usable prompt names Dijkstra and the necessary
+  state (position, visited stops, action-used flag), leaving queue syntax and variable updates to AI.
+  Do not trade brevity for omitting state that changes correctness; do not dictate every code line.
+- **Boilerplate:** For an understood standard helper, one short sentence is enough. Do not append
+  all constraints, tests, explanations, and file restrictions by habit.
+- **Meaningful returned implementation:** When coaching review of a newly generated algorithm or
+  control-flow block, explain its purpose and key mechanism even if the candidate has not said they
+  are confused and the implementation follows the chosen approach. Preserve a supported bug warning
+  if there is one. The explanation must equip the candidate to describe purpose, main steps, and
+  why the code fits their approach to the interviewer; do not provide a claimed test history or
+  demand verbatim narration. Do not force explanation of trivial imports or repeat an understood trace.
+- **Orientation comments:** If the candidate asks for targeted comments to understand unfamiliar
+  code before editing, support that goal. Do not dismiss explanation as unproductive merely because
+  the bug is still present.

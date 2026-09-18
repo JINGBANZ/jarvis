@@ -14,8 +14,8 @@ extension LiveE2ETests {
         }
         let presses = launch.stepIndices(Self.isPress)
         let says = launch.stepIndices(Self.isSay)
-        guard presses.count == 4, says.count == 4 else {
-            results.check("D", false, "four hint presses and four spoken steps ran "
+        guard presses.count == 5, says.count == 5 else {
+            results.check("D", false, "five hint presses and five spoken steps ran "
                 + "(saw \(presses.count), \(says.count))")
             try launcher.finish(results)
             return
@@ -55,6 +55,14 @@ extension LiveE2ETests {
         }
         results.check("C29", hasCorrectiveDetail,
                       "the blocked delegation step delivered supporting detail without an explicit prompt request")
+        let comprehensionChains = [launch.attemptChain(forStep: says[3]), chains[3]]
+        let hasComprehensionDetail = comprehensionChains.contains { chain in
+            guard let detail = Self.deliveredDetail(evidence, chain),
+                  let rendered = ReplyDetail(markdown: detail) else { return false }
+            return rendered.hasContent
+        }
+        results.check("C30", hasComprehensionDetail,
+                      "review of a valid AI proposal delivered supporting detail without a confusion signal")
         results.note("C29", "Structural checks only. Semantic review NOT EVALUATED: apply "
             + "Tests/JarvisLiveTests/Scenarios/D-review.md to the recorded replies. "
             + "AI proposal and test results are spoken reports; the JPEG is OCR-only and proves no Chrome AX coverage.")
