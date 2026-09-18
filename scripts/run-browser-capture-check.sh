@@ -29,7 +29,7 @@ case "$WORKSPACE" in
   /tmp|/tmp/*|/private/tmp|/private/tmp/*)
     echo "Capture checks require a durable workspace outside /tmp." >&2; exit 2 ;;
 esac
-BASE="$WORKSPACE/.jarvis/live-e2e"
+BASE="$WORKSPACE/.jarvis/browser-capture"
 if [[ -L "$WORKSPACE/.jarvis" || -L "$BASE" ]]; then
   echo "Refusing a symlinked capture directory." >&2
   exit 2
@@ -77,7 +77,12 @@ if kill -0 "$OPENER" 2>/dev/null; then
   echo "CHROME fail: capture did not finish within 30 seconds ($OUTPUT)." >&2
   exit 1
 fi
-wait "$OPENER"
+OPEN_STATUS=0
+wait "$OPENER" || OPEN_STATUS=$?
+if (( OPEN_STATUS != 0 )); then
+  echo "CHROME fail: app launch exited $OPEN_STATUS ($OUTPUT)." >&2
+  exit 1
+fi
 if [[ ! -f "$OUTPUT/capture-check-finished" || ! -s "$OUTPUT/capture-check.txt" ]]; then
   echo "CHROME fail: capture completion evidence is missing ($OUTPUT)." >&2
   exit 1

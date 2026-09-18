@@ -120,4 +120,46 @@ if [[ -e "$SYNTHETIC_SWIFT_CALLED" ]]; then
 fi
 SYNTHETIC_APP_PROCESS='/workspace/Jarvis Dev.app/Contents/MacOS/JarvisApp'
 expect_status 1 'live wrapper rejects a running development app' run_live D
+SYNTHETIC_APP_PROCESS=''
+for i in {1..10}; do
+  mkdir -p "$TMP/repo/.jarvis/live-e2e/chrome-$i"
+done
+expect_status 0 'legacy Chrome directories cannot delete a new live run' run_live D
+
+cp "$ROOT/scripts/run-browser-capture-check.sh" "$TMP/repo/scripts/"
+mkdir -p "$TMP/repo/Jarvis Dev.app" "$TMP/repo/.git" "$TMP/repo/Tests/JarvisLiveTests/Fixtures"
+printf '{}\n' > "$TMP/repo/Tests/JarvisLiveTests/Fixtures/browser-capture.json"
+export SYNTHETIC_CAPTURE_WORKSPACE="$TMP/repo" SYNTHETIC_OPEN_STATUS=17
+run_capture() {
+  bash -c '
+    /usr/bin/pgrep() { return 1; }
+    git() { echo "$SYNTHETIC_CAPTURE_WORKSPACE/.git"; }
+    sleep() { if [[ "$1" != 5 ]]; then command sleep 0.01; fi; }
+    /usr/bin/open() {
+      local output=""
+      while (( $# )); do
+        if [[ "$1" == --live-e2e-output-dir ]]; then output="$2"; shift; fi
+        shift
+      done
+      if [[ "$SYNTHETIC_OPEN_STATUS" == 0 ]]; then
+        printf "CHROME pass\n" > "$output/capture-check.txt"
+        touch "$output/capture-check-finished"
+      fi
+      return "$SYNTHETIC_OPEN_STATUS"
+    }
+    source "$0"
+  ' "$TMP/repo/scripts/run-browser-capture-check.sh"
+}
+expect_status 1 'capture launch failure is classified' run_capture
+if ! grep -q 'CHROME fail:.*browser-capture/' "$TMP/output"; then
+  echo 'FAIL: launch failure did not report its diagnostic directory' >&2
+  cat "$TMP/output" >&2
+  exit 1
+fi
+SYNTHETIC_OPEN_STATUS=0
+expect_status 0 'capture success reports isolated evidence' run_capture
+if ! grep -q 'Result:.*browser-capture/' "$TMP/output"; then
+  echo 'FAIL: capture evidence shares the live retention pool' >&2
+  exit 1
+fi
 echo "Test completion regression checks passed ($passed cases)."

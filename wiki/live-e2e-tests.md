@@ -237,8 +237,11 @@ not the unseen content between them. An optional forbidden-text list can detect 
 unselected tab when the operator places its sentinel there. Gate tests cover missing middle lines,
 wrong file names, whitespace changes, OCR-only captures, truncation, and excluded text.
 
-Results and the supplied expectation stay owner-only under the main workspace's `.jarvis/live-e2e`,
-even when the source worktree is temporary. The check writes no raw captured text or image archive. Successful capture removes its temporary
+Results and the supplied expectation stay owner-only under the main workspace's `.jarvis/browser-capture`,
+even when the source worktree is temporary. Capture-check directories are outside the ten-run live
+e2e retention pool and are retained until the operator removes them. Live-test pruning selects only
+date-named runs, excluding any older `chrome-*` directories in that pool. A launch failure reports
+its exit status and diagnostic directory. The check writes no raw captured text or image archive. Successful capture removes its temporary
 image through the production runner. A failed or unacknowledged cleanup can leave a transient image
 in the protected output directory and must be investigated. A pass establishes the expected text
 in that capture and unchanged foreground application, not cursor/scroll stability, file memory,

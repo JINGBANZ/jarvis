@@ -54,7 +54,7 @@ RUN_DIR="$BASE/$(date '+%Y-%m-%d_%H-%M-%S')-$$"
 mkdir "$RUN_DIR"
 chmod 700 "$RUN_DIR"
 # Keep the newest ten runs, the transcription benchmark's cap.
-find "$BASE" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort -r | tail -n +11 \
+find "$BASE" -mindepth 1 -maxdepth 1 -type d -name '[0-9][0-9][0-9][0-9]-*' | LC_ALL=C sort -r | tail -n +11 \
   | while IFS= read -r old_run; do
       rm -rf "$old_run"
     done
