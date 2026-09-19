@@ -12,7 +12,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private let detailDivider = OverlayDetailDividerView(frame: .zero)
     /// A user-selected proportion takes precedence over content sizing for this session.
     private var detailHeightFraction: CGFloat?
-    private var allowsDiagramExpansion = true
     private var details: [(stamp: String, detail: ReplyDetail)] = []
     private var slot = DetailSlot()
     private static let sampleDetail = ReplyDetail(markdown: """
@@ -268,32 +267,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             ? (available.isEmpty ? nil : available.count - 1)
             : slot.shownIndex.map { min($0, max(0, available.count - 1)) }
         let entry = index.flatMap { available.indices.contains($0) ? available[$0] : nil }
-        if entry?.detail.diagram != nil, !slot.isRolled, !isCollapsed,
-           display == .log, shouldBeVisible {
-            expandForDiagram()
-        }
         detailView.show(entry?.detail, stamp: entry?.stamp ?? "",
                         position: index.map { ($0, available.count) },
                         isHeld: slot.isHeld, isRolled: slot.isRolled,
                         fontSize: detailFontSize,
                         enabled: entry != nil && !isCollapsed)
         layoutDetails()
-    }
-
-    private func expandForDiagram() {
-        guard allowsDiagramExpansion, let visible = panel.screen?.visibleFrame else { return }
-        allowsDiagramExpansion = false
-        let frame = Self.diagramFrame(from: panel.frame, within: visible)
-        panel.setFrame(frame, display: true) // ghost-mode-allowed: resize the capture-excluded coaching panel
-    }
-
-    static func diagramFrame(from current: NSRect, within visible: NSRect) -> NSRect {
-        let width = min(visible.width, max((visible.width * 0.45).rounded(.down), current.width))
-        let height = min(visible.height, max((visible.height * 0.60).rounded(.down), current.height))
-        return NSRect(
-            x: min(max(visible.minX, current.minX), visible.maxX - width),
-            y: min(max(visible.minY, current.maxY - height), visible.maxY - height),
-            width: width, height: height)
     }
 
     private func boundedDetailHeight(_ proposed: CGFloat, available: CGFloat) -> CGFloat {
@@ -310,11 +289,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         } else if slot.isRolled {
             height = min(available, detailView.stripHeight)
         } else {
-            let ceiling = box.bounds.height * (detailView.detail?.diagram == nil ? 0.45 : 0.75)
-            let preferred = detailHeightFraction.map { $0 * available }
-                ?? min(ceiling, detailView.preferredHeight(
+            let automatic: CGFloat
+            if detailView.detail?.diagram != nil {
+                automatic = max(0, available - max(72, fontSize * 3 + 24))
+            } else {
+                let ceiling = box.bounds.height * 0.45
+                automatic = min(ceiling, detailView.preferredHeight(
                     viewportWidth: box.bounds.width,
                     viewportHeight: max(1, ceiling - detailView.stripHeight)))
+            }
+            let preferred = detailHeightFraction.map { $0 * available } ?? automatic
             height = boundedDetailHeight(preferred, available: available)
         }
         historyBackground.frame = NSRect(x: 0, y: height, width: box.bounds.width,
@@ -422,10 +406,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     public func setSessionLive(_ live: Bool) {
-        if live && !isSessionLive {
-            detailHeightFraction = nil
-            allowsDiagramExpansion = true
-        }
+        if live && !isSessionLive { detailHeightFraction = nil }
         isSessionLive = live
         if !live {
             details.removeAll()
@@ -460,7 +441,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// Once per finished drag, never per frame, so the preference isn't rewritten mid-gesture.
     private func reportContentSize() {
-        allowsDiagramExpansion = false
         let size = panel.contentRect(forFrameRect: panel.frame).size
         onSizeChanged?(Double(size.width), Double(isCollapsed ? expandedContentHeight : size.height))
     }

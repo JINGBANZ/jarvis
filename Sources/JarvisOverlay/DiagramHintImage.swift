@@ -4,38 +4,30 @@ import JarvisCore
 @MainActor
 enum DiagramHintImage {
     static func render(_ graph: DiagramHint, fitting available: NSSize) -> NSImage {
-        let gap: CGFloat = 100
-        let margin: CGFloat = 36
-        let boxSize = NSSize(width: 172, height: 88)
-        let ranks = ranks(graph)
-        let rankCount = (ranks.values.max() ?? 0) + 1
-        let groups = (0..<rankCount).map { rank in graph.nodes.filter { ranks[$0.id] == rank } }
-        let horizontal = graph.direction == .leftToRight
-        let breadth = groups.map(\.count).max() ?? 1
-        let natural = NSSize(
-            width: margin * 2 + CGFloat(horizontal ? rankCount : breadth) * (boxSize.width + gap) - gap,
-            height: margin * 2 + CGFloat(horizontal ? breadth : rankCount) * (boxSize.height + gap) - gap)
-        var frames: [String: NSRect] = [:]
-        for (rank, nodes) in groups.enumerated() {
-            for (index, node) in nodes.enumerated() {
-                let across = CGFloat(index) - CGFloat(nodes.count - 1) / 2
-                let x = horizontal
-                    ? margin + CGFloat(rank) * (boxSize.width + gap)
-                    : natural.width / 2 - boxSize.width / 2 + across * (boxSize.width + gap)
-                let y = horizontal
-                    ? natural.height / 2 - boxSize.height / 2 + across * (boxSize.height + gap)
-                    : margin + CGFloat(rank) * (boxSize.height + gap)
-                frames[node.id] = NSRect(origin: NSPoint(x: x, y: y), size: boxSize)
-            }
-        }
-        // Preserve the native 15pt node and 12pt edge labels; the detail view scrolls overflow.
+        let margin = min(16, max(0, (available.width - 1) / 2))
+        let width = min(144, max(1, available.width - margin * 2))
+        let nodeHeight = graph.nodes.map {
+            labelHeight($0.label, width: max(1, width - 16), fontSize: 15) + 16
+        }.max() ?? 36
+        let box = NSSize(width: width, height: max(36, nodeHeight))
+        let edgeWidth = min(100, max(1, available.width - 16))
+        let edgeHeight = graph.edges.compactMap(\.label).map {
+            labelHeight($0, width: edgeWidth, fontSize: 12)
+        }.max() ?? 0
+        let edgeLabel = NSSize(width: edgeWidth, height: max(20, edgeHeight))
+        let layout = DiagramHintLayout(graph, fitting: available, box: box,
+                                       edgeLabel: edgeLabel, margin: margin)
+        let frames = layout.frames
+        let natural = layout.size
+        let horizontal = layout.horizontal
+        // Layout fits the width at native font sizes; only vertical overflow scrolls.
         let scale = max(1, min(max(1, available.width) / natural.width, max(1, available.height) / natural.height))
         let image = NSImage(size: NSSize(width: natural.width * scale, height: natural.height * scale))
         image.lockFocusFlipped(true)
         let transform = NSAffineTransform()
         transform.scale(by: scale)
         transform.concat()
-        for edge in graph.edges {
+        for (index, edge) in graph.edges.enumerated() {
             guard let from = frames[edge.from], let to = frames[edge.to] else { continue }
             let forward = horizontal ? to.minX > from.minX : to.minY > from.minY
             let start = horizontal
@@ -51,29 +43,28 @@ enum DiagramHintImage {
                     ? frame.minX > from.minX && frame.minX < to.minX
                     : frame.minY > from.minY && frame.minY < to.minY
             }
+            let labelIndex = graph.edges.prefix(index).filter {
+                $0.from == edge.from && $0.label != nil
+            }.count
+            let labelExtent = horizontal ? edgeLabel.width : edgeLabel.height
+            let offset = edge.label == nil ? 8 : 4 + (CGFloat(labelIndex) + 0.5) * (labelExtent + 8)
+            let track = (horizontal ? start.x : start.y) + offset
+            labelPoint = horizontal ? NSPoint(x: track, y: start.y) : NSPoint(x: start.x, y: track)
             if forward && !interveningBox {
-                let middle = horizontal ? (start.x + end.x) / 2 : (start.y + end.y) / 2
-                let first = horizontal ? NSPoint(x: middle, y: start.y) : NSPoint(x: start.x, y: middle)
-                let second = horizontal ? NSPoint(x: middle, y: end.y) : NSPoint(x: end.x, y: middle)
-                path.line(to: first)
-                path.line(to: second)
-                labelPoint = horizontal
-                    ? NSPoint(x: middle, y: end.y - 20)
-                    : NSPoint(x: end.x, y: middle)
+                path.line(to: horizontal ? NSPoint(x: track, y: start.y) : NSPoint(x: start.x, y: track))
+                path.line(to: horizontal ? NSPoint(x: track, y: end.y) : NSPoint(x: end.x, y: track))
+            } else if horizontal {
+                let lane = natural.height - margin / 2
+                path.line(to: NSPoint(x: track, y: start.y))
+                path.line(to: NSPoint(x: track, y: lane))
+                path.line(to: NSPoint(x: end.x - 8, y: lane))
+                path.line(to: NSPoint(x: end.x - 8, y: end.y))
             } else {
-                if horizontal {
-                    path.line(to: NSPoint(x: start.x + 16, y: start.y))
-                    path.line(to: NSPoint(x: start.x + 16, y: natural.height - 12))
-                    path.line(to: NSPoint(x: end.x - 16, y: natural.height - 12))
-                    path.line(to: NSPoint(x: end.x - 16, y: end.y))
-                    labelPoint = NSPoint(x: natural.width / 2, y: natural.height - 12)
-                } else {
-                    path.line(to: NSPoint(x: start.x, y: start.y + 16))
-                    path.line(to: NSPoint(x: natural.width - 12, y: start.y + 16))
-                    path.line(to: NSPoint(x: natural.width - 12, y: end.y - 16))
-                    path.line(to: NSPoint(x: end.x, y: end.y - 16))
-                    labelPoint = NSPoint(x: (natural.width - 12 + end.x) / 2, y: end.y - 36)
-                }
+                let lane = natural.width - margin / 2
+                path.line(to: NSPoint(x: start.x, y: track))
+                path.line(to: NSPoint(x: lane, y: track))
+                path.line(to: NSPoint(x: lane, y: end.y - 8))
+                path.line(to: NSPoint(x: end.x, y: end.y - 8))
             }
             path.line(to: end)
             NSColor(white: 0.75, alpha: 1).setStroke()
@@ -86,8 +77,11 @@ enum DiagramHintImage {
             arrow.lineWidth = 2
             arrow.stroke()
             if let label = edge.label {
-                drawLabel(label, in: NSRect(x: labelPoint.x - 40, y: labelPoint.y - 20, width: 80, height: 40),
-                          fontSize: 12, background: true)
+                let rect = NSRect(
+                    x: min(max(0, labelPoint.x - edgeLabel.width / 2), max(0, natural.width - edgeLabel.width)),
+                    y: min(max(0, labelPoint.y - edgeLabel.height / 2), max(0, natural.height - edgeLabel.height)),
+                    width: min(edgeLabel.width, natural.width), height: edgeLabel.height)
+                drawLabel(label, in: rect, fontSize: 12, background: true)
             }
         }
         for node in graph.nodes {
@@ -122,18 +116,13 @@ enum DiagramHintImage {
         text.draw(with: centered, options: [.usesLineFragmentOrigin, .usesFontLeading])
     }
 
-    private static func ranks(_ graph: DiagramHint) -> [String: Int] {
-        var remaining = graph.nodes.map(\.id)
-        var ranks: [String: Int] = [:]
-        while !remaining.isEmpty {
-            // `?? remaining[0]` breaks a cycle in declaration order; its back edge still renders.
-            let ready = remaining.first { id in
-                graph.edges.filter { $0.to == id }.allSatisfy { ranks[$0.from] != nil }
-            } ?? remaining[0]
-            let predecessors = graph.edges.filter { $0.to == ready }.compactMap { ranks[$0.from] }
-            ranks[ready] = predecessors.max().map { $0 + 1 } ?? 0
-            remaining.removeAll { $0 == ready }
-        }
-        return ranks
+    private static func labelHeight(_ label: String, width: CGFloat, fontSize: CGFloat) -> CGFloat {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byWordWrapping
+        return ceil((label as NSString).boundingRect(
+            with: NSSize(width: width, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: NSFont.systemFont(ofSize: fontSize, weight: .medium),
+                         .paragraphStyle: paragraph]).height)
     }
 }

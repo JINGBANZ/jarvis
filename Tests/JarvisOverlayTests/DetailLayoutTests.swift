@@ -48,7 +48,7 @@ import Testing
         view.needsLayout = true
         view.layoutSubtreeIfNeeded()
         #expect(document.frame.height > scroll.contentSize.height)
-        #expect(stacked[1].frame.height >= 536, "the three-node diagram retains readable native scale")
+        #expect(stacked[1].frame.height >= 196, "the three-node diagram retains readable native scale")
         #expect(stacked[1].frame.maxY <= stacked[2].frame.minY)
         #expect(document.frame.height >= stacked[2].frame.maxY)
     }

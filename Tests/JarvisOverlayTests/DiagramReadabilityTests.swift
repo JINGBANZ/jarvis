@@ -5,33 +5,7 @@ import Testing
 
 @MainActor
 @Suite struct DiagramReadabilityTests {
-    @Test func expansionFitsSmallAndOffsetDisplays() {
-        let secondary = NSRect(x: -800, y: 100, width: 800, height: 600)
-        let frame = OverlayBoxPanel.diagramFrame(
-            from: NSRect(x: -100, y: 500, width: 520, height: 440), within: secondary)
-        #expect(secondary.contains(frame))
-        #expect(frame.size == NSSize(width: 520, height: 440))
-        let large = NSRect(x: 100, y: -1000, width: 1600, height: 900)
-        let expanded = OverlayBoxPanel.diagramFrame(
-            from: NSRect(x: 1600, y: -300, width: 520, height: 440), within: large)
-        #expect(large.contains(expanded))
-        #expect(expanded.size == NSSize(width: 720, height: 540))
-    }
-
-    @Test func expansionScalesWithUsableDisplayArea() {
-        let current = NSRect(x: 20, y: 20, width: 520, height: 440)
-        let laptop = OverlayBoxPanel.diagramFrame(
-            from: current, within: NSRect(x: 0, y: 0, width: 1280, height: 800))
-        let monitor = OverlayBoxPanel.diagramFrame(
-            from: current, within: NSRect(x: 0, y: 0, width: 2560, height: 1440))
-        #expect(laptop.size == NSSize(width: 576, height: 480))
-        #expect(monitor.size == NSSize(width: 1152, height: 864))
-        let chosen = NSRect(x: 20, y: 20, width: 900, height: 650)
-        #expect(OverlayBoxPanel.diagramFrame(
-            from: chosen, within: NSRect(x: 0, y: 0, width: 1280, height: 800)) == chosen)
-    }
-
-    @Test func crowdedDetailScrollsWithoutShrinkingDiagramLabels() throws {
+    @Test func crowdedDetailFitsWidthWithoutHorizontalScrolling() throws {
         let source = "flowchart LR\n" + (0..<7).map {
             "N\($0)[Service \($0)] --> N\($0 + 1)[Service \($0 + 1)]"
         }.joined(separator: "\n")
@@ -45,10 +19,10 @@ import Testing
         let document = try #require(scroll.documentView)
         let drawing = try #require(document.subviews.compactMap { $0 as? NSImageView }.first)
         let image = try #require(drawing.image)
-        // Eight 172pt boxes, seven 100pt gaps, and two 36pt margins at readable native scale.
-        #expect(image.size.width >= 2148)
-        #expect(image.size.height >= 160)
-        #expect(scroll.hasHorizontalScroller)
+        #expect(image.size.width <= scroll.contentSize.width)
+        #expect(image.size.height > 160)
+        #expect(!scroll.hasHorizontalScroller)
+        #expect(document.frame.width <= scroll.contentSize.width)
         #expect(scroll.hasVerticalScroller)
         #expect(document.frame.width >= drawing.frame.maxX)
         #expect(document.frame.height >= drawing.frame.maxY)
@@ -56,8 +30,9 @@ import Testing
         #expect(view.proseText.contains("Explain the request path."))
     }
 
-    @Test func diagramGetsMostOfThePanelByDefault() throws {
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 960, height: 720))
+    @Test(arguments: [NSSize(width: 520, height: 440), NSSize(width: 960, height: 720)])
+    func diagramGetsMostOfThePanelByDefault(_ size: NSSize) throws {
+        let panel = OverlayBoxPanel(contentSize: size)
         panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
@@ -65,25 +40,25 @@ import Testing
             "```mermaid\nflowchart TD\nA[Client] --> B[API]\nB --> C[Database]\n```"))
         _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
         #expect(panel.currentDetailHeight > panel.currentContentSize.height * 0.6)
+        #expect(panel.currentContentSize.height - panel.currentDetailHeight >= 72)
+        #expect(panel.currentContentSize == size)
         #expect(panel.currentSharingType == .none)
     }
 
-    @Test func firstDiagramExpandsWithinTheDisplayWithoutSavingItsSize() throws {
+    @Test func diagramDeliveryKeepsTheUsersPanelFrame() throws {
         let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel()
         let window = try #require(NSApplication.shared.windows.first { !windows.contains($0.windowNumber) })
         panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
-        let visible = try #require(window.screen).visibleFrame
+        let original = window.frame
         var savedSizes = 0
         panel.onSizeChanged = { _, _ in savedSizes += 1 }
         let detail = try #require(ReplyDetail(markdown:
             "```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"))
         _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
-        #expect(panel.currentContentSize.width >= min(max(520, (visible.width * 0.45).rounded(.down)), visible.width))
-        #expect(panel.currentContentSize.height >= min(max(440, (visible.height * 0.60).rounded(.down)), visible.height))
-        #expect(visible.contains(panel.currentFrame))
+        #expect(window.frame == original)
         #expect(savedSizes == 0)
 
         panel.setContentSize(NSSize(width: 400, height: 300))

@@ -77,7 +77,6 @@ final class DetailDocumentView: NSView {
     /// A diagram uses the remaining viewport, scrolling at its readable minimum scale.
     func fit(viewportWidth: CGFloat, viewportHeight: CGFloat) {
         let width = max(1, viewportWidth)
-        var documentWidth = width
         var textHeight: CGFloat = 0
         for case let view as NSTextView in stack {
             view.setFrameSize(NSSize(width: width, height: view.frame.height))
@@ -105,13 +104,12 @@ final class DetailDocumentView: NSView {
         for view in stack {
             if view === drawing {
                 view.setFrameOrigin(NSPoint(x: 14, y: y + 6))
-                documentWidth = max(width, view.frame.maxX + 14)
                 y = view.frame.maxY + 8
             } else {
                 view.setFrameOrigin(NSPoint(x: 0, y: y))
                 y = view.frame.maxY
             }
         }
-        setFrameSize(NSSize(width: documentWidth, height: y))
+        setFrameSize(NSSize(width: width, height: y))
     }
 }

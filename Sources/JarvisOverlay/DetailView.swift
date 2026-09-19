@@ -142,7 +142,6 @@ final class DetailView: NSView {
                                 label: isRolled ? "Show detail" : "Dismiss detail")
         emptyLabel.isHidden = detail != nil || isRolled
         scroll.isHidden = detail == nil || isRolled
-        scroll.hasHorizontalScroller = detail?.diagram != nil
         needsLayout = true
         guard let detail, !isRolled else { return }
         document.show(detail, fontSize: preferredFontSize)

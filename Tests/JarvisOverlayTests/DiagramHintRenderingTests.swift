@@ -35,12 +35,12 @@ import Testing
         let graph = try #require(DiagramHint(mermaid: source))
         let large = DiagramHintImage.render(graph, fitting: NSSize(width: 600, height: 300))
         let small = DiagramHintImage.render(graph, fitting: NSSize(width: 300, height: 150))
-        #expect(large.size == NSSize(width: 2148, height: 160))
-        #expect(small.size == large.size)
-        #expect(large.size.width > large.size.height, "resizing preserves the LR layout")
+        #expect(large.size.width <= 600)
+        #expect(small.size.width <= 300)
+        #expect(small.size.height > 150, "long chains scroll vertically at readable font sizes")
+        #expect(small.size == large.size, "limited height cannot shrink native labels")
         let short = DiagramHintImage.render(graph, fitting: NSSize(width: 600, height: 20))
         #expect(short.size == large.size)
-        #expect(abs(short.size.width / short.size.height - large.size.width / large.size.height) < 0.01)
     }
 
     @MainActor @Test func anUnsupportedGraphKeepsTheRestOfTheDocument() async throws {
@@ -82,9 +82,9 @@ import Testing
         panel.setContentSize(NSSize(width: 260, height: 220))
         let after = try imageSize()
         #expect(after.height <= drawing.bounds.height, "the graph fits inside the detail box")
-        #expect(after == NSSize(width: 244, height: 536), "small panels preserve native readable scale")
+        #expect(after.width <= 232, "resizing reflows within the panel padding")
+        #expect(after.height >= 196, "three nodes retain their native 36-point boxes and gaps")
         #expect(after.width <= before.width && after.height <= before.height)
-        #expect(abs(after.width / after.height - before.width / before.height) < 0.01)
     }
 
     @MainActor @Test func aVerticalDragGrowsATallGraph() throws {
@@ -110,7 +110,8 @@ import Testing
         panel.setContentSize(NSSize(width: 900, height: 380))
         let wider = try #require(drawing.image).size
         #expect(wider.width > start.width)
-        #expect(abs(wider.width / wider.height - start.width / start.height) < 0.01)
+        #expect(wider.width > wider.height, "extra width permits the requested horizontal flow")
+        #expect(start.height > start.width, "the narrow panel uses vertical flow")
     }
 
     @MainActor private func makeDiagramPanel(
@@ -123,7 +124,6 @@ import Testing
         })
         panel.setEnabled(true)
         panel.setSessionLive(true)
-        panel.endLiveResize()
         let detail = try #require(ReplyDetail(markdown: "```mermaid\n\(source)\n```"))
         _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
         let content = try #require(window.contentView)
@@ -139,11 +139,34 @@ import Testing
         let image = DiagramHintImage.render(graph, fitting: NSSize(width: 500, height: 800))
         let data = try #require(image.tiffRepresentation)
         let bitmap = try #require(NSBitmapImageRep(data: data))
-        // The bypass lane sits 12pt inside the right edge of the 244pt natural layout. At the
+        // The bypass lane sits 8pt inside the right edge of the 176pt natural layout. At the
         // middle row it is transparent unless A→C routes around Cache.
-        let x = Int((1 - 12.0 / 244.0) * Double(bitmap.pixelsWide))
+        let x = Int((1 - 8.0 / 176.0) * Double(bitmap.pixelsWide))
         let y = bitmap.pixelsHigh / 2
         #expect((bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5)
+    }
+
+    @MainActor @Test func wrappedBranchesKeepBothEdgeLabelsVisible() throws {
+        let graph = try #require(DiagramHint(mermaid:
+            "flowchart TD\nA[API] -->|read| B[Cache]\nA -->|write| C[Database]"))
+        let image = DiagramHintImage.render(graph, fitting: NSSize(width: 200, height: 100))
+        let data = try #require(image.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: data))
+        let pixelsPerPoint = CGFloat(bitmap.pixelsWide) / image.size.width
+        // Two label tracks below API, above either wrapped destination node.
+        for centerY in [70.0, 98.0] {
+            var whitePixels = 0
+            for y in Int((centerY - 10) * pixelsPerPoint)..<Int((centerY + 10) * pixelsPerPoint) {
+                for x in Int(38 * pixelsPerPoint)..<Int(138 * pixelsPerPoint) {
+                    guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                    if color.alphaComponent > 0.9 && color.redComponent > 0.9
+                        && color.greenComponent > 0.9 && color.blueComponent > 0.9 {
+                        whitePixels += 1
+                    }
+                }
+            }
+            #expect(whitePixels > 10, "each track contains visible label glyphs, not just its gray connector")
+        }
     }
 
     @MainActor @Test func rendersReadableImageAndGrowsWhenSpacePermits() throws {

@@ -374,15 +374,13 @@ source text; the content uses its configured compact size and shrinks only as ne
 readable minimum. Very small panels scroll rather than clipping or shrinking indefinitely. Collapsing
 the box hides both sections and expanding restores them.
 
-A shown diagram gives the detail area a larger automatic share of the panel. The first shown
-diagram in a session expands the panel toward a proportion of its display's usable width and height,
-keeping a larger existing panel within display bounds. Proportional sizing leaves more working space
-on a laptop while allowing a larger sketch on an external monitor; a manual panel resize opts out
-for that session. Automatic expansion does not rewrite the saved size, and a manually
-chosen divider proportion still takes precedence. Diagram node and edge labels stay at least at
-their native readable size, with horizontal and vertical scrolling for overflow. Prose beside a
-diagram keeps its configured compact size rather than shrinking to compensate for the graph.
-See `OverlayBoxPanel`, `DetailDocumentView`, and `DiagramHintImage` for sizing.
+A shown diagram gives the detail area most of the existing panel, leaving a compact hint-history
+strip visible. It never changes the outer panel's size or position. A manually chosen divider
+proportion still takes precedence. Diagrams adapt their flow to the available width: a horizontal
+chain can become vertical, and wide ranks wrap into rows. Node and edge labels retain their native
+readable size, with only vertical scrolling when the graph cannot fit the remaining height. Prose
+beside a diagram keeps its configured compact size rather than shrinking to compensate for the graph.
+See `OverlayBoxPanel`, `DetailDocumentView`, `DiagramHintLayout`, and `DiagramHintImage` for sizing.
 
 Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
 reports back what reached the screen. A detail the box could not accept, because it is hidden or
