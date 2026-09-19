@@ -81,9 +81,10 @@ composition used in production.
 |---|---|---|
 | Standard matrix | `./scripts/transcription-benchmark.sh standard` | Compare every selectable transcription path over the fixed English, Mandarin, and bilingual fixtures. |
 | Standard matrix with more repetitions | `./scripts/transcription-benchmark.sh standard --repetitions N` | Gather a larger sample; `N` must preserve the source-owned minimum. |
+| Technical-context comparison | `./scripts/transcription-benchmark.sh vocabulary` | Compare GPT-4o Transcribe with and without a short technical-context prompt using identical synthetic audio. |
 | Scoped reconnect | `./scripts/transcription-benchmark.sh reconnect` | Verify OpenAI reconnect, buffering, replay, final ordering, and provider identity. |
 
-Both modes are explicit developer operations. They never run as part of `swift build`,
+All modes are explicit developer operations. They never run as part of `swift build`,
 `./scripts/run-tests.sh`, or the normal GitHub Actions gate. The live runner needs macOS TCC access;
 OpenAI arms make real provider requests, and Apple Speech may need to prepare its selected locale
 model. The deterministic scorer and its edge cases still run automatically as unit tests in the
@@ -115,6 +116,30 @@ provider comparisons less informative.
 macOS 26+) — Gemini is explicitly out of scope rather than silently missing. Adding Gemini arms needs
 a provider-neutral model identifier on `Arm` before the matrix can compare it against the other two
 paths.
+
+## Technical-Context Comparison
+
+Vocabulary mode compares the production GPT-4o Transcribe configuration with a benchmark-only
+technical-context prompt. Each fixture has matched baseline and candidate arms, sharing the same
+synthesized bytes, language configuration, and repetition count. The prompt is recorded on the arm;
+it never changes saved preferences or the normal app's default prompt. Standard and reconnect modes
+retain their existing inputs and configuration.
+
+The fixtures cover evict/deque/min-max terminology, timestamps, complexity notation, and unfinished
+fragments separated by explicit synthesis pauses. Ordinary English, Mandarin, and bilingual phrases
+are controls for unwanted terminology insertion or language changes. Synthetic pronunciation and
+clean system audio do not reproduce microphone noise, accents, or every supported language.
+
+Compare each pair's final text, normalized character error rate, unavailable finals, continuity, and
+speech-end-to-final latency in `summary.json`. Inspect technical terms and unrelated inserted words
+in the final text, rather than interpreting character error rate as term accuracy. Paused fixtures
+may produce several finals: their combined text is scored, and final latency is relative to the end
+of the entire fixture. Vocabulary mode observes five seconds of final-stream quiet (within the
+existing bounded timeout) so a short pause between fragments does not immediately end observation.
+Keep a candidate out of production unless multiple runs show repeatable
+technical improvement without control-language, insertion, or latency regressions. A local speech
+activity warning in a real session is an investigation signal, not proof of a missed utterance;
+controlled input and finalization evidence are needed to establish loss.
 
 ## Why Scoring Belongs to the Benchmark
 

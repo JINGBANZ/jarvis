@@ -34,12 +34,17 @@ public enum TranscriptionBenchmark {
         public let language: Language
         public let text: String
         public let voice: String
+        public let synthesisText: String?
 
-        public init(id: String, language: Language, text: String, voice: String) {
+        public init(
+            id: String, language: Language, text: String, voice: String,
+            synthesisText: String? = nil
+        ) {
             self.id = id
             self.language = language
             self.text = text
             self.voice = voice
+            self.synthesisText = synthesisText
         }
     }
 
@@ -69,6 +74,7 @@ public enum TranscriptionBenchmark {
         public let languageProfile: LanguageProfile?
         public let localeIdentifier: String?
         public let phrase: Phrase
+        public let transcriptionPrompt: String?
 
         public init(
             id: String,
@@ -76,7 +82,8 @@ public enum TranscriptionBenchmark {
             model: OpenAITranscriptionModel?,
             languageProfile: LanguageProfile?,
             localeIdentifier: String?,
-            phrase: Phrase
+            phrase: Phrase,
+            transcriptionPrompt: String? = nil
         ) {
             self.id = id
             self.provider = provider
@@ -84,6 +91,7 @@ public enum TranscriptionBenchmark {
             self.languageProfile = languageProfile
             self.localeIdentifier = localeIdentifier
             self.phrase = phrase
+            self.transcriptionPrompt = transcriptionPrompt
         }
     }
 
