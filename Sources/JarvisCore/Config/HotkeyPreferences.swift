@@ -37,6 +37,28 @@ public final class HotkeyPreferences: @unchecked Sendable {
         self.shortcut = shortcut
     }
 
+    public var mouseCombination: MouseHotkeyCombination? {
+        get {
+            guard let stored = defaults.dictionary(forKey: mouseKey),
+                  let button = stored["button"] as? Int,
+                  let rawModifiers = stored["modifiers"] as? Int,
+                  let modifiers = UInt32(exactly: rawModifiers) else { return nil }
+            let combination = MouseHotkeyCombination(
+                button: button, modifiers: HotkeyModifiers(rawValue: modifiers))
+            return combination.isValid ? combination : nil
+        }
+        set {
+            guard let newValue else {
+                defaults.removeObject(forKey: mouseKey)
+                return
+            }
+            defaults.set(["button": newValue.button, "modifiers": Int(newValue.modifiers.rawValue)],
+                         forKey: mouseKey)
+        }
+    }
+
+    private var mouseKey: String { Defaults.Hotkey.mouseKey(for: shortcut) }
+
     /// A stored combination failing `satisfiesHotkeyRequirement` falls back to the default, so a
     /// corrupt plist can't register an unsafe global hotkey.
     public var combination: HotkeyCombination {

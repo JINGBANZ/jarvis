@@ -198,7 +198,7 @@ pages it moves.
 | `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts what is ready. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | Prep notes search, with its switch and its list of local note files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
-| `HotkeySection` | **Shortcuts**: "Ask me for help, or step through my details." | One card with a row each for **Give me a hint**, **Explain more**, **Show code**, **Previous detail**, and **Next detail**: keycaps, a **Record** button, and per-row failure feedback ([Shortcuts](#shortcuts)). |
+| `HotkeySection` | **Shortcuts**: "Ask me for help, or step through my details." | One card with a row each for **Give me a hint**, **Explain more**, **Show code**, **Previous detail**, and **Next detail**: keyboard keycaps and **Record**, an optional mouse row with **Record**/**Clear**, and per-row failure feedback ([Shortcuts](#shortcuts)). |
 | `ActivitySection` | **Activity**: "What I heard and said, session by session." | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
 `AppDelegate` builds the hub model, the hub, and the section list at launch and passes them to
@@ -312,12 +312,33 @@ scheduling behavior.
 of history, while stopped, or with the box disabled or collapsed, they silently do nothing. Stepping
 back holds the chosen detail; reaching the newest resumes following incoming details.
 
-The page is one card with a row for each of the five shortcuts (`HotkeyBindingView`): the shortcut's
-name and what it does, its keys drawn as keycaps (`ShortcutKeycapsView`), and a **Record** button
-(`HotkeyRecorderButton`). While recording, the row asks for a combination with Command or Option,
-which the recorder requires, and Escape cancels. A successful rebind takes effect immediately and
-persists only that shortcut through `HotkeyPreferences`; defaults and storage keys live in
-`Defaults.Hotkey`.
+The page is one scrolling card with a keyboard row (`HotkeyBindingView`) and an optional mouse row
+(`MouseHotkeyBindingView`) for each action. The keyboard row shows the action's name and purpose,
+keycaps (`ShortcutKeycapsView`), and **Record** (`HotkeyRecorderButton`). Keyboard recording requires
+Command or Option; Escape cancels. Every action keeps its keyboard binding when a mouse binding is
+added or cleared. Successful edits take effect immediately and persist independently through
+`HotkeyPreferences`; defaults and storage keys live in `Defaults.Hotkey`.
+
+The mouse row starts at **Not set** and offers **Record** and **Clear**. Press Record, then click in
+Jarvis with the desired button and modifiers. Middle and side buttons work alone or with modifiers;
+left and right clicks require Command or Option to protect ordinary clicking. The modifier set must
+match exactly. Escape, an ordinary unmodified primary click, focus loss, leaving the page, or closing
+Settings cancels recording without changing the binding. Recording suspends mouse shortcut dispatch.
+Clearing the mouse binding leaves the keyboard binding intact. Wheel scrolling and gestures are not
+bindings.
+
+Mouse shortcuts require the optional macOS Accessibility grant. The recorder checks permission and
+shows instructions for **System Settings → Privacy & Security → Accessibility** when it is missing;
+it never prompts or opens another app. After granting access, record again. A saved mouse binding
+that cannot become active remains saved and shows an inline warning; keyboard shortcuts stay usable.
+`MouseHotkeyController` installs a mouse-only Core Graphics event tap and routes through the same
+coaching/navigation actions as the keyboard controller. During a live session, a matching enabled
+binding fires once on button-down and consumes the down, drag, and up events so the foreground app
+does not also act on the click. While stopped or when an action is unavailable, clicks pass through.
+An already consumed press finishes consuming its release even if the session or modifiers change;
+an interrupted event stream clears pending presses. The tap is disabled when no bindings, pending
+releases, or recording need mouse events, and is re-enabled when recording or binding again. No mouse
+activity is logged or archived.
 
 **Explain more**, **Show code**, and the two navigation shortcuts all act on the detail box, so the
 Overlay Box switch is the only thing that decides whether they can be bound: with the box off, their
@@ -328,10 +349,12 @@ off never registers them, even if the box is switched on mid-session, while a se
 with it on releases them when the box is switched off and registers them again when it is switched
 back on.
 
-A collision with another application or another Jarvis shortcut leaves the old working binding
-active, and that row's detail turns into an amber warning until the page is visited again. If no
-binding could be registered at launch, its warning shows on every visit. Warnings live in the row
-rather than in a box under it, so the page stays one card at a fixed height. The Overlay Box shows
+A keyboard collision with another application or another Jarvis shortcut leaves the old working
+binding active, and that row's detail turns into an amber warning until the page is visited again.
+Mouse bindings reject duplicates across all five Jarvis actions, including temporarily unavailable
+actions, and keep the previous binding on failure. Other applications' mouse bindings cannot be
+reserved or checked through Carbon. If a binding could not become active at launch, its warning
+shows on every visit. Warnings live in the corresponding row. The Overlay Box shows
 semibold hints in its upper section and the reply's detail in the lower one; a hint whose reply
 carried a detail ends with a dim marker. Both use the configured text size, and the appearance
 preview shows an example. Neither surface's visibility preference changes. No shortcut enables the
@@ -738,7 +761,10 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/HotkeySection.swift`, `HotkeyBindingView.swift` | Shortcuts page and one shortcut's row |
-| `Sources/JarvisApp/Settings/HotkeyRecorderButton.swift`, `ShortcutKeycapsView.swift` | The Record button and the drawn keycaps |
+| `Sources/JarvisApp/Settings/HotkeyRecorderButton.swift`, `ShortcutKeycapsView.swift` | The keyboard Record button and the drawn keycaps |
+| `Sources/JarvisApp/Settings/MouseHotkeyBindingView.swift`, `MouseHotkeyRecorderButton.swift` | Optional mouse binding controls and cancellable recording |
+| `Sources/JarvisApp/Shortcuts/MouseHotkeyController.swift` | Permission-aware mouse event tap and dispatch |
+| `Sources/JarvisCore/Config/MouseHotkeyCombination.swift`, `MouseShortcutRouter.swift` | Mouse validation, duplicate rejection, exact matching, and click consumption |
 | `Sources/JarvisApp/Settings/NSView+PixelGrid.swift` | Rounds centered text to the screen's pixel grid |
 | `Sources/JarvisApp/Settings/ActivitySection.swift` | Activity page |
 | `Sources/JarvisCore/Brain/BrainProvider.swift` | The four providers: the OpenAI and Gemini APIs and the two subscriptions |
