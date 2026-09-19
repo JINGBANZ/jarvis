@@ -753,8 +753,10 @@ rather than a per-turn screenshot.
   policy already warrants; coding-with-ai adds guidance for directing another AI, reviewing its
   proposals, challenging an approach against constraints, distinguishing adopted code and execution
   evidence, verifying counterexamples, and checking minimal fixes against reproducing and regression
-  cases. It composes with coding when offered and applies only while AI collaboration is relevant.
-  Its separate catalog entry keeps that workflow conditional without a round or seniority setting
+  cases. It composes with coding when offered and applies only once AI collaboration is established:
+  the candidate is using a coding assistant, or the interviewer or candidate has said it is allowed.
+  A visible assistant panel alone is a hint, not that establishment. Its separate catalog entry keeps
+  that workflow conditional without a round or seniority setting
   (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
   System-design supplies the stage vocabulary from requirements through
   trade-offs, and asks for a diagram in the one stage that benefits. The base prompt keeps what is

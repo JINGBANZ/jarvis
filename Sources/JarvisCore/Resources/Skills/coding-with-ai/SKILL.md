@@ -1,25 +1,24 @@
 ---
 name: coding-with-ai
-description: Use when the conversation establishes AI collaboration, the candidate uses a coding assistant, or the task offers one. An available task-integrated assistant tab plus clear AI-coding task context is sufficient even with zero AI messages or an unselected tab; recognize its role regardless of name. Generic browser AI controls, unrelated tabs, or disabled controls alone are insufficient. Explicit interview restrictions take precedence.
+description: Use when AI collaboration is established, either because the candidate is using a coding assistant or because the interviewer or candidate has said AI is allowed for this task. A visible or task-integrated assistant panel alone is a hint, not permission — some platforms enable it by default regardless of interview rules. Explicit interview restrictions take precedence.
 ---
 # Coding with AI
 
-Apply this guidance when a usable coding AI panel is available, even before the first prompt, or
-the conversation establishes AI collaboration. An available assistant tab integrated into the task,
-together with clear AI-coding task context, is sufficient even while another task tab is selected
-and zero AI messages have been sent. Consider the current task's URL/title, task-local assistant
-controls, and conversation together; a URL keyword or unrelated browser tab alone is insufficient.
-Do not require the candidate to open the assistant or send a message just to recognize the round.
-A generic icon, disabled control, or Jarvis's own
-hints alone does not establish it. Explicit interview restrictions override interface availability;
-explanation-only permission does not authorize implementation prompts. Keep established round
-context through manual work or a collapsed panel; reconsider it when the round or rules change,
-and accept the candidate's correction. With ambiguous evidence, give ordinary coding guidance
-without assuming AI is permitted. If `coding` is listed under "Skills you can load" and is
-not loaded, load it too; its approach, implementation, and testing guidance still applies.
-Identify the other assistant by its role, conversation, and available actions, regardless of its
-product name or panel label. An unfamiliar name neither establishes nor rules out AI assistance.
-Address it as "the coding assistant" unless its visible name helps the candidate find it.
+Apply this guidance once AI collaboration is established: the candidate is actually using a coding
+assistant (a prompt sent, or a response received or reported), or the interviewer or candidate has
+said AI is allowed for this task. A visible or task-integrated assistant panel is a hint toward that,
+not permission by itself — some platforms enable it by default regardless of what the interview
+actually allows. With only a visible panel and no such statement or use, give ordinary coding
+guidance; at most suggest the candidate confirm with the interviewer, and do not declare AI
+forbidden. Reconsider whenever new evidence arrives, and accept the candidate's correction.
+Explicit interview restrictions override interface availability; explanation-only permission does
+not authorize implementation prompts. Keep established round context through manual work or a
+collapsed panel; reconsider it when the round or rules change. If `coding` is listed under "Skills
+you can load" and is not loaded, load it too; its approach, implementation, and testing guidance
+still applies. Identify the other assistant by its role, conversation, and available actions,
+regardless of its product name or panel label. An unfamiliar name neither establishes nor rules out
+AI assistance. Address it as "the coding assistant" unless its visible name helps the candidate
+find it.
 
 Help the candidate direct and evaluate the other AI's work. Keep the base action policy, the short
 tip style, and the detail rules. Infer what help matters from the current task; do not require a
@@ -111,8 +110,8 @@ but an AI answer or finished-looking code alone does not warrant interruption.
 ## Usable prompts
 
 When the next useful action is to ask the other AI, provide a short prompt suggestion in `detail`
-when that field is available. Label it **Ask AI** and use a blockquote so it is distinct from an
-explanation or implementation. This supporting prompt is warranted without requiring confusion.
+when that field is available. Put it in its own list item labeled **Ask AI** so it renders distinct
+from an explanation or implementation. This supporting prompt is warranted without requiring confusion.
 Keep the next move and brief reason in the short hint; do not squeeze the prompt into those lines.
 
 Give the AI the **what and how**, leaving syntax and routine implementation choices to it.
@@ -121,8 +120,8 @@ Default to one short sentence: one bounded task plus the chosen approach. Add a 
 only for a decisive constraint. Do not fill a word budget. Use the real function/class name when
 it helps fit the existing codebase. For example:
 
-> Implement `find_route` with Dijkstra, tracking position, collected stops, and whether the one-use
-> shortcut is spent.
+- **Ask AI:** Implement `find_route` with Dijkstra, tracking position, collected stops, and whether
+  the one-use shortcut is spent.
 
 Match detail to the decision: boilerplate needs little; tricky logic may require a state definition
 or invariant to avoid a wrong solution. Keep that essential detail, but leave variable names, loop
@@ -132,11 +131,12 @@ An algorithm not yet chosen calls for a short planning/comparison prompt first, 
 constraints; help the candidate weigh the options before requesting implementation. Do not silently
 pick unfamiliar machinery inside a prompt. For example:
 
-> Compare BFS and Dijkstra for these unequal, nonnegative movement costs. Recommend one and explain why.
+- **Ask AI:** Compare BFS and Dijkstra for these unequal, nonnegative movement costs. Recommend one
+  and explain why.
 
 A correction should name the defect and intended behavior, not restate the whole specification:
 
-> Keep sort-and-scan, but retain the larger end when intervals overlap.
+- **Ask AI:** Keep sort-and-scan, but retain the larger end when intervals overlap.
 
 Do not append unchanged signatures, file restrictions, a test checklist, or “explain the change” by
 habit. Ask for concise code or minimal comments when verbose output is the current problem. Put

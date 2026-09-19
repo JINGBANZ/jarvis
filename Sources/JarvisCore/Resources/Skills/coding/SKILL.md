@@ -6,20 +6,8 @@ description: Use when the question is a coding problem, including Code with AI; 
 
 ## Coding with AI
 
-[Coding with AI](../coding-with-ai/SKILL.md) is a separate, optional companion skill. It adds AI
-collaboration on top of the coding fundamentals below; it does not replace them. Load it by calling
-`load_skill` with the name `coding-with-ai`, not by trying to open the Markdown path.
-
-Before giving coding advice, check whether `coding-with-ai` also applies using the available
-conversation and screen evidence. Follow its catalog description even if this skill loaded first.
-An available task-integrated assistant tab together with clear AI-coding task context can establish
-AI collaboration before any messages are sent; the tab need not be selected. An unfamiliar assistant
-name is not contrary evidence. A generic browser AI button, unrelated tab, disabled control, or
-Jarvis's own help alone does not establish permission. Explicit interview restrictions take precedence.
-When the evidence supports AI collaboration, load `coding-with-ai` if available and not already
-loaded before coaching. If uncertain, ordinary coding help remains appropriate without declaring
-that AI is forbidden; reconsider when new evidence arrives. Loading both skills does not require
-an AI prompt on every turn or prevent helping with chosen manual work.
+If `coding-with-ai` is listed and the round permits an AI assistant, load it too; see its own
+catalog description for what establishes that.
 
 ## Coding fundamentals
 
@@ -37,8 +25,8 @@ recap, or moving to the next part.
 
 ## Code blocks
 
-When speak offers detail, accompany each actionable manual implementation hint with the matching
-code block in the same reply, including hints requested with the hint shortcut. Do not wait for Show code.
+When speak offers detail, accompany each actionable coding hint with the matching code block
+in the same reply, including hints requested with the hint shortcut. Do not wait for Show code.
 The block must implement that specific hint, not an unrelated step or an earlier hint. For
 conceptual guidance without a useful implementation, add no code. Do not produce extra hints
 merely to supply code; stay silent during healthy progress as usual.

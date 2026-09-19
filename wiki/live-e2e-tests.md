@@ -122,10 +122,9 @@ every other brain response runs on a subscription.
 A result line is `<case> pass`, `fail`, `note`, or `skipped`. `pass` and `fail` come from assertions.
 `note` records a model's choice and never affects the exit code (see
 [Notes and the rerun rule](#notes-and-the-rerun-rule)). The `skipped` lines are fixed: G07 (offline),
-G10 (dropped), C21 (optional), and F03, R01, R02, S01 (manual). A successful run requires a nonempty successful Swift Testing completion summary, results and a
-finished marker for every selected scenario, and no failed assertions or process/logging failures.
-An empty run or a process that exits zero before its tests finish fails. The offline Gate applies
-the same Swift Testing completion check; synthetic runner regressions exercise both wrappers.
+G10 (dropped), C21 (optional), and F03, R01, R02, S01 (manual). The exit code counts only `fail`
+lines, missing finished markers, and a failed test process, so a launch that dies mid-scenario fails
+the run even when no assertion ran.
 
 Each session directory is an ordinary one, so `scripts/eval-session.sh` or an agent reads it like any
 other. Run directories hold screenshots and finalized speech, which is why they stay owner-only under
@@ -211,44 +210,6 @@ Its JPEG remains the coding fixture, so its assertions do not establish Chrome p
 observed test execution. Advice quality, restrictions, and factual caveats are judged against the
 [scenario rubric](../Tests/JarvisLiveTests/Scenarios/D-review.md). Results explicitly record semantic
 review as not evaluated; structural success alone does not establish that the advice is correct.
-
-## Explicit Chrome capture check
-
-`scripts/run-browser-capture-check.sh [expectation.json]` exercises `WindowScopedScreenCapture`
-inside the signed development app with Chrome text enabled, without audio or provider calls. It
-uses the existing confined live-e2e output options and a separate debug-only delegate. The script
-requires a built development app and no running development instance; it never quits a live preview
-to begin the check. Unlike the scenario command, this check reads the real foreground window.
-
-The operator opens the authorized fixture in Chrome and brings it forward during the script's
-five-second preparation window. Screen Recording and Accessibility grants must already exist;
-missing grants or a non-Chrome foreground app produce a blocked result and exit 2. Missing capture,
-missing completion evidence, truncation, and mismatched expectations fail with exit 1. Success exits
-0. The script waits up to 30 seconds, then requests cancellation and allows five seconds for cleanup.
-The app independently cancels capture after 25 seconds. If cancellation is not acknowledged, the
-command fails and leaves the app alive to finish its helper cleanup; the output directory requires
-inspection before another run.
-
-The default HTML and JSON under `Tests/JarvisLiveTests/Fixtures/browser-capture.*` are a small
-synthetic smoke fixture, not a CoderPad emulator. `BrowserCaptureExpectation` requires exact text
-blocks from accessibility evidence; OCR cannot satisfy them. Include the entire expected file as
-one required block to check every line and indentation. Separate blocks check only those blocks,
-not the unseen content between them. An optional forbidden-text list can detect content from an
-unselected tab when the operator places its sentinel there. Gate tests cover missing middle lines,
-wrong file names, whitespace changes, OCR-only captures, truncation, and excluded text.
-
-Results and the supplied expectation stay owner-only under the main workspace's `.jarvis/browser-capture`,
-even when the source worktree is temporary. Capture-check directories are outside the ten-run live
-e2e retention pool and are retained until the operator removes them. `LiveE2EOptions` selects this
-base only for `--browser-capture-check`; ordinary scenarios still require `.jarvis/live-e2e`.
-Both modes require exactly two output-directory levels and reject symbolic links and stale evidence. Live-test pruning selects only
-date-named runs, excluding any older `chrome-*` directories in that pool. A launch failure reports
-its exit status and diagnostic directory. The check writes no raw captured text or image archive. Successful capture removes its temporary
-image through the production runner. A failed or unacknowledged cleanup can leave a transient image
-in the protected output directory and must be investigated. A pass establishes the expected text
-in that capture and unchanged foreground application, not cursor/scroll stability, file memory,
-revision identity, or CoderPad-wide full-file support. Run it with expectations for the actual
-editor to measure those exposure limits; the operator owns all file switches and scrolling.
 
 ## Notes and the rerun rule
 
@@ -395,9 +356,8 @@ it as unverified in its description.
   work through demonstrated understanding, a local block, a visible bug, completion without tests, and
   valid progress; confirm the overlay stays at most three short lines and healthy progress stays
   silent.
-- **Browser screen text,** when screen capture, OCR, or Chrome Accessibility extraction changes.
-  Run the [explicit capture check](#explicit-chrome-capture-check) for exact expected text, then
-  check cursor/scroll stability and real-editor behavior following
+- **Browser screen text,** when screen capture, OCR, or Chrome Accessibility extraction changes,
+  because the run views a fixture screenshot instead of Chrome. Follow
   [build-and-run.md → Browser screen-text validation](./build-and-run.md#browser-screen-text-validation).
 - **Coding with AI in CoderPad,** when the `coding-with-ai` skill or browser text extraction changes,
   because it needs a live CoderPad page with Chrome page text enabled. Establish an AI-assisted

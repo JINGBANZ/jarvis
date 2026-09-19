@@ -66,53 +66,6 @@ struct LiveE2EOptionsTests {
         #expect(options.secretsDirectory?.path == secrets.standardizedFileURL.path)
     }
 
-    @Test("browser capture uses its own confined output base")
-    func browserCaptureUsesSeparateBase() throws {
-        let layout = try Layout.make()
-        defer { layout.remove() }
-        let output = layout.repository.appendingPathComponent(".jarvis/browser-capture/chrome-1/Chrome")
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        try Data("{}".utf8).write(to: output.appendingPathComponent("scenario.json"))
-
-        let options = try LiveE2EOptions(
-            arguments: layout.arguments(output: output) + ["--browser-capture-check"])
-        #expect(options.outputDirectory.path == resolved(output).path)
-        #expect(invalidDetail(failure(layout.arguments(output: output)))?.contains("exactly two levels") == true)
-        #expect(invalidDetail(failure(layout.arguments() + ["--browser-capture-check"]))?
-            .contains("exactly two levels") == true)
-    }
-
-    @Test(arguments: [".jarvis/browser-capture/chrome-1",
-                      ".jarvis/browser-capture/chrome-1/Chrome/extra",
-                      ".jarvis/browser-capture-escape/chrome-1/Chrome"])
-    func browserCaptureRejectsWrongBaseOrDepth(relativeOutput: String) throws {
-        let layout = try Layout.make()
-        defer { layout.remove() }
-        let output = layout.repository.appendingPathComponent(relativeOutput)
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        let result = failure(layout.arguments(output: output) + ["--browser-capture-check"])
-        #expect(invalidDetail(result)?.contains("exactly two levels") == true)
-    }
-
-    @Test("browser capture retains symlink and stale-output protections")
-    func browserCaptureRejectsRedirectedOrStaleOutput() throws {
-        let layout = try Layout.make()
-        defer { layout.remove() }
-        let base = layout.repository.appendingPathComponent(".jarvis/browser-capture")
-        try FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
-        let link = base.appendingPathComponent("linked-run")
-        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: layout.outside)
-        let redirected = failure(layout.arguments(output: link.appendingPathComponent("Chrome"))
-            + ["--browser-capture-check"])
-        #expect(invalidDetail(redirected)?.contains("symbolic links") == true)
-
-        let output = base.appendingPathComponent("chrome-1/Chrome")
-        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-        try Data("CHROME pass".utf8).write(to: output.appendingPathComponent("capture-check.txt"))
-        let stale = failure(layout.arguments(output: output) + ["--browser-capture-check"])
-        #expect(invalidDetail(stale)?.contains("empty except for scenario.json") == true)
-    }
-
     @Test("the optional flags default to nil")
     func optionalFlagsDefaultToNil() throws {
         let layout = try Layout.make()

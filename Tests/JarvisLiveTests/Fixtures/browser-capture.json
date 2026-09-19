@@ -1,8 +1,0 @@
-{
-  "requiredText": [
-    "Jarvis browser capture fixture",
-    "src/total.py",
-    "def total(values):\n    # Preserve duplicates: café, λ\n    return sum(values)"
-  ],
-  "forbiddenText": ["JARVIS_UNSELECTED_TAB_SENTINEL"]
-}
