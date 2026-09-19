@@ -67,13 +67,15 @@ def call(directory, label, system, prompt, model):
                                  '--model', model, '--system-prompt', system], input=prompt,
                                 capture_output=True, text=True, timeout=120)
         data = json.loads(result.stdout) if result.returncode == 0 else {}
+        if not isinstance(data, dict):
+            raise TypeError('CLI response must be a JSON object')
         answer = data.get('result')
         ok = (result.returncode == 0 and isinstance(answer, str)
               and not data.get('is_error', False)
               and data.get('stop_reason') in (None, 'end_turn'))
         record = {k: data.get(k) for k in ('duration_api_ms', 'stop_reason', 'usage', 'modelUsage')}
         record.update({'ok': ok, 'result': answer if ok else None, 'returncode': result.returncode})
-    except (subprocess.TimeoutExpired, json.JSONDecodeError) as error:
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, TypeError) as error:
         record = {'ok': False, 'result': None, 'errorType': type(error).__name__}
     record['wallSeconds'] = time.monotonic() - start
     record['promptBytes'] = len(prompt.encode())

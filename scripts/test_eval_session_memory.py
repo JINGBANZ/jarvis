@@ -1,4 +1,5 @@
 import importlib.util
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -28,6 +29,22 @@ class TailParityTests(unittest.TestCase):
         evaluation.ensure_preservation(False, history, list(history))
         with self.assertRaises(RuntimeError):
             evaluation.ensure_preservation(False, history, history[1:])
+
+
+class CallTests(unittest.TestCase):
+    def test_non_object_cli_json_records_failure(self):
+        for value in ([], None, 'answer', 42, True):
+            with self.subTest(value=value), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                result = SimpleNamespace(returncode=0, stdout=json.dumps(value))
+                with mock.patch.object(evaluation.subprocess, 'run', return_value=result):
+                    record = evaluation.call(directory, 'trial', 'system', 'prompt', 'haiku')
+                self.assertFalse(record['ok'])
+                self.assertIsNone(record['result'])
+                self.assertEqual(record['errorType'], 'TypeError')
+                output = directory / 'trial-output.json'
+                self.assertEqual(json.loads(output.read_text()), record)
+                self.assertEqual(output.stat().st_mode & 0o777, 0o600)
 
 
 class SetupTests(unittest.TestCase):
