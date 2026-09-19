@@ -443,7 +443,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or a subscription through the bundled helper, both on the OpenAI Responses wire shape, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
 | **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
@@ -767,6 +767,11 @@ rather than a per-turn screenshot.
   every target shares, and one `BrainWireFormat` per API family holds the JSON. Every format replays
   an assistant message by one rule: its raw items when present, otherwise its parsed calls,
   otherwise its text.
+- **Claude brain: the selected Claude model via Anthropic's Messages API**, through the bundled
+  helper's `/v1/messages`. The tool loop is threaded with `tool_use` / `tool_result` blocks, and
+  within an attempt each reply's content goes back unchanged, thinking blocks ahead of the call,
+  Anthropic's requirement for the model to continue over a tool result. See
+  [Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy).
 - **Gemini brain: the selected Gemini Flash model via Google's Interactions API.** See
   [Gemini API target](#gemini-api-target).
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
@@ -920,12 +925,15 @@ ChatGPT or Claude plan pay for coaching instead of a metered API key. Both are s
 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT, Go), shipped inside the app at
 `Contents/MacOS/cliproxyapi` from the pinned, checksum-verified release in
 [`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh). The helper holds the OAuth sign-ins
-and serves them as an OpenAI Responses endpoint on 127.0.0.1, so both subscriptions go through the one
-[`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) and the attempt runner
-reads one wire shape. Only the endpoint, the key, and the target's tool policy differ, and each
-provider's [`BrainProviderDescriptor`](../Sources/JarvisCore/Brain/BrainProviderDescriptor.swift)
-names them, together with its display name, wire format, failure table, and effort floor, and for a
-subscription the helper's model owner, login flag, and account-file prefix.
+and serves them on 127.0.0.1: Codex on its OpenAI Responses route (`/v1/responses`) and Claude Code
+on Anthropic's own Messages route (`/v1/messages`), so both subscriptions go through the one
+[`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) with the wire format
+of their API family (`ResponsesWireFormat`, `MessagesWireFormat`), and the attempt runner reads one
+provider-neutral reply. Only the route, the key, the wire format, the failure table, and the target's
+tool policy differ, and each provider's
+[`BrainProviderDescriptor`](../Sources/JarvisCore/Brain/BrainProviderDescriptor.swift) names them,
+together with its display name and effort floor, and for a subscription the helper's model owner,
+login flag, and account-file prefix.
 
 A proxy rather than the vendors' own CLIs: driving `claude` and `codex` as coaching processes meant
 imitating native function calls with a text protocol the model had to follow and Jarvis had to parse
@@ -977,36 +985,53 @@ is about 60 MB on disk and 20 MB per update.
 - **Tool policy per target** ([`ToolChoicePolicy`](../Sources/JarvisCore/Brain/ToolChoicePolicy.swift)).
   The OpenAI API and Codex are `providerEnforced`: `required`, `allowed_tools`, a
   forced function, strict tools, and verbatim reasoning replay all pass through the Codex path intact.
-  Claude Code is `filteredAuto`: through the helper a forced tool is a 400 on Claude Fable
-  5.1 and strips thinking on Opus 5, and `allowed_tools` is dropped, so Opus called `capture_screen`
-  on a press six times in six. Every Claude request therefore sends `tool_choice: auto` with only the
-  permitted tools declared, which costs a press the prompt cache from the tools block onward. Its
-  reasoning floors at `low`, because `none` disables thinking and Fable 5.1 rejects that. Neither
-  policy is trusted on its own: the runner checks every reply against the choice it asked for
-  ([Capabilities](#capabilities)).
+  Claude Code is `filteredAuto`: Anthropic has no subset choice and Claude Fable 5.1 rejects a forced
+  tool (`any` and `tool` are 400s), and without narrowing Opus called `capture_screen` on a press six
+  times in six. Every Claude request therefore sends `tool_choice: {type: auto,
+  disable_parallel_tool_use: true}` with only the permitted tools declared, which costs a press the
+  prompt cache from the tools block onward. Its reasoning floors at `low`, because `none` disables
+  thinking and Fable 5.1 rejects that. Neither policy is trusted on its own: the runner checks every
+  reply against the choice it asked for ([Capabilities](#capabilities)).
 - **What the helper changes on the wire.** On the Codex path it deletes `max_output_tokens`, so the
   workload timeout is the output bound; forces `store: false`, which Jarvis also sends for every
   subscription target, so the dashboard retention described in
   [sandbox.md](./sandbox.md#data-egress) never covers plan traffic; forces `parallel_tool_calls: true`,
   which the runner answers by running the first call; and reuses `prompt_cache_key` as the upstream
-  session id, which is why Jarvis keeps that key stable. On the Claude path it drops `strict`,
-  `parallel_tool_calls`, `store`, and `prompt_cache_key`, turns the effort into adaptive thinking,
-  and replays reasoning items as signed thinking blocks. Without `strict`, about one Opus 5 `speak`
-  in ten arrives with `lines` double-encoded as a string, which the runner answers with the schema in
-  the same attempt. The helper's default cloak stays on: it presents Claude traffic as Anthropic's own
-  Claude Code client so usage stays on plan limits, which moves Jarvis's system prompt behind that
-  client's identity block.
+  session id, which is why Jarvis keeps that key stable. On the Claude route the request is already
+  Anthropic's own shape
+  ([`MessagesWireFormat`](../Sources/JarvisBrainProviders/Accessor/MessagesWireFormat.swift)): the
+  helper forwards it with only its Claude Code disguise applied and its prompt-cache breakpoints
+  injected, so the tool definitions reach Anthropic untouched. Jarvis sends the system prompt at the
+  top level, screenshots as base64 `image` blocks, a round's tool results in one user message,
+  adaptive thinking with `output_config.effort` at the floor, `max_tokens` as the cap, and no
+  `strict`: Anthropic compiles a strict tool set it has not seen for several seconds before the first
+  byte, and Jarvis declares several sets per session, so a malformed reply, about one Opus 5 `speak`
+  in ten with `lines` double-encoded as a string, is answered with the schema in the same attempt
+  instead. Within an attempt each reply's content blocks go back unchanged, so a thinking block
+  precedes the `tool_use` it belongs to; committed history keeps the rebuilt calls and drops the
+  thinking, which Anthropic allows outside a tool round. The tool-less history summarizer on Haiku 4.5
+  sends neither thinking nor effort, which that model rejects. The helper's default cloak stays on:
+  it presents Claude traffic as Anthropic's own Claude Code client so usage stays on plan limits,
+  which moves Jarvis's system prompt behind that client's identity block.
 - **Models.** The Codex shares the OpenAI list; an id the Codex backend does not serve
   fails at request time with the helper's `model_not_found`. The Claude list names releases the helper
   routes, which is why Haiku is the dated `claude-haiku-4-5-20251001`: the helper reads the undated
   alias as an unknown model. The Claude summarizer is Haiku; the Codex summarizer is the target model,
   since the Codex backend serves neither mini model.
-- **Failures read as the vendor wrote them.** The helper returns the vendor's own error body, which
-  [`OpenAIFailureClassifier`](../Sources/JarvisCore/Providers/OpenAI/OpenAIFailureClassifier.swift)
-  reads for both vendors. With every credential for a vendor gone it answers 503
-  `upstream_authentication_required`, a permanent authentication failure. A model it cannot route
-  answers 400 `unknown provider for model`, which stays a configuration failure: the helper sends the
-  same reply for a signed-out vendor and for a model it does not serve, so the Start probe is what
+- **Failures read as the vendor wrote them.** The helper answers each route in its API family's
+  error shape, its own errors included: OpenAI's on the Codex route
+  ([`OpenAIFailureClassifier`](../Sources/JarvisCore/Providers/OpenAI/OpenAIFailureClassifier.swift))
+  and Anthropic's on the Claude route
+  ([`AnthropicFailureClassifier`](../Sources/JarvisCore/Providers/Anthropic/AnthropicFailureClassifier.swift)),
+  where `authentication_error` and `permission_error` are permanent, `not_found_error` and the
+  helper's own `unknown provider for model` answer are configuration, and `rate_limit_error`,
+  `overloaded_error`, `api_error`, and any other `invalid_request_error` (Anthropic's catch-all 400,
+  which a fresh attempt's different conversation may pass) stay temporary. With every credential for
+  a vendor gone the Codex route answers 503
+  `upstream_authentication_required`, a permanent authentication failure. A model the helper cannot
+  route answers 400 `unknown provider for model` (`model_not_found` on the Codex route,
+  `invalid_request_error` on the Claude route), which stays a configuration failure: the helper sends
+  the same reply for a signed-out vendor and for a model it does not serve, so the Start probe is what
   names a signed-out subscription. When every credential is cooling down it answers 429 with its own
   `Retry-After`, a temporary rejection. A helper that stopped mid-session refuses the connection, an
   unreachable failure that is temporary, so the cycle fails, listening continues, and the restart on

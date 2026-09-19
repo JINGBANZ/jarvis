@@ -29,9 +29,7 @@ enum EvaluationTranscript {
             let tag = entry["tag"] as? String ?? "?"
             let request = entry["request"] as? [String: Any]
             let response = entry["response"] as? [String: Any]
-            let exchange = RecordedExchange.read(
-                provider: entry["provider"] as? String ?? request?["provider"] as? String,
-                request: entry["request"], response: entry["response"])
+            let exchange = RecordedExchange.read(request: entry["request"], response: entry["response"])
             let provider = SessionMetrics.providerName(
                 provider: entry["provider"] as? String, request: request, response: response)
             let isPreRequestFailure = entry["record_kind"] as? String

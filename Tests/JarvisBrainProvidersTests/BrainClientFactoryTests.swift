@@ -17,7 +17,10 @@ import JarvisCore
             traffic: nil,
             send: { request in
                 captured.append(request)
-                return (Data(#"{"output":[]}"#.utf8),
+                let reply = request.url?.path.hasSuffix("/v1/messages") == true
+                    ? #"{"type":"message","content":[],"stop_reason":"end_turn"}"#
+                    : #"{"output":[]}"#
+                return (Data(reply.utf8),
                         HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil))
             })
         let clients = factory.makeClients(for: target, effort: effort)
@@ -46,19 +49,38 @@ import JarvisCore
     }
 
     @Test func subscriptionTargetsCallTheHelperWithTheLaunchKey() async throws {
-        let claude = try await requests(
-            for: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"))
-        #expect(claude.coach.url?.absoluteString == "http://127.0.0.1:4555/v1/responses")
-        #expect(claude.coach.value(forHTTPHeaderField: "Authorization") == "Bearer launch-key")
-        #expect(try body(claude.coach)["store"] as? Bool == false)
-        #expect(try body(claude.coach)["tool_choice"] as? String == "auto")
-        #expect((try body(claude.coach)["reasoning"] as? [String: Any])?["effort"] as? String == "low")
-        #expect(try body(claude.summarizer)["model"] as? String == "claude-haiku-4-5-20251001")
-
         let codex = try await requests(
             for: BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5"))
+        #expect(codex.coach.url?.absoluteString == "http://127.0.0.1:4555/v1/responses")
+        #expect(codex.coach.value(forHTTPHeaderField: "Authorization") == "Bearer launch-key")
+        #expect(try body(codex.coach)["store"] as? Bool == false)
         #expect(try body(codex.coach)["tool_choice"] as? String == "required")
         #expect(try body(codex.summarizer)["model"] as? String == "gpt-5.5")
+    }
+
+    /// Claude takes Anthropic's own route on the helper, on the coach and the summarizer alike.
+    @Test func claudeTargetsCallTheHelpersMessagesRoute() async throws {
+        let claude = try await requests(
+            for: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"))
+        #expect(claude.coach.url?.absoluteString == "http://127.0.0.1:4555/v1/messages")
+        #expect(claude.coach.value(forHTTPHeaderField: "Authorization") == "Bearer launch-key")
+        #expect(claude.coach.value(forHTTPHeaderField: "anthropic-version") == "2023-06-01")
+        let coach = try body(claude.coach)
+        #expect(coach["model"] as? String == "claude-opus-5")
+        #expect(coach["store"] == nil && coach["strict"] == nil)
+        let choice = coach["tool_choice"] as? [String: Any]
+        #expect(choice?["type"] as? String == "auto")
+        #expect(choice?["disable_parallel_tool_use"] as? Bool == true)
+        #expect((coach["thinking"] as? [String: Any])?["type"] as? String == "adaptive")
+        #expect((coach["output_config"] as? [String: Any])?["effort"] as? String == "low")   // the floor
+        #expect(coach["max_tokens"] as? Int == ReasoningEffort.low.maxOutputTokens)
+
+        #expect(claude.summarizer.url?.absoluteString == "http://127.0.0.1:4555/v1/messages")
+        let summarizer = try body(claude.summarizer)
+        #expect(summarizer["model"] as? String == "claude-haiku-4-5-20251001")
+        #expect(summarizer["tools"] == nil && summarizer["tool_choice"] == nil)
+        #expect(summarizer["thinking"] == nil && summarizer["output_config"] == nil)
+        #expect(summarizer["max_tokens"] as? Int == 2_048)
     }
 
     @Test func geminiTargetsCallGoogleWithTheGeminiKey() async throws {
