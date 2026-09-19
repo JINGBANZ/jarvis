@@ -260,6 +260,46 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
     }
 
+    /// A cut inside a diagram fence commits the detail as the box showed it: the text before the
+    /// fence, with no diagram and no placeholder.
+    @Test func anIncompleteReplyCutInsideADiagramCommitsNoDiagram() async throws {
+        let overlay = ProgressRecordingOverlay()
+        let activity = RecordingActivity()
+        let cut = #"{"lines":["Sort by start.","Then merge overlaps."],"detail":"Sketch it.\n\n```mermaid\nflowchart LR\nclient[Client] --> api[API]\napi --> "#
+        let brain = StreamingBrain(turns: [
+            .init(prefixes: [cut], outcome: .reply(reply(incompleteReason: "max_tokens"))),
+            .init(outcome: .reply(speak)),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, activity: activity)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+
+        #expect(overlay.events.last == .deliver(lines: ["Sort by start.", "Then merge overlaps."], detail: "Sketch it."))
+        #expect(activity.events.contains {
+            if case .tip(let lines, let detail) = $0 { lines == ["Sort by start.", "Then merge overlaps."] && detail == "Sketch it." } else { false }
+        })
+
+        transcript.append(.init(speaker: .them, text: "And the complexity?", at: 101))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        let replayed = try #require(brain.calls[1].flatMap { $0.toolCalls ?? [] }.first { $0.name == speakToolName })
+        let object = try #require(JSONSerialization.jsonObject(with: Data(replayed.argumentsJSON.utf8)) as? [String: Any])
+        #expect(object["detail"] as? String == "Sketch it.")
+    }
+
+    /// A cut inside a code block commits the code as shown, its half-written line included.
+    @Test func anIncompleteReplyCutInsideACodeBlockCommitsTheCodeAsShown() async {
+        let overlay = ProgressRecordingOverlay()
+        let cut = #"{"lines":["Sort by start.","Then merge overlaps."],"detail":"Try this.\n\n```python\na = 1\nb = "#
+        let brain = StreamingBrain(turns: [.init(prefixes: [cut], outcome: .reply(reply(incompleteReason: "max_tokens")))])
+
+        guard case .completed(let outcome) = await runAttempt(.turnEnd, brain: brain, overlay: overlay) else {
+            Issue.record("expected the closed lines to be spoken"); return
+        }
+        #expect(outcome == .spoke)
+        #expect(overlay.events.last == .deliver(lines: ["Sort by start.", "Then merge overlaps."],
+                                                detail: "Try this.\n\n```python\na = 1\nb = "))
+    }
+
     /// An array that closed empty showed no hint, so there is nothing to keep: the attempt fails
     /// like any other and the route is not credited.
     @Test func anEmptyLinesArrayIsNeverCommittedFromTheSnapshot() async {
