@@ -807,11 +807,18 @@ rather than a per-turn screenshot.
   experience answers with STAR, handles personal and hypothetical questions directly, preserves
   prep-material caveats, and reserves labeled fictional examples for an explicit practice request.
   It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
-  local implementation and defect diagnosis, and boundary tests for a post-completion hint the base
-  policy already warrants; coding-with-ai adds guidance for directing another AI, reviewing its
-  proposals, challenging an approach against constraints, distinguishing adopted code and execution
+  local implementation and defect diagnosis, workload-grounded performance reasoning, and
+  discriminating tests with explicit expected results. Understanding questions precede implementation
+  detail, and ambiguous requirements are resolved before labeling a design a bug. Boundary tests
+  remain available for a post-completion hint the base policy already warrants; coding-with-ai adds
+  guidance for directing another AI, reviewing its proposals, challenging an approach against constraints, distinguishing adopted code and execution
   evidence, verifying counterexamples, and checking minimal fixes against reproducing and regression
-  cases. It composes with coding when offered and applies only once AI collaboration is established:
+  cases. Verification reminders follow changed evidence or impending unsupported completion rather
+  than repeating during learning; delegated prompts leave routine algorithm steps to the other AI.
+  Instruction-level regression inputs and their semantic criteria live in
+  [`coaching-quality.json`](../Tests/JarvisLiveTests/Scenarios/coaching-quality.json), with evaluation
+  limits in the [review guide](../Tests/JarvisLiveTests/Scenarios/coaching-quality-review.md).
+  It composes with coding when offered and applies only once AI collaboration is established:
   the candidate is using a coding assistant, or the interviewer or candidate has said it is allowed.
   A visible assistant panel alone is a hint, not that establishment. Its separate catalog entry keeps
   that workflow conditional without a round or seniority setting
