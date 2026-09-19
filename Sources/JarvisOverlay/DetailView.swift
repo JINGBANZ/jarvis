@@ -5,6 +5,9 @@ import JarvisCore
 @MainActor
 final class DetailView: NSView {
     static let background = NSColor(srgbRed: 0.055, green: 0.07, blue: 0.10, alpha: 1)
+    /// Secondary text in the body: the empty prompt and the diagram placeholder.
+    static let secondaryTextColor = NSColor(white: 0.8, alpha: 1)
+    static let secondaryTextFont = NSFont.systemFont(ofSize: 13)
 
     let previousButton = OverlayBoxHeaderButton(symbol: "chevron.left", label: "Earlier detail")
     let nextButton = OverlayBoxHeaderButton(symbol: "chevron.right", label: "Later detail")
@@ -24,6 +27,8 @@ final class DetailView: NSView {
     private let document = DetailDocumentView(frame: .zero)
     private var preferredFontSize: CGFloat = 18
     private(set) var detail: ReplyDetail?
+    /// The detail ends inside a diagram fence, so the document shows a placeholder there.
+    private var isDrawingDiagram = false
     /// Which reply's detail is on screen, so a detail that grows keeps the reader's scroll position.
     private var shownOrigin: (stamp: String, index: Int?)?
     private(set) var isRolled = false
@@ -35,6 +40,7 @@ final class DetailView: NSView {
     var codeText: NSAttributedString { document.codeText }
     var proseText: String { document.proseText }
     var showsDiagram: Bool { !isRolled && document.hasDiagram }
+    var diagramPlaceholderText: String? { isRolled ? nil : document.diagramPlaceholderText }
     var titleText: String { title.stringValue }
     var positionText: String { position.stringValue }
 
@@ -61,8 +67,8 @@ final class DetailView: NSView {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.documentView = document
-        emptyLabel.textColor = NSColor(white: 0.8, alpha: 1)
-        emptyLabel.font = .systemFont(ofSize: 13)
+        emptyLabel.textColor = Self.secondaryTextColor
+        emptyLabel.font = Self.secondaryTextFont
         for view in [title, position, previousButton, nextButton, pinButton, dismissButton,
                      scroll, emptyLabel] {
             addSubview(view)
@@ -114,7 +120,7 @@ final class DetailView: NSView {
         guard let detail, !isRolled else { return }
         var size = preferredFontSize
         while true {
-            document.show(detail, fontSize: size)
+            document.show(detail, fontSize: size, drawingDiagram: isDrawingDiagram)
             document.fit(viewportWidth: scroll.contentSize.width,
                          viewportHeight: scroll.contentSize.height)
             if detail.diagram != nil || document.frame.height <= scroll.contentSize.height || size <= 12 { break }
@@ -124,12 +130,14 @@ final class DetailView: NSView {
 
     /// `position.index` is zero-based.
     func show(_ detail: ReplyDetail?, stamp: String, position slot: (index: Int, count: Int)?,
-              isHeld: Bool, isRolled: Bool, fontSize: CGFloat, enabled: Bool = true) {
+              isHeld: Bool, isRolled: Bool, fontSize: CGFloat, enabled: Bool = true,
+              drawingDiagram: Bool = false) {
         preferredFontSize = min(18, max(12, fontSize))
         let origin = (stamp: stamp, index: slot?.index)
         let changed = shownOrigin.map { $0 != origin } ?? true
         shownOrigin = origin
         self.detail = detail
+        isDrawingDiagram = drawingDiagram
         self.isRolled = isRolled
         isHidden = !enabled
         title.stringValue = detail == nil || stamp.isEmpty ? "DETAIL" : "DETAIL · FROM \(stamp)"
@@ -148,7 +156,7 @@ final class DetailView: NSView {
         scroll.isHidden = detail == nil || isRolled
         needsLayout = true
         guard let detail, !isRolled else { return }
-        document.show(detail, fontSize: preferredFontSize)
+        document.show(detail, fontSize: preferredFontSize, drawingDiagram: drawingDiagram)
         document.fit(viewportWidth: max(1, bounds.width),
                      viewportHeight: max(1, bounds.height - stripHeight))
         if changed { scroll.contentView.scroll(to: .zero) }
@@ -157,7 +165,7 @@ final class DetailView: NSView {
     /// `viewportHeight` is the tallest body the panel would grant; readable overflow scrolls.
     func preferredHeight(viewportWidth: CGFloat, viewportHeight: CGFloat) -> CGFloat {
         guard let detail, !isRolled else { return stripHeight }
-        document.show(detail, fontSize: preferredFontSize)
+        document.show(detail, fontSize: preferredFontSize, drawingDiagram: isDrawingDiagram)
         document.fit(viewportWidth: viewportWidth, viewportHeight: viewportHeight)
         return stripHeight + document.frame.height
     }
