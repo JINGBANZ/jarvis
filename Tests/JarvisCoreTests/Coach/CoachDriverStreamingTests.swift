@@ -218,6 +218,35 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == replayed.id })
     }
 
+    /// Claude's `stop_reason: refusal` reaches the runner as a `.rejected` failure: the provider
+    /// stopped the reply on purpose, so its closed lines are withdrawn, nothing is committed, and a
+    /// fresh attempt follows as after any failure. The target is OpenAI because the runner only
+    /// reads the category.
+    @Test func aRejectedReplyAfterTheLinesCloseIsWithdrawnAndFails() async throws {
+        let overlay = ProgressRecordingOverlay()
+        let activity = RecordingActivity()
+        let refusal = ProviderFailure(
+            source: .brain(.openAI), stage: .response, category: .rejected, disposition: .temporary,
+            identity: .init(errorType: "refusal", errorCode: "harmful_content"), message: "")
+        let brain = StreamingBrain(turns: [
+            .init(prefixes: [Self.linesClosed], outcome: .failure(refusal)),
+            .init(prefixes: Self.prefixes, outcome: .reply(speak)),
+        ])
+        let (driver, _) = makeDriver(brain: brain, overlay: overlay, activity: activity)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+
+        #expect(brain.calls.count == 2, "a fresh attempt follows the refusal")
+        let events = overlay.events
+        let withdraw = try #require(events.firstIndex(of: .withdraw))
+        #expect(events[..<withdraw].contains { if case .progress(let snapshot) = $0 { snapshot.linesComplete } else { false } },
+                "the withdrawn lines had closed")
+        #expect(!brain.calls[1].contains { ($0.toolCalls ?? []).contains { $0.name == speakToolName } },
+                "nothing from the refused reply was committed")
+        #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
+        #expect(activity.events.filter { if case .tip = $0 { true } else { false } }.count == 1)
+    }
+
     @Test func anIncompleteReplyAfterTheLinesCloseCommitsTheHint() async {
         let overlay = ProgressRecordingOverlay()
         let brain = StreamingBrain(turns: [.init(
