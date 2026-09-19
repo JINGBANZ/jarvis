@@ -31,6 +31,7 @@ import Testing
         #expect(Defaults.Overlay.Box.heightKey == "overlayBox.height")
         #expect(Defaults.Hotkey.keyCodeKey == "hotkey.keyCode")
         #expect(Defaults.Hotkey.modifiersKey == "hotkey.modifiers")
+        #expect(Defaults.Onboarding.completedKey == "onboarding.completed")
     }
 
     /// OpenAI keeps the unscoped key so existing installs keep their model selection.
