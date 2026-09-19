@@ -227,7 +227,7 @@ choice nor a failure: it is judged through its retry, as the evidence rules abov
 - **Only Scenario R touches the real audio device.** The physical microphone, the aggregate device,
   echo cancellation, and the system-wide tap run only in R, which starts the production capture and
   waits for readiness on real frames. The [transcription benchmark](./transcription-benchmark.md)
-  covers the tap with known audio, and the permission gate walk stays manual.
+  covers the tap with known audio, and the onboarding walk stays manual.
 - **The screen is injected.** No scenario shoots the Mac's screen, so the front-window pick, the
   `screencapture` helper, and its cleanup run only in their Gate tests (`FrontWindowSelectorTests`,
   `ScreenCaptureRunnerTests`) and in everyday use. A real front window would need an idle, unlocked
@@ -293,7 +293,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 |---|---|---|
 | F01 | Frames never arrive | F01: no system frames degrades to microphone-only; no microphone frames ends the session |
 | F02 | The transcription provider refuses the key | F02: the session ends naming the rejection and `invalid_api_key` |
-| F03 | The permission gate walk | Manual |
+| F03 | The onboarding walk | Manual |
 | S01 | Realtime reconnect recovery | `./scripts/transcription-benchmark.sh reconnect` |
 | R01 | Check for Updates in a signed build | Manual, when update code changes |
 | R02 | Evaluate picks the right release source | Manual, when evaluation source selection changes |
@@ -305,10 +305,11 @@ release, a real device change, or macOS's own dialogs, so the run cannot perform
 to run it and what to confirm. A pull request that changes one of these areas runs its check or names
 it as unverified in its description.
 
-- **Permission gate walk (F03),** when the gate or its permission probes change, because macOS does not
-  let automation click its own permission dialogs. Reset the three services and the one persisted
-  marker as [build-and-run.md → Packaging & signing](./build-and-run.md#packaging--signing--why-permission-grants-persist)
-  describes, then walk the gate against [architecture.md → Permissions](./architecture.md#permissions).
+- **Onboarding walk (F03),** when onboarding, its key check, or its permission probes change, because
+  macOS does not let automation click its own permission dialogs. Reset as
+  [build-and-run.md → Packaging & signing](./build-and-run.md#packaging--signing--why-permission-grants-persist)
+  describes, then walk both steps against [architecture.md → Onboarding](./architecture.md#onboarding)
+  and [Permissions](./architecture.md#permissions).
 - **Check for Updates (R01),** when the updater or feed code changes. In a signed release build, confirm
   the item is greyed out while a session runs, enabled once stopped, and reports the app up to date
   against the current release. Releases themselves are verified by the release workflow.

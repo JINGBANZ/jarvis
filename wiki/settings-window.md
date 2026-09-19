@@ -58,7 +58,8 @@ The pages share these AppKit primitives rather than styling their controls indep
   live, amber for what needs the user. Each color resolves per appearance, including the Increase
   Contrast appearances, where card lines draw at full strength, so every view follows light and dark
   mode without observing the change.
-- `SettingsBackgroundView` draws the radial backdrop behind the hub and every page.
+- `SettingsBackgroundView` draws the radial backdrop behind the hub and every page. Onboarding reuses
+  it with its own two colors.
 - `SettingsPageView` owns the page header: the back button (`SettingsBackButton`), the part's mini
   robot on the four head pages, the uppercase title, one-line summary, and an optional chip that
   says when edits apply or, in teal, what is live. It also owns an optional amber notice and the
