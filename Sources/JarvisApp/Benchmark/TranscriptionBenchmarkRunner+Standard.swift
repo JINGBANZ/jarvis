@@ -3,15 +3,16 @@ import JarvisCore
 
 extension TranscriptionBenchmarkRunner {
     func runStandard(
-        fixtures: SyntheticSpeechFixtures
+        fixtures: SyntheticSpeechFixtures,
+        arms: [TranscriptionBenchmark.Arm] = TranscriptionBenchmark.standardArms
     ) async throws -> TranscriptionBenchmark.Summary {
         var summaries: [TranscriptionBenchmark.ArmSummary] = []
-        for (armIndex, arm) in TranscriptionBenchmark.standardArms.enumerated() {
+        for (armIndex, arm) in arms.enumerated() {
             try Task.checkCancellation()
             guard !isAbortRequested else { throw Failure.benchmarkAborted }
             TranscriptionBenchmarkFiles.writeProgress(
                 phase: "standard-arm",
-                detail: "\(armIndex + 1)/\(TranscriptionBenchmark.standardArms.count): \(arm.id)",
+                detail: "\(armIndex + 1)/\(arms.count): \(arm.id)",
                 to: options.outputDirectory)
             if arm.provider == .openAI, apiKey == nil {
                 summaries.append(.init(
@@ -59,7 +60,7 @@ extension TranscriptionBenchmarkRunner {
             summaries.append(.init(arm: arm, repetitions: repetitions))
         }
         return .init(
-            mode: TranscriptionBenchmarkOptions.Mode.standard.rawValue,
+            mode: options.mode.rawValue,
             repetitionsPerArm: options.repetitions,
             arms: summaries)
     }
@@ -96,7 +97,7 @@ extension TranscriptionBenchmarkRunner {
                 })
             try await recorder.waitForFinalStreamToSettle(
                 minimumCount: 1,
-                quietPeriod: 1,
+                quietPeriod: options.mode == .vocabulary ? 5 : 1,
                 timeout: 20)
         } catch {
             failure = String(describing: error)

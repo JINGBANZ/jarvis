@@ -14,6 +14,7 @@ public enum RealtimeSession {
         speaker: Speaker = .me,
         expectedLanguages: [TranscriptionLanguage] = [],
         keywords: [String] = [],
+        prompt: String? = nil,
         silenceDurationMs: Int = 1000,
         noiseReduction: String? = "near_field"
     ) -> [String: Any] {
@@ -36,6 +37,8 @@ public enum RealtimeSession {
                 transcription["delay"] = "low"
             }
         }
+
+        if let prompt { transcription["prompt"] = prompt }
 
         let turnDetection: Any
         switch model.turnDetectionStrategy {

@@ -16,7 +16,10 @@ final class SyntheticSpeechFixtures {
     private let directory: URL
     private let outputDirectory: URL
 
-    init(outputDirectory: URL) throws {
+    init(
+        outputDirectory: URL,
+        phrases: [TranscriptionBenchmark.Phrase] = TranscriptionBenchmark.phrases
+    ) throws {
         let standardizedOutput = outputDirectory.standardizedFileURL
         let fixtureDirectory = outputDirectory.appendingPathComponent("fixtures", isDirectory: true)
             .standardizedFileURL
@@ -32,7 +35,7 @@ final class SyntheticSpeechFixtures {
                 withIntermediateDirectories: false,
                 attributes: [.posixPermissions: 0o700])
             createdDirectory = true
-            for phrase in TranscriptionBenchmark.phrases {
+            for phrase in phrases {
                 let url = fixtureDirectory.appendingPathComponent("\(phrase.id).aiff")
                 try Self.synthesize(phrase, to: url)
                 let data = try Data(contentsOf: url)
@@ -121,7 +124,7 @@ final class SyntheticSpeechFixtures {
             "--output-file", url.path,
             // AIFF stores linear PCM in big-endian order; `say` rejects a little-endian format.
             "--data-format=BEI16@48000",
-            phrase.text,
+            phrase.synthesisText ?? phrase.text,
         ]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
