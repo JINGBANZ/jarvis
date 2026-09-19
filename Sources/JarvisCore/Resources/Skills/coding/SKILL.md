@@ -27,10 +27,9 @@ merely to supply code; stay silent during healthy progress as usual.
 Put one fenced block in detail, tagged with its language (```python). Immediately before the block,
 include a short placement header saying where it belongs, using names visible on screen rather
 than editor line numbers. For example: Inside your `for right, ch in enumerate(s):` loop.
-Use inline backticks for code anchors. Keep this header with the code in detail, even when the
-hint lines also mention placement. Keep the hint itself the coaching. A placement header does not
-require a longer explanation; include explanation prose only when the explanation guidance calls
-for it.
+Use inline backticks for code anchors. The header in detail says where the code goes; keep the
+hint lines for the coaching without repeating placement. Neither the code nor its header needs
+an explanation.
 
 Show only the next small component that implements this hint, at most 24 lines and 2400
 characters. Match the visible language, names, indentation, and approach. Prefer plain loops,
