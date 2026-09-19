@@ -265,16 +265,18 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
-        let events = overlay.events
-        #expect(events.first == .withdraw, "the load reply ends its request with a withdrawal and no text")
-        #expect(events.dropFirst().allSatisfy { $0 != .withdraw })
+        // A request that showed nothing has nothing to withdraw, and must not wait on the main
+        // actor to do so.
+        #expect(!overlay.events.contains(.withdraw))
         #expect(!overlay.snapshots.isEmpty)
+        #expect(overlay.snapshots.allSatisfy { $0.closedLines.first == "Sort by start." },
+                "only the speak reply reached the overlay")
         #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
     }
 
-    /// Claude without strict tools can double-encode `lines`; the scanner shows nothing and the
-    /// runner's re-ask ends the request with a withdrawal.
-    @Test func aReplyWhoseArgumentsFailToParseIsWithdrawn() async {
+    /// Claude without strict tools can double-encode `lines`: the scanner shows nothing early and
+    /// the runner's schema re-ask handles the completed call.
+    @Test func doubleEncodedLinesShowNothingBeforeTheReask() async {
         let overlay = ProgressRecordingOverlay()
         let malformed = #"{"lines":"[\"a\"]"}"#
         let brain = StreamingBrain(turns: [
@@ -287,12 +289,33 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
         #expect(brain.calls.count == 2)
-        #expect(overlay.events.first == .withdraw)
+        #expect(!overlay.events.contains(.withdraw))
         #expect(overlay.snapshots.allSatisfy { $0.closedLines.first == "Sort by start." })
         #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
     }
 
-    @Test func aCallAPressMayNotMakeIsWithdrawn() async {
+    /// Text that streamed leaves the overlay when the completed call's arguments fail the parser.
+    @Test func aParseFailureWithdrawsTheTextItShowed() async throws {
+        let overlay = ProgressRecordingOverlay()
+        let brain = StreamingBrain(turns: [
+            .init(prefixes: [#"{"lines":["Sort by"#],
+                  outcome: .reply(reply(RawToolCall(id: "m1", name: speakToolName, argumentsJSON: #"{"lines":["  "]}"#)))),
+            .init(prefixes: Self.prefixes, outcome: .reply(speak)),
+        ])
+        let (driver, _) = makeDriver(brain: brain, overlay: overlay)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+
+        #expect(brain.calls.count == 2)
+        let events = overlay.events
+        let withdraw = try #require(events.firstIndex(of: .withdraw))
+        #expect(events[..<withdraw].contains { if case .progress(let snapshot) = $0 { snapshot.openLine == "Sort by" } else { false } },
+                "the withdrawn text had been on screen")
+        #expect(events[(withdraw + 1)...].allSatisfy { $0 != .withdraw })
+        #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
+    }
+
+    @Test func aCallAPressMayNotMakeShowsNothing() async {
         let overlay = ProgressRecordingOverlay()
         let brain = StreamingBrain(turns: [
             .init(call: staySilentTool.name, prefixes: ["{", "{}"],
@@ -303,7 +326,8 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
-        #expect(overlay.events.first == .withdraw)
+        #expect(!overlay.events.contains(.withdraw))
+        #expect(overlay.snapshots.allSatisfy { $0.closedLines.first == "Sort by start." })
         #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
     }
 

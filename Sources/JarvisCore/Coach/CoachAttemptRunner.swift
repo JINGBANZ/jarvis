@@ -296,9 +296,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
+            /// Whether the current request's reply reached the overlay. A request that showed
+            /// nothing must not wait on the main actor to withdraw nothing.
+            var shown = false
 
             /// A reply that streamed but is not being delivered leaves the overlay.
             func withdraw() async {
+                guard shown else { return }
+                shown = false
                 await MainActor.run { self.overlay.showReplyProgress(nil, perLineSeconds: []) }
             }
 
@@ -391,6 +396,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     }
                 } catch {
                     let streamed = await relay.endRequest()
+                    shown = streamed?.hasText == true
                     if Task.isCancelled || error is CancellationError {
                         await withdraw()
                         jlog("… attempt cancelled (interrupted)")
@@ -410,6 +416,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     return .failed(outcome: .brainError, failure: failure, work: work)
                 }
                 let streamed = await relay.endRequest()
+                shown = streamed?.hasText == true
 
                 if Task.isCancelled {
                     await withdraw()
