@@ -53,6 +53,20 @@ import JarvisCore
         #expect(config(b)["tool_choice"] == nil)
     }
 
+    /// Models write arguments in schema order, so `lines` must reach the wire before `detail`.
+    @Test func toolSchemasKeepTheirAuthoredKeyOrder() throws {
+        let tools = coachTools(detailEnabled: true)
+        let data = try wire.encode(messages: [.user("hi")], tools: tools, toolChoice: .required)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains(speakTool(detailEnabled: true).parametersJSON))
+        let lines = try #require(text.range(of: #""lines""#))
+        let detail = try #require(text.range(of: #""detail""#))
+        #expect(lines.lowerBound < detail.lowerBound)
+        let declared = try #require(body([.user("hi")])["tools"] as? [[String: Any]])
+        let speak = declared[1]["parameters"] as? [String: Any]
+        #expect(speak?["required"] as? [String] == ["lines", "detail"])
+    }
+
     @Test func noneEffortIsMinimal() throws {
         let b = try body([.user("hi")], wire: InteractionsWireFormat(
             model: "gemini-3.5-flash", reasoningEffort: "none", maxOutputTokens: 1_024))
