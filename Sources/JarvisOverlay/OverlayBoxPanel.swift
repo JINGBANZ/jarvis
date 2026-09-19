@@ -49,6 +49,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private var entries: [(stamp: String, text: String, hasDetail: Bool)] = []
     /// The entry a streaming reply is writing into, until `deliver` finalizes it or nil removes it.
     private var liveEntryIndex: Int?
+    /// The detail that reply is writing into, parsed from the text so far; `deliver` replaces it
+    /// with the delivered detail, where dropped blocks are applied, and nil removes it.
+    private var liveDetailIndex: Int?
     /// A detail that arrives before its first line has nothing to head the entry with yet.
     private static let liveDetailPlaceholder = "Writing…"
     private(set) var captureExclusionReassertCount = 0
@@ -321,7 +324,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             .filter { !$0.isEmpty }.joined(separator: " ")
         guard !summary.isEmpty else {
             // A reply that delivers no line ends whatever it had opened.
-            removeLiveEntry()
+            removeLiveReply()
             return nil
         }
         let shown = acceptsDetail ? detail.flatMap { $0.hasContent ? $0 : nil } : nil
@@ -337,31 +340,55 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     /// The entry opens on the first closed line, or on the first detail character when the model
-    /// writes the detail first, and its text follows every snapshot until `deliver` finalizes it.
+    /// writes the detail first, and its text and detail follow every snapshot until `deliver`
+    /// finalizes them.
     public func showReplyProgress(_ progress: BrainReplyProgress?, perLineSeconds: [TimeInterval]) {
-        guard let progress else { return removeLiveEntry() }
+        guard let progress else { return removeLiveReply() }
         let closed = progress.closedLines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         guard !closed.isEmpty || progress.detailMarkdown?.isEmpty == false else { return }
         let open = progress.openLine?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let text = (closed + [open]).filter { !$0.isEmpty }.joined(separator: " ")
         let shown = text.isEmpty ? Self.liveDetailPlaceholder : text
+        let entry: Int
         if let index = liveEntryIndex {
-            entries[index].text = shown
+            entry = index
+            entries[entry].text = shown
         } else {
             entries.append((stamp: timeFormatter.string(from: Date()), text: shown, hasDetail: false))
-            liveEntryIndex = entries.count - 1
+            entry = entries.count - 1
+            liveEntryIndex = entry
+        }
+        if acceptsDetail, let markdown = progress.detailMarkdown,
+           let detail = ReplyDetail(partialMarkdown: markdown), detail.hasContent {
+            if let index = liveDetailIndex {
+                details[index].detail = detail
+            } else {
+                details.append((stamp: entries[entry].stamp, detail: detail))
+                slot.received(details.count - 1)
+                liveDetailIndex = details.count - 1
+            }
+            entries[entry].hasDetail = true
         }
         if panel.isVisible { reassertCaptureExclusion() }
         renderDisplay()
         textView.scrollToEndOfDocument(nil)
     }
 
-    private func removeLiveEntry() {
-        guard let index = liveEntryIndex else { return }
-        entries.remove(at: index)
+    /// A reply that will not be delivered leaves both sections.
+    private func removeLiveReply() {
+        guard liveEntryIndex != nil || liveDetailIndex != nil else { return }
+        if let index = liveEntryIndex { entries.remove(at: index) }
         liveEntryIndex = nil
+        removeLiveDetail()
         renderDisplay()
+    }
+
+    private func removeLiveDetail() {
+        guard let index = liveDetailIndex else { return }
+        details.remove(at: index)
+        slot.removed(index)
+        liveDetailIndex = nil
     }
 
     private func append(_ text: String, detail: ReplyDetail?) {
@@ -371,7 +398,14 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     private func show(detail: ReplyDetail?, for stamp: String) {
-        if let detail, detail.hasContent {
+        if let index = liveDetailIndex {
+            if let detail, detail.hasContent {
+                details[index] = (stamp: stamp, detail: detail)
+                liveDetailIndex = nil
+            } else {
+                removeLiveDetail()
+            }
+        } else if let detail, detail.hasContent {
             details.append((stamp: stamp, detail: detail))
             slot.received(details.count - 1)
         }
@@ -430,6 +464,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         if !slot.isHeld {
             details.removeAll()
             slot.reset()
+            liveDetailIndex = nil
         }
         renderDisplay()
     }
@@ -454,6 +489,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         if !live {
             details.removeAll()
             slot.reset()
+            liveDetailIndex = nil
         }
         applyDisplay()
         if live { setCollapsed(false) }

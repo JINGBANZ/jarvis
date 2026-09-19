@@ -69,6 +69,36 @@ import Testing
         #expect(slot.shownIndex == 0)
     }
 
+    @Test func removingTheShownNewestDetailMovesToTheOneBefore() {
+        var slot = DetailSlot()
+        slot.received(0)
+        slot.received(1)
+        slot.removed(1)
+        #expect(slot.shownIndex == 0)
+        slot.removed(0)
+        #expect(slot.shownIndex == nil)
+    }
+
+    @Test func removingALaterDetailLeavesAHeldEarlierOneAlone() {
+        var slot = DetailSlot()
+        slot.received(0)
+        slot.pin()
+        slot.received(1)
+        slot.removed(1)
+        #expect(slot.shownIndex == 0)
+        #expect(slot.isHeld)
+    }
+
+    @Test func removingTheHeldDetailKeepsTheHoldOnTheOneBefore() {
+        var slot = DetailSlot()
+        slot.received(0)
+        slot.received(1)
+        slot.pin()
+        slot.removed(1)
+        #expect(slot.shownIndex == 0)
+        #expect(slot.isHeld)
+    }
+
     @Test func resetClearsEverything() {
         var slot = DetailSlot()
         slot.received(3)
