@@ -65,9 +65,12 @@ extension JarvisPrompts {
         }
 
         static func validatedSummary(_ output: String) -> String? {
-            var json = output.trimmingCharacters(in: .whitespacesAndNewlines)
-            if json.hasPrefix("```json\n"), json.hasSuffix("\n```") {
-                json = String(json.dropFirst(8).dropLast(4))
+            var json = output.replacingOccurrences(of: "\r\n", with: "\n")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let lines = json.split(separator: "\n", omittingEmptySubsequences: false)
+            if lines.count >= 3, let first = lines.first,
+               ["```", "```json"].contains(first.lowercased()), lines.last == "```" {
+                json = lines.dropFirst().dropLast().joined(separator: "\n")
             }
             guard let briefing = try? JSONDecoder().decode(Briefing.self, from: Data(json.utf8)),
                   !briefing.context.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,

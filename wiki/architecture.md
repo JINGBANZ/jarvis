@@ -796,11 +796,12 @@ rather than a per-turn screenshot.
   not establish a capture failure. The retention and topic-retirement policy lives in
   [`JarvisPrompts.HistorySummary`](../Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift).
   The model returns a JSON briefing covering context, decisions, prior coaching, open questions, and
-  verification evidence. The validator also accepts a single whole-response `json`-tagged Markdown
-  fence because Haiku can wrap valid briefing JSON despite the prompt requesting bare JSON.
-  It strips only that envelope before validating the same briefing structure; surrounding prose and
-  incomplete fences are rejected. The runner replaces history only with a valid briefing; malformed
-  output or missing fields leaves the full history intact through the existing fail-soft path. This
+  verification evidence. The validator also accepts a single whole-response Markdown fence because
+  Haiku can wrap valid briefing JSON despite the prompt requesting bare JSON. An untagged fence or
+  case-insensitive `json` tag is accepted, with LF or CRLF line endings. It strips only that envelope
+  before validating the same briefing structure; surrounding prose, other language tags, incomplete
+  fences, and truncated JSON are rejected. The runner replaces history only with a valid briefing;
+  malformed output or missing fields leaves the full history intact through the existing fail-soft path. This
   check establishes structure, not factual truth: preserving evidence and distinguishing proposals from
   observed results remain summarizer responsibilities. Compaction uses one Core-owned workload
   deadline across providers; a slow or failed summary also leaves full history for a later attempt. Server-side memory (a Conversations

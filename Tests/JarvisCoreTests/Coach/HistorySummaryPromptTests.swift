@@ -51,6 +51,32 @@ import Testing
         #expect(JarvisPrompts.HistorySummary.validatedSummary("```json\n" + json + "\n```\nDone") == nil)
     }
 
+    @Test(arguments: ["", "json", "JSON", "JsOn"], ["\n", "\r\n"])
+    func commonWholeResponseFencesPreserveBriefingEvidence(_ tag: String, _ newline: String) throws {
+        let json = #"{"context":"Window review","decisions":[],"coaching":[],"openQuestions":[],"verification":["Tests not observed"]}"#
+        let wrapped = "```" + tag + newline + json + newline + "```"
+        let summary = try #require(JarvisPrompts.HistorySummary.validatedSummary(wrapped))
+        let briefing = try #require(JSONSerialization.jsonObject(with: Data(summary.utf8)) as? [String: Any])
+        #expect(briefing["context"] as? String == "Window review")
+        #expect(briefing["verification"] as? [String] == ["Tests not observed"])
+    }
+
+    @Test(arguments: ["", "JSON"], [
+        #"{"context":"Window review"}"#,
+        #"{"context":" ","decisions":[],"coaching":[],"openQuestions":[],"verification":[]}"#,
+        #"{"context":"Window review","decisions":[],"coaching":[],"openQuestions":[],"verification":false}"#,
+        #"{"context":"Window review","decisions":[],"coaching":[],"openQuestions":[],"verification":[]"#
+    ])
+    func commonFencesDoNotRelaxBriefingValidation(_ tag: String, _ json: String) {
+        #expect(JarvisPrompts.HistorySummary.validatedSummary("```" + tag + "\r\n" + json + "\r\n```") == nil)
+    }
+
+    @Test(arguments: ["python", "json extra"])
+    func unrelatedFenceTagsAreRejected(_ tag: String) {
+        let json = #"{"context":"Window review","decisions":[],"coaching":[],"openQuestions":[],"verification":[]}"#
+        #expect(JarvisPrompts.HistorySummary.validatedSummary("```" + tag + "\n" + json + "\n```") == nil)
+    }
+
     @Test func summaryIsFormatNeutralAndRetiresResolvedTopics() {
         let prompt = JarvisPrompts.HistorySummary.system.lowercased()
 

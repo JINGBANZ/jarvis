@@ -7,8 +7,9 @@ its `pass` rubric to the model. Use the configured summary model without tools a
 identity, response, and prompt revision locally.
 
 First validate the five-field briefing shape with the production validator. A single whole-response
-JSON Markdown fence is accepted; surrounding prose, truncated JSON, missing fields, and incorrect
-field types are rejected. Structural validity does not establish factual accuracy: review the output
+Markdown fence is accepted when untagged or tagged `json` case-insensitively, with LF or CRLF line
+endings; surrounding prose, other language tags, incomplete fences, truncated JSON, missing fields,
+and incorrect field types are rejected. Structural validity does not establish factual accuracy: review the output
 against the case's complete semantic `pass` criterion. Mark omitted evidence separately from invented
 facts, and do not score solely by keyword matches. Repeat uncertain or failing cases; a single sample
 is not a reliability rate. Test accepted and rejected replacement behavior with the Core compaction
