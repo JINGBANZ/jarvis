@@ -148,6 +148,37 @@ import JarvisCore
         #expect(response.outputItemsJSON[1].contains(#""id":"toolu_01""#))
     }
 
+    @Test func malformedSpeakArgumentsRemainAvailableForSchemaRecovery() throws {
+        let data = Data(#"""
+        {"id":"msg_malformed","type":"message","role":"assistant","model":"claude-opus-5",
+         "content":[{"type":"tool_use","id":"toolu_malformed","name":"speak",
+                     "input":{"lines":"\n<parameter name=\"detail\">Explain the queue invariant.\n"}}],
+         "stop_reason":"tool_use","usage":{"input_tokens":20,"output_tokens":60}}
+        """#.utf8)
+        let response = try wire.decode(data)
+
+        #expect(response.toolCalls.isEmpty)
+        #expect(response.outputText == nil)
+        #expect(response.incompleteReason == nil)
+        let raw = try #require(response.rawToolCalls.first)
+        #expect(raw.id == "toolu_malformed")
+        #expect(raw.name == "speak")
+        let arguments = try #require(
+            JSONSerialization.jsonObject(with: Data(raw.argumentsJSON.utf8)) as? [String: Any])
+        #expect(arguments["lines"] as? String == "\n<parameter name=\"detail\">Explain the queue invariant.\n")
+        #expect(arguments["detail"] == nil)
+
+        let continuation = try body([
+            .user("Explain the queue."),
+            .rawItems(response.outputItemsJSON, calls: response.rawToolCalls),
+            .init(role: .tool, text: "Arguments did not match the schema.", toolCallId: raw.id),
+        ])
+        let replayed = blocks(turns(continuation)[1])[0]
+        #expect(replayed["id"] as? String == "toolu_malformed")
+        #expect((replayed["input"] as? NSDictionary) == (arguments as NSDictionary))
+        #expect(blocks(turns(continuation)[2])[0]["tool_use_id"] as? String == "toolu_malformed")
+    }
+
     @Test func decodesATextReply() throws {
         let response = try wire.decode(Data(#"{"type":"message","content":[{"type":"text","text":"The user "},{"type":"text","text":"outlined a hash map."}],"stop_reason":"end_turn"}"#.utf8))
         #expect(response.outputText == "The user outlined a hash map.")
