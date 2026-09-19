@@ -3,10 +3,19 @@ import AppKit
 @MainActor
 final class SettingsBackgroundView: NSView {
     private let gradient = CAGradientLayer()
+    private let center: NSColor
+    private let edge: NSColor
 
     override var wantsUpdateLayer: Bool { true }
 
-    override init(frame frameRect: NSRect) {
+    /// Onboarding passes its own two colors; Settings uses the defaults.
+    init(
+        frame frameRect: NSRect,
+        center: NSColor = SettingsTheme.backgroundCenter,
+        edge: NSColor = SettingsTheme.backgroundEdge
+    ) {
+        self.center = center
+        self.edge = edge
         super.init(frame: frameRect)
         wantsLayer = true
         gradient.type = .radial
@@ -30,6 +39,6 @@ final class SettingsBackgroundView: NSView {
     }
 
     override func updateLayer() {
-        gradient.colors = [SettingsTheme.backgroundCenter.cgColor, SettingsTheme.backgroundEdge.cgColor]
+        gradient.colors = [center.cgColor, edge.cgColor]
     }
 }

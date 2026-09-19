@@ -30,7 +30,7 @@ enum SettingsTheme {
 
     /// `@Sendable`, calling only a `nonisolated` helper, because AppKit may resolve a dynamic color
     /// off the main actor.
-    private static func dynamic(
+    static func dynamic(
         light: UInt32,
         dark: UInt32,
         alpha: (light: CGFloat, dark: CGFloat) = (1, 1),
