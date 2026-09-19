@@ -78,6 +78,17 @@ import JarvisCore
     }
 
     @MainActor @Test
+    func aDeliveryWithNoLinesEndsTheLiveEntry() {
+        let panel = liveBox()
+        panel.showReplyProgress(progress(detail: "Only a detail"), perLineSeconds: [])
+        #expect(panel.hasLiveEntry)
+        #expect(panel.deliver([], perLineSeconds: [], detail: ReplyDetail(markdown: "Only a detail")) == nil)
+        #expect(!panel.hasLiveEntry)
+        #expect(panel.entryCount == 0, "nothing delivered, nothing left behind")
+        #expect(!panel.currentText.contains("Writing…"))
+    }
+
+    @MainActor @Test
     func clearRemovesALiveEntryLikeAnyOther() {
         let panel = liveBox()
         panel.showReplyProgress(progress(closed: ["Half way."]), perLineSeconds: [3])

@@ -192,11 +192,18 @@ public struct BrainAccessor: BrainClient, Sendable {
             }
         }
         do {
-            for try await chunk in chunks {
-                for event in reader.receive(chunk) { try receive(event) }
+            // The terminal event ends the reply; a connection that stalls after it must not cost
+            // the reply its deadline.
+            chunks: for try await chunk in chunks {
+                for event in reader.receive(chunk) {
+                    try receive(event)
+                    if decoder.isComplete { break chunks }
+                }
             }
-            try Task.checkCancellation()
-            if let trailing = reader.finish() { try receive(trailing) }
+            if !decoder.isComplete {
+                try Task.checkCancellation()
+                if let trailing = reader.finish() { try receive(trailing) }
+            }
             return Reply(status: status, outcome: .body(try decoder.finish()))
         } catch let failure as StreamFailure {
             return Reply(status: status, outcome: .failed(failure))

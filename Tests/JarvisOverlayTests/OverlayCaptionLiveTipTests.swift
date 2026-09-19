@@ -13,6 +13,8 @@ import JarvisCore
     @Test func deliverFinalizesTheLiveTipWithoutASecondTip() async { await checkDeliverFinalizes() }
     @Test func nilWithdrawsTheLiveTipAndHidesThePanel() async { await checkWithdraw() }
     @Test func aLiveTipWaitsBehindThePlayingTip() async { await checkQueuedLiveTip() }
+    @Test func thePanelComesDownOnceEveryLineHasPlayed() async { await checkLinesCompleteHides() }
+    @Test func theAppearancePreviewKeepsThePanelWhileATipStreams() async { await checkPreviewOwnsThePanel() }
 
     @MainActor @Test
     func nothingShowsBeforeTheFirstCharacter() {
@@ -116,6 +118,46 @@ private func checkWithdraw() async {
     panel.showReplyProgress(progress(closed: ["Kept."]), perLineSeconds: [5])
     #expect(panel.currentText == "Kept.", "a later reply starts a fresh live tip")
     panel.showReplyProgress(nil, perLineSeconds: [])
+}
+
+/// The lines closed while the detail is still being written: the panel hides after the last line
+/// and `deliver` ends the tip without playing it again.
+@MainActor
+private func checkLinesCompleteHides() async {
+    let panel = OverlayCaptionPanel()
+    panel.interLineGapSeconds = 0
+    panel.showReplyProgress(progress(closed: ["Only line."], complete: true), perLineSeconds: [0.3])
+    #expect(panel.currentText == "Only line.")
+    #expect(await waitUntil { !panel.isPanelVisible }, "the panel comes down once its last line has played")
+    #expect(panel.isShowingLiveTip, "the reply is still live until deliver")
+
+    panel.showReplyProgress(progress(closed: ["Only line."], complete: true), perLineSeconds: [0.3])
+    #expect(!panel.isPanelVisible, "a detail snapshot does not bring the panel back")
+    _ = panel.deliver(["Only line."], perLineSeconds: [0.3], detail: nil)
+    #expect(!panel.isShowingLiveTip)
+    #expect(!panel.isPanelVisible, "the delivered tip is not played a second time")
+
+    panel.render(["probe"], perLineSeconds: 0.3)
+    #expect(await waitUntil { panel.currentText == "probe" }, "the next tip plays at once")
+}
+
+@MainActor
+private func checkPreviewOwnsThePanel() async {
+    let panel = OverlayCaptionPanel()
+    panel.interLineGapSeconds = 0
+    panel.showReplyProgress(progress(open: "Sort"), perLineSeconds: [])
+    #expect(panel.currentText == "Sort")
+
+    panel.showAppearancePreview(true)
+    #expect(panel.currentText == "Sample overlay text")
+    panel.showReplyProgress(progress(closed: ["Sort by start."], open: "Then"), perLineSeconds: [5])
+    #expect(panel.currentText == "Sample overlay text", "a streamed line never replaces the preview")
+    _ = panel.deliver(["Sort by start.", "Then merge."], perLineSeconds: [5, 5], detail: nil)
+    #expect(panel.currentText == "Sample overlay text", "nor does the delivered reply")
+
+    panel.showAppearancePreview(false)
+    #expect(panel.currentText == "Sort by start.", "closing the preview resumes the reply")
+    panel.setEnabled(false)
 }
 
 @MainActor

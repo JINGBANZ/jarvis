@@ -9,9 +9,11 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
         var lines: [String]
         var seconds: [TimeInterval]
         var isError = false
-        /// More lines may still close; `openLine` is the one being written.
+        /// `deliver` has not finalized the reply yet; `openLine` is the line being written.
         var isLive = false
         var openLine: String?
+        /// No more lines will close: the reply is writing its detail.
+        var linesComplete = false
     }
     private var queue: [Tip] = []
     private var active: (tip: Tip, nextLine: Int)?
@@ -108,7 +110,8 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
             tip.isLive = false
             tip.openLine = nil
             active = (tip, line)
-            if isWaitingForLine { advance() }
+            // The preview owns the panel until it closes, and resumes the tip itself.
+            if isWaitingForLine, !isPreviewing { advance() }
         } else if let index = queue.firstIndex(where: \.isLive) {
             if final.lines.isEmpty { queue.remove(at: index) } else { queue[index] = final }
         } else if !final.lines.isEmpty {
@@ -129,14 +132,17 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
             tip.lines = cleaned.map(\.0)
             tip.seconds = cleaned.map(\.1)
             tip.openLine = open
+            tip.linesComplete = progress.linesComplete
             active = (tip, line)
-            if isWaitingForLine { advance() }
+            if isWaitingForLine, !isPreviewing { advance() }
         } else if let index = queue.firstIndex(where: \.isLive) {
             queue[index].lines = cleaned.map(\.0)
             queue[index].seconds = cleaned.map(\.1)
             queue[index].openLine = open
+            queue[index].linesComplete = progress.linesComplete
         } else {
-            show(Tip(lines: cleaned.map(\.0), seconds: cleaned.map(\.1), isLive: true, openLine: open))
+            show(Tip(lines: cleaned.map(\.0), seconds: cleaned.map(\.1), isLive: true,
+                     openLine: open, linesComplete: progress.linesComplete))
         }
     }
 
@@ -184,9 +190,15 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
             active = (tip, line + 1)
             scheduleTick(after: tip.seconds[line]) { $0.gapThenAdvance() }
         } else if tip.isLive {
-            // The next line has not closed yet: line 1 shows as it is written, the rest wait blank.
             isWaitingForLine = true
             tickWorkItem?.cancel(); tickWorkItem = nil
+            // Every line has played while the detail is still being written: the panel comes
+            // down now and `deliver` ends the tip without replaying it.
+            if tip.linesComplete {
+                hide()
+                return
+            }
+            // The next line has not closed yet: line 1 shows as it is written, the rest wait blank.
             text = line == 0 ? tip.openLine ?? "" : ""
         } else {
             active = nil

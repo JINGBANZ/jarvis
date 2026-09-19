@@ -14,6 +14,8 @@ struct ResponsesStreamDecoder: BrainStreamDecoder {
     private var calls: [Int: Call] = [:]
     private var terminal: [String: Any]?
 
+    var isComplete: Bool { terminal != nil }
+
     mutating func receive(_ event: ServerSentEvent) throws -> ToolCallDelta? {
         guard let object = (try? JSONSerialization.jsonObject(with: Data(event.data.utf8))) as? [String: Any]
         else { return nil }

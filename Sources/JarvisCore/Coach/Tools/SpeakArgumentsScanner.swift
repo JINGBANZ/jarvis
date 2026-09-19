@@ -183,8 +183,11 @@ public enum SpeakArgumentsScanner {
                 }
                 return false
             default:
+                // A delimiter where a value belongs is malformed JSON; consuming nothing would
+                // leave the caller at the same position forever.
+                let start = index
                 while index < text.count, !Self.valueEnd.contains(text[index]) { index += 1 }
-                return index < text.count
+                return index > start && index < text.count
             }
         }
 
