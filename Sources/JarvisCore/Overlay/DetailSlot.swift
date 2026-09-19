@@ -26,10 +26,11 @@ public struct DetailSlot: Equatable, Sendable {
         isRolled = false
     }
 
-    /// The detail at `index` left the list, so the ones after it moved down; a box showing it moves
-    /// to the one before, keeping its hold.
+    /// The detail at `index` left the list, so the ones after it moved down. A box showing it moves
+    /// to the one before and stops holding, since what it held is gone.
     public mutating func removed(_ index: Int) {
         guard let shown = shownIndex, shown >= index else { return }
+        if shown == index { isHeld = false }
         shownIndex = shown == 0 ? nil : shown - 1
     }
 

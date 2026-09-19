@@ -168,6 +168,40 @@ import JarvisCore
     }
 
     @MainActor @Test
+    func aSnapshotThatParsesToNothingTakesTheLiveDetailDown() {
+        let panel = liveBox()
+        func code(lines: Int) -> String {
+            "```python\n" + (1...lines).map { "x\($0) = \($0)" }.joined(separator: "\n") + "\n"
+        }
+        panel.showReplyProgress(progress(closed: ["Fill the list."], detail: code(lines: CodeBlock.lineLimit)),
+                                perLineSeconds: [3])
+        #expect(panel.detailCount == 1)
+        #expect(panel.currentText.contains("detail below"))
+        panel.showReplyProgress(progress(closed: ["Fill the list."], detail: code(lines: CodeBlock.lineLimit + 1)),
+                                perLineSeconds: [3])
+        #expect(panel.detailCount == 0, "a block that outgrew its bounds is not left on screen")
+        #expect(panel.currentDetail == nil)
+        #expect(!panel.currentText.contains("detail below"))
+        #expect(panel.entryCount == 1)
+        #expect(panel.hasLiveEntry)
+    }
+
+    @MainActor @Test
+    func withdrawingAPinnedLiveDetailReleasesTheHold() throws {
+        let panel = liveBox()
+        panel.showReplyProgress(progress(closed: ["Move the left edge."], detail: "Use a window.\n\n```python\nleft = 0\n"),
+                                perLineSeconds: [3])
+        panel.clickDetailPin()
+        #expect(panel.isDetailHeld)
+        panel.showReplyProgress(nil, perLineSeconds: [])
+        #expect(panel.detailCount == 0)
+        #expect(!panel.isDetailHeld, "a hold on a detail that never arrived has nothing to keep")
+        let next = try #require(ReplyDetail(markdown: "Sort, then scan."))
+        #expect(panel.deliver(["Sort by start."], perLineSeconds: [3], detail: next) == next)
+        #expect(panel.currentDetail == next, "the box takes the next detail")
+    }
+
+    @MainActor @Test
     func aDetailThatGrowsKeepsTheReadersScrollPosition() throws {
         let view = DetailView(frame: NSRect(x: 0, y: 0, width: 240, height: 96))
         func code(lines: Int) throws -> ReplyDetail {

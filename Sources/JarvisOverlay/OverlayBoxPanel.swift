@@ -359,16 +359,21 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             entry = entries.count - 1
             liveEntryIndex = entry
         }
-        if acceptsDetail, let markdown = progress.detailMarkdown,
-           let detail = ReplyDetail(partialMarkdown: markdown), detail.hasContent {
-            if let index = liveDetailIndex {
-                details[index].detail = detail
+        if acceptsDetail, let markdown = progress.detailMarkdown {
+            if let detail = ReplyDetail(partialMarkdown: markdown), detail.hasContent {
+                if let index = liveDetailIndex {
+                    details[index].detail = detail
+                } else {
+                    details.append((stamp: entries[entry].stamp, detail: detail))
+                    slot.received(details.count - 1)
+                    liveDetailIndex = details.count - 1
+                }
+                entries[entry].hasDetail = true
             } else {
-                details.append((stamp: entries[entry].stamp, detail: detail))
-                slot.received(details.count - 1)
-                liveDetailIndex = details.count - 1
+                // A block that just outgrew its bounds leaves the view as it will leave the delivery.
+                removeLiveDetail()
+                entries[entry].hasDetail = false
             }
-            entries[entry].hasDetail = true
         }
         if panel.isVisible { reassertCaptureExclusion() }
         renderDisplay()
