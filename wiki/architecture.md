@@ -447,11 +447,13 @@ Markdown, diagram source included, is persisted with the tip in the owner-only s
 On a streamed reply ([Latency](#latency)) the detail box follows the detail as the model writes it:
 each snapshot's text so far is parsed by `ReplyDetail(partialMarkdown:)` and shown as the newest
 detail, held or stepped through like any other, and the reader's scroll position survives each
-update. An open fence is read up to its last complete line, because a diagram is parsed whole and a
-half-written line would drop it on every character until the line ends; code therefore appears a
-line at a time. `deliver` replaces the live detail with the delivered one, which is where dropped
-blocks are applied and where a detail the box cannot accept is dropped whole, and a withdrawn reply
-removes it, so the history holds one detail per reply whatever streamed.
+update; a snapshot that parses to nothing the box would show, such as a code block that has just
+outgrown its bounds, takes the live detail down until one does. An open fence is read up to its last
+complete line, because a diagram is parsed whole and a half-written line would drop it on every
+character until the line ends; code therefore appears a line at a time. `deliver` replaces the live
+detail with the delivered one, which is where dropped blocks are applied and where a detail the box
+cannot accept is dropped whole, and a withdrawn reply removes it and releases a hold placed on it,
+so the history holds one detail per reply whatever streamed.
 
 ### On-demand coaching shortcuts
 

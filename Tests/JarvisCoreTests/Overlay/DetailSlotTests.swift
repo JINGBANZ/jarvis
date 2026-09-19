@@ -89,14 +89,27 @@ import Testing
         #expect(slot.isHeld)
     }
 
-    @Test func removingTheHeldDetailKeepsTheHoldOnTheOneBefore() {
+    @Test func removingTheHeldDetailReleasesTheHold() {
         var slot = DetailSlot()
         slot.received(0)
         slot.received(1)
         slot.pin()
         slot.removed(1)
         #expect(slot.shownIndex == 0)
-        #expect(slot.isHeld)
+        #expect(!slot.isHeld)
+        slot.received(1)
+        #expect(slot.shownIndex == 1, "the box follows new details again")
+    }
+
+    @Test func removingTheOnlyDetailWhileHeldLeavesTheBoxFreeToTakeTheNext() {
+        var slot = DetailSlot()
+        slot.received(0)
+        slot.pin()
+        slot.removed(0)
+        #expect(slot.shownIndex == nil)
+        #expect(!slot.isHeld)
+        slot.received(0)
+        #expect(slot.shownIndex == 0)
     }
 
     @Test func resetClearsEverything() {
