@@ -88,7 +88,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|C|R|F01|F02|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|D|R|F01|F02|all] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -147,6 +147,7 @@ layout in the Gate.
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
 | B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
+| D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
@@ -203,6 +204,12 @@ C26 checks the delivered Activity response, after overlay acceptance, for both n
 and a code block accepted by `ReplyDetail`. The candidate already understands a viable approach
 and is stuck implementing it, so code accompanies these actionable hints. A missing block is a
 regression failure, not a note; conceptual orientation is covered by other scenarios.
+
+Scenario D's AI proposal and test output are candidate reports carried through real transcription.
+Its JPEG remains the coding fixture, so its assertions do not establish Chrome panel detection or
+observed test execution. Advice quality, restrictions, and factual caveats are judged against the
+[scenario rubric](../Tests/JarvisLiveTests/Scenarios/D-review.md). Results explicitly record semantic
+review as not evaluated; structural success alone does not establish that the advice is correct.
 
 ## Notes and the rerun rule
 
@@ -270,6 +277,9 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C25 | Explain more delivers a detail, even when the model first answers in prose | B: the Explain more press |
 | C26 | Ordinary hint presses deliver hint and code in the same reply without Show code | C: both hint presses |
 | C27 | A keyed target coaches after a switch, replaying another provider's calls | B: the behavioral question and the hint press, on Gemini |
+| C28 | Code with AI guidance loads before permitted review and ordinary hint presses deliver committed replies | D |
+| C29 | A blocked delegation step delivers supporting detail without an explicit prompt request | D; semantics use `Tests/JarvisLiveTests/Scenarios/D-review.md` |
+| C30 | Review of a valid AI proposal delivers supporting detail without a confusion signal | D; explanation quality uses the same semantic rubric |
 
 ### General coaching flow
 

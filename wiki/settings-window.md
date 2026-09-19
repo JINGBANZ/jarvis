@@ -493,6 +493,10 @@ Every card uses the same sparkles icon. Each card has its own switch and reads *
 **UNEQUIPPED**; a switched-off card dims but keeps a live switch, so it can be switched back on. The
 cards sit in two columns, or one on a narrow window. The catalog is read when the page is built.
 
+[Coding with AI](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md) is its own card,
+a separate optional companion to [coding](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md)
+rather than nested inside it; see the skill file for its coaching rules.
+
 Tools and Skills write `BrainPreferences.disabledTools` and `BrainPreferences.disabledSkills`, the
 names that are OFF, so a capability added in a later version is on for everyone who never opened
 these pages, and nothing else: a session resolves its capabilities once at Start and builds its

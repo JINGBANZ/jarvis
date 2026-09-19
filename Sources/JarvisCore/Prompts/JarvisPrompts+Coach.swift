@@ -76,10 +76,18 @@ extension JarvisPrompts {
                 skills ? "a skill listed under \"Skills you can load\" with load_skill" : nil,
                 tools ? "a tool listed under \"Tools you can load\" with load_tool" : nil,
             ].compactMap { $0 }.joined(separator: ", or ")
+            // Only meaningful when a skill catalog actually ships; a tools-only session has no
+            // "Skills you can load" list to reassess.
+            let skillReassessment = skills
+                ? "Skills can apply together. Loading one does not finish skill selection: reassess the other\n"
+                    + "available descriptions when new conversation or screen evidence arrives, including after\n"
+                    + "a capture. Load each additional applicable skill before coaching; do not wait for the user\n"
+                    + "to name it.\n"
+                : ""
             return """
             # Loading
             Before choosing an action, load what this question needs and has not loaded: \(loaders).
-            Load one per response; the result comes straight back, so act on it in the same turn.
+            \(skillReassessment)Load one per response; continue loading if needed when its result comes back.
             When the turn says you must call speak, skip loading and speak with what you have.
             """
         }
