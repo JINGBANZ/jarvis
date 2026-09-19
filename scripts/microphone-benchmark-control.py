@@ -50,5 +50,7 @@ if __name__ == "__main__":
     try:
         main()
     except (KeyboardInterrupt, EOFError, RuntimeError) as error:
+        if len(sys.argv) > 1:
+            (Path(sys.argv[1]) / "abort").touch(mode=0o600)
         print(str(error) or "Test cancelled.", file=sys.stderr)
         sys.exit(1)
