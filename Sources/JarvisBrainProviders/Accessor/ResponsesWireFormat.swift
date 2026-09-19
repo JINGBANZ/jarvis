@@ -67,12 +67,12 @@ struct ResponsesWireFormat: BrainWireFormat {
             }
         }
 
+        var verbatim = VerbatimJSON()
         let toolsJSON: [[String: Any]] = try tools.map { t in
-            let params = try JSONSerialization.jsonObject(with: Data(t.parametersJSON.utf8))
             // Responses uses a flat function tool shape. `strict` requires every object in the
             // schema to set additionalProperties:false and list all keys as required.
-            return ["type": "function", "name": t.name, "description": t.description,
-                    "parameters": params, "strict": true]
+            ["type": "function", "name": t.name, "description": t.description,
+             "parameters": try verbatim.placeholder(for: t.parametersJSON), "strict": true]
         }
 
         // A subset narrows tool_choice, not the declared tools, so the cached prefix holds.
@@ -103,7 +103,7 @@ struct ResponsesWireFormat: BrainWireFormat {
         if !instructions.isEmpty {
             body["instructions"] = instructions.joined(separator: "\n\n")
         }
-        return try JSONSerialization.data(withJSONObject: body)
+        return try verbatim.data(withJSONObject: body)
     }
 
     private struct Response: Decodable {
