@@ -13,6 +13,7 @@ public actor LocalProxySupervisor {
         public let baseURL: URL
         public let key: String
         public var responsesURL: URL { baseURL.appendingPathComponent("v1/responses") }
+        public var messagesURL: URL { baseURL.appendingPathComponent("v1/messages") }
         public var modelsURL: URL { baseURL.appendingPathComponent("v1/models") }
     }
 

@@ -20,7 +20,7 @@ public enum BrainProvider: String, CaseIterable, Sendable {
                 toolChoicePolicy: .providerEnforced,
                 reasoningEffortFloor: nil)
         // Raw values keep `-subscription`: they are persisted route ids, so renaming them would
-        // drop saved routes. The helper returns each vendor's own error body, in OpenAI's shape.
+        // drop saved routes. The helper answers each route in that API family's own error shape.
         case .codexSubscription:
             BrainProviderDescriptor(
                 displayName: "Codex",
@@ -30,16 +30,15 @@ public enum BrainProvider: String, CaseIterable, Sendable {
                 failureTable: .openAI,
                 toolChoicePolicy: .providerEnforced,
                 reasoningEffortFloor: nil)
-        // Through the helper, a forced Claude tool is a 400 on Fable 5.1 and strips thinking on
-        // Opus 5, and a narrowed choice is dropped. `none` disables thinking, which Fable 5.1
-        // rejects.
+        // Anthropic has no subset tool choice and Fable 5.1 rejects a forced tool. `none` disables
+        // thinking, which Fable 5.1 rejects.
         case .claudeSubscription:
             BrainProviderDescriptor(
                 displayName: "Claude Code",
                 access: .localProxy(
                     modelOwner: "anthropic", loginFlag: "-claude-login", accountFilePrefix: "claude-"),
-                wire: .responses,
-                failureTable: .openAI,
+                wire: .messages,
+                failureTable: .anthropic,
                 toolChoicePolicy: .filteredAuto,
                 reasoningEffortFloor: .low)
         // Called directly, not through the helper: the helper would need the key in its config file

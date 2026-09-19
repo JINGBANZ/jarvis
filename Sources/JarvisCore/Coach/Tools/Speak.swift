@@ -55,8 +55,10 @@ private let detailGuidance = """
     The lines are the coaching. Keep the hint and its brief rationale there. Include detail when a
     loaded skill calls for supporting content or an explanation is warranted; otherwise leave it null.
     detail is Markdown shown under the hint in the persistent box. Use it for what a line cannot
-    hold: a code block or a diagram a loaded skill asked for. Write paragraphs there only when the
-    user asks you to explain, or is clearly lost: they ask why, they restate something wrongly, or
+    hold: a code block, a diagram, or other supporting content a loaded skill calls for, on that
+    skill's own terms for when it applies.
+    Otherwise, for explanatory paragraphs, the user should have asked you to explain or be clearly lost:
+    they ask why, they restate something wrongly, or
     they say they can't follow earlier advice. Silence or unchanged work is not confusion, and you
     hear transcripts, not tone.
     When you do explain, keep it to what the gap needs: why it works, a tiny example when it helps,

@@ -134,6 +134,14 @@ public enum Defaults {
 
     }
 
+    // MARK: - Onboarding
+
+    public enum Onboarding {
+        /// Records that onboarding finished, never a key or a grant: both are always read live.
+        public static let completedKey = "onboarding.completed"
+        public static let completed = false
+    }
+
     // MARK: - Overlay
 
     /// Opacity is the background fill only, so 0 is a text-only surface, not a hidden one.

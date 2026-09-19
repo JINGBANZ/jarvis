@@ -137,7 +137,7 @@ extension LiveSessionEvidence {
         let context = object["coach_attempt"] as? [String: Any]
         let request = object["request"] as? [String: Any] ?? [:]
         let provider = object["provider"] as? String ?? request["provider"] as? String
-        let exchange = RecordedExchange.read(provider: provider, request: request, response: object["response"])
+        let exchange = RecordedExchange.read(request: request, response: object["response"])
         return TrafficRecord(
             index: index,
             tag: object["tag"] as? String ?? "",

@@ -79,16 +79,22 @@ that checkout-local bundle to the Trash so it cannot be launched accidentally; l
 `/Applications/Jarvis.app` in place.
 
 - Recover a stale *denied* state (which macOS won't re-prompt for) with
-  `tccutil reset Microphone com.jarvis.coach.dev` (or `ScreenCapture`), then relaunch `Jarvis Dev`
-  and Allow. Use `com.jarvis.coach` only when intentionally resetting the production release.
-- All three grants come from **TCC prompts at launch**, not an App-Sandbox entitlement file.
-  `PermissionGate` walks Microphone, System Audio Recording, and Screen Recording one dialog at a
-  time and keeps Jarvis closed until it holds all three. Reset one with
-  `tccutil reset AudioCapture com.jarvis.coach.dev` (or `Microphone` / `ScreenCapture`) to see the
-  gate again. No grant is remembered, so nothing else has to be cleared: each launch proves what it
-  holds. For a true first-run, also
+  `tccutil reset Microphone com.jarvis.coach.dev` (or `ScreenCapture`) plus
+  `defaults delete com.jarvis.coach.dev onboarding.completed`, because onboarding asks only while it
+  hasn't completed; then relaunch `Jarvis Dev` and Allow. Use `com.jarvis.coach` only when
+  intentionally resetting the production release.
+- All three grants come from **TCC prompts during first-run onboarding**, not an App-Sandbox
+  entitlement file. `OnboardingGate` asks for an API key when none is saved, then walks Microphone,
+  System Audio Recording, and Screen Recording one dialog at a time, and keeps Jarvis closed until it
+  has all of them. Onboarding runs once per install; to see it again,
+  `defaults delete com.jarvis.coach.dev onboarding.completed`. To see the permissions step, also
+  `tccutil reset AudioCapture com.jarvis.coach.dev` (or `Microphone` / `ScreenCapture`). To see the
+  key step, also move `~/Library/Application Support/Jarvis/openai-api-key` and `gemini-api-key`
+  aside (both builds share them) and unset `OPENAI_API_KEY` / `GEMINI_API_KEY`; put the files back
+  afterwards. For a true first run, also
   `defaults delete com.jarvis.coach.dev permissions.screenRecordingAsked`, the one marker that
-  persists — it records that Jarvis asked, not that it was granted. See [architecture.md](./architecture.md#permissions).
+  records that Jarvis asked, not that it was granted. See
+  [architecture.md → Onboarding](./architecture.md#onboarding).
 
 ## Distribution — signed, notarized releases from CI
 

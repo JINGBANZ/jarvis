@@ -121,8 +121,8 @@ absence rather than counts.
 Evidence stays in the owner-only session directory under the existing retention policy. Images are
 redacted from traffic JSON on the audit worker, in responses as well as requests, since a provider
 may echo input back: both a string that starts with `data:image/` and the `data` of any object whose
-`mime_type` names an image, because captured pixels already exist as owner-only screenshot files
-there. Screenshot attachments for Activity are written owner-only inside that same directory, before
+`mime_type` (Gemini) or `media_type` (Anthropic) names an image, because captured pixels already
+exist as owner-only screenshot files there. Screenshot attachments for Activity are written owner-only inside that same directory, before
 the row that references them. Nothing archives raw microphone audio or a separate live
 transcript, and the capture heartbeat carries content-free frame progress only.
 

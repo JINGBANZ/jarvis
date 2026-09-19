@@ -198,7 +198,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         // No system-audio probe: fixtures never open the tap, and the device scenario fails at
         // capture start when that grant is gone.
         let begun = readiness.begin(configuration: JarvisReadiness.Configuration(
-            requiredPermissions: PermissionGate.required.subtracting([.systemAudio]),
+            requiredPermissions: Set(JarvisReadiness.Permission.allCases).subtracting([.systemAudio]),
             requiredCredentials: TranscriptionProvider.openAI.requiredCredentials(for: route)))
         let readinessSession = begun.session
         composition.applyReadinessEffects(begun.effects)

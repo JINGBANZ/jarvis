@@ -1,0 +1,22 @@
+{
+  "id": "D",
+  "audio": "fixture",
+  "brain": { "primary": "claude-subscription", "fallbacks": [] },
+  "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": ["behavioral", "system-design"] },
+  "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "steps": [
+    { "screen": "coding-problem.jpg" },
+    { "say": { "speaker": "me", "text": "This Java task merges closed intervals. I see a generic AI icon, but I do not know whether this interview permits AI assistance. I have not opened or used it. I am stuck deciding what to do first. What is a sensible next step?" } },
+    { "press": "hint" },
+    { "say": { "speaker": "me", "text": "The interviewer has now explicitly allowed the built-in coding assistant, named Orbit, to explain and generate code in this Code with AI round. I asked it about merge intervals. Its proposal is to sort by start, then scan. If the current start is at most the previous end, it replaces the previous end with the current end; otherwise it appends the interval. It claims all tests passed, but shows no test output. This is only a proposal, not code I have adopted. I do not understand why sorting helps or whether that update is safe. Help me understand and review it before I accept it." } },
+    { "press": "hint" },
+    { "say": { "speaker": "me", "text": "I understand the shrinking-end bug now. I tried the proposed algorithm separately on intervals one to ten and two to three. I got one to three, but the expected merged interval is one to ten. That is my reported test result; the output is not on screen. I want to keep the Java method signature and the sort-and-scan approach. I am continuing to have the coding assistant make the edits, but I am stuck deciding what to delegate next and how to check its work. I have not sent a follow-up yet." } },
+    { "press": "hint" },
+    { "say": { "speaker": "me", "text": "For a separate weighted-route helper, the interviewer still permits AI. I chose Dijkstra because movement costs are nonnegative. The coding assistant returned this proposal: a min-heap starts with cost zero at the source, a distances map stores the cheapest known cost per position, popped entries worse than that cost are skipped, and a neighbor is pushed with an updated predecessor only when its new cost is smaller. The destination is returned when popped with its current best cost, and predecessors reconstruct the route. I have not applied or tested this code yet. I am reviewing this returned helper before accepting it. The proposed edit is awaiting my decision." } },
+    { "press": "hint" },
+    { "say": { "speaker": "me", "text": "We have moved to the next part of the interview. The interviewer explicitly says no more AI assistance, even though the AI panel is still open. I have not sent that correction prompt. I must now fix the shrinking-end bug myself. I am stuck on which end to keep when intervals overlap. Help me reason through that one manual change." } },
+    { "press": "hint" },
+    { "stop": true }
+  ]
+}

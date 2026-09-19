@@ -37,7 +37,11 @@ public struct BrainClientFactory: Sendable {
             guard let proxyEndpoint else {
                 preconditionFailure("\(provider.displayName) was composed without the helper's endpoint")
             }
-            endpoint = proxyEndpoint.responsesURL
+            switch provider.descriptor.wire {
+            case .responses: endpoint = proxyEndpoint.responsesURL
+            case .messages: endpoint = proxyEndpoint.messagesURL
+            case .interactions: preconditionFailure("the helper serves no Interactions route")
+            }
             key = proxyEndpoint.key
         }
         let summaryModel = BrainModelCatalog.summarizerModelID(for: provider)
