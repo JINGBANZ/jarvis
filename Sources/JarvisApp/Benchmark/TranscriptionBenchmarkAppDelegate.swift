@@ -22,10 +22,23 @@ final class TranscriptionBenchmarkAppDelegate: NSObject, NSApplicationDelegate {
             } catch {
                 jlog("Jarvis transcription benchmark failed: \(error)")
                 TranscriptionBenchmarkFiles.writeFailure(
-                    String(describing: error), to: options.outputDirectory)
+                    options.mode == .microphone ? Self.microphoneFailureMessage(error)
+                        : String(describing: error), to: options.outputDirectory)
             }
             NSApp.terminate(nil)
         }
+    }
+
+    private static func microphoneFailureMessage(_ error: any Error) -> String {
+        if let capture = error as? MicrophoneBenchmarkCapture.Failure { return capture.description }
+        if let benchmark = error as? TranscriptionBenchmarkRunner.Failure {
+            switch benchmark {
+            case .apiKeyUnavailable: return "OpenAI credentials are unavailable."
+            case .benchmarkAborted: return "Microphone benchmark cancelled."
+            default: break
+            }
+        }
+        return "Microphone benchmark did not complete; no speech was saved."
     }
 
     func applicationWillTerminate(_ notification: Notification) {

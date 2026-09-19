@@ -4,6 +4,7 @@ public struct TranscriptionBenchmarkOptions: Sendable {
     public enum Mode: String, Sendable {
         case standard
         case vocabulary
+        case microphone
         case reconnect
     }
 
@@ -31,7 +32,7 @@ public struct TranscriptionBenchmarkOptions: Sendable {
     public init(arguments: [String] = CommandLine.arguments) throws {
         guard let rawMode = Self.value(after: "--benchmark-mode", in: arguments),
               let mode = Mode(rawValue: rawMode) else {
-            throw Failure.missing("--benchmark-mode standard|vocabulary|reconnect")
+            throw Failure.missing("--benchmark-mode standard|vocabulary|microphone|reconnect")
         }
         guard let rawOutput = Self.value(after: "--benchmark-output-dir", in: arguments) else {
             throw Failure.missing("--benchmark-output-dir")
@@ -69,9 +70,10 @@ public struct TranscriptionBenchmarkOptions: Sendable {
         ) else {
             throw Failure.invalid("repository directory does not contain Package.swift")
         }
-        let repetitions = Int(Self.value(after: "--benchmark-repetitions", in: arguments) ?? "3") ?? 0
-        guard repetitions >= 3 else {
-            throw Failure.invalid("--benchmark-repetitions must be at least 3")
+        let repetitions = Int(Self.value(after: "--benchmark-repetitions", in: arguments) ?? (mode == .microphone ? "2" : "3")) ?? 0
+        let minimum = mode == .microphone ? 2 : 3
+        guard repetitions >= minimum else {
+            throw Failure.invalid("--benchmark-repetitions must be at least \(minimum)")
         }
         self.mode = mode
         outputDirectory = output

@@ -4,6 +4,21 @@ import Testing
 
 @Suite("Transcription benchmark options")
 struct TranscriptionBenchmarkOptionsTests {
+    @Test("microphone mode permits the approved two repetitions")
+    func parsesMicrophoneRun() throws {
+        let repository = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: repository) }
+        let output = repository.appendingPathComponent(".jarvis/transcription-benchmarks/mic-run")
+        let options = try TranscriptionBenchmarkOptions(arguments: arguments(
+            mode: "microphone", output: output, repository: repository, repetitions: "2"))
+        #expect(options.mode.rawValue == "microphone")
+        #expect(options.repetitions == 2)
+        #expect(throws: (any Error).self) {
+            try TranscriptionBenchmarkOptions(arguments: arguments(
+                mode: "microphone", output: output, repository: repository, repetitions: "1"))
+        }
+    }
+
     @Test("standard mode accepts only a run below the repository benchmark tree")
     func parsesStandardRun() throws {
         let repository = try makeRepository()
