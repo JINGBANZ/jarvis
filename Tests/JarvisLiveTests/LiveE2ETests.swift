@@ -343,6 +343,14 @@ struct LiveE2ETests {
             (tip(a6) != nil && count("prepNotesSearched", in: a6) == 0,
              "A6 answers the one-pass coding question without searching preparation"),
         ])
+        results.check("C32", [
+            (count("prepNotesSearched", in: a1) == 0,
+             "A1's cold coding hint does not force an unrelated prep search"),
+            (count("prepNotesSearched", in: a2) == 0,
+             "A2's small talk does not search prep notes"),
+        ])
+        results.note("C31", "A4 content review: \(tip(a4)?.message ?? "no tip")")
+        results.note("C31", "A9 content review: \(tip(a9)?.message ?? "no tip")")
         results.time("A6 question-to-tip", seconds: Self.questionToTip(evidence, a6))
         results.time("A9 question-to-tip", seconds: Self.questionToTip(evidence, a9))
 
