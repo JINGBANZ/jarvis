@@ -317,14 +317,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
             }
 
             /// Delivers one hint, records it, and commits the turn: the attempt's terminal action.
-            func speak(callID: String, lines: [String], requestedDetail: String?) async -> AttemptResult {
+            func speak(callID: String, lines: [String], detail parsedDetail: ReplyDetail?) async -> AttemptResult {
                 if Task.isCancelled {
                     jlog("… attempt cancelled (stopped) before speaking")
                     await withdraw()
                     return .cancelled
                 }
                 jlog("💬 \(lines.joined(separator: " "))")
-                let parsedDetail = requestedDetail.flatMap(ReplyDetail.init(markdown:))
                 for reason in parsedDetail?.dropped ?? [] { jlog("Detail: \(reason)") }
                 let delivery = await MainActor.run { () -> (accepted: Bool, detail: ReplyDetail?) in
                     guard !Task.isCancelled else { return (false, nil) }
@@ -356,13 +355,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
             }
 
             /// The hint as the stream left it, committed like a completed reply. Nothing is
-            /// synthesized: the lines the user read stay, with the detail written so far.
+            /// synthesized: the lines the user read stay, with the detail as the box showed it.
             func speak(_ streamed: BrainReplyProgress) async -> AttemptResult {
-                let detail = streamed.detailMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines)
-                return await speak(
+                await speak(
                     callID: "runner_" + UUID().uuidString.prefix(8).lowercased(),
                     lines: streamed.closedLines,
-                    requestedDetail: detail.flatMap { $0.isEmpty ? nil : $0 })
+                    detail: streamed.detailMarkdown.flatMap(ReplyDetail.init(partialMarkdown:)))
             }
 
             while iterations < maxToolIterations {
@@ -623,7 +621,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     }
 
                 case .speak(let callID, let lines, let requestedDetail):
-                    return await speak(callID: callID, lines: lines, requestedDetail: requestedDetail)
+                    return await speak(callID: callID, lines: lines,
+                                       detail: requestedDetail.flatMap(ReplyDetail.init(markdown:)))
 
                 case .staySilent:
                     await withdraw()
