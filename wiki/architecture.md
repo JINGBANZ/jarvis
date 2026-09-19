@@ -471,19 +471,56 @@ built-in mic.
 
 ### Onboarding
 
-A new install can't coach without an API key and the three macOS grants, so `OnboardingGate` collects both before `AppDelegate` builds the rest of the app. It runs once: completing it sets `OnboardingPreferences.isCompleted`, and every later launch goes straight to the menu bar without probing anything. The flag records completion, never a key or a grant; those are always read live. After onboarding, a missing key, Microphone, or Screen Recording grant shows as needing the user on the Settings hub ([settings-window.md → Status](./settings-window.md#status)), and Start refuses with the reason. System Audio can't show there, because only the test tone proves it, so the probe every Start runs is what catches it.
+A new install can't coach without an API key and the three macOS grants, so `OnboardingGate`
+collects both before `AppDelegate` builds the rest of the app. It runs once: completing it sets
+`OnboardingPreferences.isCompleted`, and every later launch goes straight to the menu bar without
+probing anything. The flag records completion, never a key or a grant; those are always read live.
+After onboarding, a missing key, Microphone, or Screen Recording grant shows as needing the user on
+the Settings hub ([settings-window.md → Status](./settings-window.md#status)), and Start refuses
+with the reason. System Audio can't show there, because only the test tone proves it, so the probe
+every Start runs is what catches it.
 
-Each step shows only when what it collects is missing (`Onboarding.steps(needsAPIKey:holdsEveryGrant:)`). The key step shows when the saved setup calls a provider whose key isn't saved, which is exactly when Start would refuse: a new install, which calls OpenAI by default, always sees it, and a setup of a subscription brain with Apple Speech never does. A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` counts, and an install that already has what it needs completes onboarding without a window. Closing the window before the end quits, so an unfinished onboarding runs again on the next launch and skips the steps already done.
+Each step shows only when what it collects is missing
+(`Onboarding.steps(needsAPIKey:holdsEveryGrant:)`). The key step shows when the saved setup calls a
+provider whose key isn't saved, which is exactly when Start would refuse: a new install, which calls
+OpenAI by default, always sees it, and a setup of a subscription brain with Apple Speech never does.
+A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` counts, and an install
+that already has what it needs completes onboarding without a window. Closing the window before the
+end quits, so an unfinished onboarding runs again on the next launch and skips the steps already
+done.
 
-**The key step** offers OpenAI and Gemini, because either key covers both the brain and transcription. Each tile names the brain model and the transcription model that key would use. Continue checks the key with the provider before saving it (`OnboardingAPIKeyStep`): a refused key is never written, so a bad key can't make a later launch skip the step. A check the provider couldn't answer turns the button into **Continue Anyway**, which saves the key, because a rate limit or an outage is no evidence against it. Connections saves first and checks after, because there a slow check must never block an edit. Saving also calls `Onboarding.adopt`, which makes the key's vendor the brain's primary target, with its default model, and the transcription provider, and drops fallback targets that need the other key. The defaults are OpenAI, so without this a Gemini-only install would have Start refuse. **Create one** opens the vendor's key page: an explicit click, before any session exists.
+**The key step** offers OpenAI and Gemini, because either key covers both the brain and
+transcription. Each tile names the brain model and the transcription model that key would use.
+Continue checks the key with the provider before saving it (`OnboardingAPIKeyStep`): a refused key
+is never written, so a bad key can't make a later launch skip the step. A check the provider
+couldn't answer turns the button into **Continue Anyway**, which saves the key, because a rate limit
+or an outage is no evidence against it. Connections saves first and checks after, because there a
+slow check must never block an edit. Saving also calls `Onboarding.adopt`, which makes the key's
+vendor the brain's primary target, with its default model, and the transcription provider, and
+drops fallback targets that need the other key. The defaults are OpenAI, so without this a
+Gemini-only install would have Start refuse. **Create one** opens the vendor's key page: an explicit
+click, before any session exists.
 
 **The permissions step** is the walk in [Permissions](#permissions).
 
-**Look.** Both steps share one layout (`OnboardingStepView`): Jarvis's head with the parts the step feeds lit, a greeting title, the step's body, a note, and Quit, step dots, and the primary button. The dots show only when both steps run. The window has no title strip; its buttons sit on the backdrop. `OnboardingTheme` holds the colors, chosen so every text color clears 4.5:1 on its surface in light and dark, while the head keeps `RobotHeadView`'s Settings colors.
+**Look.** Both steps share one layout (`OnboardingStepView`): Jarvis's head with the parts the step
+feeds lit, a greeting title, the step's body, a note, and Quit, step dots, and the primary button.
+The dots show only when both steps run. The window has no title strip; its buttons sit on the
+backdrop. `OnboardingTheme` holds the colors, chosen so every text color clears 4.5:1 on its surface
+in light and dark, while the head keeps `RobotHeadView`'s Settings colors.
 
 ### Permissions
 
-Jarvis needs three macOS grants (Microphone, System Audio Recording, Screen Recording) and cannot coach without any of them, so onboarding's permissions step asks for all three before the app is built. One button walks the dialogs, strictly one at a time because macOS queues them. The window's close button quits: grant or quit is the whole choice. Once onboarding has completed, a grant that goes missing is not asked for at launch: Start refuses and names it, and the Settings hub names the System Settings pane for Microphone and Screen Recording. There is no Permissions page in Settings: macOS's own panes are where a grant comes back. A grant macOS forgets after onboarding (a `tccutil reset` or a changed signature) returns to undetermined, which System Settings can't switch on until Jarvis asks again; onboarding runs once, so the way back is clearing `onboarding.completed` ([build-and-run.md](./build-and-run.md#packaging--signing--why-permission-grants-persist)).
+Jarvis needs three macOS grants (Microphone, System Audio Recording, Screen Recording) and cannot
+coach without any of them, so onboarding's permissions step asks for all three before the app is
+built. One button walks the dialogs, strictly one at a time because macOS queues them. The window's
+close button quits: grant or quit is the whole choice. Once onboarding has completed, a grant that
+goes missing is not asked for at launch: Start refuses and names it, and the Settings hub names the
+System Settings pane for Microphone and Screen Recording. There is no Permissions page in Settings:
+macOS's own panes are where a grant comes back. A grant macOS forgets after onboarding (a
+`tccutil reset` or a changed signature) returns to undetermined, which System Settings can't switch
+on until Jarvis asks again; onboarding runs once, so the way back is clearing `onboarding.completed`
+([build-and-run.md](./build-and-run.md#packaging--signing--why-permission-grants-persist)).
 
 Chrome semantic text has a fourth, optional Accessibility grant. **Read Chrome page text** is off by
 default and can request this grant only from Settings while Jarvis is stopped. The setting remains
@@ -1258,7 +1295,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
   **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-coaching-shortcuts) — but it
   complements the proactive default; it is not a trigger-to-listen wake key.)
-- Productization: hosted auth, billing, onboarding, or arbitrary provider chains.
+- Productization: hosted auth, billing, or arbitrary provider chains.
 - Windows / cross-platform.
 
 ## 7. Design Principles
