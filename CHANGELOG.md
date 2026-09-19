@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.3.3](https://github.com/JINGBANZ/jarvis/compare/v0.3.2...v0.3.3) (2026-09-19)
+
+
+### Features
+
+* **brain:** move Claude Code to Anthropic's Messages format through the helper ([#372](https://github.com/JINGBANZ/jarvis/issues/372)) ([fb81683](https://github.com/JINGBANZ/jarvis/commit/fb81683374a373f312fd0ffa4fab3793c8cf88f5))
+
+
+### Bug Fixes
+
+* **brain:** keep the authored tool-schema key order in encoded requests ([#370](https://github.com/JINGBANZ/jarvis/issues/370)) ([34a37bd](https://github.com/JINGBANZ/jarvis/commit/34a37bd0ad3efdadd4a601212ac04b66e70b7674))
+
 ## [0.3.2](https://github.com/JINGBANZ/jarvis/compare/v0.3.1...v0.3.2) (2026-09-19)
 
 
