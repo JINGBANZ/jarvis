@@ -11,6 +11,9 @@ struct ResponsesWireFormat: BrainWireFormat {
     /// True deliberately retains transcripts and screenshots at OpenAI for dashboard debugging
     /// (wiki/sandbox.md); subscription targets pass false so a helper bump can't turn it back on.
     let store: Bool
+    let stream: Bool
+
+    func makeStreamDecoder() -> (any BrainStreamDecoder)? { ResponsesStreamDecoder() }
 
     func encode(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) throws -> Data {
         var instructions: [String] = []
@@ -102,6 +105,9 @@ struct ResponsesWireFormat: BrainWireFormat {
         ]
         if !instructions.isEmpty {
             body["instructions"] = instructions.joined(separator: "\n\n")
+        }
+        if stream {
+            body["stream"] = true
         }
         return try verbatim.data(withJSONObject: body)
     }

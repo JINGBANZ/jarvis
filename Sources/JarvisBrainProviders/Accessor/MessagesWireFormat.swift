@@ -13,8 +13,11 @@ struct MessagesWireFormat: BrainWireFormat {
     let model: String
     let reasoningEffort: String
     let maxOutputTokens: Int
+    let stream: Bool
 
     var requestHeaders: [String: String] { ["anthropic-version": Self.apiVersion] }
+
+    func makeStreamDecoder() -> (any BrainStreamDecoder)? { MessagesStreamDecoder() }
 
     func encode(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) throws -> Data {
         var system: [String] = []
@@ -71,13 +74,22 @@ struct MessagesWireFormat: BrainWireFormat {
             body["system"] = system.joined(separator: "\n\n")
         }
         var verbatim = VerbatimJSON()
+        if stream {
+            body["stream"] = true
+        }
         if !tools.isEmpty {
             // No `strict`: Anthropic compiles each new strict tool set for seconds, and the catalog
             // enum differs per session, so the first request of every session would pay it. The
             // runner re-asks on a malformed reply instead.
+            // Without `eager_input_streaming` Anthropic holds each argument until it is whole, so
+            // a streamed reply would arrive in one burst.
             body["tools"] = try tools.map { tool -> [String: Any] in
-                ["name": tool.name, "description": tool.description,
-                 "input_schema": try verbatim.placeholder(for: tool.parametersJSON)]
+                var declared: [String: Any] = [
+                    "name": tool.name, "description": tool.description,
+                    "input_schema": try verbatim.placeholder(for: tool.parametersJSON),
+                ]
+                if stream { declared["eager_input_streaming"] = true }
+                return declared
             }
             // Anthropic has no subset choice and Claude Fable 5.1 rejects `any` and `tool`, so the
             // runner's own check enforces a narrowed choice; see wiki/architecture.md#capabilities.

@@ -6,7 +6,7 @@ import JarvisCore
 @Suite struct ResponsesWireFormatTests {
     private func body(_ messages: [ChatMessage], store: Bool = true) throws -> [String: Any] {
         let wire = ResponsesWireFormat(
-            model: "gpt-5.5", reasoningEffort: "low", maxOutputTokens: 2_048, store: store)
+            model: "gpt-5.5", reasoningEffort: "low", maxOutputTokens: 2_048, store: store, stream: false)
         let data = try wire.encode(messages: messages, tools: [], toolChoice: .auto)
         return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
     }
@@ -38,7 +38,7 @@ import JarvisCore
     /// Models write arguments in schema order, so `lines` must reach the wire before `detail`.
     @Test func toolSchemasKeepTheirAuthoredKeyOrder() throws {
         let wire = ResponsesWireFormat(
-            model: "gpt-5.5", reasoningEffort: "low", maxOutputTokens: 2_048, store: true)
+            model: "gpt-5.5", reasoningEffort: "low", maxOutputTokens: 2_048, store: true, stream: false)
         let tools = coachTools
         let data = try wire.encode(messages: [.user("hi")], tools: tools, toolChoice: .auto)
         let text = String(decoding: data, as: UTF8.self)

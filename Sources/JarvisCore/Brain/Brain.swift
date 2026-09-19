@@ -112,7 +112,9 @@ public protocol BrainConversation: Sendable {
 
 public protocol BrainClient: Sendable {
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse
-    func makeConversation() async throws -> any BrainConversation
+    /// `progress` hears every streamed tool-call delta of the conversation's requests; a client
+    /// that reads replies whole never calls it.
+    func makeConversation(progress: ToolCallProgressSink?) async throws -> any BrainConversation
     func prepare()
 }
 
@@ -121,7 +123,7 @@ public extension BrainClient {
         try await respond(messages: messages, tools: tools, toolChoice: .auto)
     }
 
-    func makeConversation() async throws -> any BrainConversation {
+    func makeConversation(progress: ToolCallProgressSink?) async throws -> any BrainConversation {
         ForwardingBrainConversation(client: self)
     }
 

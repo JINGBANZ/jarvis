@@ -15,7 +15,7 @@ import JarvisCore
             keys: keys,
             proxyEndpoint: .init(baseURL: URL(string: "http://127.0.0.1:4555")!, key: "launch-key"),
             traffic: nil,
-            send: { request in
+            send: sending { request in
                 captured.append(request)
                 let reply = request.url?.path.hasSuffix("/v1/messages") == true
                     ? #"{"type":"message","content":[],"stop_reason":"end_turn"}"#
@@ -43,8 +43,10 @@ import JarvisCore
         #expect(try body(sent.coach)["model"] as? String == "gpt-6-astra")
         #expect((try body(sent.coach)["reasoning"] as? [String: Any])?["effort"] as? String == "low")
         #expect(try body(sent.coach)["store"] as? Bool == true)
+        #expect(try body(sent.coach)["stream"] as? Bool == true)
         #expect(sent.coach.timeoutInterval == BrainWorkloadTimeout.liveCoaching)
         #expect(try body(sent.summarizer)["model"] as? String == "gpt-5.4-mini")
+        #expect(try body(sent.summarizer)["stream"] == nil, "the summarizer's reply is read whole")
         #expect(sent.summarizer.timeoutInterval == BrainWorkloadTimeout.historyCompaction)
     }
 
@@ -54,7 +56,11 @@ import JarvisCore
         #expect(codex.coach.url?.absoluteString == "http://127.0.0.1:4555/v1/responses")
         #expect(codex.coach.value(forHTTPHeaderField: "Authorization") == "Bearer launch-key")
         #expect(try body(codex.coach)["store"] as? Bool == false)
+        #expect(try body(codex.coach)["stream"] as? Bool == true)
         #expect(try body(codex.coach)["tool_choice"] as? String == "required")
+        // The eager field is Anthropic's; the Responses route streams arguments as they are.
+        #expect((try body(codex.coach)["tools"] as? [[String: Any]])?
+            .allSatisfy { $0["eager_input_streaming"] == nil } == true)
         #expect(try body(codex.summarizer)["model"] as? String == "gpt-5.5")
     }
 
@@ -68,6 +74,9 @@ import JarvisCore
         let coach = try body(claude.coach)
         #expect(coach["model"] as? String == "claude-opus-5")
         #expect(coach["store"] == nil && coach["strict"] == nil)
+        #expect(coach["stream"] as? Bool == true)
+        // Anthropic holds each tool argument until it is whole unless the tool asks for eager streaming.
+        #expect((coach["tools"] as? [[String: Any]])?.allSatisfy { $0["eager_input_streaming"] as? Bool == true } == true)
         let choice = coach["tool_choice"] as? [String: Any]
         #expect(choice?["type"] as? String == "auto")
         #expect(choice?["disable_parallel_tool_use"] as? Bool == true)
@@ -80,6 +89,7 @@ import JarvisCore
         #expect(summarizer["model"] as? String == "claude-haiku-4-5-20251001")
         #expect(summarizer["tools"] == nil && summarizer["tool_choice"] == nil)
         #expect(summarizer["thinking"] == nil && summarizer["output_config"] == nil)
+        #expect(summarizer["stream"] == nil)
         #expect(summarizer["max_tokens"] as? Int == 2_048)
     }
 
@@ -92,6 +102,7 @@ import JarvisCore
         #expect(sent.coach.value(forHTTPHeaderField: "Authorization") == nil)
         let config = try body(sent.coach)["generation_config"] as? [String: Any]
         #expect(config?["thinking_level"] as? String == "low")   // 3.8 rejects `minimal`
+        #expect(try body(sent.coach)["stream"] == nil, "Gemini delivers a call whole, so it is never streamed")
         #expect(try body(sent.summarizer)["model"] as? String == "gemini-3.5-flash-lite")
         #expect(try body(sent.summarizer)["tools"] == nil)
     }
