@@ -48,6 +48,11 @@ extension JarvisPrompts {
             let coaching: [String]
             let openQuestions: [String]
             let verification: [String]
+
+            var wordCount: Int {
+                ([context] + decisions + coaching + openQuestions + verification)
+                    .reduce(0) { $0 + $1.split(whereSeparator: \.isWhitespace).count }
+            }
         }
 
         static func input(_ messages: [ChatMessage]) throws -> String {
@@ -74,6 +79,7 @@ extension JarvisPrompts {
             }
             guard let briefing = try? JSONDecoder().decode(Briefing.self, from: Data(json.utf8)),
                   !briefing.context.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  briefing.wordCount < 250,
                   let data = try? JSONEncoder().encode(briefing) else { return nil }
             return String(decoding: data, as: UTF8.self)
         }
