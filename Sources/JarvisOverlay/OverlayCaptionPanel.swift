@@ -5,9 +5,18 @@ import JarvisCore
 public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCaptionApplying {
     private let panel: NSPanel
     private let label: NSTextField
-    private struct Tip { let lines: [String]; let seconds: [TimeInterval]; var isError = false }
+    private struct Tip {
+        var lines: [String]
+        var seconds: [TimeInterval]
+        var isError = false
+        /// More lines may still close; `openLine` is the one being written.
+        var isLive = false
+        var openLine: String?
+    }
     private var queue: [Tip] = []
     private var active: (tip: Tip, nextLine: Int)?
+    /// A live tip whose next line has not closed holds the gap instead of ending.
+    private var isWaitingForLine = false
     private var tickWorkItem: DispatchWorkItem?
     /// Settable so timing-sensitive tests can opt out.
     var interLineGapSeconds: TimeInterval = Config.overlayLineGapSeconds
@@ -81,12 +90,71 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
     }
 
     public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
-        let cleaned = zip(lines, perLineSeconds)
-            .map { ($0.0.trimmingCharacters(in: .whitespacesAndNewlines), $0.1) }
-            .filter { !$0.0.isEmpty }
+        let cleaned = Self.cleaned(lines, perLineSeconds)
         guard !cleaned.isEmpty else { return }
         let tip = Tip(lines: cleaned.map(\.0), seconds: cleaned.map(\.1))
         Task { @MainActor in self.show(tip) }
+    }
+
+    /// Inline, unlike `render`, so finalizing a live tip is ordered after its progress updates.
+    public func deliver(_ lines: [String], perLineSeconds: [TimeInterval],
+                        detail: ReplyDetail?) -> ReplyDetail? {
+        let cleaned = Self.cleaned(lines, perLineSeconds)
+        let final = Tip(lines: cleaned.map(\.0), seconds: cleaned.map(\.1))
+        if let (live, line) = active, live.isLive {
+            var tip = live
+            tip.lines = final.lines
+            tip.seconds = final.seconds
+            tip.isLive = false
+            tip.openLine = nil
+            active = (tip, line)
+            if isWaitingForLine { advance() }
+        } else if let index = queue.firstIndex(where: \.isLive) {
+            if final.lines.isEmpty { queue.remove(at: index) } else { queue[index] = final }
+        } else if !final.lines.isEmpty {
+            show(final)
+        }
+        return nil
+    }
+
+    /// Line 1 shows as it is written; later lines join the tip as they close and play through
+    /// `advance`. The live tip is the active one or waits in the queue behind an earlier tip.
+    public func showReplyProgress(_ progress: BrainReplyProgress?, perLineSeconds: [TimeInterval]) {
+        guard let progress else { return withdrawLiveTip() }
+        let cleaned = Self.cleaned(progress.closedLines, perLineSeconds)
+        let open = progress.openLine?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty || open?.isEmpty == false else { return }
+        if let (live, line) = active, live.isLive {
+            var tip = live
+            tip.lines = cleaned.map(\.0)
+            tip.seconds = cleaned.map(\.1)
+            tip.openLine = open
+            active = (tip, line)
+            if isWaitingForLine { advance() }
+        } else if let index = queue.firstIndex(where: \.isLive) {
+            queue[index].lines = cleaned.map(\.0)
+            queue[index].seconds = cleaned.map(\.1)
+            queue[index].openLine = open
+        } else {
+            show(Tip(lines: cleaned.map(\.0), seconds: cleaned.map(\.1), isLive: true, openLine: open))
+        }
+    }
+
+    private func withdrawLiveTip() {
+        if let (tip, _) = active, tip.isLive {
+            tickWorkItem?.cancel(); tickWorkItem = nil
+            active = nil
+            isWaitingForLine = false
+            if queue.isEmpty { hide() } else { pumpQueue() }
+        } else {
+            queue.removeAll(where: \.isLive)
+        }
+    }
+
+    private nonisolated static func cleaned(_ lines: [String], _ seconds: [TimeInterval]) -> [(String, TimeInterval)] {
+        zip(lines, seconds)
+            .map { ($0.0.trimmingCharacters(in: .whitespacesAndNewlines), $0.1) }
+            .filter { !$0.0.isEmpty }
     }
 
     public func showError(_ message: String) {
@@ -109,18 +177,27 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
 
     private func advance() {
         guard let (tip, line) = active else { return }
-        guard line < tip.lines.count else {
+        isWaitingForLine = false
+        let text: String
+        if line < tip.lines.count {
+            text = tip.lines[line]
+            active = (tip, line + 1)
+            scheduleTick(after: tip.seconds[line]) { $0.gapThenAdvance() }
+        } else if tip.isLive {
+            // The next line has not closed yet: line 1 shows as it is written, the rest wait blank.
+            isWaitingForLine = true
+            tickWorkItem?.cancel(); tickWorkItem = nil
+            text = line == 0 ? tip.openLine ?? "" : ""
+        } else {
             active = nil
             tickWorkItem = nil
             if queue.isEmpty { hide() } else { pumpQueue() }
             return
         }
         label.textColor = tip.isError ? .systemRed : .white
-        label.stringValue = tip.lines[line]
+        label.stringValue = text
         resizeToFit()
         panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
-        active = (tip, line + 1)
-        scheduleTick(after: tip.seconds[line]) { $0.gapThenAdvance() }
     }
 
     private func gapThenAdvance() {
@@ -167,6 +244,7 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
         tickWorkItem?.cancel(); tickWorkItem = nil
         queue.removeAll()
         active = nil
+        isWaitingForLine = false
         hide()
     }
 
@@ -188,6 +266,7 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
                 tickWorkItem?.cancel(); tickWorkItem = nil
                 queue.removeAll()
                 active = nil
+                isWaitingForLine = false
                 hide()
                 return
             }
@@ -212,6 +291,8 @@ public final class OverlayCaptionPanel: NSObject, OverlayRendering, OverlayCapti
     var currentText: String { label.stringValue }
 
     var isPanelVisible: Bool { panel.isVisible }
+
+    var isShowingLiveTip: Bool { active?.tip.isLive == true }
 
     var currentPanelHeight: CGFloat { panel.frame.height }
 

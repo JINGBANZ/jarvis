@@ -4,8 +4,12 @@ public protocol OverlayRendering: AnyObject {
     /// Sampled at delivery, since the user can hide the persistent surface during a request.
     @MainActor var acceptsDetail: Bool { get }
     /// The detail that reached the screen; nil if the box is hidden or nothing was left to draw.
+    /// Finalizes a reply `showReplyProgress` opened instead of adding a second one.
     @MainActor func deliver(_ lines: [String], perLineSeconds: [TimeInterval],
                             detail: ReplyDetail?) -> ReplyDetail?
+    /// The reply as far as it has streamed, `perLineSeconds` aligned with its closed lines; nil
+    /// withdraws a reply that will not be delivered.
+    @MainActor func showReplyProgress(_ progress: BrainReplyProgress?, perLineSeconds: [TimeInterval])
     /// `perLineSeconds` should align with `lines`; a shorter array truncates safely.
     func render(_ lines: [String], perLineSeconds: [TimeInterval])
     func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?)
@@ -20,6 +24,8 @@ extension OverlayRendering {
         render(lines, perLineSeconds: perLineSeconds, detail: shown)
         return shown?.hasContent == true ? shown : nil
     }
+
+    @MainActor public func showReplyProgress(_ progress: BrainReplyProgress?, perLineSeconds: [TimeInterval]) {}
 
     public func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?) {
         render(lines, perLineSeconds: perLineSeconds)
