@@ -296,7 +296,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func aSubscriptionTargetAsksForNoRetention() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(
-            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
+            provider: .codexSubscription, apiKey: "proxy-key", model: "gpt-5.5",
             reasoningEffort: "low",
             send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("transcript")], tools: coachTools(detailEnabled: true))
@@ -304,27 +304,55 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"store\":false"))
     }
 
-    @Test func aTargetSendsToItsOwnEndpointWithItsOwnKey() async throws {
+    @Test func aTargetSendsToItsOwnEndpointWithItsOwnKeyAndAPIVersion() async throws {
         let box = CapturedRequest()
-        let endpoint = URL(string: "http://127.0.0.1:52001/v1/responses")!
+        let endpoint = URL(string: "http://127.0.0.1:52001/v1/messages")!
         let client = BrainAccessor(
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
             endpoint: endpoint,
-            send: { request in box.set(request); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+            send: { request in
+                box.set(request)
+                return (Data(#"{"type":"message","content":[],"stop_reason":"end_turn"}"#.utf8), http(200))
+            })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         #expect(box.get()?.url == endpoint)
         #expect(box.get()?.value(forHTTPHeaderField: "Authorization") == "Bearer proxy-key")
+        #expect(box.get()?.value(forHTTPHeaderField: "anthropic-version") == "2023-06-01")
+        #expect(box.get()?.value(forHTTPHeaderField: "anthropic-beta") == nil)
     }
 
     @Test func aSubscriptionFailureNamesItsOwnProvider() async {
         let client = BrainAccessor(
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
-            send: { _ in (Data(#"{"error":{"message":"nope"}}"#.utf8), http(500)) })
+            send: { _ in (Data(#"{"type":"error","error":{"type":"api_error","message":"nope"}}"#.utf8), http(500)) })
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
             Issue.record("expected the request to fail")
         } catch let failure as ProviderFailure {
             #expect(failure.source == .brain(.claudeSubscription))
+            #expect(failure.category == .unavailable && failure.disposition == .temporary)
+            #expect(failure.message == "nope")
+        } catch {
+            Issue.record("expected a ProviderFailure, got \(error)")
+        }
+    }
+
+    /// A refusal is a 2xx with no usable content; it names its category so Activity can say why.
+    @Test func aRefusedClaudeReplyIsATemporaryRejection() async {
+        let client = BrainAccessor(
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-fable-5-1",
+            send: { _ in
+                (Data(#"{"type":"message","content":[],"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":"declined"}}"#.utf8), http(200))
+            })
+        do {
+            _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
+            Issue.record("expected the reply to fail")
+        } catch let failure as ProviderFailure {
+            #expect(failure.source == .brain(.claudeSubscription))
+            #expect(failure.stage == .response)
+            #expect(failure.category == .rejected && failure.disposition == .temporary)
+            #expect(failure.identity == .init(errorType: "refusal", errorCode: "cyber"))
+            #expect(failure.message == "declined")
         } catch {
             Issue.record("expected a ProviderFailure, got \(error)")
         }

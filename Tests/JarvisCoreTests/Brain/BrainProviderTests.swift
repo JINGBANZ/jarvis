@@ -33,9 +33,13 @@ import Testing
             modelOwner: "openai", loginFlag: "-codex-login", accountFilePrefix: "codex-"))
         #expect(BrainProvider.claudeSubscription.descriptor.access == .localProxy(
             modelOwner: "anthropic", loginFlag: "-claude-login", accountFilePrefix: "claude-"))
-        for provider in [BrainProvider.openAI, .codexSubscription, .claudeSubscription] {
+        for provider in [BrainProvider.openAI, .codexSubscription] {
             #expect(provider.descriptor.wire == .responses)
             #expect(provider.descriptor.failureTable == .openAI)
+        }
+        #expect(BrainProvider.claudeSubscription.descriptor.wire == .messages)
+        #expect(BrainProvider.claudeSubscription.descriptor.failureTable == .anthropic)
+        for provider in [BrainProvider.openAI, .codexSubscription, .claudeSubscription] {
             #expect(provider.descriptor.auth == .bearer)
             #expect(provider.displayName == provider.descriptor.displayName)
             #expect(provider.credential == (provider == .openAI ? .openAIAPIKey : nil))
