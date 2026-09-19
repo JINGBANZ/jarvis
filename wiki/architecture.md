@@ -374,6 +374,14 @@ source text; the content uses its configured compact size and shrinks only as ne
 readable minimum. Very small panels scroll rather than clipping or shrinking indefinitely. Collapsing
 the box hides both sections and expanding restores them.
 
+A shown diagram gives the detail area most of the existing panel, leaving a compact hint-history
+strip visible. It never changes the outer panel's size or position. A manually chosen divider
+proportion still takes precedence. Diagrams adapt their flow to the available width: a horizontal
+chain can become vertical, and wide ranks wrap into rows. Node and edge labels retain their native
+readable size, with only vertical scrolling when the graph cannot fit the remaining height. Prose
+beside a diagram keeps its configured compact size rather than shrinking to compensate for the graph.
+See `OverlayBoxPanel`, `DetailDocumentView`, `DiagramHintLayout`, and `DiagramHintImage` for sizing.
+
 Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
 reports back what reached the screen. A detail the box could not accept, because it is hidden or
 collapsed or has nothing left to draw, is dropped whole from Activity and from committed history, so the
@@ -817,7 +825,13 @@ rather than a per-turn screenshot.
   that workflow conditional without a round or seniority setting
   (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
   System-design supplies the stage vocabulary from requirements through
-  trade-offs, and asks for a diagram in the one stage that benefits. The base prompt keeps what is
+  trade-offs, and asks for a diagram in the one stage that benefits. An explicitly requested stage
+  takes precedence over screen notes; generic hints continue the stage established in conversation.
+  Architecture hints describe component responsibilities and a request or data flow. Canvas navigation
+  controls are interface state and become the answer when navigation is what the candidate asks for;
+  an unseen drawing calls for a conversation-grounded hint with its visual limitation stated.
+  Unresolved requirements call for a specific question the candidate can put to the interviewer,
+  without needing to answer Jarvis during the interview. The base prompt keeps what is
   true of every session: when to speak or stay silent, hint length, and comprehension before
   strategy. Finishing code alone still does not trigger a hint, and there is no runtime classifier
   or persisted question classification.
