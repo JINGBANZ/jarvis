@@ -1,8 +1,15 @@
 ---
 name: coding
-description: Use when the question is a coding problem ("write a function that...", a problem in a shared editor): approach hints, local implementation help, edge-case tests, and code blocks.
+description: Use when the question is a coding problem, including Code with AI; this is the base coding guidance. Also check the available AI-collaboration skill when the round permits a coding assistant; loading coding alone does not establish that this is an ordinary coding round.
 ---
 # Coding questions
+
+## Coding with AI
+
+If `coding-with-ai` is listed and the round permits an AI assistant, load it too; see its own
+catalog description for what establishes that.
+
+## Coding fundamentals
 
 When the current question is a coding problem, an approach hint identifies a useful representation,
 invariant, or decomposition and its first operation. For example, a tokenizer can use a cursor whose
@@ -23,6 +30,8 @@ in the same reply, including hints requested with the hint shortcut. Do not wait
 The block must implement that specific hint, not an unrelated step or an earlier hint. For
 conceptual guidance without a useful implementation, add no code. Do not produce extra hints
 merely to supply code; stay silent during healthy progress as usual.
+When the coding-with-ai skill calls for a prompt to another assistant, that prompt is the supporting
+artifact. Do not attach an implementation block unless the candidate also needs a manual code change.
 
 Put one fenced block in detail, tagged with its language (```python). Keep the hint itself the
 coaching: say in the lines where the block goes, using names visible on screen rather than editor
@@ -38,3 +47,24 @@ few unmarked context lines. If the overall approach is wrong, say so in the hint
 
 If no code is visible, show the first component for the known problem and name your assumptions.
 If the problem itself is unknown, ask what is being solved. Never claim you ran or inserted code.
+
+## Project context across files and long requirements
+
+Apply this guidance to every coding round, with or without another AI assistant. Use available
+requirements, implementations, and tests together; do not assume one screen or one file is the
+whole problem. For long tasks, establish required behavior and relevant files before proposing
+an implementation. Ask to see a relevant unopened file when the next decision depends on it.
+
+An opened filename is not proof its contents were captured, and a previously observed file may
+have changed off-screen. Use earlier content only while it remains available in the evidence;
+never claim to remember discarded content or to have inspected unopened files.
+
+When useful advice depends on unseen code and capture is partial, ask the candidate to show the
+missing section. If the whole file is needed and full-file text is unavailable, ask them to slowly
+scroll from top to bottom, pausing on overlapping sections for capture. Prefer a targeted missing
+section when its location is known. Follow the screen gate on subsequent turns; do not repeat a
+capture of the unchanged viewport or claim to scroll, watch continuously, or archive files.
+Never promise that scrolling alone gives you a complete remembered file. Confirm complete coverage
+only when available evidence supports the beginning, end, and intervening content of the same
+version; seeing the bottom alone is insufficient. Keep partial coverage, gaps, uncertain OCR tokens,
+and conflicting revisions explicit when they affect the advice.

@@ -81,7 +81,11 @@ import Testing
         #expect(text.contains("• Move left forward only."))
         #expect(text.contains("the notes"))
         #expect(!text.contains("example.com"))
-        let rendered = DetailProseFormatting.render(detail.prose, fontSize: 16)
+        guard case .prose(let prose)? = detail.segments.first, detail.segments.count == 1 else {
+            Issue.record("a detail without fences is one prose segment")
+            return
+        }
+        let rendered = DetailProseFormatting.render(prose, fontSize: 16)
         let inline = (rendered.string as NSString).range(of: "last_seen")
         let font = try #require(rendered.attribute(.font, at: inline.location, effectiveRange: nil) as? NSFont)
         #expect(font.isFixedPitch)

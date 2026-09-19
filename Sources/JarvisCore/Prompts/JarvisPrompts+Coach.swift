@@ -7,9 +7,7 @@ extension JarvisPrompts {
         public static func system(capabilities: CoachCapabilities) -> String {
             let deferred = capabilities.deferredTools
             let skills = capabilities.skills
-            let sections = [base(
-                loadableSkills: !skills.isEmpty, loadableTools: !deferred.isEmpty,
-                prepNotes: capabilities.tool(named: searchPrepNotesTool.name) != nil)]
+            let sections = [base(loadableSkills: !skills.isEmpty, loadableTools: !deferred.isEmpty)]
                 + capabilities.hotTools.map(\.guidance).filter { !$0.isEmpty }
             return sections.joined(separator: "\n\n")
                 + (deferred.isEmpty ? "" : "\n\n" + toolCatalog(deferred))
@@ -22,7 +20,7 @@ extension JarvisPrompts {
 
         /// Loading is its own section so the policy stays numbered 1 to 6, and it names only the
         /// loaders the session offers.
-        private static func base(loadableSkills: Bool, loadableTools: Bool, prepNotes: Bool = false) -> String {
+        private static func base(loadableSkills: Bool, loadableTools: Bool) -> String {
             let loading = loadableSkills || loadableTools
                 ? "\n" + loadingSection(skills: loadableSkills, tools: loadableTools) + "\n"
                 : ""
@@ -46,11 +44,9 @@ extension JarvisPrompts {
               but does not prove it.
             - You can see the screen only through capture_screen. A fresh screenshot or screen text in the current input
               counts as current screen context.
-            \(loading)\(prepNotes ? "\n" + prepNotesDiscovery + "\n" : "")
+            \(loading)
             # Action policy
-            Choose exactly one action on each model response, in this priority order. A decision to
-            speak requires completing the applicable loading and prepared-reference steps first;
-            it does not mean skipping directly to speak.
+            Choose exactly one action on each model response, in this priority order:
 
             1. Direct address from "me": bypass the fragment gate. If a specific, correct reply depends on
                missing current visible information, continue to the screen gate below. Otherwise call speak.
@@ -80,12 +76,19 @@ extension JarvisPrompts {
                 skills ? "a skill listed under \"Skills you can load\" with load_skill" : nil,
                 tools ? "a tool listed under \"Tools you can load\" with load_tool" : nil,
             ].compactMap { $0 }.joined(separator: ", or ")
+            // Only meaningful when a skill catalog actually ships; a tools-only session has no
+            // "Skills you can load" list to reassess.
+            let skillReassessment = skills
+                ? "Skills can apply together. Loading one does not finish skill selection: reassess the other\n"
+                    + "available descriptions when new conversation or screen evidence arrives, including after\n"
+                    + "a capture. Load each additional applicable skill before coaching; do not wait for the user\n"
+                    + "to name it.\n"
+                : ""
             return """
             # Loading
             Before choosing an action, load what this question needs and has not loaded: \(loaders).
-            Load one per response; the result comes straight back, so act on it in the same turn.
-            Only when speak is the sole permitted tool, speak with what you have. A required eventual
-            reply does not bypass loading or preparation while those tools are still permitted.
+            \(skillReassessment)Load one per response; continue loading if needed when its result comes back.
+            Only when speak is the sole permitted tool, speak with what you have.
             """
         }
 

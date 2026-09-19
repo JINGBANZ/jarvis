@@ -43,6 +43,37 @@ import Foundation
         #expect(resp["status"] as? String == "completed")
     }
 
+    /// Anthropic names an image's type under `media_type`, inside the block's `source`.
+    @Test func messagesRequestImagesAreRedactedByMediaType() async throws {
+        let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
+        let log = await FileSessionAudit.readyForTesting(directory: dir)
+        let request = try JSONSerialization.data(withJSONObject: [
+            "model": "claude-opus-5",
+            "messages": [["role": "user", "content": [
+                ["type": "text", "text": "The user pressed Show code."],
+                ["type": "image", "source": ["type": "base64", "media_type": "image/jpeg",
+                                              "data": TestFixtures.tinyJpegBase64]],
+            ]]],
+        ])
+        log.record(tag: "coach", request: request,
+                   response: Data(#"{"type":"message","content":[],"stop_reason":"end_turn"}"#.utf8),
+                   status: 200, latencyMs: 900)
+        _ = await log.closeForTesting()
+
+        let text = try String(contentsOf: dir.appendingPathComponent(FileSessionAudit.brainTrafficFilename),
+                              encoding: .utf8)
+        let needle = String(TestFixtures.tinyJpegBase64.prefix(24))
+        #expect(!text.contains(needle))
+        #expect(!text.contains(needle.replacingOccurrences(of: "/", with: "\\/")))
+        let entry = try #require(try lines(in: dir).first)
+        let turns = try #require((entry["request"] as? [String: Any])?["messages"] as? [[String: Any]])
+        let blocks = try #require(turns.first?["content"] as? [[String: Any]])
+        #expect(blocks[0]["text"] as? String == "The user pressed Show code.")
+        let source = try #require(blocks[1]["source"] as? [String: Any])
+        #expect(source["media_type"] as? String == "image/jpeg")
+        #expect((source["data"] as? String)?.hasPrefix("[base64 image omitted") == true)
+    }
+
     /// A provider may echo input steps, a screenshot included, back in its reply.
     @Test func responseImagesAreRedactedToo() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
@@ -117,12 +148,14 @@ import Foundation
                 ["type": "text", "text": "data stays when no image type is named"],
             ]]],
             "other": ["mime_type": "text/plain", "data": "kept"],
+            "document": ["media_type": "application/pdf", "data": "kept too"],
         ]) as? [String: Any]
         let content = ((redacted?["input"] as? [[String: Any]])?.first?["content"] as? [[String: Any]]) ?? []
         #expect((content.first?["data"] as? String)?.hasPrefix("[base64 image omitted") == true)
         #expect(content.first?["mime_type"] as? String == "image/jpeg")
         #expect(content.last?["text"] as? String == "data stays when no image type is named")
         #expect((redacted?["other"] as? [String: Any])?["data"] as? String == "kept")
+        #expect((redacted?["document"] as? [String: Any])?["data"] as? String == "kept too")
     }
 
     @Test func coachingRequestContextLinksTheWireCallToItsAttempt() async throws {

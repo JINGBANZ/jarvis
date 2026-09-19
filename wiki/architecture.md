@@ -171,16 +171,17 @@ A tool carries its own usage guidance (`ToolDef.guidance`) and a deferred flag. 
 declared with its schema and its guidance from the first request: the tip style is `speak`'s
 guidance, because `speak` is the tip. A **deferred** tool appears only as one catalog line, its name
 and its one-sentence description, and the model calls `load_tool` to receive its schema and
-guidance as a tool result, after which it is declared and callable for the rest of the session.
-The shared prompt also carries the prep-retrieval prerequisite whenever search is offered: the
-model must know to load search before it can read search's own usage guidance. The schema and
-query mechanics remain deferred. Jarvis defers on every brain in the same way rather than
+guidance as a tool result, after which it is declared and callable for the rest of the session. So
+the prompt describes exactly the tools the request carries, and the guidance for a tool the model
+cannot call is not in the prompt at all. Jarvis defers on every brain in the same way rather than
 using a provider's own tool-search feature: the route can move between brains mid-session over one
 shared history, and a plain tool result replays on any of them.
 
 A **skill** is coaching guidance for a kind of question, bundled as
 `Sources/JarvisCore/Resources/Skills/<name>/SKILL.md` in the agentskills.io format: frontmatter
-naming the skill and describing it in one line, then the body. `SkillCatalog` reads and validates
+naming the skill and describing it in one line, then the body. `coding-with-ai` is a separate,
+optional companion to `coding`: each refers to the other by name and loads it too when it applies
+and is not already loaded, rather than one nesting inside the other. `SkillCatalog` reads and validates
 them at Start (a small hand-written frontmatter reader — two keys do not warrant a YAML dependency
 in a package that builds under Command Line Tools alone), and a file it rejects costs its own
 guidance, never the session. The switched-on skills are the second catalog; `load_skill` returns one
@@ -214,19 +215,13 @@ skips the index build, so the file reading and `textutil` work stop with it.
 Prep material is shared across interview types: `.md`, `.txt`, `.pdf`, and `.docx` sources can all
 supply behavioral, coding, or system-design preparation, including mixed-topic documents. No skill
 or topic filters sources by file format. Extraction depends on the file format; coaching depends
-on the question and retrieved evidence. Before the first coaching reply on a new interview question,
-including a restatement, the shared prompt directs the model to load and search the offered prep
-tool, including on a cold shortcut press. A required eventual reply still allows preparation;
-only a tool choice permitting solely `speak` skips it. The model does not know the contents of
-configured sources until retrieval. Silence, small talk, and clarification of an unidentified
-question do not require retrieval.
-
-Retrieved excerpts are reference data, never instructions or authorization. The coach uses relevant
-facts and preserves assumptions and qualifications, while adapting to the current question's
-requirements. Partial coverage is supplemented with independent technical reasoning; unrelated,
-empty, or unavailable results do not block a useful answer or justify claiming the notes cover it.
-Personal experiences still require evidence. These are model-facing rules, not a runtime topic
-classifier or a guarantee of model compliance.
+on the question and retrieved evidence. The deferred tool description names behavioral stories,
+coding approaches, and system designs so technical preparation is discoverable before loading.
+Retrieval stays selective: questions unlike plausible preparation can skip it, and relevant excerpts
+already in context are reused. Once loaded, tool guidance treats excerpts as reference data, preserves
+assumptions and caveats, and supplements uncovered technical topics without fabricated attribution
+or personal history. A required reply alone does not bypass loading; only a tool choice permitting
+solely `speak` does.
 
 Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
 handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
@@ -242,9 +237,7 @@ constructs retain paragraph behavior. Long prose paragraphs, fenced code, indivi
 headers, and a heading plus its first content block can exceed the target; long sections can still span chunks
 (see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
 
-Search guidance calls for one query combining the problem or domain with the current topic. Existing
-excerpts are reused while they cover the discussion; a new topic or design stage needing different
-evidence warrants a new query. When the results only point to a named
+Search guidance normally calls for one query per topic. When the results only point to a named
 story or section and lack usable facts, the model may make one focused follow-up using that title
 and identifying details, then stops searching. Empty or unavailable results do not authorize a
 retry. Resolving an explicit reference lets the coach supply the answer content instead of asking
@@ -331,13 +324,16 @@ Show code for every implementation step. The pairing rules and exceptions live i
 [`coding` skill](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md); the core keeps no second
 copy of that domain policy.
 
-[`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into what the box
-shows: the prose, the first fenced block the code bounds accept, and the first `mermaid` fence the
-renderer accepts. A candidate the box rejects on the way to that one is removed from the prose, from
-the replayed arguments, and from Activity, and the tool result names it, so the model reads back what
-the user actually saw rather than assuming its block landed; the search then goes on, so a valid block
-written after a broken one still reaches the box. Everything else stays in the prose and renders
-inline, including a fence written after the shown one of its kind.
+[`ReplyDetail`](../Sources/JarvisCore/Overlay/ReplyDetail.swift) splits one detail into an ordered
+list of segments: the first fenced block the code bounds accept, the first `mermaid` fence the
+renderer accepts, and the prose before, between, and after them. The segments keep the order the
+model wrote them, so a sentence written after a block reads after it and a line that introduces a
+block sits directly above it. A candidate the box rejects on the way to the accepted one is removed
+from the prose, from the replayed arguments, and from Activity, and the tool result names it, so the
+model reads back what the user actually saw rather than assuming its block landed; the search then
+goes on, so a valid block written after a broken one still reaches the box. Everything else stays in
+the prose and renders inline where it was written, including a fence written after the shown one of
+its kind.
 [`CodeBlock`](../Sources/JarvisCore/Overlay/CodeBlock.swift) rejects oversized code rather than
 cutting it into an invalid fragment. [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift)
 accepts a bounded Mermaid subset of rectangular labeled boxes and directed connections; the parser
@@ -353,6 +349,11 @@ hint whose reply carried a detail ends with a dim marker in the same text, not a
 renders the whole document in [`DetailView`](../Sources/JarvisOverlay/DetailView.swift): paragraphs,
 lists, and inline code as attributed text, a code block in monospace with `diff` lines tinted and
 struck, and a mermaid block drawn in place.
+[`DetailDocumentView`](../Sources/JarvisOverlay/DetailDocumentView.swift) stacks one view per
+segment, top to bottom in document order, rather than one text view with the diagram attached
+inline. Apple's Markdown parser gives no syntax coloring or diff tinting and cannot draw a diagram, so
+the code block and the diagram keep their own formatters, and a diagram in its own view scales into
+the height the text segments leave, wherever it sits, down to a legible floor.
 
 There is one detail box, so a later reply replaces what is in it. Its title strip names the hint the
 detail came from and carries the recovery: back and forward arrows step through the session's details
@@ -448,7 +449,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or a subscription through the bundled helper, both on the OpenAI Responses wire shape, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
 | **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
@@ -456,7 +457,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box; the caption remains text-only. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the coaching and detail-navigation shortcuts; AppDelegate routes coaching to the session and navigation to the overlay. See [§2 On-demand coaching shortcuts](#on-demand-coaching-shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
-| **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
+| **OnboardingGate** | Run first-run onboarding once per install, before the rest of the app is built: one OpenAI or Gemini API key, then the three TCC grants, each step shown only when what it collects is missing. Closing the window before the end quits; completing it sets the one onboarding flag, so later launches go straight to the menu bar. `SystemAudioPermissionProbe` proves the silently enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Onboarding](#onboarding) and [§3 Permissions](#permissions). | AppKit window, `CredentialVerifier`, AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
 "intelligence" lives, and even there the intelligence is the model — the driver just wires events
@@ -484,31 +485,76 @@ all routes — it's a near-passthrough on earbuds (no acoustic echo to cancel). 
 mic* are HFP narrowband and low-fidelity regardless of resampling; for input quality, use the
 built-in mic.
 
+### Onboarding
+
+A new install can't coach without an API key and the three macOS grants, so `OnboardingGate`
+collects both before `AppDelegate` builds the rest of the app. It runs once: completing it sets
+`OnboardingPreferences.isCompleted`, and every later launch goes straight to the menu bar without
+probing anything. The flag records completion, never a key or a grant; those are always read live.
+After onboarding, a missing key, Microphone, or Screen Recording grant shows as needing the user on
+the Settings hub ([settings-window.md → Status](./settings-window.md#status)), and Start refuses
+with the reason. System Audio can't show there, because only the test tone proves it, so the probe
+every Start runs is what catches it.
+
+Each step shows only when what it collects is missing
+(`Onboarding.steps(needsAPIKey:holdsEveryGrant:)`). The key step shows when the saved setup calls a
+provider whose key isn't saved, which is exactly when Start would refuse: a new install, which calls
+OpenAI by default, always sees it, and a setup of a subscription brain with Apple Speech never does.
+A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` counts, and an install
+that already has what it needs completes onboarding without a window. Closing the window before the
+end quits, so an unfinished onboarding runs again on the next launch and skips the steps already
+done.
+
+**The key step** offers OpenAI and Gemini, because either key covers both the brain and
+transcription. Each tile names the brain model and the transcription model that key would use.
+Continue checks the key with the provider before saving it (`OnboardingAPIKeyStep`): a refused key
+is never written, so a bad key can't make a later launch skip the step. A check the provider
+couldn't answer turns the button into **Continue Anyway**, which saves the key, because a rate limit
+or an outage is no evidence against it. Connections saves first and checks after, because there a
+slow check must never block an edit. Saving also calls `Onboarding.adopt`, which makes the key's
+vendor the brain's primary target, with its default model, and the transcription provider, and
+drops fallback targets that need the other key. The defaults are OpenAI, so without this a
+Gemini-only install would have Start refuse. **Create one** opens the vendor's key page: an explicit
+click, before any session exists.
+
+**The permissions step** is the walk in [Permissions](#permissions).
+
+**Look.** Both steps share one layout (`OnboardingStepView`): Jarvis's head with the parts the step
+feeds lit, a greeting title, the step's body, a note, and Quit, step dots, and the primary button.
+The dots show only when both steps run. The window has no title strip; its buttons sit on the
+backdrop. `OnboardingTheme` holds the colors, chosen so every text color clears 4.5:1 on its surface
+in light and dark, while the head keeps `RobotHeadView`'s Settings colors.
+
 ### Permissions
 
 Jarvis needs three macOS grants (Microphone, System Audio Recording, Screen Recording) and cannot
-coach without any of them, so `PermissionGate` asks for all three at launch and keeps the app closed
-until it holds them. One button walks the dialogs, strictly one at a time because macOS queues them.
-The window's close button quits: grant or quit is the whole choice. Nothing records that the gate has
-run, because it is shown exactly when the grants are incomplete, which is also the only way back in
-after a refusal. There is no Permissions page in Settings: the hard gate makes one unreachable.
+coach without any of them, so onboarding's permissions step asks for all three before the app is
+built. One button walks the dialogs, strictly one at a time because macOS queues them. The window's
+close button quits: grant or quit is the whole choice. Once onboarding has completed, a grant that
+goes missing is not asked for at launch: Start refuses and names it, and the Settings hub names the
+System Settings pane for Microphone and Screen Recording. There is no Permissions page in Settings:
+macOS's own panes are where a grant comes back. A grant macOS forgets after onboarding (a
+`tccutil reset` or a changed signature) returns to undetermined, which System Settings can't switch
+on until Jarvis asks again; onboarding runs once, so the way back is clearing `onboarding.completed`
+([build-and-run.md](./build-and-run.md#packaging--signing--why-permission-grants-persist)).
 
 Chrome semantic text has a fourth, optional Accessibility grant. **Read Chrome page text** is off by
 default and can request this grant only from Settings while Jarvis is stopped. The setting remains
 off unless the grant is live. Turning it off during a session takes effect at the next attempt. It is
-deliberately outside `PermissionGate`: denial or revocation leaves current-viewport OCR available and
+deliberately outside onboarding: denial or revocation leaves current-viewport OCR available and
 never blocks coaching. Capture itself never prompts, and the setting is frozen into each attempt's
 session-plan revision so live teardown cannot produce privacy UI.
 
 The reason it happens at launch rather than at Start is the coaching context. A TCC dialog is system
 UI that no capture-exclusion trick can hide, so one arriving mid-interview is visible to whoever the
-user is sharing a screen with.
+user is sharing a screen with. After onboarding, the only dialog Start can still raise is System
+Audio's, and only after a `tccutil reset` returns that grant to undetermined.
 
 **Screen Recording is invisible to the process that asks.** `CGRequestScreenCaptureAccess` returns
 false whether the user allowed or refused, and preflight keeps returning what the process started
 with. A *later* launch sees the truth, so `PermissionPreferences.screenRecordingAsked` records that
 Jarvis asked, and a launch that has asked before and still lacks the grant treats it as a proven
-refusal. Without that, a refusal is indistinguishable from a grant awaiting relaunch and the gate
+refusal. Without that, a refusal is indistinguishable from a grant awaiting relaunch and the walk
 loops the user through Quit & Reopen forever.
 
 **System Audio Recording is enforced silently.** There is no API to request it and none to read it,
@@ -529,23 +575,23 @@ denied tap still delivers frames, and `CaptureReadinessMonitor` reads frame arri
 without inspecting amplitude, so a session would report full readiness while hearing nothing from
 the other side.
 
-So proof is gathered twice, and lives only in the process that gathered it. At launch the two
-readable grants are checked first, because they cost nothing and cannot prompt; system audio is
-probed only when they are held, so anything missing opens the gate and lets the walk raise its
-dialogs with a window on screen to explain them. Then every Start proves system audio again, ahead of the
+So proof is gathered twice, and lives only in the process that gathered it. While onboarding hasn't
+completed, launch checks the two readable grants first, because they cost nothing and cannot prompt;
+system audio is probed only when they are held, and anything missing opens the permissions step,
+which raises its dialogs with a window on screen to explain them. Then every Start proves system audio again, ahead of the
 preparation it already runs, since a menu-bar app can sit for days between launches and a grant
 withdrawn in that time would otherwise reach a session. Every Start takes that path: there is no
 longer a configuration with nothing to await, and nothing before the probe gates on its previous
 answer, so a Start that failed on system audio is retried by pressing Start again. A probe that
 cannot run proves nothing: it blocks the attempt at hand without counting as a refusal, so the
-checklist keeps offering to ask rather than sending the user to a toggle that may already be on.
+permissions step keeps offering to ask rather than sending the user to a toggle that may already be on.
 
 The one thing that persists is `screenRecordingAsked`, and it is not a grant: it records that Jarvis
 asked, which no later grant or refusal makes untrue. It is cleared once the grant is observed held,
-because holding it proves the asking was answered — which is what lets a later reset be treated as
-undetermined and asked for again, rather than read as a refusal. Mid-session revocation is out of scope — every
-way to catch it is either amplitude policing, which contradicts the rule above, or a timer. The next
-Start refuses with the reason.
+which onboarding does at launch and again when it completes, because holding it proves the asking was
+answered. That is what lets a later reset be treated as undetermined and asked for again, rather than
+read as a refusal. Mid-session revocation is out of scope: every way to catch it is either amplitude
+policing, which contradicts the rule above, or a timer. The next Start refuses with the reason.
 
 ### Failure surfacing — startup loud, runtime ghost
 
@@ -727,6 +773,11 @@ rather than a per-turn screenshot.
   every target shares, and one `BrainWireFormat` per API family holds the JSON. Every format replays
   an assistant message by one rule: its raw items when present, otherwise its parsed calls,
   otherwise its text.
+- **Claude brain: the selected Claude model via Anthropic's Messages API**, through the bundled
+  helper's `/v1/messages`. The tool loop is threaded with `tool_use` / `tool_result` blocks, and
+  within an attempt each reply's content goes back unchanged, thinking blocks ahead of the call,
+  Anthropic's requirement for the model to continue over a tool result. See
+  [Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy).
 - **Gemini brain: the selected Gemini Flash model via Google's Interactions API.** See
   [Gemini API target](#gemini-api-target).
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
@@ -757,9 +808,8 @@ rather than a per-turn screenshot.
   documented in [sandbox.md](./sandbox.md).
 - **Coaching guidance is loaded on demand, not chosen at Start** (see
   [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
-  policy, the shared prep-retrieval prerequisite when search is offered, and the guidance of its
-  always-on tools; other tool mechanics and domain guidance are cataloged for on-demand loading.
-  Four skills ship: behavioral shapes candidate-owned
+  policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
+  model loads when the question calls for it. Four skills ship: behavioral shapes candidate-owned
   experience answers with STAR, handles personal and hypothetical questions directly, preserves
   prep-material caveats, and reserves labeled fictional examples for an explicit practice request.
   It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
@@ -767,14 +817,15 @@ rather than a per-turn screenshot.
   policy already warrants; coding-with-ai adds guidance for directing another AI, reviewing its
   proposals, challenging an approach against constraints, distinguishing adopted code and execution
   evidence, verifying counterexamples, and checking minimal fixes against reproducing and regression
-  cases. It composes with coding when offered and applies only while AI collaboration is relevant.
-  Its separate catalog entry keeps that workflow conditional without a round or seniority setting
+  cases. It composes with coding when offered and applies only once AI collaboration is established:
+  the candidate is using a coding assistant, or the interviewer or candidate has said it is allowed.
+  A visible assistant panel alone is a hint, not that establishment. Its separate catalog entry keeps
+  that workflow conditional without a round or seniority setting
   (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
-  System-design supplies the stage vocabulary from requirements through trade-offs, carries agreed
-  requirements into state ownership and complete synchronous/background paths, and asks for a
-  diagram in the one stage that benefits. It checks how derived work is created, replenished, and
-  recovered before treating a scheduler or queue as a complete mechanism; the hint still targets
-  the highest-impact gap in the current stage. The base prompt keeps what is
+  System-design supplies the stage vocabulary from requirements through trade-offs and checks
+  state ownership, durable background-work creation, replenishment, and recovery against the current
+  requirements. It targets the highest-impact missing mechanism at the current stage and asks for
+  a diagram in the one stage that benefits. The base prompt keeps what is
   true of every session: when to speak or stay silent, hint length, and comprehension before
   strategy. Finishing code alone still does not trigger a hint, and there is no runtime classifier
   or persisted question classification.
@@ -882,12 +933,15 @@ ChatGPT or Claude plan pay for coaching instead of a metered API key. Both are s
 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT, Go), shipped inside the app at
 `Contents/MacOS/cliproxyapi` from the pinned, checksum-verified release in
 [`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh). The helper holds the OAuth sign-ins
-and serves them as an OpenAI Responses endpoint on 127.0.0.1, so both subscriptions go through the one
-[`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) and the attempt runner
-reads one wire shape. Only the endpoint, the key, and the target's tool policy differ, and each
-provider's [`BrainProviderDescriptor`](../Sources/JarvisCore/Brain/BrainProviderDescriptor.swift)
-names them, together with its display name, wire format, failure table, and effort floor, and for a
-subscription the helper's model owner, login flag, and account-file prefix.
+and serves them on 127.0.0.1: Codex on its OpenAI Responses route (`/v1/responses`) and Claude Code
+on Anthropic's own Messages route (`/v1/messages`), so both subscriptions go through the one
+[`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) with the wire format
+of their API family (`ResponsesWireFormat`, `MessagesWireFormat`), and the attempt runner reads one
+provider-neutral reply. Only the route, the key, the wire format, the failure table, and the target's
+tool policy differ, and each provider's
+[`BrainProviderDescriptor`](../Sources/JarvisCore/Brain/BrainProviderDescriptor.swift) names them,
+together with its display name and effort floor, and for a subscription the helper's model owner,
+login flag, and account-file prefix.
 
 A proxy rather than the vendors' own CLIs: driving `claude` and `codex` as coaching processes meant
 imitating native function calls with a text protocol the model had to follow and Jarvis had to parse
@@ -939,36 +993,53 @@ is about 60 MB on disk and 20 MB per update.
 - **Tool policy per target** ([`ToolChoicePolicy`](../Sources/JarvisCore/Brain/ToolChoicePolicy.swift)).
   The OpenAI API and Codex are `providerEnforced`: `required`, `allowed_tools`, a
   forced function, strict tools, and verbatim reasoning replay all pass through the Codex path intact.
-  Claude Code is `filteredAuto`: through the helper a forced tool is a 400 on Claude Fable
-  5.1 and strips thinking on Opus 5, and `allowed_tools` is dropped, so Opus called `capture_screen`
-  on a press six times in six. Every Claude request therefore sends `tool_choice: auto` with only the
-  permitted tools declared, which costs a press the prompt cache from the tools block onward. Its
-  reasoning floors at `low`, because `none` disables thinking and Fable 5.1 rejects that. Neither
-  policy is trusted on its own: the runner checks every reply against the choice it asked for
-  ([Capabilities](#capabilities)).
+  Claude Code is `filteredAuto`: Anthropic has no subset choice and Claude Fable 5.1 rejects a forced
+  tool (`any` and `tool` are 400s), and without narrowing Opus called `capture_screen` on a press six
+  times in six. Every Claude request therefore sends `tool_choice: {type: auto,
+  disable_parallel_tool_use: true}` with only the permitted tools declared, which costs a press the
+  prompt cache from the tools block onward. Its reasoning floors at `low`, because `none` disables
+  thinking and Fable 5.1 rejects that. Neither policy is trusted on its own: the runner checks every
+  reply against the choice it asked for ([Capabilities](#capabilities)).
 - **What the helper changes on the wire.** On the Codex path it deletes `max_output_tokens`, so the
   workload timeout is the output bound; forces `store: false`, which Jarvis also sends for every
   subscription target, so the dashboard retention described in
   [sandbox.md](./sandbox.md#data-egress) never covers plan traffic; forces `parallel_tool_calls: true`,
   which the runner answers by running the first call; and reuses `prompt_cache_key` as the upstream
-  session id, which is why Jarvis keeps that key stable. On the Claude path it drops `strict`,
-  `parallel_tool_calls`, `store`, and `prompt_cache_key`, turns the effort into adaptive thinking,
-  and replays reasoning items as signed thinking blocks. Without `strict`, about one Opus 5 `speak`
-  in ten arrives with `lines` double-encoded as a string, which the runner answers with the schema in
-  the same attempt. The helper's default cloak stays on: it presents Claude traffic as Anthropic's own
-  Claude Code client so usage stays on plan limits, which moves Jarvis's system prompt behind that
-  client's identity block.
+  session id, which is why Jarvis keeps that key stable. On the Claude route the request is already
+  Anthropic's own shape
+  ([`MessagesWireFormat`](../Sources/JarvisBrainProviders/Accessor/MessagesWireFormat.swift)): the
+  helper forwards it with only its Claude Code disguise applied and its prompt-cache breakpoints
+  injected, so the tool definitions reach Anthropic untouched. Jarvis sends the system prompt at the
+  top level, screenshots as base64 `image` blocks, a round's tool results in one user message,
+  adaptive thinking with `output_config.effort` at the floor, `max_tokens` as the cap, and no
+  `strict`: Anthropic compiles a strict tool set it has not seen for several seconds before the first
+  byte, and Jarvis declares several sets per session, so a malformed reply, about one Opus 5 `speak`
+  in ten with `lines` double-encoded as a string, is answered with the schema in the same attempt
+  instead. Within an attempt each reply's content blocks go back unchanged, so a thinking block
+  precedes the `tool_use` it belongs to; committed history keeps the rebuilt calls and drops the
+  thinking, which Anthropic allows outside a tool round. The tool-less history summarizer on Haiku 4.5
+  sends neither thinking nor effort, which that model rejects. The helper's default cloak stays on:
+  it presents Claude traffic as Anthropic's own Claude Code client so usage stays on plan limits,
+  which moves Jarvis's system prompt behind that client's identity block.
 - **Models.** The Codex shares the OpenAI list; an id the Codex backend does not serve
   fails at request time with the helper's `model_not_found`. The Claude list names releases the helper
   routes, which is why Haiku is the dated `claude-haiku-4-5-20251001`: the helper reads the undated
   alias as an unknown model. The Claude summarizer is Haiku; the Codex summarizer is the target model,
   since the Codex backend serves neither mini model.
-- **Failures read as the vendor wrote them.** The helper returns the vendor's own error body, which
-  [`OpenAIFailureClassifier`](../Sources/JarvisCore/Providers/OpenAI/OpenAIFailureClassifier.swift)
-  reads for both vendors. With every credential for a vendor gone it answers 503
-  `upstream_authentication_required`, a permanent authentication failure. A model it cannot route
-  answers 400 `unknown provider for model`, which stays a configuration failure: the helper sends the
-  same reply for a signed-out vendor and for a model it does not serve, so the Start probe is what
+- **Failures read as the vendor wrote them.** The helper answers each route in its API family's
+  error shape, its own errors included: OpenAI's on the Codex route
+  ([`OpenAIFailureClassifier`](../Sources/JarvisCore/Providers/OpenAI/OpenAIFailureClassifier.swift))
+  and Anthropic's on the Claude route
+  ([`AnthropicFailureClassifier`](../Sources/JarvisCore/Providers/Anthropic/AnthropicFailureClassifier.swift)),
+  where `authentication_error` and `permission_error` are permanent, `not_found_error` and the
+  helper's own `unknown provider for model` answer are configuration, and `rate_limit_error`,
+  `overloaded_error`, `api_error`, and any other `invalid_request_error` (Anthropic's catch-all 400,
+  which a fresh attempt's different conversation may pass) stay temporary. With every credential for
+  a vendor gone the Codex route answers 503
+  `upstream_authentication_required`, a permanent authentication failure. A model the helper cannot
+  route answers 400 `unknown provider for model` (`model_not_found` on the Codex route,
+  `invalid_request_error` on the Claude route), which stays a configuration failure: the helper sends
+  the same reply for a signed-out vendor and for a model it does not serve, so the Start probe is what
   names a signed-out subscription. When every credential is cooling down it answers 429 with its own
   `Retry-After`, a temporary rejection. A helper that stopped mid-session refuses the connection, an
   unreachable failure that is temporary, so the cycle fails, listening continues, and the restart on
@@ -1269,7 +1340,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
   **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-coaching-shortcuts) — but it
   complements the proactive default; it is not a trigger-to-listen wake key.)
-- Productization: hosted auth, billing, onboarding, or arbitrary provider chains.
+- Productization: hosted auth, billing, or arbitrary provider chains.
 - Windows / cross-platform.
 
 ## 7. Design Principles

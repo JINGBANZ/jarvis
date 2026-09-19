@@ -103,10 +103,20 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     private func build() {
         let win = EscapableWindow(
             contentRect: NSRect(origin: .zero, size: Self.defaultContentSize),
-            styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            backing: .buffered, defer: false)
+        // Kept for the Window menu and VoiceOver; the bar itself shows the backdrop.
         win.title = "Jarvis Settings"
+        win.titleVisibility = .hidden
+        win.titlebarAppearsTransparent = true
         win.isReleasedWhenClosed = false
-        win.contentMinSize = Self.minContentSize
+        // Pages lay out below the bar, so the area below it keeps the old default and minimum.
+        let barHeight = win.frame.height - win.contentLayoutRect.height
+        win.setFrame(NSRect(origin: win.frame.origin, size: NSSize(
+            width: Self.defaultContentSize.width,
+            height: Self.defaultContentSize.height + barHeight)), display: false)
+        win.minSize = NSSize(
+            width: Self.minContentSize.width, height: Self.minContentSize.height + barHeight)
         // Pages are added and removed while the window is open; let AppKit keep Tab order current.
         win.autorecalculatesKeyViewLoop = true
         win.delegate = self
@@ -116,7 +126,8 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         let background = SettingsBackgroundView(frame: content.bounds)
         background.autoresizingMask = [.width, .height]
         content.addSubview(background)
-        let container = SettingsPageContainer(frame: content.bounds)
+        // Below the bar; the backdrop above still fills the whole window, bar included.
+        let container = SettingsPageContainer(frame: win.contentLayoutRect)
         container.autoresizingMask = [.width, .height]
         container.wantsLayer = true
         content.addSubview(container)

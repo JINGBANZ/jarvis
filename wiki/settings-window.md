@@ -43,12 +43,14 @@ lit; the first Tab starts keyboard focus.
 
 ### Window sizing
 
-One user-resizable window size for every page — 820×600 by default, minimum 560×460. Navigating
-never resizes the window; whatever size the user set stays. Every page uses `SettingsPageView`, so
-page margins and headers expand consistently while cards and trailing controls adapt to the
-available width. Brain, Ear, Connections, Tools, and Shortcuts stack their cards in
-`SettingsCardStack`; Mouth, Skills, and the hub scroll their own documents; Eye and Activity use the
-page shell without an outer scroll view.
+One user-resizable window size for every page, 820×600 by default, minimum 560×460, both measured
+below the title bar. The title bar is transparent with its title hidden (the window keeps "Jarvis
+Settings" for the Window menu and VoiceOver), so the window buttons sit on the backdrop while pages
+lay out in the window's content layout rect. Navigating never resizes the window; whatever size the
+user set stays. Every page uses `SettingsPageView`, so page margins and headers expand consistently
+while cards and trailing controls adapt to the available width. Brain, Ear, Connections, Tools, and
+Shortcuts stack their cards in `SettingsCardStack`; Mouth, Skills, and the hub scroll their own
+documents; Eye and Activity use the page shell without an outer scroll view.
 
 ### Shared visual system
 
@@ -58,7 +60,8 @@ The pages share these AppKit primitives rather than styling their controls indep
   live, amber for what needs the user. Each color resolves per appearance, including the Increase
   Contrast appearances, where card lines draw at full strength, so every view follows light and dark
   mode without observing the change.
-- `SettingsBackgroundView` draws the radial backdrop behind the hub and every page.
+- `SettingsBackgroundView` draws the radial backdrop behind the hub and every page. Onboarding reuses
+  it with its own two colors.
 - `SettingsPageView` owns the page header: the back button (`SettingsBackButton`), the part's mini
   robot on the four head pages, the uppercase title, one-line summary, and an optional chip that
   says when edits apply or, in teal, what is live. It also owns an optional amber notice and the
@@ -492,6 +495,10 @@ titled from the skill's folder name (`Skill.displayTitle`) and described by its 
 Every card uses the same sparkles icon. Each card has its own switch and reads **EQUIPPED** or
 **UNEQUIPPED**; a switched-off card dims but keeps a live switch, so it can be switched back on. The
 cards sit in two columns, or one on a narrow window. The catalog is read when the page is built.
+
+[Coding with AI](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md) is its own card,
+a separate optional companion to [coding](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md)
+rather than nested inside it; see the skill file for its coaching rules.
 
 Tools and Skills write `BrainPreferences.disabledTools` and `BrainPreferences.disabledSkills`, the
 names that are OFF, so a capability added in a later version is on for everyone who never opened

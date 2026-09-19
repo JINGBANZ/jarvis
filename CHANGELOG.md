@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.3.2](https://github.com/JINGBANZ/jarvis/compare/v0.3.1...v0.3.2) (2026-09-19)
+
+
+### Features
+
+* **brain:** add Gemini as a coaching brain over the Interactions API ([#359](https://github.com/JINGBANZ/jarvis/issues/359)) ([3a4f0b0](https://github.com/JINGBANZ/jarvis/commit/3a4f0b03ba62feb3bd35a2e4f48554b6c9a58f75))
+* **coaching:** improve code with ai guidance and regression coverage ([#362](https://github.com/JINGBANZ/jarvis/issues/362)) ([24c485c](https://github.com/JINGBANZ/jarvis/commit/24c485c8cdf0f9081fab95ed6c434ef9418cfe17))
+* **onboarding:** ask for an API key before the permissions, once per install ([#371](https://github.com/JINGBANZ/jarvis/issues/371)) ([6b6decb](https://github.com/JINGBANZ/jarvis/commit/6b6decbc74ec7196852ab68a1b87e5eb164305c0))
+* **overlay:** render a reply's detail in document order ([#366](https://github.com/JINGBANZ/jarvis/issues/366)) ([9794433](https://github.com/JINGBANZ/jarvis/commit/9794433062ae87115a259437c1b5d586bf7fdaee))
+* **settings:** let the window buttons sit on the backdrop ([#373](https://github.com/JINGBANZ/jarvis/issues/373)) ([d0c584f](https://github.com/JINGBANZ/jarvis/commit/d0c584f197962e281f5a18d187b503d146d3dc00))
+
+
+### Bug Fixes
+
+* **proxy:** fail the start when the helper exits during its readiness probe ([#357](https://github.com/JINGBANZ/jarvis/issues/357)) ([eb373d9](https://github.com/JINGBANZ/jarvis/commit/eb373d90e7e476aab656b7dddb8593ed2879a3d7))
+* resolve concurrency, naming, and copy findings from the comment trim ([#352](https://github.com/JINGBANZ/jarvis/issues/352)) ([4a6c25c](https://github.com/JINGBANZ/jarvis/commit/4a6c25c41c13440ba28f51848f9f5151c5da1bd3))
+
 ## [0.3.1](https://github.com/JINGBANZ/jarvis/compare/v0.3.0...v0.3.1) (2026-09-17)
 
 

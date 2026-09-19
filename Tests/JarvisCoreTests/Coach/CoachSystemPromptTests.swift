@@ -108,6 +108,10 @@ import Testing
         #expect(!toolsOnly.contains("load_skill"))
         #expect(!toolsOnly.contains("# Skills you can load"))
         #expect(toolsOnly.contains("with load_tool"))
+        // Speak's own guidance legitimately says "skill" elsewhere, so check the leaking
+        // skill-reassessment sentences specifically rather than the word "skill" anywhere.
+        #expect(!toolsOnly.contains("finish skill selection"))
+        #expect(!toolsOnly.contains("Load each additional applicable skill"))
     }
 
     @Test func theLoadingSectionStillDefersToAForcedSpeak() {
@@ -115,19 +119,6 @@ import Testing
             disabledTools: [], prepSourcesConfigured: true, skills: skills))
         #expect(prompt.contains(
             "Only when speak is the sole permitted tool, speak with what you have."))
-    }
-
-    @Test func prepDiscoveryIsAvailableBeforeLoadingAndOnlyWhenSearchIsOffered() {
-        for configured in [false, true] {
-            for disabled in [false, true] {
-                let capabilities = CoachCapabilities.compose(
-                    disabledTools: disabled ? ["search_prep_notes"] : [],
-                    prepSourcesConfigured: configured)
-                let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
-                #expect(prompt.contains("# Prepared references") == (configured && !disabled))
-                #expect(!capabilities.callable(loaded: []).contains { $0.name == "search_prep_notes" })
-            }
-        }
     }
 
     @Test func everythingSwitchedOffIsTheBarePrompt() {

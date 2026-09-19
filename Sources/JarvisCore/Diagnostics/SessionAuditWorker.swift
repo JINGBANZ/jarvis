@@ -640,8 +640,9 @@ final class SessionAuditWorker: @unchecked Sendable {
         }
         if let dictionary = value as? [String: Any] {
             var redacted = dictionary.mapValues { redactingImages($0) }
-            // Gemini sends bare base64 with no `data:` prefix; the MIME type beside it names it.
-            if (dictionary["mime_type"] as? String)?.hasPrefix("image/") == true,
+            // Gemini and Anthropic send bare base64 with no `data:` prefix; the MIME type beside it
+            // names it, under each vendor's own key.
+            if ((dictionary["mime_type"] ?? dictionary["media_type"]) as? String)?.hasPrefix("image/") == true,
                let data = dictionary["data"] as? String {
                 redacted["data"] = omittedImage(characters: data.count)
             }

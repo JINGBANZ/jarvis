@@ -233,64 +233,6 @@ struct LiveE2ETests {
         try launcher.finish(results)
     }
 
-    @Test func scenarioPUnavailable() async throws {
-        guard let launcher = await LiveE2ELauncher.begin(scenario: "P-unavailable") else { return }
-        let launch = try await launcher.launch()
-        var results = LiveE2EResults(scenario: "P-unavailable")
-        if let evidence = Self.requireEvidence(launch, &results) {
-            let unavailable = evidence.activity.filter { $0.kind == "prepNotesUnavailable" }
-            let tip = evidence.activity.last { $0.kind == "tip" }
-            results.check("C31", [
-                (unavailable.count == 1, "unavailable prep is attempted once without a search loop"),
-                (Self.precedes(unavailable.first?.index, tip?.index), "coaching continues after unavailable prep"),
-                (tip?.response?.lines.isEmpty == false, "the cold shortcut still delivers guidance"),
-            ])
-            Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
-        }
-        try launcher.finish(results)
-    }
-
-    @Test func scenarioP() async throws {
-        guard let launcher = await LiveE2ELauncher.begin(scenario: "P") else { return }
-        let launch = try await launcher.launch()
-        var results = LiveE2EResults(scenario: "P")
-        if let evidence = Self.requireEvidence(launch, &results) {
-            let steps = launch.stepIndices { Self.isPress($0) || Self.isSay($0) }
-            results.check("C28", steps.count == 5, "cold press and four spoken requests ran")
-            for (index, step) in steps.enumerated() {
-                let chain = launch.attemptChain(forStep: step)
-                let rows = evidence.rows(inChain: chain)
-                let searches = rows.filter { $0.kind == "prepNotesSearched" }
-                let tip = rows.last { $0.kind == "tip" }
-                let label = "P request \(index + 1)"
-                Self.noteStalls([(label, chain)], evidence, &results)
-                results.check("C28", [
-                    (chain.last?.isCommitted == true, "\(label) committed"),
-                    (tip?.response?.lines.isEmpty == false, "\(label) delivered guidance"),
-                ])
-                if index == 2 {
-                    results.check("C29", searches.isEmpty,
-                                  "the same reminder topic reuses its retrieved evidence")
-                } else {
-                    results.check("C28", [
-                        ((1...2).contains(searches.count),
-                         "\(label) searched once, with at most one reference follow-up"),
-                        (Self.precedes(searches.last?.index, tip?.index),
-                         "\(label) searched before speaking"),
-                    ])
-                }
-                if index == 0 {
-                    results.check("C28", Self.precedes(
-                        rows.first { $0.loadedCapability?.name == "search_prep_notes" }?.index,
-                        searches.first?.index), "the cold shortcut loads search before using it")
-                }
-                results.note("C30", "\(label) content review: \(tip?.message ?? "no tip")")
-            }
-            Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
-        }
-        try launcher.finish(results)
-    }
-
     @Test func scenarioA() async throws {
         guard let launcher = await LiveE2ELauncher.begin(scenario: "A") else { return }
         let launch = try await launcher.launch()
@@ -338,17 +280,15 @@ struct LiveE2ETests {
         }
 
         func pressChecks(_ chain: [Attempt], _ label: String) -> [LiveE2EResults.Check] {
-            let loadRows = rows(chain).filter { $0.kind == "capabilityLoaded" }
+            let loadRows = rows(chain.filter(\.isCommitted)).filter { $0.kind == "capabilityLoaded" }
             let tipRow = tip(chain)
             return [
                 (!chain.isEmpty, "\(label) ran an attempt"),
                 (count("screenViewed", in: chain) == 1,
                  "\(label) viewed the screen once (saw \(count("screenViewed", in: chain)))"),
-                (loadRows.count == 2 && Set(loads(chain)) == ["coding", "search_prep_notes"],
-                 "\(label) loaded coding and prep search (saw \(loads(chain)))"),
-                (Self.precedes(loadRows.last?.index, tipRow?.index), "\(label) loaded before its tip"),
-                (Self.precedes(rows(chain).last { $0.kind == "prepNotesSearched" }?.index, tipRow?.index),
-                 "\(label) searched before its tip"),
+                (loadRows.count == 1 && loadRows.first?.loadedCapability?.name == "coding",
+                 "\(label) committed one coding load (saw \(loadRows.compactMap(\.loadedCapability)))"),
+                (Self.precedes(loadRows.first?.index, tipRow?.index), "\(label) loaded before its tip"),
                 (tipRow.map { !Self.carriesProtocolText($0.message) } ?? false,
                  "\(label) tip carries no protocol text"),
             ]
@@ -369,17 +309,15 @@ struct LiveE2ETests {
             (evidence.debugLines(containing: "was already loaded").isEmpty, "no already-loaded line"),
         ])
 
-        let a1Sequence = sequence(a1)
         let a3Sequence = sequence(a3)
         let a4Sequence = sequence(a4)
         let firstOpenAI = a4.flatMap { evidence.traffic(for: $0) }.first {
             $0.tag == "coach" && $0.provider == BrainProvider.openAI.rawValue
         }
         results.check("C05", [
-            (Self.precedes(a1Sequence.firstIndex(of: "load search_prep_notes"),
-                           a1Sequence.firstIndex(of: "search")),
-             "A1 loads search_prep_notes before searching (saw \(a1Sequence))"),
-            (!loads(a3).contains("search_prep_notes"), "A3 reuses the loaded search tool"),
+            (Self.precedes(a3Sequence.firstIndex(of: "load search_prep_notes"),
+                           a3Sequence.firstIndex(of: "search")),
+             "A3 loads search_prep_notes before searching (saw \(a3Sequence))"),
             (firstOpenAI?.declaredToolNames.contains("search_prep_notes") == true,
              "A4's first OpenAI request declares search_prep_notes"),
         ])
@@ -387,22 +325,26 @@ struct LiveE2ETests {
                                            a3Sequence.lastIndex(of: "tip")),
                       "A3 loads behavioral before its tip (saw \(a3Sequence))")
         results.check("C07", [
-            (a3.filter(\.isCommitted).count == 1
-                && a3Sequence.sorted() == ["load behavioral", "search", "tip"].sorted(),
-             "A3 loads its skill, searches, and answers in one committed attempt (saw \(a3Sequence))"),
-            (a4.filter(\.isCommitted).count == 1
-                && a4Sequence.sorted() == ["load system-design", "search", "tip"].sorted(),
-             "A4 loads its skill, searches, and answers in one committed attempt (saw \(a4Sequence))"),
-            (Self.precedes(a3Sequence.firstIndex(of: "search"), a3Sequence.lastIndex(of: "tip")),
-             "A3 searches before speaking"),
-            (Self.precedes(a4Sequence.firstIndex(of: "search"), a4Sequence.lastIndex(of: "tip")),
-             "A4 searches before speaking"),
-            (Self.precedes(a4Sequence.firstIndex(of: "load system-design"), a4Sequence.lastIndex(of: "tip")),
-             "A4 loads its skill before speaking"),
+            (a3Sequence == ["load behavioral", "load search_prep_notes", "search", "tip"],
+             "A3's chain stays in one attempt (saw \(a3Sequence))"),
+            (a4Sequence.sorted() == ["load system-design", "search", "tip"]
+                && Self.precedes(a4Sequence.firstIndex(of: "load system-design"),
+                                 a4Sequence.lastIndex(of: "tip")),
+             "A4's chain stays in one attempt (saw \(a4Sequence))"),
             (evidence.debugLines(containing: "tool loop exhausted").isEmpty, "no tool loop exhausted"),
         ])
         results.time("A3 question-to-tip", seconds: Self.questionToTip(evidence, a3))
         results.time("A4 question-to-tip", seconds: Self.questionToTip(evidence, a4))
+        results.check("C31", [
+            (Self.precedes(a4Sequence.firstIndex(of: "search"), a4Sequence.lastIndex(of: "tip")),
+             "A4 searches design preparation before answering"),
+            (tip(a9) != nil && count("prepNotesSearched", in: a9) == 0,
+             "A9 answers cache invalidation using the existing design excerpt"),
+            (tip(a6) != nil && count("prepNotesSearched", in: a6) == 0,
+             "A6 answers the one-pass coding question without searching preparation"),
+        ])
+        results.time("A6 question-to-tip", seconds: Self.questionToTip(evidence, a6))
+        results.time("A9 question-to-tip", seconds: Self.questionToTip(evidence, a9))
 
         results.check("C08", [
             (sequence(a5).contains("search"), "A5 searched prep notes (saw \(sequence(a5)))"),
@@ -413,9 +355,8 @@ struct LiveE2ETests {
         ])
         results.time("A5 question-to-tip", seconds: Self.questionToTip(evidence, a5))
         results.check("C09", loads(a1).contains("coding"), "A1 loaded coding (saw \(loads(a1)))")
-        results.check("C10", committed.count == 4
-            && Set(committed) == ["coding", "behavioral", "search_prep_notes", "system-design"],
-                      "four required loads, each once (saw \(committed))")
+        results.check("C10", committed == ["coding", "behavioral", "search_prep_notes", "system-design"],
+                      "four loads, each once, in order (saw \(committed))")
 
         results.check("C11", [
             (a7.allSatisfy { !$0.isEmpty }, "both A7 presses ran an attempt"),

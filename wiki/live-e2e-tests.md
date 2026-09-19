@@ -88,7 +88,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|C|P|R|F01|F02|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|D|R|F01|F02|all] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -136,10 +136,8 @@ after decoding, and no audio is archived.
 Capabilities are fixed at Start, so each switch configuration is its own scenario; brain switches
 happen inside a scenario, applied the way a Settings edit applies them. Steps live in
 `Tests/JarvisLiveTests/Scenarios/`; fixtures in `Tests/JarvisLiveTests/Fixtures/` are the coding
-screenshot `coding-problem.jpg`, fictional behavioral `prep-notes.md`, and the partial technical
-`shared-prep-notes.md` for Scenario P. Its unavailable-index variant uses `empty-prep-notes.md`,
-whose heading has no indexable content. Each behavioral story is one section with no
-sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
+screenshot `coding-problem.jpg` and fictional `prep-notes.md`, including a short search-design
+section with cache invalidation. Each story is one section with no sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
 again. The manager story stays out of everything a teammate query returns, so the first behavioral
 search never already answers the second and C08 stays a real check; `LiveE2EScenarioTests` pins that
 layout in the Gate.
@@ -149,13 +147,13 @@ layout in the Gate.
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
 | B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
-| P | Codex | A cold coding hint with prep notes, a calendar reminder architecture question, reuse of that evidence, a daylight-saving question with partial coverage, and an unrelated graph question; a separate P-unavailable launch checks an empty prep index. |
+| D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
 
-Scenario A's second half and the focused prep scenario P run on Codex; B's second half runs on the
-Gemini API, a few Flash calls. The remaining scenarios and evaluation run on Claude. The ChatGPT plan's usage limit is the
+Only Scenario A's second half runs on Codex, and B's second half runs on the Gemini API, a few Flash
+calls; every other scenario and the evaluation run on Claude. The ChatGPT plan's usage limit is the
 one a day of runs exhausts, and A's Codex stretch (a behavioral search, a spoken screen question, two
 presses, and a design follow-up) is enough to keep that subscription covered.
 
@@ -207,6 +205,12 @@ and a code block accepted by `ReplyDetail`. The candidate already understands a 
 and is stuck implementing it, so code accompanies these actionable hints. A missing block is a
 regression failure, not a note; conceptual orientation is covered by other scenarios.
 
+Scenario D's AI proposal and test output are candidate reports carried through real transcription.
+Its JPEG remains the coding fixture, so its assertions do not establish Chrome panel detection or
+observed test execution. Advice quality, restrictions, and factual caveats are judged against the
+[scenario rubric](../Tests/JarvisLiveTests/Scenarios/D-review.md). Results explicitly record semantic
+review as not evaluated; structural success alone does not establish that the advice is correct.
+
 ## Notes and the rerun rule
 
 Some cases depend on what the model chose rather than on what the app did, and those write a `note`
@@ -230,7 +234,7 @@ choice nor a failure: it is judged through its retry, as the evidence rules abov
 - **Only Scenario R touches the real audio device.** The physical microphone, the aggregate device,
   echo cancellation, and the system-wide tap run only in R, which starts the production capture and
   waits for readiness on real frames. The [transcription benchmark](./transcription-benchmark.md)
-  covers the tap with known audio, and the permission gate walk stays manual.
+  covers the tap with known audio, and the onboarding walk stays manual.
 - **The screen is injected.** No scenario shoots the Mac's screen, so the front-window pick, the
   `screencapture` helper, and its cleanup run only in their Gate tests (`FrontWindowSelectorTests`,
   `ScreenCaptureRunnerTests`) and in everyday use. A real front window would need an idle, unlocked
@@ -250,7 +254,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C02 | Small talk loads nothing | A: the interviewer's logistics line |
 | C03 | The first behavioral question picks the behavioral skill | A: the first behavioral question |
 | C04 | An already-loaded kind never reloads | A: every turn on Codex |
-| C05 | Prep search loads on demand and stays callable on every brain | A: the cold coding press and the OpenAI design question |
+| C05 | Prep search loads on demand and stays callable on every brain | A: the first behavioral question and the OpenAI design question |
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
 | C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the OpenAI design question |
 | C08 | A second prepared question searches without loading, on another brain | A: the second behavioral question, on Codex |
@@ -273,17 +277,15 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C25 | Explain more delivers a detail, even when the model first answers in prose | B: the Explain more press |
 | C26 | Ordinary hint presses deliver hint and code in the same reply without Show code | C: both hint presses |
 | C27 | A keyed target coaches after a switch, replaying another provider's calls | B: the behavioral question and the hint press, on Gemini |
-| C28 | Prep retrieval precedes the first reply on a cold shortcut and each new topic | P |
-| C29 | A follow-up covered by retrieved evidence does not search again | P: reminder progress follow-up |
-| C30 | Relevant evidence informs the answer; uncovered topics still receive grounded guidance | P: recorded replies and search results, manual content review |
-| C31 | An unavailable prep index is tried once and still yields a hint | P-unavailable: cold shortcut |
+| C28 | Code with AI guidance loads before permitted review and ordinary hint presses deliver committed replies | D |
+| C29 | A blocked delegation step delivers supporting detail without an explicit prompt request | D; semantics use `Tests/JarvisLiveTests/Scenarios/D-review.md` |
+| C30 | Review of a valid AI proposal delivers supporting detail without a confusion signal | D; explanation quality uses the same semantic rubric |
+| C31 | Technical preparation is searched when relevant and reused; unrelated coding skips search | A: design, cache invalidation, and one-pass questions |
 
-C28 and C29 assert actual retrieval order and reuse in Scenario P. C30 records the replies for
-semantic review: the calendar answer must connect authoritative rules to durable reminder jobs and
-periodic replenishment, preserve the proposed status of the fixture's horizon, and use independent
-reasoning for its uncovered DST topic and unrelated graph question. Search counts alone do not prove
-that an answer used relevant evidence. Review the search results and delivered replies together;
-this content check is manual and is not reported as an automated pass.
+C31 checks Scenario A's selective technical retrieval: the existing design question searches before
+answering, its cache-invalidation follow-up reuses the excerpt, and the one-pass coding question
+answers without a prep search. The Gate checks that the technical section includes the follow-up
+and stays out of the teammate and manager searches.
 
 ### General coaching flow
 
@@ -307,7 +309,7 @@ this content check is manual and is not reported as an automated pass.
 |---|---|---|
 | F01 | Frames never arrive | F01: no system frames degrades to microphone-only; no microphone frames ends the session |
 | F02 | The transcription provider refuses the key | F02: the session ends naming the rejection and `invalid_api_key` |
-| F03 | The permission gate walk | Manual |
+| F03 | The onboarding walk | Manual |
 | S01 | Realtime reconnect recovery | `./scripts/transcription-benchmark.sh reconnect` |
 | R01 | Check for Updates in a signed build | Manual, when update code changes |
 | R02 | Evaluate picks the right release source | Manual, when evaluation source selection changes |
@@ -319,10 +321,11 @@ release, a real device change, or macOS's own dialogs, so the run cannot perform
 to run it and what to confirm. A pull request that changes one of these areas runs its check or names
 it as unverified in its description.
 
-- **Permission gate walk (F03),** when the gate or its permission probes change, because macOS does not
-  let automation click its own permission dialogs. Reset the three services and the one persisted
-  marker as [build-and-run.md → Packaging & signing](./build-and-run.md#packaging--signing--why-permission-grants-persist)
-  describes, then walk the gate against [architecture.md → Permissions](./architecture.md#permissions).
+- **Onboarding walk (F03),** when onboarding, its key check, or its permission probes change, because
+  macOS does not let automation click its own permission dialogs. Reset as
+  [build-and-run.md → Packaging & signing](./build-and-run.md#packaging--signing--why-permission-grants-persist)
+  describes, then walk both steps against [architecture.md → Onboarding](./architecture.md#onboarding)
+  and [Permissions](./architecture.md#permissions).
 - **Check for Updates (R01),** when the updater or feed code changes. In a signed release build, confirm
   the item is greyed out while a session runs, enabled once stopped, and reports the app up to date
   against the current release. Releases themselves are verified by the release workflow.

@@ -16,11 +16,13 @@ public struct BrainProviderDescriptor: Sendable, Equatable {
 
     public enum WireFormat: Sendable, Equatable {
         case responses
+        case messages
         case interactions
     }
 
     public enum FailureTable: Sendable, Equatable {
         case openAI
+        case anthropic
         case gemini
     }
 

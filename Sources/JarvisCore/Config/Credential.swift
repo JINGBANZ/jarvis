@@ -40,4 +40,12 @@ public enum Credential: String, Sendable, Hashable, CaseIterable {
         case .geminiAPIKey: "AIza…"
         }
     }
+
+    /// Where a new user creates a key.
+    public var keyPageURL: URL {
+        switch self {
+        case .openAIAPIKey: URL(string: "https://platform.openai.com/api-keys")!
+        case .geminiAPIKey: URL(string: "https://aistudio.google.com/apikey")!
+        }
+    }
 }

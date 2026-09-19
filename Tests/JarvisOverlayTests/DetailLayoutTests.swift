@@ -5,6 +5,75 @@ import Testing
 
 @MainActor
 @Suite struct DetailLayoutTests {
+    @Test func aSentenceAfterACodeBlockIsDrawnBelowIt() throws {
+        let detail = try #require(ReplyDetail(markdown: """
+            First, track the last index.
+
+            ```python
+            last_seen = {}
+            ```
+
+            Then handle the empty string.
+            """))
+        #expect(try stackedText(detail) == ["First, track the last index.",
+                                            "last_seen = {}",
+                                            "Then handle the empty string."])
+    }
+
+    @Test func aNoteAfterADiagramIsDrawnBelowItAndTheDiagramFitsWhatTheTextLeaves() throws {
+        let detail = try #require(ReplyDetail(markdown: """
+            Sketch the read path.
+
+            ```mermaid
+            flowchart TD
+            A[Client] --> B[API]
+            B --> C[Database]
+            ```
+
+            The API owns the cache.
+            """))
+        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+        view.show(detail, stamp: "10:30:00", position: (0, 1), isHeld: false, isRolled: false,
+                  fontSize: 14)
+        view.layoutSubtreeIfNeeded()
+        let scroll = try #require(view.subviews.compactMap { $0 as? NSScrollView }.first)
+        let document = try #require(scroll.documentView)
+        let stacked = document.subviews.filter { !$0.isHidden }.sorted { $0.frame.minY < $1.frame.minY }
+        #expect(stacked.map { $0.accessibilityLabel() } == ["Detail", "Diagram", "Detail"])
+        #expect((stacked.last as? NSTextView)?.string == "The API owns the cache.")
+        #expect(stacked[1].frame.maxY <= stacked[2].frame.minY)
+        #expect(document.frame.height <= scroll.contentSize.height,
+                "the note below the diagram counts against the space the diagram scales into")
+    }
+
+    /// VoiceOver walks the view hierarchy, not the frames.
+    @Test func theViewHierarchyFollowsTheDrawnOrder() throws {
+        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        func hierarchy(_ markdown: String) throws -> [String?] {
+            view.show(try #require(ReplyDetail(markdown: markdown)), stamp: "10:30:00",
+                      position: (0, 1), isHeld: false, isRolled: false, fontSize: 14)
+            let scroll = try #require(view.subviews.compactMap { $0 as? NSScrollView }.first)
+            return try #require(scroll.documentView).subviews.map { $0.accessibilityLabel() }
+        }
+        #expect(try hierarchy("First.\n\n```python\na = 1\n```\n\nThen.")
+            == ["Detail", "Code block", "Detail"])
+        #expect(try hierarchy("```mermaid\nflowchart LR\nA[Client] --> B[API]\n```\n\nA note.")
+            == ["Diagram", "Detail"])
+    }
+
+    private func stackedText(_ detail: ReplyDetail) throws -> [String] {
+        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        view.show(detail, stamp: "10:30:00", position: (0, 1), isHeld: false, isRolled: false,
+                  fontSize: 14)
+        view.layoutSubtreeIfNeeded()
+        let scroll = try #require(view.subviews.compactMap { $0 as? NSScrollView }.first)
+        let document = try #require(scroll.documentView)
+        return document.subviews.compactMap { $0 as? NSTextView }
+            .filter { !$0.isHidden }
+            .sorted { $0.frame.minY < $1.frame.minY }
+            .map(\.string)
+    }
+
     @Test func longLinesWrapWithoutChangingTheCode() throws {
         let detail = try #require(ReplyDetail(markdown: """
             ```python
@@ -19,10 +88,10 @@ import Testing
         view.layoutSubtreeIfNeeded()
         let scroll = try #require(view.subviews.compactMap { $0 as? NSScrollView }.first)
         let document = try #require(scroll.documentView)
-        // Find the code view by label: the prose view is also an NSTextView, hidden and empty here.
+        // Find the code view by label: a prose view is also an NSTextView.
         let views = document.subviews.compactMap { $0 as? NSTextView }
         let text = try #require(views.first { $0.accessibilityLabel() == "Code block" })
-        #expect(views.first { $0.accessibilityLabel() == "Detail" }?.isHidden == true)
+        #expect(!views.contains { $0.accessibilityLabel() == "Detail" })
         #expect(document.frame.width <= scroll.contentSize.width)
         #expect(document.frame.height <= scroll.contentSize.height)
         #expect(view.codeText.string == detail.code?.code)
