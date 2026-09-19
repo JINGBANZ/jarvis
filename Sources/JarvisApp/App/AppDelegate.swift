@@ -27,7 +27,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private let screenPreferences = ScreenCapturePreferences()
     private let prepMaterialPreferences = PrepMaterialPreferences()
     private let permissionPreferences = PermissionPreferences()
-    private var permissionGate: PermissionGate!
+    private let onboardingPreferences = OnboardingPreferences()
+    private var onboarding: OnboardingGate!
     private var didStartApp = false
     private let hotkeyPreferences = CoachingShortcut.allCases.map { HotkeyPreferences(shortcut: $0) }
     private var activityViewer: ActivityViewer!
@@ -41,16 +42,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
         MainMenu.install()
 
-        permissionGate = PermissionGate(preferences: permissionPreferences)
-        permissionGate.onSatisfied = { [weak self] in self?.startApp() }
+        onboarding = OnboardingGate(
+            preferences: onboardingPreferences,
+            permissionPreferences: permissionPreferences,
+            secrets: secrets,
+            keyStore: secretFile,
+            brainPreferences: BrainPreferences(),
+            transcriptionPreferences: transcriptionPreferences)
+        onboarding.onFinished = { [weak self] in self?.startApp() }
         // Async: proving the system-audio grant runs a tap, which must not block the main thread.
         Task { @MainActor [weak self] in
-            guard let self else { return }
-            if await self.permissionGate.holdsEveryGrant() {
-                self.startApp()
-            } else {
-                self.permissionGate.present()
-            }
+            await self?.onboarding.begin()
         }
     }
 
@@ -251,7 +253,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Quitting from the permission gate: nothing exists to stop yet.
+        // Quitting from onboarding: nothing exists to stop yet.
         guard didStartApp else { return .terminateNow }
         activityViewer?.cancelEvaluation()
         stop(reason: .applicationQuit)
@@ -278,7 +280,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         // System audio is left to the probe below: requiring its last answer here would let one
         // failed probe refuse every later Start until relaunch.
         let readinessConfiguration = JarvisReadiness.Configuration(
-            requiredPermissions: PermissionGate.required.subtracting([.systemAudio]),
+            requiredPermissions: Set(JarvisReadiness.Permission.allCases).subtracting([.systemAudio]),
             requiredCredentials: requiredCredentials,
             requiresTranscriptionPreparation: preparesAppleSpeech)
         let readinessStart = readiness.begin(configuration: readinessConfiguration)

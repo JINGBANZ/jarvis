@@ -8,6 +8,8 @@ final class RobotHeadView: NSView {
     enum Style: Equatable {
         case hero
         case badge(RobotPart)
+        /// The hero drawing with fixed parts lit, and no hover, clicks, or animation.
+        case still(lit: Set<RobotPart>)
     }
 
     var highlightedPart: RobotPart? {
@@ -54,9 +56,11 @@ final class RobotHeadView: NSView {
         designTransform().concat()
         switch style {
         case .hero:
-            drawHero(time: animationTime)
+            drawHero(time: animationTime, lit: Set([highlightedPart].compactMap { $0 }))
         case .badge(let part):
             drawBadge(lit: part)
+        case .still(let lit):
+            drawHero(time: 0, lit: lit)
         }
         context.restoreGraphicsState()
     }
@@ -78,14 +82,13 @@ final class RobotHeadView: NSView {
         return transform
     }
 
-    private func drawHero(time: Double) {
-        let lit = highlightedPart
+    private func drawHero(time: Double, lit: Set<RobotPart>) {
         paint(NSBezierPath(roundedRect: Self.neckRect, xRadius: 3, yRadius: 3),
               fill: SettingsTheme.shell, stroke: SettingsTheme.purple.withAlphaComponent(0.7), width: 1)
         paint(Self.shellPath(), fill: SettingsTheme.shell, stroke: SettingsTheme.purple, width: 2)
 
-        glowing(lit == .brain) {
-            let hot = lit == .brain
+        glowing(lit.contains(.brain)) {
+            let hot = lit.contains(.brain)
             paint(Self.domePath(),
                   fill: hot ? SettingsTheme.highlightFill : SettingsTheme.dome,
                   stroke: hot ? SettingsTheme.teal : SettingsTheme.purple.withAlphaComponent(0.7),
@@ -105,8 +108,8 @@ final class RobotHeadView: NSView {
             }
         }
 
-        glowing(lit == .ear) {
-            let hot = lit == .ear
+        glowing(lit.contains(.ear)) {
+            let hot = lit.contains(.ear)
             for rect in Self.earRects {
                 paint(NSBezierPath(roundedRect: rect, xRadius: 10, yRadius: 10),
                       fill: hot ? SettingsTheme.highlightFill : SettingsTheme.shell,
@@ -123,8 +126,8 @@ final class RobotHeadView: NSView {
                                         width: 7, height: 7)).fill()
         }
 
-        glowing(lit == .eye) {
-            let hot = lit == .eye
+        glowing(lit.contains(.eye)) {
+            let hot = lit.contains(.eye)
             paint(NSBezierPath(roundedRect: Self.visorRect, xRadius: 21, yRadius: 21),
                   fill: SettingsTheme.visor,
                   stroke: hot ? SettingsTheme.teal : SettingsTheme.purple.withAlphaComponent(0.6),
@@ -132,8 +135,8 @@ final class RobotHeadView: NSView {
         }
         drawEyes(verticalRadius: Self.eyeOpenness(time))
 
-        glowing(lit == .mouth) {
-            if lit == .mouth {
+        glowing(lit.contains(.mouth)) {
+            if lit.contains(.mouth) {
                 paint(NSBezierPath(roundedRect: Self.mouthRect, xRadius: 10, yRadius: 10),
                       fill: SettingsTheme.highlightFill, stroke: SettingsTheme.teal, width: 2.5)
             }

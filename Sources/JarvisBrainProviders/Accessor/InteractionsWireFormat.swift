@@ -75,10 +75,11 @@ struct InteractionsWireFormat: BrainWireFormat {
             "max_output_tokens": maxOutputTokens,
         ]
         var body: [String: Any] = ["model": model, "input": input, "store": false]
+        var verbatim = VerbatimJSON()
         if !tools.isEmpty {
             body["tools"] = try tools.map { tool -> [String: Any] in
                 ["type": "function", "name": tool.name, "description": tool.description,
-                 "parameters": try JSONSerialization.jsonObject(with: Data(tool.parametersJSON.utf8))]
+                 "parameters": try verbatim.placeholder(for: tool.parametersJSON)]
             }
             // Top-level `tool_choice` and any parallel-call field are 400s; the runner answers extra
             // calls itself.
@@ -97,7 +98,7 @@ struct InteractionsWireFormat: BrainWireFormat {
         if !instructions.isEmpty {
             body["system_instruction"] = instructions.joined(separator: "\n\n")
         }
-        return try JSONSerialization.data(withJSONObject: body)
+        return try verbatim.data(withJSONObject: body)
     }
 
     func decode(_ data: Data) throws -> BrainResponse {

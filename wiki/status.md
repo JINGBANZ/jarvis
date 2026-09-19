@@ -47,7 +47,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisOverlay/`: the capture-excluded caption and box panels and their chrome ([overlay-invisibility.md](./overlay-invisibility.md)).
 - `Sources/JarvisApp/App/` + `Sources/JarvisApp/MenuBar/`: the entry point, Start and Stop, and the session, brain, and artifact composition owners ([lean-coaching-core.md](./lean-coaching-core.md)).
 - `Sources/JarvisApp/Capture/`: microphone and system-audio capture with AEC3 and Silero VAD, the transcription provider adapters, permissions, and the window screenshot edge.
-- `Sources/JarvisApp/Onboarding/`: the launch permission gate ([architecture.md → Permissions](./architecture.md#permissions)).
+- `Sources/JarvisApp/Onboarding/`: first-run onboarding, an API key then the permissions ([architecture.md → Onboarding](./architecture.md#onboarding)).
 - `Sources/JarvisApp/Settings/`: the Settings window ([settings-window.md](./settings-window.md)).
 - `Sources/JarvisApp/Shortcuts/HotkeyController.swift`: the global coaching shortcuts.
 - `Sources/JarvisApp/Updates/UpdateController.swift`: the **Check for Updates** menu item ([build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed)).

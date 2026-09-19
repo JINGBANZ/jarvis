@@ -204,7 +204,7 @@ private final class DetailSink: OverlayRendering, @unchecked Sendable {
     func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}
     func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?) {
         self.lines = lines
-        self.detailText = detail.map { String($0.prose.characters) }
+        self.detailText = detail?.deliveredMarkdown
     }
 }
 private final class MissingExplanationScreen: ScreenCapturing, Sendable {

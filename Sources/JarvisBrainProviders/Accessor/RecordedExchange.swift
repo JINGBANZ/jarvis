@@ -82,7 +82,7 @@ public struct RecordedExchange: Equatable, Sendable {
         let declared = tools as? [[String: Any]] ?? []
         toolNames = declared.compactMap { $0["name"] as? String }
         guard let speak = declared.first(where: { $0["name"] as? String == speakToolName }),
-              let parameters = speak["parameters"] as? [String: Any],
+              let parameters = (speak["parameters"] ?? speak["input_schema"]) as? [String: Any],
               let properties = parameters["properties"] as? [String: Any]
         else {
             speakParameters = nil

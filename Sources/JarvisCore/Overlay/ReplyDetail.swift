@@ -9,53 +9,74 @@ public struct ReplyDetail: Sendable, Equatable {
         let range: Range<String.Index>
     }
 
-    /// A later fence of an already shown kind stays here as an inline code block.
-    public let prose: AttributedString
-    public let code: CodeBlock?
-    public let diagram: DiagramHint?
+    public enum Segment: Sendable, Equatable {
+        /// A later fence of an already shown kind stays here as an inline code block.
+        case prose(AttributedString)
+        case code(CodeBlock)
+        case diagram(DiagramHint)
+    }
+
+    /// In the order the markdown wrote them; at most one code block and one diagram.
+    public let segments: [Segment]
     public let dropped: [String]
     /// What the model replays and Activity records: the detail minus any dropped fence.
     public let deliveredMarkdown: String
 
-    public var hasContent: Bool {
-        code != nil || diagram != nil || !prose.characters.isEmpty
+    public var hasContent: Bool { !segments.isEmpty }
+
+    public var code: CodeBlock? {
+        for case .code(let block) in segments { return block }
+        return nil
+    }
+
+    public var diagram: DiagramHint? {
+        for case .diagram(let diagram) in segments { return diagram }
+        return nil
     }
 
     /// Nil when the markdown is blank.
     public init?(markdown: String) {
         guard !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        var diagram: DiagramHint?
-        var code: CodeBlock?
+        var shown: [(range: Range<String.Index>, segment: Segment)] = []
         var dropped: [String] = []
         // Rejected fences also leave the replay, so the model reads back only what the user saw.
-        var liftedFromProse: [Range<String.Index>] = []
-        var removedFromReplay: [Range<String.Index>] = []
+        var rejected: [Range<String.Index>] = []
 
         let fences = Self.fences(in: markdown)
         for fence in fences where fence.language == "mermaid" {
-            liftedFromProse.append(fence.range)
             if let parsed = DiagramHint(mermaid: fence.body) {
-                diagram = parsed
+                shown.append((fence.range, .diagram(parsed)))
                 break
             }
-            removedFromReplay.append(fence.range)
+            rejected.append(fence.range)
             dropped.append(Self.diagramDropped)
         }
         for fence in fences where fence.language != "mermaid" {
-            liftedFromProse.append(fence.range)
             if let parsed = CodeBlock(language: fence.language, code: fence.body) {
-                code = parsed
+                shown.append((fence.range, .code(parsed)))
                 break
             }
-            removedFromReplay.append(fence.range)
+            rejected.append(fence.range)
             dropped.append(Self.codeDropped)
         }
 
-        self.code = code
-        self.diagram = diagram
+        var segments: [Segment] = []
+        var cursor = markdown.startIndex
+        func appendProse(upTo end: String.Index) {
+            let inside = rejected.filter { $0.lowerBound >= cursor && $0.upperBound <= end }
+            let prose = Self.parseProse(Self.removing(inside, from: markdown[cursor..<end]))
+            if !prose.characters.isEmpty { segments.append(.prose(prose)) }
+        }
+        for block in shown.sorted(by: { $0.range.lowerBound < $1.range.lowerBound }) {
+            appendProse(upTo: block.range.lowerBound)
+            segments.append(block.segment)
+            cursor = block.range.upperBound
+        }
+        appendProse(upTo: markdown.endIndex)
+
+        self.segments = segments
         self.dropped = dropped
-        self.deliveredMarkdown = Self.removing(removedFromReplay, from: markdown)
-        self.prose = Self.parseProse(Self.removing(liftedFromProse, from: markdown))
+        self.deliveredMarkdown = Self.removing(rejected, from: markdown[...])
     }
 
     // MARK: - Fence scanning
@@ -115,8 +136,8 @@ public struct ReplyDetail: Sendable, Equatable {
 
     // MARK: - Rendering
 
-    private static func removing(_ ranges: [Range<String.Index>], from markdown: String) -> String {
-        guard !ranges.isEmpty else { return markdown }
+    private static func removing(_ ranges: [Range<String.Index>], from markdown: Substring) -> String {
+        guard !ranges.isEmpty else { return String(markdown) }
         var remaining = ""
         var cursor = markdown.startIndex
         for range in ranges.sorted(by: { $0.lowerBound < $1.lowerBound }) {

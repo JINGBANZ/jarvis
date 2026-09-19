@@ -11,7 +11,7 @@ import Testing
         #expect(box.currentDetailPosition == "1 of 1")
         try deliver(box, "Add a cache.", "flowchart LR\nB[API] --> C[Cache]")
         #expect(box.currentDetailPosition == "2 of 2")
-        #expect(box.currentDetail?.prose.characters.isEmpty == false)
+        #expect(box.currentDetail?.segments.count == 2)
         #expect(box.currentDetailProseText.contains("Add a cache."))
         #expect(box.currentDetailTitle.hasPrefix("DETAIL · FROM "))
     }

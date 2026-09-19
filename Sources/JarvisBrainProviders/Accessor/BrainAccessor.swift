@@ -50,6 +50,8 @@ public struct BrainAccessor: BrainClient, Sendable {
             wire = ResponsesWireFormat(
                 model: model, reasoningEffort: effort, maxOutputTokens: cap,
                 store: !provider.servedByLocalProxy)
+        case .messages:
+            wire = MessagesWireFormat(model: model, reasoningEffort: effort, maxOutputTokens: cap)
         case .interactions:
             wire = InteractionsWireFormat(model: model, reasoningEffort: effort, maxOutputTokens: cap)
         }
@@ -78,6 +80,9 @@ public struct BrainAccessor: BrainClient, Sendable {
         var request = URLRequest(url: endpoint, timeoutInterval: timeout)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (field, value) in wire.requestHeaders {
+            request.setValue(value, forHTTPHeaderField: field)
+        }
         switch provider.descriptor.auth {
         case .bearer: request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         case .googAPIKey: request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
@@ -110,13 +115,23 @@ public struct BrainAccessor: BrainClient, Sendable {
         guard (200..<300).contains(status) else {
             throw failure(httpStatus: status, body: data)
         }
-        return try wire.decode(data)
+        do {
+            return try wire.decode(data)
+        } catch let refusal as RefusedReply {
+            throw ProviderFailure(
+                source: .brain(provider), stage: .response, category: .rejected, disposition: .temporary,
+                identity: .init(errorType: "refusal", errorCode: refusal.category),
+                message: refusal.explanation)
+        }
     }
 
     private func failure(httpStatus: Int, body: Data) -> ProviderFailure {
         switch provider.descriptor.failureTable {
         case .openAI:
             OpenAIFailureClassifier.classify(
+                httpStatus: httpStatus, body: body, source: .brain(provider), stage: .request)
+        case .anthropic:
+            AnthropicFailureClassifier.classify(
                 httpStatus: httpStatus, body: body, source: .brain(provider), stage: .request)
         case .gemini:
             GeminiFailureClassifier.classify(

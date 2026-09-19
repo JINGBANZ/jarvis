@@ -156,9 +156,7 @@ enum SessionMetrics {
             guard let entry = record.object else { continue }
             let request = entry["request"] as? [String: Any]
             let response = entry["response"] as? [String: Any]
-            let exchange = RecordedExchange.read(
-                provider: entry["provider"] as? String ?? request?["provider"] as? String,
-                request: request, response: response)
+            let exchange = RecordedExchange.read(request: request, response: response)
             let model = exchange.model ?? "?"
             let recordKind = (entry["record_kind"] as? String)
                 .flatMap(BrainTrafficAuditEvent.Kind.init(rawValue:)) ?? .providerCall
