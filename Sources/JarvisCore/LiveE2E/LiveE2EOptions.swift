@@ -67,18 +67,19 @@ public struct LiveE2EOptions: Sendable {
         }
         let output = requestedOutput.resolvingSymlinksInPath().standardizedFileURL
         let repository = requestedRepository.resolvingSymlinksInPath().standardizedFileURL
-        let liveE2EBase = repository
+        let outputBaseName = arguments.contains("--browser-capture-check") ? "browser-capture" : "live-e2e"
+        let outputBase = repository
             .appendingPathComponent(".jarvis", isDirectory: true)
-            .appendingPathComponent("live-e2e", isDirectory: true)
+            .appendingPathComponent(outputBaseName, isDirectory: true)
             .resolvingSymlinksInPath()
             .standardizedFileURL
         // Two levels: each launch owns only its own `<run>/<id>` directory.
         let runDirectory = output.deletingLastPathComponent()
-        guard runDirectory.deletingLastPathComponent().pathComponents == liveE2EBase.pathComponents,
+        guard runDirectory.deletingLastPathComponent().pathComponents == outputBase.pathComponents,
               !runDirectory.lastPathComponent.isEmpty,
               !output.lastPathComponent.isEmpty else {
             throw Failure.invalid(
-                "output must be a scenario directory exactly two levels under \(liveE2EBase.path)")
+                "output must be a scenario directory exactly two levels under \(outputBase.path)")
         }
         guard FileManager.default.fileExists(
             atPath: repository.appendingPathComponent("Package.swift").path

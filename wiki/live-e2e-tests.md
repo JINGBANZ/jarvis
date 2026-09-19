@@ -204,6 +204,53 @@ and a code block accepted by `ReplyDetail`. The candidate already understands a 
 and is stuck implementing it, so code accompanies these actionable hints. A missing block is a
 regression failure, not a note; conceptual orientation is covered by other scenarios.
 
+## Explicit Chrome capture check
+
+`scripts/run-browser-capture-check.sh [expectation.json]` exercises `WindowScopedScreenCapture`
+inside the signed development app with Chrome text enabled, without audio or provider calls. It
+uses the existing confined live-e2e output options and a separate debug-only delegate. The script
+requires a built development app and no running development instance; it never quits a live preview
+to begin the check. Unlike the scenario command, this check reads the real foreground window.
+
+The operator opens the authorized fixture in Chrome and brings it forward during the script's
+five-second preparation window. Screen Recording and Accessibility grants must already exist;
+missing grants or a non-Chrome foreground app produce a blocked result and exit 2. Missing capture,
+missing completion evidence, truncation, and mismatched expectations fail with exit 1. Success exits
+0. The script waits up to 30 seconds, then requests cancellation and allows five seconds for cleanup.
+The app independently cancels capture after 25 seconds. If cancellation is not acknowledged, the
+command fails and leaves the app alive to finish its helper cleanup; the output directory requires
+inspection before another run.
+
+The default HTML and JSON under `Tests/JarvisLiveTests/Fixtures/browser-capture.*` are a small
+synthetic smoke fixture, not a CoderPad emulator. `BrowserCaptureExpectation` requires exact text
+blocks from accessibility evidence; OCR cannot satisfy them. Include the entire expected file as
+one required block to check every line and indentation. Separate blocks check only those blocks,
+not the unseen content between them. An optional forbidden-text list can detect content from an
+unselected tab when the operator places its sentinel there. Gate tests cover missing middle lines,
+wrong file names, whitespace changes, OCR-only captures, truncation, and excluded text.
+
+Results and the supplied expectation stay owner-only under the main workspace's `.jarvis/browser-capture`,
+even when the source worktree is temporary. Capture-check directories are outside the ten-run live
+e2e retention pool and are retained until the operator removes them. `LiveE2EOptions` selects this
+base only for `--browser-capture-check`; ordinary scenarios still require `.jarvis/live-e2e`.
+Both modes require exactly two output-directory levels and reject symbolic links and stale evidence.
+A launch failure reports its exit status and diagnostic directory. The check writes no raw captured
+text or image archive. Successful capture removes its temporary image through the production runner.
+A failed or unacknowledged cleanup can leave a transient image in the protected output directory and
+must be investigated. A pass establishes the expected text in that capture and unchanged foreground
+application, not cursor/scroll stability, file memory, revision identity, or CoderPad-wide full-file
+support. Run it with expectations for the actual editor to measure those exposure limits; the
+operator owns all file switches and scrolling.
+
+**Not yet proven live.** This check has never been run against a real Chrome tab. Do the first
+measurement by hand before trusting it or wiring it into any automated flow: build the signed dev
+app, open the fixture (or a real CoderPad page) in Chrome, and run the script with the checklist
+this section describes. Known suspects if it doesn't pass cleanly: `AccessibleTextExtractor` may
+trim per-node text such that the fixture's indented block only matches if Chrome returns the whole
+`<pre>` as one accessibility node; `forbiddenText` in the expectation schema is required even though
+this text describes it as optional; and the delegate's catch block drops a thrown error without a
+`jlog` call, which would hide a failure's real cause.
+
 ## Notes and the rerun rule
 
 Some cases depend on what the model chose rather than on what the app did, and those write a `note`
