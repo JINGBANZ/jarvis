@@ -627,10 +627,12 @@ API calls from the normal test gate. Realtime health remains visible through the
 Activity badge; `ErrorReporter` owns failure lifecycle and permitted startup surfacing.
 
 Brain transport diagnostics (`BrainRequestDelegate`) use per-task URLSession metrics while
-preserving the shared connection pool. DNS/connect/TLS/upload/response durations and connection
-reuse/proxy counts enter the existing `BrainTrafficAuditEvent.phases` on the same provider-call record
-the evaluator reads. Missing endpoints are omitted, not reported as zero. No parallel correlation
-stream is emitted; diagnostic fields exclude URLs, headers, payloads, and arbitrary error text.
+preserving the shared connection pool. On an unstreamed request, DNS/connect/TLS/upload/response
+durations and connection reuse/proxy counts enter the existing `BrainTrafficAuditEvent.phases` on the
+same provider-call record the evaluator reads. A streamed reply is recorded at its terminal event,
+before URLSession finishes collecting those metrics, so its record carries the streaming phases named
+under [Latency](#latency) instead. Missing endpoints are omitted, not reported as zero. No parallel
+correlation stream is emitted; diagnostic fields exclude URLs, headers, payloads, and arbitrary error text.
 
 ### Ordered provider route
 
@@ -660,6 +662,8 @@ the stream ([Latency](#latency)): the runner delivers and commits the lines as r
 written so far, through the same path as a completed reply, and logs `Detail: cut short`. Withdrawing
 text the user has already read and running a fresh attempt would risk a second, different hint for
 the same moment; a `max_tokens` cut mid-detail is the common case, a transport drop the rare one. A
+provider rejection, such as Claude's `refusal` stop, is excluded: the provider ended that reply on
+purpose, so it is withdrawn and fails like a failure before the lines closed. A
 provider error, an incomplete response, a reply the runner cannot answer within the
 response cap ([Capabilities](#capabilities)), or failure after an intermediate `capture_screen` fails
 the attempt once; cancellation, filler suppression, and local

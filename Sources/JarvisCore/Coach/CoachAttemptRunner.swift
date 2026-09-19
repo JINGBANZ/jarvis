@@ -408,8 +408,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("Jarvis coach: brain request failed on \(reason) via "
                          + "\(attempt.target.provider.displayName): \(failure.errorDescription ?? "")")
                     // Lines the user has read stay on screen and commit with the detail so far.
-                    // An array that closed empty showed nothing, so it has nothing to keep.
-                    if let streamed, streamed.linesComplete, !streamed.closedLines.isEmpty {
+                    // An array that closed empty showed nothing, so it has nothing to keep, and a
+                    // rejection (Claude's refusal stop) ended the reply on purpose, so nothing is kept.
+                    if let streamed, streamed.linesComplete, !streamed.closedLines.isEmpty,
+                       failure.category != .rejected {
                         jlog("Detail: cut short (\(failure.category.rawValue))")
                         return await speak(streamed)
                     }
