@@ -446,14 +446,20 @@ Markdown, diagram source included, is persisted with the tip in the owner-only s
 
 On a streamed reply ([Latency](#latency)) the detail box follows the detail as the model writes it:
 each snapshot's text so far is parsed by `ReplyDetail(partialMarkdown:)` and shown as the newest
-detail, held or stepped through like any other, and the reader's scroll position survives each
-update; a snapshot that parses to nothing the box would show, such as a code block that has just
-outgrown its bounds, takes the live detail down until one does. An open fence is read up to its last
-complete line, because a diagram is parsed whole and a half-written line would drop it on every
-character until the line ends; code therefore appears a line at a time. `deliver` replaces the live
-detail with the delivered one, which is where dropped blocks are applied and where a detail the box
-cannot accept is dropped whole, and a withdrawn reply removes it and releases a hold placed on it,
-so the history holds one detail per reply whatever streamed.
+detail, held or stepped through like any other. Text and code stream as they arrive, a half-written
+line included. A diagram is parsed whole, so an open diagram fence contributes nothing until its
+closing fence arrives; until then the box shows a muted `Drawing diagram…` line where the diagram
+will appear, and a detail that is so far only an open diagram shows just that line. The placeholder
+is view state on the box's live detail, never part of a `ReplyDetail`, so it cannot reach the
+delivered or committed detail. A live detail keeps its hold, its dismissal, and the reader's scroll
+position while it grows, and a snapshot that parses to nothing the box would show, such as a code
+block that has just outgrown its bounds, leaves the last live detail up; only a withdrawal, the
+delivery, Clear, or Stop removes it. `deliver` replaces the live detail with the delivered one,
+which is where dropped blocks are applied and where a detail the box cannot accept is dropped
+whole, and a withdrawn reply removes it and releases a hold placed on it, so the history holds one
+detail per reply whatever streamed. A reply cut short after its lines closed commits its detail
+through the same partial parse the box showed, so a cut inside a diagram fence commits no diagram
+and a cut inside a code block commits the code as shown.
 
 ### On-demand coaching shortcuts
 
@@ -740,7 +746,8 @@ that target for the complete tool loop. Every provider request in that loop is m
 non-truncated terminal `speak` or `stay_silent` commits the attempt and clears that target's consecutive
 failure count. So does a `speak` reply that fails or is cut off after its `lines` array has closed on
 the stream ([Latency](#latency)): the runner delivers and commits the lines as read with the detail
-written so far, through the same path as a completed reply, and logs `Detail: cut short`. Withdrawing
+as the box showed it ([The detail box](#the-detail-box)), through the same path as a completed
+reply, and logs `Detail: cut short`. Withdrawing
 text the user has already read and running a fresh attempt would risk a second, different hint for
 the same moment; a `max_tokens` cut mid-detail is the common case, a transport drop the rare one. A
 provider rejection, such as Claude's `refusal` stop or an OpenAI reply that ends `incomplete` for
