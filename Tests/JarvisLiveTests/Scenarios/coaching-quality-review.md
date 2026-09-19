@@ -3,6 +3,11 @@
 `coaching-quality.json` contains synthetic inputs and semantic pass criteria for performance
 reasoning, adaptive verification, comprehension, bounded delegation, and distinguishing tests.
 It also includes ordinary-coding and system-design controls. No private session material is needed.
+These are development regressions, not held-out transfer tests: they informed the guidance and remain
+useful for checking the known failures after edits. Removing answer-specific examples from the skill
+does not make these cases held out. Report their results as regression evidence. A transfer claim
+requires separate, previously unused problems from different domains, evaluated without tuning the
+guidance to their answers; report those results separately.
 
 Run each input in a fresh model conversation with the production `JarvisPrompts.Coach.system`
 base instructions, `speakTool(detailEnabled: true)` guidance, and the named bundled skill bodies

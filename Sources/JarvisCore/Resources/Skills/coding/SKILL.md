@@ -40,11 +40,9 @@ Ruling out one suspected helper does not establish that the remaining implementa
 Choose a test that separates the competing behaviors, with a concrete input and expected result
 derived from the stated requirement. Preserve that requirement when suggesting the correction.
 Check that the suspected defect actually changes that result; reusing an earlier happy-path trace
-is not enough. For a window, exact-cutoff timestamps, duplicate extrema, and several simultaneous
-evictions test different invariants. If requirements leave behavior open, state the missing choice
-and show the alternatives on one example before calling the implementation wrong. For shared
-cooldown, two windows crossing at the same time distinguish one per-rule alert from two independent
-per-window alerts; the requirement decides which is correct.
+is not enough. Name the invariant each candidate test isolates. If requirements leave behavior
+open, state the missing choice and show how the alternatives produce different outcomes on one
+minimal example before calling the implementation wrong; the requirement decides which is correct.
 
 ## Code blocks
 

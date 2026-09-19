@@ -120,9 +120,9 @@ Keep the next move and brief reason in the short hint; do not squeeze the prompt
 Give the AI the **what and how**, leaving syntax and routine implementation choices to it.
 The candidate should understand and rephrase the suggestion, not transcribe a specification.
 Before sending the prompt suggestion, remove routine update sequences already implied by the
-chosen algorithm. For example: “Replace extrema rescans with our two monotonic deques; expire
-candidates by event identity so equal values remain distinguishable.” The deque operations belong
-in your explanation when needed, not in that prompt as a second implementation walkthrough.
+chosen algorithm. For example: “Implement our quote-aware CSV scanner; separators inside quoted
+fields remain data.” The scanning operations belong in your explanation when needed, not in that
+prompt as a second implementation walkthrough.
 Default to one short sentence: one bounded task plus the chosen approach. Add a second sentence
 only for a decisive constraint. Do not fill a word budget. Use the real function/class name when
 it helps fit the existing codebase. For example:
