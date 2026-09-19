@@ -6,21 +6,18 @@ final class DetailDocumentView: NSView {
     private var proseViews: [(view: NSTextView, text: AttributedString)] = []
     private let code = DetailDocumentView.makeTextView(label: "Code block")
     private let drawing = NSImageView()
-    /// One view per segment of the rendered detail, top to bottom.
     private var stack: [NSView] = []
     private var rendered: (detail: ReplyDetail, fontSize: CGFloat)?
     private var drawnDiagram: (diagram: DiagramHint, available: NSSize)?
     override var isFlipped: Bool { true }
     var codeText: NSAttributedString { code.attributedString() }
     var proseText: String { proseViews.map(\.view.string).joined(separator: "\n\n") }
-    var hasDiagram: Bool { !drawing.isHidden }
+    var hasDiagram: Bool { stack.contains(drawing) }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
-        addSubview(code)
         drawing.imageScaling = .scaleProportionallyUpOrDown
         drawing.setAccessibilityLabel("Diagram")
-        addSubview(drawing)
     }
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
@@ -56,27 +53,22 @@ final class DetailDocumentView: NSView {
                 ?? NSAttributedString())
     }
 
+    /// Subviews follow the stack because VoiceOver walks the hierarchy, not the frames.
     private func restack(_ segments: [ReplyDetail.Segment]) {
-        proseViews.forEach { $0.view.removeFromSuperview() }
+        stack.forEach { $0.removeFromSuperview() }
         proseViews = []
-        code.isHidden = true
-        drawing.isHidden = true
         stack = segments.map { segment in
             switch segment {
             case .prose(let text):
                 let view = Self.makeTextView(label: "Detail")
-                addSubview(view)
                 proseViews.append((view, text))
                 return view
-            case .code:
-                code.isHidden = false
-                return code
-            case .diagram:
-                drawing.isHidden = false
-                return drawing
+            case .code: return code
+            case .diagram: return drawing
             }
         }
-        if drawing.isHidden {
+        stack.forEach(addSubview)
+        if !hasDiagram {
             drawing.image = nil
             drawnDiagram = nil
         }

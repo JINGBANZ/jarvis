@@ -46,6 +46,21 @@ import Testing
                 "the note below the diagram counts against the space the diagram scales into")
     }
 
+    /// VoiceOver walks the view hierarchy, not the frames.
+    @Test func theViewHierarchyFollowsTheDrawnOrder() throws {
+        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
+        func hierarchy(_ markdown: String) throws -> [String?] {
+            view.show(try #require(ReplyDetail(markdown: markdown)), stamp: "10:30:00",
+                      position: (0, 1), isHeld: false, isRolled: false, fontSize: 14)
+            let scroll = try #require(view.subviews.compactMap { $0 as? NSScrollView }.first)
+            return try #require(scroll.documentView).subviews.map { $0.accessibilityLabel() }
+        }
+        #expect(try hierarchy("First.\n\n```python\na = 1\n```\n\nThen.")
+            == ["Detail", "Code block", "Detail"])
+        #expect(try hierarchy("```mermaid\nflowchart LR\nA[Client] --> B[API]\n```\n\nA note.")
+            == ["Diagram", "Detail"])
+    }
+
     /// Top to bottom, as drawn.
     private func stackedText(_ detail: ReplyDetail) throws -> [String] {
         let view = DetailView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
