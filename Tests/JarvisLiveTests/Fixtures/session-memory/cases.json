@@ -1,0 +1,452 @@
+{
+  "revision": 1,
+  "cases": [
+    {
+      "id": "calendar",
+      "rounds": [
+        {
+          "newHistory": [
+            {
+              "role": "user",
+              "text": "Interviewer Mira asks candidate Theo to design a shared calendar for 200 organizations. This is the current task; the earlier URL shortener exercise is finished. Mira says calendar correctness matters more than global search in this interview."
+            },
+            {
+              "role": "user",
+              "text": "Theo: recurring series and explicit exceptions are authoritative; expanded occurrences are derived. We accepted this data model. Exception identity uses the original local start plus series ID, even when an occurrence is moved. Deleting an exception must not create a new series."
+            },
+            {
+              "role": "user",
+              "text": "Mira: preserve the wall-clock meeting time in the series time zone across daylight-saving changes. We have not chosen whether to skip or shift a nonexistent local time. Do not assume UTC-only recurrence solves that decision."
+            },
+            {
+              "role": "user",
+              "text": "Theo: we discussed a 90-day expansion cache as a candidate, but Mira explicitly deferred the horizon decision. Redis is an option, not selected infrastructure. The horizon and cache vendor remain open."
+            },
+            {
+              "role": "user",
+              "text": "Theo: a code assistant proposed a recurrence patch and claimed its tests passed. I have not accepted that patch and have not seen the test output. My own hand-drawn example covered a weekly meeting, not a daylight-saving transition."
+            },
+            {
+              "role": "user",
+              "text": "Mira: before we discuss scale, keep the correctness constraints in view. An organization administrator can cancel an instance; consumers should still identify which original occurrence was canceled. We spent the next few minutes comparing read materialization with doing all expansion at request time."
+            },
+            {
+              "role": "assistant",
+              "calls": [
+                {
+                  "id": "cal1",
+                  "name": "speak",
+                  "arguments": "{\"lines\": [\"Separate authoritative recurrence from derived occurrences; explicitly resolve the daylight-saving gap policy.\"]}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "toolCallID": "cal1",
+              "text": "shown to the user"
+            }
+          ],
+          "question": "What recurrence records are authoritative, how are exceptions identified, what remains undecided about time and caching, and what verification actually occurred?",
+          "facts": [
+            "Series and explicit exceptions authoritative; expanded occurrences derived",
+            "Exception identity is original local start plus series ID",
+            "Wall-clock time stays in series time zone",
+            "Nonexistent local time skip/shift undecided",
+            "90-day horizon only proposed; cache vendor not selected",
+            "Assistant claimed tests passed; candidate neither accepted patch nor saw test output"
+          ]
+        },
+        {
+          "newHistory": [
+            {
+              "role": "user",
+              "text": "Mira returns to recurrence after discussing read paths: choose a 45-day rolling expansion horizon. Theo accepts 45 days; the old 90-day suggestion is rejected. No particular cache product is selected today."
+            },
+            {
+              "role": "user",
+              "text": "Theo and Mira now agree to shift nonexistent local times forward to the first valid local time. Ambiguous repeated times use the earlier offset. This is a policy agreement; no code or tests have yet demonstrated it."
+            },
+            {
+              "role": "user",
+              "text": "Theo: I accepted the revised recurrence patch, but still have not opened its tests. The assistant again says green. Acceptance is new; direct verification is still missing."
+            },
+            {
+              "role": "user",
+              "text": "Mira asks about tenant boundaries. Organization ID must scope each lookup. A permission revocation must block future reads immediately; deletion of already downloaded copies is outside the stated scope."
+            },
+            {
+              "role": "user",
+              "text": "Theo: the review is still on calendar correctness, not search ranking. I can draw the state change on paper. The earlier weekly example was insufficient for the tricky daylight-saving cases; I need a real result before calling those verified."
+            },
+            {
+              "role": "assistant",
+              "calls": [
+                {
+                  "id": "cal2",
+                  "name": "speak",
+                  "arguments": "{\"lines\": [\"Test the spring gap and fall repeat separately; a policy agreement is not evidence of execution.\"]}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "toolCallID": "cal2",
+              "text": "shown to the user"
+            }
+          ],
+          "question": "Which horizon and DST policies were accepted, what is the tenant-read constraint, and has the accepted patch actually been verified?",
+          "facts": [
+            "45-day horizon accepted, replacing 90-day suggestion",
+            "Gap shifts to first valid local time",
+            "Repeated local time uses earlier offset",
+            "Organization ID scopes every lookup",
+            "Revocation blocks future reads immediately",
+            "Patch accepted; tests only assistant-reported, not observed"
+          ]
+        },
+        {
+          "newHistory": [
+            {
+              "role": "user",
+              "text": "Theo shares actual test output: gap_case PASS and repeat_case FAIL. Mira sees the output. The failure concerns choosing the wrong offset in a repeated hour. The agreed earlier-offset rule has not changed."
+            },
+            {
+              "role": "user",
+              "text": "Mira: pause rollout until repeat_case passes. The spring gap test is genuinely observed green, but this is not an all-tests-pass result. Theo agrees and assigns himself the fix; no production deployment occurred."
+            },
+            {
+              "role": "user",
+              "text": "Theo: the 45-day horizon remains accepted. We have not measured cache hit rate or chosen Redis. I will keep organization scoping while fixing the recurrence code, and will not silently adopt the 90-day estimate."
+            },
+            {
+              "role": "user",
+              "text": "Mira: next session compare expansion work per tenant. Today end with a precise list of verified cases and unresolved work, preserving the original exception identifier if an occurrence moves."
+            },
+            {
+              "role": "assistant",
+              "calls": [
+                {
+                  "id": "cal3",
+                  "name": "speak",
+                  "arguments": "{\"lines\": [\"Report the observed gap pass and repeat failure separately; keep rollout paused.\"]}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "toolCallID": "cal3",
+              "text": "shown to the user"
+            }
+          ],
+          "question": "Summarize the final horizon, exception identity, observed test outcomes, repeat policy, rollout status, and remaining cache choice.",
+          "facts": [
+            "45-day horizon remains",
+            "Exception identity original local start plus series ID",
+            "Observed gap_case PASS",
+            "Observed repeat_case FAIL; earlier-offset rule unchanged",
+            "Rollout paused; no deployment",
+            "Cache vendor still undecided"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "behavioral",
+      "rounds": [
+        {
+          "newHistory": [
+            {
+              "role": "user",
+              "text": "Coach listens to interviewer Noor and candidate Elise in a behavioral interview about a warehouse migration. Noor asks for Elise\u2019s own contribution and what the team learned. This is a retrospective story, not permission to alter production."
+            },
+            {
+              "role": "user",
+              "text": "Elise: I wrote the reconciliation checker and coordinated the incident timeline. My teammate Luis designed the replication system. Please do not credit me with designing replication; we worked together but had distinct ownership."
+            },
+            {
+              "role": "user",
+              "text": "Elise: the migration slipped two days. We initially blamed the vendor, but the incident review found our retry configuration amplified duplicate deliveries. We did not prove the vendor caused the incident."
+            },
+            {
+              "role": "user",
+              "text": "Elise: the team reported mismatch rate fell from 3.2 percent to 0.4 percent after the checker rollout. I do not have the dashboard available in this interview, and the numbers are team-reported rather than independently observed here."
+            },
+            {
+              "role": "user",
+              "text": "Noor: do not invent cost savings or customer growth. I want the decision and the tradeoff. Elise chose a read-only checkpoint before write cutover, accepting the delay to prevent silent mismatches."
+            },
+            {
+              "role": "user",
+              "text": "Elise: legal review of the data-retention policy was still pending when I left the project. We discussed seven days but never got approval. I have not told the interviewer that a seven-day retention rule shipped."
+            },
+            {
+              "role": "assistant",
+              "calls": [
+                {
+                  "id": "beh1",
+                  "name": "speak",
+                  "arguments": "{\"lines\": [\"Use your checker ownership, the read-only checkpoint decision, and the reported mismatch numbers; do not claim Luis\\u2019s replication work.\"]}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "toolCallID": "beh1",
+              "text": "shown to the user"
+            }
+          ],
+          "question": "Who owned which work, why was cutover delayed, what metric can Elise cite with what confidence, and was retention approved?",
+          "facts": [
+            "Elise wrote reconciliation checker and coordinated timeline",
+            "Luis designed replication",
+            "Delay two days; read-only checkpoint chosen to prevent silent mismatches",
+            "Retry configuration amplified duplicates; vendor blame unproven",
+            "Team-reported mismatch 3.2% to 0.4%; dashboard unseen",
+            "Seven-day retention discussed, not approved; legal pending"
+          ]
+        },
+        {
+          "newHistory": [
+            {
+              "role": "user",
+              "text": "Noor asks a follow-up about disagreement. Elise says product manager Hana wanted Friday cutover, while Elise argued for the read-only checkpoint. Hana ultimately accepted the two-day delay after seeing the mismatch sample."
+            },
+            {
+              "role": "user",
+              "text": "Elise corrects a detail: I coordinated the timeline but Luis, not I, led the final incident review. I must distinguish keeping notes from leading the investigation."
+            },
+            {
+              "role": "user",
+              "text": "Elise: I can explain our retry-setting mistake without proving every delivery was duplicated. The evidence supports amplification, not an exact duplicate count. We never measured customer churn attributable to this incident."
+            },
+            {
+              "role": "user",
+              "text": "Noor: the story is clearer now. Please keep the technical detail short and explain what you would change next time. Elise proposes a staging replay before future migrations; that is a lesson and future proposal, not work done during this project."
+            },
+            {
+              "role": "user",
+              "text": "Elise: the legal retention question was still pending at handoff, and I have no update. I want to avoid adding a confident ending just because the interview is nearly finished."
+            },
+            {
+              "role": "assistant",
+              "calls": [
+                {
+                  "id": "beh2",
+                  "name": "speak",
+                  "arguments": "{\"lines\": [\"Distinguish coordinating the timeline from leading the review; frame staging replay as a future lesson.\"]}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "toolCallID": "beh2",
+              "text": "shown to the user"
+            }
+          ],
+          "question": "How was the disagreement resolved, who led the incident review, and what future lesson and unmeasured impact must remain qualified?",
+          "facts": [
+            "Hana wanted Friday cutover then accepted two-day delay",
+            "Luis led final incident review; Elise coordinated timeline",
+            "Staging replay is a future proposal, not completed project work",
+            "Duplicate amplification known, exact count unknown",
+            "Customer churn not measured",
+            "Legal retention still pending"
+          ]
+        },
+        {
+          "newHistory": [
+            {
+              "role": "user",
+              "text": "Noor asks for a final sixty-second answer. Elise finds a written handoff note during the interview: legal approved a three-day retention limit after she left. She reads the note aloud; no live system configuration is visible."
+            },
+            {
+              "role": "user",
+              "text": "Elise: the handoff note updates the approval status but does not prove deployment. I still cannot show the metrics dashboard. I will say the team reported 3.2 to 0.4 percent, and label the three-day rule as approved in the note."
+            },
+            {
+              "role": "user",
+              "text": "Noor: that distinction is sufficient. No need to revisit the earlier vendor accusation. Focus on personal ownership and the disagreement that changed the plan."
+            },
+            {
+              "role": "user",
+              "text": "Elise: my next-migration recommendation remains staging replay. Neither the note nor the story says replay was actually implemented. Luis still deserves credit for the replication design and incident-review leadership."
+            },
+            {
+              "role": "assistant",
+              "calls": [
+                {
+                  "id": "beh3",
+                  "name": "speak",
+                  "arguments": "{\"lines\": [\"Close with your decision and lesson while preserving reported metrics and approval-versus-deployment evidence.\"]}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "toolCallID": "beh3",
+              "text": "shown to the user"
+            }
+          ],
+          "question": "What can the final answer accurately say about ownership, mismatch improvement, retention approval versus deployment, and staging replay?",
+          "facts": [
+            "Elise owns checker and timeline coordination",
+            "Luis owns replication design and review leadership",
+            "3.2% to 0.4% remains team-reported; dashboard unseen",
+            "Written handoff note approves three-day retention",
+            "Retention deployment not observed",
+            "Staging replay remains recommendation, not implemented"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "window",
+      "rounds": [
+        {
+          "newHistory": [
+            {
+              "role": "user",
+              "text": "Interviewer Imani asks Ravi to implement a rolling event-window range check. Events arrive in nondecreasing timestamp order, including equal timestamps. The old linked-list warmup is finished. Focus now is exact boundaries before performance."
+            },
+            {
+              "role": "user",
+              "text": "Ravi accepts two monotone candidate deques. Both preserve arrival order, oldest retained candidate at the front. Min-deque values increase and max-deque values decrease. The coach offered the amortized argument; no benchmark has run."
+            },
+            {
+              "role": "user",
+              "text": "Imani sets an inclusive lower boundary: an event exactly at now minus W remains eligible. Only events strictly earlier than that cutoff expire. The predicate fires only when max minus min is strictly greater than D, not equal to D."
+            },
+            {
+              "role": "user",
+              "text": "Ravi: cooldown is scoped per sensor, but we have not decided whether an alert resets the window. The assistant proposed resetting all state on alert; I have not accepted that proposal."
+            },
+            {
+              "role": "user",
+              "text": "Ravi: I accepted a change from less-than-or-equal to strict less-than for expiration. I have not run it. A screenshot was attached in the original conversation, but we have no pixel evidence in this text-only record."
+            },
+            {
+              "role": "user",
+              "text": "Imani: negative values are allowed, equal timestamps retain arrival order, and W is positive. Do not sort all current values on each update. Ravi explains how a dominated candidate leaves from the back, while expired candidates leave from the front."
+            },
+            {
+              "role": "assistant",
+              "calls": [
+                {
+                  "id": "win1",
+                  "name": "speak",
+                  "arguments": "{\"lines\": [\"Trace equality at both the time cutoff and the range threshold; amortized reasoning is not a benchmark.\"]}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "toolCallID": "win1",
+              "text": "shown to the user"
+            }
+          ],
+          "question": "What are the time/range boundaries and deque invariants, which cooldown/reset decisions are established, and what evidence exists for the patch?",
+          "facts": [
+            "Expire only timestamp < now-W; equality stays",
+            "Alert only max-min > D; equality does not fire",
+            "Both deques arrival ordered; oldest retained at front",
+            "Min values increasing; max values decreasing",
+            "Cooldown per sensor; reset-on-alert undecided and unaccepted",
+            "Expiration patch accepted but not run; no benchmark"
+          ]
+        },
+        {
+          "newHistory": [
+            {
+              "role": "user",
+              "text": "Imani resolves alert behavior: keep window contents on alert. Only the sensor\u2019s last-alert time updates. Ravi accepts this rule and rejects the assistant\u2019s reset-all-state proposal."
+            },
+            {
+              "role": "user",
+              "text": "Ravi runs two hand calculations: at timestamp 100 with W=10, timestamp 90 stays and 89 expires. With D=5, range 5 does not fire and range 6 does. These are hand traces, not executable test results."
+            },
+            {
+              "role": "user",
+              "text": "Ravi adds a failing regression test for duplicate timestamps. The test runner output is visible and says duplicate_order FAIL. No passing test result is shown. The assistant suggests replacing indices with timestamps; Ravi has not accepted that suggestion."
+            },
+            {
+              "role": "user",
+              "text": "Imani insists preserving event identity because two events may share a timestamp and have different values. Ravi plans to use unique sequence IDs, but has not written the fix yet."
+            },
+            {
+              "role": "user",
+              "text": "Ravi: per-sensor cooldown remains unchanged. I want to avoid responding to the assistant\u2019s new algorithm suggestion before checking it against the agreed ordering and identity requirements."
+            },
+            {
+              "role": "assistant",
+              "calls": [
+                {
+                  "id": "win2",
+                  "name": "speak",
+                  "arguments": "{\"lines\": [\"Keep distinct event identity for equal timestamps; verify duplicate order before accepting another patch.\"]}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "toolCallID": "win2",
+              "text": "shown to the user"
+            }
+          ],
+          "question": "What happens on alert, what was hand-traced versus tested, and which duplicate-identity fix is only planned?",
+          "facts": [
+            "Keep window on alert; update only sensor last-alert time",
+            "100/W10 retains90 expires89; hand trace only",
+            "D5 range5 no fire range6 fire; hand trace only",
+            "Observed duplicate_order FAIL",
+            "Unique sequence IDs planned, not implemented",
+            "Timestamp-only replacement suggestion not accepted"
+          ]
+        },
+        {
+          "newHistory": [
+            {
+              "role": "user",
+              "text": "Ravi implements unique sequence IDs and shares actual output: duplicate_order PASS and cutoff_equal PASS. The coach sees those two results. No threshold-equality executable test or load benchmark appears."
+            },
+            {
+              "role": "user",
+              "text": "Imani asks whether cooldown duration is global. Ravi clarifies duration is configured globally but last-alert timestamps are stored separately per sensor. They agree that sensors do not suppress one another."
+            },
+            {
+              "role": "user",
+              "text": "Ravi: we keep window contents on alert, as agreed. The inclusive time boundary and strict range threshold are unchanged. The earlier hand traces still are not substitutes for missing threshold test output."
+            },
+            {
+              "role": "user",
+              "text": "Imani ends the exercise after the two passes. Ravi should describe O(1) amortized update as the analytical argument already discussed, without claiming measured throughput or all tests passing."
+            },
+            {
+              "role": "assistant",
+              "calls": [
+                {
+                  "id": "win3",
+                  "name": "speak",
+                  "arguments": "{\"lines\": [\"Name the two observed passes; threshold equality and throughput still lack executable evidence.\"]}"
+                }
+              ]
+            },
+            {
+              "role": "tool",
+              "toolCallID": "win3",
+              "text": "shown to the user"
+            }
+          ],
+          "question": "What is verified now, what remains unverified, how is cooldown scoped, and what window/boundary rules remain?",
+          "facts": [
+            "Observed duplicate_order PASS and cutoff_equal PASS",
+            "Threshold-equality executable result absent",
+            "No measured throughput; amortized O(1) is analytical",
+            "Global cooldown duration, per-sensor last-alert timestamps",
+            "Keep window on alert",
+            "Inclusive time cutoff; strict range threshold"
+          ]
+        }
+      ]
+    }
+  ]
+}
