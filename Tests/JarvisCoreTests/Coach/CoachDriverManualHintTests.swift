@@ -60,6 +60,31 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(userText.contains("two-sum"))
     }
 
+    @Test func manualHintIncludesSpeechFinalizedDuringCaptureWithoutDuplicateAttempt() async throws {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "answer", lines: ["O(1) amortized per event."])]),
+            .init(toolCalls: [.staySilent(callId: "duplicate")]),
+        ])
+        let screen = GatedScreen()
+        let (driver, transcript) = makeDriver(
+            brain: brain, screen: screen, overlay: FakeOverlay(), clock: ManualClock())
+        let task = Task { await driver.handleTrigger(.manualHint) }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async { screen.entered.wait(); continuation.resume() }
+        }
+        let boundary = transcript.append(.init(
+            speaker: .me, text: "What is the time complexity for this new approach?", at: 1))
+        #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary) == .busy)
+        screen.release.signal()
+
+        #expect(await task.value == .spoke)
+        let request = try #require(brain.calls.first)
+        #expect(request.contains { ($0.text ?? "").contains("What is the time complexity") })
+        #expect(brain.calls.count == 1)
+        #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary) == .busy)
+        #expect(brain.calls.count == 1)
+    }
+
     @Test func manualHintCarriesRecognizedTextAlongsideTheScreenshot() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.speak(callId: "s1", lines: ["groupEnd can be null on the last group."])],

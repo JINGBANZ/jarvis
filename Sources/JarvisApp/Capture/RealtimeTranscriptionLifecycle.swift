@@ -425,11 +425,12 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
 
     /// Publish under `lock` so concurrent socket and timeout callbacks cannot reorder transitions.
     private func updateCoachingActivityLocked() {
-        coachingCoordinator.updateTranscriptionWork(hasPendingWorkLocked)
-    }
-
-    private var hasPendingWorkLocked: Bool {
-        ledger.hasPendingItems || reconnectRecovery.blocksCoaching
-            || localSpeechActive || unboundLocalTurnCount > 0
+        let state: TranscriptionWorkState
+        if reconnectRecovery.blocksCoaching || localSpeechActive || unboundLocalTurnCount > 0 {
+            state = .pending(since: nil)
+        } else {
+            state = ledger.coachingWorkState
+        }
+        coachingCoordinator.updateTranscriptionWork(state)
     }
 }

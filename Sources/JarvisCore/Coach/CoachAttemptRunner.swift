@@ -95,6 +95,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
         /// Speech finalized during inference lies past this boundary, so a failure cannot discard
         /// it.
         var attemptedTranscriptBoundary = 0
+        /// Pin the delta admitted by the scheduler; target selection can suspend before the runner.
+        var admittedTranscript: RollingTranscript.Snapshot?
 
         init(reason: TriggerReason) {
             self.reason = reason
@@ -157,8 +159,47 @@ final class CoachAttemptRunner: @unchecked Sendable {
         let context = TriggerContext(
             reason: reason,
             sessionElapsedSeconds: now - sessionStart)
+        if reason.isManual && work.preparedManualReason != reason {
+            if let prompt = context.promptLine {
+                jlog("⌨️ coaching shortcut — \(prompt)")
+                switch reason {
+                case .manualCode: activity?.record(.manualCode(prompt: prompt))
+                case .manualExplanation: activity?.record(.manualExplanation(prompt: prompt))
+                default: activity?.record(.manualHint(prompt: prompt))
+                }
+            }
+            let screen = self.screen
+            let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
+            if Task.isCancelled {
+                jlog("… attempt cancelled (stopped) after capture")
+                return AttemptExecution(id: nil, result: .cancelled)
+            }
+            if let shot {
+                jlog("👁 looking at your screen")
+                activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
+                var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
+                if !shot.textEvidence.isEmpty {
+                    let lines = shot.textEvidence.reduce(0) {
+                        $0 + $1.text.count(where: { $0 == "\n" }) + 1
+                    }
+                    jlog("🔤 read \(lines) lines of on-screen text")
+                    observations.append(.user(JarvisPrompts.Coach.screenText(
+                        shot.textEvidence,
+                        capturedAt: RollingTranscript.stamp(clock.now() - sessionStart))))
+                }
+                work.screenObservation = observations
+            } else {
+                jlog("👁 screenshot failed")
+                activity?.record(.screenViewFailed)
+                work.screenObservation = [
+                    .user(JarvisPrompts.Coach.manualHintCaptureFailed),
+                ]
+            }
+            work.preparedManualReason = reason
+        }
+
         let transcriptStartIndex = ledger.committedCount
-        let delta = transcript.renderFrom(index: transcriptStartIndex)
+        let delta = work.admittedTranscript ?? transcript.renderFrom(index: transcriptStartIndex)
         work.attemptedTranscriptBoundary = delta.upTo
         let classifications = delta.lines.map { TurnSubstance.classification(of: $0.text) }
         let brainFacingOffsets = classifications.indices.filter {
@@ -198,46 +239,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
         }
         let systemPrompt = JarvisPrompts.Coach.system(capabilities: capabilities)
         let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
-        if reason.isManual && work.preparedManualReason != reason {
-            if let prompt = context.promptLine {
-                jlog("⌨️ coaching shortcut — \(prompt)")
-                switch reason {
-                case .manualCode: activity?.record(.manualCode(prompt: prompt))
-                case .manualExplanation: activity?.record(.manualExplanation(prompt: prompt))
-                default: activity?.record(.manualHint(prompt: prompt))
-                }
-            }
-            let screen = self.screen
-            let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
-            if Task.isCancelled {
-                jlog("… attempt cancelled (stopped) after capture")
-                return AttemptExecution(id: attemptID, result: .cancelled)
-            }
-            if let shot {
-                jlog("👁 looking at your screen")
-                activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
-                var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
-                if !shot.textEvidence.isEmpty {
-                    let lines = shot.textEvidence.reduce(0) {
-                        $0 + $1.text.count(where: { $0 == "\n" }) + 1
-                    }
-                    jlog("🔤 read \(lines) lines of on-screen text")
-                    observations.append(.user(JarvisPrompts.Coach.screenText(
-                        shot.textEvidence,
-                        capturedAt: RollingTranscript.stamp(clock.now() - sessionStart))))
-                }
-                work.screenObservation = observations
-            } else {
-                jlog("👁 screenshot failed")
-                activity?.record(.screenViewFailed)
-                work.screenObservation = [
-                    .user(JarvisPrompts.Coach.manualHintCaptureFailed),
-                ]
-            }
-            turnMessages = userText.isEmpty ? work.observations : [.user(userText)] + work.observations
-            work.preparedManualReason = reason
-        }
-
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
