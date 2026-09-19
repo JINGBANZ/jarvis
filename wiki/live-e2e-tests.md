@@ -366,7 +366,13 @@ it as unverified in its description.
   claim, an unresolved algorithm tradeoff, a false AI counterexample, a minimal bug fix with a
   reproducing test, repeated ineffective repair prompts, and productive review with observed test
   output. Confirm Jarvis separates proposed from adopted code, qualifies missing evidence, and stays
-  silent during healthy progress. Switch to ordinary coding and confirm AI-specific advice stops;
+  silent during healthy progress. Include whole-problem delegation without demonstrated understanding,
+  a data-structure choice with an unresolved time/space tradeoff, and a candidate who has already
+  explained the approach and is delegating a bounded helper. Confirm the coach supports candidate
+  reasoning without requiring repeated narration or preventing productive AI brainstorming. When
+  explicitly asked about practice with a less capable coding model, confirm it distinguishes the
+  coding assistant from Jarvis's brain and does not present an anecdotal rubric as company policy.
+  Switch to ordinary coding and confirm AI-specific advice stops;
   disable the skill and confirm ordinary coding still works on the next Start.
 - **Settings route walk,** because it needs Settings and faults on several targets. Check the first-open
   Brain state, the Connections **Add API key** state, and Sign in, Cancel, and Sign out for each subscription in

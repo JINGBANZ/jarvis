@@ -811,7 +811,11 @@ rather than a per-turn screenshot.
   policy already warrants; coding-with-ai adds guidance for directing another AI, reviewing its
   proposals, challenging an approach against constraints, distinguishing adopted code and execution
   evidence, verifying counterexamples, and checking minimal fixes against reproducing and regression
-  cases. It composes with coding when offered and applies only once AI collaboration is established:
+  cases. Interview practice emphasizes the candidate's own interpretation, data-structure and
+  algorithm choices, and time/space tradeoffs, using already-demonstrated understanding rather than
+  demanding repeated narration. Candidate-supplied evaluation criteria inform practice without
+  establishing company policy; a requested less capable practice model concerns the coding assistant,
+  not Jarvis's brain. It composes with coding when offered and applies only once AI collaboration is established:
   the candidate is using a coding assistant, or the interviewer or candidate has said it is allowed.
   A visible assistant panel alone is a hint, not that establishment. Its separate catalog entry keeps
   that workflow conditional without a round or seniority setting
