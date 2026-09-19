@@ -77,7 +77,7 @@ import JarvisCore
         #expect(panel.currentText.contains("Use a loop."))
         #expect(!panel.currentText.contains("Writing…"))
         #expect(panel.detailCount == 1)
-        #expect(panel.currentDetail?.code?.code == "int i = 0;", "an unfinished code line waits for its newline")
+        #expect(panel.currentDetail?.code?.code == "int i = 0;\nint j", "code streams as it arrives, half line included")
     }
 
     @MainActor @Test
@@ -167,23 +167,103 @@ import JarvisCore
         #expect(panel.currentDetail == delivered)
     }
 
+    private func code(lines: Int) -> String {
+        "```python\n" + (1...lines).map { "x\($0) = \($0)" }.joined(separator: "\n") + "\n"
+    }
+
     @MainActor @Test
-    func aSnapshotThatParsesToNothingTakesTheLiveDetailDown() {
+    func aSnapshotThatParsesToNothingLeavesTheLastLiveDetailUp() throws {
         let panel = liveBox()
-        func code(lines: Int) -> String {
-            "```python\n" + (1...lines).map { "x\($0) = \($0)" }.joined(separator: "\n") + "\n"
-        }
         panel.showReplyProgress(progress(closed: ["Fill the list."], detail: code(lines: CodeBlock.lineLimit)),
                                 perLineSeconds: [3])
-        #expect(panel.detailCount == 1)
+        let shown = try #require(panel.currentDetail)
         #expect(panel.currentText.contains("detail below"))
         panel.showReplyProgress(progress(closed: ["Fill the list."], detail: code(lines: CodeBlock.lineLimit + 1)),
                                 perLineSeconds: [3])
-        #expect(panel.detailCount == 0, "a block that outgrew its bounds is not left on screen")
-        #expect(panel.currentDetail == nil)
-        #expect(!panel.currentText.contains("detail below"))
+        #expect(panel.detailCount == 1)
+        #expect(panel.currentDetail == shown, "a block that outgrew its bounds leaves the last detail as it was")
+        #expect(panel.currentText.contains("detail below"))
         #expect(panel.entryCount == 1)
         #expect(panel.hasLiveEntry)
+
+        let delivered = ReplyDetail(markdown: code(lines: CodeBlock.lineLimit + 1) + "```")
+        #expect(panel.deliver(["Fill the list."], perLineSeconds: [3], detail: delivered) == nil,
+                "the delivery is where the dropped block is applied")
+        #expect(panel.detailCount == 0)
+        #expect(panel.currentDetail == nil)
+        #expect(!panel.currentText.contains("detail below"))
+    }
+
+    @MainActor @Test
+    func aHeldAndDismissedLiveDetailSurvivesASnapshotThatParsesToNothing() throws {
+        let panel = liveBox()
+        panel.showReplyProgress(progress(closed: ["Fill the list."], detail: code(lines: CodeBlock.lineLimit)),
+                                perLineSeconds: [3])
+        panel.clickDetailPin()
+        panel.clickDetailDismiss()
+        #expect(panel.isDetailHeld && panel.isDetailRolled)
+        let title = panel.currentDetailTitle
+        #expect(panel.currentDetailPosition == "1 of 1")
+
+        panel.showReplyProgress(progress(closed: ["Fill the list."], detail: code(lines: CodeBlock.lineLimit + 1)),
+                                perLineSeconds: [3])
+        #expect(panel.isDetailHeld, "the hold is not released")
+        #expect(panel.isDetailRolled, "the dismissed box stays rolled")
+        #expect(panel.detailCount == 1)
+        #expect(panel.currentText.contains("detail below"))
+        #expect(panel.currentDetailTitle == title && panel.currentDetailPosition == "1 of 1",
+                "the same reply's detail, so the reader's scroll position is kept")
+
+        let closed = code(lines: CodeBlock.lineLimit + 1) + "```\n\nThen scan."
+        panel.showReplyProgress(progress(closed: ["Fill the list."], detail: closed), perLineSeconds: [3])
+        #expect(panel.isDetailHeld && panel.isDetailRolled, "a later snapshot rewrites the detail in place")
+        #expect(panel.detailCount == 1)
+        #expect(panel.currentDetail?.code == nil)
+        #expect(panel.currentDetail?.deliveredMarkdown.hasSuffix("Then scan.") == true)
+        #expect(panel.currentDetailTitle == title && panel.currentDetailPosition == "1 of 1")
+
+        let delivered = try #require(ReplyDetail(markdown: closed))
+        #expect(panel.deliver(["Fill the list."], perLineSeconds: [3], detail: delivered) == delivered)
+        #expect(panel.isDetailHeld && panel.isDetailRolled)
+        #expect(panel.detailCount == 1)
+        #expect(panel.currentDetailTitle == title && panel.currentDetailPosition == "1 of 1")
+    }
+
+    @MainActor @Test
+    func anOpenDiagramShowsAPlaceholderUntilItsFenceCloses() {
+        let panel = liveBox()
+        let open = "Sketch it.\n\n```mermaid\nflowchart LR\nclient[Client] --> api[API]\n"
+        panel.showReplyProgress(progress(closed: ["Sketch the read path."], detail: open), perLineSeconds: [3])
+        #expect(panel.detailCount == 1)
+        #expect(panel.currentDetailPlaceholderText == "Drawing diagram…")
+        #expect(!panel.showsDiagram)
+        #expect(panel.currentDetailProseText.contains("Sketch it."))
+        #expect(panel.currentText.contains("detail below"))
+
+        panel.showReplyProgress(progress(closed: ["Sketch the read path."], detail: open + "```"), perLineSeconds: [3])
+        #expect(panel.detailCount == 1)
+        #expect(panel.currentDetailPlaceholderText == nil, "the whole diagram replaces the placeholder")
+        #expect(panel.showsDiagram)
+        #expect(panel.currentDetail?.diagram?.nodes.map(\.label) == ["Client", "API"])
+    }
+
+    @MainActor @Test
+    func aDetailThatIsOnlyAnOpenDiagramShowsJustThePlaceholder() {
+        let panel = liveBox()
+        let open = "```mermaid\nflowchart LR\nclient[Client] --> api[API]"
+        panel.showReplyProgress(progress(closed: ["Sketch the read path."], detail: open), perLineSeconds: [3])
+        #expect(panel.detailCount == 1)
+        #expect(panel.currentDetailPlaceholderText == "Drawing diagram…")
+        #expect(panel.currentDetail?.hasContent == false)
+        #expect(panel.currentDetailPosition == "1 of 1")
+        #expect(panel.currentText.contains("detail below"))
+
+        // A reply cut short here commits what the box showed: no diagram and no placeholder.
+        #expect(panel.deliver(["Sketch the read path."], perLineSeconds: [3],
+                              detail: ReplyDetail(partialMarkdown: open)) == nil)
+        #expect(panel.detailCount == 0)
+        #expect(panel.currentDetailPlaceholderText == nil)
+        #expect(!panel.currentText.contains("detail below"))
     }
 
     @MainActor @Test

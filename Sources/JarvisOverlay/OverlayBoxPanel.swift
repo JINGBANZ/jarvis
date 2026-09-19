@@ -49,9 +49,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private var entries: [(stamp: String, text: String, hasDetail: Bool)] = []
     /// The entry a streaming reply is writing into, until `deliver` finalizes it or nil removes it.
     private var liveEntryIndex: Int?
-    /// The detail that reply is writing into, parsed from the text so far; `deliver` replaces it
-    /// with the delivered detail, where dropped blocks are applied, and nil removes it.
-    private var liveDetailIndex: Int?
+    /// The detail that reply is writing into, parsed from the text so far and always the last
+    /// filed; `deliver` replaces it with the delivered detail, where dropped blocks are applied,
+    /// and nil removes it. `isDrawingDiagram` is view state only: the text ends inside a diagram
+    /// fence, so the document shows a placeholder where the diagram will appear.
+    private var liveDetail: (index: Int, isDrawingDiagram: Bool)?
     /// A detail that arrives before its first line has nothing to head the entry with yet.
     private static let liveDetailPlaceholder = "Writing…"
     private(set) var captureExclusionReassertCount = 0
@@ -278,7 +280,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
                         position: index.map { ($0, available.count) },
                         isHeld: slot.isHeld, isRolled: slot.isRolled,
                         fontSize: detailFontSize,
-                        enabled: entry != nil && !isCollapsed)
+                        enabled: entry != nil && !isCollapsed,
+                        drawingDiagram: liveDetail.map { $0.isDrawingDiagram && $0.index == index } ?? false)
         layoutDetails()
     }
 
@@ -360,19 +363,19 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             liveEntryIndex = entry
         }
         if acceptsDetail, let markdown = progress.detailMarkdown {
-            if let detail = ReplyDetail(partialMarkdown: markdown), detail.hasContent {
-                if let index = liveDetailIndex {
-                    details[index].detail = detail
+            let drawingDiagram = ReplyDetail.endsInsideADiagram(markdown)
+            // Only a withdrawal or the delivery takes a live detail down: a snapshot with nothing to
+            // show, such as a code block that just outgrew its bounds, leaves the last one as it
+            // was, so a hold, a dismissal, and the reader's scroll position survive it.
+            if let detail = ReplyDetail(partialMarkdown: markdown), detail.hasContent || drawingDiagram {
+                if let live = liveDetail {
+                    details[live.index].detail = detail
                 } else {
                     details.append((stamp: entries[entry].stamp, detail: detail))
                     slot.received(details.count - 1)
-                    liveDetailIndex = details.count - 1
                 }
+                liveDetail = (index: details.count - 1, isDrawingDiagram: drawingDiagram)
                 entries[entry].hasDetail = true
-            } else {
-                // A block that just outgrew its bounds leaves the view as it will leave the delivery.
-                removeLiveDetail()
-                entries[entry].hasDetail = false
             }
         }
         if panel.isVisible { reassertCaptureExclusion() }
@@ -382,7 +385,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// A reply that will not be delivered leaves both sections.
     private func removeLiveReply() {
-        guard liveEntryIndex != nil || liveDetailIndex != nil else { return }
+        guard liveEntryIndex != nil || liveDetail != nil else { return }
         if let index = liveEntryIndex { entries.remove(at: index) }
         liveEntryIndex = nil
         removeLiveDetail()
@@ -390,10 +393,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     private func removeLiveDetail() {
-        guard let index = liveDetailIndex else { return }
-        details.remove(at: index)
-        slot.removed(index)
-        liveDetailIndex = nil
+        guard let live = liveDetail else { return }
+        details.remove(at: live.index)
+        slot.removed(live.index)
+        liveDetail = nil
     }
 
     private func append(_ text: String, detail: ReplyDetail?) {
@@ -403,10 +406,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     private func show(detail: ReplyDetail?, for stamp: String) {
-        if let index = liveDetailIndex {
+        if let live = liveDetail {
             if let detail, detail.hasContent {
-                details[index] = (stamp: stamp, detail: detail)
-                liveDetailIndex = nil
+                details[live.index] = (stamp: stamp, detail: detail)
+                liveDetail = nil
             } else {
                 removeLiveDetail()
             }
@@ -469,7 +472,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         if !slot.isHeld {
             details.removeAll()
             slot.reset()
-            liveDetailIndex = nil
+            liveDetail = nil
         }
         renderDisplay()
     }
@@ -494,7 +497,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         if !live {
             details.removeAll()
             slot.reset()
-            liveDetailIndex = nil
+            liveDetail = nil
         }
         applyDisplay()
         if live { setCollapsed(false) }
@@ -574,6 +577,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     var currentDetailCodeText: NSAttributedString { detailView.codeText }
     var currentDetailProseText: String { detailView.proseText }
     var showsDiagram: Bool { !detailView.isHidden && detailView.showsDiagram }
+    var currentDetailPlaceholderText: String? {
+        detailView.isHidden ? nil : detailView.diagramPlaceholderText
+    }
     var isDetailRolled: Bool { detailView.isRolled }
     var detailStripHeight: CGFloat { detailView.stripHeight }
     var detailIconPointSize: CGFloat { detailView.iconPointSize }
