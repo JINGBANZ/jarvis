@@ -93,7 +93,7 @@ enum CoachingParityHarness {
                 }
                 guard call == 1 else { throw transportFailure }
                 return (
-                    speakResponse,
+                    chunk(speakResponse),
                     HTTPURLResponse(
                         url: request.url!,
                         statusCode: 200,
@@ -139,6 +139,14 @@ enum CoachingParityHarness {
             overlayEvents: zip(overlay.rendered, overlay.renderedSeconds)
                 .map { OverlayEvent(lines: $0, perLineSeconds: $1) },
             routeTransitions: transitions.events)
+    }
+}
+
+/// A whole-body reply as the one-chunk stream the production transport delivers it in.
+private func chunk(_ data: Data) -> AsyncThrowingStream<Data, Error> {
+    AsyncThrowingStream { continuation in
+        continuation.yield(data)
+        continuation.finish()
     }
 }
 

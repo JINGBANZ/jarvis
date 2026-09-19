@@ -1,4 +1,5 @@
 import Foundation
+import JarvisBrainProviders
 import JarvisCore
 import Testing
 
@@ -8,6 +9,23 @@ func tmp() -> URL {
     try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true,
                                              attributes: [.posixPermissions: 0o700])
     return d
+}
+
+/// A whole-body reply as the one-chunk stream the production transport delivers it in.
+func chunk(_ data: Data) -> AsyncThrowingStream<Data, Error> {
+    AsyncThrowingStream { continuation in
+        continuation.yield(data)
+        continuation.finish()
+    }
+}
+
+func sending(
+    _ reply: @escaping @Sendable (URLRequest) async throws -> (Data, HTTPURLResponse?)
+) -> BrainAccessor.Sender {
+    { request in
+        let (data, http) = try await reply(request)
+        return (chunk(data), http)
+    }
 }
 
 /// @unchecked Sendable: `lock` guards `requests`, which the sender closure appends to from any task.

@@ -251,7 +251,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 phase: requestPhase,
                 sequence: requestSequence)
             conversation = try await CoachingRequestAttribution.$current.withValue(requestContext) {
-                try await attempt.brain.makeConversation()
+                try await attempt.brain.makeConversation(progress: nil)
             }
         } catch {
             if Task.isCancelled || error is CancellationError {
