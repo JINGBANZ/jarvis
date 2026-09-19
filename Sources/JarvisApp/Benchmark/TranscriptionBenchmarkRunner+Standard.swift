@@ -3,9 +3,9 @@ import JarvisCore
 
 extension TranscriptionBenchmarkRunner {
     func runStandard(
-        fixtures: SyntheticSpeechFixtures,
-        arms: [TranscriptionBenchmark.Arm] = TranscriptionBenchmark.standardArms
+        fixtures: SyntheticSpeechFixtures
     ) async throws -> TranscriptionBenchmark.Summary {
+        let arms = TranscriptionBenchmark.standardArms
         var summaries: [TranscriptionBenchmark.ArmSummary] = []
         for (armIndex, arm) in arms.enumerated() {
             try Task.checkCancellation()
@@ -54,7 +54,8 @@ extension TranscriptionBenchmarkRunner {
                     repetition: repetition,
                     fixture: fixture,
                     silenceURL: fixtures.silenceURL,
-                    appleLocale: appleLocale))
+                    appleLocale: appleLocale,
+                    quietPeriod: 1))
                 guard !isAbortRequested else { throw Failure.benchmarkAborted }
             }
             summaries.append(.init(arm: arm, repetitions: repetitions))
@@ -65,12 +66,13 @@ extension TranscriptionBenchmarkRunner {
             arms: summaries)
     }
 
-    private func runRepetition(
+    func runRepetition(
         arm: TranscriptionBenchmark.Arm,
         repetition: Int,
         fixture: SyntheticSpeechFixtures.Fixture,
         silenceURL: URL,
-        appleLocale: Locale?
+        appleLocale: Locale?,
+        quietPeriod: TimeInterval
     ) async -> TranscriptionBenchmark.RepetitionResult {
         let recorder = TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)
         let session = makeSession(arm: arm, appleLocale: appleLocale, recorder: recorder)
@@ -97,7 +99,7 @@ extension TranscriptionBenchmarkRunner {
                 })
             try await recorder.waitForFinalStreamToSettle(
                 minimumCount: 1,
-                quietPeriod: options.mode == .vocabulary ? 5 : 1,
+                quietPeriod: quietPeriod,
                 timeout: 20)
         } catch {
             failure = String(describing: error)

@@ -121,8 +121,7 @@ final class TranscriptionBenchmarkRunner {
         case .standard:
             summary = try await runStandard(fixtures: fixtures)
         case .vocabulary:
-            summary = try await runStandard(
-                fixtures: fixtures, arms: TranscriptionBenchmark.vocabularyArms)
+            summary = try await runVocabulary(fixtures: fixtures)
         case .reconnect:
             summary = await runReconnect(fixtures: fixtures)
         }
@@ -146,7 +145,7 @@ final class TranscriptionBenchmarkRunner {
                 requiredProviders: requiredProviders)
             guard incompleteArms.isEmpty else {
                 throw Failure.acceptanceFailed(
-                    "incomplete standard arms: \(incompleteArms.joined(separator: ", "))")
+                    "incomplete \(options.mode.rawValue) arms: \(incompleteArms.joined(separator: ", "))")
             }
         case .reconnect:
             var failedModels = summary.reconnect.filter { !$0.passed }.map { $0.model.rawValue }

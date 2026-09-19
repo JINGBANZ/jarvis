@@ -125,6 +125,12 @@ synthesized bytes, language configuration, and repetition count. The prompt is r
 it never changes saved preferences or the normal app's default prompt. Standard and reconnect modes
 retain their existing inputs and configuration.
 
+Each fixture runs adjacent baseline/context pairs for every repetition, reversing which arm goes
+first on each repetition and each fixture. This deterministic counterbalancing reduces confounding
+from changing service load without introducing random run-to-run schedules. The summary's optional
+`executionOrder` records each arm ID and repetition actually attempted in execution order; unavailable
+arms are reported without fabricated attempts. Standard mode retains its arm-major execution order.
+
 The fixtures cover evict/deque/min-max terminology, timestamps, complexity notation, and unfinished
 fragments separated by explicit synthesis pauses. Ordinary English, Mandarin, and bilingual phrases
 are controls for unwanted terminology insertion or language changes. Synthetic pronunciation and

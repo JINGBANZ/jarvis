@@ -111,18 +111,21 @@ public extension TranscriptionBenchmark {
         public let repetitionsPerArm: Int
         public let arms: [ArmSummary]
         public let reconnect: [ReconnectSummary]
+        public let executionOrder: [ExecutionStep]?
 
         public init(
             mode: String,
             repetitionsPerArm: Int,
             arms: [ArmSummary],
-            reconnect: [ReconnectSummary] = []
+            reconnect: [ReconnectSummary] = [],
+            executionOrder: [ExecutionStep]? = nil
         ) {
             schemaVersion = TranscriptionBenchmark.schemaVersion
             self.mode = mode
             self.repetitionsPerArm = repetitionsPerArm
             self.arms = arms.sorted { $0.arm.id < $1.arm.id }
             self.reconnect = reconnect.sorted { $0.model.rawValue < $1.model.rawValue }
+            self.executionOrder = executionOrder
         }
 
         public func encodedJSON() throws -> Data {

@@ -21,6 +21,44 @@ struct TranscriptionVocabularyBenchmarkTests {
         #expect(Set(arms.map(\.phrase.language)) == Set(TranscriptionBenchmark.Language.allCases))
     }
 
+    @Test(arguments: [3, 4])
+    func pairedScheduleAlternatesOrderAndKeepsEveryRepetition(repetitions: Int) throws {
+        let schedule = TranscriptionBenchmark.vocabularySchedule(repetitions: repetitions)
+        #expect(schedule.count == 14 * repetitions)
+        #expect(schedule.prefix(6).map { $0.armID.hasSuffix("baseline") } == [
+            true, false, false, true, true, false,
+        ])
+        #expect(schedule.dropFirst(2 * repetitions).prefix(6).map { $0.armID.hasSuffix("baseline") } == [
+            false, true, true, false, false, true,
+        ])
+        #expect(schedule.prefix(6).map(\.repetition) == [1, 1, 2, 2, 3, 3])
+        for arm in TranscriptionBenchmark.vocabularyArms {
+            #expect(schedule.filter { $0.armID == arm.id }.map(\.repetition) == Array(1...repetitions))
+        }
+        for index in stride(from: 0, to: schedule.count, by: 2) {
+            let first = try #require(TranscriptionBenchmark.vocabularyArms.first {
+                $0.id == schedule[index].armID
+            })
+            let second = try #require(TranscriptionBenchmark.vocabularyArms.first {
+                $0.id == schedule[index + 1].armID
+            })
+            #expect(first.phrase == second.phrase)
+            #expect(first.transcriptionPrompt != second.transcriptionPrompt)
+        }
+    }
+
+    @Test func reportPreservesActualExecutionOrder() throws {
+        let order = Array(TranscriptionBenchmark.vocabularySchedule(repetitions: 3).prefix(4))
+        let summary = TranscriptionBenchmark.Summary(
+            mode: "vocabulary", repetitionsPerArm: 3, arms: [], executionOrder: order)
+        let decoded = try JSONDecoder().decode(
+            TranscriptionBenchmark.Summary.self, from: summary.encodedJSON())
+        #expect(decoded.executionOrder == order)
+        let standard = TranscriptionBenchmark.Summary(mode: "standard", repetitionsPerArm: 3, arms: [])
+        #expect(try JSONDecoder().decode(
+            TranscriptionBenchmark.Summary.self, from: standard.encodedJSON()).executionOrder == nil)
+    }
+
     @Test func promptExperimentOnlyChangesTranscriptionPrompt() throws {
         let baseline = RealtimeSession.sessionUpdate(model: .gpt4oTranscribe)
         let candidate = RealtimeSession.sessionUpdate(
