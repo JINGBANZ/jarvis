@@ -1,12 +1,13 @@
 # Transcription Benchmark
 
-> The explicit signed-app regression harness for Jarvis's transcription paths. It compares fixed synthetic playback or explicitly requested live microphone phrases,
-> measures recognition and lifecycle behavior, and never changes the Mac's network connectivity.
+> The explicit signed-app regression harness for Jarvis's transcription paths. It plays fixed
+> synthetic speech through Jarvis's own process, measures what happened, and writes a repeatable
+> result without opening the microphone or changing the Mac's network connectivity.
 
 ## Purpose and Boundary
 
 The benchmark answers a narrow question: **given known audio, does each production transcription
-path receive it continuously and return the expected result with a healthy lifecycle?** Synthetic modes use the
+path receive it continuously and return the expected result with a healthy lifecycle?** It uses the
 real signed `Jarvis Dev.app`, process-scoped system-audio capture, provider sessions, reconnect code,
 and replay buffer. It does not start a coaching session or evaluate what the coach did. Its sibling,
 the [live e2e mode](./live-e2e-tests.md), runs whole coaching sessions from synthesized speech and
@@ -36,7 +37,7 @@ This is separate from session auditing:
 
 | | Transcription benchmark | Session audit and evaluation |
 |---|---|---|
-| Question | Does controlled audio survive and transcribe correctly? | What happened during a real coaching session, and why? |
+| Question | Does known synthetic audio survive and transcribe correctly? | What happened during a real coaching session, and why? |
 | Input | Fixed non-user audio and benchmark lifecycle events | User-visible Activity, coaching-attempt provenance, provider traffic, and screenshots |
 | Invocation | Explicit developer command | Normal session persistence plus an explicit completed-session evaluation |
 | Output location | `.jarvis/transcription-benchmarks/<run>/` | The matching `.jarvis/<session>/` directory |
@@ -71,8 +72,8 @@ for an explicit reconnect run and owns the hold outside `WebSocketConnection`'s 
 
 ## Running It
 
-The launcher builds the signed app and opens a hidden benchmark mode so macOS attributes capture
-permissions to the stable app identity. It is not a separate SwiftPM executable because the
+The launcher builds the signed app and opens a hidden benchmark mode so macOS attributes System Audio
+Recording permission to the stable app identity. It is not a separate SwiftPM executable because the
 experiment must exercise the same signed app, TCC identity, capture edge, and transcription
 composition used in production.
 
@@ -81,7 +82,6 @@ composition used in production.
 | Standard matrix | `./scripts/transcription-benchmark.sh standard` | Compare every selectable transcription path over the fixed English, Mandarin, and bilingual fixtures. |
 | Standard matrix with more repetitions | `./scripts/transcription-benchmark.sh standard --repetitions N` | Gather a larger sample; `N` must preserve the source-owned minimum. |
 | Technical-context comparison | `./scripts/transcription-benchmark.sh vocabulary` | Compare GPT-4o Transcribe with and without a short technical-context prompt using identical synthetic audio. |
-| Live microphone comparison | `./scripts/transcription-benchmark.sh microphone` | Read six scripted English phrases twice; paired baseline/context sessions receive identical live microphone chunks. |
 | Scoped reconnect | `./scripts/transcription-benchmark.sh reconnect` | Verify OpenAI reconnect, buffering, replay, final ordering, and provider identity. |
 
 All modes are explicit developer operations. They never run as part of `swift build`,
@@ -147,34 +147,6 @@ technical improvement without control-language, insertion, or latency regression
 activity warning in a real session is an investigation signal, not proof of a missed utterance;
 controlled input and finalization evidence are needed to establish loss.
 
-## Live Microphone Comparison
-
-Microphone mode is an interactive, opt-in extension of the vocabulary comparison. The signed app
-waits with capture off until the terminal controller receives Enter, connects both GPT-4o Transcribe
-arms, then opens the default microphone. Both arms receive identical PCM chunks and local speech
-boundaries; connection order alternates between trials. The terminal shows when to read the fixed
-phrase and accepts Enter afterward. Two seconds of trailing silence let the local detector finish
-before capture stops. Each capture window is bounded to 45 seconds; abort, failure, and timeout stop
-capture and both sessions. Six phrases include ordinary speech and a deliberate two-second pause;
-two repetitions are the minimum. The source-owned script is in `MicrophoneBenchmark.phrases`.
-
-This mode does not attach a session audit and disables process diagnostics before constructing
-transcription sessions because ordinary diagnostic paths can contain finalized speech. Audio,
-recognized text, and provider events remain in memory only. `summary.json` contains numeric
-measurements and fixed phrase/arm identifiers; failure output is categorical. The displayed script
-is fixed test input, not a live transcript. Partial measurements survive an incomplete run, which
-exits unsuccessfully. Any dropped capture chunks, missing finals, continuity failure, provider
-failure, or reconnect makes a pair unusable. Recognition errors themselves are measured outcomes.
-
-Term coverage counts distinct exact technical words, while character error rate measures the whole
-phrase. Unexpected technical terms in the ordinary control are counted separately. Latency is from
-the last server endpoint notification to the last usable final, not acoustic speech-end latency. Keep assistant
-speech and other room audio quiet; the harness cannot determine whether the participant read the
-script correctly. It uses a direct microphone tap rather than the production echo-cancellation
-pipeline, so the result evaluates real-voice recognition, not production AEC or coaching. These
-small paired trials do not establish population accuracy, and normal transcription preferences
-remain unchanged.
-
 ## Why Scoring Belongs to the Benchmark
 
 A script that only plays audio and saves whatever transcript arrives is a demo, not a benchmark. A
@@ -220,7 +192,7 @@ and replay behavior, not a test of macOS network-outage detection.
 
 ## Artifacts, Privacy, and Interpretation
 
-Synthetic runs write owner-only `summary.json`, `jarvis-debug.log`, progress state, and any typed failure
+Each run writes owner-only `summary.json`, `jarvis-debug.log`, progress state, and any typed failure
 under `.jarvis/transcription-benchmarks/<run>/`. The run store retains only the bounded number owned by
 [`TranscriptionBenchmark.retainedRunCount`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift).
 Generated fixture audio lives temporarily inside that run directory and is removed at exit. Captured

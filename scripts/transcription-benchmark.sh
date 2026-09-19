@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Explicit transcription benchmarks. Microphone mode requires interactive user participation.
+# Repeatable system-audio transcription benchmark. All modes use only fixed synthetic playback.
 # Reconnect mode interrupts only Jarvis's transcription WebSocket; host networking stays online.
 set -euo pipefail
 umask 077
@@ -9,20 +9,17 @@ usage() {
   echo "usage:" >&2
   echo "  $0 standard [--repetitions N]" >&2
   echo "  $0 vocabulary [--repetitions N]" >&2
-  echo "  $0 microphone [--repetitions N]" >&2
   echo "  $0 reconnect" >&2
 }
 
 MODE="${1:-}"
-if [[ "$MODE" != "standard" && "$MODE" != "vocabulary" && "$MODE" != "reconnect" && "$MODE" != "microphone" ]]; then
+if [[ "$MODE" != "standard" && "$MODE" != "vocabulary" && "$MODE" != "reconnect" ]]; then
   usage
   exit 2
 fi
 shift
 
 REPETITIONS=3
-MINIMUM=3
-if [[ "$MODE" == "microphone" ]]; then REPETITIONS=2; MINIMUM=2; fi
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repetitions)
@@ -38,8 +35,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if ! [[ "$REPETITIONS" =~ ^[0-9]+$ ]] || (( REPETITIONS < MINIMUM )); then
-  echo "--repetitions must be an integer of at least $MINIMUM" >&2
+if ! [[ "$REPETITIONS" =~ ^[0-9]+$ ]] || (( REPETITIONS < 3 )); then
+  echo "--repetitions must be an integer of at least 3" >&2
   exit 2
 fi
 
@@ -84,8 +81,6 @@ if [[ "$MODE" == "standard" ]]; then
   echo "▶ running fixed system-audio matrix ($REPETITIONS repetitions per arm)"
 elif [[ "$MODE" == "vocabulary" ]]; then
   echo "▶ comparing fixed technical-context arms ($REPETITIONS repetitions per arm)"
-elif [[ "$MODE" == "microphone" ]]; then
-  echo "▶ paired microphone test; capture starts only after you press Enter"
 else
   echo "▶ running scoped reconnect validation (host networking remains online)"
 fi
@@ -107,14 +102,6 @@ trap abort_run INT TERM
 # `open -W` gives a waitable launcher, so the trap can reap it after the app sees the abort marker.
 open -W -n "./$APP" --args "${COMMON_ARGS[@]}" &
 APP_WAITER_PID=$!
-if [[ "$MODE" == "microphone" ]]; then
-  if ! python3 scripts/microphone-benchmark-control.py "$RUN_DIR" "$REPETITIONS"; then
-    touch "$RUN_DIR/abort"
-    wait "$APP_WAITER_PID" || true
-    show_failure_if_present || true
-    exit 1
-  fi
-fi
 wait "$APP_WAITER_PID"
 APP_WAITER_PID=""
 trap - INT TERM

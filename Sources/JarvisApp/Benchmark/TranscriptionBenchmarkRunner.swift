@@ -52,11 +52,6 @@ final class TranscriptionBenchmarkRunner {
             base: options.outputDirectory.deletingLastPathComponent(),
             current: options.outputDirectory
         ).pruneToMostRecent(TranscriptionBenchmark.retainedRunCount)
-        if options.mode == .microphone {
-            JarvisLog.suppressForProcess()
-            try await runMicrophone()
-            return
-        }
         // `scripts/transcription-benchmark.sh` reads this run's jarvis-debug.log on failure. Close
         // on both exits so the health marker never claims an unfinished close.
         let evidence = FileSessionAudit(directory: options.outputDirectory)
@@ -123,8 +118,6 @@ final class TranscriptionBenchmarkRunner {
 
         let summary: TranscriptionBenchmark.Summary
         switch options.mode {
-        case .microphone:
-            preconditionFailure("Microphone mode has a separate measurements-only runner")
         case .standard:
             summary = try await runStandard(fixtures: fixtures)
         case .vocabulary:
@@ -141,8 +134,6 @@ final class TranscriptionBenchmarkRunner {
 
     private func validate(_ summary: TranscriptionBenchmark.Summary) throws {
         switch options.mode {
-        case .microphone:
-            preconditionFailure("Microphone results have separate acceptance criteria")
         case .standard, .vocabulary:
             var requiredProviders: Set<TranscriptionProvider> = [.openAI]
             if #available(macOS 26.0, *), options.mode == .standard {

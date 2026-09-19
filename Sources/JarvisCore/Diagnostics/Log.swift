@@ -6,13 +6,6 @@ public enum JarvisLog {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var session: FileSessionAudit?   // guarded by `lock`
 
-    nonisolated(unsafe) private static var suppressed = false // guarded by `lock`
-
-    /// The explicit microphone benchmark retains measurements only, including during late teardown.
-    public static func suppressForProcess() {
-        lock.withLock { suppressed = true }
-    }
-
     public static func attach(to evidence: FileSessionAudit) {
         lock.withLock { session = evidence }
     }
@@ -23,7 +16,6 @@ public enum JarvisLog {
     }
 
     fileprivate static func emit(_ message: String) {
-        guard !lock.withLock({ suppressed }) else { return }
         let event = DiagnosticAuditEvent(message: message)
         if let session = lock.withLock({ session }), session.recordDiagnostic(event) { return }
         SessionAuditWorker.shared.recordProcessDiagnostic(event)
