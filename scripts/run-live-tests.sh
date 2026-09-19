@@ -92,11 +92,12 @@ abort_run() {
 trap abort_run INT TERM
 
 source scripts/lib/swift-test-flags.sh
+source scripts/lib/test-completion.sh
 echo "▶ running live e2e scenarios ($SCENARIO) into $RUN_DIR"
 set +e
 swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} --filter "$FILTER" 2>&1 \
   | tee "$RUN_DIR/swift-test.log"
-test_status=${PIPESTATUS[0]}
+test_statuses=("${PIPESTATUS[@]}")
 set -e
 
 {
@@ -140,15 +141,11 @@ fi
 echo
 cat "$RUN_DIR/results.txt"
 fail_lines="$(awk '$2 == "fail"' "$RUN_DIR/results.txt" | wc -l | tr -d ' ')"
-missing_markers=0
-for scenario_dir in "$RUN_DIR"/*/; do
-  if [[ -f "$scenario_dir/scenario.json" && ! -f "$scenario_dir/live-e2e-finished" ]]; then
-    echo "missing live-e2e-finished: $scenario_dir" >&2
-    missing_markers=$((missing_markers + 1))
-  fi
-done
-if (( fail_lines > 0 || missing_markers > 0 || test_status != 0 )); then
-  echo "❌ live e2e run failed: $fail_lines fail lines, $missing_markers missing markers, swift test exit $test_status ($RUN_DIR)" >&2
+completion_status=0
+check_swift_test_completion "$RUN_DIR/swift-test.log" "${test_statuses[0]}" || completion_status=1
+check_live_test_completion "$RUN_DIR" "$SCENARIO" || completion_status=1
+if (( fail_lines > 0 || completion_status != 0 || test_statuses[1] != 0 )); then
+  echo "❌ live e2e run failed: $fail_lines fail lines, completion status $completion_status, swift test exit ${test_statuses[0]}, log capture exit ${test_statuses[1]} ($RUN_DIR)" >&2
   exit 1
 fi
 echo "✅ live e2e run passed: $RUN_DIR/results.txt"
