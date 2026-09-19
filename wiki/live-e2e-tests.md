@@ -204,6 +204,10 @@ C26 checks the delivered Activity response, after overlay acceptance, for both n
 and a code block accepted by `ReplyDetail`. The candidate already understands a viable approach
 and is stuck implementing it, so code accompanies these actionable hints. A missing block is a
 regression failure, not a note; conceptual orientation is covered by other scenarios.
+C31 checks those same delivered replies for prose immediately before the code block containing a
+nonempty inline code anchor. It fails when placement is absent, only in the hint lines, after the
+code, or missing its inline anchor. It does not require fixed model wording or judge whether the
+anchor names the correct editor location; the Gate's layout test covers rendering separately.
 
 Scenario D's AI proposal and test output are candidate reports carried through real transcription.
 Its JPEG remains the coding fixture, so its assertions do not establish Chrome panel detection or
@@ -280,6 +284,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C28 | Code with AI guidance loads before permitted review and ordinary hint presses deliver committed replies | D |
 | C29 | A blocked delegation step delivers supporting detail without an explicit prompt request | D; semantics use `Tests/JarvisLiveTests/Scenarios/D-review.md` |
 | C30 | Review of a valid AI proposal delivers supporting detail without a confusion signal | D; explanation quality uses the same semantic rubric |
+| C31 | Code hints retain a preceding placement header with an inline code anchor | C: both hint presses |
 
 ### General coaching flow
 
