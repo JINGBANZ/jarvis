@@ -7,6 +7,8 @@ public struct ReplyDetail: Sendable, Equatable {
         public let body: String
         /// Opener and closer included.
         let range: Range<String.Index>
+        /// False when the document ended before the closer.
+        let isClosed: Bool
     }
 
     public enum Segment: Sendable, Equatable {
@@ -106,7 +108,7 @@ public struct ReplyDetail: Sendable, Equatable {
                    trimmed.dropFirst(run.count).allSatisfy({ $0 == " " }) {
                     fences.append(Fence(language: language,
                                         body: String(markdown[bodyStart..<bodyEnd]),
-                                        range: start..<afterLine))
+                                        range: start..<afterLine, isClosed: true))
                     openedAt = nil
                 }
             } else if indent <= 3, let first = trimmed.first, first == "`" || first == "~" {
@@ -129,7 +131,7 @@ public struct ReplyDetail: Sendable, Equatable {
         if let start = openedAt {
             fences.append(Fence(language: language,
                                 body: String(markdown[bodyStart..<bodyEnd]),
-                                range: start..<markdown.endIndex))
+                                range: start..<markdown.endIndex, isClosed: false))
         }
         return fences
     }

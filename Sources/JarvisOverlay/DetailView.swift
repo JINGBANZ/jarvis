@@ -24,6 +24,8 @@ final class DetailView: NSView {
     private let document = DetailDocumentView(frame: .zero)
     private var preferredFontSize: CGFloat = 18
     private(set) var detail: ReplyDetail?
+    /// Which reply's detail is on screen, so a detail that grows keeps the reader's scroll position.
+    private var shownOrigin: (stamp: String, index: Int?)?
     private(set) var isRolled = false
     private var chrome: OverlayBoxChrome
     var stripHeight: CGFloat { chrome.height }
@@ -124,7 +126,9 @@ final class DetailView: NSView {
     func show(_ detail: ReplyDetail?, stamp: String, position slot: (index: Int, count: Int)?,
               isHeld: Bool, isRolled: Bool, fontSize: CGFloat, enabled: Bool = true) {
         preferredFontSize = min(18, max(12, fontSize))
-        let changed = self.detail != detail
+        let origin = (stamp: stamp, index: slot?.index)
+        let changed = shownOrigin.map { $0 != origin } ?? true
+        shownOrigin = origin
         self.detail = detail
         self.isRolled = isRolled
         isHidden = !enabled
