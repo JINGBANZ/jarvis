@@ -451,7 +451,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box; the caption remains text-only. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController** | Register the coaching and detail-navigation shortcuts; AppDelegate routes coaching to the session and navigation to the overlay. See [§2 On-demand coaching shortcuts](#on-demand-coaching-shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
-| **PermissionGate** | Gather every TCC grant at launch instead of mid-session, and keep Jarvis closed until it holds all three: one button walks Microphone, System Audio Recording, and Screen Recording one dialog at a time, and closing the window quits. `SystemAudioPermissionProbe` proves the silently-enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Permissions](#permissions). | AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
+| **OnboardingGate** | Run first-run onboarding once per install, before the rest of the app is built: one OpenAI or Gemini API key, then the three TCC grants, each step shown only when what it collects is missing. Closing the window before the end quits; completing it sets the one onboarding flag, so later launches go straight to the menu bar. `SystemAudioPermissionProbe` proves the silently enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Onboarding](#onboarding) and [§3 Permissions](#permissions). | AppKit window, `CredentialVerifier`, AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
 "intelligence" lives, and even there the intelligence is the model — the driver just wires events
@@ -479,31 +479,76 @@ all routes — it's a near-passthrough on earbuds (no acoustic echo to cancel). 
 mic* are HFP narrowband and low-fidelity regardless of resampling; for input quality, use the
 built-in mic.
 
+### Onboarding
+
+A new install can't coach without an API key and the three macOS grants, so `OnboardingGate`
+collects both before `AppDelegate` builds the rest of the app. It runs once: completing it sets
+`OnboardingPreferences.isCompleted`, and every later launch goes straight to the menu bar without
+probing anything. The flag records completion, never a key or a grant; those are always read live.
+After onboarding, a missing key, Microphone, or Screen Recording grant shows as needing the user on
+the Settings hub ([settings-window.md → Status](./settings-window.md#status)), and Start refuses
+with the reason. System Audio can't show there, because only the test tone proves it, so the probe
+every Start runs is what catches it.
+
+Each step shows only when what it collects is missing
+(`Onboarding.steps(needsAPIKey:holdsEveryGrant:)`). The key step shows when the saved setup calls a
+provider whose key isn't saved, which is exactly when Start would refuse: a new install, which calls
+OpenAI by default, always sees it, and a setup of a subscription brain with Apple Speech never does.
+A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` counts, and an install
+that already has what it needs completes onboarding without a window. Closing the window before the
+end quits, so an unfinished onboarding runs again on the next launch and skips the steps already
+done.
+
+**The key step** offers OpenAI and Gemini, because either key covers both the brain and
+transcription. Each tile names the brain model and the transcription model that key would use.
+Continue checks the key with the provider before saving it (`OnboardingAPIKeyStep`): a refused key
+is never written, so a bad key can't make a later launch skip the step. A check the provider
+couldn't answer turns the button into **Continue Anyway**, which saves the key, because a rate limit
+or an outage is no evidence against it. Connections saves first and checks after, because there a
+slow check must never block an edit. Saving also calls `Onboarding.adopt`, which makes the key's
+vendor the brain's primary target, with its default model, and the transcription provider, and
+drops fallback targets that need the other key. The defaults are OpenAI, so without this a
+Gemini-only install would have Start refuse. **Create one** opens the vendor's key page: an explicit
+click, before any session exists.
+
+**The permissions step** is the walk in [Permissions](#permissions).
+
+**Look.** Both steps share one layout (`OnboardingStepView`): Jarvis's head with the parts the step
+feeds lit, a greeting title, the step's body, a note, and Quit, step dots, and the primary button.
+The dots show only when both steps run. The window has no title strip; its buttons sit on the
+backdrop. `OnboardingTheme` holds the colors, chosen so every text color clears 4.5:1 on its surface
+in light and dark, while the head keeps `RobotHeadView`'s Settings colors.
+
 ### Permissions
 
 Jarvis needs three macOS grants (Microphone, System Audio Recording, Screen Recording) and cannot
-coach without any of them, so `PermissionGate` asks for all three at launch and keeps the app closed
-until it holds them. One button walks the dialogs, strictly one at a time because macOS queues them.
-The window's close button quits: grant or quit is the whole choice. Nothing records that the gate has
-run, because it is shown exactly when the grants are incomplete, which is also the only way back in
-after a refusal. There is no Permissions page in Settings: the hard gate makes one unreachable.
+coach without any of them, so onboarding's permissions step asks for all three before the app is
+built. One button walks the dialogs, strictly one at a time because macOS queues them. The window's
+close button quits: grant or quit is the whole choice. Once onboarding has completed, a grant that
+goes missing is not asked for at launch: Start refuses and names it, and the Settings hub names the
+System Settings pane for Microphone and Screen Recording. There is no Permissions page in Settings:
+macOS's own panes are where a grant comes back. A grant macOS forgets after onboarding (a
+`tccutil reset` or a changed signature) returns to undetermined, which System Settings can't switch
+on until Jarvis asks again; onboarding runs once, so the way back is clearing `onboarding.completed`
+([build-and-run.md](./build-and-run.md#packaging--signing--why-permission-grants-persist)).
 
 Chrome semantic text has a fourth, optional Accessibility grant. **Read Chrome page text** is off by
 default and can request this grant only from Settings while Jarvis is stopped. The setting remains
 off unless the grant is live. Turning it off during a session takes effect at the next attempt. It is
-deliberately outside `PermissionGate`: denial or revocation leaves current-viewport OCR available and
+deliberately outside onboarding: denial or revocation leaves current-viewport OCR available and
 never blocks coaching. Capture itself never prompts, and the setting is frozen into each attempt's
 session-plan revision so live teardown cannot produce privacy UI.
 
 The reason it happens at launch rather than at Start is the coaching context. A TCC dialog is system
 UI that no capture-exclusion trick can hide, so one arriving mid-interview is visible to whoever the
-user is sharing a screen with.
+user is sharing a screen with. After onboarding, the only dialog Start can still raise is System
+Audio's, and only after a `tccutil reset` returns that grant to undetermined.
 
 **Screen Recording is invisible to the process that asks.** `CGRequestScreenCaptureAccess` returns
 false whether the user allowed or refused, and preflight keeps returning what the process started
 with. A *later* launch sees the truth, so `PermissionPreferences.screenRecordingAsked` records that
 Jarvis asked, and a launch that has asked before and still lacks the grant treats it as a proven
-refusal. Without that, a refusal is indistinguishable from a grant awaiting relaunch and the gate
+refusal. Without that, a refusal is indistinguishable from a grant awaiting relaunch and the walk
 loops the user through Quit & Reopen forever.
 
 **System Audio Recording is enforced silently.** There is no API to request it and none to read it,
@@ -524,23 +569,23 @@ denied tap still delivers frames, and `CaptureReadinessMonitor` reads frame arri
 without inspecting amplitude, so a session would report full readiness while hearing nothing from
 the other side.
 
-So proof is gathered twice, and lives only in the process that gathered it. At launch the two
-readable grants are checked first, because they cost nothing and cannot prompt; system audio is
-probed only when they are held, so anything missing opens the gate and lets the walk raise its
-dialogs with a window on screen to explain them. Then every Start proves system audio again, ahead of the
+So proof is gathered twice, and lives only in the process that gathered it. While onboarding hasn't
+completed, launch checks the two readable grants first, because they cost nothing and cannot prompt;
+system audio is probed only when they are held, and anything missing opens the permissions step,
+which raises its dialogs with a window on screen to explain them. Then every Start proves system audio again, ahead of the
 preparation it already runs, since a menu-bar app can sit for days between launches and a grant
 withdrawn in that time would otherwise reach a session. Every Start takes that path: there is no
 longer a configuration with nothing to await, and nothing before the probe gates on its previous
 answer, so a Start that failed on system audio is retried by pressing Start again. A probe that
 cannot run proves nothing: it blocks the attempt at hand without counting as a refusal, so the
-checklist keeps offering to ask rather than sending the user to a toggle that may already be on.
+permissions step keeps offering to ask rather than sending the user to a toggle that may already be on.
 
 The one thing that persists is `screenRecordingAsked`, and it is not a grant: it records that Jarvis
 asked, which no later grant or refusal makes untrue. It is cleared once the grant is observed held,
-because holding it proves the asking was answered — which is what lets a later reset be treated as
-undetermined and asked for again, rather than read as a refusal. Mid-session revocation is out of scope — every
-way to catch it is either amplitude policing, which contradicts the rule above, or a timer. The next
-Start refuses with the reason.
+which onboarding does at launch and again when it completes, because holding it proves the asking was
+answered. That is what lets a later reset be treated as undetermined and asked for again, rather than
+read as a refusal. Mid-session revocation is out of scope: every way to catch it is either amplitude
+policing, which contradicts the rule above, or a timer. The next Start refuses with the reason.
 
 ### Failure surfacing — startup loud, runtime ghost
 
@@ -1262,7 +1307,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
   **⌥⌘J** hotkey for an on-demand screen hint *does* exist — see [§2](#on-demand-coaching-shortcuts) — but it
   complements the proactive default; it is not a trigger-to-listen wake key.)
-- Productization: hosted auth, billing, onboarding, or arbitrary provider chains.
+- Productization: hosted auth, billing, or arbitrary provider chains.
 - Windows / cross-platform.
 
 ## 7. Design Principles

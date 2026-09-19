@@ -17,6 +17,11 @@ import Foundation
         #expect(Credential.geminiAPIKey.displayName == "Gemini API")
     }
 
+    @Test func eachCredentialLinksToItsVendorsKeyPage() {
+        #expect(Credential.openAIAPIKey.keyPageURL.absoluteString == "https://platform.openai.com/api-keys")
+        #expect(Credential.geminiAPIKey.keyPageURL.absoluteString == "https://aistudio.google.com/apikey")
+    }
+
     @Test func savingOneCredentialLeavesTheOtherIntact() {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
