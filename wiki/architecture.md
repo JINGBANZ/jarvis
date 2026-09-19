@@ -1023,9 +1023,11 @@ is about 60 MB on disk and 20 MB per update.
   ([`OpenAIFailureClassifier`](../Sources/JarvisCore/Providers/OpenAI/OpenAIFailureClassifier.swift))
   and Anthropic's on the Claude route
   ([`AnthropicFailureClassifier`](../Sources/JarvisCore/Providers/Anthropic/AnthropicFailureClassifier.swift)),
-  where `authentication_error` and `permission_error` are permanent, `invalid_request_error` and
-  `not_found_error` are configuration, and `rate_limit_error`, `overloaded_error`, and `api_error`
-  stay temporary. With every credential for a vendor gone the Codex route answers 503
+  where `authentication_error` and `permission_error` are permanent, `not_found_error` and the
+  helper's own `unknown provider for model` answer are configuration, and `rate_limit_error`,
+  `overloaded_error`, `api_error`, and any other `invalid_request_error` (Anthropic's catch-all 400,
+  which a fresh attempt's different conversation may pass) stay temporary. With every credential for
+  a vendor gone the Codex route answers 503
   `upstream_authentication_required`, a permanent authentication failure. A model the helper cannot
   route answers 400 `unknown provider for model` (`model_not_found` on the Codex route,
   `invalid_request_error` on the Claude route), which stays a configuration failure: the helper sends

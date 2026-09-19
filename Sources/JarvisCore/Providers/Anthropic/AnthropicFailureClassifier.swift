@@ -13,7 +13,8 @@ public enum AnthropicFailureClassifier {
         let message = error?["message"] as? String
             ?? body.flatMap { String(data: $0, encoding: .utf8) }
             ?? ""
-        let (category, disposition) = categorize(httpStatus: httpStatus, type: type?.lowercased(), stage: stage)
+        let (category, disposition) = categorize(
+            httpStatus: httpStatus, type: type?.lowercased(), message: message.lowercased(), stage: stage)
         return ProviderFailure(
             source: source, stage: stage, category: category, disposition: disposition,
             identity: .init(httpStatus: httpStatus, errorType: type),
@@ -21,14 +22,18 @@ public enum AnthropicFailureClassifier {
     }
 
     private static func categorize(
-        httpStatus: Int, type: String?, stage: ProviderFailure.Stage
+        httpStatus: Int, type: String?, message: String, stage: ProviderFailure.Stage
     ) -> (ProviderFailure.Category, ProviderFailure.Disposition) {
         switch type {
         case "authentication_error": return (.authentication, .permanent)
         case "permission_error": return (.access, .permanent)
         case "billing_error": return (.quota, .permanent)
-        // The helper's own answer for a model it cannot route reads `unknown provider for model`.
-        case "invalid_request_error", "not_found_error": return (.configuration, .permanent)
+        case "not_found_error": return (.configuration, .permanent)
+        // The helper's own answer for a model it cannot route. Every other invalid request is
+        // Anthropic's catch-all 400 (a prompt too long, a bad replay), which the next attempt's
+        // different conversation may pass, so it stays temporary.
+        case "invalid_request_error" where message.hasPrefix("unknown provider for model"):
+            return (.configuration, .permanent)
         // Subscription Activity reads a 429 rejection as the plan's usage limit.
         case "rate_limit_error": return (.rejected, .temporary)
         case "overloaded_error", "api_error": return (.unavailable, .temporary)

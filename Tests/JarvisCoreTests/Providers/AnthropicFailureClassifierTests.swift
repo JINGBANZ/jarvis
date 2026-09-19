@@ -44,6 +44,18 @@ import Testing
             + "check Settings → Brain, or sign in again in Settings → Connections")
     }
 
+    /// Anthropic's catch-all 400 is not proof of a permanent failure; a fresh attempt sends a
+    /// different conversation.
+    @Test func anyOtherInvalidRequestStaysTemporary() {
+        let tooLong = classify(400, body(type: "invalid_request_error",
+                                         message: "prompt is too long: 1000001 tokens > 1000000 maximum"))
+        #expect(tooLong.category == .rejected && tooLong.disposition == .temporary)
+        #expect(tooLong.identity == .init(httpStatus: 400, errorType: "invalid_request_error"))
+        let badReplay = classify(400, body(type: "invalid_request_error",
+                                           message: "messages.3: tool_use ids were found without tool_result blocks"))
+        #expect(badReplay.disposition == .temporary)
+    }
+
     @Test func aRateLimitReadsAsThePlansUsageLimit() {
         let failure = classify(429, body(type: "rate_limit_error", message: "Slow down."))
         #expect(failure.activitySentence == "Claude Code reached its usage limit (HTTP 429, rate_limit_error: Slow down.); "
