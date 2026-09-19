@@ -434,8 +434,9 @@ Keyboard shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessib
 collision—including another Jarvis shortcut—keeps the prior working binding. Each action also supports
 an optional, separately persisted mouse binding. `MouseHotkeyController` uses a suppressing event tap
 with an existing Accessibility grant; `MouseShortcutRouter` matches only actions allowed in the live
-session and consumes the matched click through release. It neither prompts nor records mouse activity. See
-[Settings → Shortcuts](./settings-window.md#shortcuts).
+session and consumes the matched click through release. See
+[Settings → Shortcuts](./settings-window.md#shortcuts) for binding behavior and
+[Sandbox → Data Egress](./sandbox.md#data-egress) for privacy scope.
 
 ## 3. Components
 
