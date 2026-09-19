@@ -10,8 +10,11 @@ final class ReplyProgressRelay: @unchecked Sendable {
 
     private struct Request {
         let started: Date
+        let stream: AsyncStream<BrainReplyProgress>
         let continuation: AsyncStream<BrainReplyProgress>.Continuation
-        let consumer: Task<Void, Never>
+        /// Started by the first snapshot, so a request that never streams never waits on the main
+        /// actor: a failed attempt must commit its route state even while the main actor is busy.
+        var consumer: Task<Void, Never>?
         var last: BrainReplyProgress?
     }
 
@@ -31,19 +34,8 @@ final class ReplyProgressRelay: @unchecked Sendable {
     func beginRequest() {
         let (stream, continuation) = AsyncStream.makeStream(
             of: BrainReplyProgress.self, bufferingPolicy: .bufferingNewest(1))
-        let overlay = overlay
-        let consumer = Task { @MainActor in
-            var lastPaint: ContinuousClock.Instant?
-            for await snapshot in stream {
-                if let lastPaint, lastPaint.duration(to: .now) < Self.frame {
-                    try? await Task.sleep(for: Self.frame - lastPaint.duration(to: .now))
-                }
-                overlay.showReplyProgress(snapshot)
-                lastPaint = .now
-            }
-        }
         lock.withLock {
-            request = Request(started: Date(), continuation: continuation, consumer: consumer, last: nil)
+            request = Request(started: Date(), stream: stream, continuation: continuation)
         }
     }
 
@@ -56,7 +48,7 @@ final class ReplyProgressRelay: @unchecked Sendable {
         }
         guard let ended else { return nil }
         ended.continuation.finish()
-        await ended.consumer.value
+        if let consumer = ended.consumer { await consumer.value }
         return ended.last
     }
 
@@ -76,11 +68,28 @@ final class ReplyProgressRelay: @unchecked Sendable {
                 phases.append("speak_lines_ms")
             }
             current.last = snapshot
+            if snapshot.hasText {
+                if current.consumer == nil { current.consumer = consume(current.stream) }
+                current.continuation.yield(snapshot)
+            }
             request = current
-            if snapshot.hasText { current.continuation.yield(snapshot) }
             return (phases, firstTextMs)
         }
         if let firstTextMs { jlog("💬 first text +\(firstTextMs)ms") }
         return phases
+    }
+
+    private func consume(_ stream: AsyncStream<BrainReplyProgress>) -> Task<Void, Never> {
+        let overlay = overlay
+        return Task { @MainActor in
+            var lastPaint: ContinuousClock.Instant?
+            for await snapshot in stream {
+                if let lastPaint, lastPaint.duration(to: .now) < Self.frame {
+                    try? await Task.sleep(for: Self.frame - lastPaint.duration(to: .now))
+                }
+                overlay.showReplyProgress(snapshot)
+                lastPaint = .now
+            }
+        }
     }
 }
