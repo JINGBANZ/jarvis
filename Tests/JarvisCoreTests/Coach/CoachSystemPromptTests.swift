@@ -108,6 +108,10 @@ import Testing
         #expect(!toolsOnly.contains("load_skill"))
         #expect(!toolsOnly.contains("# Skills you can load"))
         #expect(toolsOnly.contains("with load_tool"))
+        // Speak's own guidance legitimately says "skill" elsewhere, so check the leaking
+        // skill-reassessment sentences specifically rather than the word "skill" anywhere.
+        #expect(!toolsOnly.contains("finish skill selection"))
+        #expect(!toolsOnly.contains("Load each additional applicable skill"))
     }
 
     @Test func theLoadingSectionStillDefersToAForcedSpeak() {
