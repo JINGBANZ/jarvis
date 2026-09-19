@@ -336,7 +336,9 @@ coaching/navigation actions as the keyboard controller. During a live session, a
 binding fires once on button-down and consumes the down, drag, and up events so the foreground app
 does not also act on the click. While stopped or when an action is unavailable, clicks pass through.
 An already consumed press finishes consuming its release even if the session or modifiers change;
-an interrupted event stream clears pending presses. No mouse activity is logged or archived.
+an interrupted event stream clears pending presses. The tap is disabled when no bindings, pending
+releases, or recording need mouse events, and is re-enabled when recording or binding again. No mouse
+activity is logged or archived.
 
 **Explain more**, **Show code**, and the two navigation shortcuts all act on the detail box, so the
 Overlay Box switch is the only thing that decides whether they can be bound: with the box off, their

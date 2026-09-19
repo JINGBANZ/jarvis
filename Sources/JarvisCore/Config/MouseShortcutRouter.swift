@@ -13,6 +13,8 @@ public struct MouseShortcutRouter: Sendable {
 
     public init() {}
 
+    public var needsMouseEvents: Bool { !bindings.isEmpty || !consumedButtons.isEmpty }
+
     @discardableResult
     public mutating func bind(_ combination: MouseHotkeyCombination?, to shortcut: CoachingShortcut) -> Bool {
         if let combination {

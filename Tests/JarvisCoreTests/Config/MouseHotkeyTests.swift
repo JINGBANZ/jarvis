@@ -60,6 +60,34 @@ import Testing
         #expect(unmatchedRelease == .passThrough)
     }
 
+    @Test func mouseEventsAreNeededOnlyForBindingsOrPendingReleases() {
+        var router = MouseShortcutRouter()
+        #expect(!router.needsMouseEvents)
+        router.bind(.init(button: 2, modifiers: []), to: .hint)
+        #expect(router.needsMouseEvents)
+        router.bind(nil, to: .hint)
+        #expect(!router.needsMouseEvents)
+
+        router.bind(.init(button: 2, modifiers: []), to: .hint)
+        let press = router.handle(button: 2, modifiers: [], phase: .down, enabled: [.hint])
+        #expect(press == .trigger(.hint))
+        router.bind(nil, to: .hint)
+        #expect(router.needsMouseEvents)
+        let release = router.handle(button: 2, modifiers: [], phase: .up, enabled: [])
+        #expect(release == .consume)
+        #expect(!router.needsMouseEvents)
+    }
+
+    @Test func interruptionAfterClearingLastBindingNeedsNoMoreMouseEvents() {
+        var router = MouseShortcutRouter()
+        router.bind(.init(button: 3, modifiers: []), to: .hint)
+        let press = router.handle(button: 3, modifiers: [], phase: .down, enabled: [.hint])
+        #expect(press == .trigger(.hint))
+        router.bind(nil, to: .hint)
+        router.resetPressedButtons()
+        #expect(!router.needsMouseEvents)
+    }
+
     @Test func disabledActionsAndUnmatchedReleasesPassThrough() {
         var router = MouseShortcutRouter()
         router.bind(.init(button: 2, modifiers: []), to: .nextDetail)

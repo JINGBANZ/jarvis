@@ -5,7 +5,9 @@ import JarvisCore
 final class MouseHotkeyController {
     var onRequest: ((CoachingShortcut) -> Void)?
     var isEnabled: (CoachingShortcut) -> Bool = { _ in false }
-    var isRecording = false
+    var isRecording = false {
+        didSet { updateTapEnabled() }
+    }
 
     private var router = MouseShortcutRouter()
     private var tap: CFMachPort?
@@ -33,6 +35,7 @@ final class MouseHotkeyController {
         }
         if combination != nil, let failure = prepare() { return failure }
         router = candidate
+        updateTapEnabled()
         return nil
     }
 
@@ -56,7 +59,7 @@ final class MouseHotkeyController {
                 // The tap source is installed only on the main run loop.
                 let consumed = MainActor.assumeIsolated { controller.handle(type, event: event) == nil }
                 return consumed ? nil : Unmanaged.passUnretained(event)
-            }, userInfo: Unmanaged.passUnretained(self).toOpaque()),
+            }, userInfo: Unmanaged.passUnretained(self).toOpaque()), // AppDelegate retains self for the app lifetime.
               let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
             return "Couldn't enable mouse shortcuts. Check Accessibility permission and try again."
         }
@@ -67,13 +70,18 @@ final class MouseHotkeyController {
         return nil
     }
 
-    // AppDelegate owns this controller for the app run, as it does the Carbon hotkey controller.
+    private func updateTapEnabled() {
+        guard let tap else { return }
+        let enabled = (isRecording || router.needsMouseEvents) && BrowserAccessibilityPermission.isGranted
+        if CGEvent.tapIsEnabled(tap: tap) != enabled {
+            CGEvent.tapEnable(tap: tap, enable: enabled)
+        }
+    }
+
     private func handle(_ type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             router.resetPressedButtons()
-            if let tap, BrowserAccessibilityPermission.isGranted {
-                CGEvent.tapEnable(tap: tap, enable: true)
-            }
+            updateTapEnabled()
             return Unmanaged.passUnretained(event)
         }
         let phase: MouseShortcutRouter.Phase
@@ -92,6 +100,7 @@ final class MouseHotkeyController {
         let outcome = router.handle(
             button: Int(event.getIntegerValueField(.mouseEventButtonNumber)),
             modifiers: modifiers, phase: phase, enabled: enabled)
+        if phase == .up { updateTapEnabled() }
         switch outcome {
         case .passThrough: return Unmanaged.passUnretained(event)
         case .consume: return nil

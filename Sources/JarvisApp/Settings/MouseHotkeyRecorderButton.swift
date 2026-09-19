@@ -57,7 +57,7 @@ final class MouseHotkeyRecorderButton: NSButton {
 
     @objc private func startRecording() {
         if isRecording { stopRecording(); return }
-        guard prepare?() != false, window?.makeFirstResponder(self) == true else { return }
+        guard window?.makeFirstResponder(self) == true, prepare?() != false else { return }
         isRecording = true
         title = "Click mouse…"
         onRecordingChanged?(true)
