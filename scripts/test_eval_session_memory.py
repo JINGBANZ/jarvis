@@ -48,6 +48,17 @@ class CallTests(unittest.TestCase):
 
 
 class SetupTests(unittest.TestCase):
+    def test_empty_run_name_is_rejected_before_creating_artifacts(self):
+        with mock.patch('sys.argv', ['eval-session-memory.py', '--run', '']), \
+                mock.patch.object(evaluation, 'create_run_directory',
+                                  side_effect=AssertionError('invalid run reached setup')) as create, \
+                mock.patch.object(evaluation, 'build_bridge'), \
+                mock.patch('sys.stderr'):
+            with self.assertRaises(SystemExit) as error:
+                evaluation.main()
+        self.assertEqual(error.exception.code, 2)
+        create.assert_not_called()
+
     def test_fresh_workspace_creates_private_artifact_parent(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = Path(temporary) / '.jarvis' / 'run'

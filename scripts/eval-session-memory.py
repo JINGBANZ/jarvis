@@ -102,7 +102,7 @@ def main():
     parser.add_argument('--run', required=True, help='New directory name under workspace .jarvis')
     parser.add_argument('--model', default='haiku')
     args = parser.parse_args()
-    if Path(args.run).name != args.run or args.run in ('.', '..'):
+    if not args.run or Path(args.run).name != args.run or args.run in ('.', '..'):
         parser.error('--run must be a single new directory name')
     os.umask(0o077)
     directory = ROOT / '.jarvis' / args.run

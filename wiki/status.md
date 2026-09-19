@@ -53,6 +53,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisApp/Updates/UpdateController.swift`: the **Check for Updates** menu item ([build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed)).
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift`: the Activity window and its **Evaluate** flow ([build-and-run.md → The live activity viewer](./build-and-run.md#the-live-activity-viewer)).
 - `Sources/EvalPrep/main.swift` + `scripts/eval-session.sh`: the terminal entry point for the same evaluator.
+- `scripts/eval-session-memory.py` + `scripts/test_eval_session_memory.py`: the opt-in synthetic session-memory evaluation and its harness tests ([fixture guide](../Tests/JarvisLiveTests/Fixtures/session-memory/README.md)).
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a`: the prebuilt WebRTC AEC3 archive, rebuilt by `scripts/build-aec.sh`.
 - `Sources/JarvisApp/Resources/SileroVAD.mlmodelc`: the Silero VAD model, rebuilt by `scripts/build-vad.sh`.
 - `scripts/build-app.sh` + `scripts/lib/cliproxyapi.sh`: the local `Jarvis Dev.app` build and the pinned subscription helper both app builds bundle ([build-and-run.md](./build-and-run.md)).
