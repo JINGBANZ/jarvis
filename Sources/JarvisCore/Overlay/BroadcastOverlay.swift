@@ -16,6 +16,13 @@ public final class BroadcastOverlay: OverlayRendering {
         return delivered
     }
 
+    /// Forwarded explicitly: the protocol's default would swallow every update in production.
+    @MainActor public func showReplyProgress(_ progress: BrainReplyProgress?, perLineSeconds: [TimeInterval]) {
+        for sink in sinks {
+            sink.showReplyProgress(progress, perLineSeconds: perLineSeconds)
+        }
+    }
+
     public init(_ sinks: [OverlayRendering]) {
         self.sinks = sinks
     }

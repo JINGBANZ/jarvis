@@ -87,4 +87,8 @@ per-tip total budget (scale the lines down proportionally past a ceiling) was co
 - **Playback:** [`CoachDriver`](../Sources/JarvisCore/Coach/CoachDriver.swift) computes a duration per
   line and hands the array to the caption; [`OverlayCaptionPanel`](../Sources/JarvisOverlay/OverlayCaptionPanel.swift)
   plays each line for its time and inserts the blank gap between them (`OverlayInvisibilityTests`
-  covers the gap and the queue/hide behavior).
+  covers the gap and the queue/hide behavior). On a streamed reply
+  ([architecture.md → Latency](./architecture.md#latency)) line 1 is on screen while it is still being
+  written and its clock starts only when it closes, so the notice buffer is not spent on a line the
+  model has not finished; a later line that has not closed when its turn comes holds the blank gap
+  until it does (`OverlayCaptionLiveTipTests`).

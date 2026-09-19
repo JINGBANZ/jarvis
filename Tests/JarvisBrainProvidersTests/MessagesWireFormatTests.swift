@@ -4,7 +4,7 @@ import JarvisCore
 @testable import JarvisBrainProviders
 
 @Suite struct MessagesWireFormatTests {
-    let wire = MessagesWireFormat(model: "claude-opus-5", reasoningEffort: "low", maxOutputTokens: 2_048)
+    let wire = MessagesWireFormat(model: "claude-opus-5", reasoningEffort: "low", maxOutputTokens: 2_048, stream: false)
 
     func body(_ messages: [ChatMessage], tools: [ToolDef] = coachTools(detailEnabled: true),
               choice: ToolChoice = .auto) throws -> [String: Any] {

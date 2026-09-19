@@ -25,7 +25,7 @@ private func speakResponseBody(arguments: String) -> Data {
         ]}
         """
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), http(200)) })
+                                       send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         #expect(resp.toolCalls == [.speak(callId: "call_1",
             lines: ["Try a hash map.", "Use `Array.from({length: n + 1}, () => [])` instead."])])
@@ -38,7 +38,7 @@ private func speakResponseBody(arguments: String) -> Data {
         ]}
         """
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), http(200)) })
+                                       send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         #expect(resp.toolCalls == [.captureScreen(callId: "call_9")])
         #expect(resp.rawToolCalls == [RawToolCall(id: "call_9", name: "capture_screen", argumentsJSON: "{}")])
@@ -52,7 +52,7 @@ private func speakResponseBody(arguments: String) -> Data {
         ]}
         """
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), http(200)) })
+                                       send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         #expect(resp.toolCalls == [.captureScreen(callId: "call_9")])
         #expect(resp.outputItemsJSON.count == 2)
@@ -67,7 +67,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func encodesRawItemsVerbatimBeforeFunctionCallOutput() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         let convo: [ChatMessage] = [
             .user("transcript"),
             .rawItems([
@@ -92,7 +92,7 @@ private func speakResponseBody(arguments: String) -> Data {
         ]}
         """
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), http(200)) })
+                                       send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         #expect(resp.toolCalls == [.staySilent(callId: "call_2")])
     }
@@ -100,7 +100,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func noToolCallsMeansSilent() async throws {
         let json = #"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"(thinking)"}]}]}"#
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), http(200)) })
+                                       send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         #expect(resp.toolCalls.isEmpty)
     }
@@ -110,7 +110,7 @@ private func speakResponseBody(arguments: String) -> Data {
         for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, #"{"lines":["  "]}"#, "not json"] {
             let body = speakResponseBody(arguments: args)
             let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                           send: { _ in (body, http(200)) })
+                                           send: sending { _ in (body, http(200)) })
             let resp = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
             #expect(resp.toolCalls.isEmpty, "args=\(args)")
         }
@@ -119,7 +119,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func decodeFlagsIncompleteResponse() async throws {
         let json = #"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"},"output":[]}"#
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), http(200)) })
+                                       send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         #expect(resp.toolCalls.isEmpty)
         #expect(resp.incompleteReason == "max_output_tokens")
@@ -128,7 +128,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func decodeCompletedResponseHasNoIncompleteReason() async throws {
         let json = #"{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}"#
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in (Data(json.utf8), http(200)) })
+                                       send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         #expect(resp.incompleteReason == nil)
     }
@@ -136,7 +136,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func decodesOutputTextForToollessCalls() async throws {
         let json = #"{"output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the "},{"type":"output_text","text":"summary"}]}]}"#
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.4-mini",
-                                       send: { _ in (Data(json.utf8), http(200)) })
+                                       send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("condense this")], tools: [])
         #expect(resp.outputText == "the summary")
         #expect(resp.toolCalls.isEmpty)
@@ -149,14 +149,14 @@ private func speakResponseBody(arguments: String) -> Data {
             apiKey: "sk-x",
             model: "gpt-5.4-mini",
             timeout: BrainWorkloadTimeout.historyCompaction,
-            send: { request in
+            send: sending { request in
                 timeouts.append(request.timeoutInterval)
                 return (response, http(200))
             })
         let defaultClient = BrainAccessor(
             apiKey: "sk-x",
             model: "gpt-5.4-mini",
-            send: { request in
+            send: sending { request in
                 timeouts.append(request.timeoutInterval)
                 return (response, http(200))
             })
@@ -175,7 +175,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func httpErrorThrowsWithoutRetry() async {
         let attempts = Counter()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { _ in _ = attempts.next(); return (Data("nope".utf8), http(400)) })
+                                       send: sending { _ in _ = attempts.next(); return (Data("nope".utf8), http(400)) })
         await #expect(throws: (any Error).self) {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         }
@@ -185,7 +185,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func httpErrorIsClassifiedAtProviderBoundary() async {
         let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-5.5",
-            send: { _ in (Data("unauthorized".utf8), http(401)) })
+            send: sending { _ in (Data("unauthorized".utf8), http(401)) })
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
             Issue.record("expected a classified HTTP failure")
@@ -202,7 +202,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let body = Data(#"{"error":{"code":"future_request_error","type":"future_type"}}"#.utf8)
         let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-5.5",
-            send: { _ in (body, http(422)) })
+            send: sending { _ in (body, http(422)) })
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
             Issue.record("expected a classified HTTP failure")
@@ -222,7 +222,7 @@ private func speakResponseBody(arguments: String) -> Data {
         for (body, expected) in cases {
             let client = BrainAccessor(
                 apiKey: "sk-x", model: "gpt-5.5",
-                send: { _ in (body, http(404)) })
+                send: sending { _ in (body, http(404)) })
             do {
                 _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
                 Issue.record("expected a classified HTTP failure")
@@ -238,7 +238,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let body = Data(#"{"error":{"code":"insufficient_quota","type":"billing_error"}}"#.utf8)
         let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-5.5",
-            send: { _ in (body, http(429)) })
+            send: sending { _ in (body, http(429)) })
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
             Issue.record("expected a classified HTTP failure")
@@ -253,7 +253,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func transportFailuresCarryTheCodeAndNoURL() async {
         let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-5.5",
-            send: { _ in throw URLError(.cannotConnectToHost) })
+            send: sending { _ in throw URLError(.cannotConnectToHost) })
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
             Issue.record("expected a classified transport failure")
@@ -270,7 +270,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func encodesResponsesRequestShape() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5", reasoningEffort: "low",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         let convo: [ChatMessage] = [
             .system("be a coach"),
             .user("transcript"),
@@ -298,7 +298,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let client = BrainAccessor(
             provider: .codexSubscription, apiKey: "proxy-key", model: "gpt-5.5",
             reasoningEffort: "low",
-            send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+            send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("transcript")], tools: coachTools(detailEnabled: true))
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"store\":false"))
@@ -310,7 +310,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let client = BrainAccessor(
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
             endpoint: endpoint,
-            send: { request in
+            send: sending { request in
                 box.set(request)
                 return (Data(#"{"type":"message","content":[],"stop_reason":"end_turn"}"#.utf8), http(200))
             })
@@ -324,7 +324,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func aSubscriptionFailureNamesItsOwnProvider() async {
         let client = BrainAccessor(
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
-            send: { _ in (Data(#"{"type":"error","error":{"type":"api_error","message":"nope"}}"#.utf8), http(500)) })
+            send: sending { _ in (Data(#"{"type":"error","error":{"type":"api_error","message":"nope"}}"#.utf8), http(500)) })
         do {
             _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
             Issue.record("expected the request to fail")
@@ -341,7 +341,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func aRefusedClaudeReplyIsATemporaryRejection() async {
         let client = BrainAccessor(
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-fable-5-1",
-            send: { _ in
+            send: sending { _ in
                 (Data(#"{"type":"message","content":[],"stop_reason":"refusal","stop_details":{"type":"refusal","category":"cyber","explanation":"declined"}}"#.utf8), http(200))
             })
         do {
@@ -367,7 +367,7 @@ private func speakResponseBody(arguments: String) -> Data {
                     model: model.id,
                     reasoningEffort: effort.rawValue,
                     maxOutputTokens: effort.maxOutputTokens,
-                    send: { request in
+                    send: sending { request in
                         box.set(request.httpBody)
                         return (Data(#"{"output":[]}"#.utf8), http(200))
                     })
@@ -391,7 +391,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let client = BrainAccessor(
             apiKey: "sk-x", model: "gpt-6-astra", reasoningEffort: "none",
             maxOutputTokens: 25_000,
-            send: { request in
+            send: sending { request in
                 box.set(request.httpBody)
                 return (Data(#"{"output":[]}"#.utf8), http(200))
             })
@@ -406,7 +406,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func encodesProvidedMaxOutputTokens() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5", maxOutputTokens: 25_000,
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"max_output_tokens\":25000"))
@@ -415,7 +415,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func defaultMaxOutputTokensTracksDefaultEffort() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"max_output_tokens\":\(Defaults.Brain.effort.maxOutputTokens)"))
@@ -424,7 +424,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func encodesStrictToolsForStructuredOutput() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"strict\":true"))
@@ -435,7 +435,7 @@ private func speakResponseBody(arguments: String) -> Data {
             disabledTools: [], prepSourcesConfigured: true)
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
 
         _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
         let before = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
@@ -458,7 +458,7 @@ private func speakResponseBody(arguments: String) -> Data {
                      Skill(name: "system-design", description: "d", body: "b")])
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
 
         _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
 
@@ -474,8 +474,8 @@ private func speakResponseBody(arguments: String) -> Data {
             disabledTools: [], prepSourcesConfigured: true)
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
-        let conversation = try await client.makeConversation()
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+        let conversation = try await client.makeConversation(progress: nil)
 
         _ = try await conversation.respond(
             messages: [.user("hi")], tools: capabilities.callable(loaded: []),
@@ -494,7 +494,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func defaultToolChoiceIsAuto() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"tool_choice\":\"auto\""))
@@ -503,7 +503,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func requiredToolChoiceEncodesRequiredString() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true), toolChoice: .required)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"tool_choice\":\"required\""))
@@ -512,7 +512,7 @@ private func speakResponseBody(arguments: String) -> Data {
     @Test func forceToolChoiceEncodesFunctionObject() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true), toolChoice: .force("speak"))
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"tool_choice\""))
@@ -528,7 +528,7 @@ private func speakResponseBody(arguments: String) -> Data {
             skills: [Skill(name: "behavioral", description: "d", body: "b")]).tools
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: tools, toolChoice: .required)
         let required = try #require(
             try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
@@ -556,7 +556,7 @@ private func speakResponseBody(arguments: String) -> Data {
             apiKey: "sk-x", model: "claude-opus-5", reasoningEffort: effort,
             maxOutputTokens: maxOutputTokens, toolChoicePolicy: policy,
             minimumReasoningEffort: floor,
-            send: { request in
+            send: sending { request in
                 box.set(request.httpBody)
                 return (Data(#"{"output":[]}"#.utf8), http(200))
             })
@@ -620,7 +620,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        traffic: traffic, trafficTag: "coach",
-                                       send: { _ in (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                       send: sending { _ in (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         _ = await traffic.closeForTesting()
 
@@ -639,7 +639,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let traffic = await FileSessionAudit.readyForTesting(directory: dir)
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        traffic: traffic, trafficTag: "coach",
-                                       send: { _ in throw URLError(.timedOut) })
+                                       send: sending { _ in throw URLError(.timedOut) })
         await #expect(throws: (any Error).self) {
             try await client.respond(messages: [.user("hi")], tools: coachTools(detailEnabled: true))
         }
@@ -658,7 +658,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let client = BrainAccessor(
             provider: .gemini, apiKey: "AIzaTestKey", model: "gemini-3.8-flash",
             endpoint: BrainProviderDescriptor.geminiInteractionsEndpoint,
-            send: { request in
+            send: sending { request in
                 captured.append(request)
                 return (Data(#"{"status":"completed","steps":[]}"#.utf8), http(200))
             })
@@ -677,7 +677,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let client = BrainAccessor(
             provider: .gemini, apiKey: "AIzaTestKey", model: "gemini-3.8-flash",
             endpoint: BrainProviderDescriptor.geminiInteractionsEndpoint,
-            send: { _ in
+            send: sending { _ in
                 (Data(#"[{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"reason":"API_KEY_INVALID"}]}}]"#.utf8), http(400))
             })
         do {
