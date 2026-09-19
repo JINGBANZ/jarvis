@@ -763,12 +763,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
             let response = try await client.respond(
                 messages: [
                     .system(JarvisPrompts.HistorySummary.system),
-                    .user(JarvisPrompts.HistorySummary.input(oldest)),
+                    .user(try JarvisPrompts.HistorySummary.input(oldest)),
                 ],
                 tools: [],
                 toolChoice: .auto)
-            guard let summary = response.outputText, !summary.isEmpty else {
-                jlog("… memory compaction returned nothing — keeping full history for now")
+            guard let output = response.outputText,
+                  let summary = JarvisPrompts.HistorySummary.validatedSummary(output) else {
+                jlog("… memory compaction returned an invalid briefing — keeping full history for now")
                 return
             }
             // A summary that wins the race with teardown must not mutate history.

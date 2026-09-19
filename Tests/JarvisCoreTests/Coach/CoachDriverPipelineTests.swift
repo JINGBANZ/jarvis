@@ -2051,7 +2051,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
-        let summarizer = ScriptedBrain(script: [.init(toolCalls: [], outputText: "PROBLEM: tic-tac-toe columns.")])
+        let summarizer = ScriptedBrain(script: [.init(toolCalls: [], outputText: #"{"context":"PROBLEM: tic-tac-toe columns.","decisions":[],"coaching":[],"openQuestions":[],"verification":[]}"#)])
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 30))
         transcript.append(.init(speaker: .me, text: String(repeating: "the problem statement goes on ", count: 8), at: 0))
@@ -2095,6 +2095,31 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(recorder.failures.isEmpty)
         // The checks above also pass if compaction never ran, so confirm the summarizer was called.
         #expect(await waitUntilAsync { summarizer.calls.count >= 1 })
+        await driver.cancelBackgroundWork()?.value
+    }
+
+    @Test func malformedBriefingKeepsHistoryAndDoesNotFailTheRoute() async {
+        let clock = ManualClock(now: 0)
+        let recorder = RouteFailureRecorder()
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
+        let summarizer = ScriptedBrain(script: [.init(toolCalls: [], outputText:
+            "I cannot provide a hint without a screenshot.")])
+        let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
+            config: Config(historyCompactionTokenThreshold: 5),
+            onRouteFailure: { recorder.record($0) })
+        transcript.append(.init(speaker: .me, text: "Keep the inclusive boundary decision", at: 0))
+        await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "Tests have not run", at: 1))
+        await driver.handleTrigger(.turnEnd)
+        #expect(await waitUntilAsync { summarizer.calls.count >= 1 })
+        for turn in 0..<20 {
+            transcript.append(.init(speaker: .me, text: "review next case", at: 2 + Double(turn)))
+            await driver.handleTrigger(.turnEnd)
+            let context = (brain.calls.last ?? []).compactMap(\.text).joined(separator: "\n")
+            #expect(context.contains("Keep the inclusive boundary decision"))
+            #expect(!context.contains("I cannot provide a hint"))
+        }
+        #expect(recorder.failures.isEmpty)
         await driver.cancelBackgroundWork()?.value
     }
 
