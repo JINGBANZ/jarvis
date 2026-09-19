@@ -2,7 +2,7 @@ import AppKit
 import JarvisCore
 
 // Design: wiki/architecture.md#permissions
-/// Onboarding's permissions step. The walk and its state are unchanged; only the look is new.
+/// Onboarding's permissions step.
 @MainActor
 final class PermissionsStepView: NSView {
     var onFinished: (() -> Void)?
