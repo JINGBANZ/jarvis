@@ -149,8 +149,9 @@ without claiming a longer prompt is displayed. Never imply you sent a suggested 
 
 ## AI exchange evidence
 
-Follow the parent coding skill's project-context guidance for missing files, partial captures,
-and long requirements. Loading this child keeps that guidance in effect.
+Follow the companion `coding` skill's project-context guidance for missing files, partial captures,
+and long requirements; load it too when it is available and not already loaded, since that guidance
+still applies here.
 
 Another AI's response is not proof of an editor change. Earlier prompts and responses can explain
 a failed iteration only when present in the evidence; do not reconstruct missing exchanges from

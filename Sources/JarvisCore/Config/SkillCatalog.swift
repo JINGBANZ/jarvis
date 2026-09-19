@@ -104,22 +104,16 @@ public enum SkillCatalog {
         return candidates.first { !skillFiles(in: $0).isEmpty }
     }
 
-    static func skillFiles(in directory: URL) -> [URL] {
+    private static func skillFiles(in directory: URL) -> [URL] {
         let contents = (try? FileManager.default.contentsOfDirectory(
-            at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey],
+            at: directory, includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles])) ?? []
         return contents
             .filter {
-                guard let values = try? $0.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-                else { return false }
-                // Nested skills are bundled directories; do not follow links out of the tree or into a cycle.
-                return values.isDirectory == true && values.isSymbolicLink != true
+                (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
             }
-            .flatMap { folder -> [URL] in
-                let own = folder.appendingPathComponent(skillFileName)
-                let files = FileManager.default.fileExists(atPath: own.path) ? [own] : []
-                return files + skillFiles(in: folder)
-            }
+            .map { $0.appendingPathComponent(skillFileName) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
             .sorted { $0.path < $1.path }
     }
 }

@@ -178,13 +178,10 @@ using a provider's own tool-search feature: the route can move between brains mi
 shared history, and a plain tool result replays on any of them.
 
 A **skill** is coaching guidance for a kind of question, bundled as
-`SKILL.md` files under `Sources/JarvisCore/Resources/Skills/` in the agentskills.io format:
-frontmatter naming the skill and describing it in one line, then the body. Parent folders can
-contain child skill folders: `coding/coding-with-ai/SKILL.md` adds AI collaboration to the coding
-parent's fundamentals and shared project-context guidance. The parent refers to the child and its
-activation conditions; loading uses the leaf skill name, so folder nesting does not change saved
-switches or introduce another loader. `SkillCatalog` recursively discovers directories, skipping
-hidden folders and symbolic links, then reads and validates
+`Sources/JarvisCore/Resources/Skills/<name>/SKILL.md` in the agentskills.io format: frontmatter
+naming the skill and describing it in one line, then the body. `coding-with-ai` is a separate,
+optional companion to `coding`: each refers to the other by name and loads it too when it applies
+and is not already loaded, rather than one nesting inside the other. `SkillCatalog` reads and validates
 them at Start (a small hand-written frontmatter reader — two keys do not warrant a YAML dependency
 in a package that builds under Command Line Tools alone), and a file it rejects costs its own
 guidance, never the session. The switched-on skills are the second catalog; `load_skill` returns one
@@ -758,7 +755,7 @@ rather than a per-turn screenshot.
   evidence, verifying counterexamples, and checking minimal fixes against reproducing and regression
   cases. It composes with coding when offered and applies only while AI collaboration is relevant.
   Its separate catalog entry keeps that workflow conditional without a round or seniority setting
-  (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding/coding-with-ai/SKILL.md)).
+  (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
   System-design supplies the stage vocabulary from requirements through
   trade-offs, and asks for a diagram in the one stage that benefits. The base prompt keeps what is
   true of every session: when to speak or stay silent, hint length, and comprehension before

@@ -493,22 +493,24 @@ Every card uses the same sparkles icon. Each card has its own switch and reads *
 **UNEQUIPPED**; a switched-off card dims but keeps a live switch, so it can be switched back on. The
 cards sit in two columns, or one on a narrow window. The catalog is read when the page is built.
 
-The [Coding with AI skill](../Sources/JarvisCore/Resources/Skills/coding/coding-with-ai/SKILL.md)
-is an optional child of [coding](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md), which
-references its activation rules and owns shared guidance for multi-file tasks, long requirements,
-and incomplete captures. Folder nesting preserves the existing separate skill switches. The child
-recognizes a usable assistant panel before the first prompt, with explicit interview restrictions
-taking precedence. Its coaching covers orientation, bounded delegation, understanding and evaluating
-AI output, and correcting it when needed. It identifies the coding assistant by its role and
-available actions, regardless of its name. When the candidate is already delegating edits and is
-stuck choosing the next task, the skill supplies a bounded prompt without requiring an explicit
-prompt request; chosen manual work still receives direct help. Prompts name one task and its approach,
-with additional constraints only where needed. When coaching review of meaningful generated code,
-the child provides a brief walkthrough the candidate can explain to the interviewer, alongside its
-correctness assessment, without waiting for expressed confusion. A suggested prompt uses the existing
-Markdown detail area when available, separately from the short hint, without requiring confusion. When needed source is missing,
-the parent skill can ask the candidate to show or slowly scroll through it; this does not add continuous
-capture or a file archive. [Capture Scope](#capture-scope) defines the actual evidence limits.
+The [Coding with AI skill](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md) is a
+separate, optional companion to [coding](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md),
+each its own card with its own switch; loading one checks whether the other's catalog description
+also applies and loads it too, rather than one nesting inside the other. `coding` owns shared
+guidance for multi-file tasks, long requirements, and incomplete captures that both follow. Coding
+with AI recognizes a usable assistant panel before the first prompt, with explicit interview
+restrictions taking precedence. Its coaching covers orientation, bounded delegation, understanding
+and evaluating AI output, and correcting it when needed. It identifies the coding assistant by its
+role and available actions, regardless of its name. When the candidate is already delegating edits
+and is stuck choosing the next task, the skill supplies a bounded prompt without requiring an
+explicit prompt request; chosen manual work still receives direct help. Prompts name one task and
+its approach, with additional constraints only where needed. When coaching review of meaningful
+generated code, it provides a brief walkthrough the candidate can explain to the interviewer,
+alongside its correctness assessment, without waiting for expressed confusion. A suggested prompt
+uses the existing Markdown detail area when available, separately from the short hint, without
+requiring confusion. When needed source is missing, `coding`'s guidance can ask the candidate to
+show or slowly scroll through it; this does not add continuous capture or a file archive.
+[Capture Scope](#capture-scope) defines the actual evidence limits.
 
 Tools and Skills write `BrainPreferences.disabledTools` and `BrainPreferences.disabledSkills`, the
 names that are OFF, so a capability added in a later version is on for everyone who never opened

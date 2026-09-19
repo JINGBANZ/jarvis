@@ -4,11 +4,11 @@ description: Use when the question is a coding problem, including Code with AI; 
 ---
 # Coding questions
 
-## Optional child: Coding with AI
+## Coding with AI
 
-[Coding with AI](coding-with-ai/SKILL.md) is a child of this skill. It adds AI collaboration to the
-coding fundamentals below; it does not replace them. Load it by calling `load_skill` with the name
-`coding-with-ai`, not by trying to open the Markdown path.
+[Coding with AI](../coding-with-ai/SKILL.md) is a separate, optional companion skill. It adds AI
+collaboration on top of the coding fundamentals below; it does not replace them. Load it by calling
+`load_skill` with the name `coding-with-ai`, not by trying to open the Markdown path.
 
 Before giving coding advice, check whether `coding-with-ai` also applies using the available
 conversation and screen evidence. Follow its catalog description even if this skill loaded first.

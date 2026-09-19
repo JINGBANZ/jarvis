@@ -13,26 +13,6 @@ import Testing
         When the current question is behavioral, organize the answer as STAR.
         """
 
-    @Test func discoversParentAndNestedChildSkills() throws {
-        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
-            .appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: root) }
-        let paths = ["coding/SKILL.md", "coding/coding-with-ai/SKILL.md", "behavioral/SKILL.md"]
-        for path in paths + ["coding/notes.md", ".hidden/SKILL.md"] {
-            let url = root.appendingPathComponent(path)
-            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
-                                                    withIntermediateDirectories: true)
-            try "fixture".write(to: url, atomically: true, encoding: .utf8)
-        }
-        try FileManager.default.createSymbolicLink(
-            at: root.appendingPathComponent("coding/loop"), withDestinationURL: root)
-        let found = SkillCatalog.skillFiles(in: root).map {
-            $0.resolvingSymlinksInPath().path
-        }
-        let expected = paths.map { root.appendingPathComponent($0).resolvingSymlinksInPath().path }
-        #expect(found == expected.sorted())
-    }
-
     @Test func aValidFileParsesIntoNameDescriptionAndBody() throws {
         let skill = try SkillCatalog.parse(valid, folderName: "behavioral")
 
