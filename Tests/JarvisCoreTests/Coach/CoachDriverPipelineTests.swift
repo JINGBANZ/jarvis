@@ -1735,12 +1735,80 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!freshRequest.contains { $0.toolCalls != nil })
     }
 
+    @Test func automaticQuestionRunsWhileBothSpeakersHaveOnlyLaterPendingSpeech() async throws {
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
+        driver.updateTranscriptionWork(.pending(since: 3), for: .me)
+        driver.updateTranscriptionWork(.pending(since: 4), for: .them)
+        let boundary = transcript.append(.init(speaker: .me, text: "What is the complexity?", at: 2))
+        let outcome = await turnOutcomeBeforeTimeout {
+            await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary)
+        }
+        #expect(outcome == .silentByModel)
+        #expect(brain.calls.count == 1)
+        #expect(brain.calls.first?.contains { ($0.text ?? "").contains("What is the complexity?") } == true)
+    }
+
+    @Test func earlierPendingSpeechStillBlocksAndIsIncludedWhenLaterSpeechRemains() async throws {
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
+        driver.updateTranscriptionWork(.pending(since: 1), for: .them)
+        transcript.append(.init(speaker: .me, text: "Yes, that approach.", at: 2))
+        let task = Task { await turnOutcomeBeforeTimeout { await driver.handleTrigger(.turnEnd) } }
+        defer { task.cancel(); driver.updateTranscriptionWork(.settled, for: .them) }
+        #expect(!(await waitUntil { !brain.calls.isEmpty }))
+        transcript.append(.init(speaker: .them, text: "Which approach?", at: 1))
+        driver.updateTranscriptionWork(.pending(since: 3), for: .them)
+        #expect(await task.value == .silentByModel)
+        let request = try #require(brain.calls.first)
+        let text = request.compactMap(\.text).joined(separator: "\n")
+        let earlier = try #require(text.range(of: "Which approach?"))
+        let later = try #require(text.range(of: "Yes, that approach."))
+        #expect(earlier.lowerBound < later.lowerBound)
+    }
+
+    @Test func silenceWaitsForBothSpeakersButNewCompletedTurnCanWakeIt() async throws {
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
+        driver.updateTranscriptionWork(.pending(since: 3), for: .them)
+        transcript.append(.init(speaker: .me, text: "What is the complexity?", at: 2))
+        let task = Task {
+            await turnOutcomeBeforeTimeout { await driver.handleTrigger(.silence(secondsQuiet: 10)) }
+        }
+        defer { task.cancel(); driver.updateTranscriptionWork(.settled, for: .them) }
+        #expect(!(await waitUntil { !brain.calls.isEmpty }))
+        #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: 1) == .busy)
+        #expect(await task.value == .silentByModel)
+        #expect(brain.calls.count == 1)
+    }
+
+    @Test func waitingAttemptRechecksNewerFinalsBeforeAdmission() async throws {
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
+        let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
+        driver.updateTranscriptionWork(.pending(since: 1), for: .them)
+        transcript.append(.init(speaker: .me, text: "First question.", at: 2))
+        let task = Task { await turnOutcomeBeforeTimeout { await driver.handleTrigger(.turnEnd) } }
+        defer { task.cancel(); driver.updateTranscriptionWork(.settled, for: .them) }
+        #expect(!(await waitUntil { !brain.calls.isEmpty }))
+        transcript.append(.init(speaker: .me, text: "Later reply.", at: 4))
+        driver.updateTranscriptionWork(.pending(since: 3), for: .them)
+        #expect(!(await waitUntil { !brain.calls.isEmpty }))
+        transcript.append(.init(speaker: .them, text: "Middle question.", at: 3))
+        driver.updateTranscriptionWork(.pending(since: 5), for: .them)
+        #expect(await task.value == .silentByModel)
+        let request = try #require(brain.calls.first)
+        let text = request.compactMap(\.text).joined(separator: "\n")
+        let middle = try #require(text.range(of: "Middle question."))
+        let later = try #require(text.range(of: "Later reply."))
+        #expect(middle.lowerBound < later.lowerBound)
+    }
+
     @Test func initialAutomaticAttemptWaitsForSettlementAndOrdersLateEarlierSpeech() async throws {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
-        driver.updateTranscriptionWork(true, for: .them)
+        driver.updateTranscriptionWork(.pending(since: nil), for: .them)
         transcript.append(.init(speaker: .me, text: "Yep.", at: 20))
 
         let outcome = Task {
@@ -1750,12 +1818,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
         defer {
             outcome.cancel()
-            driver.updateTranscriptionWork(false, for: .them)
+            driver.updateTranscriptionWork(.settled, for: .them)
         }
 
         #expect(!(await waitUntil { !brain.calls.isEmpty }))
         transcript.append(.init(speaker: .them, text: "Did you see the pop-up?", at: 10))
-        driver.updateTranscriptionWork(false, for: .them)
+        driver.updateTranscriptionWork(.settled, for: .them)
 
         #expect(await outcome.value == .silentByModel)
         let request = try #require(brain.calls.first)
@@ -1781,18 +1849,18 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
         defer {
             outcome.cancel()
-            driver.updateTranscriptionWork(false, for: .them)
+            driver.updateTranscriptionWork(.settled, for: .them)
         }
         await gate.waitUntilEntered()
 
-        driver.updateTranscriptionWork(true, for: .them)
+        driver.updateTranscriptionWork(.pending(since: nil), for: .them)
         transcript.append(.init(speaker: .me, text: "Yep.", at: 20))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
         await gate.release()
 
         #expect(!(await waitUntil { brain.callCount == 2 }))
         transcript.append(.init(speaker: .them, text: "Did you see the pop-up?", at: 10))
-        driver.updateTranscriptionWork(false, for: .them)
+        driver.updateTranscriptionWork(.settled, for: .them)
 
         #expect(await outcome.value == .silentByModel)
         let request = try #require(brain.calls.last)
@@ -1818,13 +1886,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
         defer { outcome.cancel() }
         await gate.waitUntilEntered()
-        driver.updateTranscriptionWork(true, for: .me)
-        driver.updateTranscriptionWork(true, for: .them)
+        driver.updateTranscriptionWork(.pending(since: nil), for: .me)
+        driver.updateTranscriptionWork(.pending(since: nil), for: .them)
         await gate.release()
         #expect(await waitUntilAsync { await delayGate.hasEntered })
         #expect(brain.calls.count == 1)
 
-        driver.updateTranscriptionWork(false, for: .me)
+        driver.updateTranscriptionWork(.settled, for: .me)
         #expect(brain.calls.count == 1)
 
         await delayGate.release()
@@ -1832,7 +1900,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!(await waitUntil {
             brain.calls.count == 2
         }))
-        driver.updateTranscriptionWork(false, for: .them)
+        driver.updateTranscriptionWork(.settled, for: .them)
         #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
     }
@@ -1858,10 +1926,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
         defer {
             outcome.cancel()
-            driver.updateTranscriptionWork(false, for: .them)
+            driver.updateTranscriptionWork(.settled, for: .them)
         }
         await gate.waitUntilEntered()
-        driver.updateTranscriptionWork(true, for: .them)
+        driver.updateTranscriptionWork(.pending(since: nil), for: .them)
         await gate.release()
         #expect(await waitUntilAsync { await delayProbe.hasEntered })
         #expect(brain.calls.count == 1)
@@ -1889,14 +1957,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         async let outcome = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
-        driver.updateTranscriptionWork(true, for: .them)
+        driver.updateTranscriptionWork(.pending(since: nil), for: .them)
         #expect(await driver.handleTrigger(reason) == .busy)
         await gate.release()
 
         #expect(await outcome == .spoke)
         #expect(brain.calls.count == 2)
         #expect(brain.calls.last?.first?.text?.contains("# Detail") == true)
-        driver.updateTranscriptionWork(false, for: .them)
+        driver.updateTranscriptionWork(.settled, for: .them)
     }
 
     @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .manualCode])
@@ -1910,7 +1978,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             capabilities: CoachCapabilities.compose(
                 disabledTools: [], prepSourcesConfigured: false, detailEnabled: true),
             automaticAttemptDelay: { _ in await delayGate.enter() })
-        driver.updateTranscriptionWork(true, for: .them)
+        driver.updateTranscriptionWork(.pending(since: nil), for: .them)
 
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
@@ -1919,7 +1987,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
         defer {
             outcome.cancel()
-            driver.updateTranscriptionWork(false, for: .them)
+            driver.updateTranscriptionWork(.settled, for: .them)
         }
         await gate.waitUntilEntered()
         await gate.release()
@@ -1931,7 +1999,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!(await waitUntil {
             brain.calls.count == 2
         }))
-        driver.updateTranscriptionWork(false, for: .them)
+        driver.updateTranscriptionWork(.settled, for: .them)
         #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
         #expect(brain.calls.last?.first?.text?.contains("# Detail") == true)
