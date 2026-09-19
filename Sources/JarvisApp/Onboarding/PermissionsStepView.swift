@@ -2,27 +2,14 @@ import AppKit
 import JarvisCore
 
 // Design: wiki/architecture.md#permissions
+/// Onboarding's permissions step. The walk and its state are unchanged; only the look is new.
 @MainActor
-final class PermissionsChecklistView: NSView {
+final class PermissionsStepView: NSView {
     var onFinished: (() -> Void)?
-    var onQuit: (() -> Void)?
-
-    private struct Row {
-        let permission: JarvisReadiness.Permission
-        let glyph: NSTextField
-        let name: NSTextField
-        let why: NSTextField
-        let status: NSTextField
-        let separator: NSBox
-    }
 
     private let preferences: PermissionPreferences
-    private let titleLabel = NSTextField(
-        labelWithString: "Hi, it’s Jarvis. Before we start, I need three things from you.")
-    private let footnote = NSTextField(labelWithString: "")
-    private var primaryButton = ClosureButton(title: "", action: {})
-    private var quitButton = ClosureButton(title: "", action: {})
-    private var rows: [Row] = []
+    private var rows: [JarvisReadiness.Permission: PermissionRowView] = [:]
+    private var shell: OnboardingStepView?
     private var isRequesting = false
     private var activationObserver: (any NSObjectProtocol)?
     private var asking: JarvisReadiness.Permission?
@@ -31,36 +18,26 @@ final class PermissionsChecklistView: NSView {
     /// Read at init, before this launch asks: only an earlier, still-missing ask proves refusal.
     private let screenAskedInEarlierLaunch: Bool
 
-    private enum Layout {
-        static let inset: CGFloat = 28
-        static let rowHeight: CGFloat = 52
-        static let titleTop: CGFloat = 30
-    }
-
-    init(preferences: PermissionPreferences) {
+    init(
+        preferences: PermissionPreferences, followsKeyStep: Bool,
+        step index: Int, of count: Int, onQuit: @escaping () -> Void
+    ) {
         self.preferences = preferences
         self.screenAskedInEarlierLaunch = preferences.screenRecordingAsked
-        super.init(frame: .zero)
+        super.init(frame: NSRect(origin: .zero, size: OnboardingStepView.size))
 
-        titleLabel.font = .systemFont(ofSize: 20, weight: .semibold)
-        titleLabel.lineBreakMode = .byWordWrapping
-        titleLabel.maximumNumberOfLines = 2
-
-        footnote.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        footnote.textColor = .secondaryLabelColor
-        footnote.lineBreakMode = .byWordWrapping
-        footnote.maximumNumberOfLines = 2
-
-        primaryButton = ClosureButton(title: "Grant Access") { [weak self] in self?.primaryAction() }
-        primaryButton.bezelStyle = .rounded
-        primaryButton.controlSize = .large
-        primaryButton.keyEquivalent = "\r"
-
-        quitButton = ClosureButton(title: "Quit") { [weak self] in self?.onQuit?() }
-        quitButton.bezelStyle = .rounded
-        quitButton.controlSize = .large
-
-        rows = JarvisReadiness.Permission.allCases.map(makeRow(for:))
+        let shell = OnboardingStepView(
+            lit: [.ear, .eye],
+            title: followsKeyStep ? "Now three things from macOS." : "Hi, I’m Jarvis.",
+            lede: followsKeyStep
+                ? "So I can hear your call and see your screen. macOS asks one at a time."
+                : "I need three things from macOS, so I can hear your call and see your screen.",
+            body: makeList(), step: index, of: count, onQuit: onQuit,
+            onPrimary: { [weak self] in self?.primaryAction() })
+        shell.frame = bounds
+        shell.autoresizingMask = [.width, .height]
+        addSubview(shell)
+        self.shell = shell
 
         // Re-render on return from System Settings, so the label matches what a click will do.
         activationObserver = NotificationCenter.default.addObserver(
@@ -71,7 +48,6 @@ final class PermissionsChecklistView: NSView {
                 self.render()
             }
         }
-        for view in [titleLabel, footnote, quitButton, primaryButton] { addSubview(view) }
         render()
     }
 
@@ -147,7 +123,7 @@ final class PermissionsChecklistView: NSView {
             string: "x-apple.systempreferences:com.apple.preference.security?\(anchor)")
         else { return }
         // Record a visit only if the pane opened, or the button would jump to a pointless relaunch.
-        guard NSWorkspace.shared.open(url) else { // ghost-mode-allowed: explicit click on the gate
+        guard NSWorkspace.shared.open(url) else { // ghost-mode-allowed: explicit click on onboarding's permissions step
             jlog("Jarvis: couldn't open the \(anchor) settings pane")
             return
         }
@@ -162,7 +138,7 @@ final class PermissionsChecklistView: NSView {
         render()
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication( // ghost-mode-allowed: explicit click on the launch gate
+        NSWorkspace.shared.openApplication( // ghost-mode-allowed: explicit click on onboarding's permissions step
             at: Bundle.main.bundleURL, configuration: configuration
         ) { [weak self] _, error in
             Task { @MainActor in
@@ -223,25 +199,18 @@ final class PermissionsChecklistView: NSView {
     }
 
     private func render() {
-        for row in rows {
-            let granted = Permissions.isGranted(row.permission)
-            let isAsking = asking == row.permission
-            row.status.stringValue = statusText(for: row.permission, granted: granted, asking: isAsking)
-            row.status.textColor = granted ? .systemGreen
-                : (isBeyondAsking(row.permission) ? .systemOrange : .secondaryLabelColor)
-            row.glyph.stringValue = granted ? "●" : "○"
-            row.glyph.textColor = granted ? .systemGreen : .tertiaryLabelColor
-            let recedes = isRequesting && !isAsking
-            for label in [row.glyph, row.name, row.why, row.status] {
-                label.alphaValue = recedes ? 0.38 : 1
-            }
+        for permission in JarvisReadiness.Permission.allCases {
+            let granted = Permissions.isGranted(permission)
+            let isAsking = asking == permission
+            let tone: PermissionRowView.Tone = granted ? .granted
+                : isBeyondAsking(permission) ? .refused
+                : isAsking ? .asking : .needed
+            rows[permission]?.render(
+                status: statusText(for: permission, granted: granted, asking: isAsking), tone: tone)
         }
-
         let state = terminalState
-        primaryButton.isEnabled = !isRequesting
-        primaryButton.title = buttonTitle(for: state)
-        footnote.stringValue = footnoteText(for: state)
-        needsLayout = true
+        shell?.setPrimary(title: buttonTitle(for: state), enabled: !isRequesting)
+        shell?.setNote(footnoteText(for: state), warning: false)
     }
 
     private func statusText(
@@ -284,31 +253,44 @@ final class PermissionsChecklistView: NSView {
         }
     }
 
-    // MARK: - Rows
+    // MARK: - List
 
-    private func makeRow(for permission: JarvisReadiness.Permission) -> Row {
-        let glyph = NSTextField(labelWithString: "○")
-        glyph.font = .systemFont(ofSize: 13)
-
-        let name = NSTextField(labelWithString: permission.displayName)
-        name.font = .systemFont(ofSize: 13.5, weight: .medium)
-
-        let why = NSTextField(labelWithString: Self.purpose(of: permission))
-        why.font = .systemFont(ofSize: 11.5)
-        why.textColor = .tertiaryLabelColor
-        why.lineBreakMode = .byTruncatingTail
-
-        let status = NSTextField(labelWithString: "Needed")
-        status.font = .systemFont(ofSize: 11.5)
-        status.alignment = .right
-
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.isHidden = permission == JarvisReadiness.Permission.allCases.first
-
-        for view in [glyph, name, why, status, separator] { addSubview(view) }
-        return Row(permission: permission, glyph: glyph, name: name, why: why,
-                   status: status, separator: separator)
+    private func makeList() -> NSView {
+        let card = NSBox()
+        card.boxType = .custom
+        card.cornerRadius = 12
+        card.borderWidth = 1
+        card.borderColor = OnboardingTheme.line
+        card.fillColor = OnboardingTheme.card
+        card.contentViewMargins = .zero
+        let permissions = JarvisReadiness.Permission.allCases
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        for (index, permission) in permissions.enumerated() {
+            let row = PermissionRowView(
+                name: permission.displayName, purpose: Self.purpose(of: permission),
+                showsSeparator: index > 0)
+            row.translatesAutoresizingMaskIntoConstraints = false
+            stack.addArrangedSubview(row)
+            // A stack's width alignment is only a low-priority preference.
+            row.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
+            rows[permission] = row
+        }
+        card.contentView?.addSubview(stack)
+        if let content = card.contentView {
+            NSLayoutConstraint.activate([
+                stack.topAnchor.constraint(equalTo: content.topAnchor),
+                stack.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+                stack.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            ])
+        }
+        // An NSBox doesn't size itself from its content's constraints.
+        card.heightAnchor.constraint(
+            equalToConstant: CGFloat(permissions.count) * PermissionRowView.height + 2).isActive = true
+        return card
     }
 
     private static func purpose(of permission: JarvisReadiness.Permission) -> String {
@@ -317,40 +299,5 @@ final class PermissionsChecklistView: NSView {
         case .systemAudio: "So I can hear the other side of your call"
         case .screenRecording: "So I can see what’s on your screen"
         }
-    }
-
-    // MARK: - Layout
-
-    override func layout() {
-        super.layout()
-        let inset = Layout.inset
-        let width = bounds.width - inset * 2
-        var top = bounds.height - Layout.titleTop
-
-        let titleHeight = ceil(titleLabel.sizeThatFits(
-            NSSize(width: width, height: .greatestFiniteMagnitude)).height)
-        top -= titleHeight
-        titleLabel.frame = NSRect(x: inset, y: top, width: width, height: titleHeight)
-        top -= 24
-
-        for row in rows {
-            row.separator.frame = NSRect(x: inset, y: top, width: width, height: 1)
-            top -= Layout.rowHeight
-            let textLeft = inset + 26
-            row.glyph.frame = NSRect(x: inset, y: top + 18, width: 18, height: 16)
-            row.name.frame = NSRect(x: textLeft, y: top + 25, width: width - 160, height: 17)
-            row.why.frame = NSRect(x: textLeft, y: top + 9, width: width - 160, height: 15)
-            row.status.frame = NSRect(x: bounds.width - inset - 130, y: top + 18,
-                                      width: 130, height: 16)
-        }
-
-        // The note gets its own line: the longest one wraps to two full-width lines.
-        let buttonWidth: CGFloat = 190
-        let quitWidth: CGFloat = 74
-        primaryButton.frame = NSRect(x: bounds.width - inset - buttonWidth, y: inset,
-                                     width: buttonWidth, height: 32)
-        quitButton.frame = NSRect(x: primaryButton.frame.minX - quitWidth - 8, y: inset,
-                                  width: quitWidth, height: 32)
-        footnote.frame = NSRect(x: inset, y: inset + 32 + 10, width: width, height: 34)
     }
 }
