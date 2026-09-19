@@ -61,7 +61,6 @@ import Testing
             == ["Diagram", "Detail"])
     }
 
-    /// Top to bottom, as drawn.
     private func stackedText(_ detail: ReplyDetail) throws -> [String] {
         let view = DetailView(frame: NSRect(x: 0, y: 0, width: 600, height: 400))
         view.show(detail, stamp: "10:30:00", position: (0, 1), isHeld: false, isRolled: false,
