@@ -43,12 +43,14 @@ lit; the first Tab starts keyboard focus.
 
 ### Window sizing
 
-One user-resizable window size for every page — 820×600 by default, minimum 560×460. Navigating
-never resizes the window; whatever size the user set stays. Every page uses `SettingsPageView`, so
-page margins and headers expand consistently while cards and trailing controls adapt to the
-available width. Brain, Ear, Connections, Tools, and Shortcuts stack their cards in
-`SettingsCardStack`; Mouth, Skills, and the hub scroll their own documents; Eye and Activity use the
-page shell without an outer scroll view.
+One user-resizable window size for every page, 820×600 by default, minimum 560×460, both measured
+below the title bar. The title bar is transparent with its title hidden (the window keeps "Jarvis
+Settings" for the Window menu and VoiceOver), so the window buttons sit on the backdrop while pages
+lay out in the window's content layout rect. Navigating never resizes the window; whatever size the
+user set stays. Every page uses `SettingsPageView`, so page margins and headers expand consistently
+while cards and trailing controls adapt to the available width. Brain, Ear, Connections, Tools, and
+Shortcuts stack their cards in `SettingsCardStack`; Mouth, Skills, and the hub scroll their own
+documents; Eye and Activity use the page shell without an outer scroll view.
 
 ### Shared visual system
 
