@@ -7,6 +7,10 @@ public struct ReplyDetail: Sendable, Equatable {
         public let body: String
         /// Opener and closer included.
         let range: Range<String.Index>
+        /// False when the document ended before the closer.
+        let isClosed: Bool
+
+        var isDiagram: Bool { language == "mermaid" }
     }
 
     public enum Segment: Sendable, Equatable {
@@ -37,13 +41,18 @@ public struct ReplyDetail: Sendable, Equatable {
     /// Nil when the markdown is blank.
     public init?(markdown: String) {
         guard !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        self.init(parsing: markdown)
+    }
+
+    /// Blank markdown parses to a detail with no content.
+    init(parsing markdown: String) {
         var shown: [(range: Range<String.Index>, segment: Segment)] = []
         var dropped: [String] = []
         // Rejected fences also leave the replay, so the model reads back only what the user saw.
         var rejected: [Range<String.Index>] = []
 
         let fences = Self.fences(in: markdown)
-        for fence in fences where fence.language == "mermaid" {
+        for fence in fences where fence.isDiagram {
             if let parsed = DiagramHint(mermaid: fence.body) {
                 shown.append((fence.range, .diagram(parsed)))
                 break
@@ -51,7 +60,7 @@ public struct ReplyDetail: Sendable, Equatable {
             rejected.append(fence.range)
             dropped.append(Self.diagramDropped)
         }
-        for fence in fences where fence.language != "mermaid" {
+        for fence in fences where !fence.isDiagram {
             if let parsed = CodeBlock(language: fence.language, code: fence.body) {
                 shown.append((fence.range, .code(parsed)))
                 break
@@ -106,7 +115,7 @@ public struct ReplyDetail: Sendable, Equatable {
                    trimmed.dropFirst(run.count).allSatisfy({ $0 == " " }) {
                     fences.append(Fence(language: language,
                                         body: String(markdown[bodyStart..<bodyEnd]),
-                                        range: start..<afterLine))
+                                        range: start..<afterLine, isClosed: true))
                     openedAt = nil
                 }
             } else if indent <= 3, let first = trimmed.first, first == "`" || first == "~" {
@@ -129,7 +138,7 @@ public struct ReplyDetail: Sendable, Equatable {
         if let start = openedAt {
             fences.append(Fence(language: language,
                                 body: String(markdown[bodyStart..<bodyEnd]),
-                                range: start..<markdown.endIndex))
+                                range: start..<markdown.endIndex, isClosed: false))
         }
         return fences
     }
