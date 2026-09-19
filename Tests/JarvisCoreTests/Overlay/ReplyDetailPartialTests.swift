@@ -24,43 +24,56 @@ import Testing
         "Check the empty list first.\n\nThen index into it.",
         "Try this.\n\n```python\na = 1\n```",
         "```python\na = 1\n```\nThen scan.",
-        "Try this.\n\n```python\na = 1\n",
+        "Try this.\n\n```python\na = 1\nb = ",
+        "```mermaid\nflowchart LR\nclient[Client] --> api[API]\n```\nThen sca",
         document,
     ])
-    func textWithNoUnfinishedFenceLineReadsAsDelivered(_ markdown: String) {
+    func textThatDoesNotEndInsideADiagramReadsAsDelivered(_ markdown: String) {
         #expect(ReplyDetail(partialMarkdown: markdown) == ReplyDetail(markdown: markdown))
     }
 
-    @Test func anUnfinishedLineInsideAnOpenCodeFenceWaitsForItsNewline() {
-        let waiting = ReplyDetail(partialMarkdown: "Try this.\n\n```python\na = 1\nb = ")
-        #expect(waiting?.code?.code == "a = 1")
-        #expect(waiting?.deliveredMarkdown.contains("Try this.") == true)
-        let closed = ReplyDetail(partialMarkdown: "Try this.\n\n```python\na = 1\nb = 2\n")
-        #expect(closed?.code?.code == "a = 1\nb = 2")
-    }
-
-    @Test func anOpenMermaidFenceKeepsTheDiagramOfItsCompleteLines() {
-        let partial = ReplyDetail(partialMarkdown:
-            "```mermaid\nflowchart LR\nclient[Client] --> api[API]\napi[API] --> cache[Cac")
-        #expect(partial?.diagram?.nodes.map(\.label) == ["Client", "API"])
-        #expect(partial?.dropped.isEmpty == true)
-        let complete = ReplyDetail(partialMarkdown:
-            "```mermaid\nflowchart LR\nclient[Client] --> api[API]\napi[API] --> cache[Cache]\n")
-        #expect(complete?.diagram?.nodes.map(\.label) == ["Client", "API", "Cache"])
+    @Test func aCodeBlockGrowsWithItsHalfWrittenLineVisible() {
+        let half = ReplyDetail(partialMarkdown: "Try this.\n\n```python\na = 1\nb = ")
+        #expect(half?.code?.code == "a = 1\nb = ")
+        #expect(half?.deliveredMarkdown.hasPrefix("Try this.") == true)
+        let whole = ReplyDetail(partialMarkdown: "Try this.\n\n```python\na = 1\nb = 2")
+        #expect(whole?.code?.code == "a = 1\nb = 2")
     }
 
     @Test func aHalfWrittenOpenerShowsNothingOfTheFence() {
         let afterProse = ReplyDetail(partialMarkdown: "Here.\n\n```pyth")
         #expect(afterProse?.code == nil)
-        #expect(afterProse?.deliveredMarkdown.trimmingCharacters(in: .whitespacesAndNewlines) == "Here.")
-        #expect(ReplyDetail(partialMarkdown: "```pyth") == nil)
-        #expect(ReplyDetail(partialMarkdown: "```python\n")?.hasContent == false, "an opener with no body yet shows nothing")
+        #expect(afterProse?.deliveredMarkdown == "Here.")
+        #expect(ReplyDetail(partialMarkdown: "```pyth")?.hasContent == false)
     }
 
-    @Test func aClosedFenceFollowedByUnfinishedProseReadsWhole() {
-        let detail = ReplyDetail(partialMarkdown: "```python\na = 1\n```\nThen sca")
-        #expect(detail?.code?.code == "a = 1")
-        #expect(detail?.deliveredMarkdown.hasSuffix("Then sca") == true)
+    @Test func anOpenDiagramContributesNothingUntilItsFenceCloses() {
+        let open = ReplyDetail(partialMarkdown:
+            "Sketch it.\n\n```mermaid\nflowchart LR\nclient[Client] --> api[API]\napi --> cache[Cac")
+        #expect(open?.diagram == nil)
+        #expect(open?.deliveredMarkdown == "Sketch it.")
+        #expect(open?.dropped.isEmpty == true)
+        let closed = ReplyDetail(partialMarkdown:
+            "Sketch it.\n\n```mermaid\nflowchart LR\nclient[Client] --> api[API]\napi --> cache[Cache]\n```")
+        #expect(closed?.diagram?.nodes.map(\.label) == ["Client", "API", "Cache"])
+        #expect(closed?.deliveredMarkdown.hasPrefix("Sketch it.") == true)
+    }
+
+    @Test func aDetailThatIsOnlyAnOpenDiagramHasNoContentYet() {
+        let detail = ReplyDetail(partialMarkdown: "```mermaid\nflowchart LR\nclient[Client] --> api[API]")
+        #expect(detail != nil, "the box files it, so the placeholder has a detail to sit in")
+        #expect(detail?.hasContent == false)
+        #expect(detail?.deliveredMarkdown == "")
+        #expect(ReplyDetail(partialMarkdown: " \n") == nil)
+    }
+
+    @Test func endsInsideADiagramFollowsTheLastFence() {
+        #expect(ReplyDetail.endsInsideADiagram("```mermaid\nflowchart LR\nclient --> api"))
+        #expect(ReplyDetail.endsInsideADiagram("Sketch it.\n\n```mermaid"))
+        #expect(!ReplyDetail.endsInsideADiagram("```mermaid\nflowchart LR\nclient --> api\n```"))
+        #expect(!ReplyDetail.endsInsideADiagram("```mermaid\nflowchart LR\nclient --> api\n```\n```python\nx = "))
+        #expect(!ReplyDetail.endsInsideADiagram("```python\nx = "))
+        #expect(!ReplyDetail.endsInsideADiagram("Sketch it."))
     }
 
     @Test func fencesReportWhetherTheirCloserArrived() {
@@ -68,7 +81,9 @@ import Testing
         #expect(ReplyDetail.fences(in: "```py\na\n```\n~~~\nb").map(\.isClosed) == [true, false])
     }
 
-    /// No snapshot shows a block, or part of one, that the delivered detail does not hold.
+    /// No snapshot shows a block, or part of one, that the delivered detail does not hold: code
+    /// grows as a prefix of the final code, except while its closer is being written, and a
+    /// diagram appears only whole.
     @Test func everyPrefixShowsOnlyWhatTheDeliveredDetailHolds() throws {
         let document = Self.document
         let delivered = try #require(ReplyDetail(markdown: document))
@@ -81,13 +96,12 @@ import Testing
             if let code = snapshot?.code {
                 shownCode = true
                 #expect(code.language == finalCode.language)
-                #expect(finalCode.code.hasPrefix(code.code))
+                let closerInProgress = ["`", "``"].contains { code.code == finalCode.code + "\n" + $0 }
+                #expect(finalCode.code.hasPrefix(code.code) || closerInProgress)
             }
             if let diagram = snapshot?.diagram {
                 shownDiagram = true
-                #expect(diagram.direction == finalDiagram.direction)
-                #expect(diagram.nodes.allSatisfy(finalDiagram.nodes.contains))
-                #expect(diagram.edges.allSatisfy(finalDiagram.edges.contains))
+                #expect(diagram == finalDiagram)
             }
         }
         #expect(shownCode && shownDiagram, "both blocks appear before the document ends")

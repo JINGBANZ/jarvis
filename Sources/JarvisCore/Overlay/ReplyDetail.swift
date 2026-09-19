@@ -9,6 +9,8 @@ public struct ReplyDetail: Sendable, Equatable {
         let range: Range<String.Index>
         /// False when the document ended before the closer.
         let isClosed: Bool
+
+        var isDiagram: Bool { language == "mermaid" }
     }
 
     public enum Segment: Sendable, Equatable {
@@ -39,13 +41,18 @@ public struct ReplyDetail: Sendable, Equatable {
     /// Nil when the markdown is blank.
     public init?(markdown: String) {
         guard !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        self.init(parsing: markdown)
+    }
+
+    /// Blank markdown parses to a detail with no content.
+    init(parsing markdown: String) {
         var shown: [(range: Range<String.Index>, segment: Segment)] = []
         var dropped: [String] = []
         // Rejected fences also leave the replay, so the model reads back only what the user saw.
         var rejected: [Range<String.Index>] = []
 
         let fences = Self.fences(in: markdown)
-        for fence in fences where fence.language == "mermaid" {
+        for fence in fences where fence.isDiagram {
             if let parsed = DiagramHint(mermaid: fence.body) {
                 shown.append((fence.range, .diagram(parsed)))
                 break
@@ -53,7 +60,7 @@ public struct ReplyDetail: Sendable, Equatable {
             rejected.append(fence.range)
             dropped.append(Self.diagramDropped)
         }
-        for fence in fences where fence.language != "mermaid" {
+        for fence in fences where !fence.isDiagram {
             if let parsed = CodeBlock(language: fence.language, code: fence.body) {
                 shown.append((fence.range, .code(parsed)))
                 break
