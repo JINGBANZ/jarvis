@@ -9,12 +9,26 @@ import Testing
         let secondary = NSRect(x: -800, y: 100, width: 800, height: 600)
         let frame = OverlayBoxPanel.diagramFrame(
             from: NSRect(x: -100, y: 500, width: 520, height: 440), within: secondary)
-        #expect(frame == secondary)
+        #expect(secondary.contains(frame))
+        #expect(frame.size == NSSize(width: 520, height: 440))
         let large = NSRect(x: 100, y: -1000, width: 1600, height: 900)
         let expanded = OverlayBoxPanel.diagramFrame(
             from: NSRect(x: 1600, y: -300, width: 520, height: 440), within: large)
         #expect(large.contains(expanded))
-        #expect(expanded.size == NSSize(width: 960, height: 720))
+        #expect(expanded.size == NSSize(width: 720, height: 540))
+    }
+
+    @Test func expansionScalesWithUsableDisplayArea() {
+        let current = NSRect(x: 20, y: 20, width: 520, height: 440)
+        let laptop = OverlayBoxPanel.diagramFrame(
+            from: current, within: NSRect(x: 0, y: 0, width: 1280, height: 800))
+        let monitor = OverlayBoxPanel.diagramFrame(
+            from: current, within: NSRect(x: 0, y: 0, width: 2560, height: 1440))
+        #expect(laptop.size == NSSize(width: 576, height: 480))
+        #expect(monitor.size == NSSize(width: 1152, height: 864))
+        let chosen = NSRect(x: 20, y: 20, width: 900, height: 650)
+        #expect(OverlayBoxPanel.diagramFrame(
+            from: chosen, within: NSRect(x: 0, y: 0, width: 1280, height: 800)) == chosen)
     }
 
     @Test func crowdedDetailScrollsWithoutShrinkingDiagramLabels() throws {
@@ -67,8 +81,8 @@ import Testing
         let detail = try #require(ReplyDetail(markdown:
             "```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"))
         _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
-        #expect(panel.currentContentSize.width >= min(960, visible.width))
-        #expect(panel.currentContentSize.height >= min(720, visible.height))
+        #expect(panel.currentContentSize.width >= min(max(520, (visible.width * 0.45).rounded(.down)), visible.width))
+        #expect(panel.currentContentSize.height >= min(max(440, (visible.height * 0.60).rounded(.down)), visible.height))
         #expect(visible.contains(panel.currentFrame))
         #expect(savedSizes == 0)
 

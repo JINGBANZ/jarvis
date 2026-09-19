@@ -82,7 +82,8 @@ import Testing
         panel.setContentSize(NSSize(width: 260, height: 220))
         let after = try imageSize()
         #expect(after.height <= drawing.bounds.height, "the graph fits inside the detail box")
-        #expect(after == before, "small panels scroll instead of reducing label size")
+        #expect(after == NSSize(width: 244, height: 536), "small panels preserve native readable scale")
+        #expect(after.width <= before.width && after.height <= before.height)
         #expect(abs(after.width / after.height - before.width / before.height) < 0.01)
     }
 

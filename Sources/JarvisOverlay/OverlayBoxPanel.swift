@@ -288,8 +288,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     static func diagramFrame(from current: NSRect, within visible: NSRect) -> NSRect {
-        let width = min(visible.width, max(960, current.width))
-        let height = min(visible.height, max(720, current.height))
+        let width = min(visible.width, max((visible.width * 0.45).rounded(.down), current.width))
+        let height = min(visible.height, max((visible.height * 0.60).rounded(.down), current.height))
         return NSRect(
             x: min(max(visible.minX, current.minX), visible.maxX - width),
             y: min(max(visible.minY, current.maxY - height), visible.maxY - height),

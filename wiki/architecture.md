@@ -375,8 +375,10 @@ readable minimum. Very small panels scroll rather than clipping or shrinking ind
 the box hides both sections and expanding restores them.
 
 A shown diagram gives the detail area a larger automatic share of the panel. The first shown
-diagram in a session expands the panel within its display's usable bounds; a manual panel resize
-opts out for that session. Automatic expansion does not rewrite the saved size, and a manually
+diagram in a session expands the panel toward a proportion of its display's usable width and height,
+keeping a larger existing panel within display bounds. Proportional sizing leaves more working space
+on a laptop while allowing a larger sketch on an external monitor; a manual panel resize opts out
+for that session. Automatic expansion does not rewrite the saved size, and a manually
 chosen divider proportion still takes precedence. Diagram node and edge labels stay at least at
 their native readable size, with horizontal and vertical scrolling for overflow. Prose beside a
 diagram keeps its configured compact size rather than shrinking to compensate for the graph.
