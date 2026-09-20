@@ -80,12 +80,11 @@ moments the model judges worthwhile.
    the newest spoken timestamp in the finalized transcript snapshot. Pending speech does not block
    that context when its known start clears that timestamp by `TranscriptionWorkState`'s start-time
    margin; a start inside the margin, an earlier start, and an unknown start all block. The margin
-   bounds the residual skew between the two paths: the per-socket audio-time mapping, server-VAD and
+   bounds the residual skew left in those starts: the per-socket audio-time mapping, server-VAD and
    local activity-tracker onset reporting, and the fixed device offset between the mic path and the
-   post-mix tap. The
-   scheduler refreshes and rechecks the snapshot after every wake, then pins the admitted delta for
-   the attempt so newer arrivals cannot cross an unresolved earlier utterance. Silence probes and
-   attempts without new finalized speech still require full settlement.
+   post-mix tap. The scheduler refreshes and rechecks the snapshot after every wake, then pins the
+   admitted delta for the attempt so newer arrivals cannot cross an unresolved earlier utterance.
+   Silence probes and attempts without new finalized speech still require full settlement.
    `TranscriptionWorkState` carries the earliest unresolved start on the shared session clock.
    OpenAI's item ledger supplies it when every pending item has timing; reconnect recovery and
    unbound local speech remain unknown. Apple PCM silence requests `SpeechAnalyzer.finalize` and
