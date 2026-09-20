@@ -76,11 +76,19 @@ moments the model judges worthwhile.
    stretch pass unchecked. The fourfold growth, rather than doubling, keeps the second check a few
    minutes after the first, so quiet thinking that the first check saw is not checked again soon,
    and a long quiet stretch costs a few requests. Speech from either side defers a check.
-2. Before an automatic attempt, `TranscriptionSettlementGate` waits until both provider streams say
-   that no active speech, finalization, or recovery can still produce an earlier transcript line.
-   OpenAI reconnect-buffered audio remains unsettled even before replay creates a server item; Apple
-   PCM silence requests `SpeechAnalyzer.finalize` and remains unsettled until matching final-result
-   progress is consumed from the module stream.
+2. Before an automatic attempt, `TranscriptionSettlementGate` checks both provider streams against
+   the newest spoken timestamp in the finalized transcript snapshot. Pending speech with a known
+   later start does not block that context; an earlier, equal, or unknown pending start does. The
+   scheduler refreshes and rechecks the snapshot after every wake, then pins the admitted delta for
+   the attempt so newer arrivals cannot cross an unresolved earlier utterance. Silence probes and
+   attempts without new finalized speech still require full settlement.
+   `TranscriptionWorkState` carries the earliest unresolved start on the shared session clock.
+   OpenAI's item ledger supplies it when every pending item has timing; reconnect recovery and
+   unbound local speech remain unknown. Apple and Gemini currently report unknown pending work,
+   preserving their settlement guarantees. Apple PCM silence requests `SpeechAnalyzer.finalize`
+   and remains unsettled until matching final-result progress is consumed from the module stream.
+   The model still decides whether a finalized thought warrants a hint; admission does not classify
+   intent or infer sentence completeness from punctuation.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
    a delayed transcript-batch callback arriving after another attempt committed that same line is
    consumed instead of buying a duplicate request. Any explicit coaching shortcut bypasses this wait.
@@ -409,8 +417,10 @@ Three configurable global shortcuts are fallbacks for a missed need: **Give me a
 clarification of the relevant gap, which may span several earlier hints; **Show code** (default
 **⌥⌘K**) requests the next small code block. Each trigger says what the user wants in one line and
 nothing about how to answer it: how is the speak guidance's job and the loaded skill's, so a trigger
-is not a third copy to keep in step. All three snapshot a fresh screen into the first request, include
-the available conversation, and always end in a tip: a press may load a skill or tool and search prep
+is not a third copy to keep in step. All three capture a fresh screen, then snapshot the latest
+finalized transcript for the first request, so speech finalized during capture reaches that request.
+The attempt audit and committed transcript boundary use that same snapshot; a deferred turn already
+covered by it does not produce another hint. All three always end in a tip: a press may load a skill or tool and search prep
 notes first, but never stays silent or captures again (see [Capabilities](#capabilities)). If capture
 fails, the request identifies the missing screen and uses available context without inventing visible
 details. They share the ordinary single-flight coach loop and provider route. Natural wakes preserve
@@ -463,7 +473,7 @@ session and consumes the matched click through release. See
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
 | **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit automatic attempts only when both transcription streams are settled through the selected context, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
 | **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
@@ -690,11 +700,11 @@ Failed conversation work remains pending within the cycle's retry budget and sch
 coaching attempt after a short fixed delay. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
 manual coaching trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
 failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
-attempt uses the same pending conversation. Every automatic attempt waits while either transcription
-stream owns unfinished work so it does not cross an earlier utterance that is about to finalize. An
-explicit coaching shortcut interrupts that postponement even after the wait begins and upgrades the same
-pending-work attempt to a shortcut attempt, which always ends in a hint; ordinary natural triggers remain parked until transcription
-settles. `TriggerReason` remains the model-facing
+attempt uses the same pending conversation. Every automatic attempt applies the
+[transcript admission rule](#the-turn) to a fresh snapshot, so later pending speech cannot starve
+completed context and earlier or unknown work still preserves chronology. Natural triggers wake the
+wait to reconsider its reason and context. An explicit coaching shortcut bypasses that wait and
+upgrades the same pending-work attempt to a shortcut attempt, which always ends in a hint. `TriggerReason` remains the model-facing
 reason that made coaching useful (`turnEnd`, `silence`, `manualHint`, `manualExplanation`, or `manualCode`); pending work is scheduler
 state, not a fourth instruction to the model. An automatic attempt with no newer trigger reuses the
 pending work's reason; when another natural trigger arrives, its newer reason describes the fresh
@@ -735,7 +745,7 @@ bundled helper running, because it serves Settings and the next Start.
 
 ```mermaid
 flowchart TD
-    T[Turn end, silence, manual shortcut,<br/>or pending-work wake] --> S{Either transcription<br/>stream unsettled?}
+    T[Turn end, silence, manual shortcut,<br/>or pending-work wake] --> S{Pending transcription blocks<br/>the selected context?}
     S -- Yes, automatic attempt --> P[Keep work pending<br/>and postpone]
     S -- No --> A[Snapshot active target +<br/>latest finalized conversation]
     A --> R[Run one coaching attempt<br/>on one target]

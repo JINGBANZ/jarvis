@@ -5,7 +5,7 @@ import Testing
 @Suite(.timeLimit(.minutes(1))) struct TranscriptionSettlementGateTests {
     @Test func interruptionBeforeWaitRegistrationIsSticky() async {
         let gate = TranscriptionSettlementGate()
-        gate.setUnsettled(true, for: .me)
+        gate.update(.pending(since: nil), for: .me)
         let generation = gate.interruptGenerationSnapshot()
 
         // Interrupts after the generation snapshot but before the wait registers its continuation.
@@ -16,7 +16,7 @@ import Testing
 
     @Test func interruptionResumesARegisteredWaitWithoutChangingProviderState() async {
         let gate = TranscriptionSettlementGate()
-        gate.setUnsettled(true, for: .them)
+        gate.update(.pending(since: nil), for: .them)
         let generation = gate.interruptGenerationSnapshot()
         let interrupter = Task {
             await Task.yield()
@@ -30,7 +30,7 @@ import Testing
         #expect(!(await completesBeforeTimeout(nanoseconds: 20_000_000) {
             await gate.waitUntilSettled(unlessInterruptedAfter: laterGeneration)
         }))
-        gate.setUnsettled(false, for: .them)
+        gate.update(.settled, for: .them)
         await gate.waitUntilSettled(unlessInterruptedAfter: laterGeneration)
     }
 }

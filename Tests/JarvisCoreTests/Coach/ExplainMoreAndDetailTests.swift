@@ -53,7 +53,7 @@ import Testing
         transcript.append(.init(speaker: .them, text: "Find the longest substring without repeats", at: 0))
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         transcript.append(.init(speaker: .me, text: "I don't understand why we move the left edge", at: 1))
-        if reason == .manualExplanation { driver.updateTranscriptionWork(true, for: .me) }
+        if reason == .manualExplanation { driver.updateTranscriptionWork(.pending(since: nil), for: .me) }
         #expect(await driver.handleTrigger(reason) == .spoke)
         let messages = try #require(brain.calls.last)
         #expect(messages.contains { $0.text?.contains("longest substring") == true })

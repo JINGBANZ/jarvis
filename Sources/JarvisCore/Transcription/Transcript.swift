@@ -19,6 +19,8 @@ public struct TranscriptLine: Sendable {
 
 /// `@unchecked Sendable`: `lock` guards `chronology`.
 public final class RollingTranscript: @unchecked Sendable {
+    public typealias Snapshot = (text: String, upTo: Int, lines: [TranscriptLine])
+
     private var chronology = ConversationChronology<TranscriptLine>()
     private let lock = NSLock()
 
@@ -51,7 +53,7 @@ public final class RollingTranscript: @unchecked Sendable {
 
     /// All three values come from one locked snapshot, so `upTo` matches the rendered lines even
     /// under a concurrent append. `index` is clamped.
-    public func renderFrom(index: Int) -> (text: String, upTo: Int, lines: [TranscriptLine]) {
+    public func renderFrom(index: Int) -> Snapshot {
         lock.lock(); let snapshot = chronology.snapshot(fromInsertionIndex: index); lock.unlock()
         let insertionOrderedLines = snapshot.insertionOrderedItems.map(\.element)
         let chronologicalLines = snapshot.chronologicalItems.map(\.element)

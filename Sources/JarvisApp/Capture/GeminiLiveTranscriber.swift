@@ -12,7 +12,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
     @unchecked Sendable {
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
-    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
+    var onTranscriptionWorkChanged: (@Sendable (TranscriptionWorkState) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
@@ -128,8 +128,8 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
             silenceEnabled: speaker == .me,
             onTurnEnd: { [weak self] boundary in self?.onTurnEnd?(boundary) },
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
-            onTranscriptionWorkChanged: { [weak self] hasPendingWork in
-                self?.onTranscriptionWorkChanged?(hasPendingWork)
+            onTranscriptionWorkChanged: { [weak self] state in
+                self?.onTranscriptionWorkChanged?(state)
             },
             activity: activity)
     }
@@ -355,7 +355,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
         lock.lock()
         let hasPendingWork = !bufferedAudio.isEmpty || recognitionInFlight
         lock.unlock()
-        coachingCoordinator.updateTranscriptionWork(hasPendingWork)
+        coachingCoordinator.updateTranscriptionWork(hasPendingWork ? .pending(since: nil) : .settled)
     }
 
     // MARK: - Receive

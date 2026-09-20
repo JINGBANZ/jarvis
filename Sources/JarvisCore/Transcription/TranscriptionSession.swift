@@ -5,9 +5,9 @@ public protocol TranscriptionSession: AnyObject, Sendable {
     /// The finalized turn's exclusive transcript insertion boundary.
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)? { get set }
     var onSilence: (@Sendable (TimeInterval) -> Void)? { get set }
-    /// True while pending work could still produce an earlier transcript line; false only once the
-    /// chronology is settled.
-    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)? { get set }
+    /// Earliest unresolved speech on the session clock, or unknown while the provider cannot prove
+    /// a boundary. Finalized lines must be published before advancing this state.
+    var onTranscriptionWorkChanged: (@Sendable (TranscriptionWorkState) -> Void)? { get set }
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)? { get set }
     var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)? { get set }
     /// Content-free: never exposes amplitude or PCM.
