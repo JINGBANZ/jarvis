@@ -34,6 +34,10 @@ enum DetailProseFormatting {
                 attributes[.foregroundColor] = NSColor(white: 1, alpha: 0.94)
             } else if inline.contains(.stronglyEmphasized) {
                 attributes[.font] = NSFont.systemFont(ofSize: fontSize, weight: .semibold)
+                if text == "Ask AI" || text == "Ask AI:" {
+                    attributes[.foregroundColor] = NSColor(srgbRed: 128 / 255, green: 217 / 255,
+                                                           blue: 238 / 255, alpha: 1)
+                }
             } else if inline.contains(.emphasized) {
                 attributes[.font] = NSFontManager.shared.convert(
                     NSFont.systemFont(ofSize: fontSize), toHaveTrait: .italicFontMask)
