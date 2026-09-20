@@ -218,7 +218,8 @@ struct LiveE2ETests {
                 let label = "C hint \(index + 1)"
                 Self.noteStalls([(label, chain)], evidence, &results)
                 let reply = evidence.rows(inChain: chain).last { $0.kind == "tip" }?.response
-                let code = reply?.detail.flatMap { ReplyDetail(markdown: $0)?.code }
+                let detail = reply?.detail.flatMap { ReplyDetail(markdown: $0) }
+                let code = detail?.code
                 results.check("C26", [
                     (chain.last?.isCommitted == true, "\(label) committed a reply"),
                     (reply?.lines.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } == true,
@@ -226,6 +227,18 @@ struct LiveE2ETests {
                     (code != nil, "\(label) delivered usable code in the same reply "
                         + "(saw \(Self.describeDetail(evidence, chain)))"),
                 ])
+                let segments = detail?.segments ?? []
+                let hasPlacementHeader = zip(segments, segments.dropFirst()).contains { before, after in
+                    guard case .prose(let header) = before, case .code = after else { return false }
+                    return header.runs.contains { run in
+                        run.inlinePresentationIntent?.contains(.code) == true
+                            && !String(header[run.range].characters)
+                                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    }
+                }
+                results.check("C33", hasPlacementHeader,
+                              "\(label) delivered a placement header with an inline code anchor "
+                                + "immediately before its code block")
                 results.time("\(label) press-to-tip", seconds: Self.pressToTip(evidence, chain))
             }
             Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)

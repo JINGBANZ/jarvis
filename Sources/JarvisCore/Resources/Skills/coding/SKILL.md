@@ -54,10 +54,12 @@ merely to supply code; stay silent during healthy progress as usual.
 When the coding-with-ai skill calls for a prompt to another assistant, that prompt is the supporting
 artifact. Do not attach an implementation block unless the candidate also needs a manual code change.
 
-Put one fenced block in detail, tagged with its language (```python). Keep the hint itself the
-coaching: say in the lines where the block goes, using names visible on screen rather than editor
-line numbers. Code does not require a longer explanation; include explanation prose only when
-the explanation guidance calls for it.
+Put one fenced block in detail, tagged with its language (```python). Immediately before the block,
+include a short placement header saying where it belongs, using names visible on screen rather
+than editor line numbers. For example: Inside your `for right, ch in enumerate(s):` loop.
+Use inline backticks for code anchors. The header in detail says where the code goes; keep the
+hint lines for the coaching without repeating placement. Neither the code nor its header needs
+an explanation.
 
 Show only the next small component that implements this hint, at most 24 lines and 2400
 characters. Match the visible language, names, indentation, and approach. Prefer plain loops,
@@ -66,7 +68,8 @@ one operation per line, and clear intermediate variables over clever one-liners.
 To correct code the candidate wrote, use a ```diff block: - for their line, + for the fix, and a
 few unmarked context lines. If the overall approach is wrong, say so in the hint and add no code.
 
-If no code is visible, show the first component for the known problem and name your assumptions.
+If no code is visible, show the first component for the known problem and name your assumptions
+briefly in the placement header; do not invent unseen names or structure.
 If the problem itself is unknown, ask what is being solved. Never claim you ran or inserted code.
 
 ## Project context across files and long requirements

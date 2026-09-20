@@ -308,7 +308,7 @@ for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/Co
 ### The detail box
 
 A reply is short lines plus one optional Markdown `detail`. The lines are the coaching; `detail` is
-for what a line cannot hold: a code block, a diagram, or the paragraphs an explanation needs.
+for supporting content requested by a loaded skill or the paragraphs an explanation needs.
 `CoachCapabilities.compose` builds the `speak` definition once per session and declares `detail` only
 when the Overlay Box can show one, so no session promises a field the box would throw away. `detail`
 is nullable rather than absent, which is what makes a field optional under strict Structured Outputs.
@@ -320,7 +320,7 @@ the core prompt names neither. A rule only the model can apply belongs where the
 a session that never loads the skill never pays for it in its cached prefix.
 
 The general detail default defers to the loaded skill so brevity does not make the user press
-Show code for every implementation step. The pairing rules and exceptions live in the
+Show code for every implementation step. The pairing rules, placement headers, and exceptions live in the
 [`coding` skill](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md); the core keeps no second
 copy of that domain policy.
 
