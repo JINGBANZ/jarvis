@@ -280,13 +280,14 @@ struct LiveE2ETests {
         }
 
         func pressChecks(_ chain: [Attempt], _ label: String) -> [LiveE2EResults.Check] {
-            let loadRows = rows(chain).filter { $0.kind == "capabilityLoaded" }
+            let loadRows = rows(chain.filter(\.isCommitted)).filter { $0.kind == "capabilityLoaded" }
             let tipRow = tip(chain)
             return [
                 (!chain.isEmpty, "\(label) ran an attempt"),
                 (count("screenViewed", in: chain) == 1,
                  "\(label) viewed the screen once (saw \(count("screenViewed", in: chain)))"),
-                (loadRows.count == 1, "\(label) loaded one capability (saw \(loads(chain)))"),
+                (loadRows.count == 1 && loadRows.first?.loadedCapability?.name == "coding",
+                 "\(label) committed one coding load (saw \(loadRows.compactMap(\.loadedCapability)))"),
                 (Self.precedes(loadRows.first?.index, tipRow?.index), "\(label) loaded before its tip"),
                 (tipRow.map { !Self.carriesProtocolText($0.message) } ?? false,
                  "\(label) tip carries no protocol text"),
@@ -326,12 +327,32 @@ struct LiveE2ETests {
         results.check("C07", [
             (a3Sequence == ["load behavioral", "load search_prep_notes", "search", "tip"],
              "A3's chain stays in one attempt (saw \(a3Sequence))"),
-            (a4Sequence == ["load system-design", "tip"],
+            (a4Sequence.sorted() == ["load system-design", "search", "tip"]
+                && Self.precedes(a4Sequence.firstIndex(of: "load system-design"),
+                                 a4Sequence.lastIndex(of: "tip")),
              "A4's chain stays in one attempt (saw \(a4Sequence))"),
             (evidence.debugLines(containing: "tool loop exhausted").isEmpty, "no tool loop exhausted"),
         ])
         results.time("A3 question-to-tip", seconds: Self.questionToTip(evidence, a3))
         results.time("A4 question-to-tip", seconds: Self.questionToTip(evidence, a4))
+        results.check("C31", [
+            (Self.precedes(a4Sequence.firstIndex(of: "search"), a4Sequence.lastIndex(of: "tip")),
+             "A4 searches design preparation before answering"),
+            (tip(a9) != nil && count("prepNotesSearched", in: a9) == 0,
+             "A9 answers cache invalidation using the existing design excerpt"),
+            (tip(a6) != nil && count("prepNotesSearched", in: a6) == 0,
+             "A6 answers the one-pass coding question without searching preparation"),
+        ])
+        results.check("C32", [
+            (count("prepNotesSearched", in: a1) == 0,
+             "A1's cold coding hint does not force an unrelated prep search"),
+            (count("prepNotesSearched", in: a2) == 0,
+             "A2's small talk does not search prep notes"),
+        ])
+        results.note("C31", "A4 content review: \(tip(a4)?.message ?? "no tip")")
+        results.note("C31", "A9 content review: \(tip(a9)?.message ?? "no tip")")
+        results.time("A6 question-to-tip", seconds: Self.questionToTip(evidence, a6))
+        results.time("A9 question-to-tip", seconds: Self.questionToTip(evidence, a9))
 
         results.check("C08", [
             (sequence(a5).contains("search"), "A5 searched prep notes (saw \(sequence(a5)))"),
