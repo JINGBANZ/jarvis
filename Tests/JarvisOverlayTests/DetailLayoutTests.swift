@@ -20,7 +20,7 @@ import Testing
                                             "Then handle the empty string."])
     }
 
-    @Test func aNoteAfterADiagramIsDrawnBelowItAndTheDiagramFitsWhatTheTextLeaves() throws {
+    @Test func aNoteAfterADiagramStaysBelowItWhenReadableOverflowScrolls() throws {
         let detail = try #require(ReplyDetail(markdown: """
             Sketch the read path.
 
@@ -32,7 +32,7 @@ import Testing
 
             The API owns the cache.
             """))
-        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 420, height: 900))
         view.show(detail, stamp: "10:30:00", position: (0, 1), isHeld: false, isRolled: false,
                   fontSize: 14)
         view.layoutSubtreeIfNeeded()
@@ -44,6 +44,13 @@ import Testing
         #expect(stacked[1].frame.maxY <= stacked[2].frame.minY)
         #expect(document.frame.height <= scroll.contentSize.height,
                 "the note below the diagram counts against the space the diagram scales into")
+        view.setFrameSize(NSSize(width: 420, height: 300))
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
+        #expect(document.frame.height > scroll.contentSize.height)
+        #expect(stacked[1].frame.height >= 196, "the three-node diagram retains readable native scale")
+        #expect(stacked[1].frame.maxY <= stacked[2].frame.minY)
+        #expect(document.frame.height >= stacked[2].frame.maxY)
     }
 
     /// VoiceOver walks the view hierarchy, not the frames.

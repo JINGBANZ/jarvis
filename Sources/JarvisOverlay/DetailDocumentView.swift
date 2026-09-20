@@ -74,7 +74,7 @@ final class DetailDocumentView: NSView {
         }
     }
 
-    /// A diagram scales into the part of `viewportHeight` the prose and code leave, wherever it sits.
+    /// A diagram uses the remaining viewport, scrolling at its readable minimum scale.
     func fit(viewportWidth: CGFloat, viewportHeight: CGFloat) {
         let width = max(1, viewportWidth)
         var textHeight: CGFloat = 0
@@ -91,9 +91,8 @@ final class DetailDocumentView: NSView {
             textHeight += height
         }
         if let diagram = rendered?.detail.diagram {
-            // The 80 pt floor keeps a graph legible in a tiny box; the scroll view takes the rest.
             let available = NSSize(width: max(1, width - 28),
-                                   height: max(80, viewportHeight - textHeight - 14))
+                                   height: max(1, viewportHeight - textHeight - 14))
             if drawnDiagram?.diagram != diagram || drawnDiagram?.available != available {
                 drawing.image = DiagramHintImage.render(diagram, fitting: available)
                 drawnDiagram = (diagram, available)
