@@ -227,7 +227,10 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         audioQueue.async { [weak self] in
             guard let self, self.isLive(generation: generation) else { return }
             if let active = self.activityTracker.observe(pcm16: pcm, at: capturedAt) {
-                self.setSpeechActivity(active, generation: generation)
+                self.setSpeechActivity(
+                    active,
+                    at: capturedAt - self.sessionStart,
+                    generation: generation)
             }
             guard self.inputContinuation != nil, self.converter != nil else {
                 self.buffer(.init(
@@ -568,10 +571,10 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             socketGeneration: generation)
     }
 
-    private func setSpeechActivity(_ active: Bool, generation: Int) {
+    private func setSpeechActivity(_ active: Bool, at start: TimeInterval, generation: Int) {
         guard isLive(generation: generation) else { return }
         let effects = active
-            ? finalizationState.recordSpeechStarted()
+            ? finalizationState.recordSpeechStarted(at: start)
             : finalizationState.recordSpeechEnded(
                 analyzerAvailable: analyzerReadyForFinalization)
         applyFinalizationEffects(effects, generation: generation)
@@ -585,8 +588,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
            activeFinalization?.token == completed {
             activeFinalization = nil
         }
-        if let pendingWork = effects.pendingWork {
-            coachingCoordinator.updateTranscriptionWork(pendingWork ? .pending(since: nil) : .settled)
+        if let work = effects.work {
+            coachingCoordinator.updateTranscriptionWork(work)
         }
         guard let token = effects.finalization else { return }
         guard submittedAnalyzerFrameCount > 0 else {
@@ -636,6 +639,14 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         }
     }
 
+    /// Analyzer ranges start at zero; the offset maps them onto the shared session clock.
+    private func sessionTime(for analyzerTime: CMTime) -> TimeInterval? {
+        lock.lock()
+        let offset = analyzerTimelineOffset
+        lock.unlock()
+        return offset.map { $0 + CMTimeGetSeconds(analyzerTime) }
+    }
+
     private func recordConsumedFinalResults(
         through resultsFinalizationTime: CMTime,
         generation: Int
@@ -647,6 +658,12 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             CMTimeCompare(resultsFinalizationTime, $0) > 0
         }) ?? true {
             latestConsumedResultsFinalizationTime = resultsFinalizationTime
+            // Runs after `handle` published the matching finals, so the barrier never skips a line.
+            if let resolved = sessionTime(for: resultsFinalizationTime) {
+                applyFinalizationEffects(
+                    finalizationState.recordResolvedSpeech(through: resolved),
+                    generation: generation)
+            }
         }
         guard let activeFinalization,
               CMTimeCompare(

@@ -6,8 +6,8 @@ public enum TranscriptionWorkState: Equatable, Sendable {
     case pending(since: TimeInterval?)
 
     /// Bounds the skew between a pending start and a finalized line: the per-socket audio-time
-    /// mapping, server-VAD onset reporting, and the fixed offset between the mic path and the
-    /// post-mix tap.
+    /// mapping, server-VAD and local activity-tracker onset reporting, and the fixed offset between
+    /// the mic path and the post-mix tap.
     public static let startTimeMargin: TimeInterval = 0.3
 
     public func permitsCoaching(through spokenAt: TimeInterval?) -> Bool {
