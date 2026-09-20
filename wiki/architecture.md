@@ -357,8 +357,9 @@ the height the text segments leave, wherever it sits, down to a legible floor.
 
 There is one detail box, so a later reply replaces what is in it. Its title strip names the hint the
 detail came from and carries the recovery: back and forward arrows step through the session's details
-and hold the box wherever they stop, stepping forward onto the newest resumes following, Pin holds the
-newest, and Dismiss rolls the box down to the strip so the arrows and Pin stay reachable.
+without changing its pin state. Pin holds the selected detail against incoming replies; unpinning
+returns to the newest. Browsing an unpinned detail lets the next incoming detail replace it. Dismiss
+rolls the box down to the strip so the arrows and Pin stay reachable.
 [`DetailSlot`](../Sources/JarvisCore/Overlay/DetailSlot.swift) owns that rule, which is why it is
 Foundation-only and unit-tested without a window. Clear empties both boxes unless the box is held,
 since the user asked for that reference to stay, and Stop resets both. Eviction is the cost of one

@@ -257,7 +257,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         guard !available.isEmpty else { return }
         let from = slot.shownIndex ?? available.count - 1
         let target = min(max(0, from + offset), available.count - 1)
-        slot.step(to: target, isNewest: target == available.count - 1)
+        slot.step(to: target)
         refreshDetails()
     }
 

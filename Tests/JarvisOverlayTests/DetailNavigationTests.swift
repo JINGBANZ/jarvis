@@ -16,23 +16,22 @@ import Testing
         #expect(box.currentDetailTitle.hasPrefix("DETAIL · FROM "))
     }
 
-    @MainActor @Test func steppingBackHoldsTheBoxAndSteppingForwardResumesFollowing() throws {
+    @MainActor @Test func browsingOlderDetailsDoesNotPinThem() throws {
         let box = try makeBox()
         defer { box.setSessionLive(false) }
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         try deliver(box, "Add a cache.", "flowchart LR\nB[API] --> C[Cache]")
         box.clickDetailPrevious()
         #expect(box.currentDetailPosition == "1 of 2")
-        #expect(box.isDetailHeld)
+        #expect(!box.isDetailHeld)
         #expect(box.currentDetailProseText.contains("First sketch."))
+        box.clickDetailNext()
+        #expect(box.currentDetailPosition == "2 of 2")
+        box.clickDetailPrevious()
 
         try deliver(box, "Shard the index.", "flowchart LR\nC[Cache] --> D[Shard]")
-        #expect(box.currentDetailPosition == "1 of 3", "a held box does not take a later reply")
-        #expect(box.currentDetailProseText.contains("First sketch."))
-
-        box.clickDetailNext()
-        box.clickDetailNext()
         #expect(box.currentDetailPosition == "3 of 3")
+        #expect(box.currentDetailProseText.contains("Shard the index."))
         #expect(!box.isDetailHeld)
         try deliver(box, "Then talk trade-offs.", "flowchart LR\nD[Shard] --> E[Replica]")
         #expect(box.currentDetailPosition == "4 of 4")
@@ -160,7 +159,7 @@ import Testing
         try deliver(box, "Add a cache.", "flowchart LR\nB --> C")
         box.showPreviousDetail()
         #expect(box.currentDetailPosition == "1 of 2")
-        #expect(box.isDetailHeld)
+        #expect(!box.isDetailHeld)
         box.clickDetailDismiss()
         box.showPreviousDetail()
         #expect(box.isDetailRolled, "the disabled previous arrow must be a no-op")
@@ -185,7 +184,7 @@ import Testing
         box.showNextDetail()
         box.showNextDetail()
         #expect(box.currentDetailPosition == "3 of 3")
-        #expect(!box.isDetailHeld)
+        #expect(box.isDetailHeld)
         box.setSessionLive(false)
         box.showPreviousDetail()
         box.showNextDetail()

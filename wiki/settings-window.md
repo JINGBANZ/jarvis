@@ -309,8 +309,8 @@ scheduling behavior.
 
 **Previous detail** and **Next detail** navigate the existing detail history with **⌥⌘←** and
 **⌥⌘→**. They mirror the arrow buttons without activating Jarvis or requesting coaching. At either end
-of history, while stopped, or with the box disabled or collapsed, they silently do nothing. Stepping
-back holds the chosen detail; reaching the newest resumes following incoming details.
+of history, while stopped, or with the box disabled or collapsed, they silently do nothing. Navigation
+leaves the pin state unchanged; see [detail navigation and pinning](./architecture.md#the-detail-box).
 
 The page is one scrolling card with a keyboard row (`HotkeyBindingView`) and an optional mouse row
 (`MouseHotkeyBindingView`) for each action. The keyboard row shows the action's name and purpose,

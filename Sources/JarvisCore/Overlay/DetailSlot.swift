@@ -3,7 +3,6 @@ import Foundation
 public struct DetailSlot: Equatable, Sendable {
     /// Nil until the first detail arrives.
     public private(set) var shownIndex: Int?
-    /// Pinned, or parked by stepping back.
     public private(set) var isHeld: Bool
     /// Dismissed to the title strip.
     public private(set) var isRolled: Bool
@@ -20,9 +19,8 @@ public struct DetailSlot: Equatable, Sendable {
         isRolled = false
     }
 
-    public mutating func step(to index: Int, isNewest: Bool) {
+    public mutating func step(to index: Int) {
         shownIndex = index
-        isHeld = !isNewest
         isRolled = false
     }
 

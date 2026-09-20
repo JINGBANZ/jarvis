@@ -11,26 +11,31 @@ import Testing
         #expect(!slot.isHeld)
     }
 
-    @Test func steppingBackHoldsTheBoxAndLaterDetailsWait() {
+    @Test func steppingBackLeavesTheBoxUnpinnedAndLaterDetailsReplaceIt() {
         var slot = DetailSlot()
         slot.received(0)
         slot.received(1)
-        slot.step(to: 0, isNewest: false)
+        slot.step(to: 0)
         #expect(slot.shownIndex == 0)
-        #expect(slot.isHeld)
+        #expect(!slot.isHeld)
 
         slot.received(2)
-        #expect(slot.shownIndex == 0)
+        #expect(slot.shownIndex == 2)
     }
 
-    @Test func steppingForwardOntoTheNewestResumesFollowing() {
+    @Test func navigationPreservesAnExplicitPin() {
         var slot = DetailSlot()
         slot.received(0)
         slot.received(1)
-        slot.step(to: 0, isNewest: false)
-        slot.step(to: 1, isNewest: true)
-        #expect(!slot.isHeld)
+        slot.pin()
+        slot.step(to: 0)
+        #expect(slot.isHeld)
         slot.received(2)
+        #expect(slot.shownIndex == 0)
+
+        slot.step(to: 2)
+        #expect(slot.isHeld)
+        slot.received(3)
         #expect(slot.shownIndex == 2)
     }
 
@@ -55,7 +60,7 @@ import Testing
         #expect(!slot.isRolled)
 
         slot.roll(true)
-        slot.step(to: 0, isNewest: false)
+        slot.step(to: 0)
         #expect(!slot.isRolled)
     }
 
