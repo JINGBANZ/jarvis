@@ -1,6 +1,6 @@
 # Interview prep notes
 
-These are my own notes for behavioral questions. Every person named here is fictional.
+These are sample behavioral and system-design notes. Every person named here is fictional.
 
 ## Pushing back on my manager
 
@@ -54,3 +54,15 @@ The weakest conflict stories I have practiced share a few habits, and I check ev
 ## Follow-up questions
 
 After a conflict story, interviewers often ask how I would handle the same disagreement if the teammate were more senior, or what I do when a conflict does not resolve at all. For a senior teammate, I still bring the numbers and ask for a time-boxed experiment, and I say that deferring to experience is fine once we have agreed how to check the result. For a conflict that stays open, I describe writing down both options with their risks and costs, agreeing on who owns the call, and committing to it once it is made, even if my option lost. Another common follow-up is how the teammate would describe the disagreement today, and my answer should match the story I already told: we argued about the approach, never about each other, and we still review each other's code. Some interviewers ask for a second example, so I keep a shorter one ready about a teammate who wanted to skip tests to hit a demo date, where we agreed to test only the payment path first. If they ask what I learned across these stories, I say that most conflict on a team comes from different information, not different goals, so sharing what each of us knows early prevents most of it.
+
+## Product search architecture
+
+Proposed product search design: Search API → query cache → sharded search index → ranked results.
+Twenty thousand searches/second, p99 below 300 milliseconds, freshness within sixty seconds are
+requirements, not measured performance. Authoritative catalog storage feeds durable change records
+to indexing workers; replicas serve reads. Cache invalidation follows catalog updates: indexing
+workers publish the indexed version, then evict affected query entries or advance a catalog-version
+namespace. Bound TTL by the freshness budget; avoid refilling stale entries before indexing catches
+up. Broad dependency sets favor versioned namespaces over per-query deletion. Durable offsets,
+idempotent indexing, and replay recover missed updates. Scale shards, replicas, and hot-query caching
+against measured bottlenecks rather than assuming linear capacity.

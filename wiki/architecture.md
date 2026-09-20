@@ -215,7 +215,13 @@ skips the index build, so the file reading and `textutil` work stop with it.
 Prep material is shared across interview types: `.md`, `.txt`, `.pdf`, and `.docx` sources can all
 supply behavioral, coding, or system-design preparation, including mixed-topic documents. No skill
 or topic filters sources by file format. Extraction depends on the file format; coaching depends
-on the question and retrieved evidence.
+on the question and retrieved evidence. The deferred tool description names behavioral stories,
+coding approaches, and system designs so technical preparation is discoverable before loading.
+Retrieval stays selective: questions unlike plausible preparation can skip it, and relevant excerpts
+already in context are reused. Once loaded, tool guidance treats excerpts as reference data, preserves
+assumptions and caveats, and supplements uncovered technical topics without fabricated attribution
+or personal history. A required reply alone does not bypass loading; only a tool choice permitting
+solely `speak` does.
 
 Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
 handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
@@ -824,14 +830,16 @@ rather than a per-turn screenshot.
   A visible assistant panel alone is a hint, not that establishment. Its separate catalog entry keeps
   that workflow conditional without a round or seniority setting
   (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
-  System-design supplies the stage vocabulary from requirements through
-  trade-offs, and asks for a diagram in the one stage that benefits. An explicitly requested stage
-  takes precedence over screen notes; generic hints continue the stage established in conversation.
-  Architecture hints describe component responsibilities and a request or data flow. Canvas navigation
-  controls are interface state and become the answer when navigation is what the candidate asks for;
-  an unseen drawing calls for a conversation-grounded hint with its visual limitation stated.
-  Unresolved requirements call for a specific question the candidate can put to the interviewer,
-  without needing to answer Jarvis during the interview. The base prompt keeps what is
+  System-design supplies the stage vocabulary from requirements through trade-offs and checks
+  state ownership, durable background-work creation, replenishment, and recovery against the current
+  requirements. It targets the highest-impact missing mechanism at the current stage and asks for
+  a diagram in the one stage that benefits. An explicitly requested stage takes precedence over
+  screen notes; generic hints continue the stage established in conversation. Architecture hints
+  describe component responsibilities and a request or data flow. Canvas navigation controls are
+  interface state and become the answer when navigation is what the candidate asks for; an unseen
+  drawing calls for a conversation-grounded hint with its visual limitation stated. Unresolved
+  requirements call for a specific question the candidate can put to the interviewer, without needing
+  to answer Jarvis during the interview. The base prompt keeps what is
   true of every session: when to speak or stay silent, hint length, and comprehension before
   strategy. Finishing code alone still does not trigger a hint, and there is no runtime classifier
   or persisted question classification.

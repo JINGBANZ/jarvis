@@ -88,6 +88,7 @@ struct LiveE2EScenarioTests {
             "teammate disagreement", "conflict with a teammate",
         ] {
             let results = index.search(query: query)
+            #expect(!results.contains { $0.text.contains("Product search architecture") })
             #expect(!results.contains(where: carriesManagerStory),
                     "\"\(query)\" returned the manager story; chunks: \(layout)")
             #expect(results.contains(where: isWholeTeammateStory),
@@ -99,8 +100,23 @@ struct LiveE2EScenarioTests {
             "pushed back on manager decision evidence alternative outcome",
             "pushed back on manager decision launch data loss bugs staged rollout",
         ] {
+            #expect(!index.search(query: query).contains { $0.text.contains("Product search architecture") })
             #expect(index.search(query: query).first.map(isWholeManagerStory) == true,
                     "\"\(query)\" did not rank the whole manager story first; chunks: \(layout)")
+        }
+    }
+
+    @Test("scenario A's technical preparation includes its cache follow-up")
+    func searchDesignPreparationIncludesInvalidation() throws {
+        let notes = try String(
+            contentsOf: Self.liveTests.appendingPathComponent("Fixtures/prep-notes.md"), encoding: .utf8)
+        let index = PrepMaterialIndex(chunks: PrepMaterialChunker.chunk(
+            text: notes, sourceDisplayName: "prep-notes.md"))
+        for query in ["product search high level architecture read path", "slow search endpoint redesign"] {
+            let result = try #require(index.search(query: query).first)
+            #expect(result.text.contains("Product search architecture"))
+            #expect(result.text.contains("invalidation"))
+            #expect(result.text.contains("version"))
         }
     }
 
