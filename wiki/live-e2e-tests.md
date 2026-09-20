@@ -66,13 +66,16 @@ Set up once per machine:
   ([build-and-run.md → Packaging & signing](./build-and-run.md#packaging--signing--why-permission-grants-persist)).
   Screen Recording is part of the readiness a Start checks, though no scenario shoots the screen.
   Nothing needs Accessibility or Automation: the runner requests shortcuts through the composition.
-- **An OpenAI key** saved in Settings, which writes the owner-only secrets file. Every scenario
-  transcribes through OpenAI. `OPENAI_API_KEY` does not serve the run: the app is launched through
-  `open`, and LaunchServices does not pass the shell's environment.
-- **A Gemini key** saved in Settings; Scenario B's second half coaches on it.
-- **Codex and Claude Code**, the subscription coaching targets, signed in from Settings → Connections. The launcher's
-  preflight checks both keys and a saved sign-in for both subscriptions before the first launch, so a
-  missing key or login stops the run in seconds instead of surfacing as a failed scenario.
+- **An OpenAI key** saved in Settings, which writes the owner-only secrets file. Standard
+  transcription uses that key; the invalid-key fixture supplies its own deliberately invalid key.
+  `OPENAI_API_KEY` does not serve the run: the app is launched through `open`, and LaunchServices
+  does not pass the shell's environment.
+- **A Gemini key** saved in Settings when running Scenario B, whose second half coaches on it.
+- **Codex and Claude Code**, signed in from Settings → Connections when the selected scenario uses
+  them. Preflight checks the scenario's primary brain, fallbacks, explicit brain switches, and
+  transcription key before launch. It reads only the required key and account files, so A does not
+  require Gemini, while B still does. These requirements are derived by
+  `LiveE2EScenario+Prerequisites.swift` and covered in the Gate.
 - **The `claude` CLI**, installed and signed in, for `--evaluate` only. It writes the report; it is
   not the coaching target of the same name, which the bundled helper serves.
 
@@ -136,8 +139,8 @@ after decoding, and no audio is archived.
 Capabilities are fixed at Start, so each switch configuration is its own scenario; brain switches
 happen inside a scenario, applied the way a Settings edit applies them. Steps live in
 `Tests/JarvisLiveTests/Scenarios/`; fixtures in `Tests/JarvisLiveTests/Fixtures/` are the coding
-screenshot `coding-problem.jpg` and fictional `prep-notes.md`. Each story is one section with no
-sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
+screenshot `coding-problem.jpg` and fictional `prep-notes.md`, including a short search-design
+section with cache invalidation. Each story is one section with no sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
 again. The manager story stays out of everything a teammate query returns, so the first behavioral
 search never already answers the second and C08 stays a real check; `LiveE2EScenarioTests` pins that
 layout in the Gate.
@@ -204,7 +207,7 @@ C26 checks the delivered Activity response, after overlay acceptance, for both n
 and a code block accepted by `ReplyDetail`. The candidate already understands a viable approach
 and is stuck implementing it, so code accompanies these actionable hints. A missing block is a
 regression failure, not a note; conceptual orientation is covered by other scenarios.
-C31 checks those same delivered replies for prose immediately before the code block containing a
+C33 checks those same delivered replies for prose immediately before the code block containing a
 nonempty inline code anchor. It fails when placement is absent, only in the hint lines, after the
 code, or missing its inline anchor. It does not require fixed model wording or judge whether the
 anchor names the correct editor location; the Gate's layout test covers rendering separately.
@@ -284,7 +287,17 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C28 | Code with AI guidance loads before permitted review and ordinary hint presses deliver committed replies | D |
 | C29 | A blocked delegation step delivers supporting detail without an explicit prompt request | D; semantics use `Tests/JarvisLiveTests/Scenarios/D-review.md` |
 | C30 | Review of a valid AI proposal delivers supporting detail without a confusion signal | D; explanation quality uses the same semantic rubric |
-| C31 | Code hints retain a preceding placement header with an inline code anchor | C: both hint presses |
+| C31 | Technical preparation is searched when relevant and reused; unrelated coding skips search | A: design, cache invalidation, and one-pass questions |
+| C32 | Cold unrelated coding hints and small talk do not force prep retrieval | A: initial hint and logistics line |
+| C33 | Code hints retain a preceding placement header with an inline code anchor | C: both hint presses |
+
+C31 checks Scenario A's selective technical retrieval: the existing design question searches before
+answering, its cache-invalidation follow-up reuses the excerpt, and the one-pass coding question
+answers without a prep search. The Gate checks that the technical section includes the follow-up
+and stays out of the teammate and manager searches. C32 covers the cold coding hint and small talk.
+A4/A9 replies are recorded for the manual content rubric in
+[`A-prep-review.md`](../Tests/JarvisLiveTests/Scenarios/A-prep-review.md); a search-count pass alone
+must not be reported as proof of grounded answer content.
 
 ### General coaching flow
 

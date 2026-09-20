@@ -47,7 +47,16 @@ struct LiveE2ELauncher {
             try? write(results, to: runDirectory.appendingPathComponent(scenarioID, isDirectory: true))
             return nil
         }
-        if let failure = LiveE2EPreflight.failure {
+        let scenario: LiveE2EScenario
+        do {
+            scenario = try LiveE2EScenario.load(
+                from: scenariosDirectory.appendingPathComponent("\(file ?? scenarioID).json"),
+                fixturesDirectory: fixturesDirectory)
+        } catch {
+            Issue.record(error)
+            return nil
+        }
+        if let failure = LiveE2EPreflight.failure(for: scenario) {
             Issue.record(Comment(rawValue: failure))
             return nil
         }
@@ -244,23 +253,24 @@ struct LiveE2ELaunch {
     }
 }
 
-/// Checks both keys and both sign-ins. Reads files only, so it never starts a second helper beside
-/// the app's.
+/// Reads only the selected scenario's credentials and account files; never starts a second helper.
 enum LiveE2EPreflight {
-    static let failure: String? = {
+    static func failure(for scenario: LiveE2EScenario) -> String? {
         // LaunchServices does not pass this shell's environment, so only the key file serves the
         // run.
-        for credential in [Credential.openAIAPIKey, .geminiAPIKey]
-        where FileSecretStore().apiKey(for: credential)?.isEmpty != false {
+        for credential in Credential.allCases
+        where scenario.requiredCredentials.contains(credential)
+            && FileSecretStore().apiKey(for: credential)?.isEmpty != false {
             return "No \(credential.displayName) key in Jarvis's key file: save one in Jarvis Settings → Connections. "
                 + "\(credential.environmentVariable) does not reach an app launched with open."
         }
         let auth = FileSecretStore().directoryURL
             .appendingPathComponent("proxy/auth", isDirectory: true)
-        for provider in [BrainProvider.codexSubscription, .claudeSubscription]
-        where LocalProxyAccountFile.all(in: auth, for: provider).isEmpty {
+        for provider in BrainProvider.allCases
+        where scenario.requiredBrainProviders.contains(provider) && provider.servedByLocalProxy
+            && LocalProxyAccountFile.all(in: auth, for: provider).isEmpty {
             return "\(provider.displayName) is not signed in: sign in from Jarvis Dev Settings → Connections."
         }
         return nil
-    }()
+    }
 }
