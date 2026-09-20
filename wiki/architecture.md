@@ -839,11 +839,7 @@ rather than a per-turn screenshot.
   evidence, verifying counterexamples, and checking minimal fixes against reproducing and regression
   cases. Verification reminders follow changed evidence or impending unsupported completion rather
   than repeating during learning; delegated prompts leave routine algorithm steps to the other AI.
-  Interview practice emphasizes the candidate's own interpretation, data-structure and algorithm
-  choices, and time/space tradeoffs, using already-demonstrated understanding rather than demanding
-  repeated narration. Candidate-supplied evaluation criteria inform practice without establishing
-  company policy; a requested less capable practice model concerns the coding assistant, not
-  Jarvis's brain. Instruction-level regression inputs and their semantic criteria live in
+  Instruction-level regression inputs and their semantic criteria live in
   [`coaching-quality.json`](../Tests/JarvisLiveTests/Scenarios/coaching-quality.json), with evaluation
   limits in the [review guide](../Tests/JarvisLiveTests/Scenarios/coaching-quality-review.md).
   It composes with coding when offered and applies only once AI collaboration is established:
