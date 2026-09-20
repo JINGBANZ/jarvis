@@ -408,10 +408,12 @@ fails, the request identifies the missing screen and uses available context with
 details. They share the ordinary single-flight coach loop and provider route. Natural wakes preserve
 pending manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass
 unsettled transcription, while an automatic retry waits for settlement. Stop cancels any request;
-while stopped, an explicit shortcut only beeps. Activity records which shortcut was pressed.
+while stopped, an explicit keyboard shortcut only beeps and mouse clicks pass through. Activity records
+which coaching shortcut was pressed.
 
 Explain more and Show code answer into the detail box, so the Overlay Box switch is the one thing that
-decides whether they exist: with the box off they are not registered, and `SessionComposition.allows`
+decides whether they exist: with the box off their keyboard bindings are not registered and their mouse
+bindings pass through, and `SessionComposition.allows`
 refuses them even when a runner calls `requestShortcut` directly. There is no separate switch for
 either; the model follows the [detail guidance](#the-detail-box) and the loaded skill to supply
 the content alongside the hint.
@@ -431,12 +433,16 @@ or writes a manual-hint Activity entry. They use the same session detail availab
 other detail shortcuts; unavailable navigation is silent. Their bindings and boundary behavior
 are defined in [Settings → Shortcuts](./settings-window.md#shortcuts).
 
-Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
+Keyboard shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
 `HotkeyController` dispatches only matching Jarvis events. Each binding persists independently through
 `HotkeyPreferences`. Registering a replacement happens before releasing the old binding, so a
-collision—including another Jarvis shortcut—keeps the prior working binding. See
-[Settings → Shortcuts](./settings-window.md#shortcuts).
+collision—including another Jarvis shortcut—keeps the prior working binding. Each action also supports
+an optional, separately persisted mouse binding. `MouseHotkeyController` uses a suppressing event tap
+with an existing Accessibility grant; `MouseShortcutRouter` matches only actions allowed in the live
+session and consumes the matched click through release. See
+[Settings → Shortcuts](./settings-window.md#shortcuts) for binding behavior and
+[Sandbox → Data Egress](./sandbox.md#data-egress) for privacy scope.
 
 ## 3. Components
 
@@ -456,7 +462,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box; the caption remains text-only. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
-| **HotkeyController** | Register the coaching and detail-navigation shortcuts; AppDelegate routes coaching to the session and navigation to the overlay. See [§2 On-demand coaching shortcuts](#on-demand-coaching-shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
+| **HotkeyController / MouseHotkeyController** | Handle the coaching and detail-navigation bindings; AppDelegate routes coaching to the session and navigation to the overlay. See [Settings → Shortcuts](./settings-window.md#shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC) for keyboard; Core Graphics event tap with Accessibility permission for mouse. |
 | **OnboardingGate** | Run first-run onboarding once per install, before the rest of the app is built: one OpenAI or Gemini API key, then the three TCC grants, each step shown only when what it collects is missing. Closing the window before the end quits; completing it sets the one onboarding flag, so later launches go straight to the menu bar. `SystemAudioPermissionProbe` proves the silently enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Onboarding](#onboarding) and [§3 Permissions](#permissions). | AppKit window, `CredentialVerifier`, AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -544,6 +550,10 @@ off unless the grant is live. Turning it off during a session takes effect at th
 deliberately outside onboarding: denial or revocation leaves current-viewport OCR available and
 never blocks coaching. Capture itself never prompts, and the setting is frozen into each attempt's
 session-plan revision so live teardown cannot produce privacy UI.
+
+Optional mouse shortcuts use the same Accessibility grant, independently of Chrome text. They require
+an existing grant and never request it; without permission, keyboard shortcuts and coaching remain
+available. See [Settings → Shortcuts](./settings-window.md#shortcuts).
 
 The reason it happens at launch rather than at Start is the coaching context. A TCC dialog is system
 UI that no capture-exclusion trick can hide, so one arriving mid-interview is visible to whoever the
