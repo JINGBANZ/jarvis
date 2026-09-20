@@ -88,7 +88,7 @@ extension JarvisPrompts {
             # Loading
             Before choosing an action, load what this question needs and has not loaded: \(loaders).
             \(skillReassessment)Load one per response; continue loading if needed when its result comes back.
-            When the turn says you must call speak, skip loading and speak with what you have.
+            Only when speak is the sole permitted tool, speak with what you have.
             """
         }
 

@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var pendingStartTask: Task<Void, Never>?
     private var pendingStartRevision: UInt = 0
     private var hotkeys: HotkeyController?
+    private var mouseHotkeys: MouseHotkeyController?
     private let artifacts = SessionArtifacts()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -161,8 +162,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 // A saved key writes a file, not UserDefaults, so nothing else would re-judge the hub.
                 self?.settingsHub.refresh(probe: false)
             })
+        let mouseHotkeys = MouseHotkeyController(preferences: hotkeyPreferences)
+        self.mouseHotkeys = mouseHotkeys
+        mouseHotkeys.isEnabled = { [weak self] shortcut in
+            guard let self, self.composition.isLive else { return false }
+            return self.composition.allows(shortcut)
+                && (shortcut == .hint || self.appearance.boxEnabled)
+        }
+        mouseHotkeys.onRequest = { [weak self] shortcut in self?.hotkeys?.onRequest?(shortcut) }
         let hotkeySection = HotkeySection(
                 preferences: hotkeyPreferences,
+                mouseController: mouseHotkeys,
                 boxEnabled: { [weak self] in self?.appearance.boxEnabled == true },
                 hasActiveHotkey: { [weak self] shortcut in
                     guard let self else { return false }
