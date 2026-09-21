@@ -545,9 +545,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     for reason in parsedDetail?.dropped ?? [] { jlog("Detail: \(reason)") }
                     let delivery = await MainActor.run { () -> (accepted: Bool, detail: ReplyDetail?) in
                         guard !Task.isCancelled else { return (false, nil) }
-                        return (true, self.overlay.deliver(lines, perLineSeconds: lines.map {
-                            OverlayTiming.displaySeconds(for: $0, config: self.config)
-                        }, detail: parsedDetail))
+                        return (true, self.overlay.deliver(lines, detail: parsedDetail))
                     }
                     guard delivery.accepted else { return .cancelled }
                     let delivered = delivery.detail

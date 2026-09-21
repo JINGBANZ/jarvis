@@ -115,8 +115,8 @@ private struct ReviewScreen: ScreenCapturing {
 private final class ReviewDetailSink: OverlayRendering {
     @MainActor var acceptsDetail = true
     var detail: ReplyDetail?
-    func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}
-    func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?) {
+    func render(_ lines: [String]) {}
+    func render(_ lines: [String], detail: ReplyDetail?) {
         self.detail = detail
     }
 }

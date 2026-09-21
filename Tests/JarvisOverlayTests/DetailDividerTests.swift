@@ -10,7 +10,7 @@ import Testing
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown: "```swift\nreturn 1\n```"))
-        _ = box.deliver(["First hint"], perLineSeconds: [1], detail: detail)
+        _ = box.deliver(["First hint"], detail: detail)
         let divider = try divider(in: window)
         let frame = box.currentFrame
         let initial = box.currentDetailHeight
@@ -19,7 +19,7 @@ import Testing
         #expect(box.currentFrame == frame)
         #expect(!divider.mouseDownCanMoveWindow)
         let chosen = box.currentDetailHeight
-        _ = box.deliver(["New hint"], perLineSeconds: [1], detail: nil)
+        _ = box.deliver(["New hint"], detail: nil)
         #expect(box.currentDetailHeight == chosen)
         box.clickCollapseButton()
         #expect(divider.isHidden)
@@ -33,7 +33,7 @@ import Testing
         box.clear()
         #expect(divider.isHidden, "clearing the session's details takes the box away with them")
         #expect(box.currentDetailHeight == 0)
-        _ = box.deliver(["Again"], perLineSeconds: [1], detail: detail)
+        _ = box.deliver(["Again"], detail: detail)
         box.setSessionLive(false)
         box.setSessionLive(true)
         #expect(box.currentDetailHeight == 0, "a new session opens with no detail")
@@ -44,8 +44,7 @@ import Testing
         box.setEnabled(true)
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
-        _ = box.deliver(["First hint"], perLineSeconds: [1],
-                        detail: ReplyDetail(markdown: "```swift\nreturn 1\n```"))
+        _ = box.deliver(["First hint"], detail: ReplyDetail(markdown: "```swift\nreturn 1\n```"))
         let divider = try divider(in: window)
         try drag(divider, by: -2000)
         #expect(box.currentDetailHeight >= 96)
@@ -67,8 +66,7 @@ import Testing
         box.setEnabled(true)
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
-        _ = box.deliver(["First hint"], perLineSeconds: [1],
-                        detail: ReplyDetail(markdown: "```swift\nreturn 1\n```"))
+        _ = box.deliver(["First hint"], detail: ReplyDetail(markdown: "```swift\nreturn 1\n```"))
         let divider = try divider(in: window)
         let originalHeight = box.currentDetailHeight
         let originalFrame = box.currentFrame

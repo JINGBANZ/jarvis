@@ -10,7 +10,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private lazy var secrets = ChainedSecretStore([secretFile, EnvSecretStore()])
     private let errorReporter = ErrorReporter()
 
-    private var overlayCaption: OverlayCaptionPanel!
     private var overlayBox: OverlayBoxPanel!
     private var menuBar: MenuBarController!
     /// Nil in a development bundle, which has no Sparkle feed URL.
@@ -93,11 +92,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session))
         }
 
-        overlayCaption = OverlayCaptionPanel()
-        overlayCaption.setFontSize(appearance.captionFontSize)
-        overlayCaption.setBackgroundOpacity(appearance.captionBackgroundOpacity)
-        overlayCaption.setEnabled(appearance.captionEnabled)
-
         overlayBox = OverlayBoxPanel(contentSize: NSSize(
             width: appearance.boxWidth, height: appearance.boxHeight))
         overlayBox.setFontSize(appearance.boxFontSize)
@@ -114,7 +108,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         composition = SessionComposition(
             brain: brain,
             artifacts: artifacts,
-            overlayCaption: overlayCaption,
             overlayBox: overlayBox,
             readiness: readiness,
             errorReporter: errorReporter,
@@ -205,7 +198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     guard let self else { return }
                     self.composition.updateScreenSelection(self.screenPreferences.selection)
                 }),
-            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
+            OverlaySection(appearance: appearance, box: overlayBox,
                 onBoxEnabledChanged: { [weak self] _ in
                     guard let self else { return }
                     self.refreshOptionalShortcut(.explainMore)

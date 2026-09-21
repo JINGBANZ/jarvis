@@ -91,7 +91,6 @@ final class SettingsHubModel {
             screenScope: screenPreferences.scope,
             displayIndex: screenPreferences.displayIndex,
             browserTextEnabled: screenPreferences.browserTextEnabled && BrowserAccessibilityPermission.isGranted,
-            captionEnabled: appearance.captionEnabled,
             boxEnabled: appearance.boxEnabled,
             readiness: RobotReadiness(
                 signedOutSubscriptions: signIns.signedOut(

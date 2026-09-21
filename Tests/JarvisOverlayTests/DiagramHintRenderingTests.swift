@@ -12,7 +12,7 @@ import Testing
         panel.setSessionLive(true)
         let detail = try #require(ReplyDetail(markdown:
             "A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"))
-        panel.render(["Sketch the request path."], perLineSeconds: [2], detail: detail)
+        panel.render(["Sketch the request path."], detail: detail)
         for _ in 0..<100 where panel.entryCount == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -52,7 +52,7 @@ import Testing
             "Keep the text hint.\n\n```mermaid\nsequenceDiagram\nA->>B: write\n```"))
         #expect(detail.diagram == nil)
         #expect(detail.dropped.count == 1)
-        panel.render(["Keep the text hint."], perLineSeconds: [2], detail: detail)
+        panel.render(["Keep the text hint."], detail: detail)
         for _ in 0..<100 where panel.entryCount == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -71,7 +71,7 @@ import Testing
         defer { panel.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown:
             "```mermaid\nflowchart TD\nA[Client] --> B[API]\nB --> C[Database]\n```"))
-        panel.render(["Sketch this path."], perLineSeconds: [2], detail: detail)
+        panel.render(["Sketch this path."], detail: detail)
         for _ in 0..<100 where panel.entryCount == 0 {
             try await Task.sleep(for: .milliseconds(10))
         }
@@ -125,7 +125,7 @@ import Testing
         panel.setEnabled(true)
         panel.setSessionLive(true)
         let detail = try #require(ReplyDetail(markdown: "```mermaid\n\(source)\n```"))
-        _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
+        _ = panel.deliver(["Sketch this path."], detail: detail)
         let content = try #require(window.contentView)
         return (panel, try #require(findImage(content)))
     }

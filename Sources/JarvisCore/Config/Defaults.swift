@@ -160,20 +160,6 @@ public enum Defaults {
             public static let opacityRange: ClosedRange<Double> = 0...1
         }
 
-
-        public enum Caption {
-            public static let enabledKey = "overlayCaption.enabled"
-            public static let enabled = false
-
-            public static let fontSizeKey = "overlayCaption.fontSize"
-            public static let fontSize: Double = 18
-            public static let fontSizeRange: ClosedRange<Double> = 12...32
-
-            public static let opacityKey = "overlayCaption.backgroundOpacity"
-            public static let opacity: Double = 0.78
-            public static let opacityRange: ClosedRange<Double> = 0...1.0
-        }
-
         public enum Box {
             public static let enabledKey = "overlayBox.enabled"
             public static let enabled = true

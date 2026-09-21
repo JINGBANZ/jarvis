@@ -141,8 +141,6 @@ public final class JarvisReadiness {
     private var captureState: CaptureReadinessMonitor.Readiness?
     private var captureRecoveryInProgress = false
     private var recoveringBrain: BrainProvider?
-    /// Independent of higher-priority capture status so caption streak suppression remains stable.
-    public var hasFailedCoachingCycle: Bool { failedBrain != nil }
     private var failedBrain: BrainProvider?
 
     public init() {}

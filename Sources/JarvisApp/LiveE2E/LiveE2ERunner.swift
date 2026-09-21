@@ -252,8 +252,6 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     private func makeComposition(audio: LiveE2EScenario.Audio) -> SessionComposition {
-        let caption = OverlayCaptionPanel()
-        caption.setEnabled(true)
         let box = OverlayBoxPanel()
         box.setEnabled(true)
 
@@ -266,7 +264,6 @@ final class LiveE2ERunner: BrainCompositionHost {
         let composition = SessionComposition(
             brain: brain,
             artifacts: artifacts,
-            overlayCaption: caption,
             overlayBox: box,
             readiness: readiness,
             errorReporter: errorReporter,

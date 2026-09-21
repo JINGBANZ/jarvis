@@ -7,58 +7,6 @@ public final class OverlayAppearance {
         self.defaults = defaults
     }
 
-    // MARK: - Overlay Caption (transient on-screen tip)
-
-    public var captionFontSize: Double {
-        get {
-            guard defaults.object(forKey: Defaults.Overlay.Caption.fontSizeKey) != nil else {
-                return Defaults.Overlay.Caption.fontSize
-            }
-            return Self.clamp(
-                defaults.double(forKey: Defaults.Overlay.Caption.fontSizeKey),
-                to: Defaults.Overlay.Caption.fontSizeRange,
-                fallback: Defaults.Overlay.Caption.fontSize)
-        }
-        set {
-            defaults.set(
-                Self.clamp(
-                    newValue,
-                    to: Defaults.Overlay.Caption.fontSizeRange,
-                    fallback: Defaults.Overlay.Caption.fontSize),
-                forKey: Defaults.Overlay.Caption.fontSizeKey)
-        }
-    }
-
-    public var captionBackgroundOpacity: Double {
-        get {
-            guard defaults.object(forKey: Defaults.Overlay.Caption.opacityKey) != nil else {
-                return Defaults.Overlay.Caption.opacity
-            }
-            return Self.clamp(
-                defaults.double(forKey: Defaults.Overlay.Caption.opacityKey),
-                to: Defaults.Overlay.Caption.opacityRange,
-                fallback: Defaults.Overlay.Caption.opacity)
-        }
-        set {
-            defaults.set(
-                Self.clamp(
-                    newValue,
-                    to: Defaults.Overlay.Caption.opacityRange,
-                    fallback: Defaults.Overlay.Caption.opacity),
-                forKey: Defaults.Overlay.Caption.opacityKey)
-        }
-    }
-
-    public var captionEnabled: Bool {
-        get {
-            guard defaults.object(forKey: Defaults.Overlay.Caption.enabledKey) != nil else {
-                return Defaults.Overlay.Caption.enabled
-            }
-            return defaults.bool(forKey: Defaults.Overlay.Caption.enabledKey)
-        }
-        set { defaults.set(newValue, forKey: Defaults.Overlay.Caption.enabledKey) }
-    }
-
     // MARK: - Detail box
 
     public var detailFontSize: Double {
@@ -205,16 +153,6 @@ public final class OverlayAppearance {
         guard v.isFinite else { return fallback }
         return min(max(v, r.lowerBound), r.upperBound)
     }
-}
-
-@MainActor
-public protocol OverlayCaptionApplying: AnyObject {
-    func setFontSize(_ points: Double)
-    func setBackgroundOpacity(_ opacity: Double)
-    /// When off, coaching tips are suppressed but the appearance preview still works.
-    func setEnabled(_ enabled: Bool)
-    /// Must preserve screen-capture exclusion.
-    func showAppearancePreview(_ on: Bool)
 }
 
 @MainActor

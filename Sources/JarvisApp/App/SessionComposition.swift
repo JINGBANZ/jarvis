@@ -28,7 +28,6 @@ final class SessionComposition {
     private let networkDiagnostics = NetworkPathDiagnostics()
     private let brain: BrainComposition
     private let artifacts: SessionArtifacts
-    private let overlayCaption: OverlayCaptionPanel
     private let overlayBox: OverlayBoxPanel
     private let readiness: JarvisReadiness
     private let errorReporter: ErrorReporter
@@ -62,7 +61,6 @@ final class SessionComposition {
     init(
         brain: BrainComposition,
         artifacts: SessionArtifacts,
-        overlayCaption: OverlayCaptionPanel,
         overlayBox: OverlayBoxPanel,
         readiness: JarvisReadiness,
         errorReporter: ErrorReporter,
@@ -74,7 +72,6 @@ final class SessionComposition {
     ) {
         self.brain = brain
         self.artifacts = artifacts
-        self.overlayCaption = overlayCaption
         self.overlayBox = overlayBox
         self.readiness = readiness
         self.errorReporter = errorReporter
@@ -176,13 +173,12 @@ final class SessionComposition {
         observeReadiness(.brainPreparation(.ready), for: readinessSession)
         // One shared origin keeps mic and system timestamps comparable.
         let conversationStart = clock.now()
-        let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(
             config: config,
             transcript: transcript,
             route: configuredRoute,
             screen: makeScreenCapture(sessionDirectory),
-            overlay: overlaySink,
+            overlay: overlayBox,
             clock: clock,
             sessionStart: conversationStart,
             coachingAttempts: attemptAuditing,
@@ -488,10 +484,7 @@ final class SessionComposition {
 
     func brainCycleDidFail(_ provider: BrainProvider) {
         guard let readinessSession = readiness.activeSession else { return }
-        let firstFailure = !readiness.hasFailedCoachingCycle
         observeReadiness(.brainCycleFailed(provider), for: readinessSession)
-        guard firstFailure else { return }
-        overlayCaption.showError("Coaching failed. I'm still listening.")
     }
 
     // MARK: - Readiness

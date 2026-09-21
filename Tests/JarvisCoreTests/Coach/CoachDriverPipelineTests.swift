@@ -209,14 +209,9 @@ private actor FinishTrackingConversation: BrainConversation {
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     private let lock = NSLock()
     private var storedRendered: [[String]] = []
-    private var storedRenderedSeconds: [[TimeInterval]] = []
     var rendered: [[String]] { lock.withLock { storedRendered } }
-    var renderedSeconds: [[TimeInterval]] { lock.withLock { storedRenderedSeconds } }
-    func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
-        lock.withLock {
-            storedRendered.append(lines)
-            storedRenderedSeconds.append(perLineSeconds)
-        }
+    func render(_ lines: [String]) {
+        lock.withLock { storedRendered.append(lines) }
     }
 }
 
@@ -325,9 +320,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         #expect(screen.captureCount == 1)
         #expect(overlay.rendered == [["What's the complexity of that nested loop?"]])
-        let expectedSeconds = OverlayTiming.displaySeconds(
-            for: "What's the complexity of that nested loop?", config: .default)
-        #expect(overlay.renderedSeconds == [[expectedSeconds]])
         #expect(brain.calls.count == 2)
         #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls?.first?.name == "capture_screen" })
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "c1" })

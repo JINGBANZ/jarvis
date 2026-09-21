@@ -38,7 +38,7 @@ import Testing
         defer { panel.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown:
             "```mermaid\nflowchart TD\nA[Client] --> B[API]\nB --> C[Database]\n```"))
-        _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
+        _ = panel.deliver(["Sketch this path."], detail: detail)
         #expect(panel.currentDetailHeight > panel.currentContentSize.height * 0.6)
         #expect(panel.currentContentSize.height - panel.currentDetailHeight >= 72)
         #expect(panel.currentContentSize == size)
@@ -57,13 +57,13 @@ import Testing
         panel.onSizeChanged = { _, _ in savedSizes += 1 }
         let detail = try #require(ReplyDetail(markdown:
             "```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"))
-        _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
+        _ = panel.deliver(["Sketch this path."], detail: detail)
         #expect(window.frame == original)
         #expect(savedSizes == 0)
 
         panel.setContentSize(NSSize(width: 400, height: 300))
         panel.endLiveResize()
-        _ = panel.deliver(["Follow this path."], perLineSeconds: [2], detail: detail)
+        _ = panel.deliver(["Follow this path."], detail: detail)
         #expect(panel.currentContentSize == NSSize(width: 400, height: 300))
         #expect(savedSizes == 1)
     }

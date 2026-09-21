@@ -153,21 +153,8 @@ moments the model judges worthwhile.
    omit the optional observer. This stays diagnostics-only; Activity remains the human-facing record
    and provider scheduling detail remains out of it. See [session-audit.md](./session-audit.md) for
    the component boundary and lifecycle.
-8. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
-   A newer tip never interrupts one still showing — tips queue and play in order, so no hint is lost.
-
-**Why the overlay never interrupts and never drops (and why direct-reply latency is a non-issue).**
-The queue is deliberately strict: a tip the user may still be reading is never cut off, and nothing
-is discarded. The obvious objection — "a direct *'Jarvis, help'* reply could wait tens of seconds
-behind a proactive tip" — does not apply in the real use case: **in a live interview the user never
-addresses Jarvis out loud** (speaking to an AI would expose it), so overlay traffic is *entirely
-proactive coaching* with no latency-critical direct reply to jump the queue. The accepted tradeoff is
-that a queued proactive tip can surface some seconds after it was generated; that is bounded in
-practice because `CoachDriver` runs a single turn in-flight (so tips are produced no faster than one
-brain round-trip) and the prompt keeps the model restrained. So the policy is *not interrupt + not
-drop*, not *show-freshest-only* — and adding direct-reply priority/preemption was considered and
-rejected as solving a problem the interview workflow doesn't have. (The must-reply-on-direct-address
-path still works for testing/practice; it is simply not latency-critical there.)
+8. `speak` appends the tip to the **Overlay Box**, the session's scrolling history, so a newer tip
+   never replaces one the user may still be reading.
 
 ### Capabilities
 
@@ -480,9 +467,8 @@ session and consumes the matched click through release. See
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
 | **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
-| **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
-| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box; the caption remains text-only. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
-| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
+| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped, as the session's scrollable history. Movable, resizable, translucent, excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. It is the `OverlayRendering` sink `CoachDriver` speaks to. A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
+| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The Overlay Box is switched on or off from Settings and cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController / MouseHotkeyController** | Handle the coaching and detail-navigation bindings; AppDelegate routes coaching to the session and navigation to the overlay. See [Settings → Shortcuts](./settings-window.md#shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC) for keyboard; Core Graphics event tap with Accessibility permission for mouse. |
 | **OnboardingGate** | Run first-run onboarding once per install, before the rest of the app is built: one OpenAI or Gemini API key, then the three TCC grants, each step shown only when what it collects is missing. Closing the window before the end quits; completing it sets the one onboarding flag, so later launches go straight to the menu bar. `SystemAudioPermissionProbe` proves the silently enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Onboarding](#onboarding) and [§3 Permissions](#permissions). | AppKit window, `CredentialVerifier`, AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
@@ -656,7 +642,7 @@ to contain only user-facing coaching, fixed failures, and lifecycle outcomes.
 
 Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
 window, browser, notification, attention request, or sound is allowed outside the nonactivating,
-capture-excluded caption and box overlays. The persistent menu-bar item and user-invoked
+capture-excluded Overlay Box. The persistent menu-bar item and user-invoked
 Settings/Activity surfaces are explicit exceptions, as is unavoidable macOS privacy UI. The Core
 presentation matrix is unit-tested, and `scripts/check-ghost-mode.sh` rejects unreviewed presentation
 API calls from the normal test gate. Realtime health remains visible through the menu and current
@@ -722,9 +708,9 @@ A successful response clears the target's failure count and preserves successful
 
 A **coaching cycle** is one finite traversal of the remaining route, possibly containing multiple
 attempts and HTTP requests. Exhausting a cycle keeps capture and transcription active. The icon,
-menu and Activity status remain failed until a successful coaching attempt; only the first failed
-cycle in a streak shows a red caption. Failures never add rows to the Box. Activity records the failed
-cycle with the provider's redacted cause.
+menu and Activity status remain failed until a successful coaching attempt. Failures never add rows
+to the Box, which holds only coaching; Activity records the failed cycle with the provider's redacted
+cause.
 
 A later explicit coaching shortcut or new finalized speech starts a fresh cycle at the primary;
 silence without new transcript does not. Consecutive failed cycles delay that admission by 0, 5, 15,
@@ -1192,13 +1178,13 @@ data from its vendor by default. Google's OpenAI-compatible layer offers only Ch
 
 ### Latency
 
-Target for the direct API path: **turn-end → first overlay line < 2s.** Transcription is continuous
+Target for the direct API path: **turn-end → tip in the Overlay Box < 2s.** Transcription is continuous
 (no STT latency at trigger time) and most turns are text-only. Subscription latency depends on the
 vendor, model, and network behind one loopback hop through the helper; how that compares with the
 vendors' own CLIs is in
 [Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy),
-and neither subscription promises the direct API target. The overlay reveals the already-returned
-lines one at a time (paced by `Config`); the brain response itself is not streamed to the overlay.
+and neither subscription promises the direct API target. The box shows the already-returned tip
+whole; the brain response itself is not streamed to the overlay.
 Session auditing adds only best-effort typed-event admission to the live path. Parsing, redaction,
 serialization, file I/O, bounded retention, and close behavior belong to the
 [session-audit component](./session-audit.md); ordinary Stop never makes a replacement Start wait for
