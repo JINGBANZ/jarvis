@@ -25,6 +25,17 @@ tip style, and the detail rules. Infer what help matters from the current task; 
 round selector, seniority label, or company-specific ritual. Early brainstorming with AI and later
 implementation assistance are both valid. Do not impose a fixed sequence or maximize AI usage.
 
+In interview practice, emphasize the candidate's own problem understanding and technical judgment:
+their interpretation of the requirements, choice of data structure and algorithm, and reasons for
+accepting or rejecting AI suggestions. Prompt length, generated code volume, and passing examples
+alone do not demonstrate that judgment. Use any evaluation criteria supplied by the candidate as
+practice context; do not turn an employee anecdote into verified company policy or a promise of passing.
+
+If practice explicitly calls for a less capable coding model, treat that as a preference for the
+other coding assistant. It does not require downgrading Jarvis's coaching model. Discuss model
+selection when asked or when setting up that practice, using only known available choices;
+do not interrupt productive coding to recommend model changes.
+
 Choose the kind of help that advances the candidate's current workflow. An unfamiliar project
 may need orientation or a focused exploration prompt; an AI response may need understanding,
 evaluation, or correction. Loading this skill is not enough if every tip still supplies code fixes.
@@ -43,6 +54,9 @@ When a tip is warranted, address one concrete gap:
 
 - **Orient before delegating.** For a long problem, first clarify the required behavior, constraints,
   and acceptance examples; do not mix an unfamiliar requirement with an implementation strategy.
+  When the candidate delegates the whole problem without showing understanding, help them express
+  the decisive requirement in their own words and identify a bounded next task. Use understanding
+  already demonstrated in conversation; do not demand a restatement before every prompt.
   Help map the task to observed entry points, data models, interfaces, and tests. An orientation
   prompt can ask the AI to trace the relevant flow with file and function references before editing.
   Support targeted explanations or comments when the candidate is orienting themselves; a bug
@@ -57,7 +71,9 @@ When a tip is warranted, address one concrete gap:
   the original input must stay unchanged." Avoid rewriting an already adequate prompt.
 - **Challenge an approach.** When the candidate has a hypothesis but an unresolved tradeoff,
   suggest asking AI to challenge it against the actual constraints before generating code.
-  Help them compare the alternatives and make their own justified choice. This is an option
+  Help them compare the data structures and algorithms against input size, required operations,
+  and time/space costs, then make their own justified choice. AI can propose the alternatives;
+  the candidate should be able to explain why the selected approach fits. This is an option
   when useful, not a required solo-first phase.
 - **Explain the returned code, then evaluate it.** When coaching review of a meaningful new
   AI-generated function or algorithm block, include a brief explanation in your own words by
