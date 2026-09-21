@@ -44,16 +44,10 @@ public enum RobotPartSummaries {
         }
     }
 
-    public static func mouth(captionEnabled: Bool, boxEnabled: Bool) -> RobotPartSummary {
-        let value = switch (boxEnabled, captionEnabled) {
-        case (true, true): "Box and caption"
-        case (true, false): "Overlay Box"
-        case (false, true): "Caption"
-        case (false, false): "Nothing on screen"
-        }
-        return RobotPartSummary(
-            value: value,
-            detail: "BOX \(boxEnabled ? "ON" : "OFF") · CAPTION \(captionEnabled ? "ON" : "OFF")")
+    public static func mouth(boxEnabled: Bool) -> RobotPartSummary {
+        RobotPartSummary(
+            value: boxEnabled ? "Overlay Box" : "Nothing on screen",
+            detail: boxEnabled ? "BOX ON" : "BOX OFF")
     }
 
     /// "GPT-4o Transcribe" reads "OpenAI · GPT-4o"; a model already named for its vendor reads

@@ -234,7 +234,7 @@ import JarvisCore
     @MainActor @Test
     func clearEmptiesTheLog() {
         let panel = OverlayBoxPanel()
-        panel.render(["kept for now"], perLineSeconds: 0)
+        panel.render(["kept for now"])
         // No wait: append runs on a later main-actor hop, and clear must empty regardless.
         panel.clear()
         #expect(panel.entryCount == 0)
@@ -426,7 +426,7 @@ private func waitUntil(timeout: TimeInterval = 5, _ condition: () -> Bool) async
 private func checkReassertOnRenderWhileVisible() async {
     let panel = liveBox()
     let before = panel.captureExclusionReassertCount
-    panel.render(["A new response."], perLineSeconds: 0)
+    panel.render(["A new response."])
     #expect(await waitUntil { panel.entryCount == 1 }, "the response should be logged")
     #expect(panel.captureExclusionReassertCount > before, "a render while visible must re-assert capture exclusion")
     #expect(panel.currentSharingType == .none)
@@ -436,7 +436,7 @@ private func checkReassertOnRenderWhileVisible() async {
 private func checkAppendDuringPreview() async {
     let panel = OverlayBoxPanel()
     panel.showAppearancePreview(true)
-    panel.render(["Mid-preview response."], perLineSeconds: 0)
+    panel.render(["Mid-preview response."])
     #expect(await waitUntil { panel.entryCount == 1 }, "the response is logged even during preview")
     #expect(panel.currentText.contains("Ask about the time complexity"), "preview still shows the sample…")
     #expect(!panel.currentText.contains("Mid-preview response."), "…not the response that arrived during it")
@@ -449,7 +449,7 @@ private func checkAppendDuringPreview() async {
 private func checkClearButtonFollowsTheLog() async {
     let panel = liveBox()
     #expect(!panel.isClearButtonVisible, "an empty box offers nothing to erase")
-    panel.render(["A new response."], perLineSeconds: 0)
+    panel.render(["A new response."])
     #expect(await waitUntil { panel.isClearButtonVisible }, "the first tip must reveal the clear button")
 
     panel.clickClearButton()
@@ -461,7 +461,7 @@ private func checkClearButtonFollowsTheLog() async {
 @MainActor
 private func checkPreviewClearLeavesTheLogAlone() async {
     let panel = liveBox()
-    panel.render(["A real tip."], perLineSeconds: 0)
+    panel.render(["A real tip."])
     #expect(await waitUntil { panel.entryCount == 1 }, "the tip should be logged")
     panel.setSessionLive(false)          // the preview only opens while stopped
 
@@ -476,8 +476,8 @@ private func checkPreviewClearLeavesTheLogAlone() async {
 @MainActor
 private func checkAppendsEntries() async {
     let panel = OverlayBoxPanel()
-    panel.render(["Ask about the time complexity."], perLineSeconds: 0)
-    panel.render(["Mention", "the edge case."], perLineSeconds: 0)
+    panel.render(["Ask about the time complexity."])
+    panel.render(["Mention", "the edge case."])
 
     #expect(await waitUntil { panel.entryCount == 2 }, "both tips should be logged")
     #expect(panel.currentText.contains("Ask about the time complexity."))
@@ -487,8 +487,8 @@ private func checkAppendsEntries() async {
 @MainActor
 private func checkDropsEmptyTips() async {
     let panel = OverlayBoxPanel()
-    panel.render([], perLineSeconds: 0)
-    panel.render(["   ", "", "\n\t"], perLineSeconds: 0)
+    panel.render([])
+    panel.render(["   ", "", "\n\t"])
     try? await Task.sleep(nanoseconds: 200_000_000)   // lets an erroneous append run
     #expect(panel.entryCount == 0, "empty/whitespace-only tips must not be logged")
 }

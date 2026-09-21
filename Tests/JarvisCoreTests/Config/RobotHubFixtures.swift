@@ -6,7 +6,6 @@ extension RobotHubInputs {
             primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5"), fallbackTargets: []),
         effort: ReasoningEffort = .high,
         transcriptionProvider: TranscriptionProvider = .openAI,
-        captionEnabled: Bool = false,
         boxEnabled: Bool = true,
         readiness: RobotReadiness? = nil,
         activeTarget: BrainTarget? = nil
@@ -22,7 +21,6 @@ extension RobotHubInputs {
             screenScope: .activeWindow,
             displayIndex: 1,
             browserTextEnabled: false,
-            captionEnabled: captionEnabled,
             boxEnabled: boxEnabled,
             readiness: readiness,
             activeTarget: activeTarget)

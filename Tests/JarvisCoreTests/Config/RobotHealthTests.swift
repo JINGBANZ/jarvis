@@ -91,10 +91,10 @@ import Testing
     }
 
     @Test func mouthNeedsASurface() {
-        #expect(health(.mouth, .fixture(captionEnabled: false, boxEnabled: false)) == .needsAttention(
+        #expect(health(.mouth, .fixture(boxEnabled: false)) == .needsAttention(
             reason: "NOTHING WILL SHOW",
-            advice: "Both overlays are off, so my hints have nowhere to appear. Switch one on below.",
+            advice: "The Overlay Box is off, so my hints have nowhere to appear. Switch it on below.",
             fix: nil))
-        #expect(health(.mouth, .fixture(captionEnabled: true, boxEnabled: false)) == .ready)
+        #expect(health(.mouth, .fixture(boxEnabled: true)) == .ready)
     }
 }

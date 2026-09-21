@@ -201,6 +201,6 @@ import Testing
 
     @MainActor private func deliver(_ box: OverlayBoxPanel, _ text: String, _ mermaid: String) throws {
         let detail = try #require(ReplyDetail(markdown: "\(text)\n\n```mermaid\n\(mermaid)\n```"))
-        #expect(box.deliver([text], perLineSeconds: [2], detail: detail) == detail)
+        #expect(box.deliver([text], detail: detail) == detail)
     }
 }

@@ -7,8 +7,9 @@
 
 ## The Requirement
 
-Jarvis draws short coaching tips in a floating overlay caption ([`OverlayCaptionPanel`](../Sources/JarvisOverlay/OverlayCaptionPanel.swift)).
-That caption must be invisible to two distinct audiences:
+Jarvis draws its coaching tips in a floating overlay, the Overlay Box
+([`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift)), which holds the full history of
+every tip in the session. That box must be invisible to two distinct audiences:
 
 1. **Other apps capturing the screen** — the interviewer's Zoom/Meet/Teams share, a QuickTime/OBS
    recording, the macOS screenshot tool.
@@ -69,43 +70,38 @@ used was a handful of standalone Swift programs driving `NSPanel` + ScreenCaptur
 
 ## What Jarvis Does
 
-- [`OverlayCaptionPanel`](../Sources/JarvisOverlay/OverlayCaptionPanel.swift) sets `panel.sharingType = .none` at
-  construction.
-- It **re-asserts** `.none` at the top of `show()` every time a coaching response is displayed.
-  This is defense-in-depth, taken from Natively's documented lesson: flipping `NSApp` activation
-  policy — which Jarvis does when opening the [Settings window](./settings-window.md)
-  (`SettingsWindow.show()`) — can, on some OS versions/configs, make WindowServer drop the flag. It
-  does **not** reproduce on macOS 26.5, but the failure would be silent and high-impact (the overlay
-  would become visible to an interviewer with no signal), so re-asserting on every show is cheap
-  insurance.
-- `OverlayCaptionPanel.showAppearancePreview(_:)` (the live preview shown while the Settings window is
-  open) routes its capture-exclusion re-assert through the counted `reassertCaptureExclusion()`
-  helper, so the preview stays excluded from screen capture. This is regression-tested via the
-  `captureExclusionReassertCount` hook (`previewReassertsCaptureExclusion`). The plain setters
-  `setFontSize`/`setBackgroundOpacity` only change font/alpha and don't touch `sharingType`.
+- [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) sets `panel.sharingType = .none`
+  at construction through the `NSPanel.excludeFromScreenCapture()` helper
+  ([`NSPanel+CaptureExclusion.swift`](../Sources/JarvisOverlay/NSPanel+CaptureExclusion.swift)).
+- It **re-asserts** `.none` on every render that reaches the screen (`append` while visible) and
+  whenever it becomes visible (`applyVisibility()`, i.e. every Start). This is defense-in-depth, taken
+  from Natively's documented lesson: flipping `NSApp` activation policy, which Jarvis does when opening
+  the [Settings window](./settings-window.md) (`SettingsWindow.show()`), can, on some OS
+  versions/configs, make WindowServer drop the flag. It does **not** reproduce on macOS 26.5, but the
+  failure would be silent and high-impact (the box would become visible to an interviewer with no
+  signal), so re-asserting on every show is cheap insurance.
+- `showAppearancePreview(_:)` (the live sample shown while the Settings Mouth page is open) routes its
+  re-assert through the same counted `reassertCaptureExclusion()` helper, so the preview stays
+  excluded from screen capture. The plain appearance setters only change font and alpha and don't
+  touch `sharingType`.
 
-**The same applies to the [Overlay Box](./settings-window.md) ([`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift)).**
-It is the *more* sensitive of the two windows — it holds the full, persistent history of every spoken
-tip — so it gets the identical treatment, not less: both panels set the flag through one shared
-`NSPanel.excludeFromScreenCapture()` helper at construction, and the box **re-asserts on every render
-that reaches the screen** (`append` while visible), whenever it becomes visible (`applyVisibility()`,
-i.e. every Start), and in its preview — mirroring the overlay's per-`show()` re-assert. Regression-tested the same way via its own
-`captureExclusionReassertCount` hook (`reassertsCaptureExclusionOnRenderWhileVisible`).
-
-That is the entire implementation: no package, no entitlement, no private API. Both panels live in
-the small `JarvisOverlay` library target (not the executable) so the tests below can import them.
+That is the entire implementation: no package, no entitlement, no private API. The panel lives in the
+small `JarvisOverlay` library target (not the executable) so the tests below can import it.
 
 ## Regression tests
 
-`Tests/JarvisOverlayTests/OverlayInvisibilityTests.swift` guards this in two layers:
+`Tests/JarvisOverlayTests/` guards this in two layers:
 
-1. **Property tests (always run, incl. CI):** assert the panel sets `sharingType = .none` at
-   construction and that `render()` re-asserts it (a counter proves the re-assert code runs — needed
-   because macOS 26 normalizes `sharingType`, so a dropped flag can't be simulated by writing another
-   value). These catch the realistic regression: the flag or the re-assert being deleted.
-2. **On-screen capture test (opt-in, local):** paints a `.none` panel + a control, captures the
-   display with ScreenCaptureKit (the Zoom/Meet/Teams path), and asserts the protected panel is
-   absent while the control is present. CI can't grant Screen Recording, so it skips unless opted in:
+1. **Property tests (always run, incl. CI):** `OverlayBoxPanelTests` asserts the box sets
+   `sharingType = .none` at construction (`excludedFromScreenCaptureAtInit`) and that showing it and
+   rendering to it re-assert the flag (`sessionStartShowsTheBoxAndReassertsCaptureExclusion`,
+   `reassertsCaptureExclusionOnRenderWhileVisible`). A counter proves the re-assert code runs, which
+   is needed because macOS 26 normalizes `sharingType`, so a dropped flag can't be simulated by
+   writing another value. These catch the realistic regression: the flag or the re-assert being
+   deleted.
+2. **On-screen capture test (opt-in, local):** `OverlayInvisibilityTests` paints a `.none` panel + a
+   control, captures the display with ScreenCaptureKit (the Zoom/Meet/Teams path), and asserts the
+   protected panel is absent while the control is present. CI can't grant Screen Recording, so it skips unless opted in:
 
    ```sh
    JARVIS_RUN_CAPTURE_TESTS=1 ./scripts/run-tests.sh --filter OverlayInvisibilityTests
@@ -130,7 +126,7 @@ A deliberate, researched choice that matches what every comparable project does:
   in CI.)
 - **Everyone asserts the flag, not the pixels, in CI.** Electron added a private `isContentProtected()`
   getter specifically to unit-test that the flag is set without capturing — exactly what our
-  `overlaySetsCaptureExclusionAtInit` test does. OBS and alt-tab-macos never pixel-test capture in CI.
+  `excludedFromScreenCaptureAtInit` test does. OBS and alt-tab-macos never pixel-test capture in CI.
 
 So: **flag/property tests gate CI; the pixel-level capture test is opt-in and runs locally** (or on a
 self-hosted Mac with auto-login + a one-time manual grant, if continuous pixel verification is ever
@@ -163,7 +159,7 @@ against:
 - Apple DTS, "no public APIs for preventing screen capture": developer.apple.com/forums/thread/792152
 - Electron `native_window_mac.mm` — `setContentProtection` → `NSWindowSharingNone`
 - Natively `native-module/src/stealth_window.rs` — direct FFI, the SCK-limitation comment, and the
-  activation-policy re-assert loop that motivated Jarvis's `show()` re-assert
+  activation-policy re-assert loop that motivated the box's re-assert on every show
 - `SCContentFilter(display:excludingApplications:exceptingWindows:)` — the robust way to exclude
   windows from *your own* `SCStream`, **if** Jarvis ever moves its brain capture off the
   `screencapture` CLI onto ScreenCaptureKit

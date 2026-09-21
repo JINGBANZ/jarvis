@@ -26,7 +26,7 @@ import Testing
         let arguments = #"{"lines":["Sketch the request path."],"detail":"A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments)])
         let overlay = DetailRecordingOverlay()
-        let driver = makeDriver(brain: brain, overlay: BroadcastOverlay([overlay]))
+        let driver = makeDriver(brain: brain, overlay: overlay)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(overlay.lines == ["Sketch the request path."])
@@ -44,7 +44,7 @@ import Testing
     @Test func replayedArgumentsCarryTheDeliveredDetail() async throws {
         let arguments = #"{"lines":["Sketch the request path."],"detail":"A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
-        let driver = makeDriver(brain: brain, overlay: BroadcastOverlay([DetailRecordingOverlay()]))
+        let driver = makeDriver(brain: brain, overlay: DetailRecordingOverlay())
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -61,7 +61,7 @@ import Testing
         let arguments = #"{"lines":["Start with the API."],"detail":"Use a queue.\n\n```mermaid\nsequenceDiagram\nA->>B: write\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
         let overlay = DetailRecordingOverlay()
-        let driver = makeDriver(brain: brain, overlay: BroadcastOverlay([overlay]))
+        let driver = makeDriver(brain: brain, overlay: overlay)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -113,8 +113,8 @@ private final class DetailRecordingOverlay: OverlayRendering, @unchecked Sendabl
     @MainActor var acceptsDetail: Bool { true }
     var lines: [String] = []
     var detail: ReplyDetail?
-    func render(_ lines: [String], perLineSeconds: [TimeInterval]) { self.lines = lines }
-    func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?) {
+    func render(_ lines: [String]) { self.lines = lines }
+    func render(_ lines: [String], detail: ReplyDetail?) {
         self.lines = lines
         self.detail = detail
     }

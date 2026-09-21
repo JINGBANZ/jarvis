@@ -7,7 +7,6 @@ public struct RobotHubInputs: Sendable, Equatable {
     public var screenScope: ScreenCaptureScope
     public var displayIndex: Int
     public var browserTextEnabled: Bool
-    public var captionEnabled: Bool
     public var boxEnabled: Bool
     /// `nil` until the app has read it, so the hub shows no status.
     public var readiness: RobotReadiness?
@@ -21,7 +20,6 @@ public struct RobotHubInputs: Sendable, Equatable {
         screenScope: ScreenCaptureScope,
         displayIndex: Int,
         browserTextEnabled: Bool,
-        captionEnabled: Bool,
         boxEnabled: Bool,
         readiness: RobotReadiness? = nil,
         activeTarget: BrainTarget? = nil
@@ -32,7 +30,6 @@ public struct RobotHubInputs: Sendable, Equatable {
         self.screenScope = screenScope
         self.displayIndex = displayIndex
         self.browserTextEnabled = browserTextEnabled
-        self.captionEnabled = captionEnabled
         self.boxEnabled = boxEnabled
         self.readiness = readiness
         self.activeTarget = activeTarget

@@ -220,12 +220,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     // MARK: - OverlayRendering
 
-    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
-        render(lines, perLineSeconds: perLineSeconds, detail: nil)
+    public nonisolated func render(_ lines: [String]) {
+        render(lines, detail: nil)
     }
 
-    public nonisolated func render(_ lines: [String], perLineSeconds: [TimeInterval],
-                                   detail: ReplyDetail?) {
+    public nonisolated func render(_ lines: [String], detail: ReplyDetail?) {
         let summary = lines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
@@ -316,8 +315,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// Returns the detail actually shown, nil when the box can't show one, so an unseen detail is
     /// never recorded as delivered or replayed to the model.
-    public func deliver(_ lines: [String], perLineSeconds: [TimeInterval],
-                        detail: ReplyDetail?) -> ReplyDetail? {
+    public func deliver(_ lines: [String], detail: ReplyDetail?) -> ReplyDetail? {
         let summary = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }.joined(separator: " ")
         guard !summary.isEmpty else { return nil }

@@ -144,7 +144,7 @@ only what Settings can fix or explain:
   the route will answer instead, or whether none can.
 - **Ear** needs its transcription provider's own key first, then microphone access.
 - **Eye** needs Screen Recording.
-- **Mouth** needs at least one of the caption and the box switched on.
+- **Mouth** needs the Overlay Box switched on.
 
 The exact wording lives in `RobotHealth`.
 
@@ -194,7 +194,7 @@ pages it moves.
 | `BrainSection` | **Brain**: "Who does my thinking, and how hard I think." | The ordered provider route and the reasoning effort ([Brain](#brain)). Valid route and effort changes take effect between coaching attempts while running, which the header chip says. |
 | `TranscriptionSection` | **Ear**: "How I turn the conversation into text." | The transcription provider and its model, language, vocabulary, mode, or locale rows ([Ear](#ear)). Applies on the next Start. |
 | `DisplaySection` | **Eye**: "What I look at when I check your screen." | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — and the optional Chrome text switch, followed by a short fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot ([Capture Scope](#capture-scope)). |
-| `OverlaySection` | **Mouth**: "How my hints show up on your screen." | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off switch, and the same text size and opacity rows; the box also carries the detail box's own rows, with no switch of their own. When a surface is **on** its rows and live sample appear only while the Mouth page is visible (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. The header's live chip says the sliders act on screen. Persists via `OverlayAppearance` ([Overlay Appearance](#overlay-appearance)). |
+| `OverlaySection` | **Mouth**: "How my hints show up on your screen." | One **Overlay Box** card (the persistent response history) with an icon, description, On/Off switch, text size and opacity rows, and the detail box's own rows, which have no switch of their own. When the box is **on** its rows and live sample appear only while the Mouth page is visible (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. The header's live chip says the sliders act on screen. Persists via `OverlayAppearance` ([Overlay Appearance](#overlay-appearance)). |
 | `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts what is ready. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | Prep notes search, with its switch and its list of local note files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
@@ -218,11 +218,9 @@ answers, so a helper that is still starting cannot delay presentation.
 ## Overlay Appearance
 
 Overlay appearance is persisted through `OverlayAppearance`; every key, default, and clamp range is
-declared in [`Defaults.Overlay`](../Sources/JarvisCore/Config/Defaults.swift). Each surface carries an
-on/off flag, a font size, and an opacity; the box additionally carries its width and height.
-
-The two surfaces default opposite ways — the caption **off**, the box **on** — so a first run shows
-the durable history rather than a flashing caption. `AppDelegate` applies both enabled flags at launch.
+declared in [`Defaults.Overlay`](../Sources/JarvisCore/Config/Defaults.swift). The box carries an
+on/off flag (**on** by default), a font size, an opacity, and its width and height. `AppDelegate`
+applies them at launch.
 
 The box is a **session surface**: switched on, it reaches the screen on Start (already cleared, for the
 new conversation) and leaves it on Stop, so a stopped Jarvis puts nothing on the desktop. Two flags in
@@ -233,10 +231,9 @@ place is why the panel, not the two call sites, owns it: switching the box on fr
 stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides
 the rule while the Mouth page is open and re-derives it on close.
 
-Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
-backdrop, not a hidden one. Nothing here takes a surface off screen: that is the On/Off switch, and
-for the box the end of a session as well. Both share one range because the page presents their
-sliders identically. A corrupted non-finite stored value restores the setting's own default rather
+Opacity governs the background fill only, so the box accepts 0%: a text-only surface with no
+backdrop, not a hidden one. Nothing here takes the box off screen: that is the On/Off switch and the
+end of a session. A corrupted non-finite stored value restores the setting's own default rather
 than the range floor, which at 0% would read as breakage.
 
 The Overlay Box card carries **Detail text size** and **Detail background opacity** sliders for the
@@ -269,19 +266,17 @@ rather than the header's. The panel's `minSize` derives from the persisted range
 floor and the clamp floor cannot drift apart, and the affordance clamps its own drags against the
 same `minSize`/`maxSize`.
 
-`OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
-panels: `OverlayCaptionApplying`, conformed by `OverlayCaptionPanel`, and `OverlayBoxApplying`,
-conformed by `OverlayBoxPanel`. Both are declared in
-[`OverlayAppearance.swift`](../Sources/JarvisCore/Config/OverlayAppearance.swift). All values
-round-trip through `OverlayAppearance` so they survive an app relaunch.
+`OverlaySection` applies changes live through the `OverlayBoxApplying` protocol, declared in
+[`OverlayAppearance.swift`](../Sources/JarvisCore/Config/OverlayAppearance.swift) and conformed by
+`OverlayBoxPanel`, with no direct dependency on the AppKit panel. All values round-trip through
+`OverlayAppearance` so they survive an app relaunch.
 
-`setEnabled(false)` on the caption suppresses coaching tips (dropping any in-flight/queued tip); on
-the box it takes the window off screen, and `setEnabled(true)` returns it there only while a session
-is running. A surface's live sample is shown only while the Mouth page is visible **and that
-surface is on** — `didBecomeActive` previews each surface for its enabled state, and flipping a
-switch shows/hides that surface's sample (and collapses/expands its sliders via `relayout()`) live.
-Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden
-from screen capture — same defense-in-depth as the coaching display path. The box's preview shows
+`setEnabled(false)` takes the box off screen, and `setEnabled(true)` returns it there only while a
+session is running. The live sample is shown only while the Mouth page is visible **and the box is
+on**: `didBecomeActive` previews the box for its enabled state, and flipping the switch shows or
+hides the sample (and collapses or expands the sliders via `relayout()`) live.
+`showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden from screen
+capture, the same defense-in-depth as the coaching display path. The box's preview shows
 sample text without disturbing the real log and re-derives `isEnabled && isSessionLive` on close, so
 leaving the page can leave the box on screen only while both hold. The box's sample stands in **only
 while stopped**: during a session the box is already on screen carrying the conversation's own tips
@@ -357,8 +352,7 @@ reserved or checked through Carbon. If a binding could not become active at laun
 shows on every visit. Warnings live in the corresponding row. The Overlay Box shows
 semibold hints in its upper section and the reply's detail in the lower one; a hint whose reply
 carried a detail ends with a dim marker. Both use the configured text size, and the appearance
-preview shows an example. Neither surface's visibility preference changes. No shortcut enables the
-master box.
+preview shows an example. No shortcut changes the box's visibility preference or switches it on.
 
 ## Activity response sections
 
@@ -758,7 +752,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Capture/BrowserAccessibilityPermission.swift` | User-initiated Accessibility grant and status |
 | `Sources/JarvisScreenCapture/BrowserAccessibilityReader.swift` | Bounded, read-only active-tab semantic extraction |
 | `Sources/JarvisScreenCapture/ScreenTextResolver.swift` | Combines optional Accessibility text with current-view OCR |
-| `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
+| `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | The Overlay Box card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/HotkeySection.swift`, `HotkeyBindingView.swift` | Shortcuts page and one shortcut's row |
 | `Sources/JarvisApp/Settings/HotkeyRecorderButton.swift`, `ShortcutKeycapsView.swift` | The keyboard Record button and the drawn keycaps |
@@ -778,12 +772,10 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisCore/Coach/CoachDriver.swift` | Between-attempt route application and attempt orchestration |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisScreenCapture/ScreenCaptureCLI.swift` | Executes the attempt's frozen `SessionPlan` capture selection and handles main-display fallback |
-| `Sources/JarvisCore/Config/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |
+| `Sources/JarvisCore/Config/OverlayAppearance.swift` | UserDefaults persistence; `OverlayBoxApplying` protocol |
 | `Sources/JarvisCore/Config/TranscriptionPreferences.swift` | Persisted transcription selection + validation |
-| `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the caption + box |
-| `Sources/JarvisOverlay/OverlayCaptionPanel.swift` | The Overlay Caption; `OverlayCaptionApplying` conformance |
 | `Sources/JarvisOverlay/OverlayBoxPanel.swift` | The Overlay Box; `OverlayBoxApplying` conformance |
-| `Sources/JarvisOverlay/NSPanel+CaptureExclusion.swift` | Shared `sharingType = .none` helper for both panels |
+| `Sources/JarvisOverlay/NSPanel+CaptureExclusion.swift` | The `sharingType = .none` helper the box re-asserts |
 
 ## Related Pages
 

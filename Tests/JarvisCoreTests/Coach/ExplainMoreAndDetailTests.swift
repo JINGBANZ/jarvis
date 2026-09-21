@@ -46,10 +46,8 @@ import Testing
         let brain = ScriptedBrain(script: [response])
         let transcript = RollingTranscript()
         let box = DetailSink()
-        let caption = FakeOverlay()
         let screen = FakeScreen()
-        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen,
-                                overlay: BroadcastOverlay([caption, box]))
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: screen, overlay: box)
         transcript.append(.init(speaker: .them, text: "Find the longest substring without repeats", at: 0))
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         transcript.append(.init(speaker: .me, text: "I don't understand why we move the left edge", at: 1))
@@ -59,7 +57,7 @@ import Testing
         #expect(messages.contains { $0.text?.contains("longest substring") == true })
         #expect(messages.contains { $0.text?.contains("left edge") == true })
         #expect(messages.contains { $0.toolCalls?.contains { $0.argumentsJSON.contains("For abca") } == true })
-        #expect(caption.rendered.last == ["Track the current range."])
+        #expect(box.lines == ["Track the current range."])
         #expect(box.detailText?.contains("For abca") == true)
         if reason == .manualExplanation {
             #expect(screen.captureCount == 2)
@@ -201,8 +199,8 @@ private final class DetailSink: OverlayRendering, @unchecked Sendable {
     @MainActor var acceptsDetail: Bool { true }
     var detailText: String?
     var lines: [String] = []
-    func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}
-    func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?) {
+    func render(_ lines: [String]) {}
+    func render(_ lines: [String], detail: ReplyDetail?) {
         self.lines = lines
         self.detailText = detail?.deliveredMarkdown
     }

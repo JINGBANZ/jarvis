@@ -38,13 +38,13 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisCore/PrepMaterial/` + `Sources/JarvisApp/PrepMaterial/`: prep-material chunking, indexing, and search behind `search_prep_notes` ([architecture.md → Capabilities](./architecture.md#capabilities)).
 - `Sources/JarvisCore/Screen/`: the model-facing screen port, front-window selection, and OCR layout.
 - `Sources/JarvisScreenCapture/`: the OS-bound screen-capture adapter, combining the `screencapture` helper, browser Accessibility text, and OCR ([settings-window.md → Capture Scope](./settings-window.md#capture-scope)).
-- `Sources/JarvisCore/Overlay/`: the overlay output port, with its text model, timing, code snippets, and diagram hints ([overlay-timing.md](./overlay-timing.md)).
+- `Sources/JarvisCore/Overlay/`: the overlay output port, with its text model, code snippets, and diagram hints ([architecture.md → The detail box](./architecture.md#the-detail-box)).
 - `Sources/JarvisCore/Config/` + `Sources/JarvisCore/Resources/Skills/`: preferences, owner-only secrets, the immutable `SessionPlan`, and the bundled coaching skills.
 - `Sources/JarvisCore/Support/`: small shared runtime primitives.
 - `Sources/JarvisCore/Diagnostics/`: session evidence, Activity, readiness, capture health, and session history ([session-audit.md](./session-audit.md)).
 - `Sources/JarvisCore/Prompts/`: the predefined model-facing text.
 - `Sources/JarvisEvaluation/`: sealed-session evaluation, from evidence parsing and metrics to the agentic evaluator and its report.
-- `Sources/JarvisOverlay/`: the capture-excluded caption and box panels and their chrome ([overlay-invisibility.md](./overlay-invisibility.md)).
+- `Sources/JarvisOverlay/`: the capture-excluded Overlay Box panel and its chrome ([overlay-invisibility.md](./overlay-invisibility.md)).
 - `Sources/JarvisApp/App/` + `Sources/JarvisApp/MenuBar/`: the entry point, Start and Stop, and the session, brain, and artifact composition owners ([lean-coaching-core.md](./lean-coaching-core.md)).
 - `Sources/JarvisApp/Capture/`: microphone and system-audio capture with AEC3 and Silero VAD, the transcription provider adapters, permissions, and the window screenshot edge.
 - `Sources/JarvisApp/Onboarding/`: first-run onboarding, an API key then the permissions ([architecture.md → Onboarding](./architecture.md#onboarding)).

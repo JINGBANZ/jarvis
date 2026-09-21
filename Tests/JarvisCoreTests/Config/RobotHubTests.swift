@@ -10,7 +10,7 @@ import Testing
         #expect(state.slots[.ear]
             == RobotSlotState(value: "OpenAI · GPT-4o", detail: "HEARS EN", tone: .normal, level: nil))
         #expect(state.slots[.eye]?.detail == "CHROME TEXT OFF")
-        #expect(state.slots[.mouth]?.detail == "BOX ON · CAPTION OFF")
+        #expect(state.slots[.mouth]?.detail == "BOX ON")
     }
 
     @Test func aSettingsChangeChangesTheState() {
@@ -33,8 +33,7 @@ import Testing
     }
 
     @Test func attentionReplacesTheSlotLineAndLightsTheMeter() {
-        let state = RobotHub.state(for: .fixture(
-            captionEnabled: false, boxEnabled: false, readiness: .fixture()))
+        let state = RobotHub.state(for: .fixture(boxEnabled: false, readiness: .fixture()))
         #expect(state.slots[.mouth]?.detail == "NOTHING WILL SHOW")
         #expect(state.slots[.mouth]?.tone == .attention)
         #expect(state.meter == RobotHubMeter(

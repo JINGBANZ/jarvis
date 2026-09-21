@@ -170,11 +170,11 @@ import Testing
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         let short = try #require(ReplyDetail(markdown: "```swift\nreturn result\n```"))
-        #expect(box.deliver(["Return it."], perLineSeconds: [1], detail: short) == short)
+        #expect(box.deliver(["Return it."], detail: short) == short)
         let shortHeight = box.currentDetailHeight
         let long = try #require(ReplyDetail(markdown:
             "```swift\nlet matchingCandidates = candidates.filter { candidate in candidate.isValid && candidate.score > minimumScore }\n```"))
-        #expect(box.deliver(["Filter them."], perLineSeconds: [1], detail: long) == long)
+        #expect(box.deliver(["Filter them."], detail: long) == long)
         #expect(box.currentDetailHeight > shortHeight)
         #expect(box.currentDetailHeight <= 360)
     }
@@ -206,7 +206,7 @@ import Testing
         box.setContentSize(box.minimumContentSize)
         let code = (1...24).map { "    values.append(\($0))" }.joined(separator: "\n")
         let detail = try #require(ReplyDetail(markdown: "```python\n\(code)\n```"))
-        _ = box.deliver(["Fill the list."], perLineSeconds: [1], detail: detail)
+        _ = box.deliver(["Fill the list."], detail: detail)
         #expect(box.currentDetailHeight > 0)
         #expect(box.currentDetailHeight <= box.currentContentSize.height - 44)
     }

@@ -9,7 +9,7 @@ public enum RobotHealth {
         case .brain: brain(inputs.route, readiness)
         case .ear: ear(inputs.transcription.provider, readiness)
         case .eye: eye(readiness)
-        case .mouth: mouth(captionEnabled: inputs.captionEnabled, boxEnabled: inputs.boxEnabled)
+        case .mouth: mouth(boxEnabled: inputs.boxEnabled)
         }
     }
 
@@ -72,11 +72,11 @@ public enum RobotHealth {
         return .ready
     }
 
-    private static func mouth(captionEnabled: Bool, boxEnabled: Bool) -> RobotPartHealth {
-        guard captionEnabled || boxEnabled else {
+    private static func mouth(boxEnabled: Bool) -> RobotPartHealth {
+        guard boxEnabled else {
             return .needsAttention(
                 reason: "NOTHING WILL SHOW",
-                advice: "Both overlays are off, so my hints have nowhere to appear. Switch one on below.",
+                advice: "The Overlay Box is off, so my hints have nowhere to appear. Switch it on below.",
                 fix: nil)
         }
         return .ready
