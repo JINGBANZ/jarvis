@@ -9,14 +9,8 @@ identity, response, and prompt revision locally.
 First validate the five-field briefing shape with the production validator. A single whole-response
 Markdown fence is accepted when untagged or tagged `json` case-insensitively, with LF or CRLF line
 endings; surrounding prose, other language tags, incomplete fences, truncated JSON, missing fields,
-and incorrect field types are rejected. Structural validity does not establish factual accuracy: review the output
+and incorrect field types are rejected. Structural validity does not establish factual accuracy or detect a refusal inside valid JSON: review the output
 against the case's complete semantic `pass` criterion. Mark omitted evidence separately from invented
 facts, and do not score solely by keyword matches. Repeat uncertain or failing cases; a single sample
 is not a reliability rate. Test accepted and rejected replacement behavior with the Core compaction
 tests separately.
-
-The initial four-case Claude CLI check (`claude-haiku-4-5-20251001`) preserved the central invariants, advice, and attribution,
-without answering historical requests. All four responses used JSON fences, motivating the narrowly
-scoped envelope handling. The deque case omitted the explicit absence of performance test output;
-it did not invent successful tests. Screenshot questions remained as unknowns in some briefings.
-These observations are instruction-level evidence, not a live-session quality guarantee.

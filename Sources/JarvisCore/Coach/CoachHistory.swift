@@ -108,7 +108,7 @@ public final class CoachHistory: @unchecked Sendable {
         }
     }
 
-    private static func estimatedTextTokens(_ text: String) -> Int {
+    static func estimatedTextTokens(_ text: String) -> Int {
         var asciiCount = 0
         var nonASCIICount = 0
         for scalar in text.unicodeScalars {

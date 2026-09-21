@@ -2152,7 +2152,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let gate = AsyncGate()
-        let summarizer = GatedSummarizer(gate: gate, summary: "never applied")
+        let briefing = #"{"context":"never applied","decisions":[],"coaching":[],"openQuestions":[],"verification":[]}"#
+        #expect(JarvisPrompts.HistorySummary.validatedSummary(briefing) != nil)
+        let summarizer = GatedSummarizer(gate: gate, summary: briefing)
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 5))
         transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))

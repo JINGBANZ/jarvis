@@ -9,7 +9,7 @@ import Testing
             .assistantToolCalls([.init(id: "reply", name: "speak", argumentsJSON:
                 #"{"lines":["Keep boundary events."],"detail":"Use < cutoff, then test equality."}"#)]),
             .init(role: .tool, text: "shown to the user", toolCallId: "reply"),
-            .userImage("PRIVATE_PIXELS")
+            .user(JarvisPrompts.Coach.earlierImageStub)
         ])
         #expect(input.contains("Keep boundary events."))
         #expect(input.contains("Use < cutoff, then test equality."))
@@ -20,8 +20,8 @@ import Testing
         #expect(calls[0]["name"] == "speak")
         #expect(records[2]["role"] as? String == "tool")
         #expect(records[2]["toolCallID"] as? String == "reply")
-        #expect(!input.contains("PRIVATE_PIXELS"))
-        #expect(input.contains("omitted"))
+        #expect(records[3]["text"] as? String == JarvisPrompts.Coach.earlierImageStub)
+        #expect(records[3]["image"] == nil)
     }
 
     @Test(arguments: [
@@ -88,6 +88,35 @@ import Testing
         ]
         let json = String(decoding: try JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
         #expect((JarvisPrompts.HistorySummary.validatedSummary(json) != nil) == (wordCount < 250))
+    }
+
+    @Test(arguments: ["中", "あ", "한"], [749, 750, 751])
+    func briefingSizeBoundsUnspacedScripts(_ scalar: String, _ tokens: Int) throws {
+        let context = String(repeating: scalar, count: tokens - 20)
+        let json = "{\"context\":\"" + context
+            + "\",\"decisions\":[],\"coaching\":[],\"openQuestions\":[],\"verification\":[]}"
+        #expect((JarvisPrompts.HistorySummary.validatedSummary(json) != nil) == (tokens < 750))
+    }
+
+    @Test(arguments: ["decisions", "coaching", "openQuestions", "verification"])
+    func briefingSizeIncludesEveryArray(_ field: String) throws {
+        var fields: [String: Any] = [
+            "context": "Review", "decisions": [], "coaching": [],
+            "openQuestions": [], "verification": []
+        ]
+        fields[field] = [String(repeating: "中", count: 750)]
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
+        #expect(JarvisPrompts.HistorySummary.validatedSummary(json) == nil)
+    }
+
+    @Test(arguments: [[String(repeating: "x", count: 3000)], Array(repeating: "", count: 1000)])
+    func briefingSizeBoundsLongWordsAndJSONOverhead(_ values: [String]) throws {
+        let fields: [String: Any] = [
+            "context": "Review", "decisions": values, "coaching": [],
+            "openQuestions": [], "verification": []
+        ]
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
+        #expect(JarvisPrompts.HistorySummary.validatedSummary(json) == nil)
     }
 
     @Test func summaryIsFormatNeutralAndRetiresResolvedTopics() {
