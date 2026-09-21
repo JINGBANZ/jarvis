@@ -14,6 +14,15 @@ import Testing
         #expect(!ledger.coachingWorkState.permitsCoaching(through: nil))
     }
 
+    @Test func pendingStartInsideTheMarginStillBlocks() {
+        let margin = TranscriptionWorkState.startTimeMargin
+        let spokenAt: TimeInterval = 2
+        #expect(!TranscriptionWorkState.pending(since: spokenAt + margin / 2)
+            .permitsCoaching(through: spokenAt))
+        #expect(TranscriptionWorkState.pending(since: spokenAt + margin * 2)
+            .permitsCoaching(through: spokenAt))
+    }
+
     @Test func outOfOrderCompletionPreservesEarlierPendingBarrier() {
         let ledger = RealtimeTranscriptionLedger()
         ledger.recordSpeechStarted(itemID: "earlier", audioStartMilliseconds: 1_000, timelineOrigin: 10)

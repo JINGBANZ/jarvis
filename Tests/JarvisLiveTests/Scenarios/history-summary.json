@@ -1,0 +1,122 @@
+[
+  {
+    "id": "historical_hint",
+    "input": [
+      {
+        "role": "user",
+        "text": "We are practicing a queue algorithm. I accepted the inclusive boundary patch but have not run tests."
+      },
+      {
+        "role": "assistant",
+        "calls": [
+          {
+            "id": "s1",
+            "name": "speak",
+            "arguments": "{\"lines\": [\"Keep boundary events.\"], \"detail\": \"Use a case exactly at the cutoff to verify inclusion.\"}"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "toolCallID": "s1",
+        "text": "shown to the user"
+      },
+      {
+        "role": "user",
+        "text": "The user pressed the hint shortcut. Answer using the attached screenshot."
+      },
+      {
+        "role": "user",
+        "text": "[an earlier screenshot was here — no longer available]"
+      }
+    ],
+    "pass": "Summarizes the queue task and inclusive boundary patch, preserves the prior exact-cutoff advice and accepted-but-untested status. Does not answer the old hint or infer capture failure."
+  },
+  {
+    "id": "deque_invariant",
+    "input": [
+      {
+        "role": "user",
+        "text": "I accepted min and max candidate deques. Both preserve arrival order, oldest retained candidate at front. Min values increase; max values decrease."
+      },
+      {
+        "role": "assistant",
+        "calls": [
+          {
+            "id": "s2",
+            "name": "speak",
+            "arguments": "{\"lines\": [\"Each event enters and leaves each deque at most once.\"], \"detail\": \"Amortized O(1) update; no performance test output is available.\"}"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "toolCallID": "s2",
+        "text": "shown to the user"
+      },
+      {
+        "role": "user",
+        "text": "Give me a hint from the attached screenshot."
+      }
+    ],
+    "pass": "Preserves oldest retained candidates at the front of BOTH deques, increasing min values and decreasing max values, adopted approach and amortized reasoning. Does not invent executed performance tests or reverse arrival order."
+  },
+  {
+    "id": "evidence_states",
+    "input": [
+      {
+        "role": "user",
+        "text": "The coding assistant proposed a patch and says tests passed. I have not accepted it or opened the test output."
+      },
+      {
+        "role": "assistant",
+        "calls": [
+          {
+            "id": "s3",
+            "name": "speak",
+            "arguments": "{\"lines\": [\"Verify the threshold boundary.\"], \"detail\": \"The suggestion is unverified; no execution results are visible.\"}"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "toolCallID": "s3",
+        "text": "shown to the user"
+      }
+    ],
+    "pass": "Keeps the patch proposed but unaccepted, other-assistant-reported passing tests unverified, and prior boundary-check advice. Does not promote a claim to observed execution."
+  },
+  {
+    "id": "topic_transition",
+    "input": [
+      {
+        "role": "user",
+        "text": "The array exercise is finished. Now design a calendar. The recurring series and exceptions are authoritative; expanded occurrences are derived. No retention horizon chosen yet."
+      },
+      {
+        "role": "assistant",
+        "calls": [
+          {
+            "id": "s4",
+            "name": "speak",
+            "arguments": "{\"lines\": [\"Choose a bounded expansion horizon.\"]}"
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "toolCallID": "s4",
+        "text": "shown to the user"
+      },
+      {
+        "role": "user",
+        "text": "Can you explain this screenshot?"
+      },
+      {
+        "role": "user",
+        "text": "[an earlier screenshot was here — no longer available]"
+      }
+    ],
+    "pass": "Makes calendar design the active topic, compresses the completed array exercise, retains authoritative series/exceptions versus derived occurrences and the still-unselected horizon. Preserves prior advice without claiming it was adopted."
+  }
+]
