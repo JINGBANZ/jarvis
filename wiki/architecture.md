@@ -77,8 +77,11 @@ moments the model judges worthwhile.
    minutes after the first, so quiet thinking that the first check saw is not checked again soon,
    and a long quiet stretch costs a few requests. Speech from either side defers a check.
 2. Before an automatic attempt, `TranscriptionSettlementGate` checks both provider streams against
-   the newest spoken timestamp in the finalized transcript snapshot. Pending speech with a known
-   later start does not block that context; an earlier, equal, or unknown pending start does. The
+   the newest spoken timestamp in the finalized transcript snapshot. Pending speech does not block
+   that context when its known start clears that timestamp by `TranscriptionWorkState`'s start-time
+   margin; a start inside the margin, an earlier start, and an unknown start all block. The margin
+   bounds the residual skew left in those starts: the per-socket audio-time mapping, server-VAD
+   onset reporting, and the fixed device offset between the mic path and the post-mix tap. The
    scheduler refreshes and rechecks the snapshot after every wake, then pins the admitted delta for
    the attempt so newer arrivals cannot cross an unresolved earlier utterance. Silence probes and
    attempts without new finalized speech still require full settlement.
