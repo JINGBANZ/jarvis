@@ -192,6 +192,52 @@ import Testing
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 
+    private var parameterMarkupArguments: String {
+        #"{"lines":"\n<parameter name=\"detail\">Explain the queue invariant.\n"}"#
+    }
+
+    @Test(arguments: [TriggerReason.turnEnd, .manualHint])
+    func parameterMarkupInLinesRequiresAValidReplacementBeforeRendering(_ reason: TriggerReason) async throws {
+        let brain = ScriptedBrain(script: [
+            reply(call("speak", id: "malformed", arguments: parameterMarkupArguments)),
+            speak,
+        ])
+        let overlay = FakeOverlay()
+
+        guard case .completed(let outcome) = await runAttempt(reason, brain: brain, overlay: overlay) else {
+            Issue.record("expected the corrected call to complete the same attempt"); return
+        }
+        #expect(outcome == .spoke)
+        #expect(brain.calls.count == 2)
+        let continuation = try #require(brain.calls.last)
+        let rejected = try #require(toolResult("malformed", in: continuation))
+        #expect(rejected.text?.contains("did not match its schema") == true)
+        #expect(rejected.text?.contains(speakTool(detailEnabled: false).parametersJSON) == true)
+        #expect(continuation.contains {
+            $0.toolCalls?.contains { $0.id == "malformed" && $0.argumentsJSON == parameterMarkupArguments } == true
+        })
+        #expect(overlay.rendered == [["Start from the read path."]])
+    }
+
+    @Test(arguments: [TriggerReason.turnEnd, .manualHint])
+    func repeatedParameterMarkupExhaustsTheAttemptWithoutRendering(_ reason: TriggerReason) async {
+        let malformed = (1...7).map {
+            reply(call("speak", id: "malformed_\($0)", arguments: parameterMarkupArguments))
+        }
+        let brain = ScriptedBrain(script: malformed + [speak])
+        let overlay = FakeOverlay()
+
+        guard case .failed(let outcome, let failure, _) = await runAttempt(reason, brain: brain, overlay: overlay)
+        else {
+            Issue.record("expected malformed calls to exhaust the attempt"); return
+        }
+        #expect(outcome == .brainError)
+        #expect(failure.stage == .response)
+        #expect(failure.disposition == .temporary)
+        #expect(brain.calls.count == 7)
+        #expect(overlay.rendered.isEmpty)
+    }
+
     @Test func aCallToAToolNobodyDeclaredIsAnsweredAndTheTurnContinues() async throws {
         let brain = ScriptedBrain(script: [reply(call("read_my_email", id: "u1")), speak])
         let (driver, transcript) = makeDriver(brain: brain)

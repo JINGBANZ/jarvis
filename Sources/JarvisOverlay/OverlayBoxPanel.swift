@@ -289,11 +289,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         } else if slot.isRolled {
             height = min(available, detailView.stripHeight)
         } else {
-            let ceiling = box.bounds.height * 0.45
-            let preferred = detailHeightFraction.map { $0 * available }
-                ?? min(ceiling, detailView.preferredHeight(
+            let automatic: CGFloat
+            if detailView.detail?.diagram != nil {
+                automatic = max(0, available - max(72, fontSize * 3 + 24))
+            } else {
+                let ceiling = box.bounds.height * 0.45
+                automatic = min(ceiling, detailView.preferredHeight(
                     viewportWidth: box.bounds.width,
                     viewportHeight: max(1, ceiling - detailView.stripHeight)))
+            }
+            let preferred = detailHeightFraction.map { $0 * available } ?? automatic
             height = boundedDetailHeight(preferred, available: available)
         }
         historyBackground.frame = NSRect(x: 0, y: height, width: box.bounds.width,

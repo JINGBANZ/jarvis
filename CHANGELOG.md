@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.3](https://github.com/JINGBANZ/jarvis/compare/v0.3.2...v0.3.3) (2026-09-20)
+
+
+### Features
+
+* **brain:** move Claude Code to Anthropic's Messages format through the helper ([#372](https://github.com/JINGBANZ/jarvis/issues/372)) ([fb81683](https://github.com/JINGBANZ/jarvis/commit/fb81683374a373f312fd0ffa4fab3793c8cf88f5))
+* **shortcuts:** add mouse bindings alongside keyboard shortcuts ([#378](https://github.com/JINGBANZ/jarvis/issues/378)) ([f76a20c](https://github.com/JINGBANZ/jarvis/commit/f76a20cd338123d338bd37620c17fb98e8e0c708))
+
+
+### Bug Fixes
+
+* **brain:** keep the authored tool-schema key order in encoded requests ([#370](https://github.com/JINGBANZ/jarvis/issues/370)) ([34a37bd](https://github.com/JINGBANZ/jarvis/commit/34a37bd0ad3efdadd4a601212ac04b66e70b7674))
+* **coach:** ground coding guidance in evidence ([#381](https://github.com/JINGBANZ/jarvis/issues/381)) ([364f0c7](https://github.com/JINGBANZ/jarvis/commit/364f0c74210bfd567684a3c0d7e230122b40852e))
+* **coach:** ground interview hints in configured prep notes ([#365](https://github.com/JINGBANZ/jarvis/issues/365)) ([4d0eab8](https://github.com/JINGBANZ/jarvis/commit/4d0eab81c4cc64a0392e042c91b2c46b56179cea))
+* **coaching:** prioritize design intent and keep diagrams readable ([#364](https://github.com/JINGBANZ/jarvis/issues/364)) ([951e1ca](https://github.com/JINGBANZ/jarvis/commit/951e1ca8d2744c3882af7736d38da5adf19ef5b9))
+* **coach:** refresh speech context before coaching ([#383](https://github.com/JINGBANZ/jarvis/issues/383)) ([02326ac](https://github.com/JINGBANZ/jarvis/commit/02326ac85973e06fb1bf8e81668b01726cd7e9a7))
+* **coach:** restore placement headers above code hints ([#360](https://github.com/JINGBANZ/jarvis/issues/360)) ([500103a](https://github.com/JINGBANZ/jarvis/commit/500103a40ac29d19bf74a299256901c95e2a7179))
+
 ## [0.3.2](https://github.com/JINGBANZ/jarvis/compare/v0.3.1...v0.3.2) (2026-09-19)
 
 
