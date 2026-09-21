@@ -1,0 +1,88 @@
+[
+  {
+    "id": "performance-call-path",
+    "skills": [
+      "coding",
+      "coding-with-ai"
+    ],
+    "input": "AI assistance is permitted. Earlier Jarvis suggested replacing min/max rescans with monotonic deques and mentioned percentile sorting. Current captured code: process_event loops over W windows, calls add_event and get_window_stats, then checks R constant-time rules. Each window has at most K events. add_event appends, evicts expired events, and uses min/max deques where each event is pushed and popped at most once. get_window_stats returns count, sum, average, min and max in constant time. A separate get_percentile sorts a copy, but no call to it appears on this path. No performance test body or timing is available. me: I made the deque change. What is the total complexity for N events, and what should I optimize next?",
+    "pass": "Explains O(NW(1+R)) amortized (or equivalent with definitions), accounting for rules. Asks for the workload/test or measurements before another optimization. Does not present percentile sorting as an established bottleneck."
+  },
+  {
+    "id": "question-after-test-reminder",
+    "skills": [
+      "coding",
+      "coding-with-ai"
+    ],
+    "input": "AI assistance is permitted. Previous Jarvis replies twice said to accept the deque edit and run tests. No test output is available. The candidate is studying the same proposed code; no adoption or completion is imminent. Current code appends candidates to the right of each extrema deque and expires old candidates from the left. me: Before testing I want to understand: why does each event get popped only once, and why does that make eviction amortized constant time?",
+    "pass": "Answers the amortization question first with a small explanation or trace. Does not repeat accept/run-tests as the next action or invent passing tests."
+  },
+  {
+    "id": "meaning-before-patch",
+    "skills": [
+      "coding",
+      "coding-with-ai"
+    ],
+    "input": "AI assistance is permitted. The candidate is orienting in unfamiliar streaming analytics code. Current captured code: add_event appends a timestamp/value pair, updates the running sum, then calls _evict(now). _evict removes events with timestamp < now-duration. A visible bug fails to subtract their values from the running sum. No patch has been requested. me: I don't understand what evict means or what this function is trying to do. Can you explain?",
+    "pass": "Explains removing expired events and keeping aggregates for the remaining window, preferably with one tiny example. May identify the sum issue with its cause, but does not lead with a patch or implementation prompt."
+  },
+  {
+    "id": "bounded-delegation",
+    "skills": [
+      "coding",
+      "coding-with-ai"
+    ],
+    "input": "AI assistance is permitted and the candidate is using the coding assistant for edits. The candidate has explained and chosen two monotonic deques: each retains candidates in timestamp order, one increasing in value and one decreasing; candidates expire by event identity. They understand duplicates must remain distinguishable. me: I want the assistant to replace rescanning extrema in _evict using that approach. What should I ask it?",
+    "pass": "Supplies a labeled Ask AI prompt in detail: one bounded task and the understood invariant/identity constraint in one or two short sentences. Leaves routine variable names and update sequences to the assistant; no full patch or long test checklist."
+  },
+  {
+    "id": "fresh-boundary-check",
+    "skills": [
+      "coding"
+    ],
+    "input": "The candidate is manually implementing a rolling maximum. The chosen window includes events with timestamp >= now-duration. An earlier test used (0,5), (4,7), (12,9). Current proposed expiry code removes while timestamp <= now-duration; no run output is visible. me: What is one test that distinguishes whether this cutoff condition is correct?",
+    "pass": "Gives a specific event exactly at the cutoff with expected retention and maximum, exposing the <= defect. Does not just repeat the earlier off-boundary example or claim execution."
+  },
+  {
+    "id": "cooldown-contract",
+    "skills": [
+      "coding",
+      "coding-with-ai"
+    ],
+    "input": "AI assistance is permitted. One rule object is evaluated for two windows and stores last_alert_time on itself. Both windows cross the threshold at timestamp 20, cooldown is 10, and there has been no prior alert. Requirements say alerts are rate limited but do not specify whether that means per rule or per window. Jarvis has already warned twice that cooldown is shared. me: How do I decide whether this is actually a bug?",
+    "pass": "Names the missing cooldown scope requirement and a distinguishing two-window test: one alert if shared per rule, two if independent per window. Does not declare shared state a bug or prescribe a refactor before scope is known."
+  },
+  {
+    "id": "productive-coding",
+    "skills": [
+      "coding",
+      "coding-with-ai"
+    ],
+    "input": "AI assistance is permitted. The candidate already understands the sort-and-scan interval approach. me: I am typing this prompt: keep sort-and-scan but retain the larger end on overlap. Then I will trace nested intervals. The assistant has not answered yet. This is narration, with no question or request to Jarvis. No new defect is visible.",
+    "pass": "Stays silent rather than rewriting an adequate prompt or repeating verification advice."
+  },
+  {
+    "id": "system-design-control",
+    "skills": [
+      "system-design"
+    ],
+    "input": "The candidate is designing a rate limiter and has chosen per-gateway local counters. The requirement is a strict global cap of 100 requests per customer per minute across two gateways. me: Each gateway will accept up to 100 using its own counter. I am stuck on how to verify whether that meets the global cap. What small example should I trace?",
+    "pass": "Uses a concrete cross-gateway total exceeding 100 to reveal the violation. Does not give coding-assistant instructions or a complete new architecture."
+  },
+  {
+    "id": "duplicate-extrema",
+    "skills": [
+      "coding"
+    ],
+    "input": "The candidate is manually reviewing a rolling maximum with a duration of 10. Events are unique objects with timestamps and values. The window retains timestamps >= now-duration. Insertion discards prior max-deque candidates whose values are less than or equal to the new value. The expiry code removes the front maximum candidate whenever its value equals the value of the expired event, regardless of event identity. The candidate has already checked an exact-cutoff case. me: What small duplicate-value case could distinguish whether that value comparison is safe?",
+    "pass": "Uses equal-valued events with different timestamps where only the older expires and the later event must still determine the maximum. States expected retention/max and distinguishes identity from value without claiming execution."
+  },
+  {
+    "id": "multiple-evictions",
+    "skills": [
+      "coding"
+    ],
+    "input": "The candidate is manually reviewing a duration-10 window retaining timestamps >= now-duration. Expiry uses if to remove one expired event, rather than looping. The candidate has already tested duplicate maxima. me: What single test tells me whether removing just one expired event per call is sufficient? Include an event that should remain, and the expected count and sum.",
+    "pass": "Gives at least two events expired at the same query time, with a retained event and concrete correct aggregate(s), so one removal produces a different result. Does not reuse a case with only one expired event or claim execution."
+  }
+]

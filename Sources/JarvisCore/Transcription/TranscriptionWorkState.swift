@@ -5,9 +5,7 @@ public enum TranscriptionWorkState: Equatable, Sendable {
     /// Earliest unresolved start on the session clock; nil means timing is unknown.
     case pending(since: TimeInterval?)
 
-    /// Bounds the skew between a pending start and a finalized line: the per-socket audio-time
-    /// mapping, server-VAD and local activity-tracker onset reporting, and the fixed offset between
-    /// the mic path and the post-mix tap.
+    /// Bounds residual timing skew; the sources are listed in wiki/architecture.md#the-turn.
     public static let startTimeMargin: TimeInterval = 0.3
 
     public func permitsCoaching(through spokenAt: TimeInterval?) -> Bool {

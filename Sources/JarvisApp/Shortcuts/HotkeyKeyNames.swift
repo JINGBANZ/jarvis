@@ -7,6 +7,17 @@ enum HotkeyKeyNames {
         keyCaps(for: combination).joined()
     }
 
+    static func displayString(for combination: MouseHotkeyCombination) -> String {
+        let button: String
+        switch combination.button {
+        case 0: button = "Left click"
+        case 1: button = "Right click"
+        case 2: button = "Middle click"
+        default: button = "Mouse \(combination.button + 1)"
+        }
+        return modifierGlyphs(combination.modifiers).joined() + button
+    }
+
     /// Modifiers first, in the order macOS menus list them.
     static func keyCaps(for combination: HotkeyCombination) -> [String] {
         modifierGlyphs(combination.modifiers) + [keyGlyph(for: combination.keyCode)]

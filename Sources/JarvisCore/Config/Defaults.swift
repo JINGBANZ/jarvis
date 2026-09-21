@@ -88,6 +88,10 @@ public enum Defaults {
     // MARK: - Hotkey
 
     public enum Hotkey {
+        public static func mouseKey(for shortcut: CoachingShortcut) -> String {
+            "hotkey.mouse.\(shortcut.rawValue)"
+        }
+
         public static let previousDetailKeyCodeKey = "hotkey.previousDetail.keyCode"
         public static let previousDetailModifiersKey = "hotkey.previousDetail.modifiers"
         public static let previousDetailCombination = HotkeyCombination(
