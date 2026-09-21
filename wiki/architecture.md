@@ -304,9 +304,10 @@ for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/Co
 
 A reply is short lines plus one optional Markdown `detail`. The lines are the coaching; `detail` is
 for supporting content requested by a loaded skill or the paragraphs an explanation needs.
-`CoachCapabilities.compose` builds the `speak` definition once per session and declares `detail` only
-when the Overlay Box can show one, so no session promises a field the box would throw away. `detail`
-is nullable rather than absent, which is what makes a field optional under strict Structured Outputs.
+Every session declares `detail`, because every session has the Overlay Box to show it. A detail that
+arrives while the box is collapsed is not shown, and the replay records none, so the model never reads
+back a detail the user did not see. `detail` is nullable rather than absent, which is what makes a
+field optional under strict Structured Outputs.
 
 Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
 all, and the skill that owns a domain says what its blocks are: the `coding` skill carries the code

@@ -1944,7 +1944,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true))
+                disabledTools: [], prepSourcesConfigured: false))
         transcript.append(.init(speaker: .me, text: "first attempt", at: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
@@ -1968,7 +1968,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true),
+                disabledTools: [], prepSourcesConfigured: false),
             automaticAttemptDelay: { _ in await delayGate.enter() })
         driver.updateTranscriptionWork(.pending(since: nil), for: .them)
 

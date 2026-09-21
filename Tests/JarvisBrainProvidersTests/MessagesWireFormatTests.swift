@@ -6,7 +6,7 @@ import JarvisCore
 @Suite struct MessagesWireFormatTests {
     let wire = MessagesWireFormat(model: "claude-opus-5", reasoningEffort: "low", maxOutputTokens: 2_048)
 
-    func body(_ messages: [ChatMessage], tools: [ToolDef] = coachTools(detailEnabled: true),
+    func body(_ messages: [ChatMessage], tools: [ToolDef] = coachTools,
               choice: ToolChoice = .auto) throws -> [String: Any] {
         let data = try wire.encode(messages: messages, tools: tools, toolChoice: choice)
         return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -36,7 +36,7 @@ import JarvisCore
         #expect(image?["media_type"] as? String == "image/jpeg")
         #expect(image?["data"] as? String == "AAAA")
         let declared = try #require(b["tools"] as? [[String: Any]])
-        #expect(declared.map { $0["name"] as? String } == coachTools(detailEnabled: true).map(\.name))
+        #expect(declared.map { $0["name"] as? String } == coachTools.map(\.name))
         #expect(declared.allSatisfy { $0["input_schema"] is [String: Any] && $0["description"] is String })
         #expect(declared.allSatisfy { $0["strict"] == nil && $0["eager_input_streaming"] == nil && $0["type"] == nil })
     }
@@ -69,10 +69,10 @@ import JarvisCore
 
     /// Models write arguments in schema order, so `lines` must reach the wire before `detail`.
     @Test func toolSchemasKeepTheirAuthoredKeyOrder() throws {
-        let tools = coachTools(detailEnabled: true)
+        let tools = coachTools
         let data = try wire.encode(messages: [.user("hi")], tools: tools, toolChoice: .auto)
         let text = String(decoding: data, as: UTF8.self)
-        #expect(text.contains(speakTool(detailEnabled: true).parametersJSON))
+        #expect(text.contains(speakTool.parametersJSON))
         let lines = try #require(text.range(of: #""lines""#))
         let detail = try #require(text.range(of: #""detail""#))
         #expect(lines.lowerBound < detail.lowerBound)

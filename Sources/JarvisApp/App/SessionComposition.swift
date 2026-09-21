@@ -132,13 +132,12 @@ final class SessionComposition {
             disabledTools: brain.preferences.disabledTools,
             disabledSkills: brain.preferences.disabledSkills,
             prepSourcesConfigured: !prepMaterialSources.isEmpty,
-            skills: bundledSkills,
-            detailEnabled: true)
+            skills: bundledSkills)
         // This log line is the only place switched-off capabilities appear. It lists only saved
         // names that match a real, switchable capability.
         let everything = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty,
-            skills: bundledSkills, detailEnabled: true)
+            skills: bundledSkills)
         let honoredDisabled = brain.preferences.disabledTools
             .subtracting(CoachCapabilities.fixedToolNames)
             .filter { everything.tool(named: $0) != nil }

@@ -3,8 +3,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct CoachDriverDetailTests {
-    private func makeDriver(brain: BrainClient, overlay: OverlayRendering,
-                            detailEnabled: Bool = true) -> CoachDriver {
+    private func makeDriver(brain: BrainClient, overlay: OverlayRendering) -> CoachDriver {
         let target = BrainTarget(
             provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return CoachDriver(
@@ -12,7 +11,7 @@ import Testing
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: FakeScreen(), overlay: overlay, clock: ManualClock(now: 100),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, detailEnabled: detailEnabled))
+                disabledTools: [], prepSourcesConfigured: false))
     }
 
     private func response(_ argumentsJSON: String) throws -> BrainResponse {
@@ -88,24 +87,6 @@ import Testing
         #expect(overlay.detail?.hasContent != true)
     }
 
-    @Test func aSessionWithoutTheBoxNeitherDeclaresNorDeliversDetail() async throws {
-        let arguments = #"{"lines":["Start with the API."],"detail":"Hidden."}"#
-        let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
-        let overlay = DetailRecordingOverlay()
-        let driver = makeDriver(brain: brain, overlay: overlay, detailEnabled: false)
-
-        #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(overlay.detail == nil)
-
-        let speak = try #require(brain.offeredTools.first?.first { $0.name == "speak" })
-        #expect(!speak.parametersJSON.contains("detail"))
-        let call = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }
-            .first { $0.name == "speak" })
-        let object = try #require(JSONSerialization.jsonObject(
-            with: Data(call.argumentsJSON.utf8)) as? [String: Any])
-        #expect(object["detail"] == nil)
-    }
 }
 
 // The driver awaits delivery; this sink is only read after that attempt has completed.
