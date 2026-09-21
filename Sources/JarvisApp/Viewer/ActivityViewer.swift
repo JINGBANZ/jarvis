@@ -28,6 +28,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private var isEvaluating = false
     private var isFetchingSource = false
     private var isFindingAgents = false
+    private var findingAgentsTask: Task<Void, Never>?
     private var evaluationTask: Task<Void, Never>?
     private var sessions: [SessionStore.Session] = []
 
@@ -145,6 +146,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         evaluateButton = nil
         clearHistoryButton = nil
         exportButton = nil
+        // Unlike an evaluation, a pending agent menu must not pop up in a reopened window.
+        findingAgentsTask?.cancel()
+        findingAgentsTask = nil
+        isFindingAgents = false
         loaded = false
         pending = []
         snapshotRows = []
@@ -350,8 +355,11 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
         isFindingAgents = true
         refreshEvaluateButtonState()
-        Task { [weak self] in
+        findingAgentsTask = Task { [weak self] in
             let agents = await AgentCLIDetector().detectAllAsync(AgenticEvaluator.searchOrder)
+            // Detection ignores cancellation, so a cancelled run must still stop here.
+            guard !Task.isCancelled else { return }
+            self?.findingAgentsTask = nil
             self?.isFindingAgents = false
             self?.refreshEvaluateButtonState()
             self?.showAgentMenu(agents, for: session)
