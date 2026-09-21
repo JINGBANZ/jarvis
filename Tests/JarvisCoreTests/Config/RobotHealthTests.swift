@@ -89,12 +89,4 @@ import Testing
             advice: "Screen Recording is off, so I can't see your screen. Turn it on in System Settings, Privacy & Security, then reopen me.",
             fix: nil))
     }
-
-    @Test func mouthNeedsASurface() {
-        #expect(health(.mouth, .fixture(boxEnabled: false)) == .needsAttention(
-            reason: "NOTHING WILL SHOW",
-            advice: "The Overlay Box is off, so my hints have nowhere to appear. Switch it on below.",
-            fix: nil))
-        #expect(health(.mouth, .fixture(boxEnabled: true)) == .ready)
-    }
 }

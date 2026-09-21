@@ -38,10 +38,8 @@ import Foundation
         #expect(a.boxFontSize == Defaults.Overlay.Box.fontSize)
     }
 
-    @Test func enabledDefaults() {
+    @Test func sizeDefaultsWhenUnset() {
         let a = OverlayAppearance(defaults: freshDefaults())
-        #expect(a.boxEnabled == Defaults.Overlay.Box.enabled)
-        #expect(a.boxEnabled == true)
         #expect(a.boxWidth == Defaults.Overlay.Box.width)
         #expect(a.boxHeight == Defaults.Overlay.Box.height)
     }
@@ -50,13 +48,11 @@ import Foundation
         let d = freshDefaults()
         OverlayAppearance(defaults: d).boxOpacity = 0.6
         OverlayAppearance(defaults: d).boxFontSize = 20
-        OverlayAppearance(defaults: d).boxEnabled = false
         OverlayAppearance(defaults: d).boxWidth = 512
         OverlayAppearance(defaults: d).boxHeight = 448
         let reloaded = OverlayAppearance(defaults: d)
         #expect(reloaded.boxOpacity == 0.6)
         #expect(reloaded.boxFontSize == 20)
-        #expect(reloaded.boxEnabled == false)
         #expect(reloaded.boxWidth == 512)
         #expect(reloaded.boxHeight == 448)
     }

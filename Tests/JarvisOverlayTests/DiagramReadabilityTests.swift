@@ -33,7 +33,6 @@ import Testing
     @Test(arguments: [NSSize(width: 520, height: 440), NSSize(width: 960, height: 720)])
     func diagramGetsMostOfThePanelByDefault(_ size: NSSize) throws {
         let panel = OverlayBoxPanel(contentSize: size)
-        panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown:
@@ -49,7 +48,6 @@ import Testing
         let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel()
         let window = try #require(NSApplication.shared.windows.first { !windows.contains($0.windowNumber) })
-        panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
         let original = window.frame

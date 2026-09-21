@@ -133,16 +133,6 @@ public final class OverlayAppearance {
         }
     }
 
-    public var boxEnabled: Bool {
-        get {
-            guard defaults.object(forKey: Defaults.Overlay.Box.enabledKey) != nil else {
-                return Defaults.Overlay.Box.enabled
-            }
-            return defaults.bool(forKey: Defaults.Overlay.Box.enabledKey)
-        }
-        set { defaults.set(newValue, forKey: Defaults.Overlay.Box.enabledKey) }
-    }
-
     /// Non-finite input (a corrupt plist value) returns `fallback`, not a bound: clamping it to an
     /// opacity floor of 0 would make the backdrop invisible.
     private static func clamp(
@@ -164,7 +154,6 @@ public protocol OverlayBoxApplying: AnyObject {
     /// Content width and height in points, once per finished resize drag. Never fires for the
     /// restored size, which is supplied at construction.
     var onSizeChanged: ((Double, Double) -> Void)? { get set }
-    func setEnabled(_ enabled: Bool)
     /// Off restores the real log and prior visibility. Must preserve screen-capture exclusion.
     func showAppearancePreview(_ on: Bool)
 }

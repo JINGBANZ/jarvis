@@ -7,7 +7,7 @@ public struct RobotHubInputs: Sendable, Equatable {
     public var screenScope: ScreenCaptureScope
     public var displayIndex: Int
     public var browserTextEnabled: Bool
-    public var boxEnabled: Bool
+    public var boxFontSize: Double
     /// `nil` until the app has read it, so the hub shows no status.
     public var readiness: RobotReadiness?
     /// `nil` when stopped.
@@ -20,7 +20,7 @@ public struct RobotHubInputs: Sendable, Equatable {
         screenScope: ScreenCaptureScope,
         displayIndex: Int,
         browserTextEnabled: Bool,
-        boxEnabled: Bool,
+        boxFontSize: Double,
         readiness: RobotReadiness? = nil,
         activeTarget: BrainTarget? = nil
     ) {
@@ -30,7 +30,7 @@ public struct RobotHubInputs: Sendable, Equatable {
         self.screenScope = screenScope
         self.displayIndex = displayIndex
         self.browserTextEnabled = browserTextEnabled
-        self.boxEnabled = boxEnabled
+        self.boxFontSize = boxFontSize
         self.readiness = readiness
         self.activeTarget = activeTarget
     }

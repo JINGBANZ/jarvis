@@ -43,7 +43,7 @@ public enum RobotHub {
                 displayIndex: inputs.displayIndex,
                 browserTextEnabled: inputs.browserTextEnabled)
         case .mouth:
-            RobotPartSummaries.mouth(boxEnabled: inputs.boxEnabled)
+            RobotPartSummaries.mouth(fontSize: inputs.boxFontSize)
         }
     }
 
