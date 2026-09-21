@@ -88,9 +88,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             self?.activityViewer?.historyDidChange()
         }
         // Resolved at click time, so a moved app bundle is picked up without rebuilding Activity.
-        activityViewer.makeEvaluator = { [weak self] session in
+        activityViewer.makeEvaluator = { [weak self] session, cli in
             guard let self else { return nil }
-            return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session))
+            return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session),
+                                    preferredCLI: cli)
         }
 
         overlayCaption = OverlayCaptionPanel()

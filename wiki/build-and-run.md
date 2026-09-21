@@ -271,8 +271,11 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   Core-computed insertion index.
 - The viewer's rendering logic (`htmlShell`/`rowScript`) and history reader (`SessionStore`) live in
   `JarvisCore` so they're unit/WebKit-tested; `ActivityViewer` in `JarvisApp` is the thin window.
-- Session evaluation is agentic only. After Stop, select a session and click **Evaluate**: the
-  read-only Claude Code / Codex agent receives the source checkout plus the complete session
+- Session evaluation is agentic only. After Stop, select a session, click **Evaluate**, and pick an
+  agent from the menu it opens. The menu lists each installed agent CLI, Codex then Claude Code, with
+  a signed-out one shown but disabled so the user sees why it can't run; with none installed, a dialog
+  says to install one. The chosen CLI is never swapped for another, and nothing remembers the choice.
+  The read-only agent receives the source checkout plus the complete session
   directory, reads the full `jarvis-activity.jsonl` itself, and correlates first-class attempt
   provenance with raw brain traffic and screenshots. Its compact input opens with a neutral evidence
   index—artifact health, categorical distributions, and correlation-field coverage—followed by

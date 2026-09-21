@@ -342,7 +342,7 @@ it as unverified in its description.
   the item is greyed out while a session runs, enabled once stopped, and reports the app up to date
   against the current release. Releases themselves are verified by the release workflow.
 - **Release evaluation source (R02),** when evaluation source selection changes. In an installed
-  release, evaluate a stopped session and confirm the button shows **Fetching source…** then
+  release, evaluate a stopped session, pick an agent, and confirm the button shows **Fetching source…** then
   **Evaluating…**, the recorded version is used after an update, a second evaluation fetches the
   source again, the offline dialog names the session's recorded version, cancelling during the fetch
   leaves no source tree, and Quit ends the run immediately. The contract is in
