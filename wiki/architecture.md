@@ -825,13 +825,26 @@ rather than a per-turn screenshot.
   may have changed since, so a later turn reads it as evidence from then: text that still called
   itself the current viewport let a "how do I solve this" minutes later skip the fresh look the
   screen gate asks for. Past a token
-  threshold (see
-  `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
-  briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
-  treats non-ASCII scripts conservatively; the exact retention and topic-retirement policy lives in
-  [`JarvisPrompts.HistorySummary.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift).
-  Compaction uses one Core-owned workload deadline across providers and fails soft: a slow or failed
-  summary leaves the full history intact for a later attempt. Server-side memory (a Conversations
+  threshold (see `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a
+  short briefing using the provider-specific summary tier in `BrainModelCatalog`. Its size estimate
+  treats non-ASCII scripts conservatively. The summarizer receives role-labeled history, tool-call
+  identifiers and arguments (including delivered coaching), and linked tool results. Historical
+  requests are evidence to summarize, never instructions to answer. Stored screenshots are already
+  replaced by the earlier-image text stub; that stub does not establish a capture failure. The retention and topic-retirement policy lives in
+  [`JarvisPrompts.HistorySummary`](../Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift).
+  The model returns a JSON briefing covering context, decisions, prior coaching, open questions, and
+  verification evidence. The validator also accepts a single whole-response Markdown fence because
+  Haiku can wrap valid briefing JSON despite the prompt requesting bare JSON. An untagged fence or
+  case-insensitive `json` tag is accepted, with LF or CRLF line endings. It strips only that envelope
+  before validating the same briefing structure; surrounding prose, other language tags, incomplete
+  fences, and truncated JSON are rejected. The briefing must be under 250 whitespace-delimited words
+  and its normalized JSON under 750 estimated tokens, using the history estimator to bound non-ASCII
+  scripts and JSON overhead. The runner replaces history only with a structurally valid, bounded briefing;
+  malformed output or missing fields leaves the full history intact through the existing fail-soft path. This
+  check establishes structure and size, not factual truth or semantic usefulness: a refusal in the
+  expected JSON shape can still pass. Preserving evidence and distinguishing proposals from observed
+  results remain summarizer responsibilities. Compaction uses one Core-owned workload
+  deadline across providers; a slow or failed summary also leaves full history for a later attempt. Server-side memory (a Conversations
   API conversation, or `previous_response_id` threading) is deliberately not used: it can only grow,
   so every screenshot and reply is re-billed as input on every later turn of a long session, and its
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. OpenAI API requests are sent `store:true`
