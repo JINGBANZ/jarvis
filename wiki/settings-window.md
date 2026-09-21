@@ -341,7 +341,7 @@ reserved or checked through Carbon. If a binding could not become active at laun
 shows on every visit. Warnings live in the corresponding row. The Overlay Box shows
 semibold hints in its upper section and the reply's detail in the lower one; a hint whose reply
 carried a detail ends with a dim marker. Both use the configured text size, and the appearance
-preview shows an example. No shortcut changes the box's visibility preference or switches it on.
+preview shows an example.
 
 ## Activity response sections
 
