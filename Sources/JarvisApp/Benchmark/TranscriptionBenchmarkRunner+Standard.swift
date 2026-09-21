@@ -74,6 +74,7 @@ extension TranscriptionBenchmarkRunner {
         let recorder = TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)
         let session = makeSession(arm: arm, appleLocale: appleLocale, recorder: recorder)
         let connectStartedAt = clock.now()
+        var speechStartedAt: TimeInterval?
         var speechEndedAt = connectStartedAt
         var failure: String?
         relay.install(session) { [recorder] sequence, samples in
@@ -84,11 +85,13 @@ extension TranscriptionBenchmarkRunner {
             _ = try await recorder.waitForReady(
                 timeout: arm.provider == .appleSpeech ? 60 : 20)
             try await Task.sleep(for: .milliseconds(150))
-            speechEndedAt = try await player.play(
+            let playback = try await player.play(
                 fixture.fileURL,
                 abortingWhen: { [abortMarker] in
                     FileManager.default.fileExists(atPath: abortMarker.path)
-                }).endedAt
+                })
+            speechStartedAt = playback.startedAt
+            speechEndedAt = playback.endedAt
             _ = try await player.play(
                 silenceURL,
                 abortingWhen: { [abortMarker] in
@@ -110,6 +113,7 @@ extension TranscriptionBenchmarkRunner {
             repetition: repetition,
             fixtureSHA256: fixture.sha256,
             connectStartedAt: connectStartedAt,
+            speechStartedAt: speechStartedAt,
             speechEndedAt: speechEndedAt,
             events: snapshot.events,
             captureObservations: snapshot.captureObservations,
