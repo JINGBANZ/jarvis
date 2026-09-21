@@ -15,16 +15,14 @@ import JarvisCore
     }
 
     @MainActor @Test
-    func staysHiddenWhileSwitchedOnUntilASessionStarts() {
+    func staysHiddenUntilASessionStarts() {
         let panel = OverlayBoxPanel()
-        panel.setEnabled(true)
-        #expect(!panel.isPanelVisible, "a box switched on must stay hidden until a session starts")
+        #expect(!panel.isPanelVisible, "the box must stay hidden until a session starts")
     }
 
     @MainActor @Test
     func sessionStartShowsTheBoxAndReassertsCaptureExclusion() {
         let panel = OverlayBoxPanel()
-        panel.setEnabled(true)
         let before = panel.captureExclusionReassertCount
         panel.setSessionLive(true)
         #expect(panel.isPanelVisible, "Start must put the box on screen")
@@ -40,44 +38,13 @@ import JarvisCore
     }
 
     @MainActor @Test
-    func sessionStartLeavesASwitchedOffBoxHidden() {
-        let panel = OverlayBoxPanel()
-        panel.setEnabled(false)
-        panel.setSessionLive(true)
-        #expect(!panel.isPanelVisible, "the Settings switch stays the master off switch")
-    }
-
-    @MainActor @Test
-    func setEnabledShowsAndHidesTheBoxDuringASession() {
-        let panel = OverlayBoxPanel()
-        panel.setSessionLive(true)
-        panel.setEnabled(true)
-        #expect(panel.isPanelVisible)
-        #expect(panel.currentSharingType == .none, "showing the box must keep it excluded from capture")
-        panel.setEnabled(false)
-        #expect(!panel.isPanelVisible)
-    }
-
-    @MainActor @Test
-    func setEnabledOffDuringPreviewHidesOnClose() {
-        let panel = OverlayBoxPanel()
-        panel.setEnabled(true)
-        panel.showAppearancePreview(true)
-        panel.setEnabled(false)
-        #expect(panel.isPanelVisible, "the preview sample must stay up until the tab closes")
-        panel.showAppearancePreview(false)
-        #expect(!panel.isPanelVisible, "a box switched off during preview must be ordered out on close")
-    }
-
-    @MainActor @Test
-    func setEnabledOnDuringPreviewShowsAtTheNextStart() {
+    func aClosedPreviewLeavesTheBoxToAppearOnStart() {
         let panel = OverlayBoxPanel()
         panel.showAppearancePreview(true)
-        panel.setEnabled(true)
         panel.showAppearancePreview(false)
         #expect(!panel.isPanelVisible, "still nothing to show: no session is running")
         panel.setSessionLive(true)
-        #expect(panel.isPanelVisible, "a box switched on during preview must appear on Start")
+        #expect(panel.isPanelVisible, "the box must appear on the Start after a preview closes")
     }
 
     @MainActor @Test
@@ -407,7 +374,6 @@ import JarvisCore
 
 @MainActor private func liveBox() -> OverlayBoxPanel {
     let panel = OverlayBoxPanel()
-    panel.setEnabled(true)
     panel.setSessionLive(true)
     return panel
 }

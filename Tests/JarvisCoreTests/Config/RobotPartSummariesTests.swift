@@ -71,10 +71,9 @@ import Testing
             == RobotPartSummary(value: "Display 2", detail: "WHOLE SCREEN"))
     }
 
-    @Test func mouthNamesWhatIsOnScreen() {
-        #expect(RobotPartSummaries.mouth(boxEnabled: true)
-            == RobotPartSummary(value: "Overlay Box", detail: "BOX ON"))
-        #expect(RobotPartSummaries.mouth(boxEnabled: false)
-            == RobotPartSummary(value: "Nothing on screen", detail: "BOX OFF"))
+    @Test func mouthNamesTheBoxAndItsTextSize() {
+        #expect(RobotPartSummaries.mouth(fontSize: 25)
+            == RobotPartSummary(value: "Overlay Box", detail: "25 PT TEXT"))
+        #expect(RobotPartSummaries.mouth(fontSize: 18.4).detail == "18 PT TEXT")
     }
 }

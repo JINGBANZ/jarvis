@@ -6,12 +6,12 @@ import Testing
         #expect(captureScreenTool.name == "capture_screen")
         #expect(speakToolName == "speak")
         #expect(staySilentTool.name == "stay_silent")
-        #expect(coachTools(detailEnabled: true).map(\.name)
+        #expect(coachTools.map(\.name)
             == ["capture_screen", "speak", "stay_silent"])
     }
 
-    @Test func bothSpeakSchemasAreStrict() {
-        let withDetail = speakTool(detailEnabled: true).parametersJSON
+    @Test func theSpeakSchemaIsStrict() {
+        let withDetail = speakTool.parametersJSON
         #expect(withDetail.contains("\"lines\""))
         // Strict Structured Outputs requires every property in `required`, so optional means
         // nullable.
@@ -19,28 +19,23 @@ import Testing
         #expect(withDetail.contains(#""required":["lines","detail"]"#))
         #expect(withDetail.contains("\"additionalProperties\":false"))
 
-        let without = speakTool(detailEnabled: false).parametersJSON
-        #expect(!without.contains("detail"))
-        #expect(without.contains(#""required":["lines"]"#))
-        #expect(without.contains("\"additionalProperties\":false"))
         #expect(!withDetail.contains("\"maxItems\""))
     }
 
     @Test func theDetailFieldIsGovernedByPromptTextAlone() {
-        let tool = speakTool(detailEnabled: true)
+        let tool = speakTool
         #expect(tool.parametersJSON.contains(
             "Follow loaded skill guidance; otherwise null unless an explanation is warranted."))
         #expect(tool.description.contains(
             "Use detail for Markdown content required by a loaded skill or a warranted explanation; otherwise null."))
         #expect(tool.guidance.contains("# Detail"))
-        #expect(!speakTool(detailEnabled: false).guidance.contains("# Detail"))
         #expect(!tool.guidance.contains("mermaid"))
     }
 
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
         #expect(captureScreenTool.description.contains("one fresh result satisfies that request"))
-        #expect(speakTool(detailEnabled: true).description.contains("up to 3 short overlay lines"))
+        #expect(speakTool.description.contains("up to 3 short overlay lines"))
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
     }
 
@@ -91,7 +86,7 @@ import Testing
         #expect(!guidance.contains("virtualized editors"))
         #expect(!guidance.contains("Use both sources together"))
         #expect(!JarvisPrompts.Coach.system.contains("Accessibility text may extend beyond"))
-        #expect(!speakTool(detailEnabled: true).parametersJSON.contains("screenMemory"))
+        #expect(!speakTool.parametersJSON.contains("screenMemory"))
         #expect(!staySilentTool.parametersJSON.contains("screenMemory"))
     }
 
@@ -164,14 +159,14 @@ import Testing
     }
 
     @Test func coachPromptHasOneConsistentFullSolutionRule() {
-        #expect(speakTool(detailEnabled: true).guidance
+        #expect(speakTool.guidance
             .contains("Give a full solution only when \"me\" explicitly asks"))
-        #expect(!speakTool(detailEnabled: true).guidance.contains("never the whole answer"))
+        #expect(!speakTool.guidance.contains("never the whole answer"))
         #expect(!JarvisPrompts.Coach.system.contains("never the whole answer"))
     }
 
     @Test func coachPromptGroundsTipVocabularyInWhatTheUserAlreadySees() {
-        let prompt = speakTool(detailEnabled: true).guidance
+        let prompt = speakTool.guidance
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         #expect(prompt.contains("Name things with the words already in front of \"me\""))
         #expect(prompt.contains("on the captured screen, or in what either speaker said"))

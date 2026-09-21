@@ -101,29 +101,6 @@ import Testing
         #expect(screen.captureCount == 1)
     }
 
-    @Test(arguments: [TriggerReason.manualHint, .turnEnd])
-    func aBoxlessSessionKeepsHintsAndRequiresANewStartToEnableDetail(_ hintReason: TriggerReason) async {
-        let brain = ScriptedBrain(script: [.init(toolCalls: [
-            .speak(callId: "s", lines: ["Track the range."], detail: "Move its left edge.")])])
-        let box = DetailSink()
-        let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .me, text: "I do not understand the sliding window", at: 0))
-        let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box,
-                                detailEnabled: false)
-        #expect(await driver.handleTrigger(hintReason) == .spoke)
-        #expect(box.lines == ["Track the range."])
-        #expect(box.detailText == nil)
-        driver.updatePlan(SessionPlan(revision: 2, screen: SessionPlan.default.screen))
-        #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(box.detailText == nil)
-        #expect(brain.calls[0].first?.text == brain.calls[1].first?.text)
-        #expect(brain.calls[0].first?.text?.contains("# Detail") == false)
-        let restarted = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box)
-        #expect(await restarted.handleTrigger(.manualExplanation) == .spoke)
-        #expect(box.detailText == "Move its left edge.")
-        #expect(brain.calls.last?.first?.text?.contains("# Detail") == true)
-    }
-
     @Test func theDetailCapabilitySurvivesPlanEdits() async {
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [
@@ -140,7 +117,7 @@ import Testing
         #expect(box.detailText == "Move its left edge.")
     }
 
-    @Test func aBoxlessSessionPreservesTheConversationPrefixAcrossAToolContinuation() async {
+    @Test func aToolContinuationPreservesTheConversationPrefix() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "capture")],
                   rawToolCalls: [.init(id: "capture", name: "capture_screen", argumentsJSON: "{}")]),
@@ -149,7 +126,7 @@ import Testing
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "Can you check the loop on my screen?", at: 0))
         let box = DetailSink()
-        let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box, detailEnabled: false)
+        let driver = makeDriver(brain: brain, transcript: transcript, screen: FakeScreen(), overlay: box)
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 2)
         guard brain.calls.count == 2 else { return }
@@ -158,7 +135,7 @@ import Testing
         let continuedPrefix = brain.calls[1].prefix(first.count).map { $0.role.rawValue + ":" + ($0.text ?? "") }
         #expect(continuedPrefix == first)
         #expect(box.lines == ["Check the loop bound."])
-        #expect(box.detailText == nil)
+        #expect(box.detailText == "Fuller detail.")
     }
 
     @Test @MainActor func queuedExplanationDoesNotStrandNextHint() async {
@@ -182,15 +159,14 @@ import Testing
     }
 
     private func makeDriver(brain: BrainClient, transcript: RollingTranscript,
-                            screen: ScreenCapturing, overlay: OverlayRendering,
-                            detailEnabled: Bool = true) -> CoachDriver {
+                            screen: ScreenCapturing, overlay: OverlayRendering) -> CoachDriver {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return CoachDriver(config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: screen, overlay: overlay, clock: ManualClock(now: 100),
             plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, detailEnabled: detailEnabled))
+                disabledTools: [], prepSourcesConfigured: false))
     }
 }
 

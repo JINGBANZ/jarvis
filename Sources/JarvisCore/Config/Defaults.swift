@@ -161,9 +161,6 @@ public enum Defaults {
         }
 
         public enum Box {
-            public static let enabledKey = "overlayBox.enabled"
-            public static let enabled = true
-
             public static let fontSizeKey = "overlayBox.fontSize"
             public static let fontSize: Double = 25
             public static let fontSizeRange: ClosedRange<Double> = 12...32

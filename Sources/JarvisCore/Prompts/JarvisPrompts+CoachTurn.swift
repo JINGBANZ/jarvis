@@ -29,10 +29,8 @@ extension JarvisPrompts.Coach {
             + "sticking point to detail, at most \(CodeBlock.lineLimit) lines."
     }
 
-    static func replyMustCallSpeak(detailEnabled: Bool) -> String {
-        "Plain text is not an answer here. Call the speak tool: the short lines are shown to the "
-            + (detailEnabled ? "user, and anything longer goes in detail." : "user.")
-    }
+    static let replyMustCallSpeak = "Plain text is not an answer here. Call the speak tool: the short "
+        + "lines are shown to the user, and anything longer goes in detail."
 
     static func condensedHistory(_ summary: String) -> String {
         "[session so far, condensed — earlier turns were summarized]\n\(summary)"

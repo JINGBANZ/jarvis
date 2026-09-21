@@ -6,7 +6,7 @@ import JarvisCore
 @Suite struct InteractionsWireFormatTests {
     let wire = InteractionsWireFormat(model: "gemini-3.8-flash", reasoningEffort: "low", maxOutputTokens: 2_048)
 
-    func body(_ messages: [ChatMessage], tools: [ToolDef] = coachTools(detailEnabled: true),
+    func body(_ messages: [ChatMessage], tools: [ToolDef] = coachTools,
               choice: ToolChoice = .required, wire: InteractionsWireFormat? = nil) throws -> [String: Any] {
         let data = try (wire ?? self.wire).encode(messages: messages, tools: tools, toolChoice: choice)
         return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -32,7 +32,7 @@ import JarvisCore
         #expect(image?["mime_type"] as? String == "image/jpeg")
         #expect(image?["data"] as? String == "AAAA")
         let declared = try #require(b["tools"] as? [[String: Any]])
-        #expect(declared.compactMap { $0["name"] as? String } == coachTools(detailEnabled: true).map(\.name))
+        #expect(declared.compactMap { $0["name"] as? String } == coachTools.map(\.name))
         #expect(declared.allSatisfy { $0["type"] as? String == "function" && $0["strict"] == nil })
     }
 
@@ -55,10 +55,10 @@ import JarvisCore
 
     /// Models write arguments in schema order, so `lines` must reach the wire before `detail`.
     @Test func toolSchemasKeepTheirAuthoredKeyOrder() throws {
-        let tools = coachTools(detailEnabled: true)
+        let tools = coachTools
         let data = try wire.encode(messages: [.user("hi")], tools: tools, toolChoice: .required)
         let text = String(decoding: data, as: UTF8.self)
-        #expect(text.contains(speakTool(detailEnabled: true).parametersJSON))
+        #expect(text.contains(speakTool.parametersJSON))
         let lines = try #require(text.range(of: #""lines""#))
         let detail = try #require(text.range(of: #""detail""#))
         #expect(lines.lowerBound < detail.lowerBound)

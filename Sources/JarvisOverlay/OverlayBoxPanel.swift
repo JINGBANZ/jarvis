@@ -37,7 +37,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Recorded rather than obeyed: Settings cannot see whether a session is running.
     private var isPreviewRequested = false
     private var wasCollapsedBeforePreview = false
-    private var isEnabled = false
     private var isSessionLive = false
     /// Called with the content width and height once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
@@ -241,12 +240,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     public func showPreviousDetail() {
-        guard isSessionLive, isEnabled, !isCollapsed, display == .log else { return }
+        guard isSessionLive, !isCollapsed, display == .log else { return }
         detailView.previousButton.performClick(nil)
     }
 
     public func showNextDetail() {
-        guard isSessionLive, isEnabled, !isCollapsed, display == .log else { return }
+        guard isSessionLive, !isCollapsed, display == .log else { return }
         detailView.nextButton.performClick(nil)
     }
 
@@ -389,15 +388,13 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         renderDisplay()
     }
 
-    public var acceptsDetail: Bool { shouldBeVisible && !isCollapsed }
-
-    /// Not `panel.isVisible`: the Settings preview can show the box while this is false.
-    private var shouldBeVisible: Bool { isEnabled && isSessionLive }
+    /// Not `panel.isVisible`: the Settings preview can show the box while no session is live.
+    public var acceptsDetail: Bool { isSessionLive && !isCollapsed }
 
     private func applyVisibility() {
         // The preview applies this on close; don't tear down its sample.
         guard display == .log else { return }
-        guard shouldBeVisible else { return panel.orderOut(nil) }
+        guard isSessionLive else { return panel.orderOut(nil) }
         // An activation-policy flip can drop `sharingType`, so re-assert on every show.
         reassertCaptureExclusion()
         panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
@@ -441,11 +438,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private func reportContentSize() {
         let size = panel.contentRect(forFrameRect: panel.frame).size
         onSizeChanged?(Double(size.width), Double(isCollapsed ? expandedContentHeight : size.height))
-    }
-
-    public func setEnabled(_ enabled: Bool) {
-        isEnabled = enabled
-        applyVisibility()
     }
 
     /// Recorded rather than applied, so a request made during a session takes effect when it stops.

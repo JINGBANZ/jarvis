@@ -8,7 +8,6 @@ import Testing
         let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel()
         let window = try #require(NSApplication.shared.windows.first { !windows.contains($0.windowNumber) })
-        panel.setEnabled(true)
         panel.setSessionLive(true)
         let detail = try #require(ReplyDetail(markdown:
             "A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"))
@@ -45,7 +44,6 @@ import Testing
 
     @MainActor @Test func anUnsupportedGraphKeepsTheRestOfTheDocument() async throws {
         let panel = OverlayBoxPanel()
-        panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown:
@@ -66,7 +64,6 @@ import Testing
         let previousWindows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
         let window = try #require(NSApplication.shared.windows.first { !previousWindows.contains($0.windowNumber) })
-        panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown:
@@ -122,7 +119,6 @@ import Testing
         let window = try #require(NSApplication.shared.windows.first {
             !previousWindows.contains($0.windowNumber)
         })
-        panel.setEnabled(true)
         panel.setSessionLive(true)
         let detail = try #require(ReplyDetail(markdown: "```mermaid\n\(source)\n```"))
         _ = panel.deliver(["Sketch this path."], detail: detail)

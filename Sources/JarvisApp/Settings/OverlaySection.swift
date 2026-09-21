@@ -5,7 +5,6 @@ import JarvisCore
 final class OverlaySection: NSObject, SettingsSection {
     let destination = SettingsDestination.mouth
 
-    private let onBoxEnabledChanged: (Bool) -> Void
     private let appearance: OverlayAppearance
     private let box: OverlayBoxApplying
 
@@ -13,9 +12,7 @@ final class OverlaySection: NSObject, SettingsSection {
     private var documentView: NSView?
     private var boxView: OverlaySurfaceSettingsView?
 
-    init(appearance: OverlayAppearance, box: OverlayBoxApplying,
-         onBoxEnabledChanged: @escaping (Bool) -> Void = { _ in }) {
-        self.onBoxEnabledChanged = onBoxEnabledChanged
+    init(appearance: OverlayAppearance, box: OverlayBoxApplying) {
         self.appearance = appearance
         self.box = box
     }
@@ -35,9 +32,7 @@ final class OverlaySection: NSObject, SettingsSection {
             title: "Overlay Box",
             description: "Every hint of this session, with details.",
             symbolName: "rectangle.inset.filled",
-            enabled: appearance.boxEnabled,
             target: self,
-            enableAction: #selector(boxEnabledChanged),
             sizeValue: appearance.boxFontSize,
             sizeRange: Defaults.Overlay.Box.fontSizeRange,
             sizeAction: #selector(boxSizeChanged),
@@ -101,21 +96,11 @@ final class OverlaySection: NSObject, SettingsSection {
 
     func didBecomeActive() {
         relayout()
-        box.showAppearancePreview(appearance.boxEnabled)
+        box.showAppearancePreview(true)
     }
 
     func didResignActive() {
         box.showAppearancePreview(false)
-    }
-
-    @objc private func boxEnabledChanged(_ sender: NSSwitch) {
-        let enabled = sender.state == .on
-        appearance.boxEnabled = enabled
-        onBoxEnabledChanged(enabled)
-        box.setEnabled(enabled)
-        box.showAppearancePreview(enabled)
-        boxView?.updateEnabledState(enabled)
-        relayout()
     }
 
     @objc private func boxSizeChanged(_ sender: NSSlider) {

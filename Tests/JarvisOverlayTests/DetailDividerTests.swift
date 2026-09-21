@@ -6,7 +6,6 @@ import Testing
 @Suite struct DetailDividerTests {
     @MainActor @Test func draggingResizesWithoutMovingWindowAndSurvivesContentChanges() throws {
         let (box, window) = try makeBox()
-        box.setEnabled(true)
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown: "```swift\nreturn 1\n```"))
@@ -41,7 +40,6 @@ import Testing
 
     @MainActor @Test func dragLimitsKeepBothSectionsUsableAndAllowImmediateReversal() throws {
         let (box, window) = try makeBox()
-        box.setEnabled(true)
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         _ = box.deliver(["First hint"], detail: ReplyDetail(markdown: "```swift\nreturn 1\n```"))
@@ -63,7 +61,6 @@ import Testing
 
     @MainActor @Test func accessibilityActionsAdjustBothWaysWithinBoundsWithoutTakingFocus() throws {
         let (box, window) = try makeBox()
-        box.setEnabled(true)
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         _ = box.deliver(["First hint"], detail: ReplyDetail(markdown: "```swift\nreturn 1\n```"))

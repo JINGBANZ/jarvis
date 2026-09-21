@@ -21,7 +21,6 @@ import Testing
         #expect(Defaults.Transcription.appleSpeechLocaleKey == "transcription.apple-speech.locale")
         #expect(Defaults.Screen.scopeKey == "screen.captureScope")
         #expect(Defaults.Screen.displayIndexKey == "screen.captureDisplayIndex")
-        #expect(Defaults.Overlay.Box.enabledKey == "overlayBox.enabled")
         #expect(Defaults.Overlay.Box.fontSizeKey == "overlayBox.fontSize")
         #expect(Defaults.Overlay.Box.opacityKey == "overlayBox.opacity")
         #expect(Defaults.Overlay.Box.widthKey == "overlayBox.width")
@@ -81,7 +80,6 @@ import Testing
         #expect(Defaults.Overlay.Box.opacityRange == 0...1.0)
         #expect(Defaults.Overlay.Box.width == 520)
         #expect(Defaults.Overlay.Box.height == 440)
-        #expect(Defaults.Overlay.Box.enabled == true)
     }
 
     // MARK: - Invariants

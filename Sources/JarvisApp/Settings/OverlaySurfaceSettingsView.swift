@@ -54,7 +54,6 @@ final class OverlaySurfaceSettingsView: NSView {
         let opacityAccessibilityLabel: String
     }
 
-    let toggle = NSSwitch()
     let sizeSlider: NSSlider
     let opacitySlider: NSSlider
     private(set) var subordinateSizeSlider: NSSlider?
@@ -64,7 +63,6 @@ final class OverlaySurfaceSettingsView: NSView {
     private let icon = NSImageView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let descriptionLabel = NSTextField(labelWithString: "")
-    private let stateLabel = NSTextField(labelWithString: "")
     private let sizeControl: SliderControlView
     private let opacityControl: SliderControlView
     private let sizeRow: SettingsRowView
@@ -74,17 +72,14 @@ final class OverlaySurfaceSettingsView: NSView {
     private var subordinateRows: [SettingsRowView] = []
 
     var preferredHeight: CGFloat {
-        guard toggle.state == .on else { return Self.headerHeight }
-        return Self.headerHeight + SettingsStyle.rowHeight * CGFloat(2 + subordinateRows.count)
+        Self.headerHeight + SettingsStyle.rowHeight * CGFloat(2 + subordinateRows.count)
     }
 
     init(
         title: String,
         description: String,
         symbolName: String,
-        enabled: Bool,
         target: AnyObject,
-        enableAction: Selector,
         sizeValue: Double,
         sizeRange: ClosedRange<Double>,
         sizeAction: Selector,
@@ -136,13 +131,6 @@ final class OverlaySurfaceSettingsView: NSView {
         descriptionLabel.textColor = SettingsTheme.mutedText
         descriptionLabel.lineBreakMode = .byTruncatingTail
 
-        toggle.state = enabled ? .on : .off
-        toggle.target = target
-        toggle.action = enableAction
-        toggle.setAccessibilityLabel(title.hasPrefix("Show ") ? title : "Show \(title.lowercased())")
-        stateLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-        stateLabel.alignment = .right
-
         sizeSlider.setAccessibilityLabel(sizeAccessibilityLabel)
         opacitySlider.setAccessibilityLabel(opacityAccessibilityLabel)
         if let subordinate {
@@ -170,11 +158,10 @@ final class OverlaySurfaceSettingsView: NSView {
                                 controlSize: NSSize(width: 310, height: 32)),
             ]
         }
-        updateEnabledState(enabled)
 
         guard let content = card.contentView else { return }
         for view in [
-            icon, titleLabel, descriptionLabel, stateLabel, toggle, sizeRow, opacityRow,
+            icon, titleLabel, descriptionLabel, sizeRow, opacityRow,
         ] {
             content.addSubview(view)
         }
@@ -186,16 +173,6 @@ final class OverlaySurfaceSettingsView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    func updateEnabledState(_ enabled: Bool) {
-        toggle.state = enabled ? .on : .off
-        stateLabel.stringValue = enabled ? "On" : "Off"
-        stateLabel.textColor = enabled ? SettingsTheme.teal : SettingsTheme.mutedText
-        sizeRow.isHidden = !enabled
-        opacityRow.isHidden = !enabled
-        for row in subordinateRows { row.isHidden = !enabled }
-        needsLayout = true
     }
 
     func updateReadouts(size: String, opacity: String) {
@@ -229,34 +206,22 @@ final class OverlaySurfaceSettingsView: NSView {
             y: headerY + 13,
             width: max(100, content.bounds.width - 200),
             height: 17)
-        toggle.sizeToFit()
-        toggle.frame.origin = NSPoint(
-            x: content.bounds.width - 16 - toggle.frame.width,
-            y: headerY + (Self.headerHeight - toggle.frame.height) / 2)
-        stateLabel.frame = NSRect(
-            x: toggle.frame.minX - 38,
-            y: headerY + 22,
-            width: 30,
-            height: 18)
-
-        if toggle.state == .on {
-            sizeRow.frame = NSRect(
+        sizeRow.frame = NSRect(
+            x: 0,
+            y: headerY - SettingsStyle.rowHeight,
+            width: content.bounds.width,
+            height: SettingsStyle.rowHeight)
+        opacityRow.frame = NSRect(
+            x: 0,
+            y: headerY - SettingsStyle.rowHeight * 2,
+            width: content.bounds.width,
+            height: SettingsStyle.rowHeight)
+        for (index, row) in subordinateRows.enumerated() {
+            row.frame = NSRect(
                 x: 0,
-                y: headerY - SettingsStyle.rowHeight,
+                y: headerY - SettingsStyle.rowHeight * CGFloat(3 + index),
                 width: content.bounds.width,
                 height: SettingsStyle.rowHeight)
-            opacityRow.frame = NSRect(
-                x: 0,
-                y: headerY - SettingsStyle.rowHeight * 2,
-                width: content.bounds.width,
-                height: SettingsStyle.rowHeight)
-            for (index, row) in subordinateRows.enumerated() {
-                row.frame = NSRect(
-                    x: 0,
-                    y: headerY - SettingsStyle.rowHeight * CGFloat(3 + index),
-                    width: content.bounds.width,
-                    height: SettingsStyle.rowHeight)
-            }
         }
     }
 }

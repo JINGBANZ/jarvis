@@ -9,7 +9,7 @@ public enum RobotHealth {
         case .brain: brain(inputs.route, readiness)
         case .ear: ear(inputs.transcription.provider, readiness)
         case .eye: eye(readiness)
-        case .mouth: mouth(boxEnabled: inputs.boxEnabled)
+        case .mouth: .ready
         }
     }
 
@@ -67,16 +67,6 @@ public enum RobotHealth {
                 reason: "SCREEN RECORDING IS OFF",
                 advice: "Screen Recording is off, so I can't see your screen. "
                     + "Turn it on in System Settings, Privacy & Security, then reopen me.",
-                fix: nil)
-        }
-        return .ready
-    }
-
-    private static func mouth(boxEnabled: Bool) -> RobotPartHealth {
-        guard boxEnabled else {
-            return .needsAttention(
-                reason: "NOTHING WILL SHOW",
-                advice: "The Overlay Box is off, so my hints have nowhere to appear. Switch it on below.",
                 fix: nil)
         }
         return .ready

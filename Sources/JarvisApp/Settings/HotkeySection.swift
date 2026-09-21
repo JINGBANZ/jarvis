@@ -10,15 +10,13 @@ final class HotkeySection: NSObject, SettingsSection {
 
     init(preferences: [HotkeyPreferences],
          mouseController: MouseHotkeyController,
-         boxEnabled: @escaping () -> Bool = { true },
          hasActiveHotkey: @escaping (CoachingShortcut) -> Bool,
          applyCombination: @escaping (CoachingShortcut, HotkeyCombination) -> HotkeyRegistrationOutcome) {
         mouseBindings = preferences.map {
-            MouseHotkeyBindingView(preferences: $0, controller: mouseController, boxEnabled: boxEnabled)
+            MouseHotkeyBindingView(preferences: $0, controller: mouseController)
         }
         bindings = preferences.map { preference in
             HotkeyBindingView(preferences: preference,
-                boxEnabled: boxEnabled,
                 hasActiveHotkey: { hasActiveHotkey(preference.shortcut) },
                 applyCombination: { applyCombination(preference.shortcut, $0) })
         }

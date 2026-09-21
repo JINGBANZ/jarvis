@@ -2,30 +2,20 @@ import Foundation
 
 public let speakToolName = "speak"
 
-public func speakTool(detailEnabled: Bool) -> ToolDef {
-    ToolDef(
-        name: speakToolName,
-        description: "Show a coaching reply: up to 3 short overlay lines, one idea each, under 12 "
-            + "words. Call only when a reply is useful."
-            + (detailEnabled
-                ? " Use detail for Markdown content required by a loaded skill or a warranted explanation; otherwise null."
-                : ""),
-        // Line breaks and the indentation after them are stripped, so no JSON string here may
-        // contain a line break.
-        parametersJSON: (detailEnabled
-            ? #"""
-            {"type":"object","properties":{
-                "lines":{"type":"array","items":{"type":"string"}},
-                "detail":{"type":["string","null"],"description":"Markdown shown under the hint in the box. Follow loaded skill guidance; otherwise null unless an explanation is warranted."}
-            },"required":["lines","detail"],"additionalProperties":false}
-            """#
-            : #"""
-            {"type":"object","properties":{
-                "lines":{"type":"array","items":{"type":"string"}}
-            },"required":["lines"],"additionalProperties":false}
-            """#).replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
-        guidance: tipStyle + (detailEnabled ? "\n\n" + detailGuidance : ""))
-}
+public let speakTool = ToolDef(
+    name: speakToolName,
+    description: "Show a coaching reply: up to 3 short overlay lines, one idea each, under 12 "
+        + "words. Call only when a reply is useful. Use detail for Markdown content required by a "
+        + "loaded skill or a warranted explanation; otherwise null.",
+    // Line breaks and the indentation after them are stripped, so no JSON string here may
+    // contain a line break.
+    parametersJSON: #"""
+        {"type":"object","properties":{
+            "lines":{"type":"array","items":{"type":"string"}},
+            "detail":{"type":["string","null"],"description":"Markdown shown under the hint in the box. Follow loaded skill guidance; otherwise null unless an explanation is warranted."}
+        },"required":["lines","detail"],"additionalProperties":false}
+        """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
+    guidance: tipStyle + "\n\n" + detailGuidance)
 
 private let tipStyle = """
     # Tip style

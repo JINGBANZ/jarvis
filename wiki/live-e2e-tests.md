@@ -367,8 +367,7 @@ it as unverified in its description.
   Start, and a forced Apple analyzer failure never sends audio to OpenAI as a fallback.
 - **Shortcut bindings and the detail box's controls,** because the run requests shortcuts without
   the global hotkeys and never clicks the box. Press all three shortcuts from another app and confirm
-  distinct requests, rebind them independently and try a collision, confirm they are unbindable while
-  the Overlay Box is off, and confirm an explanation after clear confusion and silence during healthy
+  distinct requests, rebind them independently and try a collision, and confirm an explanation after clear confusion and silence during healthy
   progress. Then step the detail box's back and forward arrows, Pin, Unpin, and Dismiss and confirm
   each takes the click without moving focus off the editor.
 - **Mixed practice,** because it judges coaching on a screen a person changes. With the OpenAI brain,

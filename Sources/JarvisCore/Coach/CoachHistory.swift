@@ -64,12 +64,11 @@ public final class CoachHistory: @unchecked Sendable {
     }
 
     private static func droppingRefusedProse(_ turn: [ChatMessage]) -> [ChatMessage] {
-        let nudges = Set([true, false].map { JarvisPrompts.Coach.replyMustCallSpeak(detailEnabled: $0) })
-        guard turn.contains(where: { $0.role == .user && $0.text.map(nudges.contains) == true })
-        else { return turn }
+        let nudge = JarvisPrompts.Coach.replyMustCallSpeak
+        guard turn.contains(where: { $0.role == .user && $0.text == nudge }) else { return turn }
         var kept: [ChatMessage] = []
         for m in turn {
-            if m.role == .user, let text = m.text, nudges.contains(text) {
+            if m.role == .user, m.text == nudge {
                 if let last = kept.last, last.role == .assistant, last.toolCalls == nil {
                     kept.removeLast()
                 }

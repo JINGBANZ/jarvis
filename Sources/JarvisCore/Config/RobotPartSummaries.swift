@@ -44,10 +44,8 @@ public enum RobotPartSummaries {
         }
     }
 
-    public static func mouth(boxEnabled: Bool) -> RobotPartSummary {
-        RobotPartSummary(
-            value: boxEnabled ? "Overlay Box" : "Nothing on screen",
-            detail: boxEnabled ? "BOX ON" : "BOX OFF")
+    public static func mouth(fontSize: Double) -> RobotPartSummary {
+        RobotPartSummary(value: "Overlay Box", detail: "\(Int(fontSize.rounded())) PT TEXT")
     }
 
     /// "GPT-4o Transcribe" reads "OpenAI · GPT-4o"; a model already named for its vendor reads
