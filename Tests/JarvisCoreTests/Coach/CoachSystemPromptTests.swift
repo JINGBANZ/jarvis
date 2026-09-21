@@ -118,7 +118,7 @@ import Testing
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills))
         #expect(prompt.contains(
-            "When the turn says you must call speak, skip loading and speak with what you have."))
+            "Only when speak is the sole permitted tool, speak with what you have."))
     }
 
     @Test func everythingSwitchedOffIsTheBarePrompt() {

@@ -168,13 +168,18 @@ Narrow and explicit. Data leaves the machine only via:
   The two source paths and provenance contract are in [build-and-run.md](./build-and-run.md).
 
 The optional Accessibility grant is broader at the OS boundary than Jarvis's use of it. Jarvis asks
-for that grant only from Settings while stopped, never during a live session. The adapter is limited
+for that grant only from Settings while stopped, never during a live session. The browser-text adapter is limited
 in code to read-only attribute queries for the exact foreground Chrome window and its active web
 area. It does not run JavaScript, invoke Accessibility actions, mutate attributes, read background
 tabs, or access raw HTML, history, cookies, or browser storage. Secure text roles and subroles are
 excluded. Missing permission, an unsupported app, an unmatched window, an absent web area, or empty
 semantic text omits that source while current-screenshot OCR remains available. These failures are
 logged without page text.
+
+Optional [mouse shortcuts](./settings-window.md#shortcuts) also use an existing Accessibility grant,
+independently of browser text, and never request permission. Their event tap suppresses a configured
+click only when its action is allowed in a live session, including its drag and release. Mouse activity
+is not recorded or sent to a provider; only the chosen bindings persist alongside keyboard preferences.
 
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: audio is either
