@@ -9,8 +9,8 @@
 ## Current phase
 
 **Released and hardening.** Jarvis coaches live technical interviews end to end, from two-speaker
-transcription through an ordered brain route with on-demand skills and tools to private
-capture-excluded overlays, and ships as a signed, notarized Apple silicon release.
+transcription through an ordered brain route with on-demand skills and tools to a private
+capture-excluded Overlay Box, and ships as a signed, notarized Apple silicon release.
 
 ## Next action
 
