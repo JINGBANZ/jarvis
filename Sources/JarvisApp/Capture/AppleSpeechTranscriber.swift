@@ -639,14 +639,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         }
     }
 
-    /// Analyzer ranges start at zero; the offset maps them onto the shared session clock.
-    private func sessionTime(for analyzerTime: CMTime) -> TimeInterval? {
-        lock.lock()
-        let offset = analyzerTimelineOffset
-        lock.unlock()
-        return offset.map { $0 + CMTimeGetSeconds(analyzerTime) }
-    }
-
     private func recordConsumedFinalResults(
         through resultsFinalizationTime: CMTime,
         generation: Int
@@ -658,12 +650,6 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             CMTimeCompare(resultsFinalizationTime, $0) > 0
         }) ?? true {
             latestConsumedResultsFinalizationTime = resultsFinalizationTime
-            // Runs after `handle` published the matching finals, so the barrier never skips a line.
-            if let resolved = sessionTime(for: resultsFinalizationTime) {
-                applyFinalizationEffects(
-                    finalizationState.recordResolvedSpeech(through: resolved),
-                    generation: generation)
-            }
         }
         guard let activeFinalization,
               CMTimeCompare(

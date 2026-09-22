@@ -26,15 +26,13 @@ import Testing
         #expect(!state.hasPendingWork)
     }
 
-    @Test func resolvedResultsAdvanceThePendingStartWithinOneEpisode() throws {
+    @Test func aPhraseFinalizedMidSentenceWaitsForTheSentenceToSettle() throws {
         var state = TranscriptionFinalizationState()
-        _ = state.recordSpeechStarted(at: 4)
+        let work = try #require(state.recordSpeechStarted(at: 4).work)
 
-        let advanced = try #require(state.recordResolvedSpeech(through: 6).work)
-        #expect(advanced == .pending(since: 6))
-        #expect(advanced.permitsCoaching(through: 5))
-        #expect(!advanced.permitsCoaching(through: 6))
-        #expect(state.recordResolvedSpeech(through: 5).work == nil)
+        // A final for the sentence's first phrase is stamped at the sentence's own start.
+        #expect(!work.permitsCoaching(through: 4))
+        #expect(work.permitsCoaching(through: 3))
     }
 
     @Test func laterSpeechDoesNotMoveAnUnsettledPendingStart() {
@@ -48,18 +46,11 @@ import Testing
     @Test func aSettledEpisodeOpensTheNextWindowAtItsOwnOnset() throws {
         var state = TranscriptionFinalizationState()
         _ = state.recordSpeechStarted(at: 4)
-        _ = state.recordResolvedSpeech(through: 6)
         let token = try #require(state.recordSpeechEnded(analyzerAvailable: true).finalization)
         _ = state.analyzerFinalizationCompleted(token, analyzerAvailable: true)
         #expect(state.finalResultsConsumed(token, analyzerAvailable: true).work == .settled)
 
         #expect(state.recordSpeechStarted(at: 9).work == .pending(since: 9))
-    }
-
-    @Test func settledWorkIgnoresAResolvedBoundary() {
-        var state = TranscriptionFinalizationState()
-        #expect(state.recordResolvedSpeech(through: 6).work == nil)
-        #expect(!state.hasPendingWork)
     }
 
     @Test func speechWithoutATimedOnsetStaysUnknown() throws {

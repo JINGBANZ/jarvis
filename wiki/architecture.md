@@ -89,9 +89,11 @@ moments the model judges worthwhile.
    OpenAI's item ledger supplies it when every pending item has timing; reconnect recovery and
    unbound local speech remain unknown. Apple PCM silence requests `SpeechAnalyzer.finalize` and
    remains unsettled until matching final-result progress is consumed from the module stream; its
-   start is the local activity tracker's onset, advanced to the analyzer's results-finalization
-   time as finals are consumed, so a long stretch of speech stops holding back the lines it has
-   already produced. Gemini reports unknown pending work, preserving its settlement guarantee.
+   start is the local activity tracker's onset, held until that pass settles. Apple finalizes
+   phrases mid-sentence, and moving the start forward with each final would let Jarvis coach on half
+   a question while the speaker is still talking, so a mid-sentence phrase waits for the pause that
+   ends the sentence, as on the OpenAI path. Gemini reports unknown pending work, preserving its
+   settlement guarantee.
    The model still decides whether a finalized thought warrants a hint; admission does not classify
    intent or infer sentence completeness from punctuation.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
