@@ -6,6 +6,8 @@ public extension TranscriptionBenchmark {
         public let repetition: Int
         public let fixtureSHA256: String
         public let connectStartedAt: TimeInterval
+        /// Nil when playback never started.
+        public let speechStartedAt: TimeInterval?
         public let speechEndedAt: TimeInterval
         public let events: [TranscriptionBenchmarkEvent]
         public let captureObservations: [CaptureObservation]
@@ -17,6 +19,7 @@ public extension TranscriptionBenchmark {
             repetition: Int,
             fixtureSHA256: String,
             connectStartedAt: TimeInterval,
+            speechStartedAt: TimeInterval? = nil,
             speechEndedAt: TimeInterval,
             events: [TranscriptionBenchmarkEvent],
             captureObservations: [CaptureObservation] = [],
@@ -27,6 +30,7 @@ public extension TranscriptionBenchmark {
             self.repetition = repetition
             self.fixtureSHA256 = fixtureSHA256
             self.connectStartedAt = connectStartedAt
+            self.speechStartedAt = speechStartedAt
             self.speechEndedAt = speechEndedAt
             self.events = events
             self.captureObservations = captureObservations
@@ -59,6 +63,9 @@ public extension TranscriptionBenchmark {
         public let endpointLatencySeconds: TimeInterval?
         public let commitLatencySeconds: TimeInterval?
         public let finalLatencySeconds: TimeInterval?
+        /// Earliest reported spoken start minus playback start. Fixture lead-in and provider padding
+        /// shift every repetition alike, so the spread, not the value, is the timing jitter.
+        public let spokenStartOffsetSeconds: TimeInterval?
         public let missing: Bool
         public let duplicateCount: Int
         public let providerDuplicateCount: Int

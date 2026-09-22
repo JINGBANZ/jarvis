@@ -94,6 +94,9 @@ public extension TranscriptionBenchmark {
             finalLatencySeconds: usableFinals.last.map {
                 max(0, $0.observedAt - input.speechEndedAt)
             },
+            spokenStartOffsetSeconds: input.speechStartedAt.flatMap { startedAt in
+                usableFinals.compactMap(\.spokenAt).min().map { $0 - startedAt }
+            },
             missing: usableFinals.isEmpty,
             duplicateCount: duplicateCount,
             providerDuplicateCount: providerDuplicateCount,

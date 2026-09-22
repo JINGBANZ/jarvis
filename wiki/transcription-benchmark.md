@@ -127,10 +127,15 @@ provider quality from harness or reconnect failures.
 | Readiness latency | How long after `connect()` was the session actually usable? | Slow or missing provider setup |
 | Endpoint or commit latency | How long after speech ended did the server detect the endpoint, or Jarvis send the client-owned commit? | Turn-detection or local-commit delay |
 | Final latency | How long after speech ended did the accepted final arrive? | End-to-end finalization delay |
+| Spoken-start offset | Where did the provider place the start of speech relative to playback, and how much does that move between repetitions? | Timing jitter beyond the [start-time margin](./architecture.md#the-turn) that orders pending speech against finalized lines |
 | Transcript quality and heard order | How close was the final text to the known phrase, and did fragments remain in spoken order? | Recognition errors or reordered delivery |
 | Missing, duplicate, revised, or unavailable finals | Did Jarvis lose a final, deliver one twice, observe changing text for one provider item, or reach a final state without recoverable text? | Lifecycle reconciliation bugs that a plausible-looking transcript can hide |
 | Capture continuity | Were captured chunk sequence numbers continuous and did they contain samples? | Audio lost before it reached the provider path |
 | Replay eviction | Did the bounded recovery tail discard audio needed after interruption? | Reconnect data loss even when the replacement socket becomes ready |
+
+The spoken-start offset carries a constant bias per path, from the fixture's lead-in silence and,
+on OpenAI's server-VAD path, `audio_start_ms` including the session's prefix padding. Only its spread
+across repetitions is jitter.
 
 These are measurements of the controlled experiment, not an audit of a user session. For example,
 suppose the expected fixture is “alpha beta.” A provider could return “alpha beta” once and look

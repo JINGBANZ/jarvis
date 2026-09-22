@@ -95,6 +95,47 @@ struct TranscriptionBenchmarkTests {
         #expect(result.finalTexts.count == 2)
     }
 
+    @Test("the earliest final's spoken start is measured against playback start")
+    func spokenStartOffset() {
+        let arm = TranscriptionBenchmark.standardArms.first {
+            $0.model == .gpt4oTranscribe && $0.phrase.language == .english
+        }!
+        let events = [
+            event(
+                .finalized,
+                observedAt: 4,
+                model: arm.model?.rawValue,
+                itemID: "fragment-2",
+                text: "while the socket reconnects.",
+                spokenAt: 2.5),
+            event(
+                .finalized,
+                observedAt: 4.1,
+                model: arm.model?.rawValue,
+                itemID: "fragment-1",
+                text: "The actor preserves ordered audio",
+                spokenAt: 1.25),
+        ]
+        let played = TranscriptionBenchmark.evaluate(.init(
+            arm: arm,
+            repetition: 1,
+            fixtureSHA256: "hash",
+            connectStartedAt: 1,
+            speechStartedAt: 1.5,
+            speechEndedAt: 3,
+            events: events))
+        let unplayed = TranscriptionBenchmark.evaluate(.init(
+            arm: arm,
+            repetition: 1,
+            fixtureSHA256: "hash",
+            connectStartedAt: 1,
+            speechEndedAt: 1,
+            events: events))
+
+        #expect(played.spokenStartOffsetSeconds == -0.25)
+        #expect(unplayed.spokenStartOffsetSeconds == nil)
+    }
+
     @Test("a reconnect contaminates a standard repetition")
     func standardReconnectIsFailure() {
         let arm = TranscriptionBenchmark.standardArms.first {
