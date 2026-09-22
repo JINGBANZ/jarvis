@@ -37,10 +37,9 @@ public struct TranscriptionFinalizationState: Sendable {
     private var needsFinalization = false
     private var finalizationInFlight: FinalizationPass?
     private var nextRevision: UInt64 = 0
-    /// Session-relative onset of the oldest speech no pass has settled yet.
+    /// Session-relative onset of the oldest speech no pass has settled yet. It holds until the pass
+    /// settles, so a phrase finalized mid-sentence still waits for the rest of the sentence.
     private var pendingSpeechStart: TimeInterval?
-    /// Session-relative time through which results are already final.
-    private var resolvedThrough: TimeInterval?
     private var publishedWork: TranscriptionWorkState = .settled
     public private(set) var hasPendingWork = false
 
@@ -62,14 +61,6 @@ public struct TranscriptionFinalizationState: Sendable {
         needsFinalization = true
         hasPendingWork = true
         return publish(finalization: beginFinalization(analyzerAvailable: analyzerAvailable))
-    }
-
-    /// Final results through `time` resolve every earlier utterance, so pending work can only
-    /// concern audio after it. Publish the finalized lines first.
-    public mutating func recordResolvedSpeech(through time: TimeInterval) -> Effects {
-        guard time.isFinite, time >= 0 else { return .none }
-        resolvedThrough = max(resolvedThrough ?? time, time)
-        return publish()
     }
 
     /// Setup can complete after buffered speech has already ended.
@@ -103,14 +94,11 @@ public struct TranscriptionFinalizationState: Sendable {
         finalizationInFlight = nil
         hasPendingWork = false
         pendingSpeechStart = nil
-        resolvedThrough = nil
         return publish()
     }
 
     private var currentWork: TranscriptionWorkState {
-        guard hasPendingWork else { return .settled }
-        guard let pendingSpeechStart else { return .pending(since: nil) }
-        return .pending(since: max(pendingSpeechStart, resolvedThrough ?? pendingSpeechStart))
+        hasPendingWork ? .pending(since: pendingSpeechStart) : .settled
     }
 
     private mutating func publish(
