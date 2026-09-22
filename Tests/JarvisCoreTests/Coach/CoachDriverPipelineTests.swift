@@ -209,14 +209,9 @@ private actor FinishTrackingConversation: BrainConversation {
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     private let lock = NSLock()
     private var storedRendered: [[String]] = []
-    private var storedRenderedSeconds: [[TimeInterval]] = []
     var rendered: [[String]] { lock.withLock { storedRendered } }
-    var renderedSeconds: [[TimeInterval]] { lock.withLock { storedRenderedSeconds } }
-    func render(_ lines: [String], perLineSeconds: [TimeInterval]) {
-        lock.withLock {
-            storedRendered.append(lines)
-            storedRenderedSeconds.append(perLineSeconds)
-        }
+    func render(_ lines: [String]) {
+        lock.withLock { storedRendered.append(lines) }
     }
 }
 
@@ -325,9 +320,6 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         #expect(screen.captureCount == 1)
         #expect(overlay.rendered == [["What's the complexity of that nested loop?"]])
-        let expectedSeconds = OverlayTiming.displaySeconds(
-            for: "What's the complexity of that nested loop?", config: .default)
-        #expect(overlay.renderedSeconds == [[expectedSeconds]])
         #expect(brain.calls.count == 2)
         #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls?.first?.name == "capture_screen" })
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "c1" })
@@ -1952,7 +1944,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true))
+                disabledTools: [], prepSourcesConfigured: false))
         transcript.append(.init(speaker: .me, text: "first attempt", at: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
@@ -1976,7 +1968,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true),
+                disabledTools: [], prepSourcesConfigured: false),
             automaticAttemptDelay: { _ in await delayGate.enter() })
         driver.updateTranscriptionWork(.pending(since: nil), for: .them)
 
@@ -2119,7 +2111,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
-        let summarizer = ScriptedBrain(script: [.init(toolCalls: [], outputText: "PROBLEM: tic-tac-toe columns.")])
+        let summarizer = ScriptedBrain(script: [.init(toolCalls: [], outputText: #"{"context":"PROBLEM: tic-tac-toe columns.","decisions":[],"coaching":[],"openQuestions":[],"verification":[]}"#)])
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 30))
         transcript.append(.init(speaker: .me, text: String(repeating: "the problem statement goes on ", count: 8), at: 0))
@@ -2166,6 +2158,31 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await driver.cancelBackgroundWork()?.value
     }
 
+    @Test func malformedBriefingKeepsHistoryAndDoesNotFailTheRoute() async {
+        let clock = ManualClock(now: 0)
+        let recorder = RouteFailureRecorder()
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
+        let summarizer = ScriptedBrain(script: [.init(toolCalls: [], outputText:
+            "I cannot provide a hint without a screenshot.")])
+        let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
+            config: Config(historyCompactionTokenThreshold: 5),
+            onRouteFailure: { recorder.record($0) })
+        transcript.append(.init(speaker: .me, text: "Keep the inclusive boundary decision", at: 0))
+        await driver.handleTrigger(.turnEnd)
+        transcript.append(.init(speaker: .me, text: "Tests have not run", at: 1))
+        await driver.handleTrigger(.turnEnd)
+        #expect(await waitUntilAsync { summarizer.calls.count >= 1 })
+        for turn in 0..<20 {
+            transcript.append(.init(speaker: .me, text: "review next case", at: 2 + Double(turn)))
+            await driver.handleTrigger(.turnEnd)
+            let context = (brain.calls.last ?? []).compactMap(\.text).joined(separator: "\n")
+            #expect(context.contains("Keep the inclusive boundary decision"))
+            #expect(!context.contains("I cannot provide a hint"))
+        }
+        #expect(recorder.failures.isEmpty)
+        await driver.cancelBackgroundWork()?.value
+    }
+
     @Test func compactionDoesNotBlockTheAttempt() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
@@ -2195,7 +2212,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let gate = AsyncGate()
-        let summarizer = GatedSummarizer(gate: gate, summary: "never applied")
+        let briefing = #"{"context":"never applied","decisions":[],"coaching":[],"openQuestions":[],"verification":[]}"#
+        #expect(JarvisPrompts.HistorySummary.validatedSummary(briefing) != nil)
+        let summarizer = GatedSummarizer(gate: gate, summary: briefing)
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 5))
         transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))

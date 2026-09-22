@@ -133,7 +133,6 @@ import Testing
 
     @MainActor @Test func aClickOnTheSettingsSampleDoesNotReachTheNextSession() throws {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
-        box.setEnabled(true)
         box.showAppearancePreview(true)
         #expect(box.currentDetail != nil, "the preview shows a sample detail")
         box.clickDetailPin()
@@ -171,10 +170,6 @@ import Testing
         box.clickDetailPin()
         box.showNextDetail()
         #expect(box.isDetailHeld, "the disabled next arrow must not unpin")
-        box.setEnabled(false)
-        box.showPreviousDetail()
-        #expect(box.currentDetailPosition == "2 of 2")
-        box.setEnabled(true)
         box.clickCollapseButton()
         box.showPreviousDetail()
         #expect(box.currentDetailPosition == "2 of 2")
@@ -194,13 +189,12 @@ import Testing
 
     @MainActor private func makeBox() throws -> OverlayBoxPanel {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
-        box.setEnabled(true)
         box.setSessionLive(true)
         return box
     }
 
     @MainActor private func deliver(_ box: OverlayBoxPanel, _ text: String, _ mermaid: String) throws {
         let detail = try #require(ReplyDetail(markdown: "\(text)\n\n```mermaid\n\(mermaid)\n```"))
-        #expect(box.deliver([text], perLineSeconds: [2], detail: detail) == detail)
+        #expect(box.deliver([text], detail: detail) == detail)
     }
 }

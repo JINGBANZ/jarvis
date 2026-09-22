@@ -129,15 +129,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
     }
 
     /// Nil unless `permitted` includes speak, so an automatic turn (nil `permitted`) fails instead.
-    private static func spokenProse(_ text: String?, permitted: [String]?,
-                                    detailEnabled: Bool) -> ToolInvocation? {
+    private static func spokenProse(_ text: String?, permitted: [String]?) -> ToolInvocation? {
         guard permitted?.contains(speakToolName) == true, let text,
               let first = text.range(of: #"\S.*"#, options: .regularExpression) else { return nil }
         let rest = text[first.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
         return .speak(
             callId: "runner_" + UUID().uuidString.prefix(8).lowercased(),
             lines: [text[first].trimmingCharacters(in: .whitespaces)],
-            detail: detailEnabled && !rest.isEmpty ? rest : nil)
+            detail: rest.isEmpty ? nil : rest)
     }
 
     func runAttempt(
@@ -396,8 +395,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     if permitted?.contains(parsed.toolName) ?? true {
                         call = parsed
                     } else if atCap, let spoken = Self.spokenProse(
-                        response.outputText, permitted: permitted,
-                        detailEnabled: capabilities.detailEnabled) {
+                        response.outputText, permitted: permitted) {
                         jlog("⚠️ \(parsed.toolName) isn't allowed on a shortcut's last response — "
                              + "speaking the reply's text")
                         call = spoken
@@ -420,8 +418,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     }
                 } else if let raw = response.rawToolCalls.first {
                     if atCap, let spoken = Self.spokenProse(
-                        response.outputText, permitted: permitted,
-                        detailEnabled: capabilities.detailEnabled) {
+                        response.outputText, permitted: permitted) {
                         jlog("⚠️ \(raw.name) couldn't run on the last response — speaking the reply's text")
                         call = spoken
                     } else if let tool = capabilities.tool(named: raw.name) {
@@ -458,13 +455,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("⚠️ reply had no tool call — asking for the speak call again")
                     refusedProse = true
                     turnMessages.append(.init(role: .assistant, text: prose))
-                    turnMessages.append(.user(JarvisPrompts.Coach.replyMustCallSpeak(
-                        detailEnabled: capabilities.detailEnabled)))
+                    turnMessages.append(.user(JarvisPrompts.Coach.replyMustCallSpeak))
                     requestSequence += 1
                     continue
                 } else if let spoken = Self.spokenProse(
-                    response.outputText, permitted: permitted,
-                    detailEnabled: capabilities.detailEnabled) {
+                    response.outputText, permitted: permitted) {
                     jlog("⚠️ reply still had no tool call — speaking its text as the reply")
                     call = spoken
                 } else {
@@ -538,25 +533,19 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("💬 \(lines.joined(separator: " "))")
-                    // Undeclared `detail` never reaches the overlay, history, or Activity.
-                    let parsedDetail = capabilities.detailEnabled
-                        ? requestedDetail.flatMap(ReplyDetail.init(markdown:))
-                        : nil
+                    let parsedDetail = requestedDetail.flatMap(ReplyDetail.init(markdown:))
                     for reason in parsedDetail?.dropped ?? [] { jlog("Detail: \(reason)") }
                     let delivery = await MainActor.run { () -> (accepted: Bool, detail: ReplyDetail?) in
                         guard !Task.isCancelled else { return (false, nil) }
-                        return (true, self.overlay.deliver(lines, perLineSeconds: lines.map {
-                            OverlayTiming.displaySeconds(for: $0, config: self.config)
-                        }, detail: parsedDetail))
+                        return (true, self.overlay.deliver(lines, detail: parsedDetail))
                     }
                     guard delivery.accepted else { return .cancelled }
                     let delivered = delivery.detail
                     activity?.record(.tip(lines: lines, detail: delivered?.deliveredMarkdown))
                     // History records the detail actually shown, not blocks the runtime dropped.
-                    var arguments: [String: Any] = ["lines": lines]
-                    if capabilities.detailEnabled {
-                        arguments["detail"] = delivered?.deliveredMarkdown ?? NSNull()
-                    }
+                    let arguments: [String: Any] = [
+                        "lines": lines, "detail": delivered?.deliveredMarkdown ?? NSNull(),
+                    ]
                     let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
                     // Rebuilt, not copied, so a hint spoken from prose still commits a call.
                     turnMessages.append(.assistantToolCalls([RawToolCall(
@@ -764,12 +753,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
             let response = try await client.respond(
                 messages: [
                     .system(JarvisPrompts.HistorySummary.system),
-                    .user(JarvisPrompts.HistorySummary.input(oldest)),
+                    .user(try JarvisPrompts.HistorySummary.input(oldest)),
                 ],
                 tools: [],
                 toolChoice: .auto)
-            guard let summary = response.outputText, !summary.isEmpty else {
-                jlog("… memory compaction returned nothing — keeping full history for now")
+            guard let output = response.outputText,
+                  let summary = JarvisPrompts.HistorySummary.validatedSummary(output) else {
+                jlog("… memory compaction returned an invalid briefing — keeping full history for now")
                 return
             }
             // A summary that wins the race with teardown must not mutate history.

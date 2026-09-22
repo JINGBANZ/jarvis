@@ -10,7 +10,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private lazy var secrets = ChainedSecretStore([secretFile, EnvSecretStore()])
     private let errorReporter = ErrorReporter()
 
-    private var overlayCaption: OverlayCaptionPanel!
     private var overlayBox: OverlayBoxPanel!
     private var menuBar: MenuBarController!
     /// Nil in a development bundle, which has no Sparkle feed URL.
@@ -88,15 +87,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             self?.activityViewer?.historyDidChange()
         }
         // Resolved at click time, so a moved app bundle is picked up without rebuilding Activity.
-        activityViewer.makeEvaluator = { [weak self] session in
+        activityViewer.makeEvaluator = { [weak self] session, cli in
             guard let self else { return nil }
-            return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session))
+            return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session),
+                                    preferredCLI: cli)
         }
-
-        overlayCaption = OverlayCaptionPanel()
-        overlayCaption.setFontSize(appearance.captionFontSize)
-        overlayCaption.setBackgroundOpacity(appearance.captionBackgroundOpacity)
-        overlayCaption.setEnabled(appearance.captionEnabled)
 
         overlayBox = OverlayBoxPanel(contentSize: NSSize(
             width: appearance.boxWidth, height: appearance.boxHeight))
@@ -108,13 +103,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             appearance.boxWidth = width
             appearance.boxHeight = height
         }
-        // Only arms the switch; the box appears on Start and hides on Stop.
-        overlayBox.setEnabled(appearance.boxEnabled)
 
         composition = SessionComposition(
             brain: brain,
             artifacts: artifacts,
-            overlayCaption: overlayCaption,
             overlayBox: overlayBox,
             readiness: readiness,
             errorReporter: errorReporter,
@@ -137,11 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             onCheckForUpdates: updates.map { updater in { updater.checkForUpdates() } })
         renderReadinessStatus(readiness.status)
 
-        // Built before Settings, whose hotkey closures apply through it. The optional shortcuts
-        // answer into the detail box, so they register only while the box is enabled.
-        hotkeys = HotkeyController(preferences: hotkeyPreferences.filter {
-            $0.shortcut == .hint || appearance.boxEnabled
-        })
+        // Built before Settings, whose hotkey closures apply through it.
+        hotkeys = HotkeyController(preferences: hotkeyPreferences)
 
         let signIns = SubscriptionSignIns(supervisor: supervisor)
         brainSection = BrainSection(
@@ -164,31 +153,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             })
         let mouseHotkeys = MouseHotkeyController(preferences: hotkeyPreferences)
         self.mouseHotkeys = mouseHotkeys
-        mouseHotkeys.isEnabled = { [weak self] shortcut in
-            guard let self, self.composition.isLive else { return false }
-            return self.composition.allows(shortcut)
-                && (shortcut == .hint || self.appearance.boxEnabled)
-        }
+        mouseHotkeys.isEnabled = { [weak self] _ in self?.composition.isLive == true }
         mouseHotkeys.onRequest = { [weak self] shortcut in self?.hotkeys?.onRequest?(shortcut) }
         let hotkeySection = HotkeySection(
                 preferences: hotkeyPreferences,
                 mouseController: mouseHotkeys,
-                boxEnabled: { [weak self] in self?.appearance.boxEnabled == true },
                 hasActiveHotkey: { [weak self] shortcut in
-                    guard let self else { return false }
-                    // Deferred bindings have no live registration to warn about until Start.
-                    return (self.composition.isLive && !self.composition.allows(shortcut))
-                        || self.hotkeys?.registered[shortcut] != nil
+                    self?.hotkeys?.registered[shortcut] != nil
                 },
                 applyCombination: { [weak self] shortcut, combination in
                     // Only a torn-down self reaches the fallback; report failure, not a rebind.
-                    guard let self else { return .failed(status: -1) }
-                    let outcome = self.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
-                    if (shortcut != .hint && !self.appearance.boxEnabled)
-                        || (self.composition.isLive && !self.composition.allows(shortcut)) {
-                        self.hotkeys?.unregister(shortcut) // Validate ownership, then release until Start.
-                    }
-                    return outcome
+                    self?.hotkeys?.apply(combination, for: shortcut) ?? .failed(status: -1)
                 })
         let sections: [SettingsSection] = [
             brainSection,
@@ -205,14 +180,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     guard let self else { return }
                     self.composition.updateScreenSelection(self.screenPreferences.selection)
                 }),
-            OverlaySection(appearance: appearance, caption: overlayCaption, box: overlayBox,
-                onBoxEnabledChanged: { [weak self] _ in
-                    guard let self else { return }
-                    self.refreshOptionalShortcut(.explainMore)
-                    self.refreshOptionalShortcut(.showCode)
-                    self.refreshOptionalShortcut(.previousDetail)
-                    self.refreshOptionalShortcut(.nextDetail)
-                }),
+            OverlaySection(appearance: appearance, box: overlayBox),
             connectionsSection,
             ToolsSection(brainPreferences: brain.preferences, prepPreferences: prepMaterialPreferences),
             SkillsSection(preferences: brain.preferences),
@@ -245,7 +213,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 }
                 return
             }
-            guard self.composition.allows(shortcut) else { return }
             switch shortcut {
             case .previousDetail: self.overlayBox.showPreviousDetail()
             case .nextDetail: self.overlayBox.showNextDetail()
@@ -281,7 +248,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionConfiguration = transcriptionPreferences.configuration
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
-        let detailEnabled = appearance.boxEnabled
         let brainKeys = brain.savedKeys(for: brainRoute)
         let transcriptionKey = transcriptionProvider.ownCredential
             .flatMap { secrets.apiKey(for: $0) } ?? ""
@@ -417,7 +383,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 brainKeys: brainKeys,
                 transcriptionKey: transcriptionKey,
                 brainRoute: brainRoute,
-                detailEnabled: detailEnabled,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
                 proxy: proxy,
@@ -473,7 +438,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         brainKeys: [Credential: String],
         transcriptionKey: String,
         brainRoute: BrainRoute,
-        detailEnabled: Bool,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
         proxy: LocalProxySupervisor.Readiness?,
@@ -495,15 +459,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             return false
         }
         stop(reason: .replacedByNewSession, preserving: readinessSession)
-        // Follows the box setting this session is frozen with, not the live one.
-        for shortcut in CoachingShortcut.allCases where shortcut != .hint {
-            if detailEnabled,
-               let preference = hotkeyPreferences.first(where: { $0.shortcut == shortcut }) {
-                hotkeys?.apply(preference.combination, for: shortcut)
-            } else {
-                hotkeys?.unregister(shortcut)
-            }
-        }
         showActiveBrainTarget(
             brain.unavailability(for: brainRoute.primary, proxy: proxy) == nil ? brainRoute.primary : nil)
         return composition.start(
@@ -514,8 +469,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 brainRoute: brainRoute,
                 appleSpeechLocale: appleSpeechLocale,
                 screen: screenPreferences.selection,
-                prepSources: prepMaterialPreferences.sources,
-                detailEnabled: detailEnabled),
+                prepSources: prepMaterialPreferences.sources),
             proxy: proxy,
             readinessSession: readinessSession,
             reportContext: reportContext)
@@ -583,14 +537,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         composition.applyReadinessEffects(readiness.stop(session: session))
     }
 
-    private func refreshOptionalShortcut(_ shortcut: CoachingShortcut) {
-        if appearance.boxEnabled, !composition.isLive || composition.allows(shortcut),
-           let preference = hotkeyPreferences.first(where: { $0.shortcut == shortcut }) {
-            hotkeys?.apply(preference.combination, for: shortcut)
-        } else {
-            hotkeys?.unregister(shortcut)
-        }
-    }
 }
 
 private extension JarvisReadiness.Status {

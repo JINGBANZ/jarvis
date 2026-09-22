@@ -39,15 +39,10 @@ enum CoachingParityHarness {
         case exhausted(BrainTarget)
     }
 
-    struct OverlayEvent: Equatable {
-        let lines: [String]
-        let perLineSeconds: [TimeInterval]
-    }
-
     struct Snapshot: Equatable {
         let outcomes: [TurnOutcome]
         let providerRequests: [Data]
-        let overlayEvents: [OverlayEvent]
+        let overlayEvents: [[String]]
         let routeTransitions: [RouteTransition]
     }
 
@@ -136,8 +131,7 @@ enum CoachingParityHarness {
         return Snapshot(
             outcomes: outcomes,
             providerRequests: requests.bodies,
-            overlayEvents: zip(overlay.rendered, overlay.renderedSeconds)
-                .map { OverlayEvent(lines: $0, perLineSeconds: $1) },
+            overlayEvents: overlay.rendered,
             routeTransitions: transitions.events)
     }
 }

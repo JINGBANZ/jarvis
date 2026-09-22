@@ -9,8 +9,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     private let log: ActivityLog
     private var store: SessionStore
 
-    /// Called per click, so the evaluator uses the current provider selection.
-    var makeEvaluator: (@MainActor (URL) -> AgenticEvaluator?)?
+    var makeEvaluator: (@MainActor (URL, AgentCLI) -> AgenticEvaluator?)?
 
     /// Ghost mode: nothing here may present while this returns true.
     var isCoachingRunning: (@MainActor () -> Bool)?
@@ -28,6 +27,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// Not reset by `teardown()`: an evaluation outlives a Settings close.
     private var isEvaluating = false
     private var isFetchingSource = false
+    private var isFindingAgents = false
+    private var findingAgentsTask: Task<Void, Never>?
     private var evaluationTask: Task<Void, Never>?
     private var sessions: [SessionStore.Session] = []
 
@@ -145,6 +146,10 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         evaluateButton = nil
         clearHistoryButton = nil
         exportButton = nil
+        // Unlike an evaluation, a pending agent menu must not pop up in a reopened window.
+        findingAgentsTask?.cancel()
+        findingAgentsTask = nil
+        isFindingAgents = false
         loaded = false
         pending = []
         snapshotRows = []
@@ -255,8 +260,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             button.isEnabled = true
         } else {
             button.title = "Evaluate"
-            button.toolTip = "Run an agentic audit over this session and the Jarvis source checkout"
-            button.isEnabled = true
+            button.toolTip = "Choose an agent CLI to audit this session and the Jarvis source checkout"
+            button.isEnabled = !isFindingAgents
         }
     }
 
@@ -338,17 +343,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     // MARK: - Session evaluation
 
     @objc private func evaluateTapped() {
-        guard !isEvaluating else { return }
-        guard isCoachingRunning?() != true else {
-            jlog("Jarvis: suppressed Activity evaluation presentation while coaching is running.")
-            return
-        }
-        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return }
-        let session = sessions[idx]
-        guard isSessionAuditClosed?(session.url) != false else {
-            jlog("Jarvis: suppressed evaluation while the selected session audit is closing.")
-            return
-        }
+        guard !isEvaluating, !isFindingAgents, let session = evaluableSession() else { return }
         if let report = AgenticEvaluation.savedReport(in: session.url) {
             openReport(report, for: session)
             return
@@ -358,7 +353,64 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
                  "This session has no recorded brain traffic. Traffic starts with the first coaching turn.")
             return
         }
-        guard let evaluator = makeEvaluator?(session.url) else { return }
+        isFindingAgents = true
+        refreshEvaluateButtonState()
+        findingAgentsTask = Task { [weak self] in
+            let agents = await AgentCLIDetector().detectAllAsync(AgenticEvaluator.searchOrder)
+            // Detection ignores cancellation, so a cancelled run must still stop here.
+            guard !Task.isCancelled else { return }
+            self?.findingAgentsTask = nil
+            self?.isFindingAgents = false
+            self?.refreshEvaluateButtonState()
+            self?.showAgentMenu(agents, for: session)
+        }
+    }
+
+    /// Nil when nothing is selected or the coaching lifecycle forbids evaluation.
+    private func evaluableSession() -> SessionStore.Session? {
+        guard isCoachingRunning?() != true else {
+            jlog("Jarvis: suppressed Activity evaluation presentation while coaching is running.")
+            return nil
+        }
+        guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else { return nil }
+        let session = sessions[idx]
+        guard isSessionAuditClosed?(session.url) != false else {
+            jlog("Jarvis: suppressed evaluation while the selected session audit is closing.")
+            return nil
+        }
+        return session
+    }
+
+    /// Re-checks the selection because coaching may start, or the picker change, during detection.
+    private func showAgentMenu(_ agents: [DetectedAgentCLI], for session: SessionStore.Session) {
+        guard let button = evaluateButton, evaluableSession()?.url == session.url else { return }
+        guard !agents.isEmpty else {
+            info("No agent to evaluate with",
+                 AgenticEvaluator.EvaluationError.noAgentCLI.localizedDescription)
+            return
+        }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        for agent in agents {
+            let signedOut = agent.authenticationStatus == .signedOut
+            let item = NSMenuItem(
+                title: signedOut ? "\(agent.cli.displayName) (signed out)" : agent.cli.displayName,
+                action: #selector(agentChosen(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = agent.cli.rawValue
+            item.isEnabled = !signedOut
+            menu.addItem(item)
+        }
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.height + 4), in: button) // ghost-mode-allowed: guarded explicit Activity action
+    }
+
+    @objc private func agentChosen(_ item: NSMenuItem) {
+        guard !isEvaluating,
+              let rawValue = item.representedObject as? String,
+              let cli = AgentCLI(rawValue: rawValue),
+              let session = evaluableSession(),
+              let evaluator = makeEvaluator?(session.url, cli)
+        else { return }
 
         isEvaluating = true
         refreshEvaluateButtonState()

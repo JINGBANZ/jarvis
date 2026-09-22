@@ -5,7 +5,6 @@ import JarvisCore
 final class MouseHotkeyBindingView: NSObject {
     private let preferences: HotkeyPreferences
     private let controller: MouseHotkeyController
-    private let boxEnabled: () -> Bool
     private var recorder: MouseHotkeyRecorderButton?
     private var clearButton: NSButton?
     private var label: NSTextField?
@@ -13,10 +12,9 @@ final class MouseHotkeyBindingView: NSObject {
     private var failure: String?
     private var isRecording = false
 
-    init(preferences: HotkeyPreferences, controller: MouseHotkeyController, boxEnabled: @escaping () -> Bool) {
+    init(preferences: HotkeyPreferences, controller: MouseHotkeyController) {
         self.preferences = preferences
         self.controller = controller
-        self.boxEnabled = boxEnabled
     }
 
     func makeRow() -> SettingsRowView {
@@ -75,14 +73,10 @@ final class MouseHotkeyBindingView: NSObject {
     }
 
     private func render() {
-        let enabled = preferences.shortcut == .hint || boxEnabled()
-        recorder?.isEnabled = enabled
         clearButton?.isEnabled = preferences.mouseCombination != nil && !isRecording
         label?.stringValue = preferences.mouseCombination.map(HotkeyKeyNames.displayString(for:)) ?? "Not set"
         label?.toolTip = label?.stringValue
-        if !enabled {
-            row?.setDetail("Needs the Overlay Box. Switch it on in Mouth.")
-        } else if isRecording {
+        if isRecording {
             row?.setDetail("Click here; left/right needs ⌘ or ⌥. Esc cancels.", color: SettingsTheme.teal)
         } else if let failure {
             row?.setDetail(failure, color: SettingsTheme.amber)

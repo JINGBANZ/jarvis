@@ -10,9 +10,6 @@ public struct Config: Sendable {
     /// Estimated tokens. Inside the usual 5-20k conversational band, so compaction stays rare and
     /// per-request input stays cheap.
     public var historyCompactionTokenThreshold: Int
-    public var overlayNoticeBufferSeconds: TimeInterval
-    public var overlaySecondsPerWord: TimeInterval
-    public var overlayMaxDisplaySeconds: TimeInterval
     /// Server VAD only (GPT-4o Transcribe). Above OpenAI's ~500 ms default so a mid-thought pause
     /// doesn't split a sentence.
     public var vadSilenceDurationMs: Int
@@ -31,9 +28,6 @@ public struct Config: Sendable {
         silenceMaxIntervalSeconds: TimeInterval = 960,
         silenceIdleCutoffSeconds: TimeInterval = 1_800,
         historyCompactionTokenThreshold: Int = 10_000,
-        overlayNoticeBufferSeconds: TimeInterval = 2.0,
-        overlaySecondsPerWord: TimeInterval = 0.35,
-        overlayMaxDisplaySeconds: TimeInterval = 8,
         vadSilenceDurationMs: Int = 1000,
         localEndpointSilenceDurationMs: Int = 800,
         audioNoiseReduction: NoiseReductionMode = .auto,
@@ -47,9 +41,6 @@ public struct Config: Sendable {
         self.silenceMaxIntervalSeconds = silenceMaxIntervalSeconds
         self.silenceIdleCutoffSeconds = silenceIdleCutoffSeconds
         self.historyCompactionTokenThreshold = historyCompactionTokenThreshold
-        self.overlayNoticeBufferSeconds = overlayNoticeBufferSeconds
-        self.overlaySecondsPerWord = overlaySecondsPerWord
-        self.overlayMaxDisplaySeconds = overlayMaxDisplaySeconds
         self.vadSilenceDurationMs = vadSilenceDurationMs
         self.localEndpointSilenceDurationMs = localEndpointSilenceDurationMs
         self.audioNoiseReduction = audioNoiseReduction
@@ -59,9 +50,6 @@ public struct Config: Sendable {
         self.realtimePingIntervalSeconds = realtimePingIntervalSeconds
         self.realtimePongTimeoutSeconds = realtimePongTimeoutSeconds
     }
-
-    /// Static because the overlay panel reads it during playback without a `Config` instance.
-    public static let overlayLineGapSeconds: TimeInterval = 0.2
 
     public static let `default` = Config()
 }

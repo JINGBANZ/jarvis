@@ -10,7 +10,7 @@ requires separate, previously unused problems from different domains, evaluated 
 guidance to their answers; report those results separately.
 
 Run each input in a fresh model conversation with the production `JarvisPrompts.Coach.system`
-base instructions, `speakTool(detailEnabled: true)` guidance, and the named bundled skill bodies
+base instructions, `speakTool` guidance, and the named bundled skill bodies
 already loaded. Give the model only `input`, never `pass`. Offer the normal coach actions or,
 for a CLI instruction-level evaluation without tools, request a JSON representation of one
 `speak`, `stay_silent`, or `capture_screen` action. Do not grant filesystem, browser, or shell tools.

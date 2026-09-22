@@ -10,7 +10,7 @@
 mode. Interviewer and candidate lines are synthesized at run time and fed as audio into real OpenAI
 transcription. The real coach loads skills and tools on demand, switches between the brains
 (Claude Code, OpenAI, Codex, and Gemini), views a fixture screenshot when it asks for the screen,
-delivers to the real overlay panels, and writes a normal session directory. A test target then reads that directory and records one result per case ID.
+delivers to the real Overlay Box, and writes a normal session directory. A test target then reads that directory and records one result per case ID.
 
 The mode is a sibling of the [transcription benchmark](./transcription-benchmark.md) and follows its
 conventions: `--live-e2e` in `Sources/JarvisApp/App/main.swift` selects `LiveE2EAppDelegate`
@@ -82,7 +82,7 @@ Set up once per machine:
 During a run:
 
 - **The Mac stays usable.** Nothing reads the screen and no window opens, so the developer keeps
-  working. The overlay panels do appear over that work while a scenario coaches.
+  working. The Overlay Box does appear over that work while a scenario coaches.
 - **Scenario R hears the room.** It records the real microphone and system audio for the few seconds
   from Start to coaching ready, so keep calls and media off while it runs.
 - **No other Jarvis Dev.app runs.** Two instances would contend for the capture device and the session
@@ -342,7 +342,7 @@ it as unverified in its description.
   the item is greyed out while a session runs, enabled once stopped, and reports the app up to date
   against the current release. Releases themselves are verified by the release workflow.
 - **Release evaluation source (R02),** when evaluation source selection changes. In an installed
-  release, evaluate a stopped session and confirm the button shows **Fetching source…** then
+  release, evaluate a stopped session, pick an agent, and confirm the button shows **Fetching source…** then
   **Evaluating…**, the recorded version is used after an update, a second evaluation fetches the
   source again, the offline dialog names the session's recorded version, cancelling during the fetch
   leaves no source tree, and Quit ends the run immediately. The contract is in
@@ -367,8 +367,7 @@ it as unverified in its description.
   Start, and a forced Apple analyzer failure never sends audio to OpenAI as a fallback.
 - **Shortcut bindings and the detail box's controls,** because the run requests shortcuts without
   the global hotkeys and never clicks the box. Press all three shortcuts from another app and confirm
-  distinct requests, rebind them independently and try a collision, confirm they are unbindable while
-  the Overlay Box is off, and confirm an explanation after clear confusion and silence during healthy
+  distinct requests, rebind them independently and try a collision, and confirm an explanation after clear confusion and silence during healthy
   progress. Then step the detail box's back and forward arrows, Pin, Unpin, and Dismiss and confirm
   each takes the click without moving focus off the editor.
 - **Mixed practice,** because it judges coaching on a screen a person changes. With the OpenAI brain,

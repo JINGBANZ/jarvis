@@ -4,7 +4,6 @@ import JarvisCore
 @MainActor
 final class HotkeyBindingView: NSObject {
     private let preferences: HotkeyPreferences
-    private let boxEnabled: () -> Bool
     /// False only when nothing was registered this run, because a rejected rebind keeps the
     /// previous combination live.
     private let hasActiveHotkey: () -> Bool
@@ -17,16 +16,11 @@ final class HotkeyBindingView: NSObject {
     private var lastOutcome: HotkeyRegistrationOutcome?
     private var isRecording = false
 
-    /// Non-hint shortcuts answer into the detail box, so they need the Overlay Box switched on.
-    private var isEnabled: Bool { preferences.shortcut == .hint || boxEnabled() }
-
     init(
         preferences: HotkeyPreferences,
-        boxEnabled: @escaping () -> Bool = { true },
         hasActiveHotkey: @escaping () -> Bool,
         applyCombination: @escaping (HotkeyCombination) -> HotkeyRegistrationOutcome
     ) {
-        self.boxEnabled = boxEnabled
         self.preferences = preferences
         self.hasActiveHotkey = hasActiveHotkey
         self.applyCombination = applyCombination
@@ -81,7 +75,6 @@ final class HotkeyBindingView: NSObject {
     }
 
     private func recorded(_ combination: HotkeyCombination) {
-        guard isEnabled else { return }
         let outcome = applyCombination(combination)
         if case .registered = outcome {
             preferences.combination = combination
@@ -92,12 +85,6 @@ final class HotkeyBindingView: NSObject {
 
     private func render() {
         keycaps?.keys = HotkeyKeyNames.keyCaps(for: preferences.combination)
-        recorder?.isEnabled = isEnabled
-        keycaps?.alphaValue = isEnabled ? 1 : 0.45
-        guard isEnabled else {
-            row?.setDetail("Needs the Overlay Box. Switch it on in Mouth.")
-            return
-        }
         if isRecording {
             row?.setDetail("Press the new shortcut with ⌘ or ⌥. Esc cancels.", color: SettingsTheme.teal)
             return

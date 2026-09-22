@@ -111,7 +111,7 @@ reasoning effort (none for None, three for High). Ear shows the transcription pr
 model name and the languages it expects; GPT-4o Transcribe with more than one language reads as
 hearing any language, because that model takes a single hint. Eye shows the capture scope and
 whether Chrome text is on, which needs both the switch and a live Accessibility grant.
-Mouth shows which overlays are on. Slots are keyboard-focusable buttons (Space or Return opens) that
+Mouth shows the Overlay Box and its text size. Slots are keyboard-focusable buttons (Space or Return opens) that
 VoiceOver reads as "<Part> settings" with the slot's value and detail. Hovering or focusing a slot
 lights its part of the head and its connector; hovering a part lights its slot.
 
@@ -144,7 +144,7 @@ only what Settings can fix or explain:
   the route will answer instead, or whether none can.
 - **Ear** needs its transcription provider's own key first, then microphone access.
 - **Eye** needs Screen Recording.
-- **Mouth** needs at least one of the caption and the box switched on.
+- **Mouth** never needs the user: the Overlay Box has no off switch.
 
 The exact wording lives in `RobotHealth`.
 
@@ -194,12 +194,12 @@ pages it moves.
 | `BrainSection` | **Brain**: "Who does my thinking, and how hard I think." | The ordered provider route and the reasoning effort ([Brain](#brain)). Valid route and effort changes take effect between coaching attempts while running, which the header chip says. |
 | `TranscriptionSection` | **Ear**: "How I turn the conversation into text." | The transcription provider and its model, language, vocabulary, mode, or locale rows ([Ear](#ear)). Applies on the next Start. |
 | `DisplaySection` | **Eye**: "What I look at when I check your screen." | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — and the optional Chrome text switch, followed by a short fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot ([Capture Scope](#capture-scope)). |
-| `OverlaySection` | **Mouth**: "How my hints show up on your screen." | Two matching cards, one per overlay surface — **Overlay Caption** (the transient on-screen tip) and **Overlay Box** (the persistent response history). Each card has an icon, description, On/Off switch, and the same text size and opacity rows; the box also carries the detail box's own rows, with no switch of their own. When a surface is **on** its rows and live sample appear only while the Mouth page is visible (`didBecomeActive`/`didResignActive`); when **off**, its rows and sample are hidden and the card collapses. The header's live chip says the sliders act on screen. Persists via `OverlayAppearance` ([Overlay Appearance](#overlay-appearance)). |
+| `OverlaySection` | **Mouth**: "How my hints show up on your screen." | One **Overlay Box** card (the persistent response history) with an icon, description, text size and opacity rows, and the detail box's own rows. It has no On/Off switch: the box shows for every session. Its live sample appears only while the Mouth page is visible (`didBecomeActive`/`didResignActive`). The header's live chip says the sliders act on screen. Persists via `OverlayAppearance` ([Overlay Appearance](#overlay-appearance)). |
 | `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts what is ready. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | Prep notes search, with its switch and its list of local note files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
 | `HotkeySection` | **Shortcuts**: "Ask me for help, or step through my details." | One card with a row each for **Give me a hint**, **Explain more**, **Show code**, **Previous detail**, and **Next detail**: keyboard keycaps and **Record**, an optional mouse row with **Record**/**Clear**, and per-row failure feedback ([Shortcuts](#shortcuts)). |
-| `ActivitySection` | **Activity**: "What I heard and said, session by session." | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**: one click runs the sole `AgenticEvaluator` through a locally installed Claude Code / Codex CLI over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
+| `ActivitySection` | **Activity**: "What I heard and said, session by session." | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**, which opens a menu of the installed Claude Code / Codex CLIs; the chosen one runs the sole `AgenticEvaluator` over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
 `AppDelegate` builds the hub model, the hub, and the section list at launch and passes them to
 `SettingsWindow`. Every page is always reachable, but its content is created lazily on its first
@@ -218,25 +218,19 @@ answers, so a helper that is still starting cannot delay presentation.
 ## Overlay Appearance
 
 Overlay appearance is persisted through `OverlayAppearance`; every key, default, and clamp range is
-declared in [`Defaults.Overlay`](../Sources/JarvisCore/Config/Defaults.swift). Each surface carries an
-on/off flag, a font size, and an opacity; the box additionally carries its width and height.
+declared in [`Defaults.Overlay`](../Sources/JarvisCore/Config/Defaults.swift). The box carries a font
+size, an opacity, and its width and height. `AppDelegate` applies them at launch.
 
-The two surfaces default opposite ways — the caption **off**, the box **on** — so a first run shows
-the durable history rather than a flashing caption. `AppDelegate` applies both enabled flags at launch.
+The box is a **session surface** with no off switch: it reaches the screen on Start (already
+cleared, for the new conversation) and leaves it on Stop, so a stopped Jarvis puts nothing on the
+desktop. `SessionComposition` calls `setSessionLive` from the one line that declares a session live
+and the one that ends it, and a single private `applyVisibility()` in `OverlayBoxPanel` follows it.
+Collapsing the box rolls it down to its header but never takes it off screen. The Settings preview
+overrides the rule while the Mouth page is open and re-derives it on close.
 
-The box is a **session surface**: switched on, it reaches the screen on Start (already cleared, for the
-new conversation) and leaves it on Stop, so a stopped Jarvis puts nothing on the desktop. Two flags in
-`OverlayBoxPanel` decide it — the Settings switch (`setEnabled`) and the session (`setSessionLive`,
-called by `SessionComposition` from the one line that declares a session live and the one that ends it) — and
-a single private `applyVisibility()` derives `isEnabled && isSessionLive`. Keeping that rule in one
-place is why the panel, not the two call sites, owns it: switching the box on from Settings while
-stopped would otherwise leave it on screen with no session behind it. The Settings preview overrides
-the rule while the Mouth page is open and re-derives it on close.
-
-Opacity governs the background fill only, so both surfaces accept 0%: a text-only surface with no
-backdrop, not a hidden one. Nothing here takes a surface off screen: that is the On/Off switch, and
-for the box the end of a session as well. Both share one range because the page presents their
-sliders identically. A corrupted non-finite stored value restores the setting's own default rather
+Opacity governs the background fill only, so the box accepts 0%: a text-only surface with no
+backdrop, not a hidden one. Nothing here takes the box off screen; only the end of a session does.
+A corrupted non-finite stored value restores the setting's own default rather
 than the range floor, which at 0% would read as breakage.
 
 The Overlay Box card carries **Detail text size** and **Detail background opacity** sliders for the
@@ -244,8 +238,8 @@ The Overlay Box card carries **Detail text size** and **Detail background opacit
 persist through `OverlayAppearance` independently of the history controls and apply live. The detail
 box defaults to a compact size and an opaque backdrop; the selected size is the preferred size, with
 its fit-to-space reduction retained. Separate background regions let its opacity reach zero without
-revealing the history fill beneath it. There is no switch of its own: the Overlay Box switch decides
-whether a reply may carry a detail at all, and the model judges when one helps. Before the first
+revealing the history fill beneath it. Neither has an off switch: every reply may carry a detail, and
+the model judges when one helps. Before the first
 reply with a detail arrives, no detail area is reserved.
 
 The box is the one surface the user sizes directly, by dragging its edges. `OverlayBoxPanel` reports a
@@ -269,21 +263,16 @@ rather than the header's. The panel's `minSize` derives from the persisted range
 floor and the clamp floor cannot drift apart, and the affordance clamps its own drags against the
 same `minSize`/`maxSize`.
 
-`OverlaySection` applies changes live through two protocols, with no direct dependency on the AppKit
-panels: `OverlayCaptionApplying`, conformed by `OverlayCaptionPanel`, and `OverlayBoxApplying`,
-conformed by `OverlayBoxPanel`. Both are declared in
-[`OverlayAppearance.swift`](../Sources/JarvisCore/Config/OverlayAppearance.swift). All values
-round-trip through `OverlayAppearance` so they survive an app relaunch.
+`OverlaySection` applies changes live through the `OverlayBoxApplying` protocol, declared in
+[`OverlayAppearance.swift`](../Sources/JarvisCore/Config/OverlayAppearance.swift) and conformed by
+`OverlayBoxPanel`, with no direct dependency on the AppKit panel. All values round-trip through
+`OverlayAppearance` so they survive an app relaunch.
 
-`setEnabled(false)` on the caption suppresses coaching tips (dropping any in-flight/queued tip); on
-the box it takes the window off screen, and `setEnabled(true)` returns it there only while a session
-is running. A surface's live sample is shown only while the Mouth page is visible **and that
-surface is on** — `didBecomeActive` previews each surface for its enabled state, and flipping a
-switch shows/hides that surface's sample (and collapses/expands its sliders via `relayout()`) live.
-Each panel's `showAppearancePreview(_:)` re-asserts capture exclusion so the preview stays hidden
-from screen capture — same defense-in-depth as the coaching display path. The box's preview shows
-sample text without disturbing the real log and re-derives `isEnabled && isSessionLive` on close, so
-leaving the page can leave the box on screen only while both hold. The box's sample stands in **only
+The live sample is shown only while the Mouth page is visible: `didBecomeActive` requests it and
+`didResignActive` withdraws it. `showAppearancePreview(_:)` re-asserts capture exclusion so the
+preview stays hidden from screen capture, the same defense-in-depth as the coaching display path.
+The box's preview shows sample text without disturbing the real log and re-derives the session
+rule on close, so leaving the page leaves the box on screen only while a session is running. The box's sample stands in **only
 while stopped**: during a session the box is already on screen carrying the conversation's own tips
 and the sliders apply to it live, so a sample would replace real content with something worse. That
 boundary is a correctness one as much as a display one, because it is what guarantees no tip can land
@@ -291,7 +280,7 @@ behind a sample and no collapse snapshot can cross a session boundary. Start the
 sample down.
 
 Settings cannot see the session, so `showAppearancePreview(_:)` records a request rather than
-obeying one, the way `setEnabled(_:)` does: the sample shows when Settings wants it **and** no session
+obeying one: the sample shows when Settings wants it **and** no session
 is running, derived in one place. A request made during a session is still standing when the session
 stops, so a Stop taken without leaving the page brings the sample up rather than leaving the sliders
 with nothing on screen to act on. Which source is showing is a value, `Display.log` or `.sample`, and
@@ -340,14 +329,9 @@ an interrupted event stream clears pending presses. The tap is disabled when no 
 releases, or recording need mouse events, and is re-enabled when recording or binding again.
 [Sandbox → Data Egress](./sandbox.md#data-egress) defines the mouse-input privacy scope.
 
-**Explain more**, **Show code**, and the two navigation shortcuts all act on the detail box, so the
-Overlay Box switch is the only thing that decides whether they can be bound: with the box off, their
-Record buttons are disabled, their keycaps dim, and their rows say the Overlay Box is needed and that
-it is switched on in Mouth. None has a switch of its own, and the **Give me a hint** shortcut is
-unconditional. Whether a session can use them is fixed at Start: a session that started with the box
-off never registers them, even if the box is switched on mid-session, while a session that started
-with it on releases them when the box is switched off and registers them again when it is switched
-back on.
+**Explain more**, **Show code**, and the two navigation shortcuts all act on the detail box, which
+every session has, so like **Give me a hint** they can always be bound and work whenever a session
+is live. None has a switch of its own.
 
 A keyboard collision with another application or another Jarvis shortcut leaves the old working
 binding active, and that row's detail turns into an amber warning until the page is visited again.
@@ -357,8 +341,7 @@ reserved or checked through Carbon. If a binding could not become active at laun
 shows on every visit. Warnings live in the corresponding row. The Overlay Box shows
 semibold hints in its upper section and the reply's detail in the lower one; a hint whose reply
 carried a detail ends with a dim marker. Both use the configured text size, and the appearance
-preview shows an example. Neither surface's visibility preference changes. No shortcut enables the
-master box.
+preview shows an example.
 
 ## Activity response sections
 
@@ -758,7 +741,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Capture/BrowserAccessibilityPermission.swift` | User-initiated Accessibility grant and status |
 | `Sources/JarvisScreenCapture/BrowserAccessibilityReader.swift` | Bounded, read-only active-tab semantic extraction |
 | `Sources/JarvisScreenCapture/ScreenTextResolver.swift` | Combines optional Accessibility text with current-view OCR |
-| `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | One reusable overlay-surface card and its slider/readout rows |
+| `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | The Overlay Box card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
 | `Sources/JarvisApp/Settings/HotkeySection.swift`, `HotkeyBindingView.swift` | Shortcuts page and one shortcut's row |
 | `Sources/JarvisApp/Settings/HotkeyRecorderButton.swift`, `ShortcutKeycapsView.swift` | The keyboard Record button and the drawn keycaps |
@@ -778,12 +761,10 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisCore/Coach/CoachDriver.swift` | Between-attempt route application and attempt orchestration |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisScreenCapture/ScreenCaptureCLI.swift` | Executes the attempt's frozen `SessionPlan` capture selection and handles main-display fallback |
-| `Sources/JarvisCore/Config/OverlayAppearance.swift` | UserDefaults persistence; `OverlayCaptionApplying` + `OverlayBoxApplying` protocols |
+| `Sources/JarvisCore/Config/OverlayAppearance.swift` | UserDefaults persistence; `OverlayBoxApplying` protocol |
 | `Sources/JarvisCore/Config/TranscriptionPreferences.swift` | Persisted transcription selection + validation |
-| `Sources/JarvisCore/Overlay/BroadcastOverlay.swift` | Fans one `render` out to the caption + box |
-| `Sources/JarvisOverlay/OverlayCaptionPanel.swift` | The Overlay Caption; `OverlayCaptionApplying` conformance |
 | `Sources/JarvisOverlay/OverlayBoxPanel.swift` | The Overlay Box; `OverlayBoxApplying` conformance |
-| `Sources/JarvisOverlay/NSPanel+CaptureExclusion.swift` | Shared `sharingType = .none` helper for both panels |
+| `Sources/JarvisOverlay/NSPanel+CaptureExclusion.swift` | The `sharingType = .none` helper the box re-asserts |
 
 ## Related Pages
 

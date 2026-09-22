@@ -130,7 +130,7 @@ import Testing
         let second = try #require(brain.calls.last)
         #expect(second.contains { $0.role == .assistant && $0.text == "Name the invariant." })
         #expect(second.contains {
-            $0.role == .user && $0.text == JarvisPrompts.Coach.replyMustCallSpeak(detailEnabled: false)
+            $0.role == .user && $0.text == JarvisPrompts.Coach.replyMustCallSpeak
         })
         #expect(overlay.rendered == [["Start from the read path."]])
     }
@@ -146,7 +146,7 @@ import Testing
         let followUp = try #require(brain.calls.last)
         #expect(!followUp.contains { $0.text == "Name the invariant." })
         #expect(!followUp.contains {
-            $0.text == JarvisPrompts.Coach.replyMustCallSpeak(detailEnabled: false)
+            $0.text == JarvisPrompts.Coach.replyMustCallSpeak
         })
     }
 
@@ -156,8 +156,7 @@ import Testing
         let overlay = FakeOverlay()
         let (driver, _) = makeDriver(brain: brain, overlay: overlay,
                                      capabilities: CoachCapabilities.compose(
-                                        disabledTools: [], prepSourcesConfigured: false,
-                                        detailEnabled: true))
+                                        disabledTools: [], prepSourcesConfigured: false))
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(brain.calls.count == 2)
@@ -188,7 +187,7 @@ import Testing
         #expect(brain.calls.count == 2)
         let answer = try #require(toolResult("m1", in: brain.calls[1]))
         #expect(answer.text?.contains("did not match its schema") == true)
-        #expect(answer.text?.contains(speakTool(detailEnabled: false).parametersJSON) == true)
+        #expect(answer.text?.contains(speakTool.parametersJSON) == true)
         #expect(overlay.rendered == [["Start from the read path."]])
     }
 
@@ -212,7 +211,7 @@ import Testing
         let continuation = try #require(brain.calls.last)
         let rejected = try #require(toolResult("malformed", in: continuation))
         #expect(rejected.text?.contains("did not match its schema") == true)
-        #expect(rejected.text?.contains(speakTool(detailEnabled: false).parametersJSON) == true)
+        #expect(rejected.text?.contains(speakTool.parametersJSON) == true)
         #expect(continuation.contains {
             $0.toolCalls?.contains { $0.id == "malformed" && $0.argumentsJSON == parameterMarkupArguments } == true
         })

@@ -44,8 +44,8 @@ import Testing
         #expect(history.map(\.id) == ["shown"])
         let call = try #require(history.first)
         let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
-        // The default capabilities declare no `detail`, so none is replayed.
-        #expect(object["detail"] == nil)
+        // `FakeOverlay` shows no detail, so the replay records none.
+        #expect(object["detail"] is NSNull)
         #expect(object["lines"] as? [String] == ["Shown hint."])
     }
 
@@ -62,7 +62,7 @@ import Testing
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: ReviewScreen(succeeds: true), overlay: box, clock: ManualClock(now: 100),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true))
+                disabledTools: [], prepSourcesConfigured: false))
         let task = Task { await driver.handleTrigger(.manualExplanation) }
         await gate.waitUntilEntered()
         box.acceptsDetail = false
@@ -88,7 +88,7 @@ import Testing
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: ReviewScreen(succeeds: true), overlay: ReviewDetailSink(), clock: ManualClock(now: 100),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, detailEnabled: true))
+                disabledTools: [], prepSourcesConfigured: false))
         // A plan edit cannot change the detail capability fixed at Start.
         driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen))
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -115,8 +115,8 @@ private struct ReviewScreen: ScreenCapturing {
 private final class ReviewDetailSink: OverlayRendering {
     @MainActor var acceptsDetail = true
     var detail: ReplyDetail?
-    func render(_ lines: [String], perLineSeconds: [TimeInterval]) {}
-    func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?) {
+    func render(_ lines: [String]) {}
+    func render(_ lines: [String], detail: ReplyDetail?) {
         self.detail = detail
     }
 }

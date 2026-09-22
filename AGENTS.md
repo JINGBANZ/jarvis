@@ -116,7 +116,7 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 ## Runtime safety boundaries
 
 - During the live pipeline and teardown, no autonomous path may activate Jarvis, present UI beyond
-  the two nonactivating capture-excluded overlay panels, open apps or URLs, request attention, notify,
+  the nonactivating capture-excluded Overlay Box panel, open apps or URLs, request attention, notify,
   or play sound. Explicit user-opened Settings/Activity and unavoidable macOS privacy UI are the only
   other presentation paths. Every presentation API call needs an inline `ghost-mode-allowed` reason.
 - `ActivityLog` contains finalized speech, manual hints, brain actions, and typed session-end or

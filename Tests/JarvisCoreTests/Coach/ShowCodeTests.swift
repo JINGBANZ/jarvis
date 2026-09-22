@@ -119,7 +119,7 @@ import Testing
             activity: activity,
             capabilities: CoachCapabilities.compose(
                 disabledTools: [], prepSourcesConfigured: false,
-                skills: skills ?? [coding], detailEnabled: true))
+                skills: skills ?? [coding]))
     }
 }
 

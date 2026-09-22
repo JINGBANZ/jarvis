@@ -17,7 +17,6 @@ final class SessionComposition {
         /// Sources, not a finished index: the index lands later and must not change what the
         /// session offers.
         let prepSources: [PrepMaterialSource]
-        let detailEnabled: Bool
     }
 
     var onReadinessStatusChanged: ((JarvisReadiness.Status) -> Void)?
@@ -28,7 +27,6 @@ final class SessionComposition {
     private let networkDiagnostics = NetworkPathDiagnostics()
     private let brain: BrainComposition
     private let artifacts: SessionArtifacts
-    private let overlayCaption: OverlayCaptionPanel
     private let overlayBox: OverlayBoxPanel
     private let readiness: JarvisReadiness
     private let errorReporter: ErrorReporter
@@ -55,14 +53,12 @@ final class SessionComposition {
     private var requestManualHint: ((CoachingShortcut) -> Void)?
     /// Only cancelled coaching turns hold the ghost lifecycle open; an audit drain alone doesn't.
     private var pendingTurnDrainIDs: Set<UUID> = []
-    private var sessionDetailEnabled = false
     /// Bumped only by Start and explicit Settings edits, never by runtime health.
     private var planRevision: UInt = 0
 
     init(
         brain: BrainComposition,
         artifacts: SessionArtifacts,
-        overlayCaption: OverlayCaptionPanel,
         overlayBox: OverlayBoxPanel,
         readiness: JarvisReadiness,
         errorReporter: ErrorReporter,
@@ -74,7 +70,6 @@ final class SessionComposition {
     ) {
         self.brain = brain
         self.artifacts = artifacts
-        self.overlayCaption = overlayCaption
         self.overlayBox = overlayBox
         self.readiness = readiness
         self.errorReporter = errorReporter
@@ -88,13 +83,6 @@ final class SessionComposition {
     var isTranscriptionLive: Bool { transcriber != nil }
     var isLive: Bool { requestManualHint != nil }
     var isCoachingRunning: Bool { transcriber != nil || !pendingTurnDrainIDs.isEmpty }
-
-    func allows(_ shortcut: CoachingShortcut) -> Bool {
-        switch shortcut {
-        case .hint: true
-        case .explainMore, .showCode, .previousDetail, .nextDetail: sessionDetailEnabled
-        }
-    }
 
     /// Ignored when no session is live.
     func requestShortcut(_ shortcut: CoachingShortcut) {
@@ -138,20 +126,18 @@ final class SessionComposition {
         }
 
         let sessionDirectory = artifacts.currentSessionDir!
-        sessionDetailEnabled = inputs.detailEnabled
         let prepMaterialSources = inputs.prepSources
         let bundledSkills = SkillCatalog.bundled()
         let capabilities = CoachCapabilities.compose(
             disabledTools: brain.preferences.disabledTools,
             disabledSkills: brain.preferences.disabledSkills,
             prepSourcesConfigured: !prepMaterialSources.isEmpty,
-            skills: bundledSkills,
-            detailEnabled: inputs.detailEnabled)
+            skills: bundledSkills)
         // This log line is the only place switched-off capabilities appear. It lists only saved
         // names that match a real, switchable capability.
         let everything = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty,
-            skills: bundledSkills, detailEnabled: inputs.detailEnabled)
+            skills: bundledSkills)
         let honoredDisabled = brain.preferences.disabledTools
             .subtracting(CoachCapabilities.fixedToolNames)
             .filter { everything.tool(named: $0) != nil }
@@ -176,13 +162,12 @@ final class SessionComposition {
         observeReadiness(.brainPreparation(.ready), for: readinessSession)
         // One shared origin keeps mic and system timestamps comparable.
         let conversationStart = clock.now()
-        let overlaySink = BroadcastOverlay([overlayCaption, overlayBox])
         let driver = CoachDriver(
             config: config,
             transcript: transcript,
             route: configuredRoute,
             screen: makeScreenCapture(sessionDirectory),
-            overlay: overlaySink,
+            overlay: overlayBox,
             clock: clock,
             sessionStart: conversationStart,
             coachingAttempts: attemptAuditing,
@@ -415,7 +400,6 @@ final class SessionComposition {
         sessionIsLive = false
         overlayBox.setSessionLive(false)
         requestManualHint = nil
-        sessionDetailEnabled = false
         // Take the handle before a quick Start can install another; cancelled turns still write to
         // the old session.
         let (audit, auditDirectory) = artifacts.takeCurrentSession()
@@ -488,10 +472,7 @@ final class SessionComposition {
 
     func brainCycleDidFail(_ provider: BrainProvider) {
         guard let readinessSession = readiness.activeSession else { return }
-        let firstFailure = !readiness.hasFailedCoachingCycle
         observeReadiness(.brainCycleFailed(provider), for: readinessSession)
-        guard firstFailure else { return }
-        overlayCaption.showError("Coaching failed. I'm still listening.")
     }
 
     // MARK: - Readiness

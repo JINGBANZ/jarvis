@@ -33,12 +33,11 @@ import Testing
     @Test(arguments: [NSSize(width: 520, height: 440), NSSize(width: 960, height: 720)])
     func diagramGetsMostOfThePanelByDefault(_ size: NSSize) throws {
         let panel = OverlayBoxPanel(contentSize: size)
-        panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown:
             "```mermaid\nflowchart TD\nA[Client] --> B[API]\nB --> C[Database]\n```"))
-        _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
+        _ = panel.deliver(["Sketch this path."], detail: detail)
         #expect(panel.currentDetailHeight > panel.currentContentSize.height * 0.6)
         #expect(panel.currentContentSize.height - panel.currentDetailHeight >= 72)
         #expect(panel.currentContentSize == size)
@@ -49,7 +48,6 @@ import Testing
         let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel()
         let window = try #require(NSApplication.shared.windows.first { !windows.contains($0.windowNumber) })
-        panel.setEnabled(true)
         panel.setSessionLive(true)
         defer { panel.setSessionLive(false) }
         let original = window.frame
@@ -57,13 +55,13 @@ import Testing
         panel.onSizeChanged = { _, _ in savedSizes += 1 }
         let detail = try #require(ReplyDetail(markdown:
             "```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"))
-        _ = panel.deliver(["Sketch this path."], perLineSeconds: [2], detail: detail)
+        _ = panel.deliver(["Sketch this path."], detail: detail)
         #expect(window.frame == original)
         #expect(savedSizes == 0)
 
         panel.setContentSize(NSSize(width: 400, height: 300))
         panel.endLiveResize()
-        _ = panel.deliver(["Follow this path."], perLineSeconds: [2], detail: detail)
+        _ = panel.deliver(["Follow this path."], detail: detail)
         #expect(panel.currentContentSize == NSSize(width: 400, height: 300))
         #expect(savedSizes == 1)
     }

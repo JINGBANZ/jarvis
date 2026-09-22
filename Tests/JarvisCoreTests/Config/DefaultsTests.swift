@@ -21,10 +21,6 @@ import Testing
         #expect(Defaults.Transcription.appleSpeechLocaleKey == "transcription.apple-speech.locale")
         #expect(Defaults.Screen.scopeKey == "screen.captureScope")
         #expect(Defaults.Screen.displayIndexKey == "screen.captureDisplayIndex")
-        #expect(Defaults.Overlay.Caption.enabledKey == "overlayCaption.enabled")
-        #expect(Defaults.Overlay.Caption.fontSizeKey == "overlayCaption.fontSize")
-        #expect(Defaults.Overlay.Caption.opacityKey == "overlayCaption.backgroundOpacity")
-        #expect(Defaults.Overlay.Box.enabledKey == "overlayBox.enabled")
         #expect(Defaults.Overlay.Box.fontSizeKey == "overlayBox.fontSize")
         #expect(Defaults.Overlay.Box.opacityKey == "overlayBox.opacity")
         #expect(Defaults.Overlay.Box.widthKey == "overlayBox.width")
@@ -79,26 +75,17 @@ import Testing
     }
 
     @Test func overlayDefaults() {
-        #expect(Defaults.Overlay.Caption.fontSize == 18)
-        #expect(Defaults.Overlay.Caption.fontSizeRange == 12...32)
-        #expect(Defaults.Overlay.Caption.opacity == 0.78)
-        #expect(Defaults.Overlay.Caption.opacityRange == 0...1.0)
         #expect(Defaults.Overlay.Box.fontSize == 25)
         #expect(Defaults.Overlay.Box.opacity == 0.45)
         #expect(Defaults.Overlay.Box.opacityRange == 0...1.0)
-        #expect(Defaults.Overlay.Box.opacityRange == Defaults.Overlay.Caption.opacityRange)
         #expect(Defaults.Overlay.Box.width == 520)
         #expect(Defaults.Overlay.Box.height == 440)
-        #expect(Defaults.Overlay.Caption.enabled == false)
-        #expect(Defaults.Overlay.Box.enabled == true)
     }
 
     // MARK: - Invariants
 
     @Test func overlayRangesContainTheirDefaults() {
         let pairs: [(ClosedRange<Double>, Double)] = [
-            (Defaults.Overlay.Caption.fontSizeRange, Defaults.Overlay.Caption.fontSize),
-            (Defaults.Overlay.Caption.opacityRange, Defaults.Overlay.Caption.opacity),
             (Defaults.Overlay.Box.fontSizeRange, Defaults.Overlay.Box.fontSize),
             (Defaults.Overlay.Box.opacityRange, Defaults.Overlay.Box.opacity),
             (Defaults.Overlay.Box.widthRange, Defaults.Overlay.Box.width),

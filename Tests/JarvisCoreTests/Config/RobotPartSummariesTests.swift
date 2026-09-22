@@ -71,11 +71,9 @@ import Testing
             == RobotPartSummary(value: "Display 2", detail: "WHOLE SCREEN"))
     }
 
-    @Test func mouthNamesWhatIsOnScreen() {
-        #expect(RobotPartSummaries.mouth(captionEnabled: false, boxEnabled: true)
-            == RobotPartSummary(value: "Overlay Box", detail: "BOX ON · CAPTION OFF"))
-        #expect(RobotPartSummaries.mouth(captionEnabled: true, boxEnabled: true).value == "Box and caption")
-        #expect(RobotPartSummaries.mouth(captionEnabled: true, boxEnabled: false).value == "Caption")
-        #expect(RobotPartSummaries.mouth(captionEnabled: false, boxEnabled: false).value == "Nothing on screen")
+    @Test func mouthNamesTheBoxAndItsTextSize() {
+        #expect(RobotPartSummaries.mouth(fontSize: 25)
+            == RobotPartSummary(value: "Overlay Box", detail: "25 PT TEXT"))
+        #expect(RobotPartSummaries.mouth(fontSize: 18.4).detail == "18 PT TEXT")
     }
 }
