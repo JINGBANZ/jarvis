@@ -227,7 +227,10 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         audioQueue.async { [weak self] in
             guard let self, self.isLive(generation: generation) else { return }
             if let active = self.activityTracker.observe(pcm16: pcm, at: capturedAt) {
-                self.setSpeechActivity(active, generation: generation)
+                self.setSpeechActivity(
+                    active,
+                    at: capturedAt - self.sessionStart,
+                    generation: generation)
             }
             guard self.inputContinuation != nil, self.converter != nil else {
                 self.buffer(.init(
@@ -568,10 +571,10 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             socketGeneration: generation)
     }
 
-    private func setSpeechActivity(_ active: Bool, generation: Int) {
+    private func setSpeechActivity(_ active: Bool, at start: TimeInterval, generation: Int) {
         guard isLive(generation: generation) else { return }
         let effects = active
-            ? finalizationState.recordSpeechStarted()
+            ? finalizationState.recordSpeechStarted(at: start)
             : finalizationState.recordSpeechEnded(
                 analyzerAvailable: analyzerReadyForFinalization)
         applyFinalizationEffects(effects, generation: generation)
@@ -585,8 +588,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
            activeFinalization?.token == completed {
             activeFinalization = nil
         }
-        if let pendingWork = effects.pendingWork {
-            coachingCoordinator.updateTranscriptionWork(pendingWork ? .pending(since: nil) : .settled)
+        if let work = effects.work {
+            coachingCoordinator.updateTranscriptionWork(work)
         }
         guard let token = effects.finalization else { return }
         guard submittedAnalyzerFrameCount > 0 else {
