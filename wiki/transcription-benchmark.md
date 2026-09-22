@@ -113,7 +113,8 @@ provider comparisons less informative.
 
 Without `--filter`, every arm is selected. A filtered run judges only the arms it ran and records its
 filter in `summary.json`, so a partial matrix is never read as the whole one. A filter that matches
-no arm is rejected before any audio plays, because an empty run would pass with nothing measured.
+no arm is rejected before any audio plays, and a run in which no selected arm could run fails
+acceptance, because either would otherwise pass with nothing measured.
 
 **Gemini is not in the matrix yet.** `Arm.model` is typed `OpenAITranscriptionModel?`, and
 `TranscriptionBenchmarkRunner`'s `requiredProviders` set names only `.openAI` (plus `.appleSpeech` on
@@ -181,6 +182,6 @@ publishing a success marker.
 The command exits nonzero when a platform-supported arm is unavailable or incomplete, capture
 continuity fails, or the strict reconnect acceptance criteria fail. On macOS 14.2–25, Apple Speech arms
 remain visible in `summary.json` as unavailable because that provider requires macOS 26, but they do
-not fail the runnable matrix. Inspect the summary to distinguish provider recognition/finalization
+not fail the runnable matrix unless a filter selected nothing else. Inspect the summary to distinguish provider recognition/finalization
 behavior from capture or replay failure. A run's results belong in the pull request that ran it, not
 on this operating-contract page.

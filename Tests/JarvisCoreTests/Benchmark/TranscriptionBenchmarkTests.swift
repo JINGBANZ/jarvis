@@ -289,6 +289,7 @@ struct TranscriptionBenchmarkTests {
         let arm = TranscriptionBenchmark.standardArms.first {
             $0.provider == .appleSpeech
         }!
+        let runnable = TranscriptionBenchmark.standardArms.first { $0.provider == .openAI }!
         let summary = TranscriptionBenchmark.Summary(
             mode: "standard",
             repetitionsPerArm: 3,
@@ -297,6 +298,9 @@ struct TranscriptionBenchmarkTests {
                     arm: arm,
                     repetitions: [],
                     unavailableReason: "requires macOS 26 or later"),
+                .init(
+                    arm: runnable,
+                    repetitions: (1...3).map { passingRepetition(arm: runnable, repetition: $0) }),
             ])
 
         #expect(summary.arms.first?.unavailableReason == "requires macOS 26 or later")
@@ -310,6 +314,24 @@ struct TranscriptionBenchmarkTests {
             expectedRepetitions: 3,
             requiredProviders: Set(TranscriptionProvider.allCases)
         ) == [arm.id])
+    }
+
+    @Test("a run where no selected arm could run fails even when the platform excuses it")
+    func onlyUnavailableArmsFailAcceptance() {
+        let appleArms = TranscriptionBenchmark.standardArms.filter { $0.provider == .appleSpeech }
+        let summary = TranscriptionBenchmark.Summary(
+            mode: "standard",
+            repetitionsPerArm: 3,
+            armFilter: "apple-speech",
+            arms: appleArms.map {
+                .init(arm: $0, repetitions: [], unavailableReason: "requires macOS 26 or later")
+            })
+
+        #expect(TranscriptionBenchmark.standardAcceptanceFailureArmIDs(
+            in: summary,
+            expectedRepetitions: 3,
+            requiredProviders: [.openAI]
+        ) == appleArms.map(\.id).sorted())
     }
 
     @Test("a filtered standard run is accepted on its selected arms and records its filter")
