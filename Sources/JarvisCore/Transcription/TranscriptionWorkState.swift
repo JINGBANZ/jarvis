@@ -18,4 +18,15 @@ public enum TranscriptionWorkState: Equatable, Sendable {
             return earliest > spokenAt + Self.startTimeMargin
         }
     }
+
+    /// An invalid start becomes unknown rather than losing to a valid one in `min`.
+    public func including(pendingSince start: TimeInterval) -> TranscriptionWorkState {
+        guard start.isFinite, start >= 0 else { return .pending(since: nil) }
+        switch self {
+        case .settled:
+            return .pending(since: start)
+        case .pending(let earliest):
+            return .pending(since: earliest.map { min($0, start) })
+        }
+    }
 }

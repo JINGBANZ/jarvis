@@ -50,4 +50,33 @@ import Testing
         #expect(TranscriptionWorkState.pending(since: 3).permitsCoaching(through: 2))
         #expect(TranscriptionWorkState.settled.permitsCoaching(through: nil))
     }
+
+    @Test func clientCommitSpeechInProgressAdmitsOnlyAnEarlierLine() {
+        let ledger = RealtimeTranscriptionLedger()
+        let speaking = ledger.coachingWorkState.including(pendingSince: 4)
+
+        #expect(speaking.permitsCoaching(through: 1))
+        #expect(!speaking.permitsCoaching(through: 4))
+        #expect(!speaking.permitsCoaching(through: 5))
+        #expect(!speaking.permitsCoaching(through: nil))
+    }
+
+    @Test func clientCommitSpeechInProgressKeepsTheLedgersEarlierOrUnknownStart() {
+        let ledger = RealtimeTranscriptionLedger()
+        ledger.recordSpeechStarted(itemID: "committed", audioStartMilliseconds: 2_000, timelineOrigin: 0)
+        ledger.recordSpeechStopped(itemID: "committed", audioEndMilliseconds: 3_000)
+        #expect(ledger.coachingWorkState.including(pendingSince: 4) == .pending(since: 2))
+
+        ledger.recordDelta(itemID: "untimed", delta: "unfinished")
+        let unknown = ledger.coachingWorkState.including(pendingSince: 4)
+        #expect(unknown == .pending(since: nil))
+        #expect(!unknown.permitsCoaching(through: 1))
+    }
+
+    @Test func anInvalidSpeechStartIsUnknown() {
+        for start: TimeInterval in [-1, .infinity, .nan] {
+            #expect(TranscriptionWorkState.pending(since: 2).including(pendingSince: start)
+                == .pending(since: nil))
+        }
+    }
 }

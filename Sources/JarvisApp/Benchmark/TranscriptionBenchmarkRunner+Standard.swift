@@ -6,12 +6,12 @@ extension TranscriptionBenchmarkRunner {
         fixtures: SyntheticSpeechFixtures
     ) async throws -> TranscriptionBenchmark.Summary {
         var summaries: [TranscriptionBenchmark.ArmSummary] = []
-        for (armIndex, arm) in TranscriptionBenchmark.standardArms.enumerated() {
+        for (armIndex, arm) in options.standardArms.enumerated() {
             try Task.checkCancellation()
             guard !isAbortRequested else { throw Failure.benchmarkAborted }
             TranscriptionBenchmarkFiles.writeProgress(
                 phase: "standard-arm",
-                detail: "\(armIndex + 1)/\(TranscriptionBenchmark.standardArms.count): \(arm.id)",
+                detail: "\(armIndex + 1)/\(options.standardArms.count): \(arm.id)",
                 to: options.outputDirectory)
             if arm.provider == .openAI, apiKey == nil {
                 summaries.append(.init(
@@ -61,6 +61,7 @@ extension TranscriptionBenchmarkRunner {
         return .init(
             mode: TranscriptionBenchmarkOptions.Mode.standard.rawValue,
             repetitionsPerArm: options.repetitions,
+            armFilter: options.armFilter,
             arms: summaries)
     }
 

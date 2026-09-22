@@ -85,5 +85,64 @@ import Testing
 
         #expect(window.state(queuedSince: nil, isRecognizing: true) == .pending(since: nil))
         #expect(window.state(queuedSince: nil, isRecognizing: false) == .settled)
+        #expect(window.recordFinalized() == nil)
+    }
+
+    @Test func aFinalCarriesTheLocalOnsetAsItsSpokenTime() {
+        var window = PendingSpeechWindow()
+        window.recordLocalSpeech(active: true, at: 9)
+        window.recordRecognitionObserved(at: 9.4)
+        window.recordLocalSpeech(active: false, at: 12.5)
+
+        #expect(window.recordFinalized() == 9)
+    }
+
+    @Test func laterFinalsInOneLongRunKeepTheirArrivalTime() {
+        var window = PendingSpeechWindow()
+        window.recordLocalSpeech(active: true, at: 9)
+        window.recordRecognitionObserved(at: 9.4)
+        #expect(window.recordFinalized() == 9)
+
+        #expect(window.state(queuedSince: nil, isRecognizing: false) == .settled)
+        window.recordRecognitionObserved(at: 15)
+        #expect(window.recordFinalized() == nil)
+    }
+
+    @Test func aSecondEpisodeLeavesTheFinalUntimed() {
+        var window = PendingSpeechWindow()
+        window.recordLocalSpeech(active: true, at: 9)
+        window.recordRecognitionObserved(at: 9.4)
+        window.recordLocalSpeech(active: false, at: 10)
+        window.recordLocalSpeech(active: true, at: 20)
+
+        #expect(window.state(queuedSince: nil, isRecognizing: true) == .pending(since: 9))
+        #expect(window.recordFinalized() == nil)
+    }
+
+    @Test func aClosedWindowTimesTheNextFinal() {
+        var window = PendingSpeechWindow()
+        window.recordLocalSpeech(active: true, at: 9)
+        #expect(window.recordFinalized() == 9)
+        window.recordLocalSpeech(active: false, at: 10)
+        #expect(window.state(queuedSince: nil, isRecognizing: false) == .settled)
+
+        window.recordLocalSpeech(active: true, at: 14)
+        #expect(window.recordFinalized() == 14)
+    }
+
+    @Test func staleRecognitionDoesNotBackdateAFinal() {
+        var window = PendingSpeechWindow()
+        window.recordRecognitionObserved(at: 5)
+        window.recordLocalSpeech(active: true, at: 20)
+
+        #expect(window.state(queuedSince: nil, isRecognizing: true) == .pending(since: 5))
+        #expect(window.recordFinalized() == 20)
+    }
+
+    @Test func aFinalTheDetectorMissedKeepsItsArrivalTime() {
+        var window = PendingSpeechWindow()
+        window.recordRecognitionObserved(at: 12)
+
+        #expect(window.recordFinalized() == nil)
     }
 }

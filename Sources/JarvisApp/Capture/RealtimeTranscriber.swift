@@ -299,9 +299,9 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
     ) {
         guard model.turnDetectionStrategy == .clientCommit else { return }
         switch event {
-        case .started:
+        case .started(let startedAt):
             jlog("Jarvis realtime [\(speaker.rawValue)]: local speech started")
-            transcriptionLifecycle.recordLocalSpeechStarted()
+            transcriptionLifecycle.recordLocalSpeechStarted(at: max(0, startedAt - sessionStart))
             lock.lock()
             guard !stopped else { lock.unlock(); return }
             let connectionUnavailable = !streamReady

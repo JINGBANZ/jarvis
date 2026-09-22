@@ -44,7 +44,8 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
     /// `ACTIVITY_END`, whose order against the final is not guaranteed. Also cleared on socket
     /// open, retry, terminate, and stop so a lost final cannot wedge it.
     private var recognitionInFlight = false
-    /// Gemini times no utterance, so the pending start comes from content-free local activity.
+    /// Gemini times no utterance, so the pending start and a final's spoken time come from
+    /// content-free local activity.
     private var activityTracker = PCM16SpeechActivityTracker()
     private var pendingSpeech = PendingSpeechWindow()
     private var isSending = false         // one in-flight audio send at a time, preserves order
@@ -428,15 +429,18 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
             return
         }
         if GeminiLiveSession.hasFinalizedTranscription(message) {
-            // Clear on any final, even one `TranscriptFiltering` rejects: the server is done.
-            lock.lock(); recognitionInFlight = false; let isDraining = draining; lock.unlock()
+            // Settle on any final, even one `TranscriptFiltering` rejects: the server is done.
+            lock.lock()
+            recognitionInFlight = false
+            let spokenAt = pendingSpeech.recordFinalized()
+            let isDraining = draining
+            lock.unlock()
             if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
                 continuityReporter.recordServerSpeech(
                     .transcriptionCompleted, audioTimeMilliseconds: nil,
                     socketGeneration: lease.generation)
-                // Gemini reports no per-utterance start time.
                 let accepted = coachingCoordinator.recordFinalizedTranscript(
-                    text, spokenAt: nil, source: "gemini-live")
+                    text, spokenAt: spokenAt, source: "gemini-live")
                 benchmark?.observer.record(.init(
                     kind: .finalized,
                     provider: TranscriptionProvider.gemini.rawValue,
