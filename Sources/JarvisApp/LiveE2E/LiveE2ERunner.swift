@@ -180,7 +180,7 @@ final class LiveE2ERunner: BrainCompositionHost {
                 }
             case .switchBrain(let provider):
                 brain.preferences.route = BrainRoute(
-                    primary: Self.defaultTarget(for: provider), fallbackTargets: [])
+                    primary: Self.target(for: provider), fallbackTargets: [])
                 await brain.applyBrainPreferencesToRunningSession(
                     update: .topologyEdit)
             case .stop:
@@ -303,8 +303,8 @@ final class LiveE2ERunner: BrainCompositionHost {
         defaults.removePersistentDomain(forName: Self.defaultsSuite)
         let preferences = BrainPreferences(defaults: defaults)
         preferences.route = BrainRoute(
-            primary: Self.defaultTarget(for: scenario.brain.primary),
-            fallbackTargets: scenario.brain.fallbacks.map(Self.defaultTarget(for:)))
+            primary: Self.target(for: scenario.brain.primary),
+            fallbackTargets: scenario.brain.fallbacks.map(Self.target(for:)))
         preferences.disabledTools = Set(scenario.capabilities.disabledTools)
         preferences.disabledSkills = Set(scenario.capabilities.disabledSkills)
         return preferences
@@ -420,8 +420,14 @@ final class LiveE2ERunner: BrainCompositionHost {
             data, named: "live-e2e-error.json", to: options.outputDirectory)
     }
 
-    private static func defaultTarget(for provider: BrainProvider) -> BrainTarget {
-        BrainTarget(provider: provider, modelID: BrainModelCatalog.defaultModel(for: provider).id)
+    /// A lighter model per line: the run checks the harness, not the model's best answer.
+    private static func target(for provider: BrainProvider) -> BrainTarget {
+        let modelID = switch provider {
+        case .claudeSubscription: "claude-sonnet-5"
+        case .openAI, .codexSubscription: "gpt-6-luna"
+        case .gemini: BrainModelCatalog.defaultModel(for: .gemini).id
+        }
+        return BrainTarget(provider: provider, modelID: modelID)
     }
 
     private static func stream(for speaker: Speaker) -> AudioTimeline.Stream {

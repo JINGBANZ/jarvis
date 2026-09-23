@@ -164,8 +164,9 @@ presses, and a design follow-up) is enough to keep that subscription covered.
 
 - **Isolated preferences.** Brain route and capability switches go to the private defaults suite
   `com.jarvis.coach.dev.live-e2e`, cleared per scenario, so a run never reads or changes the
-  developer's own settings. Each brain provider uses its default model, and transcription is pinned
-  to `gpt-4o-transcribe`.
+  developer's own settings. Claude Code runs Claude Sonnet 5 and Codex runs GPT-6 Luna, lighter
+  than the app's defaults because a run checks the harness, not the model's best answer; see
+  `LiveE2ERunner.target(for:)`. Transcription is pinned to `gpt-4o-transcribe`.
 - **Synthesized speech.** `FixtureSpeech` renders each line with `/usr/bin/say` to 24 kHz PCM16 at
   run time and deletes the file right after decoding. `FixtureAudioSource` feeds both transcription
   streams as audio frames; nothing plays through the speakers.
