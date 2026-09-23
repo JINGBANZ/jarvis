@@ -65,6 +65,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
         #expect(!brain.offeredTools[0].map(\.name).contains("search_prep_notes"))
         #expect(brain.offeredTools[0].map(\.name).contains("load_tool"))
+        #expect(brain.offeredTools[0].map(\.name).contains("call_tool"))
         #expect(brain.calls[0].contains {
             $0.role == .system && ($0.text ?? "").contains("- search_prep_notes:")
         })
@@ -74,8 +75,8 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
                   rawToolCalls: [RawToolCall(
-                    id: "p1", name: "search_prep_notes",
-                    argumentsJSON: #"{"query":"rate limiter"}"#)]),
+                    id: "p1", name: "call_tool",
+                    argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"rate limiter\"}"}"#)]),
             .init(toolCalls: [.speak(callId: "s1", lines: ["Use a token bucket."])],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
                                              argumentsJSON: #"{"lines":["Use a token bucket."]}"#)]),
@@ -140,8 +141,8 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
                   rawToolCalls: [RawToolCall(
-                    id: "p1", name: "search_prep_notes",
-                    argumentsJSON: #"{"query":"rate limiter"}"#)]),
+                    id: "p1", name: "call_tool",
+                    argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"rate limiter\"}"}"#)]),
             nil,
             .init(toolCalls: [.speak(callId: "s1", lines: ["done"])],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
@@ -166,12 +167,12 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
     @Test func secondSearchAcrossRetriesReplacesTheFirstsStaleResult() async {
         let brain = ScriptedThrowBrain(script: [
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "A")],
-                  rawToolCalls: [RawToolCall(id: "p1", name: "search_prep_notes",
-                                             argumentsJSON: #"{"query":"A"}"#)]),
+                  rawToolCalls: [RawToolCall(id: "p1", name: "call_tool",
+                                             argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"A\"}"}"#)]),
             nil,
             .init(toolCalls: [.searchPrepNotes(callId: "p2", query: "B")],
-                  rawToolCalls: [RawToolCall(id: "p2", name: "search_prep_notes",
-                                             argumentsJSON: #"{"query":"B"}"#)]),
+                  rawToolCalls: [RawToolCall(id: "p2", name: "call_tool",
+                                             argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"B\"}"}"#)]),
             nil,
             .init(toolCalls: [.speak(callId: "s1", lines: ["done"])],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
@@ -197,8 +198,8 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "quantum computing")],
                   rawToolCalls: [RawToolCall(
-                    id: "p1", name: "search_prep_notes",
-                    argumentsJSON: #"{"query":"quantum computing"}"#)]),
+                    id: "p1", name: "call_tool",
+                    argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"quantum computing\"}"}"#)]),
             .init(toolCalls: [.staySilent(callId: "s1")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "stay_silent", argumentsJSON: "{}")]),
         ])

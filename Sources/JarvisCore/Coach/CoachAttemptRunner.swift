@@ -295,12 +295,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
             while iterations < maxToolIterations {
                 iterations += 1
                 let loaded = alreadyLoaded.union(loadedThisAttempt)
-                let tools = capabilities.callable(loaded: loaded)
+                let tools = capabilities.tools
                 // A press must end in a hint and already sent the screen, so it never gets
                 // stay_silent or capture_screen.
                 let toolChoice: ToolChoice
                 if reason.isManual {
-                    let permitted = tools.map(\.name).filter {
+                    let permitted = capabilities.callableNames(loaded: loaded).filter {
                         $0 != staySilentTool.name && $0 != captureScreenTool.name
                     }
                     toolChoice = iterations == maxToolIterations || permitted == [speakToolName]
@@ -391,58 +391,50 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     response.toolCalls.first
                 }
                 let call: ToolInvocation
-                if let parsed = firstParsed {
-                    if permitted?.contains(parsed.toolName) ?? true {
+                if let raw = response.rawToolCalls.first,
+                   let rejection = capabilities.rejection(for: raw, parsed: firstParsed) {
+                    if atCap, let spoken = Self.spokenProse(response.outputText, permitted: permitted) {
+                        jlog("⚠️ \(raw.name) couldn't run on the last response — speaking the reply's text")
+                        call = spoken
+                    } else if atCap {
+                        jlog("⚠️ \(raw.name) couldn't run on the last response — scheduling fresh attempt")
+                        return .failed(
+                            outcome: .brainError,
+                            failure: Self.unusableResponse(
+                                "provider called \(raw.name), which could not run", from: attempt.target),
+                            work: work)
+                    } else {
+                        jlog("⚠️ \(raw.name) couldn't run — telling the model so")
+                        appendToolContinuation(
+                            toolCallId: raw.id,
+                            resultText: JarvisPrompts.Coach.rejected(rejection),
+                            newPhase: requestPhase)
+                        continue
+                    }
+                } else if let parsed = firstParsed {
+                    // The choice names declared tools, and a routed call's raw name is call_tool.
+                    let declared = response.rawToolCalls.first?.name ?? parsed.toolName
+                    if permitted?.contains(declared) ?? true {
                         call = parsed
                     } else if atCap, let spoken = Self.spokenProse(
                         response.outputText, permitted: permitted) {
-                        jlog("⚠️ \(parsed.toolName) isn't allowed on a shortcut's last response — "
+                        jlog("⚠️ \(declared) isn't allowed on a shortcut's last response — "
                              + "speaking the reply's text")
                         call = spoken
                     } else if atCap {
-                        jlog("⚠️ \(parsed.toolName) isn't allowed on a shortcut's last response — "
+                        jlog("⚠️ \(declared) isn't allowed on a shortcut's last response — "
                              + "scheduling fresh attempt")
                         return .failed(
                             outcome: .brainError,
                             failure: Self.unusableResponse(
-                                "provider called \(parsed.toolName), which this response did not permit",
+                                "provider called \(declared), which this response did not permit",
                                 from: attempt.target),
                             work: work)
                     } else {
-                        jlog("⚠️ \(parsed.toolName) isn't allowed on a shortcut — asking for the hint again")
+                        jlog("⚠️ \(declared) isn't allowed on a shortcut — asking for the hint again")
                         appendToolContinuation(
                             toolCallId: parsed.callID,
-                            resultText: JarvisPrompts.Coach.notPermittedOnShortcut(parsed.toolName),
-                            newPhase: requestPhase)
-                        continue
-                    }
-                } else if let raw = response.rawToolCalls.first {
-                    if atCap, let spoken = Self.spokenProse(
-                        response.outputText, permitted: permitted) {
-                        jlog("⚠️ \(raw.name) couldn't run on the last response — speaking the reply's text")
-                        call = spoken
-                    } else if let tool = capabilities.tool(named: raw.name) {
-                        guard !atCap else {
-                            jlog("⚠️ \(tool.name) arguments didn't match its schema on the last response — "
-                                 + "scheduling fresh attempt")
-                            return .failed(
-                                outcome: .brainError,
-                                failure: Self.unusableResponse(
-                                    "provider called \(tool.name) with arguments that did not match its schema",
-                                    from: attempt.target),
-                                work: work)
-                        }
-                        jlog("⚠️ \(tool.name) arguments didn't match its schema — asking for the call again")
-                        appendToolContinuation(
-                            toolCallId: raw.id,
-                            resultText: JarvisPrompts.Coach.argumentsRejected(tool),
-                            newPhase: requestPhase)
-                        continue
-                    } else {
-                        jlog("⚠️ \(raw.name) isn't available in this session — telling the model so")
-                        appendToolContinuation(
-                            toolCallId: raw.id,
-                            resultText: JarvisPrompts.Coach.toolUnavailable(raw.name),
+                            resultText: JarvisPrompts.Coach.notPermittedOnShortcut(declared),
                             newPhase: requestPhase)
                         continue
                     }

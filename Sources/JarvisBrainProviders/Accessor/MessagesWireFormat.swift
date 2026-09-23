@@ -72,8 +72,9 @@ struct MessagesWireFormat: BrainWireFormat {
         }
         var verbatim = VerbatimJSON()
         if !tools.isEmpty {
-            // No `strict`: Anthropic compiles each new strict tool set for seconds, and Jarvis
-            // declares several sets per session. The runner re-asks on a malformed reply instead.
+            // No `strict`: Anthropic compiles each new strict tool set for seconds, and the catalog
+            // enum differs per session, so the first request of every session would pay it. The
+            // runner re-asks on a malformed reply instead.
             body["tools"] = try tools.map { tool -> [String: Any] in
                 ["name": tool.name, "description": tool.description,
                  "input_schema": try verbatim.placeholder(for: tool.parametersJSON)]
