@@ -281,6 +281,7 @@ struct TranscriptionBenchmarkTests {
         #expect(forward == reverse)
         let object = try #require(JSONSerialization.jsonObject(with: forward) as? [String: Any])
         #expect(object["schemaVersion"] as? Int == 1)
+        #expect(object["armFilter"] == nil)
     }
 
     @Test("platform-only unavailable arms remain reported without failing the runnable matrix")
@@ -288,6 +289,7 @@ struct TranscriptionBenchmarkTests {
         let arm = TranscriptionBenchmark.standardArms.first {
             $0.provider == .appleSpeech
         }!
+        let runnable = TranscriptionBenchmark.standardArms.first { $0.provider == .openAI }!
         let summary = TranscriptionBenchmark.Summary(
             mode: "standard",
             repetitionsPerArm: 3,
@@ -296,6 +298,9 @@ struct TranscriptionBenchmarkTests {
                     arm: arm,
                     repetitions: [],
                     unavailableReason: "requires macOS 26 or later"),
+                .init(
+                    arm: runnable,
+                    repetitions: (1...3).map { passingRepetition(arm: runnable, repetition: $0) }),
             ])
 
         #expect(summary.arms.first?.unavailableReason == "requires macOS 26 or later")
@@ -309,6 +314,45 @@ struct TranscriptionBenchmarkTests {
             expectedRepetitions: 3,
             requiredProviders: Set(TranscriptionProvider.allCases)
         ) == [arm.id])
+    }
+
+    @Test("a run where no selected arm could run fails even when the platform excuses it")
+    func onlyUnavailableArmsFailAcceptance() {
+        let appleArms = TranscriptionBenchmark.standardArms.filter { $0.provider == .appleSpeech }
+        let summary = TranscriptionBenchmark.Summary(
+            mode: "standard",
+            repetitionsPerArm: 3,
+            armFilter: "apple-speech",
+            arms: appleArms.map {
+                .init(arm: $0, repetitions: [], unavailableReason: "requires macOS 26 or later")
+            })
+
+        #expect(TranscriptionBenchmark.standardAcceptanceFailureArmIDs(
+            in: summary,
+            expectedRepetitions: 3,
+            requiredProviders: [.openAI]
+        ) == appleArms.map(\.id).sorted())
+    }
+
+    @Test("a filtered standard run is accepted on its selected arms and records its filter")
+    func filteredStandardAcceptance() throws {
+        let selected = TranscriptionBenchmark.standardArms.filter { $0.id.contains("gpt-transcribe") }
+        let summary = TranscriptionBenchmark.Summary(
+            mode: "standard",
+            repetitionsPerArm: 3,
+            armFilter: "gpt-transcribe",
+            arms: selected.map { arm in
+                .init(arm: arm, repetitions: (1...3).map { passingRepetition(arm: arm, repetition: $0) })
+            })
+
+        #expect(TranscriptionBenchmark.standardAcceptanceFailureArmIDs(
+            in: summary,
+            expectedRepetitions: 3,
+            requiredProviders: Set(TranscriptionProvider.allCases)
+        ).isEmpty)
+        let object = try #require(
+            JSONSerialization.jsonObject(with: summary.encodedJSON()) as? [String: Any])
+        #expect(object["armFilter"] as? String == "gpt-transcribe")
     }
 
     @Test("reconnect evaluation requires replay exactly once ordering and provider identity")
@@ -839,6 +883,30 @@ struct TranscriptionBenchmarkTests {
         #expect(result.exactlyOnce == false)
         #expect(result.finalPhraseIDs.isEmpty)
         #expect(result.finalTexts.count == 1)
+    }
+
+    private func passingRepetition(
+        arm: TranscriptionBenchmark.Arm,
+        repetition: Int
+    ) -> TranscriptionBenchmark.RepetitionResult {
+        TranscriptionBenchmark.evaluate(.init(
+            arm: arm,
+            repetition: repetition,
+            fixtureSHA256: "abc123",
+            connectStartedAt: 10,
+            speechEndedAt: 20,
+            events: [
+                event(.ready, observedAt: 11, model: arm.model?.rawValue),
+                event(.clientCommit, observedAt: 20.2, model: arm.model?.rawValue),
+                event(
+                    .finalized,
+                    observedAt: 21.5,
+                    model: arm.model?.rawValue,
+                    itemID: "item-\(repetition)",
+                    text: arm.phrase.text,
+                    spokenAt: 12),
+            ],
+            captureObservations: [.init(sequenceNumber: 7, sampleCount: 2_400)]))
     }
 
     private func event(

@@ -116,18 +116,22 @@ public extension TranscriptionBenchmark {
         public let schemaVersion: Int
         public let mode: String
         public let repetitionsPerArm: Int
+        /// Present only on a filtered run, so a partial matrix is never read as the whole one.
+        public let armFilter: String?
         public let arms: [ArmSummary]
         public let reconnect: [ReconnectSummary]
 
         public init(
             mode: String,
             repetitionsPerArm: Int,
+            armFilter: String? = nil,
             arms: [ArmSummary],
             reconnect: [ReconnectSummary] = []
         ) {
             schemaVersion = TranscriptionBenchmark.schemaVersion
             self.mode = mode
             self.repetitionsPerArm = repetitionsPerArm
+            self.armFilter = armFilter
             self.arms = arms.sorted { $0.arm.id < $1.arm.id }
             self.reconnect = reconnect.sorted { $0.model.rawValue < $1.model.rawValue }
         }

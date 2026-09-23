@@ -103,6 +103,45 @@ struct TranscriptionBenchmarkOptionsTests {
         }
     }
 
+    @Test("an arm filter selects the standard arms whose id contains it")
+    func filtersStandardArms() throws {
+        let repository = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: repository) }
+        let output = repository.appendingPathComponent(
+            ".jarvis/transcription-benchmarks/filtered-run")
+        let standard = arguments(
+            mode: "standard", output: output, repository: repository, repetitions: "3")
+
+        let filtered = try TranscriptionBenchmarkOptions(
+            arguments: standard + ["--benchmark-arm-filter", "gpt-transcribe"])
+        #expect(filtered.armFilter == "gpt-transcribe")
+        #expect(filtered.standardArms.map(\.id)
+            == TranscriptionBenchmark.phrases.map { "openai--gpt-transcribe--\($0.id)" })
+
+        let unfiltered = try TranscriptionBenchmarkOptions(arguments: standard)
+        #expect(unfiltered.armFilter == nil)
+        #expect(unfiltered.standardArms == TranscriptionBenchmark.standardArms)
+    }
+
+    @Test("an arm filter must select a standard arm")
+    func rejectsUnusableArmFilter() throws {
+        let repository = try makeRepository()
+        defer { try? FileManager.default.removeItem(at: repository) }
+        let output = repository.appendingPathComponent(
+            ".jarvis/transcription-benchmarks/filtered-run")
+
+        #expect(throws: (any Error).self) {
+            try TranscriptionBenchmarkOptions(arguments: arguments(
+                mode: "standard", output: output, repository: repository, repetitions: "3")
+                + ["--benchmark-arm-filter", "no-such-arm"])
+        }
+        #expect(throws: (any Error).self) {
+            try TranscriptionBenchmarkOptions(arguments: arguments(
+                mode: "reconnect", output: output, repository: repository, repetitions: "3")
+                + ["--benchmark-arm-filter", "gpt-transcribe"])
+        }
+    }
+
     private func makeRepository() throws -> URL {
         let repository = ActivityLogTests.tmp()
         try Data("// test package".utf8).write(
