@@ -203,6 +203,27 @@ struct TranscriptionBenchmarkTurnsTests {
         #expect(result.passed == false)
     }
 
+    @Test("a summary written before turns mode still decodes")
+    func earlierSummaryDecodes() throws {
+        let earlier = Data("""
+        {
+          "schemaVersion" : 1,
+          "mode" : "standard",
+          "repetitionsPerArm" : 3,
+          "arms" : []
+        }
+        """.utf8)
+
+        let summary = try JSONDecoder().decode(
+            TranscriptionBenchmark.Summary.self,
+            from: earlier)
+
+        #expect(summary.turns.isEmpty)
+        #expect(summary.reconnect.isEmpty)
+        #expect(summary.armFilter == nil)
+        #expect(summary.mode == "standard")
+    }
+
     private var appleArm: TranscriptionBenchmark.Arm {
         TranscriptionBenchmark.turnArms.first { $0.provider == .appleSpeech }!
     }

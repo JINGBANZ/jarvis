@@ -205,6 +205,19 @@ public extension TranscriptionBenchmark {
             self.turns = turns.sorted { $0.armID < $1.armID }
         }
 
+        /// Schema-1 summaries written before a mode existed carry no key for it.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+            mode = try container.decode(String.self, forKey: .mode)
+            repetitionsPerArm = try container.decode(Int.self, forKey: .repetitionsPerArm)
+            armFilter = try container.decodeIfPresent(String.self, forKey: .armFilter)
+            arms = try container.decode([ArmSummary].self, forKey: .arms)
+            reconnect = try container.decodeIfPresent(
+                [ReconnectSummary].self, forKey: .reconnect) ?? []
+            turns = try container.decodeIfPresent([TurnsSummary].self, forKey: .turns) ?? []
+        }
+
         public func encodedJSON() throws -> Data {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
