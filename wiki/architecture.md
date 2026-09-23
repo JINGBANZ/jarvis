@@ -1049,13 +1049,13 @@ is about 60 MB on disk and 20 MB per update.
 - **Tool policy per target** ([`ToolChoicePolicy`](../Sources/JarvisCore/Brain/ToolChoicePolicy.swift)).
   The OpenAI API and Codex are `providerEnforced`: `required`, `allowed_tools`, a
   forced function, strict tools, and verbatim reasoning replay all pass through the Codex path intact.
-  Claude Code is `filteredAuto`: Anthropic has no subset choice and Claude Fable 5.1 rejects a forced
-  tool (`any` and `tool` are 400s), and without narrowing Opus called `capture_screen` on a press six
-  times in six. Every Claude request therefore sends `tool_choice: {type: auto,
-  disable_parallel_tool_use: true}` with only the permitted tools declared, which costs a press the
-  prompt cache from the tools block onward. Its reasoning floors at `low`, because `none` disables
-  thinking and Fable 5.1 rejects that. Neither policy is trusted on its own: the runner checks every
-  reply against the choice it asked for ([Capabilities](#capabilities)).
+  Claude Code is `filteredAuto`: Anthropic has no subset choice and Claude Fable 5.1 and Opus 5.5
+  reject a forced tool (`any` and `tool` are 400s), and without narrowing Opus called
+  `capture_screen` on a press six times in six. Every Claude request therefore sends `tool_choice:
+  {type: auto, disable_parallel_tool_use: true}` with only the permitted tools declared, which costs a
+  press the prompt cache from the tools block onward. Its reasoning floors at `low`, because `none`
+  disables thinking and Fable 5.1 and Opus 5.5 reject that. Neither policy is trusted on its own: the
+  runner checks every reply against the choice it asked for ([Capabilities](#capabilities)).
 - **What the helper changes on the wire.** On the Codex path it deletes `max_output_tokens`, so the
   workload timeout is the output bound; forces `store: false`, which Jarvis also sends for every
   subscription target, so the dashboard retention described in

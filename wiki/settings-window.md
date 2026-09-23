@@ -421,12 +421,12 @@ route with one usable target can still coach. Runtime movement through the route
 saved list. Stop → Start begins at the saved primary again.
 
 **Model + reasoning effort.** A **Model** dropdown is drawn from `BrainModelCatalog` per provider.
-The OpenAI API and Codex share one concrete model list; Claude Code
-exposes the current concrete Claude releases, including the latest in each supported family and
-older choices needed to preserve saved routes; the Gemini API offers Gemini 3.8, 3.7, 3.6, and 3.5
+The OpenAI API and Codex share one concrete model list; the OpenAI and Claude lists offer only the
+newest release of each model line, so a new release replaces its predecessor and a saved selection
+naming the older one reads as unknown; the Gemini API offers Gemini 3.8, 3.7, 3.6, and 3.5
 Flash and 3.5 Flash-Lite. A listed model Codex does not serve
 fails at request time with the helper's `model_not_found`, which reads as a configuration failure.
-Adding a model keeps provider defaults and existing selections stable. Concrete releases, never
+Concrete releases, never
 rolling aliases such as `sonnet` or `opus`: a saved route must keep naming the release the user
 picked, and an alias silently retargets it the day the provider advances it. Claude Haiku 4.5 is
 listed by its dated id because the helper does not resolve the undated one. Each provider remembers
@@ -438,7 +438,7 @@ segment's tooltip, so all four fit at the window's minimum width. The effort is 
 applies uniformly to whichever provider is active; its default lives with the others in
 [`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). The brain client raises None to Low,
 and the output budget to at least the Low budget, for Claude Code, whose provider descriptor carries
-that floor because None disables thinking on that path and Claude Fable 5.1 rejects it, and for
+that floor because None disables thinking on that path and Claude Fable 5.1 and Opus 5.5 reject it, and for
 GPT-6 Astra, whose catalog entry carries it because Astra requires reasoning, and for Gemini 3.8 and
 3.7 Flash, whose catalog entries carry it because they reject Gemini's lowest level. The stored
 effort remains unchanged, and every other target keeps the selected effort.

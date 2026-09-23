@@ -4,14 +4,14 @@ import Testing
 @Suite struct RobotPartSummariesTests {
     @Test func brainNamesTheModelTheProviderAndTheEffortLevel() {
         let summary = RobotPartSummaries.brain(
-            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-5.5"),
+            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol"),
             effort: .high)
-        #expect(summary == RobotPartSummary(value: "GPT-5.5", detail: "VIA CODEX", level: 3))
+        #expect(summary == RobotPartSummary(value: "GPT-6 Sol", detail: "VIA CODEX", level: 3))
     }
 
     @Test func noEffortLightsNoBars() {
         let summary = RobotPartSummaries.brain(
-            primary: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), effort: .none)
+            primary: BrainTarget(provider: .openAI, modelID: "gpt-6-sol"), effort: .none)
         #expect(summary.level == 0)
         #expect(summary.detail == "VIA OPENAI API")
     }
