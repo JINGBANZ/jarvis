@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.1](https://github.com/JINGBANZ/jarvis/compare/v0.5.0...v0.5.1) (2026-09-23)
+
+
+### Features
+
+* **coach:** keep one declared tool list per session ([#406](https://github.com/JINGBANZ/jarvis/issues/406)) ([6fbeaa3](https://github.com/JINGBANZ/jarvis/commit/6fbeaa3890d5fc36b0e5bb4c7841d173bea410fe))
+
+
+### Bug Fixes
+
+* **overlay:** stop test runs from exiting 0 partway through ([#401](https://github.com/JINGBANZ/jarvis/issues/401)) ([364ab53](https://github.com/JINGBANZ/jarvis/commit/364ab53d1676417262e6bb5f44d46cb60f983971)), closes [#399](https://github.com/JINGBANZ/jarvis/issues/399)
+
 ## [0.5.0](https://github.com/JINGBANZ/jarvis/compare/v0.4.0...v0.5.0) (2026-09-23)
 
 
