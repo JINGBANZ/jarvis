@@ -331,8 +331,9 @@ struct LiveE2ETests {
             (Self.precedes(a3Sequence.firstIndex(of: "load search_prep_notes"),
                            a3Sequence.firstIndex(of: "search")),
              "A3 loads search_prep_notes before searching (saw \(a3Sequence))"),
-            (firstOpenAI?.declaredToolNames.contains("search_prep_notes") == true,
-             "A4's first OpenAI request declares search_prep_notes"),
+            (firstOpenAI?.declaredToolNames.contains("call_tool") == true
+                && firstOpenAI?.declaredToolNames.contains("search_prep_notes") == false,
+             "A4's first OpenAI request declares call_tool and never search_prep_notes"),
         ])
         results.check("C06", Self.precedes(a3Sequence.firstIndex(of: "load behavioral"),
                                            a3Sequence.lastIndex(of: "tip")),
@@ -677,7 +678,7 @@ struct LiveE2ETests {
     }
 
     static func carriesProtocolText(_ text: String) -> Bool {
-        ["load_skill", "load_tool", "{\""].contains { text.contains($0) }
+        ["load_skill", "load_tool", "call_tool", "{\""].contains { text.contains($0) }
     }
 
     static func normalized(_ text: String) -> String {
