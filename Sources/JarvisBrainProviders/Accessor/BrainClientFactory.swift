@@ -50,7 +50,6 @@ public struct BrainClientFactory: Sendable {
             reasoningEffort: effort.rawValue, endpoint: endpoint,
             timeout: BrainWorkloadTimeout.liveCoaching,
             maxOutputTokens: effort.maxOutputTokens,
-            toolChoicePolicy: provider.toolChoicePolicy,
             minimumReasoningEffort: provider.reasoningEffortFloor,
             traffic: traffic, trafficTag: "coach", send: send)
         let summarizer = BrainAccessor(
@@ -58,7 +57,6 @@ public struct BrainClientFactory: Sendable {
             model: summaryModel.isEmpty ? target.modelID : summaryModel,
             reasoningEffort: ReasoningEffort.low.rawValue, endpoint: endpoint,
             timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
-            toolChoicePolicy: provider.toolChoicePolicy,
             minimumReasoningEffort: provider.reasoningEffortFloor,
             traffic: traffic, trafficTag: "summarizer", send: send)
         return Clients(coach: coach, summarizer: summarizer)

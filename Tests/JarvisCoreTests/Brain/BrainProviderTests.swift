@@ -2,11 +2,9 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct BrainProviderTests {
-    /// Claude Code can neither force nor narrow a tool call, and rejects disabled reasoning.
-    @Test func onlyTheClaudeSubscriptionFiltersToolsAndFloorsReasoning() {
+    /// Claude Code rejects disabled reasoning.
+    @Test func onlyTheClaudeSubscriptionFloorsReasoning() {
         for provider in BrainProvider.allCases {
-            #expect(provider.toolChoicePolicy
-                == (provider == .claudeSubscription ? .filteredAuto : .providerEnforced))
             #expect(provider.reasoningEffortFloor == (provider == .claudeSubscription ? .low : nil))
         }
     }
@@ -57,7 +55,6 @@ import Testing
             endpoint: BrainProviderDescriptor.geminiInteractionsEndpoint, auth: .googAPIKey))
         #expect(gemini.descriptor.wire == .interactions)
         #expect(gemini.descriptor.failureTable == .gemini)
-        #expect(gemini.toolChoicePolicy == .providerEnforced)
         #expect(gemini.reasoningEffortFloor == nil)
         #expect(!gemini.servedByLocalProxy)
         #expect(Defaults.Brain.modelKey(for: .gemini) == "brain.model.gemini")
