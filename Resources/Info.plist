@@ -6,8 +6,8 @@
   <key>CFBundleDisplayName</key><string>Jarvis</string>
   <key>CFBundleIdentifier</key><string>com.jarvis.coach</string>
   <!-- release-please owns these versions; don't edit them by hand. -->
-  <key>CFBundleVersion</key><string>0.5.0</string> <!-- x-release-please-version -->
-  <key>CFBundleShortVersionString</key><string>0.5.0</string> <!-- x-release-please-version -->
+  <key>CFBundleVersion</key><string>0.5.1</string> <!-- x-release-please-version -->
+  <key>CFBundleShortVersionString</key><string>0.5.1</string> <!-- x-release-please-version -->
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleExecutable</key><string>JarvisApp</string>
   <key>CFBundleIconFile</key><string>Jarvis.icns</string>
