@@ -241,12 +241,19 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     public func showPreviousDetail() {
         guard isSessionLive, !isCollapsed, display == .log else { return }
-        detailView.previousButton.performClick(nil)
+        press(detailView.previousButton)
     }
 
     public func showNextDetail() {
         guard isSessionLive, !isCollapsed, display == .log else { return }
-        detailView.nextButton.performClick(nil)
+        press(detailView.nextButton)
+    }
+
+    // Not performClick: its nested event wait can queue a CFRunLoopStop on the main run loop, which
+    // ends an async-main process such as the swift-testing runner with exit 0.
+    private func press(_ button: NSButton) {
+        guard button.isEnabled, let action = button.action else { return }
+        button.sendAction(action, to: button.target)
     }
 
     private func step(by offset: Int) {
@@ -489,10 +496,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     var isDetailHeld: Bool { slot.isHeld }
     var detailCount: Int { details.count }
 
-    func clickDetailPrevious() { detailView.previousButton.performClick(nil) }
-    func clickDetailNext() { detailView.nextButton.performClick(nil) }
-    func clickDetailPin() { detailView.pinButton.performClick(nil) }
-    func clickDetailDismiss() { detailView.dismissButton.performClick(nil) }
+    func clickDetailPrevious() { press(detailView.previousButton) }
+    func clickDetailNext() { press(detailView.nextButton) }
+    func clickDetailPin() { press(detailView.pinButton) }
+    func clickDetailDismiss() { press(detailView.dismissButton) }
 
     var detailButtonTooltips: [String?] {
         [detailView.previousButton.toolTip, detailView.nextButton.toolTip,
@@ -541,8 +548,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     var isClearButtonVisible: Bool { !header.clearButton.isHidden }
 
-    func clickCollapseButton() { header.collapseButton.performClick(nil) }
-    func clickClearButton() { header.clearButton.performClick(nil) }
+    func clickCollapseButton() { press(header.collapseButton) }
+    func clickClearButton() { press(header.clearButton) }
 
     var currentFrame: NSRect { panel.frame }
 

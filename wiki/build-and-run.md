@@ -38,8 +38,10 @@ key saved in the secrets file, and Codex and Claude Code signed in from Settings
 - **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
   search/rpath flags that plain `swift test` lacks CLT-only and passes `--skip JarvisLiveTests`, so
-  the Gate compiles the live target but never runs it. `run-live-tests.sh` sources the same flags
-  from `scripts/lib/swift-test-flags.sh`. (One sharp edge: a direct
+  the Gate compiles the live target but never runs it. It also fails a run that exits 0 without
+  swift-testing's `Test run with N tests` summary, because anything that stops the main run loop
+  (such as `NSButton.performClick`) ends the runner early with success. `run-live-tests.sh`
+  sources the same flags from `scripts/lib/swift-test-flags.sh`. (One sharp edge: a direct
   `@MainActor async @Test` miscompiles on the CLT swift-testing — async UI tests use a `nonisolated`
   `@Test` that `await`s a `@MainActor` helper; see `OverlayInvisibilityTests`.)
 
