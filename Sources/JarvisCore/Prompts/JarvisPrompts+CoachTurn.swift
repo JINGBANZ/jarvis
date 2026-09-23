@@ -32,6 +32,24 @@ extension JarvisPrompts.Coach {
     static let replyMustCallSpeak = "Plain text is not an answer here. Call the speak tool: the short "
         + "lines are shown to the user, and anything longer goes in detail."
 
+    static let sessionStateHeader = "Session state:"
+
+    /// Restated on every attempt and never kept in history: after a brain switch a load result
+    /// deep in replayed history is easy to miss, and one current line costs less than a reload.
+    /// Nil when there is nothing to state.
+    static func sessionState(loadedSkills: [String], loadedTools: [String], unloadedTools: [String]) -> String? {
+        // Facts only: saying how to call a loaded tool reads as an invitation to call it again.
+        let loaded = loadedSkills.map { "skill \($0)" } + loadedTools.map { "tool \($0)" }
+        var parts: [String] = []
+        if !loaded.isEmpty {
+            parts.append("Already loaded, never load again: \(loaded.joined(separator: ", ")).")
+        }
+        if !unloadedTools.isEmpty {
+            parts.append("Not loaded yet: \(unloadedTools.map { "tool \($0)" }.joined(separator: ", ")).")
+        }
+        return parts.isEmpty ? nil : "\(sessionStateHeader) " + parts.joined(separator: " ")
+    }
+
     static func condensedHistory(_ summary: String) -> String {
         "[session so far, condensed — earlier turns were summarized]\n\(summary)"
     }

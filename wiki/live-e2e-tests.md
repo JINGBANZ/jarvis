@@ -44,7 +44,12 @@ The run is not:
   provider; anything that does lives under `Tests/JarvisLiveTests/`, so there is one mechanism for
   live verification rather than environment-gated tests hidden inside unit targets.
 - **A timing test.** Press-to-tip and question-to-tip times are printed as `time` lines and never
-  asserted, because provider latency varies between runs.
+  asserted, because provider latency varies between runs. Scenarios A and B also print a `tokens`
+  line per provider with its coach calls and their input, cache-read, and output totals, so a
+  prompt change shows its token cost from one run to the next. They are never asserted, and never
+  summed across providers because OpenAI's input count includes cached input and Anthropic's
+  does not. Totals cover the calls that reported usage, and the line counts the calls that did
+  not, such as a timed-out request, rather than reading them as zero.
 - **A transcription comparison.** It uses one transcription model as configured. The benchmark owns
   model comparison, Apple Speech, and reconnect.
 - **A UI test.** Nothing asserts on Settings, the menu, or overlay rendering. Overlay rendering and
@@ -114,7 +119,7 @@ every other brain response runs on a subscription.
 
 ```text
 .jarvis/live-e2e/<run>/     owner-only (0700); the newest ten runs are kept
-  results.txt               one line per case ID, plus time lines
+  results.txt               one line per case ID, plus time and token lines
   <id>/                     one per launch, named by the scenario file
     scenario.json
     steps.jsonl             each step and the attempt it waited on
@@ -262,7 +267,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C02 | Small talk loads nothing | A: the interviewer's logistics line |
 | C03 | The first behavioral question picks the behavioral skill | A: the first behavioral question |
 | C04 | An already-loaded kind never reloads | A: every turn on Codex |
-| C05 | Prep search loads on demand and stays callable on every brain | A: the first behavioral question and the OpenAI design question |
+| C05 | Prep search loads on demand, never runs before its load, and stays callable on every brain | A: the first behavioral question and the OpenAI design question |
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
 | C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the OpenAI design question |
 | C08 | A second prepared question searches without loading, on another brain | A: the second behavioral question, on Codex |

@@ -30,8 +30,8 @@ extension JarvisPrompts {
             interviews. Help without interrupting productive thinking.
 
             # Context
-            - "me:" is the user you coach. "them:" is the interviewer or caller. Speak only to "me"; never
-              answer "them" directly.
+            - "me:" is the user you coach, the candidate. "them:" is the interviewer or caller. Speak
+              only to "me"; never answer "them" directly.
             - Never speak as if you are "me" or claim you performed an action. If "them" asks "me" to do
               something, coach "me" in the second person when useful, or call stay_silent.
             - Your only actions are the tools available to you. capture_screen lets you inspect the
@@ -87,6 +87,8 @@ extension JarvisPrompts {
             return """
             # Loading
             Before choosing an action, load what this question needs and has not loaded: \(loaders).
+            A load lasts for the rest of the session and its result stays earlier in this conversation,
+            so never load the same name twice.
             \(skillReassessment)Load one per response; continue loading if needed when its result comes back.
             Only when speak is the sole permitted tool, speak with what you have.
             """
@@ -100,8 +102,9 @@ extension JarvisPrompts {
         private static func toolCatalog(_ tools: [ToolDef]) -> String {
             ("""
             # Tools you can load
-            Call load_tool with the name before first use; the result carries the schema and guidance. \
-            Then call the tool through call_tool with its name and its arguments as JSON text.
+            Load a tool once per session with load_tool, before its first use; the result carries the \
+            schema and guidance. From then on, call the tool through call_tool with its name and its \
+            arguments as JSON text, without loading it again.
             """ + "\n")
                 + tools.map { "- \($0.name): \($0.description)" }.joined(separator: "\n")
         }
@@ -109,8 +112,8 @@ extension JarvisPrompts {
         private static func skillCatalog(_ skills: [Skill]) -> String {
             ("""
             # Skills you can load
-            Call load_skill with the name the first time a question of that kind comes up; the result is \
-            the skill's full guidance.
+            Load a skill once per session with load_skill, the first time a question of that kind comes \
+            up; the result is the skill's full guidance for the rest of the conversation.
             """ + "\n")
                 + skills.map { "- \($0.name): \($0.description)" }.joined(separator: "\n")
         }

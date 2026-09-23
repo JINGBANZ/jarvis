@@ -3,8 +3,8 @@ import Foundation
 public let searchPrepNotesTool = ToolDef(
     name: "search_prep_notes",
     description: "Search the user's prepared behavioral stories, coding approaches, and system designs "
-        + "when the current question resembles preparation they may have; load before answering such "
-        + "questions, including shortcut hints, and reuse relevant excerpts on follow-ups.",
+        + "when the current question, including a shortcut hint, resembles preparation they may have "
+        + "and no excerpt already in this conversation covers it.",
     parametersJSON: #"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}"#,
     guidance: """
         # Prep material

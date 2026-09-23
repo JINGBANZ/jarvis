@@ -7,8 +7,8 @@ extension CoachCapabilities {
         ToolDef(
             name: loadSkillName,
             description: "Load a skill listed under 'Skills you can load'. Returns the "
-                + "skill's full coaching guidance. Call it once per skill, the first time a "
-                + "question of that kind comes up.",
+                + "skill's full coaching guidance. Call it once per session for each skill, the "
+                + "first time a question of that kind comes up.",
             parametersJSON: loaderParametersJSON(catalogNames: catalogNames))
     }
 }

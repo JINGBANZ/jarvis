@@ -82,6 +82,15 @@ public struct CoachCapabilities: Sendable, Equatable {
         }
     }
 
+    /// Nil when nothing is loaded and no tool waits for a load.
+    public func sessionState(loaded: Set<String>) -> String? {
+        let tools = deferredTools.map(\.name)
+        return JarvisPrompts.Coach.sessionState(
+            loadedSkills: skills.map(\.name).filter { loaded.contains(Self.loadedKey(forSkill: $0)) },
+            loadedTools: tools.filter(loaded.contains),
+            unloadedTools: tools.filter { !loaded.contains($0) })
+    }
+
     /// Why a raw call will not run. Only a hot tool can be called by name, the norm every agent
     /// follows: a deferred tool called by its own name is pointed at `call_tool`, and a malformed
     /// routed call is answered with the routed tool's schema, not `call_tool`'s.

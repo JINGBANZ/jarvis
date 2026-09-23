@@ -158,7 +158,8 @@ extension LiveSessionEvidence {
                 return callID ?? ""
             },
             speakParameters: exchange.speakParameters,
-            speakDetail: speakDetail(in: exchange))
+            speakDetail: speakDetail(in: exchange),
+            usage: exchange.usage)
     }
 
     /// Reports what the model wrote: a speak call the runner built from prose is absent from the

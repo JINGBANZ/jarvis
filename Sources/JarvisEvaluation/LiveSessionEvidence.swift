@@ -1,4 +1,5 @@
 import Foundation
+import JarvisBrainProviders
 import JarvisCore
 
 public struct LiveSessionEvidence: Sendable {
@@ -117,6 +118,7 @@ public struct LiveSessionEvidence: Sendable {
         /// Sorted property names of the declared `speak` tool; nil when none was declared.
         public let speakParameters: [String]?
         public let speakDetail: SpeakDetail
+        public let usage: RecordedExchange.Usage?
     }
 
     public let activity: [ActivityRow]

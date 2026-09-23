@@ -1,4 +1,5 @@
 import Foundation
+import JarvisBrainProviders
 import JarvisCore
 import JarvisEvaluation
 import Testing
@@ -192,6 +193,7 @@ struct LiveE2ETests {
             ])
             results.time("B4 press-to-tip", seconds: Self.pressToTip(evidence, b4))
             Self.noteReplyRecoveries(evidence, &results)
+            Self.recordTokens(evidence, &results)
             Self.checkNoScreenshotBytes(launch, &results)
             Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         }
@@ -334,6 +336,8 @@ struct LiveE2ETests {
             (firstOpenAI?.declaredToolNames.contains("call_tool") == true
                 && firstOpenAI?.declaredToolNames.contains("search_prep_notes") == false,
              "A4's first OpenAI request declares call_tool and never search_prep_notes"),
+            (evidence.debugLines(containing: "was called before it was loaded").isEmpty,
+             "no deferred tool ran before its load"),
         ])
         results.check("C06", Self.precedes(a3Sequence.firstIndex(of: "load behavioral"),
                                            a3Sequence.lastIndex(of: "tip")),
@@ -438,6 +442,7 @@ struct LiveE2ETests {
         }
         results.check("C15", c15)
         Self.noteReplyRecoveries(evidence, &results)
+        Self.recordTokens(evidence, &results)
 
         results.check("G01", [
             (evidence.activity.contains { $0.message.hasPrefix("🗣 heard (them)") }, "the them stream transcribed"),
@@ -577,12 +582,28 @@ struct LiveE2ETests {
 
     static func noteReplyRecoveries(_ evidence: Evidence, _ results: inout LiveE2EResults) {
         let needles = ["isn't allowed on a shortcut", "didn't match its schema", "had no tool call",
-                       "couldn't run on the last response", "isn't available in this session"]
+                       "couldn't run — telling the model so", "couldn't run on the last response",
+                       "isn't available in this session"]
         let sightings = needles.compactMap { needle -> String? in
             let count = evidence.debugLines(containing: needle).count
             return count > 0 ? "\(count) x \"\(needle)\"" : nil
         }
         results.note("C20", sightings.isEmpty ? "no reply recoveries" : sightings.joined(separator: ", "))
+    }
+
+    /// Per provider, because OpenAI's input count includes cached input and Anthropic's does not.
+    static func recordTokens(_ evidence: Evidence, _ results: inout LiveE2EResults) {
+        let providers = Set(evidence.traffic.filter { $0.tag == "coach" }.compactMap(\.provider)).sorted()
+        for provider in providers {
+            let records = evidence.traffic.filter { $0.tag == "coach" && $0.provider == provider }
+            let usages = records.compactMap(\.usage)
+            func total(_ count: (RecordedExchange.Usage) -> Int?) -> Int {
+                usages.reduce(0) { $0 + (count($1) ?? 0) }
+            }
+            results.tokens("\(provider) coach", calls: records.count,
+                           withoutUsage: records.count - usages.count,
+                           input: total(\.input), cacheRead: total(\.cacheRead), output: total(\.output))
+        }
     }
 
     static func noteStalls(
