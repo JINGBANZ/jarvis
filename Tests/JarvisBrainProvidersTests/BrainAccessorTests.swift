@@ -577,10 +577,10 @@ private func speakResponseBody(arguments: String) -> Data {
                 box.set(request.httpBody)
                 return (Data(#"{"type":"message","content":[],"stop_reason":"end_turn"}"#.utf8), http(200))
             })
-        _ = try await client.respond(messages: [.user("hi")], tools: fiveTools, toolChoice: choice)
+        _ = try await client.respond(messages: [.user("hi")], tools: declaredTools, toolChoice: choice)
         let body = try #require(
             try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
-        #expect(declaredNames(body) == fiveTools.map(\.name))
+        #expect(declaredNames(body) == declaredTools.map(\.name))
         #expect((body["tool_choice"] as? [String: Any])?["type"] as? String == "auto")
     }
 
