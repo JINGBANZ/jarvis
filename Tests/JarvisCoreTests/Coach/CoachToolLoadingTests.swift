@@ -35,6 +35,15 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
                                          argumentsJSON: #"{"lines":["Name the constraint first."]}"#)])
     }
 
+    private func callViaDispatcher(_ name: String, _ argumentsJSON: String, id: String = "c1",
+                                   parsed: ToolInvocation?) -> BrainResponse {
+        let escaped = argumentsJSON.replacingOccurrences(of: "\"", with: "\\\"")
+        return .init(toolCalls: parsed.map { [$0] } ?? [],
+                     rawToolCalls: [RawToolCall(
+                        id: id, name: "call_tool",
+                        argumentsJSON: #"{"name":"\#(name)","arguments":"\#(escaped)"}"#)])
+    }
+
     private func makeDriver(
         brain: BrainClient,
         capabilities: CoachCapabilities,
@@ -80,15 +89,14 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             prepMaterial: prepMaterial)).result
     }
 
-    @Test func aLoadedToolIsUsableInTheSameAttempt() async throws {
+    @Test func aLoadedToolIsCalledThroughCallToolWithoutChangingTheHotList() async throws {
         let search = FakePrepMaterialSearch(results: [PrepMaterialSearchResult(
             sourceDisplayName: "system-design.md", text: "token bucket notes")])
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [
             loadCall("search_prep_notes"),
-            .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
-                  rawToolCalls: [RawToolCall(id: "p1", name: "search_prep_notes",
-                                             argumentsJSON: #"{"query":"rate limiter"}"#)]),
+            callViaDispatcher("search_prep_notes", #"{"query":"rate limiter"}"#,
+                              parsed: .searchPrepNotes(callId: "c1", query: "rate limiter")),
             speak,
         ])
         let (driver, transcript) = makeDriver(
@@ -99,9 +107,11 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
 
         let result = try #require(brain.calls[1].first { $0.toolCallId == "l1" })
         #expect(result.text?.contains(searchPrepNotesTool.parametersJSON) == true)
+        #expect(result.text?.contains("call_tool") == true)
         #expect(result.text?.contains("# Prep material") == true)
-        #expect(!brain.offeredTools[0].map(\.name).contains("search_prep_notes"))
-        #expect(brain.offeredTools[1].map(\.name).contains("search_prep_notes"))
+        let offered = brain.offeredTools.map { $0.map(\.name) }
+        #expect(offered.count == 3)
+        #expect(offered.allSatisfy { $0 == prepConfigured.tools.map(\.name) })
         #expect(search.queries == ["rate limiter"])
         #expect(activity.kinds == [.capabilityLoaded, .prepNotesSearched, .tip])
         #expect(brain.requestContexts.compactMap { $0 }.map(\.phase)
@@ -174,7 +184,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
 
         let second = try #require(brain.calls[3].first { $0.toolCallId == "l2" })
         #expect(second.text == JarvisPrompts.Coach.loadToolAlreadyLoaded("search_prep_notes"))
-        #expect(brain.offeredTools[2].map(\.name).contains("search_prep_notes"))
+        #expect(brain.offeredTools.allSatisfy { $0.map(\.name) == prepConfigured.tools.map(\.name) })
     }
 
     @Test func aCallToAToolTheSessionDoesNotOfferIsRefused() async throws {
@@ -201,32 +211,83 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(activity.kinds == [.tip])
     }
 
-    @Test func aDeferredToolCalledBeforeLoadingStillRuns() async throws {
-        let search = FakePrepMaterialSearch(results: [PrepMaterialSearchResult(
-            sourceDisplayName: "system-design.md", text: "token bucket notes")])
+    @Test func aDeferredToolCalledByNameIsPointedAtCallTool() async throws {
+        let search = FakePrepMaterialSearch(results: [])
         let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
+            .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "q")],
                   rawToolCalls: [RawToolCall(id: "p1", name: "search_prep_notes",
-                                             argumentsJSON: #"{"query":"rate limiter"}"#)]),
+                                             argumentsJSON: #"{"query":"q"}"#)]),
             speak,
         ])
-        let (driver, transcript) = makeDriver(
-            brain: brain, capabilities: prepConfigured, prepMaterial: search)
-        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
+        let (driver, transcript) = makeDriver(brain: brain, capabilities: prepConfigured, prepMaterial: search)
+        transcript.append(.init(speaker: .them, text: "Tell me about a conflict.", at: 100))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
-        #expect(search.queries == ["rate limiter"])
-        let result = try #require(brain.calls[1].first { $0.toolCallId == "p1" })
-        #expect(result.text?.contains("token bucket notes") == true)
+        let answer = try #require(brain.calls[1].first { $0.toolCallId == "p1" })
+        #expect(answer.text == JarvisPrompts.Coach.rejected(.notCallableByName("search_prep_notes")))
+        #expect(search.queries.isEmpty)
+    }
+
+    @Test func aPressPermitsCallToolOnlyOnceSomethingIsLoaded() async throws {
+        let search = FakePrepMaterialSearch(results: [PrepMaterialSearchResult(
+            sourceDisplayName: "behavioral.md", text: "the migration I led")])
+        let brain = ScriptedBrain(script: [
+            loadCall("search_prep_notes"),
+            callViaDispatcher("search_prep_notes", #"{"query":"disagreement"}"#,
+                              parsed: .searchPrepNotes(callId: "c1", query: "disagreement")),
+            speak,
+        ])
+        let (driver, _) = makeDriver(brain: brain, capabilities: prepConfigured, prepMaterial: search)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+
+        #expect(brain.toolChoices == [
+            .allowed(["speak", "load_tool"]),
+            .allowed(["speak", "call_tool"]),
+            .allowed(["speak", "call_tool"]),
+        ])
+        #expect(search.queries == ["disagreement"])
+    }
+
+    @Test func aCallToolThatRoutesToAFixedToolIsAnsweredWithCallToolsSchema() async throws {
+        let brain = ScriptedBrain(script: [
+            callViaDispatcher("capture_screen", "{}", parsed: nil),
+            speak,
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, capabilities: prepConfigured)
+        transcript.append(.init(speaker: .them, text: "Tell me about a conflict.", at: 100))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        let answer = try #require(brain.calls[1].first { $0.toolCallId == "c1" })
+        let callTool = try #require(prepConfigured.tool(named: "call_tool"))
+        #expect(answer.text == JarvisPrompts.Coach.argumentsRejected(callTool))
+    }
+
+    @Test func aMalformedRoutedCallIsAnsweredWithTheRoutedToolsSchema() async throws {
+        let brain = ScriptedBrain(script: [
+            callViaDispatcher("search_prep_notes", "{}", parsed: nil),
+            callViaDispatcher("nope", "{}", id: "c2", parsed: nil),
+            speak,
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, capabilities: prepConfigured)
+        transcript.append(.init(speaker: .them, text: "Tell me about a conflict.", at: 100))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        let malformed = try #require(brain.calls[1].first { $0.toolCallId == "c1" })
+        #expect(malformed.text == JarvisPrompts.Coach.argumentsRejected(searchPrepNotesTool))
+        let unknown = try #require(brain.calls[2].first { $0.toolCallId == "c2" })
+        #expect(unknown.text == JarvisPrompts.Coach.toolUnavailable("nope"))
     }
 
     @Test func searchingWithNoIndexAnswersAndKeepsCoaching() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
-                  rawToolCalls: [RawToolCall(id: "p1", name: "search_prep_notes",
-                                             argumentsJSON: #"{"query":"rate limiter"}"#)]),
+                  rawToolCalls: [RawToolCall(id: "p1", name: "call_tool",
+                                             argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"rate limiter\"}"}"#)]),
             speak,
         ])
         let (driver, transcript) = makeDriver(

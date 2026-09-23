@@ -3,7 +3,8 @@ import Testing
 
 @Suite struct CoachSystemPromptTests {
     private let withCatalog = CoachCapabilities(
-        tools: coachTools + [ToolDef(
+        tools: coachTools,
+        deferredTools: [ToolDef(
             name: "search_prep_notes",
             description: searchPrepNotesTool.description,
             parametersJSON: "{}",

@@ -106,7 +106,7 @@ import Testing
         }
         let behavioral = try #require(skills.first { $0.name == "behavioral" })
         #expect(behavioral.body.contains("STAR"))
-        #expect(behavioral.body.contains("load_tool"))
+        #expect(behavioral.body.contains("search_prep_notes"))
         let design = try #require(skills.first { $0.name == "system-design" })
         #expect(design.body.contains("mermaid"))
         #expect(skills.first { $0.name == "coding" }?.body.contains("invariant") == true)

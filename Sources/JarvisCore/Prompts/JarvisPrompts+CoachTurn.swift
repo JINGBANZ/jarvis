@@ -45,6 +45,16 @@ extension JarvisPrompts.Coach {
             + "Call it again with arguments that match this JSON Schema: \(tool.parametersJSON)"
     }
 
+    static func rejected(_ rejection: CoachCapabilities.CallRejection) -> String {
+        switch rejection {
+        case .notCallableByName(let name):
+            "\(name) is not callable by name. Call it through call_tool with name \"\(name)\" and "
+                + "its arguments as JSON text."
+        case .unavailable(let name): toolUnavailable(name)
+        case .malformed(let tool): argumentsRejected(tool)
+        }
+    }
+
     static let extraCallNotExecuted =
         "Only one action runs per response. This call was not executed; call it again next turn if it is still needed."
 }

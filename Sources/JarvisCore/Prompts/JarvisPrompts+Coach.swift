@@ -8,7 +8,7 @@ extension JarvisPrompts {
             let deferred = capabilities.deferredTools
             let skills = capabilities.skills
             let sections = [base(loadableSkills: !skills.isEmpty, loadableTools: !deferred.isEmpty)]
-                + capabilities.hotTools.map(\.guidance).filter { !$0.isEmpty }
+                + capabilities.tools.map(\.guidance).filter { !$0.isEmpty }
             return sections.joined(separator: "\n\n")
                 + (deferred.isEmpty ? "" : "\n\n" + toolCatalog(deferred))
                 + (skills.isEmpty ? "" : "\n\n" + skillCatalog(skills))
@@ -100,7 +100,8 @@ extension JarvisPrompts {
         private static func toolCatalog(_ tools: [ToolDef]) -> String {
             ("""
             # Tools you can load
-            Call load_tool with the name before first use; the result carries the schema and guidance.
+            Call load_tool with the name before first use; the result carries the schema and guidance. \
+            Then call the tool through call_tool with its name and its arguments as JSON text.
             """ + "\n")
                 + tools.map { "- \($0.name): \($0.description)" }.joined(separator: "\n")
         }

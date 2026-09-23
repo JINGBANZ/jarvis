@@ -15,7 +15,8 @@ extension CoachCapabilities {
 
 extension JarvisPrompts.Coach {
     static func loadToolResult(_ tool: ToolDef) -> String {
-        "Loaded \(tool.name).\nArguments JSON Schema: \(tool.parametersJSON)\n\n\(tool.guidance)"
+        "Loaded \(tool.name). Call it through call_tool with name \"\(tool.name)\" and, as "
+            + "arguments, JSON text matching this schema: \(tool.parametersJSON)\n\n\(tool.guidance)"
     }
 
     static func loadToolAlreadyLoaded(_ name: String) -> String {

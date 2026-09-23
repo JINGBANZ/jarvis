@@ -430,25 +430,20 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"strict\":true"))
     }
 
-    @Test func encodesTheLoaderAndDeclaresADeferredToolOnlyOnceLoaded() async throws {
-        let capabilities = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true)
+    @Test func declaresBothLoadersAndNeverTheDeferredTool() async throws {
+        let capabilities = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                   send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
 
-        _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
-        let before = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
-        #expect(before.contains("\"load_tool\""))
-        #expect(before.contains("\"enum\":[\"search_prep_notes\"]"))
-        #expect(before.contains("\"strict\":true"))
-        #expect(!before.contains("\"name\":\"search_prep_notes\""))
+        _ = try await client.respond(messages: [.user("hi")], tools: capabilities.tools)
 
-        _ = try await client.respond(
-            messages: [.user("hi")],
-            tools: capabilities.callable(loaded: ["search_prep_notes"]))
-        let after = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
-        #expect(after.contains("\"name\":\"search_prep_notes\""))
+        let body = try #require(try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
+        #expect(declaredNames(body) == ["capture_screen", "speak", "stay_silent", "load_tool", "call_tool"])
+        let callTool = try #require((body["tools"] as? [[String: Any]])?.first { $0["name"] as? String == "call_tool" })
+        #expect(callTool["strict"] as? Bool == true)
+        let text = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
+        #expect(text.contains("\"enum\":[\"search_prep_notes\"]"))
     }
 
     @Test func encodesTheSkillLoaderWithItsCatalogEnum() async throws {
@@ -460,7 +455,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
 
-        _ = try await client.respond(messages: [.user("hi")], tools: capabilities.callable(loaded: []))
+        _ = try await client.respond(messages: [.user("hi")], tools: capabilities.tools)
 
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
         #expect(body.contains("\"load_skill\""))
@@ -469,26 +464,22 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(!body.contains("\"load_tool\""))
     }
 
-    @Test func aConversationDeclaresEachRequestsOwnTools() async throws {
-        let capabilities = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true)
+    @Test func aConversationDeclaresTheSameToolsOnEveryRequest() async throws {
+        let capabilities = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
-                                       send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
+                                   send: { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         let conversation = try await client.makeConversation()
 
-        _ = try await conversation.respond(
-            messages: [.user("hi")], tools: capabilities.callable(loaded: []),
-            toolChoice: .required)
-        #expect(!(String(data: box.get() ?? Data(), encoding: .utf8) ?? "")
-            .contains("\"name\":\"search_prep_notes\""))
-
-        _ = try await conversation.respond(
-            messages: [.user("hi")], tools: capabilities.callable(loaded: ["search_prep_notes"]),
-            toolChoice: .required)
-        #expect((String(data: box.get() ?? Data(), encoding: .utf8) ?? "")
-            .contains("\"name\":\"search_prep_notes\""))
+        _ = try await conversation.respond(messages: [.user("hi")], tools: capabilities.tools, toolChoice: .required)
+        let first = try #require(try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
+        _ = try await conversation.respond(messages: [.user("hi"), .user("more")], tools: capabilities.tools,
+                                           toolChoice: .allowed(["speak", "call_tool"]))
+        let second = try #require(try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
         await conversation.finish()
+
+        #expect(first["tools"] as? NSArray == second["tools"] as? NSArray)
+        #expect(declaredNames(second)?.contains("search_prep_notes") == false)
     }
 
     @Test func defaultToolChoiceIsAuto() async throws {
@@ -565,10 +556,10 @@ private func speakResponseBody(arguments: String) -> Data {
             try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
     }
 
-    private var fiveTools: [ToolDef] {
+    private var hotTools: [ToolDef] {
         CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true,
-            skills: [Skill(name: "behavioral", description: "d", body: "b")]).callable(loaded: [])
+            skills: [Skill(name: "behavioral", description: "d", body: "b")]).tools
     }
 
     private func declaredNames(_ body: [String: Any]) -> [String]? {
@@ -586,22 +577,22 @@ private func speakResponseBody(arguments: String) -> Data {
                 box.set(request.httpBody)
                 return (Data(#"{"type":"message","content":[],"stop_reason":"end_turn"}"#.utf8), http(200))
             })
-        _ = try await client.respond(messages: [.user("hi")], tools: fiveTools, toolChoice: choice)
+        _ = try await client.respond(messages: [.user("hi")], tools: hotTools, toolChoice: choice)
         let body = try #require(
             try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
-        #expect(declaredNames(body) == fiveTools.map(\.name))
+        #expect(declaredNames(body) == hotTools.map(\.name))
         #expect((body["tool_choice"] as? [String: Any])?["type"] as? String == "auto")
     }
 
     @Test func aReasoningFloorRaisesOnlyAShallowerEffort() async throws {
         let raised = try await encodedBody(
-            tools: fiveTools, choice: .required,
+            tools: hotTools, choice: .required,
             effort: "none", maxOutputTokens: 1_024, floor: .low)
         #expect((raised["reasoning"] as? [String: Any])?["effort"] as? String == "low")
         #expect(raised["max_output_tokens"] as? Int == 2_048)
 
         let kept = try await encodedBody(
-            tools: fiveTools, choice: .required,
+            tools: hotTools, choice: .required,
             effort: "medium", maxOutputTokens: 8_192, floor: .low)
         #expect((kept["reasoning"] as? [String: Any])?["effort"] as? String == "medium")
         #expect(kept["max_output_tokens"] as? Int == 8_192)

@@ -126,8 +126,8 @@ moments the model judges worthwhile.
 3. It calls the **selected brain model** with the coach system prompt, the session memory
    (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the session's
-   switched-on tool set. `capture_screen`, `speak`, and `stay_silent` are always there; `load_tool`
-   and a one-line catalog entry for `search_prep_notes` join them when prep sources are configured
+   switched-on tool set. `capture_screen`, `speak`, and `stay_silent` are always there; `load_tool`,
+   `call_tool`, and a one-line catalog entry for `search_prep_notes` join them when prep sources are configured
    and the user has not switched that capability off (see [Capabilities](#capabilities)). The timing
    is what lets the model tell "thinking" from "stuck."
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
@@ -181,14 +181,32 @@ between two requests of the same conversation, and a route can move between brai
 history.
 
 A tool carries its own usage guidance (`ToolDef.guidance`) and a deferred flag. A **hot** tool is
-declared with its schema and its guidance from the first request: the tip style is `speak`'s
-guidance, because `speak` is the tip. A **deferred** tool appears only as one catalog line, its name
-and its one-sentence description, and the model calls `load_tool` to receive its schema and
-guidance as a tool result, after which it is declared and callable for the rest of the session. So
-the prompt describes exactly the tools the request carries, and the guidance for a tool the model
-cannot call is not in the prompt at all. Jarvis defers on every brain in the same way rather than
-using a provider's own tool-search feature: the route can move between brains mid-session over one
-shared history, and a plain tool result replays on any of them.
+in the `tools` array with its schema, and its guidance is in the system prompt from the first
+request: the tip style is `speak`'s guidance, because `speak` is the tip. A **deferred** tool is
+never in the `tools` array. It appears under "Tools you can load" as one line, its name and its
+one-sentence description; the model calls `load_tool` to receive its schema and guidance as a plain tool result,
+then calls it through `call_tool` with the tool's name and its arguments as JSON text, which the
+runner routes to the tool exactly as a direct call
+([`ToolInvocation+Parsing.swift`](../Sources/JarvisCore/Brain/ToolInvocation+Parsing.swift)). So the
+`tools` array is fixed for the whole session and byte-identical on every request, on every brain.
+That is the property the design exists for: a changed array misses the prompt cache from the tools
+block on, and on Claude Fable 5.1 it invalidates every replayed thinking block bound to the earlier
+list. What a request may call still changes per request, through the tool choice, which sits outside
+both: a loader with nothing left to load leaves the choice and `call_tool` joins it once a deferred
+tool is loaded (`CoachCapabilities.callableNames`). Only a hot tool can be called by name, as in every agent: a
+deferred tool called by its own name is answered with a pointer to `call_tool`, a `call_tool` that
+names a hot tool is answered as malformed (so a press cannot reach `capture_screen` through
+it), and a malformed routed call is answered with the routed tool's own schema
+(`CoachCapabilities.rejection`).
+
+Jarvis routes deferred tools through one fixed pair on every brain rather than using a provider's
+own deferral (Anthropic's `defer_loading` and `tool_reference`, OpenAI's `tool_search` and
+`additional_tools`): those are two different mechanisms with their own replay rules, Gemini has
+none, Claude Code itself loads everything up front behind a proxy, and the route can move between
+brains mid-session over one shared history, which a plain tool result replays on any of them. The
+cost is that a deferred tool's arguments are validated by the runner, not the provider; the runner
+already re-asks on a malformed call. OpenClaw and Goose ship a similar trio, search, describe and
+call; the catalog in the prompt stands in for their search tool, so two suffice here.
 
 A **skill** is coaching guidance for a kind of question, bundled as
 `Sources/JarvisCore/Resources/Skills/<name>/SKILL.md` in the agentskills.io format: frontmatter
@@ -271,23 +289,27 @@ the missing fact. A retrieval miss cannot establish that the candidate has never
 or authorize invention.
 
 A call to a tool the session does not offer, or a load naming something it does not have, is answered
-with a plain "no tool named X is available" rather than failing the attempt. The per-attempt response
+with a plain "no tool named X is available" rather than failing the attempt; a deferred tool called
+by its own name is answered with a pointer to `call_tool`. The per-attempt response
 cap is 7, leaving room for loading a skill and tool, an initial search and its permitted reference
 follow-up, a capture, and a terminal coaching action.
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
-capture, and a turn cannot end without one of the other two. Neither loader has one either, because
-each is composed only while its catalog has something left in it. See
+capture, and a turn cannot end without one of the other two. Neither loader has one either, nor does
+`call_tool`: each is composed only when its catalog has entries, and permitted only while it has
+something to do. See
 [settings-window.md](./settings-window.md) for the user-facing card.
 
 A [coaching shortcut](#on-demand-coaching-shortcuts) press runs this same loop, so even the first press
 of a session can load the skill or tool its question needs and search prep notes, and its loads commit
-when it speaks, like any attempt's. What a press may call is narrowed on each response instead: every
-callable tool except `stay_silent` and `capture_screen`, since its screen is already in the first
-request, and the response at the cap is forced to `speak`. A press therefore always ends in a tip and
-never runs out of responses. When `speak` is the only tool left, the request is the plain forced
-`speak`, one round trip. On the OpenAI API, Codex, and the Gemini API the narrowing is an
-`allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
+when it speaks, like any attempt's. What a press may call is narrowed on each response instead,
+with the `tools` array unchanged: every callable tool except `stay_silent` and `capture_screen`,
+since its screen is already in the first request, and the response at the cap is forced to `speak`.
+A press therefore always ends in a tip and never runs out of responses. When `speak` is the only tool
+left, the request is the plain forced `speak`, one round trip. On Claude Code, which cannot force,
+a forced `speak` is a request for it: a reply that calls anything else is refused and asked again,
+and at the cap its text is spoken or the attempt retried. On the OpenAI API, Codex, and the Gemini
+API the narrowing is an `allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
 attempts (`ResponsesWireFormat`, `InteractionsWireFormat`). Claude Code can neither force nor
 narrow a call, so its request sends `tool_choice: auto` over the same declared array and leaves the
 narrowing to the runner
@@ -1074,9 +1096,9 @@ is about 60 MB on disk and 20 MB per update.
   top level, screenshots as base64 `image` blocks, a round's tool results in one user message,
   adaptive thinking with `output_config.effort` at the floor, `max_tokens` as the cap, and no
   `strict`: Anthropic compiles a strict tool set it has not seen for several seconds before the first
-  byte, and Jarvis declares several sets per session, so a malformed reply, about one Opus 5 `speak`
-  in ten with `lines` double-encoded as a string, is answered with the schema in the same attempt
-  instead. Within an attempt each reply's content blocks go back unchanged, so a thinking block
+  byte, and the catalog enum differs per session, so the first request of every session would pay
+  it. A malformed reply, about one Opus 5 `speak` in ten with `lines` double-encoded as a string, is
+  answered with the schema in the same attempt instead. Within an attempt each reply's content blocks go back unchanged, so a thinking block
   precedes the `tool_use` it belongs to; committed history keeps the rebuilt calls and drops the
   thinking, which Anthropic allows outside a tool round. The tool-less history summarizer on Haiku 4.5
   sends neither thinking nor effort, which that model rejects. The helper's default cloak stays on:

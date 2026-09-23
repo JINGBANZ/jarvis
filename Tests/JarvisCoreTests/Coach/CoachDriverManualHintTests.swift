@@ -222,9 +222,9 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
             .init(toolCalls: [.loadTool(callId: "l1", name: "search_prep_notes")],
                   rawToolCalls: [RawToolCall(id: "l1", name: "load_tool",
                                              argumentsJSON: #"{"name":"search_prep_notes"}"#)]),
-            .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "disagreement")],
-                  rawToolCalls: [RawToolCall(id: "p1", name: "search_prep_notes",
-                                             argumentsJSON: #"{"query":"disagreement"}"#)]),
+            .init(toolCalls: [.searchPrepNotes(callId: "c1", query: "disagreement")],
+                  rawToolCalls: [RawToolCall(id: "c1", name: "call_tool",
+                                             argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"disagreement\"}"}"#)]),
             speak,
         ])
         let (driver, _) = makeDriver(
@@ -236,8 +236,8 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
 
         #expect(brain.toolChoices == [
             .allowed(["speak", "load_tool"]),
-            .allowed(["speak", "search_prep_notes"]),
-            .allowed(["speak", "search_prep_notes"]),
+            .allowed(["speak", "call_tool"]),
+            .allowed(["speak", "call_tool"]),
         ])
         #expect(search.queries == ["disagreement"])
         #expect(activity.kinds
