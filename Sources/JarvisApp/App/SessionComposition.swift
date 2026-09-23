@@ -145,7 +145,7 @@ final class SessionComposition {
             + brain.preferences.disabledSkills
             .filter { everything.skill(named: $0) != nil }
             .sorted()
-        jlog("Jarvis coach capabilities: declared="
+        jlog("Jarvis coach capabilities: hot="
             + capabilities.tools.map(\.name).joined(separator: ",")
             + " deferred=" + (capabilities.catalogNames.isEmpty
                 ? "(none)" : capabilities.catalogNames.joined(separator: ","))

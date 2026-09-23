@@ -89,7 +89,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             prepMaterial: prepMaterial)).result
     }
 
-    @Test func aLoadedToolIsCalledThroughCallToolWithoutChangingTheDeclaredList() async throws {
+    @Test func aLoadedToolIsCalledThroughCallToolWithoutChangingTheHotList() async throws {
         let search = FakePrepMaterialSearch(results: [PrepMaterialSearchResult(
             sourceDisplayName: "system-design.md", text: "token bucket notes")])
         let activity = RecordingActivity()
@@ -109,9 +109,9 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(result.text?.contains(searchPrepNotesTool.parametersJSON) == true)
         #expect(result.text?.contains("call_tool") == true)
         #expect(result.text?.contains("# Prep material") == true)
-        let declared = brain.offeredTools.map { $0.map(\.name) }
-        #expect(declared.count == 3)
-        #expect(declared.allSatisfy { $0 == prepConfigured.tools.map(\.name) })
+        let offered = brain.offeredTools.map { $0.map(\.name) }
+        #expect(offered.count == 3)
+        #expect(offered.allSatisfy { $0 == prepConfigured.tools.map(\.name) })
         #expect(search.queries == ["rate limiter"])
         #expect(activity.kinds == [.capabilityLoaded, .prepNotesSearched, .tip])
         #expect(brain.requestContexts.compactMap { $0 }.map(\.phase)

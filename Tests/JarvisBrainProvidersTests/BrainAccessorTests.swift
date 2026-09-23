@@ -556,7 +556,7 @@ private func speakResponseBody(arguments: String) -> Data {
             try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
     }
 
-    private var declaredTools: [ToolDef] {
+    private var hotTools: [ToolDef] {
         CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true,
             skills: [Skill(name: "behavioral", description: "d", body: "b")]).tools
@@ -577,22 +577,22 @@ private func speakResponseBody(arguments: String) -> Data {
                 box.set(request.httpBody)
                 return (Data(#"{"type":"message","content":[],"stop_reason":"end_turn"}"#.utf8), http(200))
             })
-        _ = try await client.respond(messages: [.user("hi")], tools: declaredTools, toolChoice: choice)
+        _ = try await client.respond(messages: [.user("hi")], tools: hotTools, toolChoice: choice)
         let body = try #require(
             try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
-        #expect(declaredNames(body) == declaredTools.map(\.name))
+        #expect(declaredNames(body) == hotTools.map(\.name))
         #expect((body["tool_choice"] as? [String: Any])?["type"] as? String == "auto")
     }
 
     @Test func aReasoningFloorRaisesOnlyAShallowerEffort() async throws {
         let raised = try await encodedBody(
-            tools: declaredTools, choice: .required,
+            tools: hotTools, choice: .required,
             effort: "none", maxOutputTokens: 1_024, floor: .low)
         #expect((raised["reasoning"] as? [String: Any])?["effort"] as? String == "low")
         #expect(raised["max_output_tokens"] as? Int == 2_048)
 
         let kept = try await encodedBody(
-            tools: declaredTools, choice: .required,
+            tools: hotTools, choice: .required,
             effort: "medium", maxOutputTokens: 8_192, floor: .low)
         #expect((kept["reasoning"] as? [String: Any])?["effort"] as? String == "medium")
         #expect(kept["max_output_tokens"] as? Int == 8_192)

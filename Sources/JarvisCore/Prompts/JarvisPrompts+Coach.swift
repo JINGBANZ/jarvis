@@ -93,7 +93,7 @@ extension JarvisPrompts {
         }
 
         // MARK: - 2. Tool guidance
-        // Not written here: each declared tool's `guidance`, from its file in `Coach/Tools/`.
+        // Not written here: each hot tool's `guidance`, from its file in `Coach/Tools/`.
 
         // MARK: - 3. What this session can load
 

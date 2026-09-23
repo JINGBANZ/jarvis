@@ -412,29 +412,29 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         continue
                     }
                 } else if let parsed = firstParsed {
-                    // The choice names declared tools, and a routed call's raw name is call_tool.
-                    let declared = response.rawToolCalls.first?.name ?? parsed.toolName
-                    if permitted?.contains(declared) ?? true {
+                    // The choice names hot tools, and a routed call's raw name is call_tool.
+                    let called = response.rawToolCalls.first?.name ?? parsed.toolName
+                    if permitted?.contains(called) ?? true {
                         call = parsed
                     } else if atCap, let spoken = Self.spokenProse(
                         response.outputText, permitted: permitted) {
-                        jlog("⚠️ \(declared) isn't allowed on a shortcut's last response — "
+                        jlog("⚠️ \(called) isn't allowed on a shortcut's last response — "
                              + "speaking the reply's text")
                         call = spoken
                     } else if atCap {
-                        jlog("⚠️ \(declared) isn't allowed on a shortcut's last response — "
+                        jlog("⚠️ \(called) isn't allowed on a shortcut's last response — "
                              + "scheduling fresh attempt")
                         return .failed(
                             outcome: .brainError,
                             failure: Self.unusableResponse(
-                                "provider called \(declared), which this response did not permit",
+                                "provider called \(called), which this response did not permit",
                                 from: attempt.target),
                             work: work)
                     } else {
-                        jlog("⚠️ \(declared) isn't allowed on a shortcut — asking for the hint again")
+                        jlog("⚠️ \(called) isn't allowed on a shortcut — asking for the hint again")
                         appendToolContinuation(
                             toolCallId: parsed.callID,
-                            resultText: JarvisPrompts.Coach.notPermittedOnShortcut(declared),
+                            resultText: JarvisPrompts.Coach.notPermittedOnShortcut(called),
                             newPhase: requestPhase)
                         continue
                     }

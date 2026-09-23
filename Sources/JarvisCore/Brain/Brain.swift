@@ -49,7 +49,7 @@ public struct ToolDef: Sendable, Equatable {
     /// Strict Structured Outputs: every object sets `additionalProperties:false` and lists every
     /// key in `required`, so an optional field is nullable instead.
     public let parametersJSON: String
-    /// In the system prompt for a declared tool, the `load_tool` result for a deferred one.
+    /// In the system prompt for a hot tool, the `load_tool` result for a deferred one.
     public let guidance: String
     public let deferLoading: Bool
     public init(name: String, description: String, parametersJSON: String,

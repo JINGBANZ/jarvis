@@ -6,10 +6,10 @@ public let coachTools = [captureScreenTool, speakTool, staySilentTool]
 /// drift. `tools` is sent byte-identical on every request of the session: a changed list misses
 /// the prompt cache from the tools block on and, on Claude Fable 5.1, invalidates replayed thinking.
 public struct CoachCapabilities: Sendable, Equatable {
-    /// The declared list, in prompt order.
+    /// The hot tools, in prompt order: the whole `tools` array every request sends.
     public let tools: [ToolDef]
     /// Named in the prompt's catalog, loaded through `load_tool`, called through `call_tool`,
-    /// never declared.
+    /// never in the `tools` array.
     public let deferredTools: [ToolDef]
     public let skills: [Skill]
 
@@ -82,32 +82,32 @@ public struct CoachCapabilities: Sendable, Equatable {
         }
     }
 
-    /// Why a raw call will not run. Only a declared name runs, the norm every agent follows: a
-    /// deferred tool called by its own name is pointed at `call_tool`, and a malformed routed call
-    /// is answered with the routed tool's schema, not `call_tool`'s.
+    /// Why a raw call will not run. Only a hot tool can be called by name, the norm every agent
+    /// follows: a deferred tool called by its own name is pointed at `call_tool`, and a malformed
+    /// routed call is answered with the routed tool's schema, not `call_tool`'s.
     public enum CallRejection: Equatable, Sendable {
         case notCallableByName(String)
         case unavailable(String)
         case malformed(ToolDef)
     }
 
-    /// Nil when `raw` names a declared tool and its arguments parsed.
+    /// Nil when `raw` names a hot tool and its arguments parsed.
     public func rejection(for raw: RawToolCall, parsed: ToolInvocation?) -> CallRejection? {
-        guard let declared = tools.first(where: { $0.name == raw.name }) else {
+        guard let hot = tools.first(where: { $0.name == raw.name }) else {
             return deferredTools.contains { $0.name == raw.name }
                 ? .notCallableByName(raw.name) : .unavailable(raw.name)
         }
         if parsed != nil { return nil }
         guard raw.name == Self.callToolName,
               let routed = ToolInvocation.routedToolName(argumentsJSON: raw.argumentsJSON),
-              !Self.fixedToolNames.contains(routed) else { return .malformed(declared) }
+              !Self.fixedToolNames.contains(routed) else { return .malformed(hot) }
         if let target = deferredTools.first(where: { $0.name == routed }) { return .malformed(target) }
         return .unavailable(routed)
     }
 
     public static func loadedKey(forSkill name: String) -> String { "skill:\(name)" }
 
-    /// Declared or deferred: the runner routes a `call_tool` call to a deferred tool by name.
+    /// Hot or deferred: the runner routes a `call_tool` call to a deferred tool by name.
     public func tool(named name: String) -> ToolDef? {
         tools.first { $0.name == name } ?? deferredTools.first { $0.name == name }
     }

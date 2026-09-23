@@ -3,8 +3,8 @@ import Foundation
 extension CoachCapabilities {
     public static let callToolName = "call_tool"
 
-    /// Always declared beside `load_tool`, so a loaded tool never joins the declared list and the
-    /// list stays byte-identical for the session on every brain. `arguments` is JSON text: strict
+    /// Always hot beside `load_tool`, so a loaded tool never joins the `tools` array and the
+    /// array stays byte-identical for the session on every brain. `arguments` is JSON text: strict
     /// mode can express it, and every provider accepts a string.
     static func callTool(catalogNames: [String]) -> ToolDef {
         ToolDef(

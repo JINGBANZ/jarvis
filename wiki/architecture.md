@@ -180,22 +180,22 @@ point: a set that grew or changed shape mid-session would change what a brain wa
 between two requests of the same conversation, and a route can move between brains over one shared
 history.
 
-A tool carries its own usage guidance (`ToolDef.guidance`) and a deferred flag. A **declared** tool
-is in the `tools` array with its schema, and its guidance is in the system prompt from the first
+A tool carries its own usage guidance (`ToolDef.guidance`) and a deferred flag. A **hot** tool is
+in the `tools` array with its schema, and its guidance is in the system prompt from the first
 request: the tip style is `speak`'s guidance, because `speak` is the tip. A **deferred** tool is
-never declared. It appears under "Tools you can load" as one line, its name and its one-sentence
-description; the model calls `load_tool` to receive its schema and guidance as a plain tool result,
+never in the `tools` array. It appears under "Tools you can load" as one line, its name and its
+one-sentence description; the model calls `load_tool` to receive its schema and guidance as a plain tool result,
 then calls it through `call_tool` with the tool's name and its arguments as JSON text, which the
 runner routes to the tool exactly as a direct call
 ([`ToolInvocation+Parsing.swift`](../Sources/JarvisCore/Brain/ToolInvocation+Parsing.swift)). So the
-declared array is fixed for the whole session and byte-identical on every request, on every brain.
+`tools` array is fixed for the whole session and byte-identical on every request, on every brain.
 That is the property the design exists for: a changed array misses the prompt cache from the tools
 block on, and on Claude Fable 5.1 it invalidates every replayed thinking block bound to the earlier
 list. What a request may call still changes per request, through the tool choice, which sits outside
 both: a loader with nothing left to load leaves the choice and `call_tool` joins it once a deferred
-tool is loaded (`CoachCapabilities.callableNames`). Only a declared name runs, as in every agent: a
+tool is loaded (`CoachCapabilities.callableNames`). Only a hot tool can be called by name, as in every agent: a
 deferred tool called by its own name is answered with a pointer to `call_tool`, a `call_tool` that
-names a declared tool is answered as malformed (so a press cannot reach `capture_screen` through
+names a hot tool is answered as malformed (so a press cannot reach `capture_screen` through
 it), and a malformed routed call is answered with the routed tool's own schema
 (`CoachCapabilities.rejection`).
 
@@ -303,7 +303,7 @@ something to do. See
 A [coaching shortcut](#on-demand-coaching-shortcuts) press runs this same loop, so even the first press
 of a session can load the skill or tool its question needs and search prep notes, and its loads commit
 when it speaks, like any attempt's. What a press may call is narrowed on each response instead,
-with the declared array unchanged: every callable tool except `stay_silent` and `capture_screen`,
+with the `tools` array unchanged: every callable tool except `stay_silent` and `capture_screen`,
 since its screen is already in the first request, and the response at the cap is forced to `speak`.
 A press therefore always ends in a tip and never runs out of responses. When `speak` is the only tool
 left, the request is the plain forced `speak`, one round trip. On Claude Code, which cannot force,

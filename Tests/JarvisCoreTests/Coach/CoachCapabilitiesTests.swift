@@ -128,7 +128,7 @@ import Testing
         #expect(!capabilities.tools.contains { $0.name == "search_prep_notes" })
     }
 
-    @Test func onlyADeclaredNameRunsAndARejectionNamesTheSchemaToQuote() throws {
+    @Test func onlyAHotToolRunsAndARejectionNamesTheSchemaToQuote() throws {
         let capabilities = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
         let callTool = try #require(capabilities.tool(named: "call_tool"))
         func verdict(_ name: String, _ arguments: String) -> CoachCapabilities.CallRejection? {
