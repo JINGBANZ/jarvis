@@ -307,8 +307,9 @@ with the declared array unchanged: every callable tool except `stay_silent` and 
 since its screen is already in the first request, and the response at the cap is forced to `speak`.
 A press therefore always ends in a tip and never runs out of responses. When `speak` is the only tool
 left, the request is the plain forced `speak`, one round trip. On Claude Code, which cannot force,
-the runner speaks the reply's text or retries if the last response calls anything else. On the OpenAI API, Codex, and the Gemini API the narrowing is an
-`allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
+a forced `speak` is a request for it: a reply that calls anything else is refused and asked again,
+and at the cap its text is spoken or the attempt retried. On the OpenAI API, Codex, and the Gemini
+API the narrowing is an `allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
 attempts (`ResponsesWireFormat`, `InteractionsWireFormat`). Claude Code can neither force nor
 narrow a call, so its request sends `tool_choice: auto` over the same declared array and leaves the
 narrowing to the runner
