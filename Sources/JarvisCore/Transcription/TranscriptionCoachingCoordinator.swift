@@ -10,7 +10,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private let silenceEnabled: Bool
     private let onTurnEnd: @Sendable (_ transcriptBoundary: Int) -> Void
     private let onSilence: @Sendable (TimeInterval) -> Void
-    private let onTranscriptionWorkChanged: @Sendable (Bool) -> Void
+    private let onTranscriptionWorkChanged: @Sendable (TranscriptionWorkState) -> Void
     /// Injected so heard speech lands in this session's log, not whichever one is globally enabled.
     private let activity: (any ActivityEventRecording)?
 
@@ -19,7 +19,8 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     private var silenceBackoff: SilenceBackoff
     private var stopped = true
     private var generation = 0
-    private var hasPendingTranscriptionWork = false
+    private var transcriptionWork: TranscriptionWorkState = .settled
+    private var pendingLatestSpeechTime: TimeInterval?
     private var pendingTranscriptBoundary: Int?
     private var transcriptBatchRevision = 0
     private var silenceRevision = 0
@@ -37,7 +38,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         silenceEnabled: Bool,
         onTurnEnd: @escaping @Sendable (_ transcriptBoundary: Int) -> Void,
         onSilence: @escaping @Sendable (TimeInterval) -> Void,
-        onTranscriptionWorkChanged: @escaping @Sendable (Bool) -> Void,
+        onTranscriptionWorkChanged: @escaping @Sendable (TranscriptionWorkState) -> Void,
         activity: (any ActivityEventRecording)? = nil
     ) {
         precondition(transcriptBatchingWindow >= 0 && transcriptBatchingWindow.isFinite)
@@ -61,16 +62,17 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         lock.lock()
         generation &+= 1
         let generation = generation
-        let reportSettled = hasPendingTranscriptionWork
+        let reportSettled = transcriptionWork != .settled
         stopped = false
-        hasPendingTranscriptionWork = false
+        transcriptionWork = .settled
+        pendingLatestSpeechTime = nil
         pendingTranscriptBoundary = nil
         transcriptBatchRevision &+= 1
         silenceRevision &+= 1
         pending.clear()
         lock.unlock()
 
-        if reportSettled { onTranscriptionWorkChanged(false) }
+        if reportSettled { onTranscriptionWorkChanged(.settled) }
         restartSilenceTimer(generation: generation)
     }
 
@@ -81,13 +83,14 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         generation &+= 1
         transcriptBatchRevision &+= 1
         silenceRevision &+= 1
-        let reportSettled = hasPendingTranscriptionWork
-        hasPendingTranscriptionWork = false
+        let reportSettled = transcriptionWork != .settled
+        transcriptionWork = .settled
+        pendingLatestSpeechTime = nil
         pendingTranscriptBoundary = nil
         pending.clear()
         lock.unlock()
 
-        if reportSettled { onTranscriptionWorkChanged(false) }
+        if reportSettled { onTranscriptionWorkChanged(.settled) }
     }
 
     /// `source` goes only to the debug log, never to Activity.
@@ -107,6 +110,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         let transcriptBoundary = transcript.append(
             .init(speaker: speaker, text: text, at: at))
         pending.append(text)
+        pendingLatestSpeechTime = max(pendingLatestSpeechTime ?? at, at)
         pendingTranscriptBoundary = max(pendingTranscriptBoundary ?? 0, transcriptBoundary)
         let generation = generation
         // Stamped with speech time, not completion time, so Activity matches the model's order.
@@ -121,20 +125,19 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         return true
     }
 
-    public func updateTranscriptionWork(_ hasPendingWork: Bool) {
+    public func updateTranscriptionWork(_ state: TranscriptionWorkState) {
         lock.lock()
-        guard !stopped, hasPendingTranscriptionWork != hasPendingWork else {
+        guard !stopped, transcriptionWork != state else {
             lock.unlock()
             return
         }
-        hasPendingTranscriptionWork = hasPendingWork
+        transcriptionWork = state
         let generation = generation
-        let shouldResume = !hasPendingWork
-            && pending.shouldResumeAfterPendingTranscriptionsSettle(
-                hasPendingTranscriptions: false)
+        let shouldResume = pending.shouldResumeAfterPendingTranscriptionsSettle(
+            hasPendingTranscriptions: !state.permitsCoaching(through: pendingLatestSpeechTime))
         lock.unlock()
 
-        onTranscriptionWorkChanged(hasPendingWork)
+        onTranscriptionWorkChanged(state)
         if shouldResume { scheduleTranscriptBatch(generation: generation) }
     }
 
@@ -156,11 +159,12 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         guard !stopped, self.generation == generation,
               transcriptBatchRevision == revision else { lock.unlock(); return }
         let result = pending.drainIfSettled(
-            hasPendingTranscriptions: hasPendingTranscriptionWork)
+            hasPendingTranscriptions: !transcriptionWork.permitsCoaching(through: pendingLatestSpeechTime))
         let transcriptBoundary: Int?
         if case .ready = result {
             transcriptBoundary = pendingTranscriptBoundary
             pendingTranscriptBoundary = nil
+            pendingLatestSpeechTime = nil
         } else {
             transcriptBoundary = nil
         }
@@ -220,7 +224,7 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
         lock.lock()
         guard !stopped, self.generation == generation,
               silenceRevision == revision else { lock.unlock(); return }
-        if hasPendingTranscriptionWork {
+        if transcriptionWork != .settled {
             lock.unlock()
             scheduleSilenceTimer(
                 after: 1,

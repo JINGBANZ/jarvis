@@ -8,23 +8,12 @@ import Testing
         #expect(c.silenceMaxIntervalSeconds == 960)
         #expect(c.silenceIdleCutoffSeconds == 1_800)
         #expect(c.historyCompactionTokenThreshold == 10_000)
-        #expect(c.overlayNoticeBufferSeconds == 2.0)
-        #expect(c.overlaySecondsPerWord == 0.35)
-        #expect(c.overlayMaxDisplaySeconds == 8)
         #expect(c.vadSilenceDurationMs == 1000)
         #expect(c.transcriptBatchingWindowSeconds == 0.4)
         #expect(c.maxBufferedAudioSeconds == 60)
         #expect(c.realtimeReadyTimeoutSeconds == 10)
         #expect(c.realtimePingIntervalSeconds == 20)
         #expect(c.realtimePongTimeoutSeconds == 10)
-    }
-
-    @Test func overlayTimingConstantsAreCoherent() {
-        let c = Config.default
-        #expect(c.overlayNoticeBufferSeconds > 0)
-        #expect(c.overlaySecondsPerWord > 0)
-        #expect(c.overlayMaxDisplaySeconds > c.overlayNoticeBufferSeconds)
-        #expect(Config.overlayLineGapSeconds >= 0)
     }
 
     @Test func realtimeHealthConstantsAreCoherent() {

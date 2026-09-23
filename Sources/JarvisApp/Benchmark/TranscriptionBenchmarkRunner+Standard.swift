@@ -5,14 +5,13 @@ extension TranscriptionBenchmarkRunner {
     func runStandard(
         fixtures: SyntheticSpeechFixtures
     ) async throws -> TranscriptionBenchmark.Summary {
-        let arms = TranscriptionBenchmark.standardArms
         var summaries: [TranscriptionBenchmark.ArmSummary] = []
-        for (armIndex, arm) in arms.enumerated() {
+        for (armIndex, arm) in options.standardArms.enumerated() {
             try Task.checkCancellation()
             guard !isAbortRequested else { throw Failure.benchmarkAborted }
             TranscriptionBenchmarkFiles.writeProgress(
                 phase: "standard-arm",
-                detail: "\(armIndex + 1)/\(arms.count): \(arm.id)",
+                detail: "\(armIndex + 1)/\(options.standardArms.count): \(arm.id)",
                 to: options.outputDirectory)
             if arm.provider == .openAI, apiKey == nil {
                 summaries.append(.init(
@@ -63,6 +62,7 @@ extension TranscriptionBenchmarkRunner {
         return .init(
             mode: options.mode.rawValue,
             repetitionsPerArm: options.repetitions,
+            armFilter: options.armFilter,
             arms: summaries)
     }
 
@@ -77,6 +77,7 @@ extension TranscriptionBenchmarkRunner {
         let recorder = TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)
         let session = makeSession(arm: arm, appleLocale: appleLocale, recorder: recorder)
         let connectStartedAt = clock.now()
+        var speechStartedAt: TimeInterval?
         var speechEndedAt = connectStartedAt
         var failure: String?
         relay.install(session) { [recorder] sequence, samples in
@@ -87,11 +88,13 @@ extension TranscriptionBenchmarkRunner {
             _ = try await recorder.waitForReady(
                 timeout: arm.provider == .appleSpeech ? 60 : 20)
             try await Task.sleep(for: .milliseconds(150))
-            speechEndedAt = try await player.play(
+            let playback = try await player.play(
                 fixture.fileURL,
                 abortingWhen: { [abortMarker] in
                     FileManager.default.fileExists(atPath: abortMarker.path)
-                }).endedAt
+                })
+            speechStartedAt = playback.startedAt
+            speechEndedAt = playback.endedAt
             _ = try await player.play(
                 silenceURL,
                 abortingWhen: { [abortMarker] in
@@ -113,6 +116,7 @@ extension TranscriptionBenchmarkRunner {
             repetition: repetition,
             fixtureSHA256: fixture.sha256,
             connectStartedAt: connectStartedAt,
+            speechStartedAt: speechStartedAt,
             speechEndedAt: speechEndedAt,
             events: snapshot.events,
             captureObservations: snapshot.captureObservations,

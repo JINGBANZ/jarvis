@@ -12,7 +12,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
     @unchecked Sendable {
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
-    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
+    var onTranscriptionWorkChanged: (@Sendable (TranscriptionWorkState) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
@@ -36,7 +36,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
     private var drainTimer: Timer?
     /// Completions match chunks by `token`, not `Data`: `sendAudio` can evict the head while its
     /// send is in flight, and silent PCM makes byte-identical chunks common.
-    private var bufferedAudio: [(token: UInt64, data: Data)] = []
+    private var bufferedAudio: [(token: UInt64, data: Data, capturedAt: TimeInterval)] = []
     private var nextChunkToken: UInt64 = 0
     private var bufferedByteCount = 0
     /// Keeps the turn open while Gemini may still be recognizing sent audio. Set by voice-activity
@@ -44,6 +44,10 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
     /// `ACTIVITY_END`, whose order against the final is not guaranteed. Also cleared on socket
     /// open, retry, terminate, and stop so a lost final cannot wedge it.
     private var recognitionInFlight = false
+    /// Gemini times no utterance, so the pending start and a final's spoken time come from
+    /// content-free local activity.
+    private var activityTracker = PCM16SpeechActivityTracker()
+    private var pendingSpeech = PendingSpeechWindow()
     private var isSending = false         // one in-flight audio send at a time, preserves order
     private var draining = false
     private var stopped = true
@@ -128,8 +132,8 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
             silenceEnabled: speaker == .me,
             onTurnEnd: { [weak self] boundary in self?.onTurnEnd?(boundary) },
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
-            onTranscriptionWorkChanged: { [weak self] hasPendingWork in
-                self?.onTranscriptionWorkChanged?(hasPendingWork)
+            onTranscriptionWorkChanged: { [weak self] state in
+                self?.onTranscriptionWorkChanged?(state)
             },
             activity: activity)
     }
@@ -137,6 +141,8 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
     func connect() {
         lock.lock()
         stopped = false; draining = false; isSending = false; recognitionInFlight = false
+        _ = activityTracker.reset()
+        pendingSpeech.reset()
         lock.unlock()
         coachingCoordinator.start()
         connection.connect()
@@ -157,6 +163,9 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
         draining = false
         isSending = false
         recognitionInFlight = false
+        // No further audio arrives to release the detector, so close the window here too.
+        _ = activityTracker.reset()
+        pendingSpeech.reset()
         bufferedAudio.removeAll(keepingCapacity: false)
         bufferedByteCount = 0
         lock.unlock()
@@ -272,9 +281,12 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
             sequence: sequenceNumber, pcm16: pcm, at: clock.now() - sessionStart)
         lock.lock()
         guard !stopped else { lock.unlock(); return }
+        if let active = activityTracker.observe(pcm16: pcm, at: capturedAt) {
+            pendingSpeech.recordLocalSpeech(active: active, at: capturedAt - sessionStart)
+        }
         let token = nextChunkToken
         nextChunkToken += 1
-        bufferedAudio.append((token: token, data: pcm))
+        bufferedAudio.append((token: token, data: pcm, capturedAt: capturedAt - sessionStart))
         bufferedByteCount += pcm.count
         var evicted = 0
         while audioFormat.duration(forByteCount: bufferedByteCount) > maxBufferedAudioSeconds,
@@ -351,11 +363,21 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
         }
     }
 
+    private func noteRecognitionInFlight() {
+        let observedAt = clock.now() - sessionStart
+        lock.lock()
+        recognitionInFlight = true
+        pendingSpeech.recordRecognitionObserved(at: observedAt)
+        lock.unlock()
+    }
+
     private func updateWorkFlag() {
         lock.lock()
-        let hasPendingWork = !bufferedAudio.isEmpty || recognitionInFlight
+        let state = pendingSpeech.state(
+            queuedSince: bufferedAudio.first?.capturedAt,
+            isRecognizing: recognitionInFlight)
         lock.unlock()
-        coachingCoordinator.updateTranscriptionWork(hasPendingWork)
+        coachingCoordinator.updateTranscriptionWork(state)
     }
 
     // MARK: - Receive
@@ -407,15 +429,18 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
             return
         }
         if GeminiLiveSession.hasFinalizedTranscription(message) {
-            // Clear on any final, even one `TranscriptFiltering` rejects: the server is done.
-            lock.lock(); recognitionInFlight = false; let isDraining = draining; lock.unlock()
+            // Settle on any final, even one `TranscriptFiltering` rejects: the server is done.
+            lock.lock()
+            recognitionInFlight = false
+            let spokenAt = pendingSpeech.recordFinalized()
+            let isDraining = draining
+            lock.unlock()
             if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
                 continuityReporter.recordServerSpeech(
                     .transcriptionCompleted, audioTimeMilliseconds: nil,
                     socketGeneration: lease.generation)
-                // Gemini reports no per-utterance start time.
                 let accepted = coachingCoordinator.recordFinalizedTranscript(
-                    text, spokenAt: nil, source: "gemini-live")
+                    text, spokenAt: spokenAt, source: "gemini-live")
                 benchmark?.observer.record(.init(
                     kind: .finalized,
                     provider: TranscriptionProvider.gemini.rawValue,
@@ -435,12 +460,12 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
         if GeminiLiveSession.hasInterimTranscription(message) {
             // Read only the flag. Interim text is speculative and must never reach Activity or the
             // transcript.
-            lock.lock(); recognitionInFlight = true; lock.unlock()
+            noteRecognitionInFlight()
             updateWorkFlag()
             return
         }
         if GeminiLiveSession.isVoiceActivityStart(message) {
-            lock.lock(); recognitionInFlight = true; lock.unlock()
+            noteRecognitionInFlight()
             updateWorkFlag()
             return
         }

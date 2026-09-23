@@ -3,8 +3,7 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct CoachDriverDetailTests {
-    private func makeDriver(brain: BrainClient, overlay: OverlayRendering,
-                            detailEnabled: Bool = true) -> CoachDriver {
+    private func makeDriver(brain: BrainClient, overlay: OverlayRendering) -> CoachDriver {
         let target = BrainTarget(
             provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return CoachDriver(
@@ -12,7 +11,7 @@ import Testing
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: FakeScreen(), overlay: overlay, clock: ManualClock(now: 100),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, detailEnabled: detailEnabled))
+                disabledTools: [], prepSourcesConfigured: false))
     }
 
     private func response(_ argumentsJSON: String) throws -> BrainResponse {
@@ -26,7 +25,7 @@ import Testing
         let arguments = #"{"lines":["Sketch the request path."],"detail":"A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments)])
         let overlay = DetailRecordingOverlay()
-        let driver = makeDriver(brain: brain, overlay: BroadcastOverlay([overlay]))
+        let driver = makeDriver(brain: brain, overlay: overlay)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(overlay.lines == ["Sketch the request path."])
@@ -44,7 +43,7 @@ import Testing
     @Test func replayedArgumentsCarryTheDeliveredDetail() async throws {
         let arguments = #"{"lines":["Sketch the request path."],"detail":"A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
-        let driver = makeDriver(brain: brain, overlay: BroadcastOverlay([DetailRecordingOverlay()]))
+        let driver = makeDriver(brain: brain, overlay: DetailRecordingOverlay())
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -61,7 +60,7 @@ import Testing
         let arguments = #"{"lines":["Start with the API."],"detail":"Use a queue.\n\n```mermaid\nsequenceDiagram\nA->>B: write\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
         let overlay = DetailRecordingOverlay()
-        let driver = makeDriver(brain: brain, overlay: BroadcastOverlay([overlay]))
+        let driver = makeDriver(brain: brain, overlay: overlay)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -88,24 +87,6 @@ import Testing
         #expect(overlay.detail?.hasContent != true)
     }
 
-    @Test func aSessionWithoutTheBoxNeitherDeclaresNorDeliversDetail() async throws {
-        let arguments = #"{"lines":["Start with the API."],"detail":"Hidden."}"#
-        let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
-        let overlay = DetailRecordingOverlay()
-        let driver = makeDriver(brain: brain, overlay: overlay, detailEnabled: false)
-
-        #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(overlay.detail == nil)
-
-        let speak = try #require(brain.offeredTools.first?.first { $0.name == "speak" })
-        #expect(!speak.parametersJSON.contains("detail"))
-        let call = try #require(brain.calls.last?.flatMap { $0.toolCalls ?? [] }
-            .first { $0.name == "speak" })
-        let object = try #require(JSONSerialization.jsonObject(
-            with: Data(call.argumentsJSON.utf8)) as? [String: Any])
-        #expect(object["detail"] == nil)
-    }
 }
 
 // The driver awaits delivery; this sink is only read after that attempt has completed.
@@ -113,8 +94,8 @@ private final class DetailRecordingOverlay: OverlayRendering, @unchecked Sendabl
     @MainActor var acceptsDetail: Bool { true }
     var lines: [String] = []
     var detail: ReplyDetail?
-    func render(_ lines: [String], perLineSeconds: [TimeInterval]) { self.lines = lines }
-    func render(_ lines: [String], perLineSeconds: [TimeInterval], detail: ReplyDetail?) {
+    func render(_ lines: [String]) { self.lines = lines }
+    func render(_ lines: [String], detail: ReplyDetail?) {
         self.lines = lines
         self.detail = detail
     }

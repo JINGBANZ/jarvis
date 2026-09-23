@@ -253,41 +253,40 @@ public final class CoachDriver: @unchecked Sendable {
         return runner.cancelBackgroundWork()
     }
 
-    /// `hasPendingWork` means the provider still owns speech or transcript work, not merely that
-    /// the audio is non-silent.
-    public func updateTranscriptionWork(_ hasPendingWork: Bool, for speaker: Speaker) {
-        transcriptionSettlement.setUnsettled(hasPendingWork, for: speaker)
+    /// Provider work state describes unresolved speech, not merely non-silent audio.
+    public func updateTranscriptionWork(_ state: TranscriptionWorkState, for speaker: Speaker) {
+        transcriptionSettlement.update(state, for: speaker)
     }
 
     private func waitForTranscriptionSettlement(
         before work: CoachAttemptRunner.PendingCoachingWork
     ) async -> CoachAttemptRunner.PendingCoachingWork {
-        guard !work.bypassesTranscriptionSettlement else { return work }
-
-        let interruptGeneration = transcriptionSettlement.interruptGenerationSnapshot()
         var settledWork = work
-        var receivedTrigger = false
-        var wake = takePendingTriggerSnapshot()
-        if let pending = wake.trigger?.reason {
-            receivedTrigger = true
-            settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
-            settledWork.bypassesTranscriptionSettlement = pending.isManual
-        }
-        guard !settledWork.bypassesTranscriptionSettlement else {
-            settledWork.wake = .trigger
-            return settledWork
-        }
+        settledWork.admittedTranscript = nil
+        while !Task.isCancelled {
+            let interruptGeneration = transcriptionSettlement.interruptGenerationSnapshot()
+            let wake = takePendingTriggerSnapshot()
+            if let pending = wake.trigger?.reason {
+                settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
+                settledWork.bypassesTranscriptionSettlement =
+                    settledWork.bypassesTranscriptionSettlement || pending.isManual
+                settledWork.wake = .trigger
+            }
+            if settledWork.bypassesTranscriptionSettlement { return settledWork }
 
-        await transcriptionSettlement.waitUntilSettled(
-            unlessInterruptedAfter: interruptGeneration)
-        wake = takePendingTriggerSnapshot()
-        if let pending = wake.trigger?.reason {
-            receivedTrigger = true
-            settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
-            settledWork.bypassesTranscriptionSettlement = pending.isManual
-        }
-        if receivedTrigger {
-            settledWork.wake = .trigger
+            let snapshot = transcript.renderFrom(index: ledger.committedCount)
+            let through: TimeInterval?
+            if case .silence = settledWork.reason {
+                through = nil
+            } else {
+                through = snapshot.lines.map(\.at).max()
+            }
+            if transcriptionSettlement.permitsCoaching(through: through) {
+                settledWork.admittedTranscript = snapshot
+                return settledWork
+            }
+            await transcriptionSettlement.waitUntilSettled(
+                through: through, unlessInterruptedAfter: interruptGeneration)
         }
         return settledWork
     }
@@ -319,10 +318,8 @@ public final class CoachDriver: @unchecked Sendable {
             pendingTriggerWaiters.removeAll()
             stateLock.unlock()
             waiters.forEach { $0.resume() }
-            if trigger.reason.isManual {
-                // Wake an automatic attempt parked on unsettled speech; the trigger stays queued.
-                transcriptionSettlement.interruptWaiters()
-            }
+            // A completed turn can replace a silence wait even while later speech remains active.
+            transcriptionSettlement.interruptWaiters()
             return .pending
         }
         // Fallback selection stays sticky; only a fully exhausted route restarts at the primary.

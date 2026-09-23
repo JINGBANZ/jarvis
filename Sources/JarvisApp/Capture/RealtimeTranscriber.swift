@@ -15,7 +15,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
 
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
-    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
+    var onTranscriptionWorkChanged: (@Sendable (TranscriptionWorkState) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
@@ -141,8 +141,8 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             silenceEnabled: speaker == .me,
             onTurnEnd: { [weak self] boundary in self?.onTurnEnd?(boundary) },
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
-            onTranscriptionWorkChanged: { [weak self] hasPendingWork in
-                self?.onTranscriptionWorkChanged?(hasPendingWork)
+            onTranscriptionWorkChanged: { [weak self] state in
+                self?.onTranscriptionWorkChanged?(state)
             },
             activity: activity)
         let onFinalizedItem: (@Sendable (RealtimeTranscriptionLedger.FinalizedItem) -> Void)?
@@ -300,9 +300,9 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
     ) {
         guard model.turnDetectionStrategy == .clientCommit else { return }
         switch event {
-        case .started:
+        case .started(let startedAt):
             jlog("Jarvis realtime [\(speaker.rawValue)]: local speech started")
-            transcriptionLifecycle.recordLocalSpeechStarted()
+            transcriptionLifecycle.recordLocalSpeechStarted(at: max(0, startedAt - sessionStart))
             lock.lock()
             guard !stopped else { lock.unlock(); return }
             let connectionUnavailable = !streamReady

@@ -1,5 +1,44 @@
 # Changelog
 
+## [0.4.0](https://github.com/JINGBANZ/jarvis/compare/v0.3.3...v0.4.0) (2026-09-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* **overlay:** keep the overlay box on for every session ([#395](https://github.com/JINGBANZ/jarvis/issues/395))
+* **overlay:** remove the overlay caption ([#391](https://github.com/JINGBANZ/jarvis/issues/391))
+
+### Features
+
+* **activity:** pick the agent CLI from an Evaluate menu ([#394](https://github.com/JINGBANZ/jarvis/issues/394)) ([396c064](https://github.com/JINGBANZ/jarvis/commit/396c0649ed0fb3ab9f87237d40450a0c4be98485))
+* **overlay:** keep the overlay box on for every session ([#395](https://github.com/JINGBANZ/jarvis/issues/395)) ([acd607d](https://github.com/JINGBANZ/jarvis/commit/acd607d06a6b229d24e9dd06de247ce4b263edc3))
+* **overlay:** remove the overlay caption ([#391](https://github.com/JINGBANZ/jarvis/issues/391)) ([656d9da](https://github.com/JINGBANZ/jarvis/commit/656d9da360b0f9163b9488c144c814d6063ea187))
+
+
+### Bug Fixes
+
+* **coach:** preserve evidence in session memory briefings ([#379](https://github.com/JINGBANZ/jarvis/issues/379)) ([a5098c5](https://github.com/JINGBANZ/jarvis/commit/a5098c5e2d448924be2b84109e0ef40d368b4564))
+* **coach:** require a clear gap before admitting later pending speech ([#388](https://github.com/JINGBANZ/jarvis/issues/388)) ([3a06ce2](https://github.com/JINGBANZ/jarvis/commit/3a06ce2b940669562336aadb193092c934c285d3))
+* **overlay:** accent ask ai prompt labels ([#386](https://github.com/JINGBANZ/jarvis/issues/386)) ([a8757f4](https://github.com/JINGBANZ/jarvis/commit/a8757f4fb452f386e66341c5dd9a16e52c9ffa06))
+
+## [0.3.3](https://github.com/JINGBANZ/jarvis/compare/v0.3.2...v0.3.3) (2026-09-20)
+
+
+### Features
+
+* **brain:** move Claude Code to Anthropic's Messages format through the helper ([#372](https://github.com/JINGBANZ/jarvis/issues/372)) ([fb81683](https://github.com/JINGBANZ/jarvis/commit/fb81683374a373f312fd0ffa4fab3793c8cf88f5))
+* **shortcuts:** add mouse bindings alongside keyboard shortcuts ([#378](https://github.com/JINGBANZ/jarvis/issues/378)) ([f76a20c](https://github.com/JINGBANZ/jarvis/commit/f76a20cd338123d338bd37620c17fb98e8e0c708))
+
+
+### Bug Fixes
+
+* **brain:** keep the authored tool-schema key order in encoded requests ([#370](https://github.com/JINGBANZ/jarvis/issues/370)) ([34a37bd](https://github.com/JINGBANZ/jarvis/commit/34a37bd0ad3efdadd4a601212ac04b66e70b7674))
+* **coach:** ground coding guidance in evidence ([#381](https://github.com/JINGBANZ/jarvis/issues/381)) ([364f0c7](https://github.com/JINGBANZ/jarvis/commit/364f0c74210bfd567684a3c0d7e230122b40852e))
+* **coach:** ground interview hints in configured prep notes ([#365](https://github.com/JINGBANZ/jarvis/issues/365)) ([4d0eab8](https://github.com/JINGBANZ/jarvis/commit/4d0eab81c4cc64a0392e042c91b2c46b56179cea))
+* **coaching:** prioritize design intent and keep diagrams readable ([#364](https://github.com/JINGBANZ/jarvis/issues/364)) ([951e1ca](https://github.com/JINGBANZ/jarvis/commit/951e1ca8d2744c3882af7736d38da5adf19ef5b9))
+* **coach:** refresh speech context before coaching ([#383](https://github.com/JINGBANZ/jarvis/issues/383)) ([02326ac](https://github.com/JINGBANZ/jarvis/commit/02326ac85973e06fb1bf8e81668b01726cd7e9a7))
+* **coach:** restore placement headers above code hints ([#360](https://github.com/JINGBANZ/jarvis/issues/360)) ([500103a](https://github.com/JINGBANZ/jarvis/commit/500103a40ac29d19bf74a299256901c95e2a7179))
+
 ## [0.3.2](https://github.com/JINGBANZ/jarvis/compare/v0.3.1...v0.3.2) (2026-09-19)
 
 

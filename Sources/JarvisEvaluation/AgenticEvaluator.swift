@@ -25,7 +25,7 @@ public struct AgenticEvaluator: Sendable {
         }
     }
 
-    static let searchOrder: [AgentCLI] = [.codex, .claude]
+    public static let searchOrder: [AgentCLI] = [.codex, .claude]
 
     private let source: EvaluationSource
     private let sourceStore: ReleaseSourceStore

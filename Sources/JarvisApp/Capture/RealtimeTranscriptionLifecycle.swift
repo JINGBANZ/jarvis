@@ -26,7 +26,8 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     private var reconnectRecovery = RealtimeReconnectTranscriptionRecovery()
     private var replayRecoveryTimer: Timer?
     private var stopped = true
-    private var localSpeechActive = false
+    /// Non-nil while client-commit local speech is in progress.
+    private var localSpeechStartedAt: TimeInterval?
     private var unboundLocalTurnCount = 0
     /// Local commits keep their PCM replayable until a terminal transcript arrives, so reconnect
     /// must not let ledger finalization discard that audio first.
@@ -55,7 +56,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         stopped = false
         ledger.clear()
         reconnectRecovery.clear()
-        localSpeechActive = false
+        localSpeechStartedAt = nil
         unboundLocalTurnCount = 0
         locallyCommittedItemIDs.removeAll(keepingCapacity: false)
         lock.unlock()
@@ -67,7 +68,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         stopped = true
         ledger.clear()
         reconnectRecovery.clear()
-        localSpeechActive = false
+        localSpeechStartedAt = nil
         unboundLocalTurnCount = 0
         locallyCommittedItemIDs.removeAll(keepingCapacity: false)
         lock.unlock()
@@ -92,10 +93,11 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         return didStart
     }
 
-    func recordLocalSpeechStarted() {
+    /// `startedAt` is on the session clock, the start the committed turn's ledger item gets.
+    func recordLocalSpeechStarted(at startedAt: TimeInterval) {
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        localSpeechActive = true
+        localSpeechStartedAt = startedAt
         updateCoachingActivityLocked()
         lock.unlock()
     }
@@ -103,7 +105,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     func recordLocalSpeechEnded() {
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        localSpeechActive = false
+        localSpeechStartedAt = nil
         unboundLocalTurnCount += 1
         updateCoachingActivityLocked()
         lock.unlock()
@@ -425,11 +427,14 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
 
     /// Publish under `lock` so concurrent socket and timeout callbacks cannot reorder transitions.
     private func updateCoachingActivityLocked() {
-        coachingCoordinator.updateTranscriptionWork(hasPendingWorkLocked)
-    }
-
-    private var hasPendingWorkLocked: Bool {
-        ledger.hasPendingItems || reconnectRecovery.blocksCoaching
-            || localSpeechActive || unboundLocalTurnCount > 0
+        let state: TranscriptionWorkState
+        if reconnectRecovery.blocksCoaching || unboundLocalTurnCount > 0 {
+            state = .pending(since: nil)
+        } else if let localSpeechStartedAt {
+            state = ledger.coachingWorkState.including(pendingSince: localSpeechStartedAt)
+        } else {
+            state = ledger.coachingWorkState
+        }
+        coachingCoordinator.updateTranscriptionWork(state)
     }
 }

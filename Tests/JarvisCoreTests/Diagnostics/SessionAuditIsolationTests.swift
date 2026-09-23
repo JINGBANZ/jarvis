@@ -170,7 +170,7 @@ import Testing
         // 7 requests: 3 primary attempts, the tip, then 3 final-target attempts in trigger two.
         #expect(absent.outcomes == [.spoke, .brainError])
         #expect(absent.providerRequests.count == 7)
-        #expect(absent.overlayEvents.map(\.lines) == [["same tip"]])
+        #expect(absent.overlayEvents == [["same tip"]])
         #expect(absent.routeTransitions == [
             .skipped(CoachingParityHarness.unavailableTarget),
             .advanced(

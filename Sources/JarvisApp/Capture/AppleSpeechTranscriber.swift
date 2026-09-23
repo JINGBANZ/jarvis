@@ -17,7 +17,7 @@ import JarvisCore
 final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
-    var onTranscriptionWorkChanged: (@Sendable (Bool) -> Void)?
+    var onTranscriptionWorkChanged: (@Sendable (TranscriptionWorkState) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
@@ -119,8 +119,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             silenceEnabled: speaker == .me,
             onTurnEnd: { [weak self] boundary in self?.onTurnEnd?(boundary) },
             onSilence: { [weak self] quiet in self?.onSilence?(quiet) },
-            onTranscriptionWorkChanged: { [weak self] hasPendingWork in
-                self?.onTranscriptionWorkChanged?(hasPendingWork)
+            onTranscriptionWorkChanged: { [weak self] state in
+                self?.onTranscriptionWorkChanged?(state)
             },
             activity: activity)
         continuityReporter.onCaptureHeartbeat = { [weak self] signal in
@@ -227,7 +227,10 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         audioQueue.async { [weak self] in
             guard let self, self.isLive(generation: generation) else { return }
             if let active = self.activityTracker.observe(pcm16: pcm, at: capturedAt) {
-                self.setSpeechActivity(active, generation: generation)
+                self.setSpeechActivity(
+                    active,
+                    at: capturedAt - self.sessionStart,
+                    generation: generation)
             }
             guard self.inputContinuation != nil, self.converter != nil else {
                 self.buffer(.init(
@@ -568,10 +571,10 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             socketGeneration: generation)
     }
 
-    private func setSpeechActivity(_ active: Bool, generation: Int) {
+    private func setSpeechActivity(_ active: Bool, at start: TimeInterval, generation: Int) {
         guard isLive(generation: generation) else { return }
         let effects = active
-            ? finalizationState.recordSpeechStarted()
+            ? finalizationState.recordSpeechStarted(at: start)
             : finalizationState.recordSpeechEnded(
                 analyzerAvailable: analyzerReadyForFinalization)
         applyFinalizationEffects(effects, generation: generation)
@@ -585,8 +588,8 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
            activeFinalization?.token == completed {
             activeFinalization = nil
         }
-        if let pendingWork = effects.pendingWork {
-            coachingCoordinator.updateTranscriptionWork(pendingWork)
+        if let work = effects.work {
+            coachingCoordinator.updateTranscriptionWork(work)
         }
         guard let token = effects.finalization else { return }
         guard submittedAnalyzerFrameCount > 0 else {

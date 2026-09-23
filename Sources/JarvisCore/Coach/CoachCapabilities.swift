@@ -1,8 +1,6 @@
 import Foundation
 
-public func coachTools(detailEnabled: Bool) -> [ToolDef] {
-    [captureScreenTool, speakTool(detailEnabled: detailEnabled), staySilentTool]
-}
+public let coachTools = [captureScreenTool, speakTool, staySilentTool]
 
 /// Resolved once at Start and read by both the prompt and the declared schemas, so they never
 /// drift.
@@ -10,12 +8,10 @@ public struct CoachCapabilities: Sendable, Equatable {
     /// In prompt order.
     public let tools: [ToolDef]
     public let skills: [Skill]
-    public let detailEnabled: Bool
 
-    public init(tools: [ToolDef], skills: [Skill] = [], detailEnabled: Bool = false) {
+    public init(tools: [ToolDef], skills: [Skill] = []) {
         self.tools = tools
         self.skills = skills
-        self.detailEnabled = detailEnabled
     }
 
     public var hotTools: [ToolDef] { tools.filter { !$0.deferLoading } }
@@ -31,8 +27,7 @@ public struct CoachCapabilities: Sendable, Equatable {
     public static func compose(disabledTools: Set<String>,
                                disabledSkills: Set<String> = [],
                                prepSourcesConfigured: Bool,
-                               skills: [Skill] = [],
-                               detailEnabled: Bool = false) -> CoachCapabilities {
+                               skills: [Skill] = []) -> CoachCapabilities {
         let disabled = disabledTools.subtracting(fixedToolNames)
         let extras = (prepSourcesConfigured ? [searchPrepNotesTool] : [])
             .filter { !disabled.contains($0.name) }
@@ -41,12 +36,11 @@ public struct CoachCapabilities: Sendable, Equatable {
             .filter { !disabledSkills.contains($0.name) }
             .sorted { $0.name < $1.name }
         return CoachCapabilities(
-            tools: coachTools(detailEnabled: detailEnabled)
+            tools: coachTools
                 + (deferred.isEmpty ? [] : [loadTool(catalogNames: deferred.map(\.name))])
                 + (offeredSkills.isEmpty ? [] : [loadSkill(catalogNames: offeredSkills.map(\.name))])
                 + extras,
-            skills: offeredSkills,
-            detailEnabled: detailEnabled)
+            skills: offeredSkills)
     }
 
     static func loaderParametersJSON(catalogNames: [String]) -> String {

@@ -7,9 +7,10 @@ cd "$(dirname "$0")/.."
 
 usage() {
   echo "usage:" >&2
-  echo "  $0 standard [--repetitions N]" >&2
+  echo "  $0 standard [--repetitions N] [--filter TEXT]" >&2
   echo "  $0 vocabulary [--repetitions N]" >&2
   echo "  $0 reconnect" >&2
+  echo "--filter runs only the standard arms whose id contains TEXT, e.g. gpt-live-transcribe" >&2
 }
 
 MODE="${1:-}"
@@ -20,11 +21,17 @@ fi
 shift
 
 REPETITIONS=3
+FILTER=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repetitions)
       [[ $# -ge 2 ]] || { usage; exit 2; }
       REPETITIONS="$2"
+      shift 2
+      ;;
+    --filter)
+      [[ $# -ge 2 && -n "$2" ]] || { usage; exit 2; }
+      FILTER="$2"
       shift 2
       ;;
     *)
@@ -37,6 +44,10 @@ done
 
 if ! [[ "$REPETITIONS" =~ ^[0-9]+$ ]] || (( REPETITIONS < 3 )); then
   echo "--repetitions must be an integer of at least 3" >&2
+  exit 2
+fi
+if [[ -n "$FILTER" && "$MODE" != "standard" ]]; then
+  echo "--filter applies only to standard mode" >&2
   exit 2
 fi
 
@@ -67,6 +78,9 @@ COMMON_ARGS=(
   --benchmark-repo-dir "$PWD"
   --benchmark-repetitions "$REPETITIONS"
 )
+if [[ -n "$FILTER" ]]; then
+  COMMON_ARGS+=(--benchmark-arm-filter "$FILTER")
+fi
 
 show_failure_if_present() {
   if [[ -f "$RUN_DIR/benchmark-error.json" ]]; then
@@ -77,7 +91,9 @@ show_failure_if_present() {
   return 1
 }
 
-if [[ "$MODE" == "standard" ]]; then
+if [[ -n "$FILTER" ]]; then
+  echo "▶ running the standard arms matching \"$FILTER\" ($REPETITIONS repetitions per arm)"
+elif [[ "$MODE" == "standard" ]]; then
   echo "▶ running fixed system-audio matrix ($REPETITIONS repetitions per arm)"
 elif [[ "$MODE" == "vocabulary" ]]; then
   echo "▶ comparing fixed technical-context arms ($REPETITIONS repetitions per arm)"

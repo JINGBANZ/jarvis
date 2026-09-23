@@ -23,6 +23,9 @@ public struct TranscriptionBenchmarkOptions: Sendable {
     public let outputDirectory: URL
     public let repositoryDirectory: URL
     public let repetitions: Int
+    /// Matched as a substring of each standard arm's id; nil selects the whole matrix.
+    public let armFilter: String?
+    public let standardArms: [TranscriptionBenchmark.Arm]
 
     public static var isRequested: Bool {
         CommandLine.arguments.contains("--transcription-benchmark")
@@ -73,10 +76,23 @@ public struct TranscriptionBenchmarkOptions: Sendable {
         guard repetitions >= 3 else {
             throw Failure.invalid("--benchmark-repetitions must be at least 3")
         }
+        let armFilter = Self.value(after: "--benchmark-arm-filter", in: arguments)
+        if armFilter != nil, mode != .standard {
+            throw Failure.invalid("--benchmark-arm-filter applies only to standard mode")
+        }
+        let standardArms = TranscriptionBenchmark.standardArms.filter { arm in
+            armFilter.map { arm.id.contains($0) } ?? true
+        }
+        // An empty selection would pass acceptance with nothing measured.
+        guard !standardArms.isEmpty else {
+            throw Failure.invalid("--benchmark-arm-filter matches no standard arm")
+        }
         self.mode = mode
         outputDirectory = output
         repositoryDirectory = repository
         self.repetitions = repetitions
+        self.armFilter = armFilter
+        self.standardArms = standardArms
     }
 
     private static func value(after flag: String, in arguments: [String]) -> String? {

@@ -5,23 +5,26 @@ import JarvisCore
 final class HotkeySection: NSObject, SettingsSection {
     let destination = SettingsDestination.shortcuts
     private let bindings: [HotkeyBindingView]
+    private let mouseBindings: [MouseHotkeyBindingView]
     private var stack: SettingsCardStack?
 
     init(preferences: [HotkeyPreferences],
-         boxEnabled: @escaping () -> Bool = { true },
+         mouseController: MouseHotkeyController,
          hasActiveHotkey: @escaping (CoachingShortcut) -> Bool,
          applyCombination: @escaping (CoachingShortcut, HotkeyCombination) -> HotkeyRegistrationOutcome) {
+        mouseBindings = preferences.map {
+            MouseHotkeyBindingView(preferences: $0, controller: mouseController)
+        }
         bindings = preferences.map { preference in
             HotkeyBindingView(preferences: preference,
-                boxEnabled: boxEnabled,
                 hasActiveHotkey: { hasActiveHotkey(preference.shortcut) },
                 applyCombination: { applyCombination(preference.shortcut, $0) })
         }
     }
 
     func makePage() -> SettingsPageView {
-        let rows = bindings.enumerated().map { index, binding in
-            binding.makeRow(showsSeparator: index > 0)
+        let rows = bindings.enumerated().flatMap { index, binding in
+            [binding.makeRow(showsSeparator: index > 0), mouseBindings[index].makeRow()]
         }
         let height = CGFloat(rows.count) * SettingsStyle.rowHeight
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: height))
@@ -47,9 +50,16 @@ final class HotkeySection: NSObject, SettingsSection {
 
     func didBecomeActive() {
         bindings.forEach { $0.didBecomeActive() }
+        mouseBindings.forEach { $0.refresh() }
+    }
+
+    func didResignActive() {
+        bindings.forEach { $0.didBecomeActive() }
+        mouseBindings.forEach { $0.stopRecording() }
     }
 
     func windowWillClose() {
+        didResignActive()
         stack = nil
     }
 }

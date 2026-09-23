@@ -130,7 +130,7 @@ import Testing
         let second = try #require(brain.calls.last)
         #expect(second.contains { $0.role == .assistant && $0.text == "Name the invariant." })
         #expect(second.contains {
-            $0.role == .user && $0.text == JarvisPrompts.Coach.replyMustCallSpeak(detailEnabled: false)
+            $0.role == .user && $0.text == JarvisPrompts.Coach.replyMustCallSpeak
         })
         #expect(overlay.rendered == [["Start from the read path."]])
     }
@@ -146,7 +146,7 @@ import Testing
         let followUp = try #require(brain.calls.last)
         #expect(!followUp.contains { $0.text == "Name the invariant." })
         #expect(!followUp.contains {
-            $0.text == JarvisPrompts.Coach.replyMustCallSpeak(detailEnabled: false)
+            $0.text == JarvisPrompts.Coach.replyMustCallSpeak
         })
     }
 
@@ -156,8 +156,7 @@ import Testing
         let overlay = FakeOverlay()
         let (driver, _) = makeDriver(brain: brain, overlay: overlay,
                                      capabilities: CoachCapabilities.compose(
-                                        disabledTools: [], prepSourcesConfigured: false,
-                                        detailEnabled: true))
+                                        disabledTools: [], prepSourcesConfigured: false))
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(brain.calls.count == 2)
@@ -188,8 +187,54 @@ import Testing
         #expect(brain.calls.count == 2)
         let answer = try #require(toolResult("m1", in: brain.calls[1]))
         #expect(answer.text?.contains("did not match its schema") == true)
-        #expect(answer.text?.contains(speakTool(detailEnabled: false).parametersJSON) == true)
+        #expect(answer.text?.contains(speakTool.parametersJSON) == true)
         #expect(overlay.rendered == [["Start from the read path."]])
+    }
+
+    private var parameterMarkupArguments: String {
+        #"{"lines":"\n<parameter name=\"detail\">Explain the queue invariant.\n"}"#
+    }
+
+    @Test(arguments: [TriggerReason.turnEnd, .manualHint])
+    func parameterMarkupInLinesRequiresAValidReplacementBeforeRendering(_ reason: TriggerReason) async throws {
+        let brain = ScriptedBrain(script: [
+            reply(call("speak", id: "malformed", arguments: parameterMarkupArguments)),
+            speak,
+        ])
+        let overlay = FakeOverlay()
+
+        guard case .completed(let outcome) = await runAttempt(reason, brain: brain, overlay: overlay) else {
+            Issue.record("expected the corrected call to complete the same attempt"); return
+        }
+        #expect(outcome == .spoke)
+        #expect(brain.calls.count == 2)
+        let continuation = try #require(brain.calls.last)
+        let rejected = try #require(toolResult("malformed", in: continuation))
+        #expect(rejected.text?.contains("did not match its schema") == true)
+        #expect(rejected.text?.contains(speakTool.parametersJSON) == true)
+        #expect(continuation.contains {
+            $0.toolCalls?.contains { $0.id == "malformed" && $0.argumentsJSON == parameterMarkupArguments } == true
+        })
+        #expect(overlay.rendered == [["Start from the read path."]])
+    }
+
+    @Test(arguments: [TriggerReason.turnEnd, .manualHint])
+    func repeatedParameterMarkupExhaustsTheAttemptWithoutRendering(_ reason: TriggerReason) async {
+        let malformed = (1...7).map {
+            reply(call("speak", id: "malformed_\($0)", arguments: parameterMarkupArguments))
+        }
+        let brain = ScriptedBrain(script: malformed + [speak])
+        let overlay = FakeOverlay()
+
+        guard case .failed(let outcome, let failure, _) = await runAttempt(reason, brain: brain, overlay: overlay)
+        else {
+            Issue.record("expected malformed calls to exhaust the attempt"); return
+        }
+        #expect(outcome == .brainError)
+        #expect(failure.stage == .response)
+        #expect(failure.disposition == .temporary)
+        #expect(brain.calls.count == 7)
+        #expect(overlay.rendered.isEmpty)
     }
 
     @Test func aCallToAToolNobodyDeclaredIsAnsweredAndTheTurnContinues() async throws {

@@ -6,7 +6,7 @@ import JarvisCore
 @Suite struct MessagesWireFormatTests {
     let wire = MessagesWireFormat(model: "claude-opus-5", reasoningEffort: "low", maxOutputTokens: 2_048)
 
-    func body(_ messages: [ChatMessage], tools: [ToolDef] = coachTools(detailEnabled: true),
+    func body(_ messages: [ChatMessage], tools: [ToolDef] = coachTools,
               choice: ToolChoice = .auto) throws -> [String: Any] {
         let data = try wire.encode(messages: messages, tools: tools, toolChoice: choice)
         return try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -36,7 +36,7 @@ import JarvisCore
         #expect(image?["media_type"] as? String == "image/jpeg")
         #expect(image?["data"] as? String == "AAAA")
         let declared = try #require(b["tools"] as? [[String: Any]])
-        #expect(declared.map { $0["name"] as? String } == coachTools(detailEnabled: true).map(\.name))
+        #expect(declared.map { $0["name"] as? String } == coachTools.map(\.name))
         #expect(declared.allSatisfy { $0["input_schema"] is [String: Any] && $0["description"] is String })
         #expect(declared.allSatisfy { $0["strict"] == nil && $0["eager_input_streaming"] == nil && $0["type"] == nil })
     }
@@ -69,10 +69,10 @@ import JarvisCore
 
     /// Models write arguments in schema order, so `lines` must reach the wire before `detail`.
     @Test func toolSchemasKeepTheirAuthoredKeyOrder() throws {
-        let tools = coachTools(detailEnabled: true)
+        let tools = coachTools
         let data = try wire.encode(messages: [.user("hi")], tools: tools, toolChoice: .auto)
         let text = String(decoding: data, as: UTF8.self)
-        #expect(text.contains(speakTool(detailEnabled: true).parametersJSON))
+        #expect(text.contains(speakTool.parametersJSON))
         let lines = try #require(text.range(of: #""lines""#))
         let detail = try #require(text.range(of: #""detail""#))
         #expect(lines.lowerBound < detail.lowerBound)
@@ -146,6 +146,37 @@ import JarvisCore
         #expect(response.outputItemsJSON.count == 2)
         #expect(response.outputItemsJSON[0].contains(#""signature":"EmcKZQER""#))
         #expect(response.outputItemsJSON[1].contains(#""id":"toolu_01""#))
+    }
+
+    @Test func malformedSpeakArgumentsRemainAvailableForSchemaRecovery() throws {
+        let data = Data(#"""
+        {"id":"msg_malformed","type":"message","role":"assistant","model":"claude-opus-5",
+         "content":[{"type":"tool_use","id":"toolu_malformed","name":"speak",
+                     "input":{"lines":"\n<parameter name=\"detail\">Explain the queue invariant.\n"}}],
+         "stop_reason":"tool_use","usage":{"input_tokens":20,"output_tokens":60}}
+        """#.utf8)
+        let response = try wire.decode(data)
+
+        #expect(response.toolCalls.isEmpty)
+        #expect(response.outputText == nil)
+        #expect(response.incompleteReason == nil)
+        let raw = try #require(response.rawToolCalls.first)
+        #expect(raw.id == "toolu_malformed")
+        #expect(raw.name == "speak")
+        let arguments = try #require(
+            JSONSerialization.jsonObject(with: Data(raw.argumentsJSON.utf8)) as? [String: Any])
+        #expect(arguments["lines"] as? String == "\n<parameter name=\"detail\">Explain the queue invariant.\n")
+        #expect(arguments["detail"] == nil)
+
+        let continuation = try body([
+            .user("Explain the queue."),
+            .rawItems(response.outputItemsJSON, calls: response.rawToolCalls),
+            .init(role: .tool, text: "Arguments did not match the schema.", toolCallId: raw.id),
+        ])
+        let replayed = blocks(turns(continuation)[1])[0]
+        #expect(replayed["id"] as? String == "toolu_malformed")
+        #expect((replayed["input"] as? NSDictionary) == (arguments as NSDictionary))
+        #expect(blocks(turns(continuation)[2])[0]["tool_use_id"] as? String == "toolu_malformed")
     }
 
     @Test func decodesATextReply() throws {

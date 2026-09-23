@@ -19,7 +19,7 @@ import Testing
         }
 
         coordinator.start()
-        coordinator.updateTranscriptionWork(true)
+        coordinator.updateTranscriptionWork(.pending(since: nil))
         #expect(coordinator.recordFinalizedTranscript(
             "  first fragment  ", spokenAt: 1, source: "test"))
         #expect(coordinator.recordFinalizedTranscript(
@@ -31,7 +31,7 @@ import Testing
         #expect(events.turnCount == 0)
         #expect(events.activity == [true])
 
-        coordinator.updateTranscriptionWork(false)
+        coordinator.updateTranscriptionWork(.settled)
         #expect(await waitUntil { events.turnCount == 1 })
         #expect(events.firstTurnBoundary == 2)
         #expect(events.activity == [true, false])
@@ -82,6 +82,36 @@ import Testing
         #expect(events.firstSilence == 1)
     }
 
+    @Test func finalizedQuestionPublishesWhileLaterSpeechIsPending() async {
+        let events = CoachingEvents()
+        let coordinator = makeCoordinator(
+            transcript: RollingTranscript(), clock: ManualClock(), sessionStart: 0,
+            transcriptBatchingWindow: 0, events: events)
+        coordinator.start()
+        coordinator.updateTranscriptionWork(.pending(since: 2))
+        coordinator.recordFinalizedTranscript("What is the complexity?", spokenAt: 1, source: "test")
+        #expect(await waitUntil { events.turnCount == 1 })
+        #expect(events.firstTurnBoundary == 1)
+        coordinator.stop()
+    }
+
+    @Test func pendingBoundaryAdvanceReleasesCompletedQuestionWithoutFullSettlement() async throws {
+        let events = CoachingEvents()
+        let coordinator = makeCoordinator(
+            transcript: RollingTranscript(), clock: ManualClock(), sessionStart: 0,
+            transcriptBatchingWindow: 0, events: events)
+        let pending = try #require(PendingTurnProbe(coordinator))
+        coordinator.start()
+        coordinator.updateTranscriptionWork(.pending(since: 1))
+        coordinator.recordFinalizedTranscript("What is the complexity?", spokenAt: 2, source: "test")
+        #expect(await waitUntil { pending.observeAndRestoreWaitingState() })
+        #expect(events.turnCount == 0)
+        coordinator.updateTranscriptionWork(.pending(since: 3))
+        #expect(await waitUntil { events.turnCount == 1 })
+        #expect(events.firstTurnBoundary == 1)
+        coordinator.stop()
+    }
+
     private func makeCoordinator(
         transcript: RollingTranscript,
         clock: Clock,
@@ -102,7 +132,7 @@ import Testing
             silenceEnabled: silenceEnabled,
             onTurnEnd: { events.recordTurn(boundary: $0) },
             onSilence: { events.recordSilence($0) },
-            onTranscriptionWorkChanged: { events.recordActivity($0) })
+            onTranscriptionWorkChanged: { events.recordActivity($0 != .settled) })
     }
 }
 
@@ -182,7 +212,7 @@ private func waitForMainQueue(after delay: TimeInterval) async {
 }
 
 /// The batch has no visible callback while transcription is active, so this reads the private
-/// buffer. It restores the waiting state so `updateTranscriptionWork(false)` still exercises the
+/// buffer. It restores the waiting state so `updateTranscriptionWork(.settled)` still exercises the
 /// resume path.
 private struct PendingTurnProbe: Sendable {
     private let pending: UtteranceBuffer
@@ -209,7 +239,7 @@ private func recordAndStopBeforeQueuedBatchRuns(
 ) -> (empty: Bool, usable: Bool) {
     coordinator.start()
     let empty = coordinator.recordFinalizedTranscript(" … ", spokenAt: nil, source: "test")
-    coordinator.updateTranscriptionWork(true)
+    coordinator.updateTranscriptionWork(.pending(since: nil))
     let usable = coordinator.recordFinalizedTranscript("usable", spokenAt: nil, source: "test")
     coordinator.stop()
     return (empty, usable)

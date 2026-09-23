@@ -230,9 +230,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             brainRoute: route,
             appleSpeechLocale: nil,
             screen: SessionPlan.default.screen,
-            prepSources: prepSources,
-            // Scenarios press Show code and Explain more, which both answer into the box.
-            detailEnabled: true)
+            prepSources: prepSources)
         guard composition.start(
             inputs, proxy: proxy, readinessSession: readinessSession,
             reportContext: .runtime)
@@ -252,10 +250,7 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     private func makeComposition(audio: LiveE2EScenario.Audio) -> SessionComposition {
-        let caption = OverlayCaptionPanel()
-        caption.setEnabled(true)
         let box = OverlayBoxPanel()
-        box.setEnabled(true)
 
         let (events, continuation) = AsyncStream.makeStream(of: CoachingAttemptAuditEvent.self)
         Task { @MainActor [weak self] in
@@ -266,7 +261,6 @@ final class LiveE2ERunner: BrainCompositionHost {
         let composition = SessionComposition(
             brain: brain,
             artifacts: artifacts,
-            overlayCaption: caption,
             overlayBox: box,
             readiness: readiness,
             errorReporter: errorReporter,

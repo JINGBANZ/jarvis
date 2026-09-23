@@ -25,7 +25,7 @@ import JarvisCore
             })
         let clients = factory.makeClients(for: target, effort: effort)
         _ = try await clients.coach.respond(
-            messages: [.user("hi")], tools: coachTools(detailEnabled: false), toolChoice: .required)
+            messages: [.user("hi")], tools: coachTools, toolChoice: .required)
         _ = try await clients.summarizer.respond(messages: [.user("summarize")], tools: [])
         let sent = captured.values
         try #require(sent.count == 2)

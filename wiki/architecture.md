@@ -76,11 +76,37 @@ moments the model judges worthwhile.
    stretch pass unchecked. The fourfold growth, rather than doubling, keeps the second check a few
    minutes after the first, so quiet thinking that the first check saw is not checked again soon,
    and a long quiet stretch costs a few requests. Speech from either side defers a check.
-2. Before an automatic attempt, `TranscriptionSettlementGate` waits until both provider streams say
-   that no active speech, finalization, or recovery can still produce an earlier transcript line.
-   OpenAI reconnect-buffered audio remains unsettled even before replay creates a server item; Apple
-   PCM silence requests `SpeechAnalyzer.finalize` and remains unsettled until matching final-result
-   progress is consumed from the module stream.
+2. Before an automatic attempt, `TranscriptionSettlementGate` checks both provider streams against
+   the newest spoken timestamp in the finalized transcript snapshot. Pending speech does not block
+   that context when its known start clears that timestamp by `TranscriptionWorkState`'s start-time
+   margin; a start inside the margin, an earlier start, and an unknown start all block. The margin
+   bounds the residual skew left in those starts: the per-socket audio-time mapping, server-VAD and
+   local detector onset reporting, and the fixed device offset between the mic path and the
+   post-mix tap. The scheduler refreshes and rechecks the snapshot after every wake, then pins the
+   admitted delta for the attempt so newer arrivals cannot cross an unresolved earlier utterance.
+   Silence probes and attempts without new finalized speech still require full settlement.
+   `TranscriptionWorkState` carries the earliest unresolved start on the shared session clock.
+   OpenAI's item ledger supplies it when every pending item has timing. On GPT Transcribe and GPT
+   Live, speech still in progress adds its Silero onset, the same start its committed item carries.
+   Reconnect recovery and an ended local turn the server has not yet bound to an item remain
+   unknown. Apple PCM silence requests `SpeechAnalyzer.finalize` and
+   remains unsettled until matching final-result progress is consumed from the module stream; its
+   start is the local activity tracker's onset, held until that pass settles. Apple finalizes
+   phrases mid-sentence, and moving the start forward with each final would let Jarvis coach on half
+   a question while the speaker is still talking, so a mid-sentence phrase waits for the pause that
+   ends the sentence, as on the OpenAI path. Gemini times no utterance at all, so
+   `PendingSpeechWindow` derives its start from the capture time of the audio still queued and the
+   local onset of the utterance the server is recognizing, capped by the moment that recognition
+   was first reported. Speech the local detector missed stays unknown, and one long run of speech
+   that the server splits into several utterances keeps its first onset until the run ends. The
+   same window gives a Gemini final its spoken time, but only the first final of a window that saw
+   one stretch of local speech gets the onset. Every other final keeps its arrival time. A later
+   final in a long run started after the onset, and after a second stretch the first may have been
+   noise Gemini began recognizing but never finalized. The recognition cap is left out for the same
+   reason. Arrival time is never earlier than the speech, so falling back can only delay coaching,
+   while a stale early stamp could let coaching pass speech that really came first.
+   The model still decides whether a finalized thought warrants a hint; admission does not classify
+   intent or infer sentence completeness from punctuation.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
    a delayed transcript-batch callback arriving after another attempt committed that same line is
    consumed instead of buying a duplicate request. Any explicit coaching shortcut bypasses this wait.
@@ -142,21 +168,8 @@ moments the model judges worthwhile.
    omit the optional observer. This stays diagnostics-only; Activity remains the human-facing record
    and provider scheduling detail remains out of it. See [session-audit.md](./session-audit.md) for
    the component boundary and lifecycle.
-8. `speak` renders to the **Overlay**, one line at a time (per-line display time set in `Config`).
-   A newer tip never interrupts one still showing — tips queue and play in order, so no hint is lost.
-
-**Why the overlay never interrupts and never drops (and why direct-reply latency is a non-issue).**
-The queue is deliberately strict: a tip the user may still be reading is never cut off, and nothing
-is discarded. The obvious objection — "a direct *'Jarvis, help'* reply could wait tens of seconds
-behind a proactive tip" — does not apply in the real use case: **in a live interview the user never
-addresses Jarvis out loud** (speaking to an AI would expose it), so overlay traffic is *entirely
-proactive coaching* with no latency-critical direct reply to jump the queue. The accepted tradeoff is
-that a queued proactive tip can surface some seconds after it was generated; that is bounded in
-practice because `CoachDriver` runs a single turn in-flight (so tips are produced no faster than one
-brain round-trip) and the prompt keeps the model restrained. So the policy is *not interrupt + not
-drop*, not *show-freshest-only* — and adding direct-reply priority/preemption was considered and
-rejected as solving a problem the interview workflow doesn't have. (The must-reply-on-direct-address
-path still works for testing/practice; it is simply not latency-critical there.)
+8. `speak` appends the tip to the **Overlay Box**, the session's scrolling history, so a newer tip
+   never replaces one the user may still be reading.
 
 ### Capabilities
 
@@ -215,7 +228,13 @@ skips the index build, so the file reading and `textutil` work stop with it.
 Prep material is shared across interview types: `.md`, `.txt`, `.pdf`, and `.docx` sources can all
 supply behavioral, coding, or system-design preparation, including mixed-topic documents. No skill
 or topic filters sources by file format. Extraction depends on the file format; coaching depends
-on the question and retrieved evidence.
+on the question and retrieved evidence. The deferred tool description names behavioral stories,
+coding approaches, and system designs so technical preparation is discoverable before loading.
+Retrieval stays selective: questions unlike plausible preparation can skip it, and relevant excerpts
+already in context are reused. Once loaded, tool guidance treats excerpts as reference data, preserves
+assumptions and caveats, and supplements uncovered technical topics without fabricated attribution
+or personal history. A required reply alone does not bypass loading; only a tool choice permitting
+solely `speak` does.
 
 Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
 handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
@@ -302,10 +321,11 @@ for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/Co
 ### The detail box
 
 A reply is short lines plus one optional Markdown `detail`. The lines are the coaching; `detail` is
-for what a line cannot hold: a code block, a diagram, or the paragraphs an explanation needs.
-`CoachCapabilities.compose` builds the `speak` definition once per session and declares `detail` only
-when the Overlay Box can show one, so no session promises a field the box would throw away. `detail`
-is nullable rather than absent, which is what makes a field optional under strict Structured Outputs.
+for supporting content requested by a loaded skill or the paragraphs an explanation needs.
+Every session declares `detail`, because every session has the Overlay Box to show it. A detail that
+arrives while the box is collapsed is not shown, and the replay records none, so the model never reads
+back a detail the user did not see. `detail` is nullable rather than absent, which is what makes a
+field optional under strict Structured Outputs.
 
 Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
 all, and the skill that owns a domain says what its blocks are: the `coding` skill carries the code
@@ -314,7 +334,7 @@ the core prompt names neither. A rule only the model can apply belongs where the
 a session that never loads the skill never pays for it in its cached prefix.
 
 The general detail default defers to the loaded skill so brevity does not make the user press
-Show code for every implementation step. The pairing rules and exceptions live in the
+Show code for every implementation step. The pairing rules, placement headers, and exceptions live in the
 [`coding` skill](../Sources/JarvisCore/Resources/Skills/coding/SKILL.md); the core keeps no second
 copy of that domain policy.
 
@@ -374,6 +394,14 @@ source text; the content uses its configured compact size and shrinks only as ne
 readable minimum. Very small panels scroll rather than clipping or shrinking indefinitely. Collapsing
 the box hides both sections and expanding restores them.
 
+A shown diagram gives the detail area most of the existing panel, leaving a compact hint-history
+strip visible. It never changes the outer panel's size or position. A manually chosen divider
+proportion still takes precedence. Diagrams adapt their flow to the available width: a horizontal
+chain can become vertical, and wide ranks wrap into rows. Node and edge labels retain their native
+readable size, with only vertical scrolling when the graph cannot fit the remaining height. Prose
+beside a diagram keeps its configured compact size rather than shrinking to compensate for the graph.
+See `OverlayBoxPanel`, `DetailDocumentView`, `DiagramHintLayout`, and `DiagramHintImage` for sizing.
+
 Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
 reports back what reached the screen. A detail the box could not accept, because it is hidden or
 collapsed or has nothing left to draw, is dropped whole from Activity and from committed history, so the
@@ -395,19 +423,20 @@ Three configurable global shortcuts are fallbacks for a missed need: **Give me a
 clarification of the relevant gap, which may span several earlier hints; **Show code** (default
 **⌥⌘K**) requests the next small code block. Each trigger says what the user wants in one line and
 nothing about how to answer it: how is the speak guidance's job and the loaded skill's, so a trigger
-is not a third copy to keep in step. All three snapshot a fresh screen into the first request, include
-the available conversation, and always end in a tip: a press may load a skill or tool and search prep
+is not a third copy to keep in step. All three capture a fresh screen, then snapshot the latest
+finalized transcript for the first request, so speech finalized during capture reaches that request.
+The attempt audit and committed transcript boundary use that same snapshot; a deferred turn already
+covered by it does not produce another hint. All three always end in a tip: a press may load a skill or tool and search prep
 notes first, but never stays silent or captures again (see [Capabilities](#capabilities)). If capture
 fails, the request identifies the missing screen and uses available context without inventing visible
 details. They share the ordinary single-flight coach loop and provider route. Natural wakes preserve
 pending manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass
 unsettled transcription, while an automatic retry waits for settlement. Stop cancels any request;
-while stopped, an explicit shortcut only beeps. Activity records which shortcut was pressed.
+while stopped, an explicit keyboard shortcut only beeps and mouse clicks pass through. Activity records
+which coaching shortcut was pressed.
 
-Explain more and Show code answer into the detail box, so the Overlay Box switch is the one thing that
-decides whether they exist: with the box off they are not registered, and `SessionComposition.allows`
-refuses them even when a runner calls `requestShortcut` directly. There is no separate switch for
-either; the model follows the [detail guidance](#the-detail-box) and the loaded skill to supply
+Explain more and Show code answer into the detail box, which every session has, so neither has a
+switch; the model follows the [detail guidance](#the-detail-box) and the loaded skill to supply
 the content alongside the hint.
 
 A Show code press preloads the `coding` skill. Moving the code rules into that skill would otherwise
@@ -425,12 +454,16 @@ or writes a manual-hint Activity entry. They use the same session detail availab
 other detail shortcuts; unavailable navigation is silent. Their bindings and boundary behavior
 are defined in [Settings → Shortcuts](./settings-window.md#shortcuts).
 
-Shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
+Keyboard shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
 `HotkeyController` dispatches only matching Jarvis events. Each binding persists independently through
 `HotkeyPreferences`. Registering a replacement happens before releasing the old binding, so a
-collision—including another Jarvis shortcut—keeps the prior working binding. See
-[Settings → Shortcuts](./settings-window.md#shortcuts).
+collision—including another Jarvis shortcut—keeps the prior working binding. Each action also supports
+an optional, separately persisted mouse binding. `MouseHotkeyController` uses a suppressing event tap
+with an existing Accessibility grant; `MouseShortcutRouter` matches only actions allowed in the live
+session and consumes the matched click through release. See
+[Settings → Shortcuts](./settings-window.md#shortcuts) for binding behavior and
+[Sandbox → Data Egress](./sandbox.md#data-egress) for privacy scope.
 
 ## 3. Components
 
@@ -441,16 +474,15 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `ProviderFailure` feeds attempt outcomes into the finite provider route; cycle exhaustion uses the session recovery policy. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
 | **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection) or Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device). |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM, and carries the pending start described in [The turn](#the-turn). The opt-in Gemini Live adapter times its pending start and its finals with `PendingSpeechWindow`, also described there. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection), Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device), or the Gemini Live WebSocket. |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit every automatic attempt only after both transcription streams settle, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit automatic attempts only when both transcription streams are settled through the selected context, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
 | **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
-| **Overlay Caption** | Render `speak` output: up to ~3 short lines (model-split), shown one at a time and queued so a newer tip never cuts off the current one; non-activating, always-on-top, excluded from capture. Switchable from Settings — **off by default**; when off, tips are suppressed. | AppKit NSPanel; `OverlayCaptionPanel`. |
-| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped — the scrollable history of what the caption flashed one line at a time. Movable, resizable, translucent, also excluded from capture; switched on/off from Settings (**on by default**). Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. Fed by the same `speak` call as the caption via **`BroadcastOverlay`**, which fans one `OverlayRendering.render` out to both sinks (so `CoachDriver` is unchanged). A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box; the caption remains text-only. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
-| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The two overlay surfaces are switched from Settings, and the Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
-| **HotkeyController** | Register the coaching and detail-navigation shortcuts; AppDelegate routes coaching to the session and navigation to the overlay. See [§2 On-demand coaching shortcuts](#on-demand-coaching-shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC). |
+| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped, as the session's scrollable history. Movable, resizable, translucent, excluded from capture, and with no off switch. Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. It is the `OverlayRendering` sink `CoachDriver` speaks to. A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
+| **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
+| **HotkeyController / MouseHotkeyController** | Handle the coaching and detail-navigation bindings; AppDelegate routes coaching to the session and navigation to the overlay. See [Settings → Shortcuts](./settings-window.md#shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC) for keyboard; Core Graphics event tap with Accessibility permission for mouse. |
 | **OnboardingGate** | Run first-run onboarding once per install, before the rest of the app is built: one OpenAI or Gemini API key, then the three TCC grants, each step shown only when what it collects is missing. Closing the window before the end quits; completing it sets the one onboarding flag, so later launches go straight to the menu bar. `SystemAudioPermissionProbe` proves the silently enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Onboarding](#onboarding) and [§3 Permissions](#permissions). | AppKit window, `CredentialVerifier`, AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -539,6 +571,10 @@ deliberately outside onboarding: denial or revocation leaves current-viewport OC
 never blocks coaching. Capture itself never prompts, and the setting is frozen into each attempt's
 session-plan revision so live teardown cannot produce privacy UI.
 
+Optional mouse shortcuts use the same Accessibility grant, independently of Chrome text. They require
+an existing grant and never request it; without permission, keyboard shortcuts and coaching remain
+available. See [Settings → Shortcuts](./settings-window.md#shortcuts).
+
 The reason it happens at launch rather than at Start is the coaching context. A TCC dialog is system
 UI that no capture-exclusion trick can hide, so one arriving mid-interview is visible to whoever the
 user is sharing a screen with. After onboarding, the only dialog Start can still raise is System
@@ -619,7 +655,7 @@ to contain only user-facing coaching, fixed failures, and lifecycle outcomes.
 
 Ghost mode applies from a live pipeline through terminal teardown: no autonomous activation, alert,
 window, browser, notification, attention request, or sound is allowed outside the nonactivating,
-capture-excluded caption and box overlays. The persistent menu-bar item and user-invoked
+capture-excluded Overlay Box. The persistent menu-bar item and user-invoked
 Settings/Activity surfaces are explicit exceptions, as is unavoidable macOS privacy UI. The Core
 presentation matrix is unit-tested, and `scripts/check-ghost-mode.sh` rejects unreviewed presentation
 API calls from the normal test gate. Realtime health remains visible through the menu and current
@@ -666,11 +702,11 @@ Failed conversation work remains pending within the cycle's retry budget and sch
 coaching attempt after a short fixed delay. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
 manual coaching trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
 failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
-attempt uses the same pending conversation. Every automatic attempt waits while either transcription
-stream owns unfinished work so it does not cross an earlier utterance that is about to finalize. An
-explicit coaching shortcut interrupts that postponement even after the wait begins and upgrades the same
-pending-work attempt to a shortcut attempt, which always ends in a hint; ordinary natural triggers remain parked until transcription
-settles. `TriggerReason` remains the model-facing
+attempt uses the same pending conversation. Every automatic attempt applies the
+[transcript admission rule](#the-turn) to a fresh snapshot, so later pending speech cannot starve
+completed context and earlier or unknown work still preserves chronology. Natural triggers wake the
+wait to reconsider its reason and context. An explicit coaching shortcut bypasses that wait and
+upgrades the same pending-work attempt to a shortcut attempt, which always ends in a hint. `TriggerReason` remains the model-facing
 reason that made coaching useful (`turnEnd`, `silence`, `manualHint`, `manualExplanation`, or `manualCode`); pending work is scheduler
 state, not a fourth instruction to the model. An automatic attempt with no newer trigger reuses the
 pending work's reason; when another natural trigger arrives, its newer reason describes the fresh
@@ -685,9 +721,9 @@ A successful response clears the target's failure count and preserves successful
 
 A **coaching cycle** is one finite traversal of the remaining route, possibly containing multiple
 attempts and HTTP requests. Exhausting a cycle keeps capture and transcription active. The icon,
-menu and Activity status remain failed until a successful coaching attempt; only the first failed
-cycle in a streak shows a red caption. Failures never add rows to the Box. Activity records the failed
-cycle with the provider's redacted cause.
+menu and Activity status remain failed until a successful coaching attempt. Failures never add rows
+to the Box, which holds only coaching; Activity records the failed cycle with the provider's redacted
+cause.
 
 A later explicit coaching shortcut or new finalized speech starts a fresh cycle at the primary;
 silence without new transcript does not. Consecutive failed cycles delay that admission by 0, 5, 15,
@@ -711,7 +747,7 @@ bundled helper running, because it serves Settings and the next Start.
 
 ```mermaid
 flowchart TD
-    T[Turn end, silence, manual shortcut,<br/>or pending-work wake] --> S{Either transcription<br/>stream unsettled?}
+    T[Turn end, silence, manual shortcut,<br/>or pending-work wake] --> S{Pending transcription blocks<br/>the selected context?}
     S -- Yes, automatic attempt --> P[Keep work pending<br/>and postpone]
     S -- No --> A[Snapshot active target +<br/>latest finalized conversation]
     A --> R[Run one coaching attempt<br/>on one target]
@@ -788,13 +824,26 @@ rather than a per-turn screenshot.
   may have changed since, so a later turn reads it as evidence from then: text that still called
   itself the current viewport let a "how do I solve this" minutes later skip the fresh look the
   screen gate asks for. Past a token
-  threshold (see
-  `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a short,
-  briefing written by a cheaper model (`gpt-5.4-mini`). Its size estimate
-  treats non-ASCII scripts conservatively; the exact retention and topic-retirement policy lives in
-  [`JarvisPrompts.HistorySummary.system`](../Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift).
-  Compaction uses one Core-owned workload deadline across providers and fails soft: a slow or failed
-  summary leaves the full history intact for a later attempt. Server-side memory (a Conversations
+  threshold (see `Config.historyCompactionTokenThreshold`) the oldest span is **compacted** into a
+  short briefing using the provider-specific summary tier in `BrainModelCatalog`. Its size estimate
+  treats non-ASCII scripts conservatively. The summarizer receives role-labeled history, tool-call
+  identifiers and arguments (including delivered coaching), and linked tool results. Historical
+  requests are evidence to summarize, never instructions to answer. Stored screenshots are already
+  replaced by the earlier-image text stub; that stub does not establish a capture failure. The retention and topic-retirement policy lives in
+  [`JarvisPrompts.HistorySummary`](../Sources/JarvisCore/Prompts/JarvisPrompts+HistorySummary.swift).
+  The model returns a JSON briefing covering context, decisions, prior coaching, open questions, and
+  verification evidence. The validator also accepts a single whole-response Markdown fence because
+  Haiku can wrap valid briefing JSON despite the prompt requesting bare JSON. An untagged fence or
+  case-insensitive `json` tag is accepted, with LF or CRLF line endings. It strips only that envelope
+  before validating the same briefing structure; surrounding prose, other language tags, incomplete
+  fences, and truncated JSON are rejected. The briefing must be under 250 whitespace-delimited words
+  and its normalized JSON under 750 estimated tokens, using the history estimator to bound non-ASCII
+  scripts and JSON overhead. The runner replaces history only with a structurally valid, bounded briefing;
+  malformed output or missing fields leaves the full history intact through the existing fail-soft path. This
+  check establishes structure and size, not factual truth or semantic usefulness: a refusal in the
+  expected JSON shape can still pass. Preserving evidence and distinguishing proposals from observed
+  results remain summarizer responsibilities. Compaction uses one Core-owned workload
+  deadline across providers; a slow or failed summary also leaves full history for a later attempt. Server-side memory (a Conversations
   API conversation, or `previous_response_id` threading) is deliberately not used: it can only grow,
   so every screenshot and reply is re-billed as input on every later turn of a long session, and its
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. OpenAI API requests are sent `store:true`
@@ -807,17 +856,32 @@ rather than a per-turn screenshot.
   experience answers with STAR, handles personal and hypothetical questions directly, preserves
   prep-material caveats, and reserves labeled fictional examples for an explicit practice request.
   It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
-  local implementation and defect diagnosis, and boundary tests for a post-completion hint the base
-  policy already warrants; coding-with-ai adds guidance for directing another AI, reviewing its
-  proposals, challenging an approach against constraints, distinguishing adopted code and execution
+  local implementation and defect diagnosis, workload-grounded performance reasoning, and
+  discriminating tests with explicit expected results. Understanding questions precede implementation
+  detail, and ambiguous requirements are resolved before labeling a design a bug. Boundary tests
+  remain available for a post-completion hint the base policy already warrants; coding-with-ai adds
+  guidance for directing another AI, reviewing its proposals, challenging an approach against constraints, distinguishing adopted code and execution
   evidence, verifying counterexamples, and checking minimal fixes against reproducing and regression
-  cases. It composes with coding when offered and applies only once AI collaboration is established:
+  cases. Verification reminders follow changed evidence or impending unsupported completion rather
+  than repeating during learning; delegated prompts leave routine algorithm steps to the other AI.
+  Instruction-level regression inputs and their semantic criteria live in
+  [`coaching-quality.json`](../Tests/JarvisLiveTests/Scenarios/coaching-quality.json), with evaluation
+  limits in the [review guide](../Tests/JarvisLiveTests/Scenarios/coaching-quality-review.md).
+  It composes with coding when offered and applies only once AI collaboration is established:
   the candidate is using a coding assistant, or the interviewer or candidate has said it is allowed.
   A visible assistant panel alone is a hint, not that establishment. Its separate catalog entry keeps
   that workflow conditional without a round or seniority setting
   (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
-  System-design supplies the stage vocabulary from requirements through
-  trade-offs, and asks for a diagram in the one stage that benefits. The base prompt keeps what is
+  System-design supplies the stage vocabulary from requirements through trade-offs and checks
+  state ownership, durable background-work creation, replenishment, and recovery against the current
+  requirements. It targets the highest-impact missing mechanism at the current stage and asks for
+  a diagram in the one stage that benefits. An explicitly requested stage takes precedence over
+  screen notes; generic hints continue the stage established in conversation. Architecture hints
+  describe component responsibilities and a request or data flow. Canvas navigation controls are
+  interface state and become the answer when navigation is what the candidate asks for; an unseen
+  drawing calls for a conversation-grounded hint with its visual limitation stated. Unresolved
+  requirements call for a specific question the candidate can put to the interviewer, without needing
+  to answer Jarvis during the interview. The base prompt keeps what is
   true of every session: when to speak or stay silent, hint length, and comprehension before
   strategy. Finishing code alone still does not trigger a hint, and there is no runtime classifier
   or persisted question classification.
@@ -1127,13 +1191,13 @@ data from its vendor by default. Google's OpenAI-compatible layer offers only Ch
 
 ### Latency
 
-Target for the direct API path: **turn-end → first overlay line < 2s.** Transcription is continuous
+Target for the direct API path: **turn-end → tip in the Overlay Box < 2s.** Transcription is continuous
 (no STT latency at trigger time) and most turns are text-only. Subscription latency depends on the
 vendor, model, and network behind one loopback hop through the helper; how that compares with the
 vendors' own CLIs is in
 [Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy),
-and neither subscription promises the direct API target. The overlay reveals the already-returned
-lines one at a time (paced by `Config`); the brain response itself is not streamed to the overlay.
+and neither subscription promises the direct API target. The box shows the already-returned tip
+whole; the brain response itself is not streamed to the overlay.
 Session auditing adds only best-effort typed-event admission to the live path. Parsing, redaction,
 serialization, file I/O, bounded retention, and close behavior belong to the
 [session-audit component](./session-audit.md); ordinary Stop never makes a replacement Start wait for

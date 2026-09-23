@@ -171,6 +171,13 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         }
     }
 
+    public var coachingWorkState: TranscriptionWorkState {
+        lock.lock(); defer { lock.unlock() }
+        guard !items.isEmpty else { return .settled }
+        guard items.values.allSatisfy({ $0.spokenAt != nil }) else { return .pending(since: nil) }
+        return .pending(since: items.values.compactMap(\.spokenAt).min())
+    }
+
     public var hasPendingItems: Bool {
         lock.lock(); defer { lock.unlock() }
         return !items.isEmpty

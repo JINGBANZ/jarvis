@@ -82,6 +82,7 @@ composition used in production.
 | Standard matrix | `./scripts/transcription-benchmark.sh standard` | Compare every selectable transcription path over the fixed English, Mandarin, and bilingual fixtures. |
 | Standard matrix with more repetitions | `./scripts/transcription-benchmark.sh standard --repetitions N` | Gather a larger sample; `N` must preserve the source-owned minimum. |
 | Technical-context comparison | `./scripts/transcription-benchmark.sh vocabulary` | Compare GPT-4o Transcribe with and without a short technical-context prompt using identical synthetic audio. |
+| Selected standard arms | `./scripts/transcription-benchmark.sh standard --filter TEXT` | Check one path quickly, such as one model's spoken-start offset; only arms whose id contains `TEXT` run. Combines with `--repetitions`. |
 | Scoped reconnect | `./scripts/transcription-benchmark.sh reconnect` | Verify OpenAI reconnect, buffering, replay, final ordering, and provider identity. |
 
 All modes are explicit developer operations. They never run as part of `swift build`,
@@ -106,10 +107,15 @@ desktop audio is outside the capture and the microphone is never opened.
 The matrix in
 [`TranscriptionBenchmark.standardArms`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift)
 covers every selectable OpenAI transcription model with the matching language profile, plus Apple
-Speech with one locale at a time. Standard mode requires every arm to finish every requested
+Speech with one locale at a time. Standard mode requires every selected arm to finish every requested
 repetition with continuous capture. Transcript quality and lifecycle measurements remain visible in
 the summary rather than being hidden behind one universal accuracy threshold, which would make
 provider comparisons less informative.
+
+Without `--filter`, every arm is selected. A filtered run judges only the arms it ran and records its
+filter in `summary.json`, so a partial matrix is never read as the whole one. A filter that matches
+no arm is rejected before any audio plays, and a run in which no selected arm could run fails
+acceptance, because either would otherwise pass with nothing measured.
 
 **Gemini is not in the matrix yet.** `Arm.model` is typed `OpenAITranscriptionModel?`, and
 `TranscriptionBenchmarkRunner`'s `requiredProviders` set names only `.openAI` (plus `.appleSpeech` on
@@ -158,10 +164,15 @@ provider quality from harness or reconnect failures.
 | Readiness latency | How long after `connect()` was the session actually usable? | Slow or missing provider setup |
 | Endpoint or commit latency | How long after speech ended did the server detect the endpoint, or Jarvis send the client-owned commit? | Turn-detection or local-commit delay |
 | Final latency | How long after speech ended did the accepted final arrive? | End-to-end finalization delay |
+| Spoken-start offset | Where did the provider place the start of speech relative to playback, and how much does that move between repetitions? | Timing jitter beyond the [start-time margin](./architecture.md#the-turn) that orders pending speech against finalized lines |
 | Transcript quality and heard order | How close was the final text to the known phrase, and did fragments remain in spoken order? | Recognition errors or reordered delivery |
 | Missing, duplicate, revised, or unavailable finals | Did Jarvis lose a final, deliver one twice, observe changing text for one provider item, or reach a final state without recoverable text? | Lifecycle reconciliation bugs that a plausible-looking transcript can hide |
 | Capture continuity | Were captured chunk sequence numbers continuous and did they contain samples? | Audio lost before it reached the provider path |
 | Replay eviction | Did the bounded recovery tail discard audio needed after interruption? | Reconnect data loss even when the replacement socket becomes ready |
+
+The spoken-start offset carries a constant bias per path, from the fixture's lead-in silence and,
+on OpenAI's server-VAD path, `audio_start_ms` including the session's prefix padding. Only its spread
+across repetitions is jitter.
 
 These are measurements of the controlled experiment, not an audit of a user session. For example,
 suppose the expected fixture is “alpha beta.” A provider could return “alpha beta” once and look
@@ -202,6 +213,6 @@ publishing a success marker.
 The command exits nonzero when a platform-supported arm is unavailable or incomplete, capture
 continuity fails, or the strict reconnect acceptance criteria fail. On macOS 14.2–25, Apple Speech arms
 remain visible in `summary.json` as unavailable because that provider requires macOS 26, but they do
-not fail the runnable matrix. Inspect the summary to distinguish provider recognition/finalization
+not fail the runnable matrix unless a filter selected nothing else. Inspect the summary to distinguish provider recognition/finalization
 behavior from capture or replay failure. A run's results belong in the pull request that ran it, not
 on this operating-contract page.

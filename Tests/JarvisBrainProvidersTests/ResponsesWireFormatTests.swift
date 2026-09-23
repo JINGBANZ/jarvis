@@ -39,10 +39,10 @@ import JarvisCore
     @Test func toolSchemasKeepTheirAuthoredKeyOrder() throws {
         let wire = ResponsesWireFormat(
             model: "gpt-5.5", reasoningEffort: "low", maxOutputTokens: 2_048, store: true)
-        let tools = coachTools(detailEnabled: true)
+        let tools = coachTools
         let data = try wire.encode(messages: [.user("hi")], tools: tools, toolChoice: .auto)
         let text = String(decoding: data, as: UTF8.self)
-        #expect(text.contains(speakTool(detailEnabled: true).parametersJSON))
+        #expect(text.contains(speakTool.parametersJSON))
         let lines = try #require(text.range(of: #""lines""#))
         let detail = try #require(text.range(of: #""detail""#))
         #expect(lines.lowerBound < detail.lowerBound)

@@ -6,9 +6,13 @@ public extension TranscriptionBenchmark {
         expectedRepetitions: Int,
         requiredProviders: Set<TranscriptionProvider>
     ) -> [String] {
-        summary.arms.compactMap { arm -> String? in
+        // An unavailable arm is excused only beside one that ran: a filter that selects only Apple
+        // arms before macOS 26 must not pass with nothing measured.
+        let someArmRan = summary.arms.contains { $0.unavailableReason == nil }
+        return summary.arms.compactMap { arm -> String? in
             if arm.unavailableReason != nil {
-                return requiredProviders.contains(arm.arm.provider) ? arm.arm.id : nil
+                let required = requiredProviders.contains(arm.arm.provider) || !someArmRan
+                return required ? arm.arm.id : nil
             }
             guard arm.repetitions.count == expectedRepetitions,
                   arm.repetitions.allSatisfy({ $0.failure == nil && $0.continuityPassed }) else {
@@ -93,6 +97,9 @@ public extension TranscriptionBenchmark {
             },
             finalLatencySeconds: usableFinals.last.map {
                 max(0, $0.observedAt - input.speechEndedAt)
+            },
+            spokenStartOffsetSeconds: input.speechStartedAt.flatMap { startedAt in
+                usableFinals.compactMap(\.spokenAt).min().map { $0 - startedAt }
             },
             missing: usableFinals.isEmpty,
             duplicateCount: duplicateCount,

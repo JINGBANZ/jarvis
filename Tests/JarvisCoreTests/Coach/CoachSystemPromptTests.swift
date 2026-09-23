@@ -3,28 +3,23 @@ import Testing
 
 @Suite struct CoachSystemPromptTests {
     private let withCatalog = CoachCapabilities(
-        tools: coachTools(detailEnabled: false) + [ToolDef(
+        tools: coachTools + [ToolDef(
             name: "search_prep_notes",
             description: searchPrepNotesTool.description,
             parametersJSON: "{}",
             guidance: searchPrepNotesTool.guidance,
             deferLoading: true)])
 
-    @Test func bareBuilderIsTheBasePromptPlusTipStyle() {
+    @Test func bareBuilderIsTheBasePromptPlusCoreToolGuidance() {
         #expect(JarvisPrompts.Coach.system(capabilities: .default)
             == [JarvisPrompts.Coach.system, captureScreenTool.guidance,
-                speakTool(detailEnabled: false).guidance]
+                speakTool.guidance]
                 .joined(separator: "\n\n"))
     }
 
-    @Test func theDetailSectionAppearsOnlyWhenTheBoxIsOn() {
-        let without = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false, detailEnabled: false))
-        #expect(!without.contains("# Detail"))
-        #expect(!without.contains("detail"))
-
+    @Test func theDetailSectionIsAlwaysPresent() {
         let with = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false, detailEnabled: true))
+            disabledTools: [], prepSourcesConfigured: false))
         #expect(with.contains("# Detail"))
         #expect(with.contains("The lines are the coaching."))
         #expect(with.contains("# Tip style"))
@@ -32,7 +27,7 @@ import Testing
 
     @Test func theCoreCarriesNoCodeOrDiagramRules() {
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true, skills: skills, detailEnabled: true))
+            disabledTools: [], prepSourcesConfigured: true, skills: skills))
         #expect(!prompt.contains("mermaid"))
         #expect(!prompt.contains("codeSnippet"))
         #expect(!prompt.contains("highlightedLines"))
@@ -118,7 +113,7 @@ import Testing
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills))
         #expect(prompt.contains(
-            "When the turn says you must call speak, skip loading and speak with what you have."))
+            "Only when speak is the sole permitted tool, speak with what you have."))
     }
 
     @Test func everythingSwitchedOffIsTheBarePrompt() {

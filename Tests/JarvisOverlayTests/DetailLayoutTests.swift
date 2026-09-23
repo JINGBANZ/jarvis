@@ -5,6 +5,36 @@ import Testing
 
 @MainActor
 @Suite struct DetailLayoutTests {
+    @Test func placementHeaderRendersAboveCodeWithInlineAnchor() throws {
+        let detail = try #require(ReplyDetail(markdown: """
+            Inside your `for right, ch in enumerate(s):` loop.
+
+            ```python
+            if ch in seen:
+                left = max(left, seen[ch] + 1)
+            seen[ch] = right
+            ```
+            """))
+        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 600, height: 300))
+        view.show(detail, stamp: "10:30:00", position: (0, 1), isHeld: false, isRolled: false,
+                  fontSize: 18)
+        view.layoutSubtreeIfNeeded()
+        let scroll = try #require(view.subviews.compactMap { $0 as? NSScrollView }.first)
+        let document = try #require(scroll.documentView)
+        let texts = document.subviews.compactMap { $0 as? NSTextView }
+        let header = try #require(texts.first { $0.accessibilityLabel() == "Detail" })
+        let code = try #require(texts.first { $0.accessibilityLabel() == "Code block" })
+        #expect(!header.isHidden)
+        #expect(header.string == "Inside your for right, ch in enumerate(s): loop.")
+        #expect(header.frame.maxY <= code.frame.minY)
+        #expect(scroll.documentVisibleRect.contains(header.frame))
+        let anchor = (header.string as NSString).range(of: "for right, ch in enumerate(s):")
+        let font = try #require(header.attributedString().attribute(
+            .font, at: anchor.location, effectiveRange: nil) as? NSFont)
+        #expect(font.isFixedPitch)
+        #expect(view.codeText.string == "if ch in seen:\n    left = max(left, seen[ch] + 1)\nseen[ch] = right")
+    }
+
     @Test func aSentenceAfterACodeBlockIsDrawnBelowIt() throws {
         let detail = try #require(ReplyDetail(markdown: """
             First, track the last index.
@@ -20,7 +50,7 @@ import Testing
                                             "Then handle the empty string."])
     }
 
-    @Test func aNoteAfterADiagramIsDrawnBelowItAndTheDiagramFitsWhatTheTextLeaves() throws {
+    @Test func aNoteAfterADiagramStaysBelowItWhenReadableOverflowScrolls() throws {
         let detail = try #require(ReplyDetail(markdown: """
             Sketch the read path.
 
@@ -32,7 +62,7 @@ import Testing
 
             The API owns the cache.
             """))
-        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 420, height: 300))
+        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 420, height: 900))
         view.show(detail, stamp: "10:30:00", position: (0, 1), isHeld: false, isRolled: false,
                   fontSize: 14)
         view.layoutSubtreeIfNeeded()
@@ -44,6 +74,13 @@ import Testing
         #expect(stacked[1].frame.maxY <= stacked[2].frame.minY)
         #expect(document.frame.height <= scroll.contentSize.height,
                 "the note below the diagram counts against the space the diagram scales into")
+        view.setFrameSize(NSSize(width: 420, height: 300))
+        view.needsLayout = true
+        view.layoutSubtreeIfNeeded()
+        #expect(document.frame.height > scroll.contentSize.height)
+        #expect(stacked[1].frame.height >= 196, "the three-node diagram retains readable native scale")
+        #expect(stacked[1].frame.maxY <= stacked[2].frame.minY)
+        #expect(document.frame.height >= stacked[2].frame.maxY)
     }
 
     /// VoiceOver walks the view hierarchy, not the frames.
@@ -129,15 +166,14 @@ import Testing
 
     @Test func theBoxGrowsForWrappedContentWhenThePanelHasRoom() throws {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 320, height: 800))
-        box.setEnabled(true)
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         let short = try #require(ReplyDetail(markdown: "```swift\nreturn result\n```"))
-        #expect(box.deliver(["Return it."], perLineSeconds: [1], detail: short) == short)
+        #expect(box.deliver(["Return it."], detail: short) == short)
         let shortHeight = box.currentDetailHeight
         let long = try #require(ReplyDetail(markdown:
             "```swift\nlet matchingCandidates = candidates.filter { candidate in candidate.isValid && candidate.score > minimumScore }\n```"))
-        #expect(box.deliver(["Filter them."], perLineSeconds: [1], detail: long) == long)
+        #expect(box.deliver(["Filter them."], detail: long) == long)
         #expect(box.currentDetailHeight > shortHeight)
         #expect(box.currentDetailHeight <= 360)
     }
@@ -163,13 +199,12 @@ import Testing
 
     @Test func theHintBoxKeepsSpaceAtTheMinimumPanelSize() throws {
         let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
-        box.setEnabled(true)
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         box.setContentSize(box.minimumContentSize)
         let code = (1...24).map { "    values.append(\($0))" }.joined(separator: "\n")
         let detail = try #require(ReplyDetail(markdown: "```python\n\(code)\n```"))
-        _ = box.deliver(["Fill the list."], perLineSeconds: [1], detail: detail)
+        _ = box.deliver(["Fill the list."], detail: detail)
         #expect(box.currentDetailHeight > 0)
         #expect(box.currentDetailHeight <= box.currentContentSize.height - 44)
     }

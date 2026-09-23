@@ -91,8 +91,7 @@ final class SettingsHubModel {
             screenScope: screenPreferences.scope,
             displayIndex: screenPreferences.displayIndex,
             browserTextEnabled: screenPreferences.browserTextEnabled && BrowserAccessibilityPermission.isGranted,
-            captionEnabled: appearance.captionEnabled,
-            boxEnabled: appearance.boxEnabled,
+            boxFontSize: appearance.boxFontSize,
             readiness: RobotReadiness(
                 signedOutSubscriptions: signIns.signedOut(
                     among: Set(route.targets.map(\.provider).filter(\.servedByLocalProxy))),
