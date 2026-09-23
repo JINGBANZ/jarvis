@@ -19,8 +19,10 @@ public struct CoachCapabilities: Sendable, Equatable {
     public var catalogNames: [String] { deferredTools.map(\.name) }
 
     /// Loaders are fixed so a hand-edited plist can't remove one while its catalog has entries.
-    public static let fixedToolNames: Set<String> =
-        [captureScreenTool.name, speakToolName, staySilentTool.name, loadToolName, loadSkillName]
+    public static let fixedToolNames: Set<String> = [
+        captureScreenTool.name, speakToolName, staySilentTool.name,
+        loadToolName, callToolName, loadSkillName,
+    ]
 
     /// `prepSourcesConfigured` means sources are configured, not that the index has been built.
     /// Disabled names that match nothing or name a fixed tool are ignored.

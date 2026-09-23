@@ -145,6 +145,13 @@ import JarvisCore
         #expect(response.outputItemsJSON[1].contains(#""id":"toolu_01""#))
     }
 
+    @Test func aCallToolBlockDecodesIntoTheRoutedInvocation() throws {
+        let reply = #"{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"call_tool","input":{"name":"search_prep_notes","arguments":"{\"query\":\"rate limiter\"}"}}]}"#
+        let response = try wire.decode(Data(reply.utf8))
+        #expect(response.toolCalls == [.searchPrepNotes(callId: "t1", query: "rate limiter")])
+        #expect(response.rawToolCalls.map(\.name) == ["call_tool"])
+    }
+
     @Test func malformedSpeakArgumentsRemainAvailableForSchemaRecovery() throws {
         let data = Data(#"""
         {"id":"msg_malformed","type":"message","role":"assistant","model":"claude-opus-5",

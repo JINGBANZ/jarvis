@@ -54,9 +54,35 @@ public extension ToolInvocation {
             return name == CoachCapabilities.loadToolName
                 ? .loadTool(callId: callId, name: loaded)
                 : .loadSkill(callId: callId, name: loaded)
+        case CoachCapabilities.callToolName:
+            // The routed tool parses exactly as a direct call would. A fixed tool is refused here,
+            // so a press cannot reach capture_screen through the dispatcher.
+            guard let target = routedToolName(argumentsJSON: argumentsJSON),
+                  !CoachCapabilities.fixedToolNames.contains(target) else { return nil }
+            let object = (try? JSONSerialization.jsonObject(
+                with: Data(argumentsJSON.utf8))) as? [String: Any]
+            let routed: String
+            if let text = object?["arguments"] as? String {
+                routed = text
+            } else if let nested = object?["arguments"] as? [String: Any],
+                      let data = try? JSONSerialization.data(withJSONObject: nested, options: [.sortedKeys]) {
+                routed = String(decoding: data, as: UTF8.self)
+            } else {
+                return nil
+            }
+            return parse(callId: callId, name: target, argumentsJSON: routed)
         default:
             return nil
         }
+    }
+
+    /// The `name` a `call_tool` call routes to, read on its own so a malformed routed call can be
+    /// answered with the routed tool's schema.
+    static func routedToolName(argumentsJSON: String) -> String? {
+        let object = (try? JSONSerialization.jsonObject(
+            with: Data(argumentsJSON.utf8))) as? [String: Any]
+        let name = (object?["name"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? nil : name
     }
 
 }
