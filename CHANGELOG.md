@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/JINGBANZ/jarvis/compare/v0.4.0...v0.5.0) (2026-09-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **brain:** a saved primary model that is no longer listed falls back to the provider's default, and a saved fallback target naming one is dropped.
+
+### Features
+
+* **benchmark:** report the spoken-start offset per repetition ([#392](https://github.com/JINGBANZ/jarvis/issues/392)) ([434bccb](https://github.com/JINGBANZ/jarvis/commit/434bccb79f22c354beb8f11126c49a2349be3632))
+* **brain:** list only the newest release of each OpenAI and Claude model line ([#400](https://github.com/JINGBANZ/jarvis/issues/400)) ([305a4a1](https://github.com/JINGBANZ/jarvis/commit/305a4a1ee324119a7c1740af8966943bcaeb7702))
+* **transcription:** report Apple pending speech start times ([#389](https://github.com/JINGBANZ/jarvis/issues/389)) ([09329de](https://github.com/JINGBANZ/jarvis/commit/09329dec35afc629ba7b457f18a58a069406c9b0))
+* **transcription:** report Gemini pending speech start times ([#390](https://github.com/JINGBANZ/jarvis/issues/390)) ([5e6adc9](https://github.com/JINGBANZ/jarvis/commit/5e6adc92d1bb86e00f701da5fe6b63663fe9a2ee))
+* **transcription:** time more pending speech and filter benchmark arms ([#398](https://github.com/JINGBANZ/jarvis/issues/398)) ([7172541](https://github.com/JINGBANZ/jarvis/commit/71725419e7c1630af0677147b38032ed86a7ba03))
+
 ## [0.4.0](https://github.com/JINGBANZ/jarvis/compare/v0.3.3...v0.4.0) (2026-09-21)
 
 
