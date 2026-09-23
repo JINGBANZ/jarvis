@@ -2,13 +2,11 @@ import Foundation
 
 public enum BrainModelCatalog {
     public static let all: [BrainModel] = [
-        BrainModel(id: "gpt-5.6-sol", displayName: "GPT-5.6 Sol"),
+        BrainModel(id: "gpt-6-sol", displayName: "GPT-6 Sol"),
         // Rejects `none`.
         BrainModel(id: "gpt-6-astra", displayName: "GPT-6 Astra", reasoningEffortFloor: .low),
         BrainModel(id: "gpt-5.6-terra", displayName: "GPT-5.6 Terra"),
-        BrainModel(id: "gpt-5.6-luna", displayName: "GPT-5.6 Luna"),
-        BrainModel(id: "gpt-5.5", displayName: "GPT-5.5"),
-        BrainModel(id: "gpt-5.4", displayName: "GPT-5.4"),
+        BrainModel(id: "gpt-6-luna", displayName: "GPT-6 Luna"),
         BrainModel(id: "gpt-5.4-mini", displayName: "GPT-5.4 mini"),
     ]
 
@@ -17,10 +15,9 @@ public enum BrainModelCatalog {
     }
 
     private static let claude: [BrainModel] = [
-        BrainModel(id: "claude-opus-5", displayName: "Claude Opus 5"),
+        BrainModel(id: "claude-opus-5-5", displayName: "Claude Opus 5.5"),
         BrainModel(id: "claude-sonnet-5", displayName: "Claude Sonnet 5"),
         BrainModel(id: "claude-fable-5-1", displayName: "Claude Fable 5.1"),
-        BrainModel(id: "claude-fable-5", displayName: "Claude Fable 5"),
         BrainModel(id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5"),
     ]
 
@@ -34,8 +31,9 @@ public enum BrainModelCatalog {
         BrainModel(id: "gemini-3.5-flash-lite", displayName: "Gemini 3.5 Flash-Lite"),
     ]
 
-    /// Older releases stay listed so saved routes stay valid; a model Codex doesn't serve fails
-    /// with `model_not_found`. Invitation-only Mythos releases and rolling aliases are excluded.
+    /// Only the newest release of each model line is listed; a saved route naming a dropped one
+    /// reads as unknown. A model Codex doesn't serve fails with `model_not_found`.
+    /// Invitation-only Mythos releases and rolling aliases are excluded.
     public static func models(for provider: BrainProvider) -> [BrainModel] {
         switch provider {
         case .openAI, .codexSubscription:

@@ -64,7 +64,7 @@ import Testing
         plan: SessionPlan
     ) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
-        let target = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
+        let target = BrainTarget(provider: .openAI, modelID: "gpt-6-sol")
         let driver = CoachDriver(
             config: .default,
             transcript: transcript,

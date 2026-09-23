@@ -127,12 +127,12 @@ import Testing
 
     @Test func openAIKeyRequirementCombinesTranscriptionAndBrainRoute() {
         let cliOnly = BrainRoute(
-            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5"),
             fallbackTargets: [])
         let routeWithOpenAIFallback = BrainRoute(
             primary: cliOnly.primary,
             fallbackTargets: [
-                BrainTarget(provider: .openAI, modelID: "gpt-5.4"),
+                BrainTarget(provider: .openAI, modelID: "gpt-6-luna"),
             ])
 
         #expect(TranscriptionProvider.openAI.requiredCredentials(for: cliOnly) == [.openAIAPIKey])
@@ -160,23 +160,23 @@ import Testing
 
     @Test func geminiTranscriptionNeedsOnlyItsOwnKeyWithACLIBrain() {
         let cliOnly = BrainRoute(
-            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5"),
             fallbackTargets: [])
         #expect(TranscriptionProvider.gemini.requiredCredentials(for: cliOnly) == [.geminiAPIKey])
     }
 
     @Test func geminiEarsWithAnOpenAIBrainNeedBothKeys() {
         let openAIRoute = BrainRoute(
-            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
-            fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4")])
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5"),
+            fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-6-luna")])
         #expect(TranscriptionProvider.gemini.requiredCredentials(for: openAIRoute)
             == [.geminiAPIKey, .openAIAPIKey])
     }
 
     @Test func appleSpeechWithAnOpenAIBrainNeedsTheOpenAIKey() {
         let openAIRoute = BrainRoute(
-            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5"),
-            fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4")])
+            primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5"),
+            fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-6-luna")])
         #expect(TranscriptionProvider.appleSpeech.requiredCredentials(for: openAIRoute)
             == [.openAIAPIKey])
     }

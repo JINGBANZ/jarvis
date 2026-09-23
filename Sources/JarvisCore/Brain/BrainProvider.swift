@@ -30,8 +30,8 @@ public enum BrainProvider: String, CaseIterable, Sendable {
                 failureTable: .openAI,
                 toolChoicePolicy: .providerEnforced,
                 reasoningEffortFloor: nil)
-        // Anthropic has no subset tool choice and Fable 5.1 rejects a forced tool. `none` disables
-        // thinking, which Fable 5.1 rejects.
+        // Anthropic has no subset tool choice and Fable 5.1 and Opus 5.5 reject a forced tool. `none`
+        // disables thinking, which they also reject.
         case .claudeSubscription:
             BrainProviderDescriptor(
                 displayName: "Claude Code",
