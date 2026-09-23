@@ -44,6 +44,12 @@ key saved in the secrets file, and Codex and Claude Code signed in from Settings
   sources the same flags from `scripts/lib/swift-test-flags.sh`. (One sharp edge: a direct
   `@MainActor async @Test` miscompiles on the CLT swift-testing — async UI tests use a `nonisolated`
   `@Test` that `await`s a `@MainActor` helper; see `OverlayInvisibilityTests`.)
+- **Stub executables are slow to start the first time.** On a desktop Mac, macOS checks each newly
+  written executable (it carries `com.apple.provenance`) on its first launch, one at a time, at
+  about 0.5 s each, so a burst of stubs queues for seconds. A test that launches a stub it just
+  wrote uses its deadline as a hang guard, never as a speed check. A stub that waits must also end
+  once `$PPID`, the test process, is gone, so a run that dies mid-test leaves nothing running; see
+  `proxyStubExecutable`.
 
 ## Packaging & signing — why permission grants persist
 

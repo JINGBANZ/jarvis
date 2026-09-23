@@ -111,7 +111,7 @@ import Testing
                 printf 'jpeg' > "$output"
                 printf '%s\\n' "$$" > '\(shellQuoted(pidFile.path))'
                 trap '' TERM
-                while :; do sleep 1; done
+                while kill -0 "$PPID" 2>/dev/null; do sleep 1; done
                 """)
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
@@ -237,7 +237,7 @@ import Testing
                 #!/bin/sh
                 for output in "$@"; do :; done
                 printf 'jpeg' > "$output"
-                while :; do sleep 1; done
+                while kill -0 "$PPID" 2>/dev/null; do sleep 1; done
                 """)
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
@@ -301,6 +301,8 @@ import Testing
         return directory
     }
 
+    /// A script that loops must stop once `$PPID`, the test process, is gone: a run that dies
+    /// mid-test must not leave a stub looping forever.
     private func makeExecutable(in directory: URL, script: String) throws -> URL {
         let executable = directory.appendingPathComponent("fake-screencapture")
         try Data(script.utf8).write(to: executable)
