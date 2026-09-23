@@ -72,7 +72,10 @@ final class TranscriptionBenchmarkRunner {
         TranscriptionBenchmarkFiles.writeProgress(
             phase: "preparing-synthetic-fixtures", to: options.outputDirectory)
 
-        let fixtures = try SyntheticSpeechFixtures(outputDirectory: options.outputDirectory)
+        let fixtures = try SyntheticSpeechFixtures(
+            outputDirectory: options.outputDirectory,
+            phrases: options.mode == .vocabulary
+                ? TranscriptionBenchmark.vocabularyPhrases : TranscriptionBenchmark.phrases)
         do {
             try await run(fixtures: fixtures)
         } catch {
@@ -117,6 +120,8 @@ final class TranscriptionBenchmarkRunner {
         switch options.mode {
         case .standard:
             summary = try await runStandard(fixtures: fixtures)
+        case .vocabulary:
+            summary = try await runVocabulary(fixtures: fixtures)
         case .reconnect:
             summary = await runReconnect(fixtures: fixtures)
         }
@@ -129,9 +134,9 @@ final class TranscriptionBenchmarkRunner {
 
     private func validate(_ summary: TranscriptionBenchmark.Summary) throws {
         switch options.mode {
-        case .standard:
+        case .standard, .vocabulary:
             var requiredProviders: Set<TranscriptionProvider> = [.openAI]
-            if #available(macOS 26.0, *) {
+            if #available(macOS 26.0, *), options.mode == .standard {
                 requiredProviders.insert(.appleSpeech)
             }
             let incompleteArms = TranscriptionBenchmark.standardAcceptanceFailureArmIDs(
@@ -140,7 +145,7 @@ final class TranscriptionBenchmarkRunner {
                 requiredProviders: requiredProviders)
             guard incompleteArms.isEmpty else {
                 throw Failure.acceptanceFailed(
-                    "incomplete standard arms: \(incompleteArms.joined(separator: ", "))")
+                    "incomplete \(options.mode.rawValue) arms: \(incompleteArms.joined(separator: ", "))")
             }
         case .reconnect:
             var failedModels = summary.reconnect.filter { !$0.passed }.map { $0.model.rawValue }
@@ -194,7 +199,8 @@ final class TranscriptionBenchmarkRunner {
             },
             benchmark: .init(
                 observer: recorder,
-                transportControl: transportControl))
+                transportControl: transportControl,
+                transcriptionPrompt: arm.transcriptionPrompt))
         session.onConnectionStateChange = { [recorder] in recorder.record($0) }
         session.onTerminalFailure = { [recorder] in recorder.record($0) }
         return session

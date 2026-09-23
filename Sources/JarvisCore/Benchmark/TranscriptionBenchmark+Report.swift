@@ -120,13 +120,15 @@ public extension TranscriptionBenchmark {
         public let armFilter: String?
         public let arms: [ArmSummary]
         public let reconnect: [ReconnectSummary]
+        public let executionOrder: [ExecutionStep]?
 
         public init(
             mode: String,
             repetitionsPerArm: Int,
             armFilter: String? = nil,
             arms: [ArmSummary],
-            reconnect: [ReconnectSummary] = []
+            reconnect: [ReconnectSummary] = [],
+            executionOrder: [ExecutionStep]? = nil
         ) {
             schemaVersion = TranscriptionBenchmark.schemaVersion
             self.mode = mode
@@ -134,6 +136,7 @@ public extension TranscriptionBenchmark {
             self.armFilter = armFilter
             self.arms = arms.sorted { $0.arm.id < $1.arm.id }
             self.reconnect = reconnect.sorted { $0.model.rawValue < $1.model.rawValue }
+            self.executionOrder = executionOrder
         }
 
         public func encodedJSON() throws -> Data {

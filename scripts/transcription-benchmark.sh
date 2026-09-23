@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Repeatable system-audio transcription benchmark. Both modes use only fixed synthetic playback.
+# Repeatable system-audio transcription benchmark. All modes use only fixed synthetic playback.
 # Reconnect mode interrupts only Jarvis's transcription WebSocket; host networking stays online.
 set -euo pipefail
 umask 077
@@ -8,12 +8,13 @@ cd "$(dirname "$0")/.."
 usage() {
   echo "usage:" >&2
   echo "  $0 standard [--repetitions N] [--filter TEXT]" >&2
+  echo "  $0 vocabulary [--repetitions N]" >&2
   echo "  $0 reconnect" >&2
   echo "--filter runs only the standard arms whose id contains TEXT, e.g. gpt-live-transcribe" >&2
 }
 
 MODE="${1:-}"
-if [[ "$MODE" != "standard" && "$MODE" != "reconnect" ]]; then
+if [[ "$MODE" != "standard" && "$MODE" != "vocabulary" && "$MODE" != "reconnect" ]]; then
   usage
   exit 2
 fi
@@ -94,6 +95,8 @@ if [[ -n "$FILTER" ]]; then
   echo "▶ running the standard arms matching \"$FILTER\" ($REPETITIONS repetitions per arm)"
 elif [[ "$MODE" == "standard" ]]; then
   echo "▶ running fixed system-audio matrix ($REPETITIONS repetitions per arm)"
+elif [[ "$MODE" == "vocabulary" ]]; then
+  echo "▶ comparing fixed technical-context arms ($REPETITIONS repetitions per arm)"
 else
   echo "▶ running scoped reconnect validation (host networking remains online)"
 fi

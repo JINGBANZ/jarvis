@@ -241,6 +241,7 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             speaker: speaker,
             expectedLanguages: expectedLanguages,
             keywords: vocabularyKeywords,
+            prompt: benchmark?.transcriptionPrompt,
             silenceDurationMs: silenceDurationMs,
             noiseReduction: profile)
         guard let data = try? JSONSerialization.data(withJSONObject: update),
