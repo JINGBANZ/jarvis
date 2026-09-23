@@ -13,7 +13,6 @@ public struct BrainAccessor: BrainClient, Sendable {
     private let apiKey: String
     private let endpoint: URL
     private let timeout: TimeInterval
-    private let toolChoicePolicy: ToolChoicePolicy
     private let wire: any BrainWireFormat
     private let send: Sender?
     private let traffic: (any BrainTrafficAuditing)?
@@ -27,7 +26,6 @@ public struct BrainAccessor: BrainClient, Sendable {
                 timeout: TimeInterval = BrainWorkloadTimeout.liveCoaching,
                 // Reasoning plus output budget: it must track the effort or the run truncates.
                 maxOutputTokens: Int = Defaults.Brain.effort.maxOutputTokens,
-                toolChoicePolicy: ToolChoicePolicy = .providerEnforced,
                 minimumReasoningEffort: ReasoningEffort? = nil,
                 traffic: (any BrainTrafficAuditing)? = nil,
                 trafficTag: String = "coach",
@@ -57,7 +55,6 @@ public struct BrainAccessor: BrainClient, Sendable {
         }
         self.endpoint = endpoint
         self.timeout = timeout
-        self.toolChoicePolicy = toolChoicePolicy
         self.traffic = traffic
         self.trafficTag = trafficTag
         self.send = send
@@ -87,8 +84,7 @@ public struct BrainAccessor: BrainClient, Sendable {
         case .bearer: request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         case .googAPIKey: request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
         }
-        let resolved = toolChoicePolicy.resolve(tools: tools, choice: toolChoice)
-        let body = try wire.encode(messages: messages, tools: resolved.tools, toolChoice: resolved.choice)
+        let body = try wire.encode(messages: messages, tools: tools, toolChoice: toolChoice)
         request.httpBody = body
 
         // Exactly one request, never retried: a fresh attempt should include newer transcript.

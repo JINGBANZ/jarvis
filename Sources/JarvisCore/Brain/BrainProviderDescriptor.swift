@@ -35,7 +35,6 @@ public struct BrainProviderDescriptor: Sendable, Equatable {
     public let access: Access
     public let wire: WireFormat
     public let failureTable: FailureTable
-    public let toolChoicePolicy: ToolChoicePolicy
     /// Applied without rewriting the saved preference; a model's own floor is catalog data.
     public let reasoningEffortFloor: ReasoningEffort?
 

@@ -1,8 +1,8 @@
 import Foundation
 import JarvisCore
 
-/// Tools arrive already resolved by the target's `ToolChoicePolicy`. See wiki/architecture.md
-/// for the replay rule every format follows.
+/// Tools arrive exactly as the runner declared them (wiki/architecture.md#capabilities). See
+/// wiki/architecture.md for the replay rule every format follows.
 protocol BrainWireFormat: Sendable {
     /// Headers the API family requires beyond the content type and the key.
     var requestHeaders: [String: String] { get }

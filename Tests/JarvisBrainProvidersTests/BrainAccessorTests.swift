@@ -548,13 +548,13 @@ private func speakResponseBody(arguments: String) -> Data {
     }
 
     private func encodedBody(
-        policy: ToolChoicePolicy, tools: [ToolDef], choice: ToolChoice,
+        tools: [ToolDef], choice: ToolChoice,
         effort: String = "low", maxOutputTokens: Int = 2_048, floor: ReasoningEffort? = nil
     ) async throws -> [String: Any] {
         let box = CapturedBody()
         let client = BrainAccessor(
             apiKey: "sk-x", model: "claude-opus-5", reasoningEffort: effort,
-            maxOutputTokens: maxOutputTokens, toolChoicePolicy: policy,
+            maxOutputTokens: maxOutputTokens,
             minimumReasoningEffort: floor,
             send: { request in
                 box.set(request.httpBody)
@@ -575,41 +575,33 @@ private func speakResponseBody(arguments: String) -> Data {
         (body["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
     }
 
-    /// Strict tools and `parallel_tool_calls` still go out; the proxy strips what it cannot
-    /// forward.
-    @Test func filteredAutoDeclaresOnlyTheAllowedToolsInCatalogOrder() async throws {
-        let tools = fiveTools
-        #expect(tools.count == 5)
-        let body = try await encodedBody(
-            policy: .filteredAuto, tools: tools, choice: .allowed(["load_tool", "speak"]))
-        #expect(declaredNames(body) == tools.map(\.name).filter { $0 == "speak" || $0 == "load_tool" })
-        #expect(body["tool_choice"] as? String == "auto")
-        #expect(body["parallel_tool_calls"] as? Bool == false)
-        #expect((body["tools"] as? [[String: Any]])?.allSatisfy { $0["strict"] as? Bool == true } == true)
-    }
-
-    @Test func filteredAutoForcesByDeclaringOnlyTheForcedTool() async throws {
-        let body = try await encodedBody(policy: .filteredAuto, tools: fiveTools, choice: .force("speak"))
-        #expect(declaredNames(body) == ["speak"])
-        #expect(body["tool_choice"] as? String == "auto")
-    }
-
-    @Test func filteredAutoRequiresByDeclaringEveryTool() async throws {
-        let tools = fiveTools
-        let body = try await encodedBody(policy: .filteredAuto, tools: tools, choice: .required)
-        #expect(declaredNames(body) == tools.map(\.name))
-        #expect(body["tool_choice"] as? String == "auto")
+    /// Claude cannot narrow, so a press declares the same full list under `auto` and the runner's
+    /// own check does the narrowing.
+    @Test(arguments: [ToolChoice.required, .allowed(["speak", "load_tool"]), .force("speak")])
+    func aClaudeRequestDeclaresEveryToolUnderAuto(choice: ToolChoice) async throws {
+        let box = CapturedBody()
+        let client = BrainAccessor(
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-fable-5-1",
+            send: { request in
+                box.set(request.httpBody)
+                return (Data(#"{"type":"message","content":[],"stop_reason":"end_turn"}"#.utf8), http(200))
+            })
+        _ = try await client.respond(messages: [.user("hi")], tools: fiveTools, toolChoice: choice)
+        let body = try #require(
+            try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
+        #expect(declaredNames(body) == fiveTools.map(\.name))
+        #expect((body["tool_choice"] as? [String: Any])?["type"] as? String == "auto")
     }
 
     @Test func aReasoningFloorRaisesOnlyAShallowerEffort() async throws {
         let raised = try await encodedBody(
-            policy: .filteredAuto, tools: fiveTools, choice: .required,
+            tools: fiveTools, choice: .required,
             effort: "none", maxOutputTokens: 1_024, floor: .low)
         #expect((raised["reasoning"] as? [String: Any])?["effort"] as? String == "low")
         #expect(raised["max_output_tokens"] as? Int == 2_048)
 
         let kept = try await encodedBody(
-            policy: .filteredAuto, tools: fiveTools, choice: .required,
+            tools: fiveTools, choice: .required,
             effort: "medium", maxOutputTokens: 8_192, floor: .low)
         #expect((kept["reasoning"] as? [String: Any])?["effort"] as? String == "medium")
         #expect(kept["max_output_tokens"] as? Int == 8_192)

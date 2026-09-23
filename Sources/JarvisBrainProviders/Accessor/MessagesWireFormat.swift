@@ -78,16 +78,12 @@ struct MessagesWireFormat: BrainWireFormat {
                 ["name": tool.name, "description": tool.description,
                  "input_schema": try verbatim.placeholder(for: tool.parametersJSON)]
             }
-            // `filteredAuto` resolves every choice to `auto`; Anthropic has no subset choice, so a
-            // narrowed choice from any other policy becomes `any`.
-            var choice: [String: Any]
-            switch toolChoice {
-            case .auto: choice = ["type": "auto"]
-            case .required, .allowed: choice = ["type": "any"]
-            case .force(let name): choice = ["type": "tool", "name": name]
-            }
-            choice["disable_parallel_tool_use"] = true   // the coach loop consumes one tool call per turn
-            body["tool_choice"] = choice
+            // Anthropic has no subset choice and Claude Fable 5.1 rejects `any` and `tool`, so the
+            // runner's own check enforces a narrowed choice; see wiki/architecture.md#capabilities.
+            body["tool_choice"] = [
+                "type": "auto",
+                "disable_parallel_tool_use": true,   // the coach loop consumes one tool call per turn
+            ]
             // Haiku 4.5, the tool-less summarizer's model, rejects both fields.
             body["thinking"] = ["type": "adaptive"]
             body["output_config"] = ["effort": reasoningEffort]

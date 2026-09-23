@@ -623,7 +623,7 @@ struct LiveE2ETests {
             ?? .noSpeakCall
     }
 
-    /// Read from Activity, not the response body: a recovered `filteredAuto` reply may carry no
+    /// Read from Activity, not the response body: a recovered reply may carry no
     /// speak call.
     static func deliveredDetail(_ evidence: Evidence, _ chain: [Attempt]) -> String? {
         evidence.rows(inChain: chain).last { $0.kind == "tip" }?.response?.detail

@@ -288,8 +288,9 @@ request, and the response at the cap is forced to `speak`. A press therefore alw
 never runs out of responses. When `speak` is the only tool left, the request is the plain forced
 `speak`, one round trip. On the OpenAI API, Codex, and the Gemini API the narrowing is an
 `allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
-attempts (`ResponsesWireFormat`, `InteractionsWireFormat`). Claude Code can neither force nor narrow a call, so
-its request declares only the permitted tools under `tool_choice: auto`
+attempts (`ResponsesWireFormat`, `InteractionsWireFormat`). Claude Code can neither force nor
+narrow a call, so its request sends `tool_choice: auto` over the same declared array and leaves the
+narrowing to the runner
 ([Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy)).
 The accepted cost is a round trip for each first load and each search, and the client resends the
 whole input, screenshot included, on each one. One load followed by a
@@ -297,7 +298,7 @@ forced `speak` was rejected as too narrow: the shortcut is the fallback for a ne
 missed, so it should not be the less capable of the two.
 
 The runner checks every reply against the tool choice its own request sent instead of trusting the
-transport to enforce it, because Claude Code's set is only the tools it declares and the
+transport to enforce it, because Claude Code cannot narrow a call at all and the
 Codex's path forces parallel calls, so a reply can call outside the set or carry more
 than one call. A call outside the permitted set is answered with a tool result saying it is not
 available on a press, and a call whose arguments the typed parser (`ToolInvocation.parse`) cannot use
@@ -993,8 +994,8 @@ and serves them on 127.0.0.1: Codex on its OpenAI Responses route (`/v1/response
 on Anthropic's own Messages route (`/v1/messages`), so both subscriptions go through the one
 [`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) with the wire format
 of their API family (`ResponsesWireFormat`, `MessagesWireFormat`), and the attempt runner reads one
-provider-neutral reply. Only the route, the key, the wire format, the failure table, and the target's
-tool policy differ, and each provider's
+provider-neutral reply. Only the route, the key, the wire format, and the failure table differ, and
+each provider's
 [`BrainProviderDescriptor`](../Sources/JarvisCore/Brain/BrainProviderDescriptor.swift) names them,
 together with its display name and effort floor, and for a subscription the helper's model owner,
 login flag, and account-file prefix.
@@ -1046,16 +1047,20 @@ is about 60 MB on disk and 20 MB per update.
   has and the edit is recorded as not applied, and if it answers without naming a vendor the
   subscription stays available, because the helper lists a vendor's models only once it has loaded that
   credential and a restart or a token refresh can answer for a moment without it.
-- **Tool policy per target** ([`ToolChoicePolicy`](../Sources/JarvisCore/Brain/ToolChoicePolicy.swift)).
-  The OpenAI API and Codex are `providerEnforced`: `required`, `allowed_tools`, a
-  forced function, strict tools, and verbatim reasoning replay all pass through the Codex path intact.
-  Claude Code is `filteredAuto`: Anthropic has no subset choice and Claude Fable 5.1 and Opus 5.5
-  reject a forced tool (`any` and `tool` are 400s), and without narrowing Opus called
-  `capture_screen` on a press six times in six. Every Claude request therefore sends `tool_choice:
-  {type: auto, disable_parallel_tool_use: true}` with only the permitted tools declared, which costs a
-  press the prompt cache from the tools block onward. Its reasoning floors at `low`, because `none`
-  disables thinking and Fable 5.1 and Opus 5.5 reject that. Neither policy is trusted on its own: the
-  runner checks every reply against the choice it asked for ([Capabilities](#capabilities)).
+- **Tool choice per target.** Every target declares the runner's tool list unchanged. The OpenAI
+  API and Codex enforce a narrowed choice with `allowed_tools`, a forced function, strict tools, and
+  verbatim reasoning replay through the Codex path intact; the Gemini API enforces it with
+  `allowed_tools` inside `generation_config`. Anthropic has no subset choice and Claude Fable 5.1 and
+  Opus 5.5 reject a forced tool (`any` and `tool` are 400s), so every Claude request that carries
+  tools asks for `auto` with parallel calls off, whatever the runner's choice
+  (`MessagesWireFormat.encode`; the tool-less summarizer sends no choice). The runner enforces the
+  narrowed choice itself: a call the request did not permit is answered as not available on a
+  shortcut press and asked again, and a wrong call on a press's last response is spoken from the
+  reply's text or retried ([Capabilities](#capabilities)). Declaring only the permitted tools
+  instead was rejected: it costs the prompt cache from the tools block on and, on Fable 5.1,
+  invalidates every replayed thinking block bound to the earlier list. Neither enforcement is
+  trusted on its own, and the runner checks every reply against the choice it asked for. Claude's
+  reasoning floors at `low`, because `none` disables thinking and Fable 5.1 and Opus 5.5 reject that.
 - **What the helper changes on the wire.** On the Codex path it deletes `max_output_tokens`, so the
   workload timeout is the output bound; forces `store: false`, which Jarvis also sends for every
   subscription target, so the dashboard retention described in
@@ -1163,7 +1168,7 @@ data from its vendor by default. Google's OpenAI-compatible layer offers only Ch
   The placeholder is the one undocumented dependency. A 400 on any request that carries history
   would signal that Google stopped accepting it, and the [live e2e run](./live-e2e-tests.md) replays
   a Claude Code preload to Gemini on every run.
-- **Tool policy `providerEnforced`.** `required` becomes `any`. A narrowed or forced choice becomes
+- **Tool choice.** `required` becomes `any`. A narrowed or forced choice becomes
   `allowed_tools` in mode `any`, inside `generation_config`. Tools keep their schemas and drop
   `strict`, which Gemini doesn't support; the runner's own check covers the difference. Gemini has
   no parallel-call switch, so the runner runs the first call, as it does for Codex.

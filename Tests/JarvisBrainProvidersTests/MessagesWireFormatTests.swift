@@ -45,15 +45,12 @@ import JarvisCore
         #expect(wire.requestHeaders == ["anthropic-version": "2023-06-01"])
     }
 
-    @Test func otherChoicesStayTotalWithParallelCallsOff() throws {
-        let any = try body([.user("hi")], choice: .required)["tool_choice"] as? [String: Any]
-        #expect(any?["type"] as? String == "any")
-        #expect(any?["disable_parallel_tool_use"] as? Bool == true)
-        let narrowed = try body([.user("hi")], choice: .allowed(["speak"]))["tool_choice"] as? [String: Any]
-        #expect(narrowed?["type"] as? String == "any")
-        let forced = try body([.user("hi")], choice: .force("speak"))["tool_choice"] as? [String: Any]
-        #expect(forced?["type"] as? String == "tool")
-        #expect(forced?["name"] as? String == "speak")
+    @Test(arguments: [ToolChoice.auto, .required, .allowed(["speak", "load_skill"]), .force("speak")])
+    func everyToolChoiceIsSentAsAuto(choice: ToolChoice) throws {
+        let toolChoice = try #require(try body([.user("hi")], choice: choice)["tool_choice"] as? [String: Any])
+        #expect(toolChoice["type"] as? String == "auto")
+        #expect(toolChoice["disable_parallel_tool_use"] as? Bool == true)
+        #expect(toolChoice["name"] == nil)
     }
 
     /// The history summarizer runs on Haiku 4.5, which rejects adaptive thinking and `effort`.
