@@ -172,7 +172,9 @@ import Testing
         guard case .completed = await run(runner, brain: brain) else {
             Issue.record("expected the second attempt to commit a turn"); return
         }
+        let bothSpent = ["capture_screen", "speak", "stay_silent", "call_tool"]
+        #expect(brain.toolChoices[3] == .allowed(bothSpent))
         let remembered = try #require(brain.calls[4].first { $0.toolCallId == "k2" })
-        #expect(remembered.text == JarvisPrompts.Coach.loadSkillAlreadyLoaded("search_prep_notes"))
+        #expect(remembered.text == JarvisPrompts.Coach.notPermitted("load_skill", callable: bothSpent))
     }
 }

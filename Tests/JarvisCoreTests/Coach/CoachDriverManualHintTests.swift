@@ -256,7 +256,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         transcript.append(.init(speaker: .them, text: "Tell me about a conflict you had.", at: 101))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
-        #expect(brain.toolChoices[2] == .required)
+        #expect(brain.toolChoices[2] == .allowed(["capture_screen", "speak", "stay_silent", "load_skill"]))
         let again = try #require(brain.calls[3].first { $0.toolCallId == "k2" })
         #expect(again.text == JarvisPrompts.Coach.loadSkillAlreadyLoaded("behavioral"))
     }

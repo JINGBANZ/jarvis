@@ -193,10 +193,12 @@ That is the property the design exists for: a changed array misses the prompt ca
 block on, and on Claude Fable 5.1 it invalidates every replayed thinking block bound to the earlier
 list. What a request may call still changes per request, through the tool choice, which sits outside
 both: a loader with nothing left to load leaves the choice and `call_tool` joins it once a deferred
-tool is loaded (`CoachCapabilities.callableNames`). Only a hot tool can be called by name, as in every agent: a
-deferred tool called by its own name is answered with a pointer to `call_tool`, a `call_tool` that
-names a hot tool is answered as malformed (so a press cannot reach `capture_screen` through
-it), and a malformed routed call is answered with the routed tool's own schema
+tool is loaded (`CoachCapabilities.callableNames`). Every request sends that narrowed choice, an
+automatic turn's as well as a press's, so a spent loader cannot be called again and `call_tool`
+cannot run a tool whose schema and guidance the model has not yet loaded. Only a hot tool can be
+called by name, as in every agent: a deferred tool called by its own name is answered with a
+pointer to `call_tool`, a `call_tool` that names a hot tool is answered as malformed (so a press
+cannot reach `capture_screen` through it), and a malformed routed call is answered with the routed tool's own schema
 (`CoachCapabilities.rejection`).
 
 Jarvis routes deferred tools through one fixed pair on every brain rather than using a provider's
@@ -323,7 +325,8 @@ The runner checks every reply against the tool choice its own request sent inste
 transport to enforce it, because Claude Code cannot narrow a call at all and the
 Codex's path forces parallel calls, so a reply can call outside the set or carry more
 than one call. A call outside the permitted set is answered with a tool result saying it is not
-available on a press, and a call whose arguments the typed parser (`ToolInvocation.parse`) cannot use
+available, on a press with a pointer to `speak` and on an automatic turn with why and what it may
+call instead, and a call whose arguments the typed parser (`ToolInvocation.parse`) cannot use
 is answered with its tool's schema; either way the model is asked again in the same attempt. The
 parser is deliberately more lenient than the schema, so a call the schema would reject but the parser
 can use still runs. The response's first call is the one judged, whether or not it parsed. A press
@@ -1076,8 +1079,8 @@ is about 60 MB on disk and 20 MB per update.
   Opus 5.5 reject a forced tool (`any` and `tool` are 400s), so every Claude request that carries
   tools asks for `auto` with parallel calls off, whatever the runner's choice
   (`MessagesWireFormat.encode`; the tool-less summarizer sends no choice). The runner enforces the
-  narrowed choice itself: a call the request did not permit is answered as not available on a
-  shortcut press and asked again, and a wrong call on a press's last response is spoken from the
+  narrowed choice itself: a call the request did not permit is answered as not available and
+  asked again, and a wrong call on a press's last response is spoken from the
   reply's text or retried ([Capabilities](#capabilities)). Declaring only the permitted tools
   instead was rejected: it costs the prompt cache from the tools block on and, on Fable 5.1,
   invalidates every replayed thinking block bound to the earlier list. Neither enforcement is

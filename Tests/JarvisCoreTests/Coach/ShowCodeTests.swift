@@ -94,7 +94,8 @@ import Testing
         transcript.append(.init(speaker: .me, text: "what next?", at: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         let answer = try #require(brain.calls.last?.first { $0.role == .tool && $0.toolCallId == "l1" })
-        #expect(answer.text == JarvisPrompts.Coach.loadSkillAlreadyLoaded("coding"))
+        #expect(answer.text == JarvisPrompts.Coach.notPermitted(
+            "load_skill", callable: ["capture_screen", "speak", "stay_silent"]))
     }
 
     private func speak(detail: String?) -> BrainResponse {

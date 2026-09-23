@@ -64,7 +64,7 @@ import Testing
             #expect(brain.toolChoices.last == .force("speak"))
             #expect(messages.contains { $0.imageBase64JPEG != nil })
         } else {
-            #expect(brain.toolChoices.last == .required)
+            #expect(brain.toolChoices.last == .allowed(["capture_screen", "speak", "stay_silent"]))
         }
     }
 

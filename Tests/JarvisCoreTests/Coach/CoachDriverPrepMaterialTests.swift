@@ -39,6 +39,12 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         return (driver, transcript)
     }
 
+    private func loadSearch(id: String = "l1") -> BrainResponse {
+        .init(toolCalls: [.loadTool(callId: id, name: "search_prep_notes")],
+              rawToolCalls: [RawToolCall(id: id, name: "load_tool",
+                                         argumentsJSON: #"{"name":"search_prep_notes"}"#)])
+    }
+
     @Test func toolAbsentWhenNoPrepMaterialConfigured() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "s1")],
@@ -73,6 +79,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
     @Test func searchThenSpeakPipelinePassesTheQueryAndResultThrough() async {
         let brain = ScriptedBrain(script: [
+            loadSearch(),
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
                   rawToolCalls: [RawToolCall(
                     id: "p1", name: "call_tool",
@@ -90,14 +97,14 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         _ = await driver.handleTrigger(.turnEnd)
 
         #expect(prepMaterial.queries == ["rate limiter"])
-        #expect(brain.calls.count == 2)
-        #expect(brain.calls[1].contains {
+        #expect(brain.calls.count == 3)
+        #expect(brain.calls[2].contains {
             $0.role == .tool && $0.toolCallId == "p1"
                 && $0.text?.contains("token bucket notes") == true
                 && $0.text?.contains("system-design.md") == true
         })
         #expect(brain.requestContexts.compactMap { $0 }.map(\.phase) == [
-            .initial, .searchPrepNotesContinuation,
+            .initial, .loadToolContinuation, .searchPrepNotesContinuation,
         ])
     }
 
@@ -139,6 +146,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         let brain = ScriptedThrowBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
+            loadSearch(),
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
                   rawToolCalls: [RawToolCall(
                     id: "p1", name: "call_tool",
@@ -157,8 +165,8 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        #expect(brain.calls.count == 4)
-        let retryRequest = brain.calls[3]
+        #expect(brain.calls.count == 5)
+        let retryRequest = brain.calls[4]
         #expect(retryRequest.contains { $0.imageBase64JPEG != nil })
         #expect(retryRequest.contains { ($0.text ?? "").contains("visible code") })
         #expect(retryRequest.contains { ($0.text ?? "").contains("token bucket details") })
@@ -166,10 +174,12 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
     @Test func secondSearchAcrossRetriesReplacesTheFirstsStaleResult() async {
         let brain = ScriptedThrowBrain(script: [
+            loadSearch(),
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "A")],
                   rawToolCalls: [RawToolCall(id: "p1", name: "call_tool",
                                              argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"A\"}"}"#)]),
             nil,
+            loadSearch(id: "l2"),
             .init(toolCalls: [.searchPrepNotes(callId: "p2", query: "B")],
                   rawToolCalls: [RawToolCall(id: "p2", name: "call_tool",
                                              argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"B\"}"}"#)]),
@@ -188,14 +198,15 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        #expect(brain.calls.count == 5)
-        let finalRetryRequest = brain.calls[4]
+        #expect(brain.calls.count == 7)
+        let finalRetryRequest = brain.calls[6]
         #expect(finalRetryRequest.contains { ($0.text ?? "").contains("result-from-query-B") })
         #expect(!finalRetryRequest.contains { ($0.text ?? "").contains("result-from-query-A") })
     }
 
     @Test func noMatchesRendersAnExplicitNoResultsMessage() async {
         let brain = ScriptedBrain(script: [
+            loadSearch(),
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "quantum computing")],
                   rawToolCalls: [RawToolCall(
                     id: "p1", name: "call_tool",
@@ -209,7 +220,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        #expect(brain.calls[1].contains {
+        #expect(brain.calls[2].contains {
             $0.role == .tool && $0.text == JarvisPrompts.Coach.prepNotesNoResults
         })
     }

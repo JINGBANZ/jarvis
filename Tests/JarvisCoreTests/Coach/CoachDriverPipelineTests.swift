@@ -2809,13 +2809,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(!freshAttemptUserText.contains("no speech for"))
     }
 
-    @Test func everyAudioTurnRequiresAToolCall() async {
+    @Test func everyAudioTurnRequiresACallToAnOfferedTool() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["hi"])])])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
         transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
         await driver.handleTrigger(.turnEnd)
-        #expect(brain.toolChoices.last == .required)
+        #expect(brain.toolChoices.last == .allowed(brain.offeredTools.last?.map(\.name) ?? []))
     }
 
     @Test func concurrentTriggerIsBusyThenCoalesced() async {

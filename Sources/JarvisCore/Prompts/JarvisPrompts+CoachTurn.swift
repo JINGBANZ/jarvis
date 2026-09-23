@@ -40,6 +40,14 @@ extension JarvisPrompts.Coach {
         "\(name) is not available on a shortcut press. Give the hint with speak."
     }
 
+    /// Only a spent loader or `call_tool` before any load leaves an automatic turn's choice.
+    static func notPermitted(_ name: String, callable: [String]) -> String {
+        let why = name == CoachCapabilities.callToolName
+            ? "Load a tool with load_tool before calling it through \(name)."
+            : "Everything \(name) offers is already loaded above."
+        return "\(name) is not available now. \(why) Call one of: \(callable.joined(separator: ", "))."
+    }
+
     static func argumentsRejected(_ tool: ToolDef) -> String {
         "The arguments for \(tool.name) did not match its schema and were not run. "
             + "Call it again with arguments that match this JSON Schema: \(tool.parametersJSON)"

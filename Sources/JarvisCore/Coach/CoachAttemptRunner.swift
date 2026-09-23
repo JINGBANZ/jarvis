@@ -128,9 +128,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
             disposition: .temporary, identity: .init(), message: message)
     }
 
-    /// Nil unless `permitted` includes speak, so an automatic turn (nil `permitted`) fails instead.
-    private static func spokenProse(_ text: String?, permitted: [String]?) -> ToolInvocation? {
-        guard permitted?.contains(speakToolName) == true, let text,
+    /// Nil off a press, so an automatic turn, which must choose between speaking and silence,
+    /// fails instead.
+    private static func spokenProse(_ text: String?, onPress: Bool) -> ToolInvocation? {
+        guard onPress, let text,
               let first = text.range(of: #"\S.*"#, options: .regularExpression) else { return nil }
         let rest = text[first.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
         return .speak(
@@ -296,19 +297,18 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 iterations += 1
                 let loaded = alreadyLoaded.union(loadedThisAttempt)
                 let tools = capabilities.tools
+                let callable = capabilities.callableNames(loaded: loaded)
                 // A press must end in a hint and already sent the screen, so it never gets
                 // stay_silent or capture_screen.
-                let toolChoice: ToolChoice
-                if reason.isManual {
-                    let permitted = capabilities.callableNames(loaded: loaded).filter {
-                        $0 != staySilentTool.name && $0 != captureScreenTool.name
-                    }
-                    toolChoice = iterations == maxToolIterations || permitted == [speakToolName]
-                        ? .force(speakToolName)
-                        : .allowed(permitted)
-                } else {
-                    toolChoice = .required
+                let pressable = callable.filter {
+                    $0 != staySilentTool.name && $0 != captureScreenTool.name
                 }
+                let permitted = !reason.isManual ? callable
+                    : iterations == maxToolIterations ? [speakToolName]
+                    : pressable
+                let toolChoice: ToolChoice = permitted == [speakToolName]
+                    ? .force(speakToolName)
+                    : .allowed(permitted)
                 let response: BrainResponse
                 do {
                     let requestContext = CoachingRequestAttribution.context(
@@ -351,13 +351,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         work: work)
                 }
 
-                // Checked here because not every provider enforces a narrowed tool choice.
-                // Nil when any offered tool may run.
-                let permitted: [String]? = switch toolChoice {
-                case .force(let name): [name]
-                case .allowed(let names): names
-                case .auto, .required: nil
-                }
                 let atCap = iterations == maxToolIterations
 
                 // Every replayed call needs a result, or the provider's linkage validation fails.
@@ -393,7 +386,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 let call: ToolInvocation
                 if let raw = response.rawToolCalls.first,
                    let rejection = capabilities.rejection(for: raw, parsed: firstParsed) {
-                    if atCap, let spoken = Self.spokenProse(response.outputText, permitted: permitted) {
+                    if atCap, let spoken = Self.spokenProse(response.outputText, onPress: reason.isManual) {
                         jlog("⚠️ \(raw.name) couldn't run on the last response — speaking the reply's text")
                         call = spoken
                     } else if atCap {
@@ -412,17 +405,18 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         continue
                     }
                 } else if let parsed = firstParsed {
-                    // The choice names hot tools, and a routed call's raw name is call_tool.
+                    // Checked here because not every provider enforces a narrowed tool choice. The
+                    // choice names hot tools, and a routed call's raw name is call_tool.
                     let called = response.rawToolCalls.first?.name ?? parsed.toolName
-                    if permitted?.contains(called) ?? true {
+                    if permitted.contains(called) {
                         call = parsed
                     } else if atCap, let spoken = Self.spokenProse(
-                        response.outputText, permitted: permitted) {
+                        response.outputText, onPress: reason.isManual) {
                         jlog("⚠️ \(called) isn't allowed on a shortcut's last response — "
                              + "speaking the reply's text")
                         call = spoken
                     } else if atCap {
-                        jlog("⚠️ \(called) isn't allowed on a shortcut's last response — "
+                        jlog("⚠️ \(called) isn't allowed on the last response — "
                              + "scheduling fresh attempt")
                         return .failed(
                             outcome: .brainError,
@@ -431,15 +425,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
                                 from: attempt.target),
                             work: work)
                     } else {
-                        jlog("⚠️ \(called) isn't allowed on a shortcut — asking for the hint again")
+                        jlog("⚠️ \(called) isn't allowed on this response — telling the model so")
                         appendToolContinuation(
                             toolCallId: parsed.callID,
-                            resultText: JarvisPrompts.Coach.notPermittedOnShortcut(called),
+                            resultText: reason.isManual
+                                ? JarvisPrompts.Coach.notPermittedOnShortcut(called)
+                                : JarvisPrompts.Coach.notPermitted(called, callable: permitted),
                             newPhase: requestPhase)
                         continue
                     }
                 } else if !atCap, !refusedProse,
-                          permitted?.contains(speakToolName) == true,
+                          reason.isManual,
                           let prose = response.outputText,
                           !prose.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     // Only once per attempt: a refusal re-sends the whole uncached request with the
@@ -451,7 +447,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     requestSequence += 1
                     continue
                 } else if let spoken = Self.spokenProse(
-                    response.outputText, permitted: permitted) {
+                    response.outputText, onPress: reason.isManual) {
                     jlog("⚠️ reply still had no tool call — speaking its text as the reply")
                     call = spoken
                 } else {

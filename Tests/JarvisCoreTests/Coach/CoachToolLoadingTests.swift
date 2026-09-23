@@ -22,6 +22,8 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
 @Suite(.serialized) struct CoachToolLoadingTests {
     private let prepConfigured = CoachCapabilities.compose(
         disabledTools: [], prepSourcesConfigured: true)
+    private let beforeLoad = ["capture_screen", "speak", "stay_silent", "load_tool"]
+    private let afterLoad = ["capture_screen", "speak", "stay_silent", "call_tool"]
 
     private func loadCall(_ name: String, id: String = "l1") -> BrainResponse {
         .init(toolCalls: [.loadTool(callId: id, name: name)],
@@ -118,7 +120,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             == [.initial, .loadToolContinuation, .searchPrepNotesContinuation])
     }
 
-    @Test func aSecondLoadIsAnsweredWithoutRepeatingTheGuidance() async throws {
+    @Test func aSpentLoaderLeavesTheChoiceAndACallToItIsRefused() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [
             loadCall("search_prep_notes"), loadCall("search_prep_notes", id: "l2"), speak,
@@ -130,8 +132,9 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
+        #expect(brain.toolChoices == [.allowed(beforeLoad), .allowed(afterLoad), .allowed(afterLoad)])
         let second = try #require(brain.calls[2].first { $0.toolCallId == "l2" })
-        #expect(second.text == JarvisPrompts.Coach.loadToolAlreadyLoaded("search_prep_notes"))
+        #expect(second.text == JarvisPrompts.Coach.notPermitted("load_tool", callable: afterLoad))
         #expect(second.text?.contains("# Prep material") == false)
         #expect(activity.kinds == [.capabilityLoaded, .tip])
     }
@@ -182,8 +185,9 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         _ = await run(runner, brain: brain)
         _ = await run(runner, brain: brain)
 
+        #expect(brain.toolChoices[2] == .allowed(afterLoad))
         let second = try #require(brain.calls[3].first { $0.toolCallId == "l2" })
-        #expect(second.text == JarvisPrompts.Coach.loadToolAlreadyLoaded("search_prep_notes"))
+        #expect(second.text == JarvisPrompts.Coach.notPermitted("load_tool", callable: afterLoad))
         #expect(brain.offeredTools.allSatisfy { $0.map(\.name) == prepConfigured.tools.map(\.name) })
     }
 
@@ -226,6 +230,24 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
 
         let answer = try #require(brain.calls[1].first { $0.toolCallId == "p1" })
         #expect(answer.text == JarvisPrompts.Coach.rejected(.notCallableByName("search_prep_notes")))
+        #expect(search.queries.isEmpty)
+    }
+
+    @Test func anAutomaticTurnRefusesCallToolBeforeALoad() async throws {
+        let search = FakePrepMaterialSearch()
+        let brain = ScriptedBrain(script: [
+            callViaDispatcher("search_prep_notes", #"{"query":"rate limiter"}"#,
+                              parsed: .searchPrepNotes(callId: "c1", query: "rate limiter")),
+            speak,
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, capabilities: prepConfigured, prepMaterial: search)
+        transcript.append(.init(speaker: .them, text: "How would you design a rate limiter?", at: 100))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        #expect(brain.toolChoices == [.allowed(beforeLoad), .allowed(beforeLoad)])
+        let answer = try #require(brain.calls[1].first { $0.toolCallId == "c1" })
+        #expect(answer.text == JarvisPrompts.Coach.notPermitted("call_tool", callable: beforeLoad))
         #expect(search.queries.isEmpty)
     }
 
@@ -285,6 +307,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
     @Test func searchingWithNoIndexAnswersAndKeepsCoaching() async throws {
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [
+            loadCall("search_prep_notes"),
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "rate limiter")],
                   rawToolCalls: [RawToolCall(id: "p1", name: "call_tool",
                                              argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"rate limiter\"}"}"#)]),
@@ -296,9 +319,9 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
-        let result = try #require(brain.calls[1].first { $0.toolCallId == "p1" })
+        let result = try #require(brain.calls[2].first { $0.toolCallId == "p1" })
         #expect(result.text == JarvisPrompts.Coach.prepNotesUnavailable)
-        #expect(activity.kinds == [.prepNotesUnavailable, .tip])
+        #expect(activity.kinds == [.capabilityLoaded, .prepNotesUnavailable, .tip])
     }
 
     @Test(arguments: [(6, true), (7, false)])
