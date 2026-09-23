@@ -575,6 +575,24 @@ private func speakResponseBody(arguments: String) -> Data {
         (body["tools"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
     }
 
+    /// Claude cannot narrow, so a press declares the same full list under `auto` and the runner's
+    /// own check does the narrowing.
+    @Test(arguments: [ToolChoice.required, .allowed(["speak", "load_tool"]), .force("speak")])
+    func aClaudeRequestDeclaresEveryToolUnderAuto(choice: ToolChoice) async throws {
+        let box = CapturedBody()
+        let client = BrainAccessor(
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-fable-5-1",
+            send: { request in
+                box.set(request.httpBody)
+                return (Data(#"{"type":"message","content":[],"stop_reason":"end_turn"}"#.utf8), http(200))
+            })
+        _ = try await client.respond(messages: [.user("hi")], tools: fiveTools, toolChoice: choice)
+        let body = try #require(
+            try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
+        #expect(declaredNames(body) == fiveTools.map(\.name))
+        #expect((body["tool_choice"] as? [String: Any])?["type"] as? String == "auto")
+    }
+
     @Test func aReasoningFloorRaisesOnlyAShallowerEffort() async throws {
         let raised = try await encodedBody(
             tools: fiveTools, choice: .required,

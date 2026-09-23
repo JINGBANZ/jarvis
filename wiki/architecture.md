@@ -1051,17 +1051,16 @@ is about 60 MB on disk and 20 MB per update.
   API and Codex enforce a narrowed choice with `allowed_tools`, a forced function, strict tools, and
   verbatim reasoning replay through the Codex path intact; the Gemini API enforces it with
   `allowed_tools` inside `generation_config`. Anthropic has no subset choice and Claude Fable 5.1 and
-  Opus 5.5 reject a forced tool (`any` and `tool` are 400s), so every Claude request sends
-  `tool_choice: {type: auto, disable_parallel_tool_use: true}` and the runner enforces the narrowed
-  choice itself: a call the request did not permit is answered as not available on a shortcut
-  press and asked again, and a wrong call on a press's last response is spoken from the reply's text or
-  retried ([Capabilities](#capabilities)). Declaring only the permitted tools instead was rejected:
-  it costs the prompt cache from the tools block on and, on Fable 5.1, invalidates every replayed
-  thinking block bound to the earlier list. Neither enforcement is trusted on its own, and the
-  runner checks every reply against the choice it asked for: replayed presses with the full list
-  under `auto` never called `capture_screen` on Opus 5 or Fable 5.1, while an earlier route that
-  dropped the choice saw Opus capture on every press. Claude's reasoning floors at `low`, because
-  `none` disables thinking and Fable 5.1 and Opus 5.5 reject that.
+  Opus 5.5 reject a forced tool (`any` and `tool` are 400s), so every Claude request that carries
+  tools asks for `auto` with parallel calls off, whatever the runner's choice
+  (`MessagesWireFormat.encode`; the tool-less summarizer sends no choice). The runner enforces the
+  narrowed choice itself: a call the request did not permit is answered as not available on a
+  shortcut press and asked again, and a wrong call on a press's last response is spoken from the
+  reply's text or retried ([Capabilities](#capabilities)). Declaring only the permitted tools
+  instead was rejected: it costs the prompt cache from the tools block on and, on Fable 5.1,
+  invalidates every replayed thinking block bound to the earlier list. Neither enforcement is
+  trusted on its own, and the runner checks every reply against the choice it asked for. Claude's
+  reasoning floors at `low`, because `none` disables thinking and Fable 5.1 and Opus 5.5 reject that.
 - **What the helper changes on the wire.** On the Codex path it deletes `max_output_tokens`, so the
   workload timeout is the output bound; forces `store: false`, which Jarvis also sends for every
   subscription target, so the dashboard retention described in
