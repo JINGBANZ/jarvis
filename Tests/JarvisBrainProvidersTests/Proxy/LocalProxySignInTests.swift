@@ -74,7 +74,7 @@ import Testing
         let login = try proxyStubExecutable(in: home, script: """
             echo 'Visit the following URL to continue authentication:'
             echo 'https://claude.ai.evil.example/oauth/authorize?code=true&state=abc'
-            exec /bin/sleep 600
+            idle
             """)
         let signIn = LocalProxySignIn(
             executable: login, configURL: home.appendingPathComponent("config.yaml"),
@@ -98,7 +98,7 @@ import Testing
         let login = try proxyStubExecutable(in: home, script: """
             echo $$ > '\(pidFile.path)'
             \(Self.noise)
-            exec /bin/sleep 600
+            idle
             """)
         let signIn = LocalProxySignIn(
             executable: login, configURL: home.appendingPathComponent("config.yaml"),

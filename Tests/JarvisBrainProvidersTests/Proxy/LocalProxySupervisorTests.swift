@@ -48,7 +48,7 @@ import Testing
         try await withSupervisor(script: """
             printf '%s\\n' "$@" > "$(dirname "$0")/arguments.partial"
             mv "$(dirname "$0")/arguments.partial" "$(dirname "$0")/arguments"
-            exec /bin/sleep 600
+            idle
             """) { supervisor, state, home in
             guard case .running(let endpoint) = state else {
                 Issue.record("expected the helper to be running, got \(state)")
@@ -97,7 +97,7 @@ import Testing
         try Data("started".utf8).write(to: ownLog)
 
         let supervisor = LocalProxySupervisor(
-            executable: try proxyStubExecutable(in: home, script: "exec /bin/sleep 600"),
+            executable: try proxyStubExecutable(in: home, script: "idle"),
             home: home, clock: ContinuousClock())
         let starting = Task { await supervisor.ensureRunning() }
         let stub = try ModelListStub(
@@ -113,7 +113,7 @@ import Testing
     }
 
     @Test func readinessNamesTheSubscriptionsTheHelperServes() async throws {
-        try await withSupervisor(script: "exec /bin/sleep 600") { supervisor, _, _ in
+        try await withSupervisor(script: "idle") { supervisor, _, _ in
             let readiness = await supervisor.readiness()
             guard case .ready(_, let signedIn) = readiness else {
                 Issue.record("expected a ready helper, got \(readiness)")
@@ -152,10 +152,10 @@ import Testing
         let supervisor = LocalProxySupervisor(
             executable: try proxyStubExecutable(in: home, script: """
                 dir="$(dirname "$0")"
-                [ -e "$dir/pid" ] && exec /bin/sleep 600
+                [ -e "$dir/pid" ] && idle
                 echo $$ > "$dir/pid.partial"
                 mv "$dir/pid.partial" "$dir/pid"
-                until [ -e "$dir/exit" ]; do sleep 0.05; done
+                wait_for "$dir/exit"
                 """),
             home: home, clock: ImmediateClock())
         let starting = Task { await supervisor.ensureRunning() }
@@ -208,7 +208,7 @@ import Testing
                 dir="$(dirname "$0")"
                 echo launched >> "$dir/launches"
                 life=$(grep -c . "$dir/launches")
-                until [ -e "$dir/release-$life" ]; do sleep 0.05; done
+                wait_for "$dir/release-$life"
                 """,
             clock: ImmediateClock()
         ) { supervisor, first, home async throws in
@@ -241,7 +241,7 @@ import Testing
         try await withSupervisor(script: """
             echo $$ > "$(dirname "$0")/pid.partial"
             mv "$(dirname "$0")/pid.partial" "$(dirname "$0")/pid"
-            exec /bin/sleep 600
+            idle
             """) { supervisor, state, home in
             guard case .running = state else {
                 Issue.record("expected the helper to be running, got \(state)")
@@ -265,10 +265,10 @@ import Testing
             -codex-login|-claude-login)
                 echo $$ > "$(dirname "$0")/login$1.partial"
                 mv "$(dirname "$0")/login$1.partial" "$(dirname "$0")/login$1"
-                exec /bin/sleep 600
+                idle
                 ;;
             esac
-            exec /bin/sleep 600
+            idle
             """) { supervisor, state, home in
             guard case .running = state else {
                 Issue.record("expected the helper to be running, got \(state)")
@@ -302,7 +302,7 @@ import Testing
             executable: try proxyStubExecutable(in: home, script: """
                 echo $$ > "$(dirname "$0")/pid.partial"
                 mv "$(dirname "$0")/pid.partial" "$(dirname "$0")/pid"
-                exec /bin/sleep 600
+                idle
                 """),
             home: home, clock: ImmediateClock())
         let starting = Task { await supervisor.ensureRunning() }
@@ -344,7 +344,7 @@ import Testing
         try await withSupervisor(script: """
             /usr/bin/env > "$(dirname "$0")/environment.partial"
             mv "$(dirname "$0")/environment.partial" "$(dirname "$0")/environment"
-            exec /bin/sleep 600
+            idle
             """) { supervisor, state, home in
             guard case .running = state else {
                 Issue.record("expected the helper to be running, got \(state)")
@@ -364,7 +364,7 @@ import Testing
         try await withSupervisor(script: """
             echo $$ > "$(dirname "$0")/pid.partial"
             mv "$(dirname "$0")/pid.partial" "$(dirname "$0")/pid"
-            exec /bin/sleep 600
+            idle
             """) { supervisor, state, home in
             guard case .running = state else {
                 Issue.record("expected the helper to be running, got \(state)")

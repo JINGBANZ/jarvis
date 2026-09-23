@@ -51,10 +51,12 @@ import JarvisBrainProviders
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o700], ofItemAtPath: executable.path)
 
+        // Hang guards, not speed checks: a freshly written stub's first launch queues behind
+        // macOS's check of every other new executable in the run.
         let detector = AgentCLIDetector(
             home: home,
             pathVariable: bin.path,
-            authStatusTimeout: 1,
+            authStatusTimeout: 10,
             temporaryDirectory: root.appendingPathComponent("unrelated-system-temp"))
         let evaluator = AgenticEvaluator(
             source: source,
@@ -68,7 +70,7 @@ import JarvisBrainProviders
                 #expect(url.lastPathComponent == "v\(actualVersion).tar.gz")
                 try FileManager.default.copyItem(at: archive, to: destination)
             },
-            timeout: 5)
+            timeout: 60)
 
         let report = try await evaluator.evaluate(sessionDirectory: session)
 
@@ -118,9 +120,9 @@ import JarvisBrainProviders
             detector: AgentCLIDetector(
                 home: home,
                 pathVariable: bin.path,
-                authStatusTimeout: 1,
+                authStatusTimeout: 10,
                 temporaryDirectory: root.appendingPathComponent("unrelated-system-temp")),
-            timeout: 5)
+            timeout: 60)
 
         await #expect(throws: AgenticEvaluator.EvaluationError.agentFailed(
             cli: AgentCLI.claude.displayName,
