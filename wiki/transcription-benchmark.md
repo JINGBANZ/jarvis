@@ -83,8 +83,9 @@ composition used in production.
 | Standard matrix with more repetitions | `./scripts/transcription-benchmark.sh standard --repetitions N` | Gather a larger sample; `N` must preserve the source-owned minimum. |
 | Selected standard arms | `./scripts/transcription-benchmark.sh standard --filter TEXT` | Check one path quickly, such as one model's spoken-start offset; only arms whose id contains `TEXT` run. Combines with `--repetitions`. |
 | Scoped reconnect | `./scripts/transcription-benchmark.sh reconnect` | Verify OpenAI reconnect, buffering, replay, final ordering, and provider identity. |
+| Two-turn session | `./scripts/transcription-benchmark.sh turns` | Verify that a session which already finalized one utterance still transcribes the next one. |
 
-Both modes are explicit developer operations. They never run as part of `swift build`,
+Every mode is an explicit developer operation. They never run as part of `swift build`,
 `./scripts/run-tests.sh`, or the normal GitHub Actions gate. The live runner needs macOS TCC access;
 OpenAI arms make real provider requests, and Apple Speech may need to prepare its selected locale
 model. The deterministic scorer and its edge cases still run automatically as unit tests in the
@@ -93,8 +94,9 @@ normal gate.
 Run the standard matrix after changing transcription model configuration, capture delivery,
 endpoint/commit/final handling, benchmark scoring, or the default transcription choice. Run reconnect
 after changing WebSocket failure handling, generations, the recovery buffer, replay, or final
-reconciliation. Run the relevant mode before merging or releasing a transcription-sensitive change;
-ordinary UI, overlay, or coaching-only changes do not need it.
+reconciliation. Run turns after changing how a path finalizes an utterance, including analyzer
+finalization, commit boundaries, or turn detection. Run the relevant mode before merging or releasing
+a transcription-sensitive change; ordinary UI, overlay, or coaching-only changes do not need it.
 
 ## Standard Matrix
 
@@ -122,7 +124,29 @@ macOS 26+) — Gemini is explicitly out of scope rather than silently missing. A
 a provider-neutral model identifier on `Arm` before the matrix can compare it against the other two
 paths.
 
-## Why Scoring Belongs to the Benchmark
+## Two-Turn Session Regression
+
+Every real session speaks many times over one connection, and a path that finalizes an utterance can
+damage what it hears next: the same analyzer, socket, or commit boundary carries both turns. The
+standard matrix cannot see that, because each repetition opens a fresh session, speaks once, and
+stops. Turns mode closes the gap by speaking twice on one connection.
+
+Each arm in
+[`TranscriptionBenchmark.turnArms`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift)
+runs one session per selectable path, meaning every OpenAI transcription model plus Apple Speech in
+`en_US`, and plays two different English phrases separated by the same endpoint silence the standard
+matrix uses. The mode waits for each turn's finalized stream to settle before the next turn
+speaks, so a final belongs to whichever turn was speaking when it arrived. Attribution is therefore
+by observation time rather than by matching text, which is what makes answering the second turn with
+the first turn's transcript a miss instead of a match.
+
+Both phrases are English so the Apple arm, which analyzes one locale per session, is tested on the
+same footing as the OpenAI arms; language coverage stays the standard matrix's job. An arm passes
+when each turn's own finals match its phrase within the shared maximum character error rate, capture
+stayed continuous, and no reconnect intervened. This mode keeps an accuracy bound where the standard
+matrix deliberately has none, because a turn that returns a fragment of its phrase is the failure
+being measured rather than a provider-quality difference. Per-turn transcripts, error rates, and
+final latency stay in `summary.json`, so a partial loss is visible rather than reduced to a verdict.
 
 A script that only plays audio and saves whatever transcript arrives is a demo, not a benchmark. A
 benchmark needs a consistent way to compare the observed result with the known input and to separate
@@ -180,8 +204,9 @@ PCM is never persisted. A fixture-cleanup failure is a run failure and prevents 
 publishing a success marker.
 
 The command exits nonzero when a platform-supported arm is unavailable or incomplete, capture
-continuity fails, or the strict reconnect acceptance criteria fail. On macOS 14.2–25, Apple Speech arms
-remain visible in `summary.json` as unavailable because that provider requires macOS 26, but they do
-not fail the runnable matrix unless a filter selected nothing else. Inspect the summary to distinguish provider recognition/finalization
+continuity fails, a turn goes unrecognized, or the strict reconnect acceptance criteria fail. On
+macOS 14.2–25, Apple Speech arms remain visible in `summary.json` as unavailable because that
+provider requires macOS 26, but they do not fail the runnable matrix unless a filter selected nothing
+else. Inspect the summary to distinguish provider recognition/finalization
 behavior from capture or replay failure. A run's results belong in the pull request that ran it, not
 on this operating-contract page.

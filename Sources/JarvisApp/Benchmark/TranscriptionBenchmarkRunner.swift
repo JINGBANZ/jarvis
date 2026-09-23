@@ -119,6 +119,8 @@ final class TranscriptionBenchmarkRunner {
             summary = try await runStandard(fixtures: fixtures)
         case .reconnect:
             summary = await runReconnect(fixtures: fixtures)
+        case .turns:
+            summary = try await runTurns(fixtures: fixtures)
         }
         try TranscriptionBenchmarkFiles.write(
             summary.encodedJSON(),
@@ -127,13 +129,17 @@ final class TranscriptionBenchmarkRunner {
         try validate(summary)
     }
 
+    private var requiredProviders: Set<TranscriptionProvider> {
+        var providers: Set<TranscriptionProvider> = [.openAI]
+        if #available(macOS 26.0, *) {
+            providers.insert(.appleSpeech)
+        }
+        return providers
+    }
+
     private func validate(_ summary: TranscriptionBenchmark.Summary) throws {
         switch options.mode {
         case .standard:
-            var requiredProviders: Set<TranscriptionProvider> = [.openAI]
-            if #available(macOS 26.0, *) {
-                requiredProviders.insert(.appleSpeech)
-            }
             let incompleteArms = TranscriptionBenchmark.standardAcceptanceFailureArmIDs(
                 in: summary,
                 expectedRepetitions: options.repetitions,
@@ -152,6 +158,51 @@ final class TranscriptionBenchmarkRunner {
                 throw Failure.acceptanceFailed(
                     "reconnect criteria not met: \(failedModels.joined(separator: ", "))")
             }
+        case .turns:
+            let required = requiredProviders
+            var failedArms = summary.turns
+                .filter { required.contains($0.provider) && !$0.passed }
+                .map(\.armID)
+            failedArms += TranscriptionBenchmark.turnArms
+                .filter { arm in
+                    required.contains(arm.provider)
+                        && !summary.turns.contains { $0.armID == arm.id }
+                }
+                .map(\.id)
+            guard failedArms.isEmpty else {
+                throw Failure.acceptanceFailed(
+                    "turns criteria not met: \(failedArms.sorted().joined(separator: ", "))")
+            }
+        }
+    }
+
+    /// Shared by the standard and turns matrices, which both need the selected locale's model ready
+    /// before capture starts.
+    func prepareAppleLocale(_ identifier: String) async throws -> Locale {
+        if let locale = preparedAppleLocales[identifier] { return locale }
+        if let failure = appleLocaleFailures[identifier] {
+            throw Failure.appleSpeechUnavailable(failure)
+        }
+        guard #available(macOS 26.0, *) else {
+            let detail = "requires macOS 26 or later"
+            appleLocaleFailures[identifier] = detail
+            throw Failure.appleSpeechUnavailable(detail)
+        }
+        do {
+            let locale = try await TranscriptionBenchmarkAbortMonitor.run(
+                marker: abortMarker
+            ) {
+                try await AppleSpeechModelPreparation.prepare(
+                    localeIdentifier: identifier)
+            }
+            preparedAppleLocales[identifier] = locale
+            return locale
+        } catch TranscriptionBenchmarkAbortMonitor.Failure.aborted {
+            throw Failure.benchmarkAborted
+        } catch {
+            let detail = String(describing: error)
+            appleLocaleFailures[identifier] = detail
+            throw Failure.appleSpeechUnavailable(detail)
         }
     }
 

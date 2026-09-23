@@ -4,6 +4,7 @@ public struct TranscriptionBenchmarkOptions: Sendable {
     public enum Mode: String, Sendable {
         case standard
         case reconnect
+        case turns
     }
 
     public enum Failure: Error, CustomStringConvertible {
@@ -33,7 +34,7 @@ public struct TranscriptionBenchmarkOptions: Sendable {
     public init(arguments: [String] = CommandLine.arguments) throws {
         guard let rawMode = Self.value(after: "--benchmark-mode", in: arguments),
               let mode = Mode(rawValue: rawMode) else {
-            throw Failure.missing("--benchmark-mode standard|reconnect")
+            throw Failure.missing("--benchmark-mode standard|reconnect|turns")
         }
         guard let rawOutput = Self.value(after: "--benchmark-output-dir", in: arguments) else {
             throw Failure.missing("--benchmark-output-dir")
