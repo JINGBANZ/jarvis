@@ -45,10 +45,10 @@ The run is not:
   live verification rather than environment-gated tests hidden inside unit targets.
 - **A timing test.** Press-to-tip and question-to-tip times are printed as `time` lines and never
   asserted, because provider latency varies between runs. Scenarios A and B also print a `tokens`
-  line per provider with its coach calls and their input, cache-read, and output totals, so a
-  prompt change shows its token cost from one run to the next. They are never asserted, and never
-  summed across providers because OpenAI's input count includes cached input and Anthropic's
-  does not. Totals cover the calls that reported usage, and the line counts the calls that did
+  line per provider with its coach calls and their input, cache-read, cache-write, and output
+  totals, so a prompt change shows its token cost from one run to the next. They are never
+  asserted, and never summed across providers because OpenAI's input count includes cached input
+  and Anthropic's excludes cache reads and writes. Totals cover the calls that reported usage, and the line counts the calls that did
   not, such as a timed-out request, rather than reading them as zero.
 - **A transcription comparison.** It uses one transcription model as configured. The benchmark owns
   model comparison, Apple Speech, and reconnect.

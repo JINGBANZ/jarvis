@@ -95,6 +95,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
             $0.role == .tool && $0.toolCallId == "p1"
                 && $0.text?.contains("token bucket notes") == true
                 && $0.text?.contains("system-design.md") == true
+                && $0.text?.hasPrefix(JarvisPrompts.Coach.prepNotesResultHeader) == true
         })
         #expect(brain.requestContexts.compactMap { $0 }.map(\.phase) == [
             .initial, .searchPrepNotesContinuation,

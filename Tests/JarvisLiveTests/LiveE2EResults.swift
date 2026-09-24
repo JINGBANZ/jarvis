@@ -53,10 +53,11 @@ struct LiveE2EResults {
     /// Totals cover the calls that reported usage; the rest are counted, never read as zero, so a
     /// failed request cannot pass for a cheap one.
     mutating func tokens(
-        _ label: String, calls: Int, withoutUsage: Int, input: Int, cacheRead: Int, output: Int
+        _ label: String, calls: Int, withoutUsage: Int, input: Int, cacheRead: Int, cacheWrite: Int,
+        output: Int
     ) {
         let missing = withoutUsage > 0 ? " (\(withoutUsage) without usage)" : ""
         lines.append("tokens \(scenario) \(label) \(calls) calls\(missing), input \(input), "
-            + "cache read \(cacheRead), output \(output)")
+            + "cache read \(cacheRead), cache write \(cacheWrite), output \(output)")
     }
 }

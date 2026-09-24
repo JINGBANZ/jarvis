@@ -591,7 +591,8 @@ struct LiveE2ETests {
         results.note("C20", sightings.isEmpty ? "no reply recoveries" : sightings.joined(separator: ", "))
     }
 
-    /// Per provider, because OpenAI's input count includes cached input and Anthropic's does not.
+    /// Per provider, because OpenAI's input count includes cached input and Anthropic's excludes
+    /// both cache reads and cache writes.
     static func recordTokens(_ evidence: Evidence, _ results: inout LiveE2EResults) {
         let providers = Set(evidence.traffic.filter { $0.tag == "coach" }.compactMap(\.provider)).sorted()
         for provider in providers {
@@ -602,7 +603,8 @@ struct LiveE2ETests {
             }
             results.tokens("\(provider) coach", calls: records.count,
                            withoutUsage: records.count - usages.count,
-                           input: total(\.input), cacheRead: total(\.cacheRead), output: total(\.output))
+                           input: total(\.input), cacheRead: total(\.cacheRead),
+                           cacheWrite: total(\.cacheWrite), output: total(\.output))
         }
     }
 

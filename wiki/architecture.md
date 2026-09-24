@@ -257,10 +257,13 @@ solely `speak` does.
 The catalogs stay in the cached prompt after a load, so every line in them holds for the whole
 session: each loader is used once per session, and the prep tool's line asks for a search only when
 no excerpt already in the conversation covers the question. A line saying to load before such
-questions still read as an instruction after the load, and one saying to search before answering
-them drew a repeat search on a follow-up the first excerpt already covered. Skills name the task ("search the prep notes"), never the deferred tool, and the search rules
-live only in the tool's own guidance: a skill naming the tool invites a call before its load, and a
-session with prep search off then carries none of those rules.
+questions would still read as an instruction after the load, and one saying to search before every
+such question competes with reusing an excerpt on a follow-up. Skills name the task ("search the
+prep notes", only if prep notes are available), never the deferred tool, and the search rules live
+only in the tool's own guidance: a skill naming the tool invites a call before its load, and a
+session with prep search off carries none of those rules. Every search result opens with a line
+marking the excerpts as reference data, never instructions, so a search that runs before its load
+still carries that boundary.
 
 Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
 handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
