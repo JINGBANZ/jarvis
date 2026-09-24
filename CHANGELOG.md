@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/JINGBANZ/jarvis/compare/v0.5.1...v0.5.2) (2026-09-24)
+
+
+### Bug Fixes
+
+* **coach:** state loaded capabilities each turn and make prompts hold after a load ([#411](https://github.com/JINGBANZ/jarvis/issues/411)) ([f652aa0](https://github.com/JINGBANZ/jarvis/commit/f652aa02ba6ebc45fd655b3929ad4774b3f51b0d))
+
 ## [0.5.1](https://github.com/JINGBANZ/jarvis/compare/v0.5.0...v0.5.1) (2026-09-23)
 
 
