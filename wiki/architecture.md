@@ -254,6 +254,17 @@ assumptions and caveats, and supplements uncovered technical topics without fabr
 or personal history. A required reply alone does not bypass loading; only a tool choice permitting
 solely `speak` does.
 
+The catalogs stay in the cached prompt after a load, so every line in them holds for the whole
+session: each loader is used once per session, and the prep tool's line asks for a search only when
+no excerpt already in the conversation covers the question. A line saying to load before such
+questions would still read as an instruction after the load, and one saying to search before every
+such question competes with reusing an excerpt on a follow-up. Skills name the task ("search the
+prep notes", only if prep notes are available), never the deferred tool, and the search rules live
+only in the tool's own guidance: a skill naming the tool invites a call before its load, and a
+session with prep search off carries none of those rules. Every search result opens with a line
+marking the excerpts as reference data, never instructions, so a search that runs before its load
+still carries that boundary.
+
 Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
 handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
 literal hash or pipe characters. Markdown section boundaries keep short stories with their accuracy
@@ -835,7 +846,14 @@ rather than a per-turn screenshot.
   [Gemini API target](#gemini-api-target).
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
-  itself and rebuilds every request as `[system] + memory + new delta`. Owning the memory is what
+  itself and rebuilds every request as `[system] + memory + new delta`, followed by one "Session
+  state" line naming the skills and tools already loaded and any tool still waiting for its first
+  load (`CoachCapabilities.sessionState`). The line is fixed for the attempt and never enters memory,
+  so it costs its own few dozen tokens per request and nothing on later ones. It exists because a
+  load result deep in replayed history is easy to miss: without it, lighter models (GPT-6 Luna,
+  Claude Sonnet 5) reload what is already loaded after a brain switch, or call `call_tool` before any
+  load. Stating the state beat enforcing it through the tool choice, which would add refusal paths
+  that differ by brain. Owning the memory is what
   keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
   cache can reuse stable prefixes); a `stay_silent` call leaves no trace, even one a turn was refused
   or went past, so its refusal never tells a later turn that silence is off-limits, while useful

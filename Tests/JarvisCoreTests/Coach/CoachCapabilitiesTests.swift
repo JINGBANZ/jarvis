@@ -120,6 +120,22 @@ import Testing
             == ["capture_screen", "speak", "stay_silent", "call_tool"])
     }
 
+    @Test func sessionStateNamesWhatIsLoadedAndWhatStillNeedsALoad() {
+        #expect(CoachCapabilities.default.sessionState(loaded: []) == nil)
+
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: true, skills: skills)
+        #expect(capabilities.sessionState(loaded: [])
+            == "Session state: Not loaded yet: tool search_prep_notes.")
+        #expect(capabilities.sessionState(
+            loaded: ["search_prep_notes", CoachCapabilities.loadedKey(forSkill: "behavioral")])
+            == "Session state: Already loaded, never load again: skill behavioral, tool search_prep_notes.")
+
+        let skillsOnly = CoachCapabilities.compose(
+            disabledTools: [], prepSourcesConfigured: false, skills: skills)
+        #expect(skillsOnly.sessionState(loaded: []) == nil)
+    }
+
     @Test func callToolRoutesOnlyToTheCatalogAndTakesArgumentsAsText() throws {
         let capabilities = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
         let callTool = try #require(capabilities.tool(named: "call_tool"))

@@ -187,6 +187,45 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(brain.offeredTools.allSatisfy { $0.map(\.name) == prepConfigured.tools.map(\.name) })
     }
 
+    @Test func eachAttemptEndsItsOpeningInCurrentStateThatHistoryNeverKeeps() async throws {
+        let runner = makeRunner(capabilities: prepConfigured)
+        let brain = ScriptedBrain(script: [loadCall("search_prep_notes"), speak, speak])
+
+        _ = await run(runner, brain: brain)
+        _ = await run(runner, brain: brain)
+
+        func stateLines(_ request: [ChatMessage]) -> [String] {
+            request.compactMap(\.text).filter { $0.hasPrefix(JarvisPrompts.Coach.sessionStateHeader) }
+        }
+        #expect(brain.calls[0].last?.text == prepConfigured.sessionState(loaded: []))
+        #expect(stateLines(brain.calls[1]) == [prepConfigured.sessionState(loaded: [])])
+        #expect(brain.calls[2].last?.text == prepConfigured.sessionState(loaded: ["search_prep_notes"]))
+        #expect(stateLines(brain.calls[2]).count == 1)
+    }
+
+    @Test func aSilentQuietCheckLeavesNoTraceEvenWithTheStateLine() async throws {
+        let runner = makeRunner(capabilities: prepConfigured)
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "q1")],
+                  rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")]),
+            speak,
+        ])
+        let target = BrainTarget(
+            provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
+        _ = await runner.runAttempt(
+            CoachAttemptRunner.PendingCoachingWork(reason: .silence(secondsQuiet: 30)),
+            using: .init(plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
+                         target: target, brain: brain, summarizer: nil, onSelected: nil,
+                         prepMaterial: nil))
+        _ = await run(runner, brain: brain)
+
+        func quietProbe(_ m: ChatMessage) -> Bool {
+            m.role == .user && m.text?.contains("(no speech for") == true
+        }
+        #expect(brain.calls[0].contains(where: quietProbe))
+        #expect(!brain.calls[1].contains(where: quietProbe))
+    }
+
     @Test func aCallToAToolTheSessionDoesNotOfferIsRefused() async throws {
         let search = FakePrepMaterialSearch()
         let activity = RecordingActivity()

@@ -7,8 +7,8 @@ extension CoachCapabilities {
         ToolDef(
             name: loadToolName,
             description: "Load a tool listed under 'Tools you can load'. Returns its "
-                + "arguments schema and usage guidance. Call it once per tool, before that tool's "
-                + "first use.",
+                + "arguments schema and usage guidance. Call it once per session for each tool, "
+                + "before its first use; after that, use call_tool.",
             parametersJSON: loaderParametersJSON(catalogNames: catalogNames))
     }
 }

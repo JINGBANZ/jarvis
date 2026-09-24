@@ -536,6 +536,23 @@ import Testing
         #expect(Evidence.SpeakDetail.noSpeakCall.fences.isEmpty)
     }
 
+    @Test func usageReadsTheResponseAndStaysNilWithoutOne() throws {
+        let answered = try Self.coachRecord(attempt: 1, response: [
+            "id": "resp_1", "status": "completed", "output": [[String: Any]](),
+            "usage": ["input_tokens": 9200, "input_tokens_details": ["cached_tokens": 8000],
+                      "output_tokens": 140] as [String: Any],
+        ])
+        let timedOut = try Self.line([
+            "tag": "coach", "error": "The request timed out.",
+            "request": ["model": "gpt-6-luna", "input": [[String: Any]]()] as [String: Any],
+        ])
+        let evidence = try Self.evidence(traffic: [answered, timedOut])
+        #expect(evidence.traffic[0].usage?.input == 9200)
+        #expect(evidence.traffic[0].usage?.cacheRead == 8000)
+        #expect(evidence.traffic[0].usage?.output == 140)
+        #expect(evidence.traffic[1].usage == nil)
+    }
+
     @Test func speakParametersReadTheDeclaredSchema() throws {
         let record = try Self.coachRecord(attempt: 1, request: [
             "model": "gpt-5.6-sol",

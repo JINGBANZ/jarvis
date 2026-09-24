@@ -103,10 +103,12 @@ import Testing
             #expect(!skill.body.hasPrefix("---"))
             #expect(!skill.body.contains("description:"))
             #expect(skill.body.count > 200)
+            // A skill names the task, never a deferred tool, which would invite a call before its load.
+            #expect(!skill.body.contains(searchPrepNotesTool.name))
         }
         let behavioral = try #require(skills.first { $0.name == "behavioral" })
         #expect(behavioral.body.contains("STAR"))
-        #expect(behavioral.body.contains("search_prep_notes"))
+        #expect(behavioral.body.contains("search the prep notes"))
         let design = try #require(skills.first { $0.name == "system-design" })
         #expect(design.body.contains("mermaid"))
         #expect(skills.first { $0.name == "coding" }?.body.contains("invariant") == true)

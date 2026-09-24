@@ -289,6 +289,16 @@ final class CoachAttemptRunner: @unchecked Sendable {
             jlog("📎 preloaded the \(coding.name) skill for the Show code press")
             activity?.record(.capabilityLoaded(kind: .skill, name: coding.name))
         }
+        // Sent right after the opening messages, next to the decision, but kept out of
+        // `turnMessages` so history never replays it. It stays fixed for the attempt, so its
+        // continuations keep their cached prefix.
+        let sessionState = capabilities.sessionState(loaded: alreadyLoaded.union(loadedThisAttempt))
+        let sessionStateIndex = turnMessages.count
+        func request() -> [ChatMessage] {
+            var messages = turnMessages
+            if let sessionState { messages.insert(.user(sessionState), at: sessionStateIndex) }
+            return historyBase + messages
+        }
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
@@ -319,7 +329,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         sequence: requestSequence)
                     response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
-                            messages: historyBase + turnMessages,
+                            messages: request(),
                             tools: tools,
                             toolChoice: toolChoice)
                     }
