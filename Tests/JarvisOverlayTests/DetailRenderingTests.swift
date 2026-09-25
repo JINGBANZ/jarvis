@@ -155,6 +155,33 @@ import Testing
         #expect(line("Result").minY >= line("six").maxY)
     }
 
+    /// The parser emits no run for an empty cell, so the cell's paragraph is only its newline.
+    @MainActor @Test func anEmptyLastCellKeepsItsBlockAndTheSpacingAfterTheTable() throws {
+        let detail = try #require(ReplyDetail(markdown: """
+            | a | b |
+            |---|---|
+            | x | |
+
+            After.
+            """))
+        guard case .prose(let prose)? = detail.segments.first, detail.segments.count == 1 else {
+            Issue.record("a detail without fences is one prose segment")
+            return
+        }
+        let rendered = DetailProseFormatting.render(prose, fontSize: 16)
+        #expect(rendered.string == "a\nb\nx\n\n\nAfter.")
+        func block(at index: Int) -> NSTextTableBlock? {
+            (rendered.attribute(.paragraphStyle, at: index, effectiveRange: nil) as? NSParagraphStyle)?
+                .textBlocks.first as? NSTextTableBlock
+        }
+        let x = try #require(block(at: 4))
+        let empty = try #require(block(at: 6))
+        #expect(x.table === empty.table)
+        #expect(empty.startingRow == 1 && empty.startingColumn == 1)
+        #expect(block(at: 7) == nil)
+        #expect(block(at: 8) == nil)
+    }
+
     @MainActor @Test func oneDocumentCanCarryBothACodeBlockAndADiagram() throws {
         let detail = try #require(ReplyDetail(markdown: """
             Sketch it, then start here.

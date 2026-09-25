@@ -51,8 +51,9 @@ extension DetailProseFormatting {
             rows[rows.count - 1].cells[cell.column].append(text)
         }
 
-        /// The last cell leaves its paragraph open for the caller's block separator to close, so a
-        /// table that ends the prose adds no empty line below itself.
+        /// A non-empty last cell leaves its paragraph open for the caller's block separator to close,
+        /// so a table that ends the prose adds no empty line below itself. An empty last cell keeps
+        /// its newline: it is the only character that can carry the cell's block.
         func render(body: [NSAttributedString.Key: Any]) -> NSAttributedString {
             let table = NSTextTable()
             table.numberOfColumns = columns.count
@@ -73,7 +74,8 @@ extension DetailProseFormatting {
                     style.textBlocks = [block]
                     style.alignment = Self.alignment(columns[columnIndex].alignment)
                     let paragraph = NSMutableAttributedString(attributedString: cell)
-                    if rowIndex < rows.count - 1 || columnIndex < row.cells.count - 1 {
+                    let isLast = rowIndex == rows.count - 1 && columnIndex == row.cells.count - 1
+                    if !isLast || cell.length == 0 {
                         paragraph.append(NSAttributedString(string: "\n", attributes: body))
                     }
                     paragraph.addAttribute(.paragraphStyle, value: style,

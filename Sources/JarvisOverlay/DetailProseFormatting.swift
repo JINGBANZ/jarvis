@@ -17,14 +17,21 @@ enum DetailProseFormatting {
         var currentBlock: PresentationIntent?
         var started = false
         var table: Table?
+        var tableEndedItsParagraph = false
         func startBlock() {
-            if started { out.append(NSAttributedString(string: "\n\n", attributes: body)) }
+            if started {
+                out.append(NSAttributedString(string: tableEndedItsParagraph ? "\n" : "\n\n",
+                                              attributes: body))
+            }
             started = true
+            tableEndedItsParagraph = false
         }
         func flushTable() {
             guard let cells = table else { return }
             startBlock()
-            out.append(cells.render(body: body))
+            let grid = cells.render(body: body)
+            out.append(grid)
+            tableEndedItsParagraph = grid.string.hasSuffix("\n")
             table = nil
         }
         for run in prose.runs {
