@@ -124,31 +124,4 @@ extension TranscriptionBenchmarkRunner {
             }))
     }
 
-    private func prepareAppleLocale(_ identifier: String) async throws -> Locale {
-        if let locale = preparedAppleLocales[identifier] { return locale }
-        if let failure = appleLocaleFailures[identifier] {
-            throw Failure.appleSpeechUnavailable(failure)
-        }
-        guard #available(macOS 26.0, *) else {
-            let detail = "requires macOS 26 or later"
-            appleLocaleFailures[identifier] = detail
-            throw Failure.appleSpeechUnavailable(detail)
-        }
-        do {
-            let locale = try await TranscriptionBenchmarkAbortMonitor.run(
-                marker: abortMarker
-            ) {
-                try await AppleSpeechModelPreparation.prepare(
-                    localeIdentifier: identifier)
-            }
-            preparedAppleLocales[identifier] = locale
-            return locale
-        } catch TranscriptionBenchmarkAbortMonitor.Failure.aborted {
-            throw Failure.benchmarkAborted
-        } catch {
-            let detail = String(describing: error)
-            appleLocaleFailures[identifier] = detail
-            throw Failure.appleSpeechUnavailable(detail)
-        }
-    }
 }

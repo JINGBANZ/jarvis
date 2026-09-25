@@ -44,12 +44,11 @@ public enum TranscriptionBenchmark {
     }
 
     /// Fixed, non-user input. Only each fixture's hash is persisted.
-    public static let phrases: [Phrase] = [
-        Phrase(
-            id: "english-technical",
-            language: .english,
-            text: "The actor preserves ordered audio while the socket reconnects.",
-            voice: "Samantha"),
+    public static let phrases: [Phrase] = standardPhrases + [followUpPhrase]
+
+    /// One phrase per session, so language coverage stays comparable across providers.
+    public static let standardPhrases: [Phrase] = [
+        englishPhrase,
         Phrase(
             id: "mandarin-technical",
             language: .mandarin,
@@ -62,6 +61,20 @@ public enum TranscriptionBenchmark {
             voice: "Tingting"),
     ]
 
+    static let englishPhrase = Phrase(
+        id: "english-technical",
+        language: .english,
+        text: "The actor preserves ordered audio while the socket reconnects.",
+        voice: "Samantha")
+
+    /// The second turn of the turns matrix. Wording shares no phrasing with `englishPhrase` so a
+    /// repeated first turn cannot be scored as this one.
+    static let followUpPhrase = Phrase(
+        id: "english-followup",
+        language: .english,
+        text: "Then the coach waits until the speaker finishes another sentence.",
+        voice: "Samantha")
+
     public struct Arm: Codable, Equatable, Sendable {
         public let id: String
         public let provider: TranscriptionProvider
@@ -69,6 +82,12 @@ public enum TranscriptionBenchmark {
         public let languageProfile: LanguageProfile?
         public let localeIdentifier: String?
         public let phrase: Phrase
+        /// Only the turns matrix speaks twice in one session; every other arm leaves this empty.
+        public let followUpPhrase: Phrase?
+
+        public var orderedPhrases: [Phrase] {
+            followUpPhrase.map { [phrase, $0] } ?? [phrase]
+        }
 
         public init(
             id: String,
@@ -76,7 +95,8 @@ public enum TranscriptionBenchmark {
             model: OpenAITranscriptionModel?,
             languageProfile: LanguageProfile?,
             localeIdentifier: String?,
-            phrase: Phrase
+            phrase: Phrase,
+            followUpPhrase: Phrase? = nil
         ) {
             self.id = id
             self.provider = provider
@@ -84,13 +104,14 @@ public enum TranscriptionBenchmark {
             self.languageProfile = languageProfile
             self.localeIdentifier = localeIdentifier
             self.phrase = phrase
+            self.followUpPhrase = followUpPhrase
         }
     }
 
     /// No Gemini arms: `Arm.model` is OpenAI-typed rather than a provider-neutral model id.
     public static var standardArms: [Arm] {
         let openAI = OpenAITranscriptionModel.allCases.flatMap { model in
-            phrases.map { phrase in
+            standardPhrases.map { phrase in
                 let profile: LanguageProfile = switch phrase.language {
                 case .english: .english
                 case .mandarin: .mandarinChinese
@@ -105,7 +126,7 @@ public enum TranscriptionBenchmark {
                     phrase: phrase)
             }
         }
-        let apple = phrases.map { phrase in
+        let apple = standardPhrases.map { phrase in
             let locale = phrase.language == .english ? "en_US" : "zh_CN"
             return Arm(
                 id: "apple-speech--\(locale)--\(phrase.id)",
@@ -116,5 +137,30 @@ public enum TranscriptionBenchmark {
                 phrase: phrase)
         }
         return openAI + apple
+    }
+
+    /// Every selectable path speaks twice in one session. The standard matrix opens a fresh session
+    /// per phrase, so a provider that loses the speech after its first finalization looks healthy
+    /// there and fails in every real session.
+    public static var turnArms: [Arm] {
+        let openAI = OpenAITranscriptionModel.allCases.map { model in
+            Arm(
+                id: "turns--openai--\(model.rawValue)",
+                provider: .openAI,
+                model: model,
+                languageProfile: .english,
+                localeIdentifier: nil,
+                phrase: englishPhrase,
+                followUpPhrase: followUpPhrase)
+        }
+        let apple = Arm(
+            id: "turns--apple-speech--en_US",
+            provider: .appleSpeech,
+            model: nil,
+            languageProfile: nil,
+            localeIdentifier: "en_US",
+            phrase: englishPhrase,
+            followUpPhrase: followUpPhrase)
+        return openAI + [apple]
     }
 }

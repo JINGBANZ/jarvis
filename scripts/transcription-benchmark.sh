@@ -9,11 +9,12 @@ usage() {
   echo "usage:" >&2
   echo "  $0 standard [--repetitions N] [--filter TEXT]" >&2
   echo "  $0 reconnect" >&2
+  echo "  $0 turns" >&2
   echo "--filter runs only the standard arms whose id contains TEXT, e.g. gpt-live-transcribe" >&2
 }
 
 MODE="${1:-}"
-if [[ "$MODE" != "standard" && "$MODE" != "reconnect" ]]; then
+if [[ "$MODE" != "standard" && "$MODE" != "reconnect" && "$MODE" != "turns" ]]; then
   usage
   exit 2
 fi
@@ -90,13 +91,21 @@ show_failure_if_present() {
   return 1
 }
 
-if [[ -n "$FILTER" ]]; then
-  echo "▶ running the standard arms matching \"$FILTER\" ($REPETITIONS repetitions per arm)"
-elif [[ "$MODE" == "standard" ]]; then
-  echo "▶ running fixed system-audio matrix ($REPETITIONS repetitions per arm)"
-else
-  echo "▶ running scoped reconnect validation (host networking remains online)"
-fi
+case "$MODE" in
+  standard)
+    if [[ -n "$FILTER" ]]; then
+      echo "▶ running the standard arms matching \"$FILTER\" ($REPETITIONS repetitions per arm)"
+    else
+      echo "▶ running fixed system-audio matrix ($REPETITIONS repetitions per arm)"
+    fi
+    ;;
+  reconnect)
+    echo "▶ running scoped reconnect validation (host networking remains online)"
+    ;;
+  turns)
+    echo "▶ running two-turn session validation (one session speaks twice per arm)"
+    ;;
+esac
 
 APP_WAITER_PID=""
 

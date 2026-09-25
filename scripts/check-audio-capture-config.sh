@@ -6,6 +6,7 @@ capture_source="Sources/JarvisApp/Capture/AggregateEchoCapture.swift"
 benchmark_capture_source="Sources/JarvisApp/Benchmark/SystemAudioBenchmarkCapture.swift"
 benchmark_standard_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Standard.swift"
 benchmark_reconnect_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Reconnect.swift"
+benchmark_turns_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner+Turns.swift"
 benchmark_runner_source="Sources/JarvisApp/Benchmark/TranscriptionBenchmarkRunner.swift"
 benchmark_fixtures_source="Sources/JarvisApp/Benchmark/SyntheticSpeechFixtures.swift"
 benchmark_script="scripts/transcription-benchmark.sh"
@@ -24,14 +25,16 @@ if [ ! -f "$benchmark_capture_source" ]; then
     exit 1
 fi
 if [ ! -f "$benchmark_standard_source" ] || [ ! -f "$benchmark_reconnect_source" ] \
-    || [ ! -f "$benchmark_script" ]; then
+    || [ ! -f "$benchmark_turns_source" ] || [ ! -f "$benchmark_script" ]; then
     echo "Audio capture guard: transcription benchmark sources not found; refusing to pass." >&2
     exit 1
 fi
 if ! /usr/bin/grep -Fq 'TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)' \
     "$benchmark_standard_source" \
+    || ! /usr/bin/grep -Fq 'TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)' \
+    "$benchmark_turns_source" \
     || ! /usr/bin/grep -Fq 'TranscriptionBenchmarkAbortMonitor.run' \
-    "$benchmark_standard_source" \
+    "$benchmark_runner_source" \
     || ! /usr/bin/grep -Fq 'trap abort_run INT TERM' "$benchmark_script"; then
     echo "Every transcription benchmark mode must stop capture when its command is interrupted." >&2
     exit 1

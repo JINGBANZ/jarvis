@@ -23,11 +23,7 @@ public extension TranscriptionBenchmark {
     }
 
     static func evaluate(_ input: RepetitionInput) -> RepetitionResult {
-        let orderedEvents = input.events.enumerated().sorted {
-            $0.element.observedAt != $1.element.observedAt
-                ? $0.element.observedAt < $1.element.observedAt
-                : $0.offset < $1.offset
-        }.map(\.element)
+        let orderedEvents = orderedByObservation(input.events)
         let ready = orderedEvents.first { $0.kind == .ready }
         let endpoints = orderedEvents.filter { $0.kind == .serverEndpoint }
         let commits = orderedEvents.filter { $0.kind == .clientCommit }
@@ -119,6 +115,79 @@ public extension TranscriptionBenchmark {
                 && captureSequenceGapCount == 0
                 && evictedChunkCount == 0,
             failure: failure)
+    }
+
+    /// Scores one uninterrupted session that spoke more than once. A final belongs to the turn that
+    /// was speaking when it arrived, so a provider that answers the second turn with the first
+    /// turn's text is a miss rather than a match.
+    static func evaluateTurns(_ input: TurnsInput) -> TurnsSummary {
+        let orderedEvents = orderedByObservation(input.events)
+        let finals = orderedEvents.filter { $0.kind == .finalized }
+        let usableFinals = finals.filter { event in
+            !event.transcriptUnavailable
+                && event.text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+        }
+        let turns = input.turns.enumerated().map { index, turn in
+            let attributed = usableFinals.filter { event in
+                turnIndex(forObservedAt: event.observedAt, in: input.turns) == index
+            }
+            let expected = normalize(turn.phrase.text)
+            let actual = normalize(attributed.compactMap(\.text).joined(separator: " "))
+            let rate = actual.isEmpty
+                ? nil
+                : Double(editDistance(expected, actual)) / Double(max(1, expected.count))
+            return TurnResult(
+                phraseID: turn.phrase.id,
+                expectedText: turn.phrase.text,
+                finalTexts: attributed.compactMap(\.text),
+                normalizedCharacterErrorRate: rate,
+                finalLatencySeconds: attributed.last.map {
+                    max(0, $0.observedAt - turn.speechEndedAt)
+                },
+                recognized: rate.map { $0 <= maximumPhraseCharacterErrorRate } ?? false)
+        }
+        let unavailableEvents = orderedEvents.filter {
+            ($0.kind == .providerFinal || $0.kind == .finalized) && $0.transcriptUnavailable
+        }
+        let capturedSampleCount = input.captureObservations.reduce(0) { $0 + $1.sampleCount }
+        let captureSequenceGapCount = sequenceGapCount(input.captureObservations)
+        let continuityPassed = !input.captureObservations.isEmpty
+            && capturedSampleCount > 0
+            && captureSequenceGapCount == 0
+        let reconnected = input.connectionStates.contains { state in
+            if case .reconnecting = state { return true }
+            return false
+        }
+        let failure = input.failure ?? (reconnected
+            ? "Transcription reconnected during a turns benchmark arm"
+            : nil)
+        return TurnsSummary(
+            armID: input.arm.id,
+            provider: input.arm.provider,
+            model: input.arm.model,
+            localeIdentifier: input.arm.localeIdentifier,
+            turns: turns,
+            duplicateCount: duplicateDeliveryCount(in: usableFinals),
+            unavailableCount: Set(unavailableEvents.compactMap(\.itemID)).count
+                + unavailableEvents.count(where: { $0.itemID == nil }),
+            capturedChunkCount: input.captureObservations.count,
+            capturedSampleCount: capturedSampleCount,
+            captureSequenceGapCount: captureSequenceGapCount,
+            continuityPassed: continuityPassed,
+            passed: failure == nil
+                && !turns.isEmpty
+                && turns.allSatisfy(\.recognized)
+                && continuityPassed,
+            failure: failure)
+    }
+
+    /// The turn that was speaking when a final arrived. Finals observed before the first turn
+    /// started belong to no turn.
+    static func turnIndex(
+        forObservedAt observedAt: TimeInterval,
+        in turns: [TurnWindow]
+    ) -> Int? {
+        turns.lastIndex { $0.startedAt <= observedAt }
     }
 
     static func evaluateReconnect(
@@ -281,8 +350,8 @@ public extension TranscriptionBenchmark {
         }
     }
 
-    /// Normalized CER a reconnect final must stay within to count as its phrase.
-    private static let reconnectMaximumCharacterErrorRate = 0.5
+    /// Normalized CER a final must stay within to count as its phrase.
+    private static let maximumPhraseCharacterErrorRate = 0.5
 
     private static func recognizedPhraseID(
         for transcript: String,
@@ -304,7 +373,7 @@ public extension TranscriptionBenchmark {
             return (phrase, Double(distance) / Double(denominator))
         }
         guard let closest = matches.min(by: { $0.errorRate < $1.errorRate }),
-              closest.errorRate <= reconnectMaximumCharacterErrorRate else { return nil }
+              closest.errorRate <= maximumPhraseCharacterErrorRate else { return nil }
         return ReconnectPhraseMatch(
             phraseID: closest.phrase.id,
             errorRate: closest.errorRate)
@@ -469,6 +538,18 @@ public extension TranscriptionBenchmark {
             let repeatedText = !text.isEmpty && !seenTexts.insert(text).inserted
             return repeatedItem || repeatedText
         }
+    }
+
+    /// Stable insertion order breaks ties, so events recorded in the same instant keep their
+    /// arrival order.
+    private static func orderedByObservation(
+        _ events: [TranscriptionBenchmarkEvent]
+    ) -> [TranscriptionBenchmarkEvent] {
+        events.enumerated().sorted {
+            $0.element.observedAt != $1.element.observedAt
+                ? $0.element.observedAt < $1.element.observedAt
+                : $0.offset < $1.offset
+        }.map(\.element)
     }
 
     private static func sequenceGapCount(_ observations: [CaptureObservation]) -> Int {

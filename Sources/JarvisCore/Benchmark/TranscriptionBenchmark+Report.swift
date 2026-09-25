@@ -93,6 +93,72 @@ public extension TranscriptionBenchmark {
         }
     }
 
+    /// One spoken turn of a turns arm. The runner owns the boundaries because it owns playback:
+    /// `startedAt` is when this turn's audio began and `speechEndedAt` is when it stopped, both on
+    /// the run's clock, so a final is attributed by when it was observed rather than by matching
+    /// text.
+    struct TurnWindow: Sendable {
+        public let phrase: Phrase
+        public let startedAt: TimeInterval
+        public let speechEndedAt: TimeInterval
+
+        public init(phrase: Phrase, startedAt: TimeInterval, speechEndedAt: TimeInterval) {
+            self.phrase = phrase
+            self.startedAt = startedAt
+            self.speechEndedAt = speechEndedAt
+        }
+    }
+
+    struct TurnsInput: Sendable {
+        public let arm: Arm
+        public let turns: [TurnWindow]
+        public let events: [TranscriptionBenchmarkEvent]
+        public let captureObservations: [CaptureObservation]
+        public let connectionStates: [TranscriptionConnectionState]
+        public let failure: String?
+
+        public init(
+            arm: Arm,
+            turns: [TurnWindow],
+            events: [TranscriptionBenchmarkEvent],
+            captureObservations: [CaptureObservation] = [],
+            connectionStates: [TranscriptionConnectionState] = [],
+            failure: String? = nil
+        ) {
+            self.arm = arm
+            self.turns = turns
+            self.events = events
+            self.captureObservations = captureObservations
+            self.connectionStates = connectionStates
+            self.failure = failure
+        }
+    }
+
+    struct TurnResult: Codable, Equatable, Sendable {
+        public let phraseID: String
+        public let expectedText: String
+        public let finalTexts: [String]
+        public let normalizedCharacterErrorRate: Double?
+        public let finalLatencySeconds: TimeInterval?
+        public let recognized: Bool
+    }
+
+    struct TurnsSummary: Codable, Equatable, Sendable {
+        public let armID: String
+        public let provider: TranscriptionProvider
+        public let model: OpenAITranscriptionModel?
+        public let localeIdentifier: String?
+        public let turns: [TurnResult]
+        public let duplicateCount: Int
+        public let unavailableCount: Int
+        public let capturedChunkCount: Int
+        public let capturedSampleCount: Int
+        public let captureSequenceGapCount: Int
+        public let continuityPassed: Bool
+        public let passed: Bool
+        public let failure: String?
+    }
+
     struct ReconnectSummary: Codable, Equatable, Sendable {
         public let model: OpenAITranscriptionModel
         public let phraseIDs: [String]
@@ -120,13 +186,15 @@ public extension TranscriptionBenchmark {
         public let armFilter: String?
         public let arms: [ArmSummary]
         public let reconnect: [ReconnectSummary]
+        public let turns: [TurnsSummary]
 
         public init(
             mode: String,
             repetitionsPerArm: Int,
             armFilter: String? = nil,
             arms: [ArmSummary],
-            reconnect: [ReconnectSummary] = []
+            reconnect: [ReconnectSummary] = [],
+            turns: [TurnsSummary] = []
         ) {
             schemaVersion = TranscriptionBenchmark.schemaVersion
             self.mode = mode
@@ -134,6 +202,20 @@ public extension TranscriptionBenchmark {
             self.armFilter = armFilter
             self.arms = arms.sorted { $0.arm.id < $1.arm.id }
             self.reconnect = reconnect.sorted { $0.model.rawValue < $1.model.rawValue }
+            self.turns = turns.sorted { $0.armID < $1.armID }
+        }
+
+        /// Schema-1 summaries written before a mode existed carry no key for it.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+            mode = try container.decode(String.self, forKey: .mode)
+            repetitionsPerArm = try container.decode(Int.self, forKey: .repetitionsPerArm)
+            armFilter = try container.decodeIfPresent(String.self, forKey: .armFilter)
+            arms = try container.decode([ArmSummary].self, forKey: .arms)
+            reconnect = try container.decodeIfPresent(
+                [ReconnectSummary].self, forKey: .reconnect) ?? []
+            turns = try container.decodeIfPresent([TurnsSummary].self, forKey: .turns) ?? []
         }
 
         public func encodedJSON() throws -> Data {

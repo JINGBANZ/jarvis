@@ -116,7 +116,7 @@ struct TranscriptionBenchmarkOptionsTests {
             arguments: standard + ["--benchmark-arm-filter", "gpt-transcribe"])
         #expect(filtered.armFilter == "gpt-transcribe")
         #expect(filtered.standardArms.map(\.id)
-            == TranscriptionBenchmark.phrases.map { "openai--gpt-transcribe--\($0.id)" })
+            == TranscriptionBenchmark.standardPhrases.map { "openai--gpt-transcribe--\($0.id)" })
 
         let unfiltered = try TranscriptionBenchmarkOptions(arguments: standard)
         #expect(unfiltered.armFilter == nil)

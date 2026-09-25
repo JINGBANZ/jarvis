@@ -329,6 +329,7 @@ must not be reported as proof of grounded answer content.
 | F02 | The transcription provider refuses the key | F02: the session ends naming the rejection and `invalid_api_key` |
 | F03 | The onboarding walk | Manual |
 | S01 | Realtime reconnect recovery | `./scripts/transcription-benchmark.sh reconnect` |
+| S02 | A session that speaks twice | `./scripts/transcription-benchmark.sh turns` |
 | R01 | Check for Updates in a signed build | Manual, when update code changes |
 | R02 | Evaluate picks the right release source | Manual, when evaluation source selection changes |
 
@@ -356,6 +357,9 @@ it as unverified in its description.
 - **Realtime reconnect (S01),** after changing WebSocket failure handling, generations, the recovery
   buffer, or replay. Run `./scripts/transcription-benchmark.sh reconnect` and confirm both
   scoped-interruption phrases return exactly once; never disable the Mac's network instead.
+- **Two-turn session (S02),** after changing how a path finalizes an utterance, because the run
+  asserts on what the coach did and a half-heard second turn can still produce a plausible hint. Run
+  `./scripts/transcription-benchmark.sh turns` and confirm every arm recognizes both turns.
 - **Standard transcription benchmark,** after changing transcription models, capture delivery, or
   finalization. Run `./scripts/transcription-benchmark.sh standard` and read the summary as
   [transcription-benchmark.md](./transcription-benchmark.md) describes.
