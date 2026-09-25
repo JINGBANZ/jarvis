@@ -6,18 +6,27 @@ final class DetailDocumentView: NSView {
     private var proseViews: [(view: NSTextView, text: AttributedString)] = []
     private let code = DetailDocumentView.makeTextView(label: "Code block")
     private let drawing = NSImageView()
+    /// Stands where a diagram still being written will appear.
+    private let diagramPlaceholder = DetailDocumentView.makeTextView(label: "Diagram")
     private var stack: [NSView] = []
-    private var rendered: (detail: ReplyDetail, fontSize: CGFloat)?
+    private var rendered: (detail: ReplyDetail, fontSize: CGFloat, drawingDiagram: Bool)?
     private var drawnDiagram: (diagram: DiagramHint, available: NSSize)?
     override var isFlipped: Bool { true }
     var codeText: NSAttributedString { code.attributedString() }
     var proseText: String { proseViews.map(\.view.string).joined(separator: "\n\n") }
     var hasDiagram: Bool { stack.contains(drawing) }
+    var diagramPlaceholderText: String? {
+        stack.contains(diagramPlaceholder) ? diagramPlaceholder.string : nil
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         drawing.imageScaling = .scaleProportionallyUpOrDown
         drawing.setAccessibilityLabel("Diagram")
+        diagramPlaceholder.textStorage?.setAttributedString(NSAttributedString(
+            string: "Drawing diagram…",
+            attributes: [.font: DetailView.secondaryTextFont,
+                         .foregroundColor: DetailView.secondaryTextColor]))
     }
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
@@ -39,11 +48,15 @@ final class DetailDocumentView: NSView {
     }
 
     /// Skips an unchanged render: one resize frame calls this several times, and `fit` reflows the
-    /// existing text for the new width anyway.
-    func show(_ detail: ReplyDetail, fontSize: CGFloat) {
-        guard rendered?.detail != detail || rendered?.fontSize != fontSize else { return }
-        if rendered?.detail != detail { restack(detail.segments) }
-        rendered = (detail, fontSize)
+    /// existing text for the new width anyway. `drawingDiagram` adds the placeholder after the
+    /// segments, where the diagram still being written will appear.
+    func show(_ detail: ReplyDetail, fontSize: CGFloat, drawingDiagram: Bool = false) {
+        guard rendered?.detail != detail || rendered?.fontSize != fontSize
+                || rendered?.drawingDiagram != drawingDiagram else { return }
+        if rendered?.detail != detail || rendered?.drawingDiagram != drawingDiagram {
+            restack(detail.segments, drawingDiagram: drawingDiagram)
+        }
+        rendered = (detail, fontSize, drawingDiagram)
         for prose in proseViews {
             prose.view.textStorage?.setAttributedString(
                 DetailProseFormatting.render(prose.text, fontSize: fontSize))
@@ -54,7 +67,7 @@ final class DetailDocumentView: NSView {
     }
 
     /// Subviews follow the stack because VoiceOver walks the hierarchy, not the frames.
-    private func restack(_ segments: [ReplyDetail.Segment]) {
+    private func restack(_ segments: [ReplyDetail.Segment], drawingDiagram: Bool) {
         stack.forEach { $0.removeFromSuperview() }
         proseViews = []
         stack = segments.map { segment in
@@ -66,7 +79,7 @@ final class DetailDocumentView: NSView {
             case .code: return code
             case .diagram: return drawing
             }
-        }
+        } + (drawingDiagram ? [diagramPlaceholder] : [])
         stack.forEach(addSubview)
         if !hasDiagram {
             drawing.image = nil
