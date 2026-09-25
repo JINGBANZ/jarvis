@@ -378,7 +378,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             // was, so a hold, a dismissal, and the reader's scroll position survive it.
             if let detail = ReplyDetail(partialMarkdown: markdown), detail.hasContent || drawingDiagram {
                 if let live = liveDetail {
-                    details[live.index].detail = detail
+                    // The entry's stamp too: after a Clear kept this held detail, it heads a new entry.
+                    details[live.index] = (stamp: entries[entry].stamp, detail: detail)
                 } else {
                     details.append((stamp: entries[entry].stamp, detail: detail))
                     slot.received(details.count - 1)

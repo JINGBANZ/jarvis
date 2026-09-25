@@ -286,6 +286,38 @@ import JarvisCore
     }
 
     @MainActor @Test
+    func aHeldLiveDetailSurvivesClearAndHeadsTheNextEntry() async throws {
+        let panel = liveBox()
+        panel.showReplyProgress(progress(closed: ["Move the left edge."], detail: "Use a window.\n\n```python\nleft = 0\n"))
+        panel.clickDetailPin()
+        let cleared = try #require(panel.entryStamps.first)
+        panel.clear()
+        #expect(panel.entryCount == 0)
+        #expect(panel.detailCount == 1, "Clear keeps a held detail")
+
+        // Stamps have one-second resolution, so wait for the next second to tell the entries apart.
+        let stamp = DateFormatter()
+        stamp.locale = Locale(identifier: "en_US_POSIX")
+        stamp.dateFormat = "HH:mm:ss"
+        while stamp.string(from: Date()) == cleared { try await Task.sleep(for: .milliseconds(20)) }
+
+        panel.showReplyProgress(progress(closed: ["Move the left edge."], detail: "Use a window.\n\n```python\nleft = 0\nright = 0\n"))
+        let entry = try #require(panel.entryStamps.first)
+        #expect(entry != cleared)
+        #expect(panel.detailCount == 1)
+        #expect(panel.isDetailHeld)
+        #expect(panel.currentDetail?.code?.code == "left = 0\nright = 0", "the held detail keeps following the reply")
+        #expect(panel.currentDetailTitle == "DETAIL · FROM \(entry)", "it heads the entry the reply now writes into")
+
+        let delivered = try #require(ReplyDetail(markdown: "Use a window.\n\n```python\nleft = 0\nright = 0\n```"))
+        #expect(panel.deliver(["Move the left edge."], detail: delivered) == delivered)
+        #expect(panel.detailCount == 1)
+        #expect(panel.isDetailHeld)
+        #expect(panel.currentDetail == delivered)
+        #expect(panel.currentDetailTitle == "DETAIL · FROM \(entry)")
+    }
+
+    @MainActor @Test
     func aDetailThatGrowsKeepsTheReadersScrollPosition() throws {
         let view = DetailView(frame: NSRect(x: 0, y: 0, width: 240, height: 96))
         func code(lines: Int) throws -> ReplyDetail {

@@ -454,7 +454,9 @@ is view state on the box's live detail, never part of a `ReplyDetail`, so it can
 delivered or committed detail. A live detail keeps its hold, its dismissal, and the reader's scroll
 position while it grows, and a snapshot that parses to nothing the box would show, such as a code
 block that has just outgrown its bounds, leaves the last live detail up; only a withdrawal, the
-delivery, Clear, or Stop removes it. `deliver` replaces the live detail with the delivered one,
+delivery, Stop, or Clear removes it, and Clear only when it is not held. A held live detail survives
+Clear like any held detail, goes on following the reply, and heads the entry the reply writes next.
+`deliver` replaces the live detail with the delivered one,
 which is where dropped blocks are applied and where a detail the box cannot accept is dropped
 whole, and a withdrawn reply removes it and releases a hold placed on it, so the history holds one
 detail per reply whatever streamed. A reply cut short after its lines closed commits its detail
