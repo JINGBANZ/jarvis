@@ -103,6 +103,8 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         return stride(from: 1, through: scalars.count, by: 3).map { String(String.UnicodeScalarView(scalars[..<$0])) }
             + [arguments]
     }()
+    /// What the speak reply's own prefixes scan to; coalescing decides which of them paint.
+    private static let speakSnapshots = prefixes.compactMap(SpeakArgumentsScanner.progress(in:))
     private static let linesClosed = String(arguments.prefix(#"{"lines":["Sort by start.","Then merge overlaps."],"detail":"Keep the"#.count))
 
     private func reply(_ raw: RawToolCall..., incompleteReason: String? = nil) -> BrainResponse {
@@ -356,7 +358,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         // actor to do so.
         #expect(!overlay.events.contains(.withdraw))
         #expect(!overlay.snapshots.isEmpty)
-        #expect(overlay.snapshots.allSatisfy { $0.closedLines.first == "Sort by start." },
+        #expect(overlay.snapshots.allSatisfy(Self.speakSnapshots.contains),
                 "only the speak reply reached the overlay")
         #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
     }
@@ -377,7 +379,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
 
         #expect(brain.calls.count == 2)
         #expect(!overlay.events.contains(.withdraw))
-        #expect(overlay.snapshots.allSatisfy { $0.closedLines.first == "Sort by start." })
+        #expect(overlay.snapshots.allSatisfy(Self.speakSnapshots.contains))
         #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
     }
 
@@ -414,7 +416,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
         #expect(!overlay.events.contains(.withdraw))
-        #expect(overlay.snapshots.allSatisfy { $0.closedLines.first == "Sort by start." })
+        #expect(overlay.snapshots.allSatisfy(Self.speakSnapshots.contains))
         #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
     }
 
