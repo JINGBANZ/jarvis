@@ -31,8 +31,9 @@ final class DetailDocumentView: NSView {
 
     required init?(coder: NSCoder) { fatalError("built in code; this project has no nibs") }
 
+    /// TextKit 1 by choice: TextKit 2 does not lay out `NSTextTable`, and `fit` reads `layoutManager`.
     private static func makeTextView(label: String) -> NSTextView {
-        let view = NSTextView()
+        let view = NSTextView(usingTextLayoutManager: false)
         view.isEditable = false
         view.isSelectable = false
         view.drawsBackground = false

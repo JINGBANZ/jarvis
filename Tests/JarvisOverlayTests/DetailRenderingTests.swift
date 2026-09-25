@@ -53,7 +53,7 @@ import Testing
         show(detail, in: view)
         view.layoutSubtreeIfNeeded()
         let marker = NSAttributedString.Key("JarvisRenderMarker")
-        let storage = try #require(codeTextView(in: view)?.textStorage)
+        let storage = try #require(textView(in: view, labeled: "Code block")?.textStorage)
         storage.addAttribute(marker, value: true, range: NSRange(location: 0, length: storage.length))
 
         show(detail, in: view)
@@ -89,6 +89,97 @@ import Testing
         let inline = (rendered.string as NSString).range(of: "last_seen")
         let font = try #require(rendered.attribute(.font, at: inline.location, effectiveRange: nil) as? NSFont)
         #expect(font.isFixedPitch)
+    }
+
+    /// Each cell arrives as its own presentation intent; drawn one per paragraph a table is a column
+    /// of 28 lines, so cells go into one `NSTextTable` and the paragraphs around it stay as they were.
+    @MainActor @Test func aTableIsAGridBetweenItsParagraphs() throws {
+        let detail = try #require(ReplyDetail(markdown: """
+            Trace of Example 1:
+
+            | step | l1 digit | carry out |
+            |---|:---:|---:|
+            | first | `two` | **zero** |
+            | second | four | six |
+
+            Result: `[7,0,8]`.
+            """))
+        let view = DetailView(frame: NSRect(x: 0, y: 0, width: 520, height: 400))
+        show(detail, in: view)
+        view.layoutSubtreeIfNeeded()
+        let prose = try #require(textView(in: view, labeled: "Detail"))
+        #expect(prose.string.hasPrefix("Trace of Example 1:\n\n"))
+        #expect(prose.string.hasSuffix("\n\nResult: [7,0,8]."))
+        let text = prose.attributedString()
+        let source = text.string as NSString
+        func paragraph(_ word: String) -> NSParagraphStyle? {
+            text.attribute(.paragraphStyle, at: source.range(of: word).location,
+                           effectiveRange: nil) as? NSParagraphStyle
+        }
+        func font(_ word: String) throws -> NSFont {
+            try #require(text.attribute(.font, at: source.range(of: word).location,
+                                        effectiveRange: nil) as? NSFont)
+        }
+        func block(_ word: String) throws -> NSTextTableBlock {
+            try #require(paragraph(word)?.textBlocks.first as? NSTextTableBlock)
+        }
+        #expect(paragraph("Trace")?.textBlocks.isEmpty != false)
+        #expect(paragraph("Result")?.textBlocks.isEmpty != false)
+        let step = try block("step")
+        let carry = try block("carry out")
+        let four = try block("four")
+        #expect(step.table === four.table)
+        #expect(step.table.numberOfColumns == 3)
+        #expect(step.startingRow == 0 && step.startingColumn == 0)
+        #expect(carry.startingRow == 0 && carry.startingColumn == 2)
+        #expect(four.startingRow == 2 && four.startingColumn == 1)
+        #expect(paragraph("first")?.alignment == .left)
+        #expect(paragraph("four")?.alignment == .center)
+        #expect(paragraph("six")?.alignment == .right)
+        #expect(try font("step").fontDescriptor.symbolicTraits.contains(.bold))
+        #expect(try !font("second").fontDescriptor.symbolicTraits.contains(.bold))
+        #expect(try font("two").isFixedPitch)
+        #expect(try font("zero").fontDescriptor.symbolicTraits.contains(.bold))
+
+        let manager = try #require(prose.layoutManager)
+        func line(_ word: String) -> NSRect {
+            let glyph = manager.glyphIndexForCharacter(at: source.range(of: word).location)
+            return manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        }
+        #expect(line("step").minY == line("carry out").minY)
+        #expect(line("step").maxX <= line("carry out").minX)
+        #expect(line("step").maxY <= line("first").minY)
+        #expect(line("first").minY == line("zero").minY)
+        #expect(line("first").maxY <= line("second").minY)
+        #expect(line("second").minY == line("six").minY)
+        #expect(line("Result").minY >= line("six").maxY)
+    }
+
+    /// The parser emits no run for an empty cell, so the cell's paragraph is only its newline.
+    @MainActor @Test func anEmptyLastCellKeepsItsBlockAndTheSpacingAfterTheTable() throws {
+        let detail = try #require(ReplyDetail(markdown: """
+            | a | b |
+            |---|---|
+            | x | |
+
+            After.
+            """))
+        guard case .prose(let prose)? = detail.segments.first, detail.segments.count == 1 else {
+            Issue.record("a detail without fences is one prose segment")
+            return
+        }
+        let rendered = DetailProseFormatting.render(prose, fontSize: 16)
+        #expect(rendered.string == "a\nb\nx\n\n\nAfter.")
+        func block(at index: Int) -> NSTextTableBlock? {
+            (rendered.attribute(.paragraphStyle, at: index, effectiveRange: nil) as? NSParagraphStyle)?
+                .textBlocks.first as? NSTextTableBlock
+        }
+        let x = try #require(block(at: 4))
+        let empty = try #require(block(at: 6))
+        #expect(x.table === empty.table)
+        #expect(empty.startingRow == 1 && empty.startingColumn == 1)
+        #expect(block(at: 7) == nil)
+        #expect(block(at: 8) == nil)
     }
 
     @MainActor @Test func oneDocumentCanCarryBothACodeBlockAndADiagram() throws {
@@ -198,9 +289,9 @@ import Testing
                   fontSize: fontSize)
     }
 
-    @MainActor private func codeTextView(in view: NSView) -> NSTextView? {
-        if let text = view as? NSTextView, text.accessibilityLabel() == "Code block" { return text }
-        return view.subviews.lazy.compactMap { codeTextView(in: $0) }.first
+    @MainActor private func textView(in view: NSView, labeled label: String) -> NSTextView? {
+        if let text = view as? NSTextView, text.accessibilityLabel() == label { return text }
+        return view.subviews.lazy.compactMap { textView(in: $0, labeled: label) }.first
     }
 }
 

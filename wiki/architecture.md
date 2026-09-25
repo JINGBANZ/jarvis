@@ -396,8 +396,14 @@ capture-excluded panel: the hint box on top, the detail box below. The hint box 
 hint whose reply carried a detail ends with a dim marker in the same text, not a control
 ([#336](https://github.com/JINGBANZ/jarvis/issues/336) makes it clickable later). The detail box
 renders the whole document in [`DetailView`](../Sources/JarvisOverlay/DetailView.swift): paragraphs,
-lists, and inline code as attributed text, a code block in monospace with `diff` lines tinted and
-struck, and a mermaid block drawn in place.
+lists, and inline code as attributed text, a table as a grid, a code block in monospace with `diff`
+lines tinted and struck, and a mermaid block drawn in place. A table is one `NSTextTable` whose cell
+paragraphs carry its blocks
+([`DetailProseFormatting+Table`](../Sources/JarvisOverlay/DetailProseFormatting+Table.swift)): the
+header row is semibold, the delimiter row's column alignment is kept, and cells wrap in a narrow box.
+The formatter sets no column widths, so columns share the width equally: it renders before the box
+width is known, and giving each column at least its widest word needs that width. The prose and code views are TextKit 1
+by choice: TextKit 2 does not lay out text tables and would fall back to TextKit 1 silently.
 [`DetailDocumentView`](../Sources/JarvisOverlay/DetailDocumentView.swift) stacks one view per
 segment, top to bottom in document order, rather than one text view with the diagram attached
 inline. Apple's Markdown parser gives no syntax coloring or diff tinting and cannot draw a diagram, so
