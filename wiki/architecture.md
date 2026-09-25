@@ -732,8 +732,9 @@ the stream ([Latency](#latency)): the runner delivers and commits the lines as r
 written so far, through the same path as a completed reply, and logs `Detail: cut short`. Withdrawing
 text the user has already read and running a fresh attempt would risk a second, different hint for
 the same moment; a `max_tokens` cut mid-detail is the common case, a transport drop the rare one. A
-provider rejection, such as Claude's `refusal` stop, is excluded: the provider ended that reply on
-purpose, so it is withdrawn and fails like a failure before the lines closed. A
+provider rejection, such as Claude's `refusal` stop or an OpenAI reply that ends `incomplete` for
+`content_filter` (which the Responses format reads as a refusal), is excluded: the provider ended
+that reply on purpose, so it is withdrawn and fails like a failure before the lines closed. A
 provider error, an incomplete response, a reply the runner cannot answer within the
 response cap ([Capabilities](#capabilities)), or failure after an intermediate `capture_screen` fails
 the attempt once; cancellation, filler suppression, and local

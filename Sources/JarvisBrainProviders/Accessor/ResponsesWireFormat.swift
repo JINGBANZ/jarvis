@@ -150,6 +150,11 @@ struct ResponsesWireFormat: BrainWireFormat {
             let truncated = decoded.status == "incomplete" ? " [incomplete]" : ""
             jlog("Jarvis coach: tokens — input \(input) (\(cached) cached), reasoning \(reasoning), output \(usage.output_tokens ?? 0), cap \(maxOutputTokens)\(truncated)")
         }
+        // A safety stop ended the reply on purpose, like Claude's `refusal` stop, so it takes the
+        // same path and a hint it cut off is never kept.
+        if decoded.status == "incomplete", decoded.incomplete_details?.reason == "content_filter" {
+            throw RefusedReply(category: "content_filter", explanation: "")
+        }
         var invocations: [ToolInvocation] = []
         var raws: [RawToolCall] = []
         // Unused by coaching turns, but the whole payload of a tool-less summarizer call.

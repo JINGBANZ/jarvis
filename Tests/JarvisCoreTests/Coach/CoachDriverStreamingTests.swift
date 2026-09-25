@@ -1,6 +1,8 @@
 import Foundation
 import Testing
 @testable import JarvisCore
+// The content-filter test streams through the real OpenAI decoder.
+import JarvisBrainProviders
 
 /// What the overlay saw, in order. @unchecked: `lock` guards the log, which the main actor writes.
 private final class ProgressRecordingOverlay: OverlayRendering, @unchecked Sendable {
@@ -245,6 +247,44 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
                 "nothing from the refused reply was committed")
         #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
         #expect(activity.events.filter { if case .tip = $0 { true } else { false } }.count == 1)
+    }
+
+    /// OpenAI's safety stop ends a streamed reply `incomplete` with `content_filter`; through the real
+    /// accessor it arrives as a rejection, so the closed lines are withdrawn, not kept.
+    @Test func aStreamedReplyTheContentFilterStopsAfterItsLinesCloseIsWithdrawn() async throws {
+        let events = #"""
+        event: response.output_item.added
+        data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":""}}
+
+        event: response.function_call_arguments.delta
+        data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"lines\":[\"Sort by start.\",\"Then merge overlaps.\"],\"detail\":\"Keep the"}
+
+        event: response.incomplete
+        data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\"lines\":[\"Sort by start.\",\"Then merge overlaps.\"],\"detail\":\"Keep the"}]}}
+
+
+        """#
+        let brain = BrainAccessor(
+            apiKey: "sk-x", model: BrainModelCatalog.defaultModel(for: .openAI).id, stream: true,
+            send: { request in
+                let http = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
+                                           headerFields: ["Content-Type": "text/event-stream"])
+                return (AsyncThrowingStream { continuation in
+                    continuation.yield(Data(events.utf8))
+                    continuation.finish()
+                }, http)
+            })
+        let overlay = ProgressRecordingOverlay()
+
+        guard case .failed(let outcome, let failure, _) = await runAttempt(.turnEnd, brain: brain, overlay: overlay) else {
+            Issue.record("expected the filtered reply to fail"); return
+        }
+        #expect(outcome == .brainError)
+        #expect(failure.category == .rejected)
+        #expect(failure.identity.errorCode == "content_filter")
+        #expect(overlay.snapshots.last?.linesComplete == true, "the lines had reached the overlay")
+        #expect(overlay.delivered.isEmpty)
+        #expect(overlay.events.last == .withdraw)
     }
 
     @Test func anIncompleteReplyAfterTheLinesCloseCommitsTheHint() async {
