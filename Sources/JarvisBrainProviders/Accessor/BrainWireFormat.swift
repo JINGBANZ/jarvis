@@ -8,6 +8,8 @@ protocol BrainWireFormat: Sendable {
     var requestHeaders: [String: String] { get }
     func encode(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) throws -> Data
     func decode(_ data: Data) throws -> BrainResponse
+    /// Nil when the format never streams: the accessor then buffers the body and calls `decode`.
+    func makeStreamDecoder() -> (any BrainStreamDecoder)?
 }
 
 extension BrainWireFormat {

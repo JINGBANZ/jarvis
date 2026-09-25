@@ -46,6 +46,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     ]
     private var latestEntryStart = 0
     private var entries: [(stamp: String, text: String, hasDetail: Bool)] = []
+    /// The entry a streaming reply is writing into, until `deliver` finalizes it or nil removes it.
+    private var liveEntryIndex: Int?
+    /// A detail that arrives before its first line has nothing to head the entry with yet.
+    private static let liveDetailPlaceholder = "Writing…"
     private(set) var captureExclusionReassertCount = 0
 
     private let timeFormatter: DateFormatter = {
@@ -324,17 +328,60 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     public func deliver(_ lines: [String], detail: ReplyDetail?) -> ReplyDetail? {
         let summary = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }.joined(separator: " ")
-        guard !summary.isEmpty else { return nil }
+        guard !summary.isEmpty else {
+            // A reply that delivers no line ends whatever it had opened.
+            removeLiveEntry()
+            return nil
+        }
         let shown = acceptsDetail ? detail.flatMap { $0.hasContent ? $0 : nil } : nil
-        append(summary, detail: shown)
+        if let index = liveEntryIndex {
+            // The live entry keeps its stamp: the moment its text first reached the box.
+            entries[index] = (stamp: entries[index].stamp, text: summary, hasDetail: shown != nil)
+            liveEntryIndex = nil
+            show(detail: shown, for: entries[index].stamp)
+        } else {
+            append(summary, detail: shown)
+        }
         return shown
     }
 
+    /// The entry opens on the reply's first character, in its lines or, when the model writes the
+    /// detail first, in its detail, and its text follows every snapshot until `deliver` finalizes it.
+    public func showReplyProgress(_ progress: BrainReplyProgress?) {
+        guard let progress else { return removeLiveEntry() }
+        let closed = progress.closedLines
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        let open = progress.openLine?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let text = (closed + [open]).filter { !$0.isEmpty }.joined(separator: " ")
+        guard !text.isEmpty || progress.detailMarkdown?.isEmpty == false else { return }
+        let shown = text.isEmpty ? Self.liveDetailPlaceholder : text
+        if let index = liveEntryIndex {
+            entries[index].text = shown
+        } else {
+            entries.append((stamp: timeFormatter.string(from: Date()), text: shown, hasDetail: false))
+            liveEntryIndex = entries.count - 1
+        }
+        if panel.isVisible { reassertCaptureExclusion() }
+        renderDisplay()
+        textView.scrollToEndOfDocument(nil)
+    }
+
+    private func removeLiveEntry() {
+        guard let index = liveEntryIndex else { return }
+        entries.remove(at: index)
+        liveEntryIndex = nil
+        renderDisplay()
+    }
+
     private func append(_ text: String, detail: ReplyDetail?) {
-        entries.append((stamp: timeFormatter.string(from: Date()),
-                        text: text, hasDetail: detail != nil))
+        let stamp = timeFormatter.string(from: Date())
+        entries.append((stamp: stamp, text: text, hasDetail: detail != nil))
+        show(detail: detail, for: stamp)
+    }
+
+    private func show(detail: ReplyDetail?, for stamp: String) {
         if let detail, detail.hasContent {
-            details.append((stamp: entries[entries.count - 1].stamp, detail: detail))
+            details.append((stamp: stamp, detail: detail))
             slot.received(details.count - 1)
         }
         // An activation-policy flip can drop `sharingType` while the box is visible, so re-assert.
@@ -388,6 +435,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// A held detail survives.
     public func clear() {
         entries.removeAll()
+        liveEntryIndex = nil
         if !slot.isHeld {
             details.removeAll()
             slot.reset()
@@ -514,6 +562,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     var currentSharingType: NSWindow.SharingType { panel.sharingType }
 
     var entryCount: Int { entries.count }
+
+    var hasLiveEntry: Bool { liveEntryIndex != nil }
+
+    var entryStamps: [String] { entries.map(\.stamp) }
 
     var currentText: String { textView.string }
 

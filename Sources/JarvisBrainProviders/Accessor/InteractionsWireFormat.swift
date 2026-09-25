@@ -18,6 +18,9 @@ struct InteractionsWireFormat: BrainWireFormat {
     let reasoningEffort: String
     let maxOutputTokens: Int
 
+    /// Gemini delivers a function call whole even when streaming, so the reply is read as one body.
+    func makeStreamDecoder() -> (any BrainStreamDecoder)? { nil }
+
     func encode(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) throws -> Data {
         var instructions: [String] = []
         var input: [[String: Any]] = []

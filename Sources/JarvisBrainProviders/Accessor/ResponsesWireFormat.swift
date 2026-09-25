@@ -11,6 +11,9 @@ struct ResponsesWireFormat: BrainWireFormat {
     /// True deliberately retains transcripts and screenshots at OpenAI for dashboard debugging
     /// (wiki/sandbox.md); subscription targets pass false so a helper bump can't turn it back on.
     let store: Bool
+    let stream: Bool
+
+    func makeStreamDecoder() -> (any BrainStreamDecoder)? { ResponsesStreamDecoder() }
 
     func encode(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) throws -> Data {
         var instructions: [String] = []
@@ -103,6 +106,9 @@ struct ResponsesWireFormat: BrainWireFormat {
         if !instructions.isEmpty {
             body["instructions"] = instructions.joined(separator: "\n\n")
         }
+        if stream {
+            body["stream"] = true
+        }
         return try verbatim.data(withJSONObject: body)
     }
 
@@ -143,6 +149,11 @@ struct ResponsesWireFormat: BrainWireFormat {
             let reasoning = usage.output_tokens_details?.reasoning_tokens ?? 0
             let truncated = decoded.status == "incomplete" ? " [incomplete]" : ""
             jlog("Jarvis coach: tokens — input \(input) (\(cached) cached), reasoning \(reasoning), output \(usage.output_tokens ?? 0), cap \(maxOutputTokens)\(truncated)")
+        }
+        // A safety stop ended the reply on purpose, like Claude's `refusal` stop, so it takes the
+        // same path and a hint it cut off is never kept.
+        if decoded.status == "incomplete", decoded.incomplete_details?.reason == "content_filter" {
+            throw RefusedReply(category: "content_filter", explanation: "")
         }
         var invocations: [ToolInvocation] = []
         var raws: [RawToolCall] = []

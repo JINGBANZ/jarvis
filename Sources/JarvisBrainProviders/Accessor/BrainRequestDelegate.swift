@@ -6,13 +6,24 @@ import FoundationNetworking
 
 /// Per-task diagnostics preserve the shared session's connection pooling and cancellation behavior.
 /// Only allowlisted metadata enters the audit: never URLs, headers, bodies, or NSError.userInfo text.
-/// `@unchecked Sendable` is safe because the sole mutable field is protected by `lock`.
+/// `@unchecked Sendable` is safe because both mutable fields are protected by `lock`.
 final class BrainRequestDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private var collectedPhases: [String: Int] = [:]
+    private var marks: [String: Int] = [:]
 
     var phases: [String: Int]? {
-        lock.withLock { collectedPhases.isEmpty ? nil : collectedPhases }
+        lock.withLock {
+            let merged = collectedPhases.merging(marks) { transaction, _ in transaction }
+            return merged.isEmpty ? nil : merged
+        }
+    }
+
+    /// Keeps the first stamp of each name, since the moments worth recording are firsts.
+    func mark(_ phase: String, elapsedMs: Int) {
+        lock.withLock {
+            if marks[phase] == nil { marks[phase] = elapsedMs }
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask,

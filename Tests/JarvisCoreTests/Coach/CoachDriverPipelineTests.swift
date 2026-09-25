@@ -168,7 +168,7 @@ private struct FinishTrackingBrain: BrainClient {
             messages: messages, tools: tools, toolChoice: toolChoice)
     }
 
-    func makeConversation() async throws -> any BrainConversation {
+    func makeConversation(progress: ToolCallProgressSink?) async throws -> any BrainConversation {
         conversation
     }
 

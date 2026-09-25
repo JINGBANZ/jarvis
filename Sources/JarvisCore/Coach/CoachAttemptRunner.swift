@@ -242,6 +242,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
         var requestSequence = 1
+        // Owned by this attempt, like the conversation whose streamed deltas it turns into overlay
+        // snapshots.
+        let relay = ReplyProgressRelay(overlay: overlay)
         let conversation: any BrainConversation
         do {
             let requestContext = CoachingRequestAttribution.context(
@@ -251,7 +254,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 phase: requestPhase,
                 sequence: requestSequence)
             conversation = try await CoachingRequestAttribution.$current.withValue(requestContext) {
-                try await attempt.brain.makeConversation()
+                try await attempt.brain.makeConversation(progress: relay.sink)
             }
         } catch {
             if Task.isCancelled || error is CancellationError {
@@ -302,6 +305,66 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
+            /// Whether the current request's reply reached the overlay. A request that showed
+            /// nothing must not wait on the main actor to withdraw nothing.
+            var shown = false
+
+            /// A reply that streamed but is not being delivered leaves the overlay.
+            func withdraw() async {
+                guard shown else { return }
+                shown = false
+                await MainActor.run { self.overlay.showReplyProgress(nil) }
+            }
+
+            /// Delivers one hint, records it, and commits the turn: the attempt's terminal action.
+            func speak(callID: String, lines: [String], requestedDetail: String?) async -> AttemptResult {
+                if Task.isCancelled {
+                    jlog("… attempt cancelled (stopped) before speaking")
+                    await withdraw()
+                    return .cancelled
+                }
+                jlog("💬 \(lines.joined(separator: " "))")
+                let parsedDetail = requestedDetail.flatMap(ReplyDetail.init(markdown:))
+                for reason in parsedDetail?.dropped ?? [] { jlog("Detail: \(reason)") }
+                let delivery = await MainActor.run { () -> (accepted: Bool, detail: ReplyDetail?) in
+                    guard !Task.isCancelled else { return (false, nil) }
+                    return (true, self.overlay.deliver(lines, detail: parsedDetail))
+                }
+                guard delivery.accepted else {
+                    await withdraw()
+                    return .cancelled
+                }
+                let delivered = delivery.detail
+                activity?.record(.tip(lines: lines, detail: delivered?.deliveredMarkdown))
+                // History records the detail actually shown, not blocks the runtime dropped.
+                let arguments: [String: Any] = [
+                    "lines": lines, "detail": delivered?.deliveredMarkdown ?? NSNull(),
+                ]
+                let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+                // Rebuilt, not copied, so a hint spoken from prose still commits a call.
+                turnMessages.append(.assistantToolCalls([RawToolCall(
+                    id: callID, name: speakToolName,
+                    argumentsJSON: String(decoding: data, as: UTF8.self))]))
+                turnMessages.append(.init(
+                    role: .tool,
+                    text: JarvisPrompts.Coach.tipShown(dropped: parsedDetail?.dropped ?? []),
+                    toolCallId: callID))
+                history.commit(turnMessages)
+                commitLoads(loadedThisAttempt)
+                ledger.commit(through: delta.upTo)
+                return .completed(.spoke)
+            }
+
+            /// The hint as the stream left it, committed like a completed reply. Nothing is
+            /// synthesized: the lines the user read stay, with the detail written so far.
+            func speak(_ streamed: BrainReplyProgress) async -> AttemptResult {
+                let detail = streamed.detailMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines)
+                return await speak(
+                    callID: "runner_" + UUID().uuidString.prefix(8).lowercased(),
+                    lines: streamed.closedLines,
+                    requestedDetail: detail.flatMap { $0.isEmpty ? nil : $0 })
+            }
+
             while iterations < maxToolIterations {
                 iterations += 1
                 let loaded = alreadyLoaded.union(loadedThisAttempt)
@@ -319,6 +382,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 } else {
                     toolChoice = .required
                 }
+                relay.beginRequest()
                 let response: BrainResponse
                 do {
                     let requestContext = CoachingRequestAttribution.context(
@@ -334,7 +398,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             toolChoice: toolChoice)
                     }
                 } catch {
+                    let streamed = await relay.endRequest()
+                    shown = streamed?.hasText == true
                     if Task.isCancelled || error is CancellationError {
+                        await withdraw()
                         jlog("… attempt cancelled (interrupted)")
                         return .cancelled
                     }
@@ -343,17 +410,36 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         stage: .request)
                     jlog("Jarvis coach: brain request failed on \(reason) via "
                          + "\(attempt.target.provider.displayName): \(failure.errorDescription ?? "")")
+                    // Lines the user has read stay on screen and commit with the detail so far.
+                    // An array that closed empty showed nothing, so it has nothing to keep, and a
+                    // rejection (Claude's refusal stop) ended the reply on purpose, so nothing is kept.
+                    if let streamed, streamed.linesComplete, !streamed.closedLines.isEmpty,
+                       failure.category != .rejected {
+                        jlog("Detail: cut short (\(failure.category.rawValue))")
+                        return await speak(streamed)
+                    }
+                    await withdraw()
                     return .failed(outcome: .brainError, failure: failure, work: work)
                 }
+                let streamed = await relay.endRequest()
+                shown = streamed?.hasText == true
 
                 if Task.isCancelled {
+                    await withdraw()
                     jlog("… attempt cancelled (stopped) mid-think")
                     return .cancelled
                 }
 
-                // Incomplete output can't prove a terminal action, even if it contains one.
+                // Incomplete output can't prove a terminal action, even if it contains one, unless
+                // its lines closed on the way: those stay on screen and commit as they were read.
                 if let incompleteReason = response.incompleteReason {
+                    if let streamed, streamed.linesComplete, !streamed.closedLines.isEmpty {
+                        jlog("⚠️ response incomplete (\(incompleteReason)) after its lines closed — keeping the hint")
+                        jlog("Detail: cut short (\(incompleteReason))")
+                        return await speak(streamed)
+                    }
                     jlog("⚠️ response incomplete (\(incompleteReason)) — scheduling fresh attempt")
+                    await withdraw()
                     return .failed(
                         outcome: .truncated,
                         failure: Self.unusableResponse(
@@ -408,6 +494,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         call = spoken
                     } else if atCap {
                         jlog("⚠️ \(raw.name) couldn't run on the last response — scheduling fresh attempt")
+                        await withdraw()
                         return .failed(
                             outcome: .brainError,
                             failure: Self.unusableResponse(
@@ -419,6 +506,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             toolCallId: raw.id,
                             resultText: JarvisPrompts.Coach.rejected(rejection),
                             newPhase: requestPhase)
+                        await withdraw()
                         continue
                     }
                 } else if let parsed = firstParsed {
@@ -434,6 +522,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     } else if atCap {
                         jlog("⚠️ \(called) isn't allowed on a shortcut's last response — "
                              + "scheduling fresh attempt")
+                        await withdraw()
                         return .failed(
                             outcome: .brainError,
                             failure: Self.unusableResponse(
@@ -446,6 +535,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             toolCallId: parsed.callID,
                             resultText: JarvisPrompts.Coach.notPermittedOnShortcut(called),
                             newPhase: requestPhase)
+                        await withdraw()
                         continue
                     }
                 } else if !atCap, !refusedProse,
@@ -459,6 +549,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     turnMessages.append(.init(role: .assistant, text: prose))
                     turnMessages.append(.user(JarvisPrompts.Coach.replyMustCallSpeak))
                     requestSequence += 1
+                    await withdraw()
                     continue
                 } else if let spoken = Self.spokenProse(
                     response.outputText, permitted: permitted) {
@@ -466,6 +557,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     call = spoken
                 } else {
                     jlog("⚠️ required coaching action missing — scheduling fresh attempt")
+                    await withdraw()
                     return .failed(
                         outcome: .brainError,
                         failure: Self.unusableResponse(
@@ -482,6 +574,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         toolCallId: call.callID,
                         resultText: JarvisPrompts.Coach.toolUnavailable(call.toolName),
                         newPhase: requestPhase)
+                    await withdraw()
                     continue
                 }
                 if called.deferLoading, !loaded.contains(called.name) {
@@ -530,39 +623,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     }
 
                 case .speak(let callID, let lines, let requestedDetail):
-                    if Task.isCancelled {
-                        jlog("… attempt cancelled (stopped) before speaking")
-                        return .cancelled
-                    }
-                    jlog("💬 \(lines.joined(separator: " "))")
-                    let parsedDetail = requestedDetail.flatMap(ReplyDetail.init(markdown:))
-                    for reason in parsedDetail?.dropped ?? [] { jlog("Detail: \(reason)") }
-                    let delivery = await MainActor.run { () -> (accepted: Bool, detail: ReplyDetail?) in
-                        guard !Task.isCancelled else { return (false, nil) }
-                        return (true, self.overlay.deliver(lines, detail: parsedDetail))
-                    }
-                    guard delivery.accepted else { return .cancelled }
-                    let delivered = delivery.detail
-                    activity?.record(.tip(lines: lines, detail: delivered?.deliveredMarkdown))
-                    // History records the detail actually shown, not blocks the runtime dropped.
-                    let arguments: [String: Any] = [
-                        "lines": lines, "detail": delivered?.deliveredMarkdown ?? NSNull(),
-                    ]
-                    let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
-                    // Rebuilt, not copied, so a hint spoken from prose still commits a call.
-                    turnMessages.append(.assistantToolCalls([RawToolCall(
-                        id: callID, name: speakToolName,
-                        argumentsJSON: String(decoding: data, as: UTF8.self))]))
-                    turnMessages.append(.init(
-                        role: .tool,
-                        text: JarvisPrompts.Coach.tipShown(dropped: parsedDetail?.dropped ?? []),
-                        toolCallId: callID))
-                    history.commit(turnMessages)
-                    commitLoads(loadedThisAttempt)
-                    ledger.commit(through: delta.upTo)
-                    return .completed(.spoke)
+                    return await speak(callID: callID, lines: lines, requestedDetail: requestedDetail)
 
                 case .staySilent:
+                    await withdraw()
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) before recording silence")
                         return .cancelled
@@ -643,9 +707,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         resultText: resultText,
                         newPhase: .loadSkillContinuation)
                 }
+                // The tool ran and the loop goes on: this response delivered nothing.
+                await withdraw()
             }
 
             jlog("⚠️ tool loop exhausted — scheduling fresh attempt")
+            await withdraw()
             return .failed(
                 outcome: .exhausted,
                 failure: Self.unusableResponse(

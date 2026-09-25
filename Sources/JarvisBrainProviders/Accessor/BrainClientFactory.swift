@@ -45,12 +45,15 @@ public struct BrainClientFactory: Sendable {
             key = proxyEndpoint.key
         }
         let summaryModel = BrainModelCatalog.summarizerModelID(for: provider)
+        // Only the coach streams: its lines reach the overlay as they arrive, and the summarizer's
+        // reply is read whole off the attempt path.
         let coach = BrainAccessor(
             provider: provider, apiKey: key, model: target.modelID,
             reasoningEffort: effort.rawValue, endpoint: endpoint,
             timeout: BrainWorkloadTimeout.liveCoaching,
             maxOutputTokens: effort.maxOutputTokens,
             minimumReasoningEffort: provider.reasoningEffortFloor,
+            stream: true,
             traffic: traffic, trafficTag: "coach", send: send)
         let summarizer = BrainAccessor(
             provider: provider, apiKey: key,
