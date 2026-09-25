@@ -1299,7 +1299,7 @@ a call the press did not permit, arguments the parser rejected, or Stop, withdra
 and takes the path it always took; a failure or truncation after the lines closed keeps the hint,
 see [Ordered provider route](#ordered-provider-route). The runner logs `💬 first text +Xms` when
 the first character reaches a snapshot, and the recorded traffic's phases gain `first_event_ms`,
-`first_speak_text_ms`, and `speak_lines_ms`; Activity is unchanged, one tip at completion.
+`first_speak_text_ms`, and `speak_lines_ms`; Activity records one tip, at completion.
 
 Session auditing adds only best-effort typed-event admission to the live path. Parsing, redaction,
 serialization, file I/O, bounded retention, and close behavior belong to the
