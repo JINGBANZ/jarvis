@@ -144,6 +144,37 @@ import Testing
         #expect(text.string == "<details>\u{2028}<summary>More</summary>\u{2028}</details>\n\nAfter.")
     }
 
+    /// The parser merges adjacent tags into one run and makes a tag on its own line an HTML block.
+    @Test func everyBrTagBreaksTheLine() throws {
+        #expect(try render("| a |\n|---|\n| x<br><br>y |").string.contains("x\u{2028}\u{2028}y"))
+        #expect(try render("x<br><kbd>K</kbd>").string == "x\u{2028}<kbd>K</kbd>")
+        #expect(try render("Line A\n\n<br>\n\nLine B").string == "Line A\n\n\u{2028}\n\nLine B")
+    }
+
+    @Test func aWideNumberStillLinesUpItsText() throws {
+        let view = try layOut("""
+            99. Short.
+            100. Keep a map from each letter to the index where it was last seen, and move the \
+            left edge past it whenever the letter repeats.
+            """, width: 260)
+        let manager = try #require(view.layoutManager)
+        let source = view.string as NSString
+        func x(_ glyph: Int) -> CGFloat {
+            manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minX
+                + manager.location(forGlyphAt: glyph).x
+        }
+        func x(_ word: String) -> CGFloat { x(manager.glyphIndexForCharacter(at: source.range(of: word).location)) }
+        var lines: [NSRange] = []
+        manager.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: manager.numberOfGlyphs)) {
+            _, _, _, glyphs, _ in lines.append(glyphs)
+        }
+        #expect(lines.count > 2)
+        #expect(x("Keep") == x("Short"))
+        #expect(x(lines[2].location) == x("Keep"))
+        let marker = (("100." as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: 16)])).width
+        #expect(x("Keep") - x("100.") > marker)
+    }
+
     private func render(_ markdown: String) throws -> NSAttributedString {
         let detail = try #require(ReplyDetail(markdown: markdown))
         guard case .prose(let prose)? = detail.segments.first, detail.segments.count == 1 else {

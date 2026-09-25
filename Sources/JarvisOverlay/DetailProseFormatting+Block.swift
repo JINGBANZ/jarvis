@@ -62,13 +62,30 @@ extension DetailProseFormatting {
 
     /// Paragraph styles for quotes, list items, and rules, measured from one font size.
     @MainActor struct BlockStyles {
-        private let column: CGFloat
+        private let markerFont: NSFont
+        private let minimumColumn: CGFloat
+        private let gap: CGFloat
+        /// Each list's marker column, wide enough for its widest marker.
+        private var columns: [Int: CGFloat] = [:]
         /// One block per quote, so the bar runs unbroken through the quote's paragraphs.
         private var quotes: [Int: NSTextBlock] = [:]
 
         init(fontSize: CGFloat) {
-            column = (fontSize * 1.6).rounded()
+            markerFont = .systemFont(ofSize: fontSize)
+            minimumColumn = (fontSize * 1.6).rounded()
+            gap = (fontSize * 0.5).rounded()
         }
+
+        /// Every block goes through here before any is styled, so a list's `100.` widens the column
+        /// its `99.` sits in too.
+        mutating func fit(_ block: Block) {
+            for case .item(_, let list, let marker) in block.containers {
+                let width = (marker as NSString).size(withAttributes: [.font: markerFont]).width
+                columns[list] = max(column(list), (width + gap).rounded(.up))
+            }
+        }
+
+        private func column(_ list: Int) -> CGFloat { columns[list] ?? minimumColumn }
 
         /// Items of one list sit on consecutive lines; anything else is a blank line apart.
         static func areTight(_ above: [Block.Container], _ below: [Block.Container]) -> Bool {
@@ -82,13 +99,15 @@ extension DetailProseFormatting {
                                 rule: Bool = false) -> NSParagraphStyle? {
             var blocks: [NSTextBlock] = []
             var indent: CGFloat = 0
+            var markerColumn: CGFloat = 0
             for container in containers {
                 switch container {
                 case .quote(let identity):
                     blocks.append(quote(identity, margin: indent))
                     indent = 0
-                case .item:
-                    indent += column
+                case .item(_, let list, _):
+                    markerColumn = column(list)
+                    indent += markerColumn
                 }
             }
             if rule {
@@ -99,7 +118,7 @@ extension DetailProseFormatting {
             let style = NSMutableParagraphStyle()
             style.textBlocks = blocks
             style.headIndent = indent
-            style.firstLineHeadIndent = marker ? indent - column : indent
+            style.firstLineHeadIndent = marker ? indent - markerColumn : indent
             if marker { style.tabStops = [NSTextTab(textAlignment: .left, location: indent)] }
             return style
         }

@@ -63,10 +63,11 @@ enum DetailProseFormatting {
             out.append(cells.render(body: body))
             table = nil
         }
-        for run in prose.runs {
+        let runs = prose.runs.map { ($0, Block($0)) }
+        for (_, block) in runs { styles.fit(block) }
+        for (run, block) in runs {
             let text = String(prose[run.range].characters)
             guard !text.isEmpty else { continue }
-            let block = Block(run)
             if let cell = run.presentationIntent.flatMap(Table.Cell.init) {
                 if table?.identity != cell.table {
                     flushTable()
@@ -120,25 +121,28 @@ enum DetailProseFormatting {
                                   attributes: attributes)
     }
 
-    /// A line break stays inside its paragraph, so it also works in a table cell. Only a `<br>` tag
-    /// becomes one; any other tag shows as written, because `List<Integer>` parses as HTML too.
+    /// A line break stays inside its paragraph, so it also works in a table cell.
     private static func displayed(_ text: String, inline: InlinePresentationIntent,
                                   in kind: Block.Kind) -> String {
         switch kind {
         case .code:
             return text.hasSuffix("\n") ? String(text.dropLast()) : text
         case .html:
-            return text.trimmingCharacters(in: .newlines)
-                .replacingOccurrences(of: "\n", with: lineSeparator)
+            return breakingLines(text.trimmingCharacters(in: .newlines)
+                .replacingOccurrences(of: "\n", with: lineSeparator))
         case .paragraph, .heading, .rule:
             break
         }
-        if inline.contains(.lineBreak)
-            || inline.contains(.inlineHTML)
-                && text.range(of: #"^<br\s*/?>$"#, options: [.regularExpression, .caseInsensitive]) != nil {
-            return lineSeparator
-        }
-        return text.replacingOccurrences(of: "\n", with: " ")
+        if inline.contains(.lineBreak) { return lineSeparator }
+        let flowed = text.replacingOccurrences(of: "\n", with: " ")
+        return inline.contains(.inlineHTML) ? breakingLines(flowed) : flowed
+    }
+
+    /// Only `<br>` becomes a line break; any other tag shows as written, because `List<Integer>` in
+    /// prose parses as HTML too.
+    private static func breakingLines(_ html: String) -> String {
+        html.replacingOccurrences(of: #"<br\s*/?>"#, with: lineSeparator,
+                                  options: [.regularExpression, .caseInsensitive])
     }
 
     private static func headingScale(_ level: Int) -> CGFloat {
