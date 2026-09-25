@@ -400,8 +400,8 @@ lines tinted and struck, and a mermaid block drawn in place. A table is one `NST
 paragraphs carry its blocks
 ([`DetailProseFormatting+Table`](../Sources/JarvisOverlay/DetailProseFormatting+Table.swift)): the
 header row is semibold, the delimiter row's column alignment is kept, and cells wrap in a narrow box.
-Columns share the width equally because a text table takes only percentages, and the formatter does
-not know the box width that a per-column floor would need. The prose and code views are TextKit 1
+The formatter sets no column widths, so columns share the width equally: it renders before the box
+width is known, and giving each column at least its widest word needs that width. The prose and code views are TextKit 1
 by choice: TextKit 2 does not lay out text tables and would fall back to TextKit 1 silently.
 [`DetailDocumentView`](../Sources/JarvisOverlay/DetailDocumentView.swift) stacks one view per
 segment, top to bottom in document order, rather than one text view with the diagram attached
