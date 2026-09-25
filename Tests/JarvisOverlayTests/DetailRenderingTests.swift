@@ -77,8 +77,8 @@ import Testing
         show(detail, in: view)
         let text = view.proseText
         #expect(text.contains("Two things matter here."))
-        #expect(text.contains("• Track last_seen per letter."))
-        #expect(text.contains("• Move left forward only."))
+        #expect(text.contains("•\tTrack last_seen per letter."))
+        #expect(text.contains("•\tMove left forward only."))
         #expect(text.contains("the notes"))
         #expect(!text.contains("example.com"))
         guard case .prose(let prose)? = detail.segments.first, detail.segments.count == 1 else {
