@@ -345,15 +345,15 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         return shown
     }
 
-    /// The entry opens on the first closed line, or on the first detail character when the model
-    /// writes the detail first, and its text follows every snapshot until `deliver` finalizes it.
+    /// The entry opens on the reply's first character, in its lines or, when the model writes the
+    /// detail first, in its detail, and its text follows every snapshot until `deliver` finalizes it.
     public func showReplyProgress(_ progress: BrainReplyProgress?) {
         guard let progress else { return removeLiveEntry() }
         let closed = progress.closedLines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        guard !closed.isEmpty || progress.detailMarkdown?.isEmpty == false else { return }
         let open = progress.openLine?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let text = (closed + [open]).filter { !$0.isEmpty }.joined(separator: " ")
+        guard !text.isEmpty || progress.detailMarkdown?.isEmpty == false else { return }
         let shown = text.isEmpty ? Self.liveDetailPlaceholder : text
         if let index = liveEntryIndex {
             entries[index].text = shown

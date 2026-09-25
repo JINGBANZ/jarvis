@@ -17,14 +17,20 @@ import JarvisCore
     }
 
     @MainActor @Test
-    func theEntryOpensOnTheFirstClosedLineAndFollowsTheReply() {
+    func theEntryOpensOnTheFirstCharacterAndFollowsTheReply() {
         let panel = liveBox()
+        panel.showReplyProgress(progress(open: "  "))
+        #expect(panel.entryCount == 0, "blank text opens nothing")
+
         panel.showReplyProgress(progress(open: "Sort by"))
-        #expect(panel.entryCount == 0, "an open line alone does not open an entry")
+        #expect(panel.entryCount == 1, "a half-written first line opens the entry")
+        #expect(panel.hasLiveEntry)
+        #expect(panel.currentText.contains("Sort by"))
+        let stamps = panel.entryStamps
 
         panel.showReplyProgress(progress(closed: ["Sort by start."], open: "Then"))
         #expect(panel.entryCount == 1)
-        #expect(panel.hasLiveEntry)
+        #expect(panel.entryStamps == stamps, "the entry keeps the moment its first character arrived")
         #expect(panel.currentText.contains("Sort by start. Then"), "closed lines, then the open line")
 
         panel.showReplyProgress(progress(closed: ["Sort by start.", "Then merge."], complete: true))
@@ -64,14 +70,25 @@ import JarvisCore
     }
 
     @MainActor @Test
-    func aDetailFirstReplyShowsAPlaceholderUntilItsFirstLineCloses() {
+    func nilRemovesAHalfWrittenFirstLine() {
+        let panel = liveBox()
+        panel.showReplyProgress(progress(open: "Sort by"))
+        #expect(panel.hasLiveEntry)
+        panel.showReplyProgress(nil)
+        #expect(panel.entryCount == 0)
+        #expect(!panel.hasLiveEntry)
+        #expect(!panel.currentText.contains("Sort by"))
+    }
+
+    @MainActor @Test
+    func aDetailFirstReplyShowsAPlaceholderUntilItsFirstLineStarts() {
         let panel = liveBox()
         panel.showReplyProgress(progress(detail: "```java\nint"))
         #expect(panel.entryCount == 1)
         #expect(panel.currentText.contains("Writing…"))
-        panel.showReplyProgress(progress(closed: ["Use a loop."], detail: "```java\nint i"))
+        panel.showReplyProgress(progress(open: "Use a", detail: "```java\nint i"))
         #expect(panel.entryCount == 1)
-        #expect(panel.currentText.contains("Use a loop."))
+        #expect(panel.currentText.contains("Use a"))
         #expect(!panel.currentText.contains("Writing…"))
         #expect(panel.detailCount == 0, "the detail reaches the box at delivery")
     }
