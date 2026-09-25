@@ -328,7 +328,11 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     public func deliver(_ lines: [String], detail: ReplyDetail?) -> ReplyDetail? {
         let summary = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }.joined(separator: " ")
-        guard !summary.isEmpty else { return nil }
+        guard !summary.isEmpty else {
+            // A reply that delivers no line ends whatever it had opened.
+            removeLiveEntry()
+            return nil
+        }
         let shown = acceptsDetail ? detail.flatMap { $0.hasContent ? $0 : nil } : nil
         if let index = liveEntryIndex {
             // The live entry keeps its stamp: the moment its text first reached the box.
@@ -344,13 +348,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// The entry opens on the first closed line, or on the first detail character when the model
     /// writes the detail first, and its text follows every snapshot until `deliver` finalizes it.
     public func showReplyProgress(_ progress: BrainReplyProgress?) {
-        guard let progress else {
-            guard let index = liveEntryIndex else { return }
-            entries.remove(at: index)
-            liveEntryIndex = nil
-            renderDisplay()
-            return
-        }
+        guard let progress else { return removeLiveEntry() }
         let closed = progress.closedLines
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         guard !closed.isEmpty || progress.detailMarkdown?.isEmpty == false else { return }
@@ -366,6 +364,13 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         if panel.isVisible { reassertCaptureExclusion() }
         renderDisplay()
         textView.scrollToEndOfDocument(nil)
+    }
+
+    private func removeLiveEntry() {
+        guard let index = liveEntryIndex else { return }
+        entries.remove(at: index)
+        liveEntryIndex = nil
+        renderDisplay()
     }
 
     private func append(_ text: String, detail: ReplyDetail?) {

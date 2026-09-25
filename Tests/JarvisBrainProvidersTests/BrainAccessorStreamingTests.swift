@@ -172,6 +172,26 @@ private final class DeltaBox: @unchecked Sendable {
         }
     }
 
+    /// The terminal event ends the reply; a connection that then stalls instead of closing must not
+    /// cost the reply its deadline.
+    @Test func theReplyReturnsAtItsTerminalEventEvenIfTheConnectionStaysOpen() async throws {
+        let http = http(200, contentType: "text/event-stream")
+        let client = BrainAccessor(
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
+            timeout: 10, stream: true,
+            send: { _ in
+                (AsyncThrowingStream { continuation in
+                    // The wire ends every event with a blank line; the literal above drops the last.
+                    continuation.yield(Data((Self.claudeEvents + "\n").utf8))
+                    // Never finished: the connection stays open after message_stop.
+                }, http)
+            })
+        let started = ContinuousClock.now
+        let response = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(response.toolCalls == [.speak(callId: "toolu_01", lines: ["Try a hash map."])])
+        #expect(started.duration(to: .now) < .seconds(5), "the reply did not wait for the deadline")
+    }
+
     /// `timeoutInterval` bounds the wait between bytes; a reply that keeps trickling ends at the
     /// same total deadline, and records like any other timeout.
     @Test func theWholeReplyIsBoundedByTheWorkloadTimeout() async throws {

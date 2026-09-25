@@ -231,6 +231,24 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
     }
 
+    /// An array that closed empty showed no hint, so there is nothing to keep: the attempt fails
+    /// like any other and the route is not credited.
+    @Test func anEmptyLinesArrayIsNeverCommittedFromTheSnapshot() async {
+        let emptyLines = #"{"lines":[],"detail":"Only a detail"#
+        for outcome in [StreamingBrain.Outcome.failure(URLError(.timedOut)),
+                        .reply(reply(incompleteReason: "max_tokens"))] {
+            let overlay = ProgressRecordingOverlay()
+            let brain = StreamingBrain(turns: [.init(prefixes: [emptyLines], outcome: outcome)])
+
+            guard case .failed = await runAttempt(.turnEnd, brain: brain, overlay: overlay) else {
+                Issue.record("expected the empty array to fail the attempt"); return
+            }
+            #expect(overlay.delivered.isEmpty)
+            #expect(overlay.snapshots.last?.linesComplete == true, "the detail had opened a live entry")
+            #expect(overlay.events.last == .withdraw)
+        }
+    }
+
     @Test func anIncompleteReplyBeforeTheLinesCloseWithdrawsAndFails() async {
         let overlay = ProgressRecordingOverlay()
         let brain = StreamingBrain(turns: [.init(

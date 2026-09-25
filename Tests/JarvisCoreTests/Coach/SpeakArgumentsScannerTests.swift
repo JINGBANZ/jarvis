@@ -107,6 +107,15 @@ import Testing
         #expect(final.linesComplete)
     }
 
+    /// A delimiter where a value belongs is malformed; the scanner must stop, not spin.
+    @Test func aDelimiterInValuePositionEndsTheScan() throws {
+        for text in [#"{"lines":[}"#, #"{"lines":["a"}"#, #"{"lines":[0}"#, #"{"lines":[,}"#, #"{"lines":[true}x"#] {
+            let snapshot = try #require(progress(text), "\(text) must yield a snapshot")
+            #expect(!snapshot.linesComplete, "\(text) never closed its array")
+        }
+        #expect(try #require(progress(#"{"lines":["a"}"#)).closedLines == ["a"])
+    }
+
     @Test func nothingYetIsAnEmptySnapshot() throws {
         for prefix in ["", "{", #"{"li"#, #"{"lines""#, #"{"lines":"#, #"{"lines":["#] {
             let snapshot = try #require(progress(prefix))

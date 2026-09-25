@@ -411,7 +411,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("Jarvis coach: brain request failed on \(reason) via "
                          + "\(attempt.target.provider.displayName): \(failure.errorDescription ?? "")")
                     // Lines the user has read stay on screen and commit with the detail so far.
-                    if let streamed, streamed.linesComplete {
+                    // An array that closed empty showed nothing, so it has nothing to keep.
+                    if let streamed, streamed.linesComplete, !streamed.closedLines.isEmpty {
                         jlog("Detail: cut short (\(failure.category.rawValue))")
                         return await speak(streamed)
                     }
@@ -430,7 +431,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // Incomplete output can't prove a terminal action, even if it contains one, unless
                 // its lines closed on the way: those stay on screen and commit as they were read.
                 if let incompleteReason = response.incompleteReason {
-                    if let streamed, streamed.linesComplete {
+                    if let streamed, streamed.linesComplete, !streamed.closedLines.isEmpty {
                         jlog("⚠️ response incomplete (\(incompleteReason)) after its lines closed — keeping the hint")
                         jlog("Detail: cut short (\(incompleteReason))")
                         return await speak(streamed)
