@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.3](https://github.com/JINGBANZ/jarvis/compare/v0.5.2...v0.5.3) (2026-09-26)
+
+
+### Features
+
+* **benchmark:** add a two-turn session mode ([#407](https://github.com/JINGBANZ/jarvis/issues/407)) ([828b78a](https://github.com/JINGBANZ/jarvis/commit/828b78aaca0361dc9985c77241295207dc77aa03))
+* **coach:** stream the speak lines to the overlay as they arrive ([#374](https://github.com/JINGBANZ/jarvis/issues/374)) ([7e3ec72](https://github.com/JINGBANZ/jarvis/commit/7e3ec72bc569c29fb50e548a479d50666df953fa))
+* **overlay:** draw markdown tables in the detail box as a grid ([#417](https://github.com/JINGBANZ/jarvis/issues/417)) ([c7c6994](https://github.com/JINGBANZ/jarvis/commit/c7c69948587d0a5055e4101350a2ede35e053413))
+* **overlay:** render every markdown block kind in the detail box ([#419](https://github.com/JINGBANZ/jarvis/issues/419)) ([f4fb127](https://github.com/JINGBANZ/jarvis/commit/f4fb127bc176429ded420afe035e50dc64324faf))
+* **overlay:** stream the reply's detail into the box ([#375](https://github.com/JINGBANZ/jarvis/issues/375)) ([56e7a46](https://github.com/JINGBANZ/jarvis/commit/56e7a461381bf165931a6f143d27cd1b8f23ee57))
+
 ## [0.5.2](https://github.com/JINGBANZ/jarvis/compare/v0.5.1...v0.5.2) (2026-09-24)
 
 
