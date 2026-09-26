@@ -395,15 +395,28 @@ the interviewer's shared canvas.
 capture-excluded panel: the hint box on top, the detail box below. The hint box holds hints only; a
 hint whose reply carried a detail ends with a dim marker in the same text, not a control
 ([#336](https://github.com/JINGBANZ/jarvis/issues/336) makes it clickable later). The detail box
-renders the whole document in [`DetailView`](../Sources/JarvisOverlay/DetailView.swift): paragraphs,
-lists, and inline code as attributed text, a table as a grid, a code block in monospace with `diff`
-lines tinted and struck, and a mermaid block drawn in place. A table is one `NSTextTable` whose cell
+renders the whole document in [`DetailView`](../Sources/JarvisOverlay/DetailView.swift): prose as
+attributed text, a table as a grid, a code block in monospace with `diff` lines tinted and struck, and
+a mermaid block drawn in place. Prose is what Apple's parser (`AttributedString(markdown:)`, CommonMark
+plus GFM tables and strikethrough) marks up, and
+[`DetailProseFormatting`](../Sources/JarvisOverlay/DetailProseFormatting.swift) draws every block kind
+it emits: larger semibold headings, numbered items with their own number, bullets that change with
+depth, nested items and a list item's later paragraphs hanging under the item's text, quotes with a
+left bar and dimmer text, and a thematic break as a full-width rule. One switch in
+[`DetailProseFormatting+Block`](../Sources/JarvisOverlay/DetailProseFormatting+Block.swift) names every
+kind, so the compiler flags one left out, and a kind a later SDK adds reads as a paragraph. Syntax the
+parser does not know, such as task lists, footnotes, or math, shows as written. Of the HTML tags, only
+`<br>` becomes a line break, which is how a model breaks a line inside a table cell; any other tag
+shows as written, because `List<Integer>` in prose parses as HTML too. The parser stays rather than a
+Markdown library: MarkdownUI and Textual are SwiftUI views (Textual also needs macOS 15 and bundles a
+JavaScript highlighter), a web view would put a browser engine in the capture-excluded panel, and
+swift-markdown parses the same syntax without drawing it. A table is one `NSTextTable` whose cell
 paragraphs carry its blocks
 ([`DetailProseFormatting+Table`](../Sources/JarvisOverlay/DetailProseFormatting+Table.swift)): the
 header row is semibold, the delimiter row's column alignment is kept, and cells wrap in a narrow box.
 The formatter sets no column widths, so columns share the width equally: it renders before the box
-width is known, and giving each column at least its widest word needs that width. The prose and code views are TextKit 1
-by choice: TextKit 2 does not lay out text tables and would fall back to TextKit 1 silently.
+width is known, and giving each column at least its widest word needs that width. Quote bars and rules are text blocks too. The prose and code views are TextKit 1
+by choice: TextKit 2 does not lay out text tables or blocks and would fall back to TextKit 1 silently.
 [`DetailDocumentView`](../Sources/JarvisOverlay/DetailDocumentView.swift) stacks one view per
 segment, top to bottom in document order, rather than one text view with the diagram attached
 inline. Apple's Markdown parser gives no syntax coloring or diff tinting and cannot draw a diagram, so

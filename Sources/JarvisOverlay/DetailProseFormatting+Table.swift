@@ -3,7 +3,7 @@ import AppKit
 extension DetailProseFormatting {
     /// One Markdown table: every cell becomes a paragraph whose style carries an `NSTextTableBlock`
     /// of the shared `NSTextTable`, which is how TextKit 1 lays text out as a grid.
-    struct Table {
+    @MainActor struct Table {
         struct Cell {
             let table: Int
             let columns: [PresentationIntent.TableColumn]
@@ -63,7 +63,7 @@ extension DetailProseFormatting {
                 for (columnIndex, cell) in row.cells.enumerated() {
                     let block = NSTextTableBlock(table: table, startingRow: rowIndex, rowSpan: 1,
                                                  startingColumn: columnIndex, columnSpan: 1)
-                    block.setBorderColor(Self.border)
+                    block.setBorderColor(DetailProseFormatting.divider)
                     block.setWidth(1, type: .absoluteValueType, for: .border)
                     block.setWidth(Self.horizontalPadding, type: .absoluteValueType, for: .padding, edge: .minX)
                     block.setWidth(Self.horizontalPadding, type: .absoluteValueType, for: .padding, edge: .maxX)
@@ -86,7 +86,6 @@ extension DetailProseFormatting {
             return out
         }
 
-        private static let border = NSColor(white: 1, alpha: 0.28)
         private static let headerFill = NSColor(white: 1, alpha: 0.08)
         private static let horizontalPadding: CGFloat = 6
         private static let verticalPadding: CGFloat = 3
