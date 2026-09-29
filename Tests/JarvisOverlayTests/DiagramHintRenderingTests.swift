@@ -37,9 +37,36 @@ import Testing
         #expect(large.size.width <= 600)
         #expect(small.size.width <= 300)
         #expect(small.size.height > 150, "long chains scroll vertically at readable font sizes")
-        #expect(small.size == large.size, "limited height cannot shrink native labels")
+        #expect(large.size.height < small.size.height, "extra width folds the chain into fewer rows")
         let short = DiagramHintImage.render(graph, fitting: NSSize(width: 600, height: 20))
-        #expect(short.size == large.size)
+        #expect(short.size.height <= large.size.height)
+        #expect(short.size.height > 150, "limited height still scrolls instead of shrinking labels")
+    }
+
+    @MainActor @Test func laterBranchDoesNotDrawThroughAnEarlierLabel() throws {
+        let graph = try #require(DiagramHint(mermaid: """
+            flowchart LR
+            A[Request] --> B[Gather]
+            B --> C[Validate]
+            C -->|AA AA| D[Draft]
+            C -->|hold| E[Review]
+            D --> F[Verify]
+            E --> F
+            F --> G[Save]
+            G --> H[Notify]
+            """))
+        let available = CGSize(width: 520, height: 200)
+        let layout = DiagramHintLayout(graph, fitting: available, box: CGSize(width: 144, height: 36),
+                                      edgeLabel: CGSize(width: 100, height: 20), margin: 16)
+        let routes = try #require(layout.foldedRoutes)
+        let center = routes[2].labelCenter
+        let image = DiagramHintImage.render(graph, fitting: available)
+        let data = try #require(image.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: data))
+        let scale = CGFloat(bitmap.pixelsWide) / layout.size.width
+        let color = try #require(bitmap.colorAt(x: Int(center.x * scale), y: Int(center.y * scale))?
+            .usingColorSpace(.deviceRGB))
+        #expect(color.redComponent < 0.2, "the space between AA and AA shows label background, not an edge")
     }
 
     @MainActor @Test func anUnsupportedGraphKeepsTheRestOfTheDocument() async throws {

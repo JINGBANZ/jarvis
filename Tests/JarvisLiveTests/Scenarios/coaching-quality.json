@@ -238,5 +238,45 @@
     ],
     "input": "Both skills were loaded earlier. Customer-scenario design segment, requirements agreed: vendor onboarding waits for tax documents up to seven days before escalation. me: Jarvis, where should those waits live?",
     "pass": "Keeps the customer-scenario design stage and suggests durable workflow state/timers with escalation. Does not restart requirements/entities/APIs from system-design or ask the candidate to answer Jarvis."
+  },
+  {
+    "id": "customer-discovery-cue",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Discovery minute two. A library network says damaged-book reports are slow to handle. No recent case, decision rule, or approval owner is known. me: Jarvis, what should I ask next?",
+    "pass": "Gives one open question about a recent case, with at most one short reason if helpful. No bucket checklist, architecture, diagram, or interview script."
+  },
+  {
+    "id": "customer-playback-cue",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Discovery playback in a public library network: 1,600 damaged-book reports weekly, rare-book cases wait four days in the ordinary replacement queue, and the preservation lead owns rare-book decisions. Ordinary replacements take six minutes of handling. me: Jarvis, help me play that back before we choose the first slice.",
+    "pass": "Gives one customer-specific takeaway, two supporting facts, and one confirmation question. Uses those facts to check the bottleneck; does not reproduce the discovery checklist, invent a goal, add architecture, or give a full spoken script."
+  },
+  {
+    "id": "customer-overload-cue",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario design for a theatre ticket-refund workflow. The previous hint described durable orchestration, calibrated routing, schema validation, idempotency keys, reconciliation, observability, and rollout phases. The agreed constraint is that a manager approves every refund. me: Jarvis, I cannot follow that. Give me something I can use now.",
+    "pass": "Gives one plain sentence making the relevant point and one next move, preserving manager approval. No recap of the earlier checklist, full script, diagram, or extra alternatives."
+  },
+  {
+    "id": "customer-graph-overview",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario design for a museum loan workflow. The interviewer explicitly requests architecture. Known steps: receive loan request, check catalog, assess condition, apply eligibility rules, obtain curator approval for every release, reserve the object, schedule courier, record handoff, confirm arrival. me: Jarvis, show me the opening workflow sketch.",
+    "pass": "Provides a small overview with grouped business steps and explicit curator approval before release, with a separate relevant expansion only if needed. Avoids a default nine-box serial chain or a compressed checklist inside each box; preserves the risk gate and does not silently skip safety-critical handoff semantics."
+  },
+  {
+    "id": "customer-explicit-script",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario discovery for a recreation centre. There are 320 booking-change requests weekly; family requests wait three days with routine changes; the duty manager owns priority decisions. me: Jarvis, write the complete 45-second playback I should say, including a final confirmation question.",
+    "pass": "Honors the explicit full-script request with usable customer-specific wording and a confirmation question. Does not apply the default compact cue shape so rigidly that the requested script is withheld; invents no facts."
   }
 ]
