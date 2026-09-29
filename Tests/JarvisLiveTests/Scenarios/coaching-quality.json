@@ -84,5 +84,159 @@
     ],
     "input": "The candidate is manually reviewing a duration-10 window retaining timestamps >= now-duration. Expiry uses if to remove one expired event, rather than looping. The candidate has already tested duplicate maxima. me: What single test tells me whether removing just one expired event per call is sufficient? Include an event that should remain, and the expected count and sum.",
     "pass": "Gives at least two events expired at the same query time, with a retained event and concrete correct aggregate(s), so one removal produces a different result. Does not reuse a case with only one expired event or claim execution."
+  },
+  {
+    "id": "customer-early-solution",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Discovery minute three. The customer has only said supplier emails are slow to handle; actual work and decisions remain unknown. me: I think an agent with tools will solve this. Jarvis, what next?",
+    "pass": "Suggests one open question about an actual recent case; no architecture, agent plan, or diagram."
+  },
+  {
+    "id": "customer-stacked-questions",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Discovery. me: I asked how many claims, which system, and who approves them in one breath. The customer answered only volume. Jarvis, how do I recover?",
+    "pass": "Suggests asking one focused open question at a time, not another stacked or multiple-choice question."
+  },
+  {
+    "id": "customer-cost-directions",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario workflow automation interview, discovery minute six. Customer processes supplier claims; false approvals pay invalid claims, false rejections delay legitimate suppliers. Candidate has asked volume, staffing, and data format but nothing about consequences of mistakes. me: Jarvis, what should I ask next?",
+    "pass": "Offers one open question eliciting the cost of mistaken approval and mistaken rejection. Does not jump to architecture or stack unrelated questions."
+  },
+  {
+    "id": "customer-clean-data",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Discovery, data readiness. them: Our data is pretty clean. me: Jarvis, how do I validate that?",
+    "pass": "Suggests asking what clean means and checking a small end-to-end sample of real records, such as twenty; does not accept the claim as measured readiness."
+  },
+  {
+    "id": "customer-playback",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Discovery playback: customer has 8,000 emails daily, urgent disputes wait two days in the routine queue, and finance owns dispute resolution. me: My playback is work, decision, cost, data, people. Jarvis, what is missing?",
+    "pass": "Suggests a customer-specific reframe around urgent disputes sharing the routine queue, followed by the priority/why-now question. Does not merely restate the bucket names."
+  },
+  {
+    "id": "customer-shape-first",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario workflow automation interview. Discovery is complete: 8,000 supplier invoices daily, matching invoices paid under existing rules, disputed invoices held for Accounts Payable, no autonomous disputed payments. Interviewer explicitly transitions to architecture. me: I'll start my drawing with Entry, Router, Orchestration, Model, Tools, Data, Safety, Observe. Jarvis, is that a useful opening?",
+    "pass": "Redirects to one invoice end to end using existing rules and the Accounts Payable exception path, rather than reciting layers or reopening discovery."
+  },
+  {
+    "id": "customer-inverted-routing",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Design: the customer has measured that 85% of claims follow complete written rules and 15% need judgment; all irreversible payments require approval. me: I will give the 85% to an autonomous agent and hardcode every exception. Jarvis, check that routing.",
+    "pass": "Corrects the inversion: deterministic rules for the proven routine slice, bounded model judgment or human review for ambiguity, preserving payment approval."
+  },
+  {
+    "id": "customer-propose-runtime",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Design of an inspection workflow; discovery established poor network connectivity and a 100ms routing deadline. me: I am going to ask the customer what camera setup and runtime they think we need. Jarvis, is that right?",
+    "pass": "Suggests proposing and caveating a feasible setup/runtime grounded in the deadline and connectivity, with camera and lighting feasibility verification; does not outsource technical design to the customer or guarantee feasibility."
+  },
+  {
+    "id": "customer-tool-validation",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Design, failure handling. me: If the ERP returns a 502 HTML page or empty result, we will tell the model not to process bad tool output. Jarvis, does that cover it?",
+    "pass": "Moves status/content-type/schema/value validation into code at the tool boundary; typed failures let orchestration decide retry, park, or escalate. Distinguishes valid empty data from zero; does not rely on a prompt as enforcement."
+  },
+  {
+    "id": "customer-rollout-exits",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario workflow automation interview, rollout segment. me: I'll do shadow, then suggestions, then auto with review, then auto. Jarvis, what is missing from that rollout answer? All earlier discovery and architecture are complete; no numeric exit conditions have been proposed.",
+    "pass": "Calls for pre-agreed numeric exit bars tied to customer error costs for each phase. Any sample thresholds are proposals, not universal or company-mandated values."
+  },
+  {
+    "id": "customer-silent-degradation",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Production evaluation of an automated claims workflow. me: Nobody has complained in three months, so quality must still be good. Jarvis, am I missing something?",
+    "pass": "Identifies silent degradation, a concrete leading indicator and frozen golden-set reruns; does not accept silence as correctness or offer only generic monitoring."
+  },
+  {
+    "id": "customer-productive-answer",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Workflow automation interview. Fresh screen confirms the diagram matches the conversation. them: How do you avoid duplicate ERP payments? me: We persist a payment intent and stable idempotency key before sending it. On timeout we reconcile status by that key before retrying. Unresolved outcomes go to finance; we never mint another key for the same payment. The candidate continues explaining these agreed mechanisms fluently. No question or hint request is addressed to Jarvis.",
+    "pass": "Returns stay_silent; does not add a checklist, praise, diagram, or unsolicited improvement."
+  },
+  {
+    "id": "customer-url-shortener-control",
+    "skills": [
+      "customer-scenario-design",
+      "system-design"
+    ],
+    "input": "A new ordinary system-design question, with no customer workflow role-play. them: Design a URL shortener. me: Jarvis, help me scope requirements.",
+    "pass": "Uses ordinary system-design requirements coaching; does not force customer discovery buckets, workflow automation, or a rollout ritual. This preloaded case checks noninterference; actual catalog selection needs a separate catalog-only evaluation."
+  },
+  {
+    "id": "customer-explicit-transition",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario interview, minute four. them: We have already agreed the requirements. Please move to architecture now. me: Jarvis, what should my opening focus on? Known workflow: ingest supplier claims, rules resolve documented cases, analysts decide exceptions, approved decisions update the claims system.",
+    "pass": "Follows the explicit design transition with the end-to-end workflow; does not require waiting until minute ten or restarting discovery."
+  },
+  {
+    "id": "customer-threshold-calibration",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Workflow evaluation. me: I changed the approval cutoff from 0.8 to 0.95, so I have calibrated the model. Jarvis, is that accurate?",
+    "pass": "Distinguishes threshold tuning from checking score correctness frequencies on labeled holdout data; connects the cutoff to asymmetric error costs without trusting self-reported confidence."
+  },
+  {
+    "id": "customer-bundle-rollback",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Workflow change management. me: We updated the prompt, tool schema, and model together. Quality fell, so I will roll back just the model alias. Jarvis, what is the gap?",
+    "pass": "Recommends versioning and reverting the compatible prompt/model snapshot/tool-schema/eval-set bundle, identifying versions in traces rather than treating an alias rollback as sufficient."
+  },
+  {
+    "id": "customer-missing-prep",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Workflow customer scenario, discovery. Prep notes search is unavailable. Customer handles 500 warranty claims weekly; no personal practice history or past design is in context. me: Jarvis, remind me of the design I used in my last practice.",
+    "pass": "States that the prior design is unavailable without inventing history, searching an unavailable tool, or substituting a hypothetical as a remembered event."
+  },
+  {
+    "id": "customer-media-control",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "New interview question: design a generative media system that creates marketing images and videos. There is no enterprise workflow automation scenario. me: Jarvis, what should I consider?",
+    "pass": "Does not claim this workflow skill covers generative media or impose workflow discovery stages. Gives grounded generic design guidance without fabricating specialist preparation."
+  },
+  {
+    "id": "customer-co-loaded-stage",
+    "skills": [
+      "customer-scenario-design",
+      "system-design"
+    ],
+    "input": "Both skills were loaded earlier. Customer-scenario design segment, requirements agreed: vendor onboarding waits for tax documents up to seven days before escalation. me: Jarvis, where should those waits live?",
+    "pass": "Keeps the customer-scenario design stage and suggests durable workflow state/timers with escalation. Does not restart requirements/entities/APIs from system-design or ask the candidate to answer Jarvis."
   }
 ]
