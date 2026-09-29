@@ -227,6 +227,46 @@ recover from; concatenating every skill into the prompt pays for all of them on 
 was what a single "general technical" skill existed to work around. The description is written for
 the model, with an example, because that line is all it sees before deciding.
 
+`customer-scenario-design` coaches enterprise workflow automation scenarios, including FDE/RRK
+customer role-play. Its description names that setting and an inbound-email example because selection
+sees only the catalog line. The generic name describes a question shape rather than one employer;
+the explicit workflow scope prevents it from claiming generative media/content creation coverage.
+An ordinary URL-shortener question belongs to `system-design`. Manufacturing can supply the customer
+context for an inspection workflow; it is not a separate interview category.
+
+The skill is standalone: discovery → design → evals and change, with a symptom-driven troubleshooting
+branch. Explicit requests and spoken transitions determine the current segment; elapsed time is a
+practice pacing aid, not a gate. If `system-design` is also loaded, the customer-scenario skill owns
+staging while that role-play continues. Loading it as a mandatory companion was rejected because the
+requirements/entities/API progression would compete with customer discovery and add unnecessary
+context. A compact copy of the supported diagram vocabulary keeps architecture hints self-contained;
+the parser still owns the grammar and limits. Only a warranted high-level design hint includes a
+focused private sketch, never an assumed edit to the customer's shared drawing.
+
+Guidance follows one customer item from current work through decisions and error costs to the proposed
+system. Discovery asks one open question at a time; design proposes a mechanism and what breaks without
+it; evaluation ties metrics and rollout gates to the customer's risk. Deterministic rules handle known
+paths, with bounded agent steps where judgment is needed. The skill covers workflow state, runtime
+choice, integrations, human approval, recovery, security, capacity/cost, evaluation, and versioned
+change. It adapts to explicit requirements instead of prescribing an agent, retrieval, or durable
+engine for every problem. General cloud knowledge is sufficient; vendor names are optional.
+
+The body targets 15 KB so a loaded skill remains usable under time pressure. It compresses repeated
+explanation and example scripts, omits the generative-content scenario, and keeps workflow mechanisms
+and their failure modes. Timings, sample sizes, routing shares, and rollout thresholds are illustrative;
+none establish company policy, universal statistical confidence, or a customer's measured baseline.
+Personal stories, previous practice designs, scores, and debriefs remain in optional prep notes.
+Missing notes leave generic coaching available without fabricated personal history; invalid skill
+files and disabled skills retain the catalog's existing degradation behavior.
+
+Catalog tests cover loading, deferred body delivery, disabling, and content/size smoke checks.
+The customer cases in [the instruction regressions](../Tests/JarvisLiveTests/Scenarios/coaching-quality.json)
+cover stage boundaries, workflow failure mechanisms, silence, and unrelated-question controls.
+Their [review guide](../Tests/JarvisLiveTests/Scenarios/coaching-quality-review.md) separates semantic
+coaching evidence from catalog selection and signed-app validation; keyword assertions alone do not
+establish coaching quality. No runtime classifier, new tool, round setting, or personal material is
+needed for this skill.
+
 A load belongs to the attempt that made it and becomes session state only when that attempt commits
 a turn. An attempt that fails simply loads again, at the cost of one round trip, and in exchange
 "already loaded" is true exactly when the loaded content is in history the model can still read. Compaction
@@ -364,8 +404,8 @@ field optional under strict Structured Outputs.
 
 Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
 all, and the skill that owns a domain says what its blocks are: the `coding` skill carries the code
-block rules and the `diff` correction shape, the `system-design` skill the mermaid block. That is why
-the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
+block rules and the `diff` correction shape; the design skills (`system-design` and
+`customer-scenario-design`) carry the mermaid guidance. That is why the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
 a session that never loads the skill never pays for it in its cached prefix.
 
 The general detail default defers to the loaded skill so brevity does not make the user press
@@ -386,7 +426,7 @@ its kind.
 [`CodeBlock`](../Sources/JarvisCore/Overlay/CodeBlock.swift) rejects oversized code rather than
 cutting it into an invalid fragment. [`DiagramHint`](../Sources/JarvisCore/Overlay/DiagramHint.swift)
 accepts a bounded Mermaid subset of rectangular labeled boxes and directed connections; the parser
-owns the grammar and limits, and the system-design skill owns the model-facing usage guidance. Native
+owns the grammar and limits; the design skills own stage-specific model-facing usage guidance. Native
 [`DiagramHintImage`](../Sources/JarvisOverlay/DiagramHintImage.swift) draws that inert graph into a
 memory-only image, needing no JavaScript, browser, remote assets, or extra window. Nothing is drawn on
 the interviewer's shared canvas.
@@ -944,7 +984,7 @@ rather than a per-turn screenshot.
 - **Coaching guidance is loaded on demand, not chosen at Start** (see
   [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
   policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
-  model loads when the question calls for it. Four skills ship: behavioral shapes candidate-owned
+  model loads when the question calls for it. Five skills ship: behavioral shapes candidate-owned
   experience answers with STAR, handles personal and hypothetical questions directly, preserves
   prep-material caveats, and reserves labeled fictional examples for an explicit practice request.
   It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
@@ -964,6 +1004,8 @@ rather than a per-turn screenshot.
   A visible assistant panel alone is a hint, not that establishment. Its separate catalog entry keeps
   that workflow conditional without a round or seniority setting
   (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
+  Customer-scenario-design supplies workflow-automation discovery, architecture, evaluation, and
+  change guidance for enterprise customer role-play (see [Capabilities](#capabilities)).
   System-design supplies the stage vocabulary from requirements through trade-offs and checks
   state ownership, durable background-work creation, replenishment, and recovery against the current
   requirements. It targets the highest-impact missing mechanism at the current stage and asks for
