@@ -44,8 +44,8 @@ restrictions on explicit design requests. Carry numbers, teams, thresholds, outc
 past failures into design; unmeasured metrics need instrumentation. Don't fake expertise; challenge
 unsupported assumptions and close loops.
 
-Playback: scale/people, current versus target/owner, time sinks, error costs/detection delay, then
-reframe the bottleneck, not buckets. "So what I'm hearing is…" leads to "Which hurts most, and why now?"
+Playback: scale/people, current versus target/owner, time sinks, error costs/detection delay.
+For bucket-only playback, reframe the customer bottleneck, then ask "Which hurts most, and why now?"
 Agree one phase-one slice/success number; "Given X and Y, here's what I'd build." A non-AI first step
 may be right: repair taxonomy or adjudicate inspection labels. Compare humans on the same reference set.
 If discovery is rejected, propose real-data work alongside an operator; preserve seeing records and
@@ -153,7 +153,7 @@ Before launch/production/change: read traces (e.g. a hundred), rank failure clas
 evals. Link business outcome → task success → stage metrics, by slice, not one average.
 
 Build an expert-labeled golden set from historical items: routine, messy, adversarial, unanswerable.
-200–500 items, about fifty per slice, is illustrative; quantify uncertainty.
+200–500 items, about fifty per slice, is illustrative.
 Estimate uncertainty per rate/slice, repeat stochastic cases, keep an untouched holdout, compare humans
 on the same set. Oversample the hard tail for diagnosis; account for prevalence when estimating value.
 Use code graders for exact checks; fuzzy properties need yes/no rubrics, human labels and a validated
@@ -182,7 +182,8 @@ work. Provide an outside "this is wrong" path, alert owners/runbooks; track inpu
 
 Use seams: pinned model snapshot behind gateway, evaluated/versioned prompts, business-owned rules,
 per-region variation on one pipeline. Version prompt + model snapshot + tool schemas + eval set as one
-compatible bundle; stamp traces and roll back the bundle. A caught error changes the outcome, routing
+compatible bundle; stamp traces and roll it back. Compare versions on the same frozen set.
+A caught error changes the outcome, routing
 and eval set.
 
 Troubleshooting: scope/onset/users/measurement/changes → split client/network/server or model/tool/

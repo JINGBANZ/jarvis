@@ -212,7 +212,7 @@
       "customer-scenario-design"
     ],
     "input": "Workflow change management. me: We updated the prompt, tool schema, and model together. Quality fell, so I will roll back just the model alias. Jarvis, what is the gap?",
-    "pass": "Recommends versioning and reverting the compatible prompt/model snapshot/tool-schema/eval-set bundle, identifying versions in traces rather than treating an alias rollback as sufficient."
+    "pass": "Recommends versioning and reverting the compatible prompt/model snapshot/tool-schema/eval-set bundle, identifying versions in traces rather than treating an alias rollback as sufficient. Compares pinned and current versions on the same frozen evaluation set; restoring the versioned eval-set definition for subsequent evaluations must not change the comparison set."
   },
   {
     "id": "customer-missing-prep",
