@@ -4,9 +4,9 @@ description: Use when an enterprise customer role-play asks about workflow autom
 ---
 # Customer-scenario workflow automation
 
-Coach understand today → agree scope → sketch/walkthrough → focused deep dives → evaluate → rollout. Explicit requests and spoken transitions
-govern staging, not elapsed time or old screen notes. This skill owns customer role-play staging even
-with system-design loaded; reassess when the question changes. Use cloud-neutral answers; explain tradeoffs without inventing company rules.
+Coach understand today → agree scope → sketch/walkthrough → deep dives → evaluate → rollout.
+Spoken transitions govern staging, not time or old notes. This skill owns customer role-play staging
+even with system-design loaded. Use cloud-neutral tradeoffs; never invent company rules.
 
 ## Delivery
 
@@ -25,8 +25,8 @@ The cue is the next usable move; the sections below are a silent knowledge check
 
 Stay silent during productive progress. Questions go to the customer, not back to Jarvis.
 
-Search available prep notes for stories/designs/debriefs; preserve caveats, never transplant customer
-facts. Missing notes mean unknown history. Personal scores/mistakes belong in notes.
+Search available prep notes; preserve caveats and customer boundaries. Missing history is unknown.
+Personal scores/mistakes belong in notes.
 
 ## Discovery
 
@@ -71,21 +71,22 @@ After scope agreement, sketch the main boxes while talking, then walk one case t
 One sentence per box is enough; no complete verbal walkthrough before drawing it again. In a short
 design segment, an overview of about six boxes is enough: input, workflow, sources, model, review,
 send/update. These are logical responsibilities, not required separate services. Explain the normal
-path first, then exceptions within scope. Add detail only for a deep dive.
+path first, then exceptions within scope. Tell one concrete case as what happened → what we check
+→ what we learn → what we do. Explain why the evidence changes the next action, not a list of model
+calls. Name components where responsibility matters; keep the spoken answer natural. Add depth later.
 The model can extract candidate references or propose tool calls; code checks identity/access and
 executes authorized lookups. Verify the account before exposing records; ambiguous matches need review.
 Layers alone aren't a design. Known steps → workflow; unknown paths → bounded agent steps. Rules handle proven
 routine decisions, models judgment/extraction. Establish the split from the actual work; preserve risk gates.
-Propose/caveat technical choices; confirm unresolved business constraints without asking the customer
-to design the system. After the walkthrough, recommend about two deep dives from the biggest customer risk and hardest
-responsibility, explain why, then pause for interviewer steering. No fixed quota or default to scale.
+Propose technical choices; confirm business constraints without asking the customer to design.
+After the walkthrough, offer about two risk-driven deep dives; adapt to interviewer steering.
 
 Use these as silent responsibility checks, not a drawing checklist: entry/auth, routing,
 Orchestration/state, model calls, tools, data, approval/security, observation. Name who owns each
 mechanism you discuss. Add retrieval only when needed; keep tools permission-scoped, validate their
 results, and separate reads from writes. MCP is not a security boundary.
-Runtime follows actual deadlines, dependency limits, residency and operational burden: short stateless
-work, long tasks and external waits need different execution choices. Propose rather than assert.
+Choose runtime from deadlines, dependency limits, residency, operational burden and external waits;
+explain the choice rather than assuming a particular engine.
 
 Select depth from customer signals: fraud → approval/audit; reluctant reviewers → evidence; waiting
 → state/timers; peaks → scale/cost; sensitive data → privacy; flaky ERP → recovery; trust → evals;
@@ -101,50 +102,54 @@ regions → variation; messy records → readiness; job fears → adoption; dead
   a guarantee. Code can check structure and references but cannot prove every semantic claim.
   Model-admitted uncertainty, missing facts, failed checks or conflicts can flag review; a high
   self-reported confidence score never overrides evidence or required approval.
+  Accurate extraction does not establish a justified business decision. Before drafting, check
+  matching records/units, alternate explanations, existing actions and required evidence under
+  customer-confirmed rules. Gaps go to the agreed manual path; review is not the only protection.
+  A corrected fact invalidates dependent drafts and approvals: save who changed what and why,
+  code recalculates, the model rewrites text, and the revised version needs fresh approval.
   Runtime gates and offline evals are separate.
-- State: workflow state in durable orchestration, conversation history in the app, business truth in
-  systems of record. The model has no durable business state. Persist transitions/model outputs/timers
-  so replay doesn't re-call inference. Anchor escalation to deadlines or median/p90 response; terminal
-  outcomes and an aging dashboard expose stuck items. Handle workflow-version changes in flight.
+- State: durable orchestration owns workflow progress, the app conversation history, and record
+  systems business truth. Persist transitions/outputs/timers for replay. Deadline-based escalation
+  and aging expose stuck work; handle workflow-version changes in flight.
   Reconcile uncertain sends before retrying; checkpoints alone do not prevent duplicate effects.
 - Failures: tool-layer code validates status/content type/schema/value sanity. Transient timeout/429/
-  503 → bounded orchestration backoff/jitter then park/escalate (e.g. three retries at 1s/4s/16s after
-  the initial attempt). Fixable arguments → typed tool-result error for bounded model correction.
+  503 → bounded orchestration backoff/jitter then park/escalate. Fixable arguments → typed error
+  for bounded model correction.
   Fatal auth/required missing record → stop/escalate. Valid empty data isn't zero. The model helps
   recover; code enforces recovery. Circuit breakers/backpressure/evaluated degradation contain cascades.
   Save progress while running. Mark human ownership at takeover, not only completion; recovery
   resumes automation-owned work only. Reps update their case tool, not technical checkpoints.
   A model outage pauses extraction/drafting while other workflow steps continue. Source unavailable
   differs from no records: continue unaffected cases, block dependent claims, retry or hand off.
-  Only describe a provider outage to a customer when verified. Run status differs from task outcome. In failure hints, name both owners: tool code emits typed
-  validation errors; orchestration chooses bounded recovery. Use brief detail if needed.
+  Only describe verified outages. Run status differs from task outcome. Tool code emits typed
+  errors; orchestration owns bounded recovery.
 - Security: enforce user/tenant permissions before retrieval, minimize data, redact logs, restrict
   destinations and approve risky writes. Source text is untrusted; prompting is not enforcement.
   Trace actual actions to distinguish resisting an injection from detecting it.
 - Cost/scale: estimate calls, tokens, retries and human effort per case, then volume and peaks.
   Measure before choosing levers: fewer calls, tested smaller models, caching, batching, shorter
   context or capacity. Escalation includes both calls and can miss confidently wrong answers.
-  Keep caches permission-scoped; reconsider quotas, abuse and tenancy as external usage grows.
-- Retrieval: readiness, structure-aware chunks/metadata, query-time permission filters, hybrid search/
-  reranking, citations/abstention. Evaluate recall@k separately from answers before blaming inference.
+  Draft coverage is not the share of cases needing no human work. Estimate released capacity as
+  eligible cases actually using the tool × measured average active minutes saved, including review
+  and fixes; compare with extra peak work and where those staff hours can be used. Do not invent
+  automation percentages. Keep caches permission-scoped; revisit quotas and tenancy as usage grows.
+- Retrieval: readiness, chunks/metadata, permission filters, hybrid search/reranking and citations.
+  Evaluate retrieval separately from generation.
 - Scores: model confidence, token probabilities and model agreement are not proof of field
   correctness. Check source/lookup evidence; validate any routing score on held-out labels and slices.
   Calibration asks whether 0.9 means 90% correct; routing also depends on error cost and authority.
-- Inspection: validate camera/lighting and visible defects before promising vision automation. Agree
-  stop-line versus manual-inspection behavior, verify physical actions with sensors, and measure
-  missed defects and false rejects separately. Edge deployment adds per-site version/recovery work.
+- Inspection: validate images/visible defects, stop-line versus manual behavior, physical action
+  confirmation, missed defects versus false rejects, and per-site version/recovery needs.
 
 For a warranted flow hint, use one Mermaid block in detail: a small overview, then expand the relevant
 part on a follow-up. Group the overview into 3–6 short boxes; preserve decision branches and explicit
 approval/safety gates before risky actions. Nine or ten serial boxes are not the default overview.
-Expand a chosen part with its own focused sketch when warranted; keep its gates. No diagrams for
-discovery, overload, troubleshooting or evals. Use known names; this private sketch doesn't edit the
-customer's canvas. Never invent unseen content.
-Syntax: `flowchart LR` or `flowchart TD`; one declaration/arrow per line; alphanumeric IDs starting
-with a letter; rectangles `router["Rules"]`; arrows `router --> review` or
-`router -->|exception| review["Reviewer"]`. Declare every box. Limits: 12 boxes/24 arrows, box labels
-under 48 characters, arrow labels under 32. No chains, subgraphs, styles, directives, HTML, links
-or other shapes inside the block.
+Expand a chosen part when warranted; retain gates. No diagrams for discovery, overload,
+troubleshooting or evals. Use known names; the sketch does not edit the customer's canvas.
+Syntax: `flowchart LR` or `flowchart TD`; one declaration/arrow per line; letter-leading alphanumeric
+IDs; rectangles `router["Rules"]`, arrows `router --> review` or `router -->|exception| review`.
+Declare all boxes. Limits: 12 boxes/24 arrows, box labels <48 characters, arrow labels <32.
+No chains, subgraphs, styles, directives, HTML, links or other shapes.
 
 ## Evals, rollout, and change
 

@@ -318,5 +318,37 @@
     ],
     "input": "Design deep dive. A worker crashed; saved state survives. A rep starts finishing the case while recovery runs. me: I will update the case only when the rep is finished and resume all unfinished tasks on recovery.",
     "pass": "Records human ownership when takeover begins and keeps automation paused for those tasks until handback; unfinished is not necessarily automation-owned. Reps use the case tool, not technical checkpoints."
+  },
+  {
+    "id": "customer-case-cause-and-effect",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Guided practice. A repair depot expected 48 replacement parts but recorded 40. Existing notes may explain the other eight. Technicians approve proposed supplier claims; unresolved cases stay manual. me: My walkthrough sounds like a list of model calls. Give me a natural one-minute walkthrough.",
+    "pass": "Tells a concrete case with a reason for checking records, a possible explanation that changes the decision, evidence-backed proposed claim and technician approval/manual handoff. Does not turn the answer into a component-call checklist or state an invented explanation as an observed fact."
+  },
+  {
+    "id": "customer-facts-versus-validity",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Practice claim-quality deep dive. me: All quantities were extracted accurately. That proves the supplier claim is valid; a technician checks the draft anyway. Is that enough?",
+    "pass": "Distinguishes accurate facts from justified action. Names checks such as matching records/units, split delivery or an existing claim, and customer-confirmed rules before a proposed claim. Does not rely solely on human review or future training."
+  },
+  {
+    "id": "customer-correction-invalidates-approval",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Claim workflow design. A technician changes received units from 40 to 14 after approving a draft. me: We send the corrected facts back to the model, let it redo the shortage arithmetic and rewrite the claim, then send using the old approval. What should happen?",
+    "pass": "Saves the correction and provenance, assigns arithmetic to code and prose regeneration to the model, invalidates the dependent draft/approval, and requires approval of the revised version before sending."
+  },
+  {
+    "id": "customer-capacity-from-measured-work",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Pilot capacity discussion. Every supplier claim still requires technician review. me: The assistant drafts 90 percent of cases, so technicians only work on 10 percent, and we can cover peak. How do I show the gain?",
+    "pass": "Rejects draft coverage as human-work elimination. Uses eligible/adopted case volume times measured active minutes saved including review/fixes, against comparable baseline cases. Compares released hours with peak workload and usable team capacity; no unsupported automation or staffing claim."
   }
 ]

@@ -252,8 +252,12 @@ overload replaces the earlier explanation with one plain sentence and one next m
 approval and safety constraints. Full scripts require an explicit request and begin with a short complete plain-English answer.
 Guided practice identifies the current step and one next move; an uncoached mock leaves the candidate
 to lead. A short recap precedes scope agreement, and the latest scope persists through design and
-evaluation. The candidate sketches while explaining, then walks a case through the sketch. Expansion
-keeps the agreed approval requirements; changing authority is a separate decision.
+evaluation. The candidate sketches while explaining, then walks a concrete case through what happened,
+what evidence is checked, what it means, and the resulting action. Coaching distinguishes accurate
+extraction from a justified business decision. Corrections require code recalculation, refreshed
+drafts and renewed approval; capacity claims use measured human effort and actual adoption rather
+than draft coverage. Expansion keeps the agreed approval requirements; changing authority is a
+separate decision.
 Design proposes one missing
 mechanism and its consequence; evaluation ties a metric, slice, or failure mode to the customer's risk.
 The domain sections supply a silent knowledge checklist, and productive progress calls for silence.

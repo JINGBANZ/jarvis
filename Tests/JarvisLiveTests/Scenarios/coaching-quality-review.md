@@ -139,3 +139,32 @@ catalog wording were inspected separately, not counted as additional semantic ru
 
 The build/catalog Gate verifies packaging, deferred loading, and existing app tests. It does not prove
 coaching behavior or deploy the updated skill into a running app.
+
+## Concrete cases, decision validity, and capacity probes
+
+Four synthetic development fixtures cover natural case narration, accurate extraction versus a
+justified business decision, corrections invalidating dependent approval, and measured human
+capacity versus draft coverage. They contain no private practice transcripts or customer records.
+
+Before editing, one fresh-context subagent read the baseline bundled skill and answered four
+related repair-depot scenarios. A separate fresh-context subagent read the revised skill and
+answered the same four inputs. Each agent answered all four inputs in a single conversation;
+there was no fresh conversation per case. Neither received the pass criteria. Both used the
+inherited Codex host model with host instructions retained, without the production coach prompt,
+speak tool, provider harness, loader, or signed app. These are single-pass instruction-level
+probes, not production coaching tests or held-out transfer evidence.
+
+| Behavior | Baseline observation | Revised observation |
+|---|---|---|
+| Natural case walkthrough | Pass: apparent eight-part shortage, evidence and manual exceptions explained as a case. | Pass: a possible separate delivery explains why a discrepancy does not yet justify a claim; approval retained. |
+| Facts versus business validity | Pass: “not that the supplier owes a claim”; notes and evidence checked. | Pass: explicit matching records/units, alternate explanations, existing claims and customer rules. |
+| Corrected fact after approval | Pass on approval invalidation: “Changing 40 to 14 invalidates the earlier approval.” Arithmetic ownership was not explicit. | Pass: code recalculates; model rewrites; revised version requires fresh approval. |
+| Capacity versus draft coverage | Pass: review/corrections included and measured time savings multiplied by case volume. | Pass: actual adoption and average active minutes saved yield released hours, compared with peak workload and usable staffing. |
+
+The baseline already handled the core scenarios; these samples do not demonstrate a measured
+quality improvement. The edit makes the intended mechanisms explicit and adds repeatable regression
+criteria. The committed correction fixture also explicitly challenges model-owned arithmetic;
+that exact added phrase was not present in the paired probes and remains unobserved in the
+production evaluation harness. All four committed fixtures should be evaluated using the protocol
+at the top of this document before making a production reliability claim. Catalog/build checks
+remain packaging evidence only; the running app is not updated by editing this bundled source.
