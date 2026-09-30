@@ -91,7 +91,8 @@ struct FoldedDiagramHintLayout {
                 points += [CGPoint(x: exitX, y: lane), CGPoint(x: entryX, y: lane),
                            CGPoint(x: entryX, y: to.midY)]
             } else {
-                let lane = size.width - 2 - CGFloat(channel * 3)
+                let inset = 2 + CGFloat(channel * 3)
+                let lane = sourceForward ? size.width - inset : inset
                 let departure = bandBottoms[sourceBand] + CGFloat(channel * 4)
                 let arrival = bandTops[targetBand] - bandGap + 4 + CGFloat(channel * 4)
                 points += [CGPoint(x: exitX, y: departure), CGPoint(x: lane, y: departure),

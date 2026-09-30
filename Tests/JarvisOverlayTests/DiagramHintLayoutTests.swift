@@ -41,6 +41,26 @@ import Testing
         }
     }
 
+    @Test(arguments: ["LR", "TD"])
+    func consecutiveFoldedBandsTurnAlongTheirSharedSide(_ direction: String) throws {
+        let source = "flowchart \(direction)\n" + (0..<8).map {
+            "N\($0)[Step \($0)] --> N\($0 + 1)[Step \($0 + 1)]"
+        }.joined(separator: "\n")
+        let graph = try #require(DiagramHint(mermaid: source))
+        let layout = DiagramHintLayout(graph, fitting: CGSize(width: 520, height: 350),
+            box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
+        let routes = try #require(layout.foldedRoutes)
+        for (edge, route) in zip(graph.edges, routes) {
+            let from = try #require(layout.frames[edge.from])
+            let to = try #require(layout.frames[edge.to])
+            guard from.minY != to.minY else { continue }
+            #expect(from.minX == to.minX, "consecutive bands meet in the same column")
+            let xs = route.points.map(\.x)
+            #expect(xs.max()! - xs.min()! <= 144,
+                    "a row turn stays local instead of doubling across the entire diagram")
+        }
+    }
+
     @Test(arguments: [380.0, 520.0, 740.0])
     func foldedBranchesAndReturnArrowsKeepEveryConnectionClear(_ width: Double) throws {
         let graph = try #require(DiagramHint(mermaid: """
