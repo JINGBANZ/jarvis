@@ -116,3 +116,26 @@ The final body is 14,818 UTF-8 bytes, within the existing 15,000-byte packaging 
 Full synthetic responses and prompt/revision metadata were retained locally for review; they are not
 production-session captures or committed evaluation artifacts. The repository Gate remains separate
 packaging/code evidence and does not run these semantic probes.
+
+## Scope, sketch, and evaluation sequence probes
+
+The scope-to-sketch, scope-stays-manual, eval-short-complete, shadow-time-claim and
+human-takeover-recovery cases check the current six-step framework. They preserve a short recap,
+separate scope from design, keep the latest scope through later answers, distinguish shadow from
+measured human effort, and prevent resumed automation from competing with a human owner.
+
+A fresh-context skill-reading agent produced baseline cues for five related synthetic cases before
+editing. The drawing cue explicitly said to explain a whole case first and then draw it, reproducing
+the duplicate-explanation problem. Its other cues largely passed; the baseline already distinguished
+shadow quality from realized savings. After the revision, a fresh read in the same evaluation agent
+produced six cues: direct scope-to-design transition, sketch while explaining then walkthrough,
+compact complete evaluation, no shadow-based time claim, manual exception scope retained, and human
+ownership recorded at takeover. The responses were manually reviewed. These are single-pass
+instruction-level development probes; the revised pass retained the baseline evaluation conversation.
+They are not independent transfer evidence, repeated reliability measurements, production-provider
+runs, or signed-app tests. The new fixture inputs/criteria are retained for repeatable future runs;
+the production harness was not used for these probes. Subsequent reference-text compression and
+catalog wording were inspected separately, not counted as additional semantic runs.
+
+The build/catalog Gate verifies packaging, deferred loading, and existing app tests. It does not prove
+coaching behavior or deploy the updated skill into a running app.

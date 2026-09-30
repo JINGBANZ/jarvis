@@ -234,8 +234,8 @@ the explicit workflow scope prevents it from claiming generative media/content c
 An ordinary URL-shortener question belongs to `system-design`. Manufacturing can supply the customer
 context for an inspection workflow; it is not a separate interview category.
 
-The skill is standalone: discovery → design → evals and change, with a symptom-driven troubleshooting
-branch. Explicit requests and spoken transitions determine the current segment, not elapsed time.
+The skill is standalone: understand today → agree scope → sketch and walkthrough → focused deep
+dives → evaluate → rollout, with a symptom-driven troubleshooting branch. Explicit requests and spoken transitions determine the current segment, not elapsed time.
 If `system-design` is also loaded, the customer-scenario skill owns staging while that role-play
 continues. Loading it as a mandatory companion was rejected because the
 requirements/entities/API progression would compete with customer discovery and add unnecessary
@@ -249,7 +249,12 @@ Guidance follows one customer item from current work through decisions and error
 system. Delivery defaults to the next usable cue: discovery asks one next question, with a short
 reason when helpful; playback gives one takeaway, two customer facts, and one confirmation question;
 overload replaces the earlier explanation with one plain sentence and one next move while preserving
-approval and safety constraints. Full scripts require an explicit request. Design proposes one missing
+approval and safety constraints. Full scripts require an explicit request and begin with a short complete plain-English answer.
+Guided practice identifies the current step and one next move; an uncoached mock leaves the candidate
+to lead. A short recap precedes scope agreement, and the latest scope persists through design and
+evaluation. The candidate sketches while explaining, then walks a case through the sketch. Expansion
+keeps the agreed approval requirements; changing authority is a separate decision.
+Design proposes one missing
 mechanism and its consequence; evaluation ties a metric, slice, or failure mode to the customer's risk.
 The domain sections supply a silent knowledge checklist, and productive progress calls for silence.
 Deterministic rules handle known paths, with bounded agent steps where judgment is needed.

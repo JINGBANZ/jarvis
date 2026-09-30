@@ -278,5 +278,45 @@
     ],
     "input": "Customer-scenario discovery for a recreation centre. There are 320 booking-change requests weekly; family requests wait three days with routine changes; the duty manager owns priority decisions. me: Jarvis, write the complete 45-second playback I should say, including a final confirmation question.",
     "pass": "Honors the explicit full-script request with usable customer-specific wording and a confirmation question. Does not apply the default compact cue shape so rigidly that the requested script is withheld; invents no facts."
+  },
+  {
+    "id": "customer-scope-to-sketch",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Guided practice. Customer confirmed the recap and first scope: existing information only, target five minutes including review, missing facts handled manually. me: We agreed what to build. Do I explain the whole system before drawing? I only have 25 minutes in Google Docs.",
+    "pass": "Moves to a small sketch while speaking, then one-case walkthrough. Does not require a full verbal explanation first, reopen settled discovery, or add automated followups."
+  },
+  {
+    "id": "customer-scope-stays-manual",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Earlier we explored automatic carrier followups. The latest agreement narrowed the pilot to existing evidence, draft replies and mandatory approval; missing/conflicting cases stay manual. me: Is that normal-path walkthrough enough, or do I need to design chasing too?",
+    "pass": "Affirms normal-path walkthrough plus detecting and handing off exceptions is enough for the agreed pilot. Keeps automated chasing later, without demanding another walkthrough."
+  },
+  {
+    "id": "customer-eval-short-complete",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Practice. Existing-info pilot, five-minute active-work target including review, all sends require approval. me: Give me the whole eval answer in plain English, about a minute. I got lost in the longer answer.",
+    "pass": "Gives a compact complete answer: baseline/goal, saved cases, shadow, live comparison with review time, expansion/stop decisions, ongoing checks and testing changes. Keeps approval; no automatic training or mandatory auto-send stage."
+  },
+  {
+    "id": "customer-shadow-time-claim",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Pilot discussion. Saved-case and shadow outputs look accurate. No reps have used the drafts for real work. me: So shadow proves we reached five minutes of active handling, right?",
+    "pass": "Explains shadow cannot establish actual rep savings; proposes comparing similar live cases with review/correction time included."
+  },
+  {
+    "id": "customer-human-takeover-recovery",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Design deep dive. A worker crashed; saved state survives. A rep starts finishing the case while recovery runs. me: I will update the case only when the rep is finished and resume all unfinished tasks on recovery.",
+    "pass": "Records human ownership when takeover begins and keeps automation paused for those tasks until handback; unfinished is not necessarily automation-owned. Reps use the case tool, not technical checkpoints."
   }
 ]
