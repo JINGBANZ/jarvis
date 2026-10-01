@@ -234,19 +234,35 @@ the explicit workflow scope prevents it from claiming generative media/content c
 An ordinary URL-shortener question belongs to `system-design`. Manufacturing can supply the customer
 context for an inspection workflow; it is not a separate interview category.
 
-The skill is standalone: discovery → design → evals and change, with a symptom-driven troubleshooting
-branch. Explicit requests and spoken transitions determine the current segment; elapsed time is a
-practice pacing aid, not a gate. If `system-design` is also loaded, the customer-scenario skill owns
-staging while that role-play continues. Loading it as a mandatory companion was rejected because the
+The skill is standalone: understand today → agree scope → sketch and walkthrough → focused deep
+dives → evaluate → rollout, with a symptom-driven troubleshooting branch. Explicit requests and spoken transitions determine the current segment, not elapsed time.
+If `system-design` is also loaded, the customer-scenario skill owns staging while that role-play
+continues. Loading it as a mandatory companion was rejected because the
 requirements/entities/API progression would compete with customer discovery and add unnecessary
 context. A compact copy of the supported diagram vocabulary keeps architecture hints self-contained;
-the parser still owns the grammar and limits. Only a warranted high-level design hint includes a
-focused private sketch, never an assumed edit to the customer's shared drawing.
+the parser still owns the grammar and limits. A warranted flow hint starts with a small overview,
+then a warranted follow-up expands the relevant part. Both preserve decision branches and explicit
+approval or safety gates before risky actions. These are private sketches, never assumed edits to
+the customer's shared drawing.
 
 Guidance follows one customer item from current work through decisions and error costs to the proposed
-system. Discovery asks one open question at a time; design proposes a mechanism and what breaks without
-it; evaluation ties metrics and rollout gates to the customer's risk. Deterministic rules handle known
-paths, with bounded agent steps where judgment is needed. The skill covers workflow state, runtime
+system. Delivery defaults to the next usable cue: discovery asks one next question, with a short
+reason when helpful; playback gives one takeaway, two customer facts, and one confirmation question;
+overload replaces the earlier explanation with one plain sentence and one next move while preserving
+approval and safety constraints. Full scripts require an explicit request and begin with a short complete plain-English answer.
+Guided practice identifies the current step and one next move; an uncoached mock leaves the candidate
+to lead. A short recap precedes scope agreement, and the latest scope persists through design and
+evaluation. The candidate sketches while explaining, then walks a concrete case through what happened,
+what evidence is checked, what it means, and the resulting action. Coaching distinguishes accurate
+extraction from a justified business decision. Corrections require code recalculation, refreshed
+drafts and renewed approval; capacity claims use measured human effort and actual adoption rather
+than draft coverage. Expansion keeps the agreed approval requirements; changing authority is a
+separate decision.
+Design proposes one missing
+mechanism and its consequence; evaluation ties a metric, slice, or failure mode to the customer's risk.
+The domain sections supply a silent knowledge checklist, and productive progress calls for silence.
+Deterministic rules handle known paths, with bounded agent steps where judgment is needed.
+The skill covers workflow state, runtime
 choice, integrations, human approval, recovery, security, capacity/cost, evaluation, and versioned
 change. It adapts to explicit requirements instead of prescribing an agent, retrieval, or durable
 engine for every problem. General cloud knowledge is sufficient; vendor names are optional.
@@ -460,8 +476,8 @@ by choice: TextKit 2 does not lay out text tables or blocks and would fall back 
 [`DetailDocumentView`](../Sources/JarvisOverlay/DetailDocumentView.swift) stacks one view per
 segment, top to bottom in document order, rather than one text view with the diagram attached
 inline. Apple's Markdown parser gives no syntax coloring or diff tinting and cannot draw a diagram, so
-the code block and the diagram keep their own formatters, and a diagram in its own view scales into
-the height the text segments leave, wherever it sits, down to a legible floor.
+the code block and diagram keep their own formatters. Diagram sizing follows the width and readability
+rules below.
 
 There is one detail box, so a later reply replaces what is in it. Its title strip names the hint the
 detail came from and carries the recovery: back and forward arrows step through the session's details
@@ -490,11 +506,13 @@ the box hides both sections and expanding restores them.
 
 A shown diagram gives the detail area most of the existing panel, leaving a compact hint-history
 strip visible. It never changes the outer panel's size or position. A manually chosen divider
-proportion still takes precedence. Diagrams adapt their flow to the available width: a horizontal
-chain can become vertical, and wide ranks wrap into rows. Node and edge labels retain their native
-readable size, with only vertical scrolling when the graph cannot fit the remaining height. Prose
-beside a diagram keeps its configured compact size rather than shrinking to compensate for the graph.
-See `OverlayBoxPanel`, `DetailDocumentView`, `DiagramHintLayout`, and `DiagramHintImage` for sizing.
+proportion still takes precedence. Diagrams adapt their flow to the available width: long workflows
+can fold into alternating rows when that reduces their height and keeps connections distinct;
+otherwise, a horizontal chain can become vertical and wide ranks wrap into rows. Layout preserves
+every node, label, and directed connection. Node and edge labels retain their native readable size,
+with vertical scrolling when the graph cannot fit the remaining height. Prose beside a diagram keeps
+its configured compact size rather than shrinking to compensate for the graph. See `OverlayBoxPanel`,
+`DetailDocumentView`, `DiagramHintLayout`, `FoldedDiagramHintLayout`, and `DiagramHintImage` for sizing.
 
 Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
 reports back what reached the screen. A detail the box could not accept, because it is hidden or

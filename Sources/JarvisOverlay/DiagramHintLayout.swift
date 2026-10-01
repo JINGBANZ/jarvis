@@ -5,6 +5,7 @@ struct DiagramHintLayout {
     let frames: [String: CGRect]
     let size: CGSize
     let horizontal: Bool
+    let foldedRoutes: [FoldedDiagramHintLayout.EdgeRoute]?
 
     init(_ graph: DiagramHint, fitting available: CGSize, box: CGSize,
          edgeLabel: CGSize, margin: CGFloat) {
@@ -41,6 +42,17 @@ struct DiagramHintLayout {
         let preferAcross = graph.direction == .leftToRight
             ? across.height <= available.height || across.height < down.height
             : down.height > available.height && across.height < down.height
+        if across.width > available.width,
+           let folded = FoldedDiagramHintLayout(graph: graph, groups: groups, width: available.width,
+                                               box: box, edgeLabel: edgeLabel, margin: margin),
+           folded.size.height < down.height {
+            frames = folded.frames
+            size = folded.size
+            horizontal = false
+            foldedRoutes = folded.routes
+            return
+        }
+        foldedRoutes = nil
         horizontal = across.width <= available.width && preferAcross
         size = horizontal ? across : down
         var frames: [String: CGRect] = [:]

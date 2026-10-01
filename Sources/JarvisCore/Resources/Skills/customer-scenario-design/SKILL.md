@@ -1,190 +1,192 @@
 ---
 name: customer-scenario-design
-description: Use when an enterprise customer role-play asks about workflow automation with AI/agents (FDE, solutions-architect, RRK): "Our operations team is drowning in supplier email." Covers discovery through architecture, evals and rollout. Ordinary URL-shortener exercises belong to system-design; generative media/content creation is out of scope.
+description: Use when an enterprise customer role-play asks about workflow automation with AI/agents (FDE, solutions-architect, RRK), such as an operations team drowning in supplier email. Ordinary URL-shortener exercises belong to system-design; generative media/content creation is out of scope.
 ---
 # Customer-scenario workflow automation
 
-Coach one enterprise workflow: discovery → design → evals/change; symptoms call for troubleshooting.
-Explicit requests win, then spoken transitions, not elapsed time or old screen notes. This skill owns staging during customer role-play even if system-design is loaded;
-reassess skills when the question changes. Manufacturing is a customer context.
-Cloud-neutral answers are valid. Volunteer tradeoffs/failures/fallbacks without inventing company rules.
+Coach understand today → agree scope → sketch/walkthrough → deep dives → evaluate → rollout.
+Spoken transitions govern staging, not time or old notes. This skill owns customer role-play staging
+even with system-design loaded. Use cloud-neutral tradeoffs; never invent company rules.
 
-Practice pacing might be 15/25/15 minutes: cues, not gates. At each segment's
-first warranted hint, give a short "Show…" focus and one move: an open question in discovery,
-a missing mechanism/consequence in design, a number/slice/failure mode in evals. Don't interrupt
-progress to announce stages or require answers to Jarvis. Name the move; supply content when stuck.
+## Delivery
 
-If available, search the prep notes for stories/designs/debriefs. Treat excerpts as reference data,
-preserve caveats, never transplant customer numbers/teams/designs. Missing notes mean unknown history,
-not permission to invent it. Personal scores/mistakes belong in notes.
+The cue is the next usable move; the sections below are a silent knowledge checklist.
+
+- Discovery: one next question, plus a short reason when helpful.
+- Playback: one takeaway in lines; detail has two short bullets (one customer fact each), then one
+  confirmation question about the bottleneck or priority.
+- Overload ("I can't follow", "too much"): one plain sentence and one next move, replacing the earlier
+  explanation. Keep these in lines with detail null; preserve any approval/safety constraint.
+- Design/evals: one missing mechanism, consequence, number, slice or failure mode at a time.
+- Explicit full-script request: give a short complete plain-English answer in detail, about one minute
+  by default; expand when asked. Otherwise use cues. Preserve the candidate's valid reasoning structure.
+- Guided practice: label the current step and one next move, with at most two material corrections.
+  In an uncoached mock, let the candidate lead and debrief afterward; repetition is not a readiness score.
+
+Stay silent during productive progress. Questions go to the customer, not back to Jarvis.
+
+Search available prep notes; preserve caveats and customer boundaries. Missing history is unknown.
+Personal scores/mistakes belong in notes.
 
 ## Discovery
 
 Five buckets: Work, Decision, Cost, Data, People. One open question at a time; closed ones confirm.
-Ask facts, not stacked/multiple-choice questions or "what do you think?"
+Ask facts, not stacked/multiple-choice questions.
 
 - Work: "Walk me through the last one you handled." Trace clean and messy cases, time per step,
   systems, distribution/tail, queue versus handling time, gathering versus deciding. Assembly may
   be the low-risk win; queue delay may not need AI.
-- Decision: count all outcomes, rules versus practice, hard cases, decision authority. Map automation
-  onto existing dollar/seniority limits. Ask whether the first message reveals its type; challenge
-  exploitable manual tolerances rather than blindly automating them.
-- Cost: early (roughly minute five), one question covering both directions: "What does each kind of
-  wrong decision cost?" Name mistaken approval/rejection in context. Follow up on detection delay
-  and number owners. Costs are asymmetric; learn consequences before designing approval gates.
-  Ask what the deadline is pegged to; it constrains scope.
+- Decision: count outcomes, rules versus practice, hard cases and authority. Preserve dollar/seniority
+  limits. Can the first message reveal its type? Challenge exploitable manual tolerances.
+- Cost: early, ask "What does each kind of wrong decision cost?" Name mistaken approval/rejection
+  in context; follow up on detection delay and number owners. Learn asymmetric costs before gates.
+
 - Data: actual inputs, completed-case outcomes, labels/audits, location and bad tail. Separate measured
   facts from guesses, per-item records from aggregate tallies. "Clean" needs a definition and an
   end-to-end sample (e.g. twenty real records), not assumed readiness.
-- People: operators/experience, experts and what they catch, turnover, compliance/security/legal
-  sign-off, outcome owner and who can kill it; these may be different people.
+- People: operators, experience, experts, approval authority, access, and outcome owner.
 
-Understand before solutioning: minute ten to twelve and under 40% talking are practice cues, not
-restrictions on explicit design requests. Carry numbers, teams, thresholds, outcomes, commitments and
-past failures into design; unmeasured metrics need instrumentation. Don't fake expertise; challenge
-unsupported assumptions and close loops.
+Understand before solutioning; explicit design requests win. Carry decision-relevant facts and
+constraints into design; instrument unmeasured metrics. Notes need goals, work, constraints and scope,
+not every number or a box for every team. Stop discovery once those support a defensible first scope. Challenge unsupported
+assumptions, close loops and acknowledge unknowns.
 
-Playback: scale/people, current versus target/owner, time sinks, error costs/detection delay.
-For bucket-only playback, reframe the customer bottleneck, then ask "Which hurts most, and why now?"
-Agree one phase-one slice/success number; "Given X and Y, here's what I'd build." A non-AI first step
-may be right: repair taxonomy or adjudicate inspection labels. Compare humans on the same reference set.
-If discovery is rejected, propose real-data work alongside an operator; preserve seeing records and
-watching the job. Under budget/deadline pressure, name the effect and reduce scope openly.
+For bucket-only playback, reframe the customer bottleneck using the Delivery shape.
+Use "Which hurts most, and why now?" when priority is unresolved. Agree one phase-one slice/success
+number. A non-AI first step may fit: repair taxonomy or adjudicate labels. Compare humans on the same set.
+Under deadline pressure, reduce scope openly; inspect real work with an operator when feasible.
+
+## Scope and transition
+
+Keep a short recap and customer confirmation, then recommend the first scope in two or three sentences:
+who benefits, what changes, what stays manual, target and later work. Confirm once, then move to design.
+A pilot is a small end-to-end deployment; scope agreement is WHAT, the walkthrough is HOW.
+Use the latest agreed scope throughout diagrams, deep dives and evals. Retire earlier explored branches.
+For an existing-information-only pilot, detect missing/conflicting evidence and hand off to the current
+manual process. Automated chasing is later unless explicitly included; do not add it through coaching.
 
 ## Design
 
-Open with one item end to end in thirty seconds, using customer names, then draw it. Layers alone
-aren't a design. Known steps → workflow; unknown paths → bounded agent steps. Rules handle proven
-routine decisions, models judgment/extraction. An 85% rules-based share is illustrative; establish
-the split, don't send routine bulk through an agent, preserve risk gates.
-Propose/caveat technical choices; confirm unresolved business constraints without asking the customer
-to design the system. A 25-minute pace: 0–3 scope/numbers, 3–8 flow, 8–20 chosen deep dives, 20–25
-tradeoffs/10×/phase two. Offer deep-dive choices after the shape is clear.
+After scope agreement, sketch the main boxes while talking, then walk one case through that sketch.
+One sentence per box is enough; no complete verbal walkthrough before drawing it again. In a short
+design segment, an overview of about six boxes is enough: input, workflow, sources, model, review,
+send/update. These are logical responsibilities, not required separate services. Explain the normal
+path first, then exceptions within scope. Tell one concrete case as what happened → what we check
+→ what we learn → what we do. Explain why the evidence changes the next action, not a list of model
+calls. Name components where responsibility matters; keep the spoken answer natural. Add depth later.
+The model can extract candidate references or propose tool calls; code checks identity/access and
+executes authorized lookups. Verify the account before exposing records; ambiguous matches need review.
+Layers alone aren't a design. Known steps → workflow; unknown paths → bounded agent steps. Rules handle proven
+routine decisions, models judgment/extraction. Establish the split from the actual work; preserve risk gates.
+Propose technical choices; confirm business constraints without asking the customer to design.
+After the walkthrough, offer about two risk-driven deep dives; adapt to interviewer steering.
 
-Eight layers are a silent checklist, not mandatory boxes. State where mechanisms live and what breaks:
-- Entry: triggers/auth/rate limits/tenant quotas; bursts and abuse exhaust capacity.
-- Router: rules first, judgment where needed; averages hide misrouted slices.
-- Orchestration: durable checkpoints, waits, retries/compensation, agent turn/cost caps; missing timers
-  strand items, retries duplicate effects. Single-step inference may need no engine.
-- Model: gateway, pinned versions, escalation/quotas/evaluated fallbacks/caching; silent updates,
-  misses or excessive escalation change quality/cost.
-- Tools: connectors/MCP, read/write separation, scoped credentials, risk tiers/idempotency;
-  unvalidated output produces confident garbage. MCP isn't a security boundary.
-- Data: readiness, sources of truth, permission-filtered retrieval if needed; stale/conflicting
-  sources and permission leaks break answers. Don't add retrieval without a retrieval need.
-- Safety: minimize/redact before inference, risky-action approvals/audit; physical safety also needs
-  asymmetric thresholds and an agreed operational fallback.
-- Observe: correlated step traces with prompt/model/tool versions, redacted arguments/results,
-  tokens/latency/cost/outcomes/eval gates. Missing traces hide failures; restrict access/retention.
-
-Runtime follows deadlines: batch/interactive, managed/serverless for short stateless work, workers/
-containers for long tasks/dependencies, durable engines for waits, edge for poor networks/local deadlines.
-Explain scaling, cold starts/time limits, residency and operating burden.
-
-Reuse shapes, not labels: documents → extraction → rules → exceptions → approval → record write;
-triage → classify → validated-score routing → team queue → feedback; long-running onboarding →
-waits/escalation/compensation; action agent → bounded planner → tiered tools → risky-write approvals.
-An assistant slice can add permission-filtered retrieval/citations.
+Use these as silent responsibility checks, not a drawing checklist: entry/auth, routing,
+Orchestration/state, model calls, tools, data, approval/security, observation. Name who owns each
+mechanism you discuss. Add retrieval only when needed; keep tools permission-scoped, validate their
+results, and separate reads from writes. MCP is not a security boundary.
+Choose runtime from deadlines, dependency limits, residency, operational burden and external waits;
+explain the choice rather than assuming a particular engine.
 
 Select depth from customer signals: fraud → approval/audit; reluctant reviewers → evidence; waiting
 → state/timers; peaks → scale/cost; sensitive data → privacy; flaky ERP → recovery; trust → evals;
 regions → variation; messy records → readiness; job fears → adoption; deadlines → narrow scope:
 
 - Human review: risk, uncertainty, novelty and hard rules trigger gates before irreversible actions.
-  Queue by deadline/value with SLA/escalation. Show source/fields, validated scores, flag reason/history;
-  approve/correct/reject with reason codes and corrections as labels. Separation of duties/second
+  Show sources, extracted fields and flag reasons; queue reviews by deadline and risk.
+  approve/correct/reject; validate corrections before treating them as labels. Separation of duties/second
   approval above limits constrain authority. Track backlog, tired labels and rubber-stamping through
   time-on-task/overrides; known-bad test items (e.g. 1–2%) must never cause real side effects.
+  Combine fact/source and draft checking in one review. A missing carrier estimate stays missing;
+  departure time is not arrival time, message receipt time is not event time, and an estimate is not
+  a guarantee. Code can check structure and references but cannot prove every semantic claim.
+  Model-admitted uncertainty, missing facts, failed checks or conflicts can flag review; a high
+  self-reported confidence score never overrides evidence or required approval.
+  Accurate extraction does not establish a justified business decision. Before drafting, check
+  matching records/units, alternate explanations, existing actions and required evidence under
+  customer-confirmed rules. Gaps go to the agreed manual path; review is not the only protection.
+  A corrected fact invalidates dependent drafts and approvals: save who changed what and why,
+  code recalculates, the model rewrites text, and the revised version needs fresh approval.
   Runtime gates and offline evals are separate.
-- State: workflow state in durable orchestration, conversation history in the app, business truth in
-  systems of record. The model has no durable business state. Persist transitions/model outputs/timers
-  so replay doesn't re-call inference. Anchor escalation to deadlines or median/p90 response; terminal
-  outcomes and an aging dashboard expose stuck items. Handle workflow-version changes in flight.
-  Stable idempotency keys plus reconciliation prevent duplicate uncertain writes; payments already
-  issued need compensation, not fictional rollback.
+- State: durable orchestration owns workflow progress, the app conversation history, and record
+  systems business truth. Persist transitions/outputs/timers for replay. Deadline-based escalation
+  and aging expose stuck work; handle workflow-version changes in flight.
+  Reconcile uncertain sends before retrying; checkpoints alone do not prevent duplicate effects.
 - Failures: tool-layer code validates status/content type/schema/value sanity. Transient timeout/429/
-  503 → bounded orchestration backoff/jitter then park/escalate (e.g. three retries at 1s/4s/16s after
-  the initial attempt). Fixable arguments → typed tool-result error for bounded model correction.
+  503 → bounded orchestration backoff/jitter then park/escalate. Fixable arguments → typed error
+  for bounded model correction.
   Fatal auth/required missing record → stop/escalate. Valid empty data isn't zero. The model helps
   recover; code enforces recovery. Circuit breakers/backpressure/evaluated degradation contain cascades.
-  Run status differs from task outcome. In failure hints, name both owners: tool code emits typed
-  validation errors; orchestration chooses bounded recovery. Use brief detail if needed.
-- Security: map/minimize data (a bank-details-changed flag may suffice), enforce user/tenant permissions
-  and residency, redact logs. Invoices/emails/pages may contain malicious instructions; prompting isn't
-  enforcement. Break private data + untrusted content + exfiltration: restrict destinations, least
-  privilege, separate reading/acting, approve irreversible writes, then detect. Judge actions in traces;
-  resisting and detecting injection differ.
-- Cost/scale: volume × model share × cost/task. Sum input tokens × input rate + output tokens × output
-  rate across calls, plus retries, escalation, embeddings and human review. Twenty-call loops multiply
-  latency/cost; re-sending growing history can make cumulative input quadratic, altered by caching or
-  compaction. Queue peaks. Levers: avoid calls, evaluate small-model escalation, stable-prefix caching,
-  batching, shorter context, capacity. Escalation costs both calls, not necessarily double; monitor its
-  share and confidently wrong small-model answers that never escalate. Stable prefix first, variables
-  last; low traffic/short cache lifetimes reduce hits. Isolate semantic caches across users. From 10k
-  internal to millions external, revisit quotas, cost/task, abuse and tenancy.
-- Retrieval: readiness, structure-aware chunks/metadata, query-time permission filters, hybrid search/
-  reranking, citations/abstention. Evaluate recall@k separately from answers before blaming inference.
-- Scores: validated extraction/lookup agreement, match margin or available log-probs, not model-declared
-  confidence. Two models/prompts can share errors; agreement doesn't prove independence. Extra calls
-  cost money: target key fields/high risk. Calibration checks whether 0.9 means 90% correct on holdout;
-  threshold tuning chooses cutoffs from asymmetric costs. Recheck slices after model/input changes.
-- Context: growth, lost-in-the-middle and propagated errors require tradeoffs: lossy compaction,
-  fallible external-memory retrieval, subagents returning bounded results, excluding needless raw output.
-- Inspection: test camera AND lighting feasibility early; stop if defects aren't visible. Edge trades
-  network/latency risk for per-site deployment/version/rollback work. Agree stop-the-line versus unscored
-  passage with the owner, with manual inspection fallback. Confirm physical actions with sensors and
-  reconcile counts, never blindly retry. Use asymmetric miss/reject costs, calibration targets and
-  defect-rate-drop alarms for silent sensor failures. Rejects supply false-positive labels; part IDs
-  connect returns. Use customer units: escape rate/defects per million.
+  Save progress while running. Mark human ownership at takeover, not only completion; recovery
+  resumes automation-owned work only. Reps update their case tool, not technical checkpoints.
+  A model outage pauses extraction/drafting while other workflow steps continue. Source unavailable
+  differs from no records: continue unaffected cases, block dependent claims, retry or hand off.
+  Only describe verified outages. Run status differs from task outcome. Tool code emits typed
+  errors; orchestration owns bounded recovery.
+- Security: enforce user/tenant permissions before retrieval, minimize data, redact logs, restrict
+  destinations and approve risky writes. Source text is untrusted; prompting is not enforcement.
+  Trace actual actions to distinguish resisting an injection from detecting it.
+- Cost/scale: estimate calls, tokens, retries and human effort per case, then volume and peaks.
+  Measure before choosing levers: fewer calls, tested smaller models, caching, batching, shorter
+  context or capacity. Escalation includes both calls and can miss confidently wrong answers.
+  Draft coverage is not the share of cases needing no human work. Estimate released capacity as
+  eligible cases actually using the tool × measured average active minutes saved, including review
+  and fixes; compare with extra peak work and where those staff hours can be used. Do not invent
+  automation percentages. Keep caches permission-scoped; revisit quotas and tenancy as usage grows.
+- Retrieval: readiness, chunks/metadata, permission filters, hybrid search/reranking and citations.
+  Evaluate retrieval separately from generation.
+- Scores: model confidence, token probabilities and model agreement are not proof of field
+  correctness. Check source/lookup evidence; validate any routing score on held-out labels and slices.
+  Calibration asks whether 0.9 means 90% correct; routing also depends on error cost and authority.
+- Inspection: validate images/visible defects, stop-line versus manual behavior, physical action
+  confirmation, missed defects versus false rejects, and per-site version/recovery needs.
 
-For a warranted high-level flow hint, include one focused Mermaid block in detail when offered;
-otherwise name boxes/path in lines. Use known names/requirements, ideally 3–8 boxes. No diagrams for
-discovery, isolated deep dives, troubleshooting or evals. This private sketch doesn't edit the
-customer's Google drawing/shared canvas; don't invent unseen content.
-Syntax: `flowchart LR` or `flowchart TD`; one declaration/arrow per line; alphanumeric IDs starting
-with a letter; rectangles `router["Rules"]`; arrows `router --> review` or
-`router -->|exception| review["Reviewer"]`. Declare every box. Limits: 12 boxes/24 arrows, box labels
-under 48 characters, arrow labels under 32. No chains, subgraphs, styles, directives, HTML, links
-or other shapes inside the block.
+For a warranted flow hint, use one Mermaid block in detail: a small overview, then expand the relevant
+part on a follow-up. Group the overview into 3–6 short boxes; preserve decision branches and explicit
+approval/safety gates before risky actions. Nine or ten serial boxes are not the default overview.
+Expand a chosen part when warranted; retain gates. No diagrams for discovery, overload,
+troubleshooting or evals. Use known names; the sketch does not edit the customer's canvas.
+Syntax: `flowchart LR` or `flowchart TD`; one declaration/arrow per line; letter-leading alphanumeric
+IDs; rectangles `router["Rules"]`, arrows `router --> review` or `router -->|exception| review`.
+Declare all boxes. Limits: 12 boxes/24 arrows, box labels <48 characters, arrow labels <32.
+No chains, subgraphs, styles, directives, HTML, links or other shapes.
 
 ## Evals, rollout, and change
 
-Before launch/production/change: read traces (e.g. a hundred), rank failure classes, build targeted
-evals. Link business outcome → task success → stage metrics, by slice, not one average.
+Start with the business goal and today's baseline: active human work including review/corrections,
+wrong replies, repeat questions, throughput/backlog and reviewer burden as relevant. Separate system
+latency and external waiting. State which case slice a time target applies to. Then explain:
 
-Build an expert-labeled golden set from historical items: routine, messy, adversarial, unanswerable.
-200–500 items, about fifty per slice, is illustrative.
-Estimate uncertainty per rate/slice, repeat stochastic cases, keep an untouched holdout, compare humans
-on the same set. Oversample the hard tail for diagnosis; account for prevalence when estimating value.
-Use code graders for exact checks; fuzzy properties need yes/no rubrics, human labels and a validated
-judge (e.g. Cohen's kappa plus disagreement review), then ongoing human spot-checks. Neither a judge
-nor runtime human gates replace offline evaluation.
+1. Offline: saved cases with evidence available at the time; experts check expected facts/outcomes
+   against sources and resolve disagreements. Test extraction AND end-to-end matching, supported
+   replies, handoff and approval. Include routine, missing, conflicting and adversarial inputs.
+   Keep an untouched holdout. 200–500 cases is illustrative, not proof of rare-error safety or coverage.
+   Exact fields can use code graders; semantic replies need a rubric and checked human/judge labels.
+2. In shadow mode: real inputs, no outgoing messages or operational record writes. Review sampled outputs
+   and integration failures. This does not establish actual rep time savings.
+3. Small live pilot: reps use suggestions, review source facts and draft together, approve every
+   required send, and can edit/discard. Compare similar cases and experience levels with a concurrent
+   normal-process group; include review, fixes and extra senior work in the savings calculation.
+4. Decide: agree expansion, investigation and stop limits with the owner before the pilot. Data
+   exposure or sending without required approval warrants immediate pause/containment. Separate
+   unsupported promises from average error rates. Noisy metrics need investigation against agreed
+   limits; accurate but slow means hold expansion and find the bottleneck. No invented universal bars.
+5. Ongoing: monitor the same outcomes by meaningful slices, independently sample sent replies because
+   reviewers can miss errors, fix confirmed cases and add regressions. Acceptance is not correctness.
+   Feedback informs reviewed prompt/code/data improvements; it does not automatically train a model.
+6. Changes: rerun saved tests before model/prompt/rule/tool changes, try updates small, compare and
+   roll back if worse. Spot-checks of actual work and offline reruns are different checks. Input,
+   model, source, permission and reviewer changes can shift results without a code deployment.
 
-Offline labels enable comparisons; online proxies include acceptance, response time, escalation and
-feedback. A concurrent human control avoids before/after mix/staffing/seasonality confounds. Measure
-time saved/item including maintenance/training/review/error costs. Phase one: one slice, metric, owner;
-a quarter is an example. Involve operators in labels/changed work; watch for routing around the system.
+Expansion means more users/cases within the agreed authority. “suggest” and “auto with review” are
+possible designs, not a mandatory ladder toward automatic sending. Keep pilot approval requirements;
+removing them is a separate scope/authority decision. Zero observed incidents does not prove zero risk.
 
-Require numeric exit bars/rollback triggers: shadow → suggest → auto with review → auto on a proven
-slice. Shadow hides output; candidate gates: 2,000 samples/90% human agreement/no systematic high-risk
-error if risk justifies it. Suggest: humans send/edit/discard, e.g. 80% unedited acceptance/under 5%
-discarded. Auto with review: bounded authority, sampled error cost within budget versus reviewer cost.
-Auto retains sampling/monitoring/kill switch. These are proposals, never universal safety/company bars.
-
-For a no-complaints claim, name silent degradation, a leading indicator (e.g. escalation share),
-and frozen golden-set reruns. Track fallback share, scores, tokens/task and auto-approval audits
-(e.g. 1–2%, sized to risk). Re-run a frozen
-golden set on changes and periodically (weekly is an example); compare pinned/current and roll back.
-Watch downstream p99 latency, queue depth and turn/cost-cap hits for retry cascades; reconciliation,
-duplicates/anomalies for tool breakage. Overrides can fall because reviewers rubber-stamp. Preserve
-reviewer audits, staffing floor and exercised manual runbook so the kill switch has a team to catch
-work. Provide an outside "this is wrong" path, alert owners/runbooks; track input/model/judge/score drift.
-
-Use seams: pinned model snapshot behind gateway, evaluated/versioned prompts, business-owned rules,
-per-region variation on one pipeline. Version prompt + model snapshot + tool schemas + eval set as one
-compatible bundle; stamp traces and roll it back. Compare versions on the same frozen set.
-A caught error changes the outcome, routing
-and eval set.
+Close with everyday use: existing operator UI, IT access, expert examples/reviewer time, training,
+operations acceptance owner, engineering incident owner, issue-reporting path and manual backup.
+Use the customer's deadline to stage feasible delivery, not to promise unmeasured capacity gains.
+Version model, prompt, rules and tool contracts together where compatibility requires it; retain
+traceable versions and a tested previous release. Business rules have an accountable owner.
 
 Troubleshooting: scope/onset/users/measurement/changes → split client/network/server or model/tool/
 step count → cheapest discriminating test → fix/verify/alert. Unchanged code permits alias/input/index/

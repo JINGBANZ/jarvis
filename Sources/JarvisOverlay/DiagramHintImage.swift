@@ -28,6 +28,10 @@ enum DiagramHintImage {
         transform.scale(by: scale)
         transform.concat()
         for (index, edge) in graph.edges.enumerated() {
+            if let routes = layout.foldedRoutes {
+                drawFoldedEdge(routes[index])
+                continue
+            }
             guard let from = frames[edge.from], let to = frames[edge.to] else { continue }
             let forward = horizontal ? to.minX > from.minX : to.minY > from.minY
             let start = horizontal
@@ -84,6 +88,14 @@ enum DiagramHintImage {
                 drawLabel(label, in: rect, fontSize: 12, background: true)
             }
         }
+        if let routes = layout.foldedRoutes {
+            for (edge, route) in zip(graph.edges, routes) {
+                guard let label = edge.label else { continue }
+                drawLabel(label, in: CGRect(x: route.labelCenter.x - edgeLabel.width / 2,
+                    y: route.labelCenter.y - edgeLabel.height / 2,
+                    width: edgeLabel.width, height: edgeLabel.height), fontSize: 12, background: true)
+            }
+        }
         for node in graph.nodes {
             guard let frame = frames[node.id] else { continue }
             let box = NSBezierPath(roundedRect: frame, xRadius: 7, yRadius: 7)
@@ -96,6 +108,24 @@ enum DiagramHintImage {
         }
         image.unlockFocus()
         return image
+    }
+
+    private static func drawFoldedEdge(_ route: FoldedDiagramHintLayout.EdgeRoute) {
+        let path = NSBezierPath()
+        path.move(to: route.points[0])
+        for point in route.points.dropFirst() { path.line(to: point) }
+        NSColor(white: 0.75, alpha: 1).setStroke()
+        path.lineWidth = 2
+        path.stroke()
+        let end = route.points.last!
+        let previous = route.points[route.points.count - 2]
+        let direction: CGFloat = end.x > previous.x ? 1 : -1
+        let arrow = NSBezierPath()
+        arrow.move(to: CGPoint(x: end.x - direction * 8, y: end.y - 5))
+        arrow.line(to: end)
+        arrow.line(to: CGPoint(x: end.x - direction * 8, y: end.y + 5))
+        arrow.lineWidth = 2
+        arrow.stroke()
     }
 
     private static func drawLabel(_ label: String, in rect: NSRect, fontSize: CGFloat, background: Bool) {
