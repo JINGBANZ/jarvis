@@ -175,6 +175,39 @@ import Testing
         #expect(x("Keep") - x("100.") > marker)
     }
 
+    @Test func discoveryCalloutsAccentTheFactAndKeepTheirLabels() throws {
+        let text = try render("""
+            - **Key fact: 30% less prep and review time.** Confirmed target.
+            - **Risk: Quotes need manager approval.** Preserve that gate.
+            - Open question: weekly custom volume.
+
+            **Ask AI:** Check the calculation.
+            """)
+        let fact = try #require(text.color("30%"))
+        let risk = try #require(text.color("Quotes need"))
+        let normal = try #require(text.color("Confirmed target"))
+        #expect(fact != normal && risk != normal && fact != risk)
+        #expect(text.color("Key fact:") == fact)
+        #expect(text.color("Risk:") == risk)
+        #expect(text.color("Open question:") == normal)
+        #expect(text.color("Ask AI:") == fact)
+        #expect(text.string.contains("Key fact: 30% less prep and review time."))
+        #expect(text.string.contains("Risk: Quotes need manager approval."))
+    }
+
+    @Test func ordinaryBoldAndCodeDoNotBecomeDiscoveryCallouts() throws {
+        let text = try render("""
+            **Important:** Read first.
+
+            Key fact: ordinary text.
+
+            `Risk: code example`
+            """)
+        #expect(text.color("Important:") == text.color("ordinary text"))
+        #expect(text.color("Key fact:") == text.color("ordinary text"))
+        #expect(try text.font("Risk:").isFixedPitch)
+    }
+
     private func render(_ markdown: String) throws -> NSAttributedString {
         let detail = try #require(ReplyDetail(markdown: markdown))
         guard case .prose(let prose)? = detail.segments.first, detail.segments.count == 1 else {

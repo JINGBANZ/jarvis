@@ -11,6 +11,7 @@ enum DetailProseFormatting {
     private static let quoted = NSColor(white: 1, alpha: 0.62)
     private static let code = NSColor(white: 1, alpha: 0.94)
     private static let askAI = NSColor(srgbRed: 128 / 255, green: 217 / 255, blue: 238 / 255, alpha: 1)
+    private static let risk = NSColor(srgbRed: 1, green: 0.81, blue: 0.57, alpha: 1)
     private static let lineSeparator = "\u{2028}"
 
     static func render(_ prose: AttributedString, fontSize: CGFloat) -> NSAttributedString {
@@ -111,8 +112,12 @@ enum DetailProseFormatting {
             .font: font,
             .foregroundColor: isCode ? code : block.isQuoted ? quoted : foreground,
         ]
-        if inline.contains(.stronglyEmphasized), text == "Ask AI" || text == "Ask AI:" {
-            attributes[.foregroundColor] = askAI
+        if inline.contains(.stronglyEmphasized), !isCode {
+            if text == "Ask AI" || text == "Ask AI:" || text.hasPrefix("Key fact:") {
+                attributes[.foregroundColor] = askAI
+            } else if text.hasPrefix("Risk:") {
+                attributes[.foregroundColor] = risk
+            }
         }
         if inline.contains(.strikethrough) {
             attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
