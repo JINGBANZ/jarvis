@@ -2,10 +2,15 @@ import Foundation
 import JarvisCore
 
 struct DiagramHintLayout {
+    struct EdgeRoute {
+        let points: [CGPoint]
+        let labelCenter: CGPoint
+    }
+
     let frames: [String: CGRect]
     let size: CGSize
     let horizontal: Bool
-    let foldedRoutes: [FoldedDiagramHintLayout.EdgeRoute]?
+    let routes: [EdgeRoute]
 
     init(_ graph: DiagramHint, fitting available: CGSize, box: CGSize,
          edgeLabel: CGSize, margin: CGFloat) {
@@ -13,67 +18,29 @@ struct DiagramHintLayout {
         let groups = (0...ranks.values.max()!).map { rank in
             graph.nodes.filter { ranks[$0.id] == rank }
         }
-        func gap(after nodes: [DiagramHint.Node], labelExtent: CGFloat) -> CGFloat {
-            let outputs = nodes.map { node in
-                graph.edges.filter { $0.from == node.id && $0.label != nil }.count
-            }.max() ?? 0
-            return max(28, CGFloat(outputs) * (labelExtent + 8) + 8)
-        }
-        let columnGap: CGFloat = 20
-        let breadth = groups.map(\.count).max()!
-        let columns = max(1, min(breadth, Int(
-            (available.width - margin * 2 + columnGap) / (box.width + columnGap))))
-        let rows = groups.flatMap { nodes in
-            stride(from: 0, to: nodes.count, by: columns).map {
-                Array(nodes[$0..<min($0 + columns, nodes.count)])
-            }
-        }
-        let horizontalGaps = groups.map { gap(after: $0, labelExtent: edgeLabel.width) }
-        let verticalGaps = rows.map { gap(after: $0, labelExtent: edgeLabel.height) }
-        let hasBackEdge = graph.edges.contains { ranks[$0.to]! <= ranks[$0.from]! }
-        let across = CGSize(
-            width: margin * 2 + CGFloat(groups.count) * box.width + horizontalGaps.dropLast().reduce(0, +)
-                + (hasBackEdge ? horizontalGaps.last! : 0),
-            height: margin * 2 + CGFloat(breadth) * (box.height + 16) - 16)
-        let down = CGSize(
-            width: margin * 2 + CGFloat(columns) * (box.width + columnGap) - columnGap,
-            height: margin * 2 + CGFloat(rows.count) * box.height + verticalGaps.dropLast().reduce(0, +)
-                + (hasBackEdge ? verticalGaps.last! : 0))
-        let preferAcross = graph.direction == .leftToRight
-            ? across.height <= available.height || across.height < down.height
-            : down.height > available.height && across.height < down.height
-        if across.width > available.width,
-           let folded = FoldedDiagramHintLayout(graph: graph, groups: groups, width: available.width,
-                                               box: box, edgeLabel: edgeLabel, margin: margin),
-           folded.size.height < down.height {
-            frames = folded.frames
-            size = folded.size
-            horizontal = false
-            foldedRoutes = folded.routes
-            return
-        }
-        foldedRoutes = nil
-        horizontal = across.width <= available.width && preferAcross
-        size = horizontal ? across : down
-        var frames: [String: CGRect] = [:]
-        var position = margin
-        for (index, nodes) in (horizontal ? groups : rows).enumerated() {
-            for (offset, node) in nodes.enumerated() {
-                let origin: CGPoint
-                if horizontal {
-                    origin = CGPoint(x: position,
-                        y: (size.height - CGFloat(nodes.count) * (box.height + 16) + 16) / 2
-                            + CGFloat(offset) * (box.height + 16))
-                } else {
-                    origin = CGPoint(
-                        x: (size.width - CGFloat(nodes.count) * (box.width + columnGap) + columnGap) / 2
-                            + CGFloat(offset) * (box.width + columnGap), y: position)
+        if graph.direction == .leftToRight {
+            let across = Self.arrange(graph, groups: groups, breadth: .greatestFiniteMagnitude,
+                box: CGSize(width: box.height, height: box.width),
+                label: CGSize(width: edgeLabel.height, height: edgeLabel.width), margin: margin)
+            if across.size.height <= available.width {
+                frames = across.frames.mapValues {
+                    CGRect(x: $0.minY, y: $0.minX, width: $0.height, height: $0.width)
                 }
-                frames[node.id] = CGRect(origin: origin, size: box)
+                size = CGSize(width: across.size.height, height: across.size.width)
+                horizontal = true
+                routes = across.routes.map { route in
+                    EdgeRoute(points: route.points.map { CGPoint(x: $0.y, y: $0.x) },
+                        labelCenter: CGPoint(x: route.labelCenter.y, y: route.labelCenter.x))
+                }
+                return
             }
-            position += horizontal ? box.width + horizontalGaps[index] : box.height + verticalGaps[index]
         }
-        self.frames = frames
+        let down = Self.arrange(graph, groups: groups, breadth: available.width,
+                               box: box, label: edgeLabel, margin: margin)
+        frames = down.frames
+        size = down.size
+        horizontal = false
+        routes = down.routes
     }
 
     private static func ranks(_ graph: DiagramHint) -> [String: Int] {

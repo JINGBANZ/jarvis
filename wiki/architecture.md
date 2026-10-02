@@ -234,8 +234,9 @@ the explicit workflow scope prevents it from claiming generative media/content c
 An ordinary URL-shortener question belongs to `system-design`. Manufacturing can supply the customer
 context for an inspection workflow; it is not a separate interview category.
 
-The skill is standalone: understand today → agree scope → sketch and walkthrough → focused deep
-dives → evaluate → rollout, with a symptom-driven troubleshooting branch. Explicit requests and spoken transitions determine the current segment, not elapsed time.
+The skill is standalone: understand today → agree scope → sketch → walk one case through → focused
+deep dives → evaluate → rollout, with a symptom-driven troubleshooting branch. Explicit requests and
+spoken transitions determine the current segment, not elapsed time.
 If `system-design` is also loaded, the customer-scenario skill owns staging while that role-play
 continues. Loading it as a mandatory companion was rejected because the
 requirements/entities/API progression would compete with customer discovery and add unnecessary
@@ -246,21 +247,36 @@ approval or safety gates before risky actions. These are private sketches, never
 the customer's shared drawing.
 
 Guidance follows one customer item from current work through decisions and error costs to the proposed
-system. Delivery defaults to the next usable cue: discovery asks one next question, with a short
-reason when helpful; playback gives one takeaway, two customer facts, and one confirmation question;
-overload replaces the earlier explanation with one plain sentence and one next move while preserving
-approval and safety constraints. Full scripts require an explicit request and begin with a short complete plain-English answer.
+system. Discovery follows the candidate's productive line of questioning and the interviewer's steering;
+the domain buckets help notice gaps without repeatedly redirecting the conversation to a preferred topic.
+Delivery defaults to one usable cue in plain English, with concise optional detail. Confusion calls for
+an explanation before another question or instruction; overload reduces that explanation to one plain
+sentence and one next move while preserving approval and safety constraints. Playback gives one
+takeaway, two customer facts, and one confirmation question. Full scripts require an explicit request
+and begin with a short complete plain-English answer. A request to stop coaching permits silence or a
+brief acknowledgment, then no further coaching or demand to finish unless the candidate asks.
 Guided practice identifies the current step and one next move; an uncoached mock leaves the candidate
-to lead. A short recap precedes scope agreement, and the latest scope persists through design and
-evaluation. The candidate sketches while explaining, then walks a concrete case through what happened,
-what evidence is checked, what it means, and the resulting action. Coaching distinguishes accurate
-extraction from a justified business decision. Corrections require code recalculation, refreshed
-drafts and renewed approval; capacity claims use measured human effort and actual adoption rather
-than draft coverage. Expansion keeps the agreed approval requirements; changing authority is a
-separate decision.
-Design proposes one missing
-mechanism and its consequence; evaluation ties a metric, slice, or failure mode to the customer's risk.
-The domain sections supply a silent knowledge checklist, and productive progress calls for silence.
+to lead.
+
+At a natural transition or on request, a compact “What we know so far” detail keeps three or four
+bullets of decision-relevant confirmed facts, risks, proposals, and open questions, with their status
+clear. These notes use the existing detail history rather than a separate store. The explicit labels
+and [detail emphasis](#the-detail-box) make the evidence easy to scan without turning every reply into
+a recap or presenting a proposed design as a confirmed customer fact.
+
+A short recap precedes scope agreement, and the latest scope persists through design and evaluation.
+The candidate sketches while explaining, then the explicit **Walk one case through** step follows what
+happened, what evidence is checked, what it means, and the resulting action. Completion means the
+candidate actually walked the case through; a prior reminder or diagram alone does not establish it.
+Interviewer steering can defer the walkthrough, and a completed walkthrough is not repeatedly requested.
+Coaching distinguishes accurate extraction from a justified business decision. Corrections require
+code recalculation, refreshed drafts and renewed approval; capacity claims use measured human effort
+and actual adoption rather than draft coverage. Expansion keeps the agreed approval requirements;
+changing authority is a separate decision. Technical claims preserve the conditions and limits that
+make them true rather than promising guarantees a mechanism alone cannot provide.
+Design proposes one missing mechanism and its consequence; evaluation ties a metric, slice, or failure
+mode to the customer's risk. The domain sections supply a silent knowledge checklist, and productive
+progress calls for silence.
 Deterministic rules handle known paths, with bounded agent steps where judgment is needed.
 The skill covers workflow state, runtime
 choice, integrations, human approval, recovery, security, capacity/cost, evaluation, and versioned
@@ -458,7 +474,11 @@ plus GFM tables and strikethrough) marks up, and
 [`DetailProseFormatting`](../Sources/JarvisOverlay/DetailProseFormatting.swift) draws every block kind
 it emits: larger semibold headings, numbered items with their own number, bullets that change with
 depth, nested items and a list item's later paragraphs hanging under the item's text, quotes with a
-left bar and dimmer text, and a thematic break as a full-width rule. One switch in
+left bar and dimmer text, and a thematic break as a full-width rule. Fully bold spans beginning with
+“Key fact:” render in cyan and those beginning with “Risk:” render in amber, including the short fact
+or risk in the same span. The words remain ordinary accessible text, so color supplements their meaning
+and the same detail remains readable in history and Activity. This uses the existing Markdown formatter;
+it adds no notes state or custom markup. One switch in
 [`DetailProseFormatting+Block`](../Sources/JarvisOverlay/DetailProseFormatting+Block.swift) names every
 kind, so the compiler flags one left out, and a kind a later SDK adds reads as a paragraph. Syntax the
 parser does not know, such as task lists, footnotes, or math, shows as written. Of the HTML tags, only
@@ -506,13 +526,14 @@ the box hides both sections and expanding restores them.
 
 A shown diagram gives the detail area most of the existing panel, leaving a compact hint-history
 strip visible. It never changes the outer panel's size or position. A manually chosen divider
-proportion still takes precedence. Diagrams adapt their flow to the available width: long workflows
-can fold into alternating rows when that reduces their height and keeps connections distinct;
-otherwise, a horizontal chain can become vertical and wide ranks wrap into rows. Layout preserves
-every node, label, and directed connection. Node and edge labels retain their native readable size,
-with vertical scrolling when the graph cannot fit the remaining height. Prose beside a diagram keeps
-its configured compact size rather than shrinking to compensate for the graph. See `OverlayBoxPanel`,
-`DetailDocumentView`, `DiagramHintLayout`, `FoldedDiagramHintLayout`, and `DiagramHintImage` for sizing.
+proportion still takes precedence. Diagrams adapt their flow to the available width using ranked rows
+with a consistent reading direction. A horizontal chain can become vertical and wide ranks wrap into
+rows; explicit connection routes preserve every node, label, directed edge, decision branch, and safety
+gate. This keeps the flow readable without making the user reverse direction on successive rows.
+Node and edge labels retain their native readable size, with vertical scrolling when the graph cannot
+fit the remaining height. Prose beside a diagram keeps its configured compact size rather than shrinking
+to compensate for the graph. See `OverlayBoxPanel`, `DetailDocumentView`, `DiagramHintLayout`, and
+`DiagramHintImage` for sizing and routing.
 
 Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
 reports back what reached the screen. A detail the box could not accept, because it is hidden or

@@ -22,18 +22,22 @@ import Testing
         }
     }
 
-    @Test func longWorkflowUsesSeveralColumnsWithoutShrinkingBoxes() throws {
-        let source = "flowchart LR\n" + (0..<8).map {
+    @Test(arguments: ["LR", "TD"])
+    func longWorkflowKeepsOneReadingDirectionWithoutShrinkingBoxes(_ direction: String) throws {
+        let source = "flowchart \(direction)\n" + (0..<8).map {
             "N\($0)[Step \($0)] --> N\($0 + 1)[Step \($0 + 1)]"
         }.joined(separator: "\n")
         let graph = try #require(DiagramHint(mermaid: source))
         let layout = DiagramHintLayout(graph, fitting: CGSize(width: 520, height: 350),
             box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
         #expect(layout.size.width <= 520)
-        #expect(layout.size.height <= 350)
-        #expect(Set(layout.frames.values.map(\.minX)).count >= 2)
-        #expect(Set(layout.frames.values.map(\.minY)).count >= 2)
+        #expect(layout.size.height > 350, "readable chains scroll instead of reversing direction")
         #expect(layout.frames.count == 9)
+        for edge in graph.edges {
+            let from = try #require(layout.frames[edge.from])
+            let to = try #require(layout.frames[edge.to])
+            #expect(to.minY > from.maxY)
+        }
         for (id, frame) in layout.frames {
             #expect(frame.size == CGSize(width: 144, height: 36))
             #expect(CGRect(origin: .zero, size: layout.size).contains(frame))
@@ -41,28 +45,8 @@ import Testing
         }
     }
 
-    @Test(arguments: ["LR", "TD"])
-    func consecutiveFoldedBandsTurnAlongTheirSharedSide(_ direction: String) throws {
-        let source = "flowchart \(direction)\n" + (0..<8).map {
-            "N\($0)[Step \($0)] --> N\($0 + 1)[Step \($0 + 1)]"
-        }.joined(separator: "\n")
-        let graph = try #require(DiagramHint(mermaid: source))
-        let layout = DiagramHintLayout(graph, fitting: CGSize(width: 520, height: 350),
-            box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
-        let routes = try #require(layout.foldedRoutes)
-        for (edge, route) in zip(graph.edges, routes) {
-            let from = try #require(layout.frames[edge.from])
-            let to = try #require(layout.frames[edge.to])
-            guard from.minY != to.minY else { continue }
-            #expect(from.minX == to.minX, "consecutive bands meet in the same column")
-            let xs = route.points.map(\.x)
-            #expect(xs.max()! - xs.min()! <= 144,
-                    "a row turn stays local instead of doubling across the entire diagram")
-        }
-    }
-
     @Test(arguments: [380.0, 520.0, 740.0])
-    func foldedBranchesAndReturnArrowsKeepEveryConnectionClear(_ width: Double) throws {
+    func branchesAndReturnArrowsKeepEveryConnectionClear(_ width: Double) throws {
         let graph = try #require(DiagramHint(mermaid: """
             flowchart LR
             A[Intake] --> B[Extract]
@@ -78,7 +62,7 @@ import Testing
             """))
         let layout = DiagramHintLayout(graph, fitting: CGSize(width: width, height: 350),
             box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
-        let routes = try #require(layout.foldedRoutes)
+        let routes = layout.routes
         #expect(routes.count == graph.edges.count)
         #expect(layout.frames.count == graph.nodes.count)
         let bounds = CGRect(origin: .zero, size: layout.size)
@@ -86,9 +70,10 @@ import Testing
         for (edge, route) in zip(graph.edges, routes) {
             let from = try #require(layout.frames[edge.from])
             let to = try #require(layout.frames[edge.to])
-            #expect(route.points.first == CGPoint(x: from.midX, y: from.maxY))
+            #expect(route.points.first?.y == from.maxY)
+            #expect((from.minX...from.maxX).contains(route.points.first!.x))
             let end = try #require(route.points.last)
-            #expect(end.y == to.midY && (end.x == to.minX || end.x == to.maxX))
+            #expect(end.y == to.minY && (to.minX...to.maxX).contains(end.x))
             #expect(route.points.allSatisfy { bounds.contains($0) })
             for (a, b) in zip(route.points, route.points.dropFirst()) {
                 #expect(a.x == b.x || a.y == b.y)
@@ -109,7 +94,30 @@ import Testing
         }
     }
 
-    @Test func foldingDoesNotJoinIndependentWorkflows() throws {
+    @Test(arguments: [
+        "flowchart TD\nA[Apply rules] -->|routine| B[Draft]\nA -->|exception| C[Review]",
+        "flowchart TD\nA[Draft] -->|approved| C[Record]\nB[Review] -->|approved| C",
+        "flowchart TD\nA[Draft] -->|yes| C[Record]\nA -->|no| D[Retry]\nB[Review] -->|yes| C\nB -->|no| D",
+        "flowchart TD\nA[Source A] -->|a approved| D[Record]\nB[Source B] -->|b approved| D\nC[Source C] -->|c approved| D",
+    ], [200.0, 520.0, 900.0])
+    func connectorsDoNotCrossAnotherLabel(_ source: String, _ width: Double) throws {
+        let graph = try #require(DiagramHint(mermaid: source))
+        let layout = DiagramHintLayout(graph, fitting: CGSize(width: width, height: 350),
+            box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
+        for (index, route) in layout.routes.enumerated() {
+            let label = CGRect(x: route.labelCenter.x - 50, y: route.labelCenter.y - 10,
+                               width: 100, height: 20)
+            for (otherIndex, other) in layout.routes.enumerated() where otherIndex != index {
+                for (a, b) in zip(other.points, other.points.dropFirst()) {
+                    let segment = CGRect(x: min(a.x, b.x), y: min(a.y, b.y),
+                        width: max(0.1, abs(a.x - b.x)), height: max(0.1, abs(a.y - b.y)))
+                    #expect(!segment.intersects(label))
+                }
+            }
+        }
+    }
+
+    @Test func routingDoesNotJoinIndependentWorkflows() throws {
         let graph = try #require(DiagramHint(mermaid: """
             flowchart LR
             A[Start one] --> B[Prepare one]
@@ -125,7 +133,7 @@ import Testing
             """))
         let layout = DiagramHintLayout(graph, fitting: CGSize(width: 520, height: 350),
             box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
-        let routes = try #require(layout.foldedRoutes)
+        let routes = layout.routes
         for first in 0..<5 {
             for second in 5..<10 {
                 for (a, b) in zip(routes[first].points, routes[first].points.dropFirst()) {
@@ -138,6 +146,25 @@ import Testing
                     }
                 }
             }
+        }
+    }
+
+    @Test func maximumGraphKeepsEveryNodeAndConnection() throws {
+        let nodes = (0..<12).map { "N\($0)[Step \($0)]" }
+        let edges = (0..<24).map { "N\($0 % 11) --> N11" }
+        let graph = try #require(DiagramHint(mermaid: (["flowchart TD"] + nodes + edges).joined(separator: "\n")))
+        let layout = DiagramHintLayout(graph, fitting: CGSize(width: 200, height: 300),
+            box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
+        #expect(layout.frames.count == 12)
+        #expect(layout.routes.count == 24)
+        #expect(layout.size.width <= 200)
+        for (edge, route) in zip(graph.edges, layout.routes) {
+            let from = try #require(layout.frames[edge.from])
+            let to = try #require(layout.frames[edge.to])
+            let start = try #require(route.points.first)
+            let end = try #require(route.points.last)
+            #expect(start.y == from.maxY && (from.minX...from.maxX).contains(start.x))
+            #expect(end.y == to.minY && (to.minX...to.maxX).contains(end.x))
         }
     }
 

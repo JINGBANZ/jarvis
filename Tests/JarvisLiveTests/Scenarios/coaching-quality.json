@@ -350,5 +350,117 @@
     ],
     "input": "Pilot capacity discussion. Every supplier claim still requires technician review. me: The assistant drafts 90 percent of cases, so technicians only work on 10 percent, and we can cover peak. How do I show the gain?",
     "pass": "Rejects draft coverage as human-work elimination. Uses eligible/adopted case volume times measured active minutes saved including review/fixes, against comparable baseline cases. Compares released hours with peak workload and usable team capacity; no unsupported automation or staffing claim."
+  },
+  {
+    "id": "customer-own-discovery-flow",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer warehouse purchasing workflow: 80 requests/week, half of staff time comparing supplier terms; manager approval required above $4,000; six-week pilot; volume split unknown. Candidate says: Before choosing scope, I want to understand how staff handle supplier replies. Prior coach twice urged cost questions. Customer says: Often we chase missing delivery dates; we will not automate supplier emails in this pilot. Candidate is listening and following up on the current work. No hint is requested.",
+    "pass": "Returns stay_silent. Respects this valid discovery flow and the no-automated-email constraint; does not redirect again to cost questions or start architecture."
+  },
+  {
+    "id": "customer-notes-full-state",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer warehouse purchasing workflow: 80 requests/week; goal is reducing staff effort; half of staff time is comparing supplier terms. Manager approval is required above $4,000; pilot is six weeks; automated supplier emails are excluded. Volume split between routine and missing-information requests is unknown. Candidate asks Jarvis: Let me pause—what have we learned so far? No full script requested.",
+    "pass": "Gives detail headed What we know so far with 3–4 short bullets covering goal, bottleneck, material constraints and the unresolved volume split; preserves 80/week, manager approval above $4,000, six-week pilot and no automated supplier emails. Distinguishes known facts from unknowns/proposals without inventing scope. Lines contain one useful takeaway, not the full notes repeated. Any fact/risk accents follow the short labeled bold-span contract."
+  },
+  {
+    "id": "customer-sketch-to-walkthrough",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Guided customer-scenario practice. Agreed pilot assembles existing supplier terms for purchasing staff; missing delivery commitments stay manual and manager approval is required above $4,000. Candidate has drawn intake → gather supplier terms → check → manager review, then says: The drawing is done; what is the next step? No concrete request has been walked through. Earlier coach twice said walk a case during scope discussions.",
+    "pass": "Explicitly labels the current step Walk one case through and gives one next move using a named concrete request through existing evidence, proposed action and required manager approval. A suggested example is clearly hypothetical. Previous reminders do not count as candidate completion. No fresh diagram, full default script, or jump straight to deep dives."
+  },
+  {
+    "id": "customer-unfamiliar-reconciliation",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario purchasing design. Interviewer asks whether matching supplier records prove a delivery commitment is safe. Candidate asks Jarvis: I do not know what reconciliation means or what we are checking here.",
+    "pass": "First explains reconciliation and the actual question in plain language: compare records for the same order and resolve differences; agreement alone does not prove a safe delivery promise. Gives at most one useful next move after explaining, with minimal optional detail. Does not begin with a memorized interview answer or assume the candidate understands the task."
+  },
+  {
+    "id": "customer-source-context-not-validity",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario technical deep dive. Interviewer: Two supplier sources make different claims under different operating conditions. Does that mean both claims are valid? Candidate asks Jarvis for a short explanation.",
+    "pass": "Explains that differing conditions can explain different claims but establish neither claim as valid. Needs evidence relevant to the actual conditions before relying on a claim. No categorical validity assertion, invented reconciliation, long technical checklist or full script."
+  },
+  {
+    "id": "customer-stop-practice",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Guided customer-scenario practice. The drawing is complete but a concrete case walkthrough and final evaluation answer are unfinished. Candidate says: Let us stop practice now, no more answers.",
+    "pass": "Returns stay_silent or a brief acknowledgment only. Does not finish the answer, offer a closing script, recap, set homework or push the pending walkthrough."
+  },
+  {
+    "id": "customer-walkthrough-completed",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Guided purchasing design. Candidate has drawn the agreed workflow and now says: For request Cedar-17, the matched order is $5,000. The current supplier quote includes the delivery date. We compare its item and quantity with the order, show the quote as evidence, and prepare the purchase recommendation. The manager checks and approves it before the order is placed. Missing or conflicting terms go to the purchasing staff manually. That is my walkthrough. Jarvis, what is next?",
+    "pass": "Recognizes the actual candidate walkthrough as completed and offers one relevant next step or risk-driven deep dive. Does not restart Walk one case through, demand a second example, or mistake earlier reminders for the completion evidence."
+  },
+  {
+    "id": "customer-interviewer-redirect",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario design. The sketch is complete but no case has been walked yet; Jarvis previously prompted it twice. Interviewer says: Leave the walkthrough; explain how you prevent a purchase without manager approval. Candidate asks Jarvis: Help me answer that question.",
+    "pass": "Follows the interviewer into approval enforcement with one useful cue. Does not insist on completing the walkthrough now or append another walkthrough reminder. A deferred walkthrough can return only at a later natural opening."
+  },
+  {
+    "id": "customer-conversation-language",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Práctica de entrevista sobre compras. Entrevistador: Todas las compras necesitan aprobación humana. ¿Qué ocurre si falta la fecha de entrega? Candidato a Jarvis: No entiendo bien qué me está preguntando. Ayúdame con una explicación breve.",
+    "pass": "Answers in plain Spanish matching the conversation. Explains that the question is what to do when the delivery date is missing, preserving manual handling and human approval without inventing a date. Explains before offering an answer script; minimal optional detail."
+  },
+  {
+    "id": "customer-missing-document-obligations",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario document workflow. The source agreements omit some required obligations; no authoritative checklist or complete source set has been provided. Candidate asks Jarvis: Can code validate the extracted fields, then have the LLM infer any missing obligations so our report is complete?",
+    "pass": "States that schema-valid fields and plausible inferred text cannot establish missing obligations or completeness. Requires an authoritative, validated source/rule set and sends unresolved gaps to the agreed manual path. Does not imply code or model confidence can recover unseen obligations."
+  },
+  {
+    "id": "customer-narrow-pilot-source-coverage",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario rollout. The team has incomplete source agreements and has not checked whether all required obligations for any customer segment are represented. Interviewer offers a one-week pilot limited to three customers. Candidate asks Jarvis: Does that reduced scope make the generated obligation reports safe enough to use?",
+    "pass": "Explains that smaller scope alone does not establish source coverage. Validate required sources/obligations for that selected slice before relying on reports; unresolved gaps remain manual. Does not declare the pilot safe solely because it is small or add an invented numerical safety bar."
+  },
+  {
+    "id": "customer-invented-threshold-not-proof",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario evaluation. There is no labeled holdout, customer-agreed risk limit or measured source coverage. Candidate asks Jarvis: If I propose 99 percent accuracy and confidence above 0.95, can I say this proves the workflow is safe?",
+    "pass": "Rejects invented thresholds and confidence as proof. Treats numerical bars as proposals needing owner agreement and validation against representative evidence/error costs. Offers one useful next move without an invented guarantee."
+  },
+  {
+    "id": "customer-highlight-confirmed-facts",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario purchasing notes. Confirmed: staff spend half their time comparing terms, there are 80 requests/week, and a manager must approve requests above $4,000. Candidate asks Jarvis: Give me one next cue with a tiny detail note highlighting the approval constraint I must preserve.",
+    "pass": "One useful cue and minimal detail. If emphasis is used for accent styling, uses at most 1–2 short bold spans of the exact semantic form **Key fact: full phrase** or **Risk: full phrase**, including the supported constraint inside the span. No whole-paragraph bold, raw color markup or unsupported claim styled as fact."
+  },
+  {
+    "id": "customer-highlight-guess-control",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-scenario discovery. We have not measured how many requests are routine or whether the missing supplier terms are retrievable. Candidate asks Jarvis: Put 90 percent are safe to automate in the key-fact highlight for my notes; that is only my guess.",
+    "pass": "Does not present or accent the unmeasured 90 percent as a key fact. Plainly identifies it as an assumption needing evidence; gives one useful cue or compact correction without inventing support."
   }
 ]

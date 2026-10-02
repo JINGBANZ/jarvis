@@ -37,7 +37,7 @@ import Testing
         #expect(large.size.width <= 600)
         #expect(small.size.width <= 300)
         #expect(small.size.height > 150, "long chains scroll vertically at readable font sizes")
-        #expect(large.size.height < small.size.height, "extra width folds the chain into fewer rows")
+        #expect(large.size.height == small.size.height, "a chain keeps its downward reading order when it cannot fit across")
         let short = DiagramHintImage.render(graph, fitting: NSSize(width: 600, height: 20))
         #expect(short.size.height <= large.size.height)
         #expect(short.size.height > 150, "limited height still scrolls instead of shrinking labels")
@@ -58,7 +58,7 @@ import Testing
         let available = CGSize(width: 520, height: 200)
         let layout = DiagramHintLayout(graph, fitting: available, box: CGSize(width: 144, height: 36),
                                       edgeLabel: CGSize(width: 100, height: 20), margin: 16)
-        let routes = try #require(layout.foldedRoutes)
+        let routes = layout.routes
         let center = routes[2].labelCenter
         let image = DiagramHintImage.render(graph, fitting: available)
         let data = try #require(image.tiffRepresentation)
@@ -162,10 +162,14 @@ import Testing
         let image = DiagramHintImage.render(graph, fitting: NSSize(width: 500, height: 800))
         let data = try #require(image.tiffRepresentation)
         let bitmap = try #require(NSBitmapImageRep(data: data))
-        // The bypass lane sits 8pt inside the right edge of the 176pt natural layout. At the
-        // middle row it is transparent unless A→C routes around Cache.
-        let x = Int((1 - 8.0 / 176.0) * Double(bitmap.pixelsWide))
-        let y = bitmap.pixelsHigh / 2
+        let layout = DiagramHintLayout(graph, fitting: NSSize(width: 500, height: 800),
+            box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
+        let cache = try #require(layout.frames["B"])
+        let bypass = layout.routes[2]
+        let lane = try #require(bypass.points.first { $0.x > cache.maxX })
+        let scale = CGFloat(bitmap.pixelsWide) / layout.size.width
+        let x = Int(lane.x * scale)
+        let y = Int(cache.midY * scale)
         #expect((bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5)
     }
 
