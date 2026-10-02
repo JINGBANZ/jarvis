@@ -192,6 +192,28 @@ private final class DeltaBox: @unchecked Sendable {
         #expect(started.duration(to: .now) < .seconds(5), "the reply did not wait for the deadline")
     }
 
+    @Test func liveCoachingAllowsAReplyToFinishBeyondFifteenSeconds() async throws {
+        let http = http(200, contentType: "text/event-stream")
+        let client = BrainAccessor(
+            provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5",
+            stream: true,
+            send: { _ in
+                (AsyncThrowingStream { continuation in
+                    let producer = Task {
+                        let text = Self.claudeEvents + "\n"
+                        let cut = text.index(text.startIndex, offsetBy: text.count / 2)
+                        continuation.yield(Data(text[..<cut].utf8))
+                        try await Task.sleep(for: .seconds(16))
+                        continuation.yield(Data(text[cut...].utf8))
+                        continuation.finish()
+                    }
+                    continuation.onTermination = { _ in producer.cancel() }
+                }, http)
+            })
+        let response = try await client.respond(messages: [.user("hi")], tools: coachTools)
+        #expect(response.toolCalls == [.speak(callId: "toolu_01", lines: ["Try a hash map."])])
+    }
+
     /// `timeoutInterval` bounds the wait between bytes; a reply that keeps trickling ends at the
     /// same total deadline, and records like any other timeout.
     @Test func theWholeReplyIsBoundedByTheWorkloadTimeout() async throws {

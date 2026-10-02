@@ -328,18 +328,43 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(object["detail"] as? String == "Sketch it.")
     }
 
-    /// A cut inside a code block commits the code as shown, its half-written line included.
-    @Test func anIncompleteReplyCutInsideACodeBlockCommitsTheCodeAsShown() async {
+    @Test(arguments: [true, false])
+    func anInterruptedCodeBlockIsOmittedFromDeliveryActivityAndHistory(timeout: Bool) async throws {
         let overlay = ProgressRecordingOverlay()
+        let activity = RecordingActivity()
         let cut = #"{"lines":["Sort by start.","Then merge overlaps."],"detail":"Try this.\n\n```python\na = 1\nb = "#
-        let brain = StreamingBrain(turns: [.init(prefixes: [cut], outcome: .reply(reply(incompleteReason: "max_tokens")))])
+        let brain = StreamingBrain(turns: [
+            .init(prefixes: [cut], outcome: timeout
+                ? .failure(URLError(.timedOut)) : .reply(reply(incompleteReason: "max_tokens"))),
+            .init(outcome: .reply(speak)),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, activity: activity)
 
-        guard case .completed(let outcome) = await runAttempt(.turnEnd, brain: brain, overlay: overlay) else {
+        #expect(await driver.handleTrigger(.manualCode) == .spoke)
+        #expect(brain.calls.count == 1)
+        let detail = "Try this.\n\nCode was interrupted. Press Show code to request it again."
+        #expect(overlay.events.last == .deliver(lines: ["Sort by start.", "Then merge overlaps."], detail: detail))
+        #expect(activity.events.contains {
+            if case .tip(_, let shown) = $0 { shown == detail } else { false }
+        })
+
+        transcript.append(.init(speaker: .them, text: "And the complexity?", at: 101))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        let replayed = try #require(brain.calls[1].flatMap { $0.toolCalls ?? [] }.first { $0.name == speakToolName })
+        let object = try #require(JSONSerialization.jsonObject(with: Data(replayed.argumentsJSON.utf8)) as? [String: Any])
+        #expect(object["detail"] as? String == detail)
+    }
+
+    @Test func aCompletedCodeBlockSurvivesATransportFailure() async {
+        let overlay = ProgressRecordingOverlay()
+        let cut = #"{"lines":["Sort by start."],"detail":"```python\na = 1\n```"#
+        let brain = StreamingBrain(turns: [.init(prefixes: [cut], outcome: .failure(URLError(.timedOut)))])
+
+        guard case .completed(let outcome) = await runAttempt(.manualCode, brain: brain, overlay: overlay) else {
             Issue.record("expected the closed lines to be spoken"); return
         }
         #expect(outcome == .spoke)
-        #expect(overlay.events.last == .deliver(lines: ["Sort by start.", "Then merge overlaps."],
-                                                detail: "Try this.\n\n```python\na = 1\nb = "))
+        #expect(overlay.events.last == .deliver(lines: ["Sort by start."], detail: "```python\na = 1\n```"))
     }
 
     /// An array that closed empty showed no hint, so there is nothing to keep: the attempt fails
