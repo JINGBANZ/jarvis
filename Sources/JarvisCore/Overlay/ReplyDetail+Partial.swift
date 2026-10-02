@@ -14,6 +14,18 @@ extension ReplyDetail {
             .trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
+    /// A stopped stream must not leave a half-written code block as the finished answer.
+    public init?(interruptedMarkdown markdown: String) {
+        guard let open = Self.fences(in: markdown).last, !open.isClosed, !open.isDiagram else {
+            self.init(partialMarkdown: markdown)
+            return
+        }
+        let prefix = String(markdown[..<open.range.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let notice = "Code was interrupted. Press Show code to request it again."
+        self.init(markdown: prefix.isEmpty ? notice : prefix + "\n\n" + notice)
+    }
+
     /// True while the text ends inside a diagram fence, where the box shows a placeholder.
     public static func endsInsideADiagram(_ markdown: String) -> Bool {
         openDiagramFence(in: markdown) != nil

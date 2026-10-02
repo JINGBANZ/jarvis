@@ -354,13 +354,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 return .completed(.spoke)
             }
 
-            /// The hint as the stream left it, committed like a completed reply. Nothing is
-            /// synthesized: the lines the user read stay, with the detail as the box showed it.
             func speak(_ streamed: BrainReplyProgress) async -> AttemptResult {
                 await speak(
                     callID: "runner_" + UUID().uuidString.prefix(8).lowercased(),
                     lines: streamed.closedLines,
-                    detail: streamed.detailMarkdown.flatMap(ReplyDetail.init(partialMarkdown:)))
+                    detail: streamed.detailMarkdown.flatMap(ReplyDetail.init(interruptedMarkdown:)))
             }
 
             while iterations < maxToolIterations {
@@ -408,7 +406,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         stage: .request)
                     jlog("Jarvis coach: brain request failed on \(reason) via "
                          + "\(attempt.target.provider.displayName): \(failure.errorDescription ?? "")")
-                    // Lines the user has read stay on screen and commit with the detail so far.
+                    // Keep the hint already read, but finalize interrupted code before committing it.
                     // An array that closed empty showed nothing, so it has nothing to keep, and a
                     // rejection (Claude's refusal stop) ended the reply on purpose, so nothing is kept.
                     if let streamed, streamed.linesComplete, !streamed.closedLines.isEmpty,

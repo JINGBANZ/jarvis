@@ -536,9 +536,11 @@ Clear like any held detail, goes on following the reply, and heads the entry the
 `deliver` replaces the live detail with the delivered one,
 which is where dropped blocks are applied and where a detail the box cannot accept is dropped
 whole, and a withdrawn reply removes it and releases a hold placed on it, so the history holds one
-detail per reply whatever streamed. A reply cut short after its lines closed commits its detail
-through the same partial parse the box showed, so a cut inside a diagram fence commits no diagram
-and a cut inside a code block commits the code as shown.
+detail per reply whatever streamed. A reply cut short after its lines closed keeps the hint and
+finalizes its detail through `ReplyDetail(interruptedMarkdown:)`. An open code fence is replaced
+with a fixed interruption notice and a suggestion to press Show code again; completed blocks stay.
+An open diagram contributes no diagram, as in the live parse. Activity and committed history receive
+only this finalized detail, so unfinished code cannot masquerade as a usable saved patch.
 
 ### On-demand coaching shortcuts
 
@@ -824,11 +826,11 @@ A **coaching attempt** snapshots one target and the latest provider-neutral conv
 that target for the complete tool loop. Every provider request in that loop is made once. A complete,
 non-truncated terminal `speak` or `stay_silent` commits the attempt and clears that target's consecutive
 failure count. So does a `speak` reply that fails or is cut off after its `lines` array has closed on
-the stream ([Latency](#latency)): the runner delivers and commits the lines as read with the detail
-as the box showed it ([The detail box](#the-detail-box)), through the same path as a completed
+the stream ([Latency](#latency)): the runner delivers and commits the lines as read with the
+interrupted detail finalized ([The detail box](#the-detail-box)), through the same path as a completed
 reply, and logs `Detail: cut short`. Withdrawing
 text the user has already read and running a fresh attempt would risk a second, different hint for
-the same moment; a `max_tokens` cut mid-detail is the common case, a transport drop the rare one. A
+the same moment. A
 provider rejection, such as Claude's `refusal` stop or an OpenAI reply that ends `incomplete` for
 `content_filter` (which the Responses format reads as a refusal), is excluded: the provider ended
 that reply on purpose, so it is withdrawn and fails like a failure before the lines closed. A
@@ -1269,8 +1271,8 @@ is about 60 MB on disk and 20 MB per update.
   needed, and Jarvis narrows it to owner-only. Cancel ends the login and closing Settings does not,
   because the browser still has to redirect; Sign out deletes that subscription's credential files.
 - **Latency sits in the vendors' own band.** Through the helper a Codex turn beats the Codex CLI on the
-  same machine and a Claude press trails the Claude CLI, both inside the same fifteen-second workload
-  deadline, and the [live e2e run](./live-e2e-tests.md) shows that shape end to end. Coaching through
+  same machine and a Claude press trails the Claude CLI; the
+  [live e2e run](./live-e2e-tests.md) measures that shape end to end. Coaching through
   the proxy therefore costs no round trip the CLIs would have saved, which is what made it worth
   adopting over driving those CLIs.
 - **Terms risk is accepted, not hidden.** Anthropic's terms prohibit intermediating Claude session
@@ -1378,7 +1380,11 @@ not to one request, so the `tools` array stays identical on every request of a s
 fallback, not a second transport: an error status, a 2xx that is not `text/event-stream`, and the
 summarizer's whole reply all read through the same body path. `URLRequest.timeoutInterval` bounds
 only the wait between bytes, so the accessor also ends the whole reply at the same
-`BrainWorkloadTimeout`, which is the existing timeout failure.
+`BrainWorkloadTimeout`, which is the existing timeout failure. The live budget covers reasoning and
+the full supporting detail, not just the first hint: a response can start its hint late and still
+need time to finish code. Streaming exposes the hint immediately; the larger total budget permits
+completion at the cost of batching newer conversation behind a slow request for longer. Stop still
+cancels immediately, and every provider keeps the same finite bound.
 
 Below the runner nothing knows the word `speak`: the transport reports neutral `ToolCallDelta`
 values (the call's ordinal, name, and argument text so far) through the sink the runner hands

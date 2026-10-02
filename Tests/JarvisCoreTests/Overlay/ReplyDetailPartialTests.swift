@@ -67,6 +67,19 @@ import Testing
         #expect(ReplyDetail(partialMarkdown: " \n") == nil)
     }
 
+    @Test(arguments: [
+        ("```pyth", "Code was interrupted. Press Show code to request it again."),
+        ("Use this.\n\n~~~diff\n+ count[r", "Use this.\n\nCode was interrupted. Press Show code to request it again."),
+        ("```python\na = 1\n```\n\nThen:\n```python\nb = ",
+         "```python\na = 1\n```\n\nThen:\n\nCode was interrupted. Press Show code to request it again."),
+    ])
+    func interruptedCodeKeepsOnlyTheContentBeforeTheOpenFence(markdown: String, expected: String) throws {
+        let detail = try #require(ReplyDetail(interruptedMarkdown: markdown))
+        #expect(detail.deliveredMarkdown == expected)
+        #expect(detail.hasContent)
+        #expect(detail.code?.code == (markdown.hasPrefix("```python\na = 1\n```") ? "a = 1" : nil))
+    }
+
     @Test func endsInsideADiagramFollowsTheLastFence() {
         #expect(ReplyDetail.endsInsideADiagram("```mermaid\nflowchart LR\nclient --> api"))
         #expect(ReplyDetail.endsInsideADiagram("Sketch it.\n\n```mermaid"))
