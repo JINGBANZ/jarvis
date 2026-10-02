@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.4](https://github.com/JINGBANZ/jarvis/compare/v0.5.3...v0.5.4) (2026-10-02)
+
+
+### Features
+
+* **skills:** add customer workflow scenario coaching ([#420](https://github.com/JINGBANZ/jarvis/issues/420)) ([c72c3df](https://github.com/JINGBANZ/jarvis/commit/c72c3dfc71b2b3518cce235ae07d79701f43fb8c))
+
+
+### Bug Fixes
+
+* **coaching:** allow streamed code to finish ([#424](https://github.com/JINGBANZ/jarvis/issues/424)) ([fd60ab7](https://github.com/JINGBANZ/jarvis/commit/fd60ab7b62733b24652c392cced4013b7d426d56))
+* **coaching:** compact workflow diagrams and rrk cues ([#422](https://github.com/JINGBANZ/jarvis/issues/422)) ([0780d0a](https://github.com/JINGBANZ/jarvis/commit/0780d0a2c9225fc910ef66e968bd964c6f6233d4))
+
 ## [0.5.3](https://github.com/JINGBANZ/jarvis/compare/v0.5.2...v0.5.3) (2026-09-26)
 
 
