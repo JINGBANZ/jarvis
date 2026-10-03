@@ -59,6 +59,7 @@ public struct LiveE2EScenario: Sendable, Equatable {
     public enum Step: Sendable, Equatable {
         case screen(fixture: String)
         case press(CoachingShortcut)
+        case autoHints(Bool)
         case say(Line, overlap: Overlap?, whileAttemptRunning: Bool)
         case switchBrain(BrainProvider)
         case stop
@@ -172,6 +173,9 @@ extension LiveE2EScenario {
                 step = .screen(fixture: fixture)
             case "press":
                 step = .press(try shortcut(raw.press ?? "", label: label))
+            case "autoHints":
+                guard let enabled = raw.autoHints else { throw invalid("autoHints must be a boolean") }
+                step = .autoHints(enabled)
             case "say":
                 guard let line = raw.say else {
                     throw invalid("say must be an object with speaker and text")
@@ -300,7 +304,7 @@ private struct RawOverlap: Decodable {
 
 /// Keeps unknown keys by name so validation can reject them with the step's index.
 private struct RawStep: Decodable {
-    static let primaryKeyNames = ["screen", "press", "say", "switchBrain", "stop"]
+    static let primaryKeyNames = ["screen", "press", "autoHints", "say", "switchBrain", "stop"]
     static let modifierKeyNames = ["overlap", "whileAttemptRunning"]
 
     private struct Key: CodingKey {
@@ -315,6 +319,7 @@ private struct RawStep: Decodable {
     let unknownKeys: [String]
     let screen: String?
     let press: String?
+    let autoHints: Bool?
     let say: RawLine?
     let switchBrain: String?
     let stop: Bool?
@@ -330,6 +335,7 @@ private struct RawStep: Decodable {
         }
         screen = try container.decodeIfPresent(String.self, forKey: Key("screen"))
         press = try container.decodeIfPresent(String.self, forKey: Key("press"))
+        autoHints = try container.decodeIfPresent(Bool.self, forKey: Key("autoHints"))
         say = try container.decodeIfPresent(RawLine.self, forKey: Key("say"))
         switchBrain = try container.decodeIfPresent(String.self, forKey: Key("switchBrain"))
         stop = try container.decodeIfPresent(Bool.self, forKey: Key("stop"))

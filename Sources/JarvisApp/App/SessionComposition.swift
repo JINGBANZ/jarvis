@@ -51,6 +51,9 @@ final class SessionComposition {
     private(set) var coachDriver: CoachDriver?
     private var prepMaterialIndexTask: Task<Void, Never>?
     private var requestManualHint: ((CoachingShortcut) -> Void)?
+    private var autoHintTimer: Timer?
+    private var autoHintSchedule = AutoHintSchedule()
+    private(set) var autoHintsEnabled = false
     /// Only cancelled coaching turns hold the ghost lifecycle open; an audit drain alone doesn't.
     private var pendingTurnDrainIDs: Set<UUID> = []
     /// Bumped only by Start and explicit Settings edits, never by runtime health.
@@ -87,6 +90,30 @@ final class SessionComposition {
     /// Ignored when no session is live.
     func requestShortcut(_ shortcut: CoachingShortcut) {
         requestManualHint?(shortcut)
+    }
+
+    func setAutoHintsEnabled(_ enabled: Bool) {
+        autoHintsEnabled = enabled
+        refreshAutoHintTimer()
+    }
+
+    private func refreshAutoHintTimer() {
+        autoHintTimer?.invalidate()
+        autoHintTimer = nil
+        let active = autoHintsEnabled && sessionIsLive
+        autoHintSchedule.setActive(active, at: ProcessInfo.processInfo.systemUptime)
+        guard active else { return }
+        let timer = Timer(timeInterval: AutoHintSchedule.interval, repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.sessionIsLive, self.autoHintsEnabled,
+                      self.autoHintSchedule.takeTick(at: ProcessInfo.processInfo.systemUptime),
+                      let driver = self.coachDriver else { return }
+                self.refreshAutoHintTimer()
+                self.turns?.run { await driver.handleTrigger(.autoHint) }
+            }
+        }
+        autoHintTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
     }
 
     /// The caller must already have stopped any previous session. Returns false, after reporting
@@ -381,6 +408,7 @@ final class SessionComposition {
         // deadline. Frames queued meanwhile still reach the monitor.
         startCaptureReadiness(readinessSession: readinessSession)
         sessionIsLive = true
+        refreshAutoHintTimer()
         // Only after every early return, so a failed Start leaves the desktop untouched.
         overlayBox.setSessionLive(true)
         jlog("Jarvis: coaching starting — verifying transcription endpoints.")
@@ -398,6 +426,7 @@ final class SessionComposition {
         let hadAllocatedPipeline = hasAllocatedPipeline
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
+        refreshAutoHintTimer()
         overlayBox.setSessionLive(false)
         requestManualHint = nil
         // Take the handle before a quick Start can install another; cancelled turns still write to

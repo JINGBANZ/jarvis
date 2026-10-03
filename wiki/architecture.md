@@ -566,6 +566,17 @@ unsettled transcription, while an automatic retry waits for settlement. Stop can
 while stopped, an explicit keyboard shortcut only beeps and mouse clicks pass through. Activity records
 which coaching shortcut was pressed.
 
+The menu's **Auto hint every 10 seconds** toggle requests screen-grounded hints without speech or
+shortcut input. It starts off on each app launch and retains its selection across Start/Stop in that
+process. `AutoHintSchedule` in `Sources/JarvisCore/Triggers/` owns the interval; `SessionComposition`
+supplies the monotonic clock and timer only while a session is live. Enabling it or starting a session
+waits one full interval before the first request. Busy ticks are discarded atomically by `CoachDriver`,
+so slow responses never build a queue. Auto hints capture a fresh screen and request a tip through the
+same tool loop as a hint shortcut, with `auto_hint` audit attribution and no fabricated manual Activity
+entry. Capture failure uses available conversation context without guessing unseen details. Automatic
+ticks respect transcription settlement and never reopen an exhausted provider route. Stop disarms the
+timer and cancels coaching through the ordinary session teardown; delivery stays in the silent overlay.
+
 Explain more and Show code answer into the detail box, which every session has, so neither has a
 switch; the model follows the [detail guidance](#the-detail-box) and the loaded skill to supply
 the content alongside the hint.

@@ -158,8 +158,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
         let context = TriggerContext(
             reason: reason,
             sessionElapsedSeconds: now - sessionStart)
-        if reason.isManual && work.preparedManualReason != reason {
-            if let prompt = context.promptLine {
+        if reason.requestsScreenHint && work.preparedManualReason != reason {
+            if reason.isManual, let prompt = context.promptLine {
                 jlog("⌨️ coaching shortcut — \(prompt)")
                 switch reason {
                 case .manualCode: activity?.record(.manualCode(prompt: prompt))
@@ -370,7 +370,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // A press must end in a hint and already sent the screen, so it never gets
                 // stay_silent or capture_screen.
                 let toolChoice: ToolChoice
-                if reason.isManual {
+                if reason.requestsScreenHint {
                     let permitted = capabilities.callableNames(loaded: loaded).filter {
                         $0 != staySilentTool.name && $0 != captureScreenTool.name
                     }

@@ -4,6 +4,7 @@ public enum TriggerReason: Sendable, Equatable {
     case turnEnd
     case silence(secondsQuiet: TimeInterval)
     case manualHint
+    case autoHint
     case manualExplanation
 
     case manualCode
@@ -11,6 +12,8 @@ public enum TriggerReason: Sendable, Equatable {
     public var isManual: Bool {
         self == .manualHint || self == .manualExplanation || self == .manualCode
     }
+
+    var requestsScreenHint: Bool { isManual || self == .autoHint }
 }
 
 public struct TriggerContext: Sendable {
@@ -35,6 +38,8 @@ public struct TriggerContext: Sendable {
             )
         case .manualHint:
             return JarvisPrompts.Coach.manualHintTrigger(timestamp: stamp)
+        case .autoHint:
+            return JarvisPrompts.Coach.autoHintTrigger(timestamp: stamp)
         case .manualExplanation:
             return JarvisPrompts.Coach.manualExplanationTrigger(timestamp: stamp)
         case .manualCode:

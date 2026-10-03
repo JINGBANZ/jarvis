@@ -156,6 +156,7 @@ layout in the Gate.
 | B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
+| E | Claude Code | Automatic screen hints without speech or shortcuts, disabling for a full interval, re-enabling, and stopping with the timer armed. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
@@ -293,6 +294,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C28 | Code with AI guidance loads before permitted review and ordinary hint presses deliver committed replies | D |
 | C29 | A blocked delegation step delivers supporting detail without an explicit prompt request | D; semantics use `Tests/JarvisLiveTests/Scenarios/D-review.md` |
 | C30 | Review of a valid AI proposal delivers supporting detail without a confusion signal | D; explanation quality uses the same semantic rubric |
+| C31 | Automatic hints deliver with no speech or shortcuts, pause when disabled, and resume when enabled | E |
 | C31 | Technical preparation is searched when relevant and reused; unrelated coding skips search | A: design, cache invalidation, and one-pass questions |
 | C32 | Cold unrelated coding hints and small talk do not force prep retrieval | A: initial hint and logistics line |
 | C33 | Code hints retain a preceding placement header with an inline code anchor | C: both hint presses |

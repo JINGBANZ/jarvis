@@ -200,6 +200,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
         menuBar.onStart = { [weak self] in self?.start() ?? false }
         menuBar.onStop = { [weak self] in self?.stop(reason: .stoppedByUser) }
+        menuBar.onAutoHintsChanged = { [weak self] enabled in
+            self?.composition.setAutoHintsEnabled(enabled)
+        }
 
         errorReporter.onFatal = { [weak self] reason in
             self?.stop(reason: reason)

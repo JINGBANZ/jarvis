@@ -5,12 +5,14 @@ import JarvisCore
 final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let startStopItem = NSMenuItem.standard("Start Jarvis", symbol: "play.fill", keyEquivalent: "s")
+    private let autoHintItem = NSMenuItem.standard("Auto hint every 10 seconds", symbol: "timer")
     let updateItem: NSMenuItem?
     private(set) var status: JarvisReadiness.Status = .stopped
     var isRunning: Bool { status.keepsSessionActive }
 
     var onStart: (() -> Bool)?
     var onStop: (() -> Void)?
+    var onAutoHintsChanged: ((Bool) -> Void)?
     var onOpenSettings: (() -> Void)?
     let updateAvailability: (() -> Bool)?
     private let onCheckForUpdates: (() -> Void)?
@@ -25,11 +27,14 @@ final class MenuBarController: NSObject {
         super.init()
         startStopItem.target = self
         startStopItem.action = #selector(toggleStartStop)
+        autoHintItem.target = self
+        autoHintItem.action = #selector(toggleAutoHints)
         updateItem?.target = self
         updateItem?.action = #selector(checkForUpdates)
         let menu = NSMenu()
         menu.items = [
             startStopItem,
+            autoHintItem,
             .standard("Settings", symbol: "gearshape",
                       action: #selector(openSettings), target: self, keyEquivalent: ","),
         ]
@@ -87,6 +92,11 @@ final class MenuBarController: NSObject {
     }
 
     @objc private func openSettings() { onOpenSettings?() }
+
+    @objc private func toggleAutoHints() {
+        autoHintItem.state = autoHintItem.state == .on ? .off : .on
+        onAutoHintsChanged?(autoHintItem.state == .on)
+    }
 
     @objc private func checkForUpdates() { onCheckForUpdates?() }
 

@@ -1,0 +1,15 @@
+{
+  "id": "E",
+  "audio": "fixture",
+  "brain": { "primary": "claude-subscription", "fallbacks": [] },
+  "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": [] },
+  "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "steps": [
+    { "screen": "coding-problem.jpg" },
+    { "autoHints": true },
+    { "autoHints": false },
+    { "autoHints": true },
+    { "stop": true }
+  ]
+}

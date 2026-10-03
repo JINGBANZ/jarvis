@@ -36,6 +36,7 @@ enum CoachingRequestAttribution {
         case .turnEnd: "turn_end"
         case .silence: "silence"
         case .manualHint: "manual_hint"
+        case .autoHint: "auto_hint"
         case .manualExplanation: "manual_explanation"
         case .manualCode: "manual_code"
         }
