@@ -302,6 +302,10 @@ public final class CoachDriver: @unchecked Sendable {
         let waiters: [CheckedContinuation<Void, Never>]
         stateLock.lock()
         if sessionTerminated { stateLock.unlock(); return .exhausted }
+        if trigger.reason == .autoHint {
+            if isHandling { stateLock.unlock(); return .covered }
+            if routeIsExhausted { stateLock.unlock(); return .exhausted }
+        }
         if routeIsExhausted && !isHandling &&
             !trigger.reason.isManual && transcript.count <= (failedTranscriptBoundary ?? transcript.count) {
             stateLock.unlock()

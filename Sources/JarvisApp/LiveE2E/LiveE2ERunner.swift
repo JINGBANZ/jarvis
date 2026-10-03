@@ -14,6 +14,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         case startFailed
         case noFixtureAudio(Int)
         case unexpectedSessionEnd(String)
+        case unexpectedAutoHint
         case timedOut(String)
         case aborted
 
@@ -26,6 +27,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             case .startFailed: "The session composition could not start"
             case .noFixtureAudio(let step): "Step \(step) speaks, but this scenario has no fixture audio"
             case .unexpectedSessionEnd(let reason): "The session ended unexpectedly: \(reason)"
+            case .unexpectedAutoHint: "An automatic hint started after automatic hints were disabled"
             case .timedOut(let what): "Timed out waiting for \(what)"
             case .aborted: "Live e2e scenario aborted"
             }
@@ -152,6 +154,18 @@ final class LiveE2ERunner: BrainCompositionHost {
                 composition.requestShortcut(shortcut)
                 try await awaitAttempt(step: index, since: mark, onStart: nil) {
                     $0 == shortcut.triggerReason
+                }
+            case .autoHints(let enabled):
+                let mark = attemptEvents.count
+                composition.setAutoHintsEnabled(enabled)
+                if enabled {
+                    try await awaitAttempt(step: index, since: mark, onStart: nil) { $0 == .autoHint }
+                } else {
+                    try await Task.sleep(for: .seconds(AutoHintSchedule.interval + 1))
+                    try checkAbort()
+                    if firstStartedAttempt(since: mark, matching: { $0 == .autoHint }) != nil {
+                        throw Failure.unexpectedAutoHint
+                    }
                 }
             case .say(let line, let overlap, _):
                 guard fixtureSource != nil, let spoken = clips[index] else {

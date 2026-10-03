@@ -35,6 +35,47 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         return (driver, transcript)
     }
 
+    @Test func autoHintCapturesScreenWithoutSpeechAndAttributesAutomaticRequest() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "s", lines: ["Check the loop boundary."])]),
+        ])
+        let screen = FakeScreen()
+        let overlay = FakeOverlay()
+        let (driver, _) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: ManualClock())
+
+        #expect(await driver.handleTrigger(.autoHint) == .spoke)
+        #expect(screen.captureCount == 1)
+        #expect(brain.calls.first?.contains { $0.imageBase64JPEG != nil } == true)
+        #expect(brain.requestContexts.first??.sourceTrigger == "auto_hint")
+        #expect(overlay.rendered == [["Check the loop boundary."]])
+    }
+
+    @Test func autoHintWhileBusyIsDroppedWithoutAPendingAttempt() async {
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.speak(callId: "s", lines: ["Check the loop boundary."])]),
+        ])
+        let screen = GatedScreen()
+        let (driver, _) = makeDriver(brain: brain, screen: screen, overlay: FakeOverlay(), clock: ManualClock())
+        let task = Task { await driver.handleTrigger(.manualHint) }
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global().async { screen.entered.wait(); continuation.resume() }
+        }
+        #expect(await driver.handleTrigger(.autoHint) == .busy)
+        screen.release.signal()
+        #expect(await task.value == .spoke)
+        #expect(brain.calls.count == 1)
+    }
+
+    @Test func autoHintsDoNotReopenAnExhaustedRoute() async {
+        let brain = ScriptedThrowBrain(script: [nil])
+        let (driver, _) = makeDriver(
+            brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock())
+        #expect(await driver.handleTrigger(.autoHint) == .brainError)
+        #expect(brain.calls.count == 3)
+        #expect(await driver.handleTrigger(.autoHint) == .brainError)
+        #expect(brain.calls.count == 3)
+    }
+
     @Test func manualHintInjectsScreenshotAndForcesSpeakInOneTrip() async {
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [
