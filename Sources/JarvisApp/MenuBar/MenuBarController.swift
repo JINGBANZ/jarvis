@@ -5,7 +5,7 @@ import JarvisCore
 final class MenuBarController: NSObject {
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let startStopItem = NSMenuItem.standard("Start Jarvis", symbol: "play.fill", keyEquivalent: "s")
-    private let autoHintItem = NSMenuItem.standard("Auto hint every 10 seconds", symbol: "timer")
+    private let autoHintItem = NSMenuItem.standard("Auto hint every 1 minute", symbol: "timer")
     let updateItem: NSMenuItem?
     private(set) var status: JarvisReadiness.Status = .stopped
     var isRunning: Bool { status.keepsSessionActive }

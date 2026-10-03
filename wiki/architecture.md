@@ -566,7 +566,7 @@ unsettled transcription, while an automatic retry waits for settlement. Stop can
 while stopped, an explicit keyboard shortcut only beeps and mouse clicks pass through. Activity records
 which coaching shortcut was pressed.
 
-The menu's **Auto hint every 10 seconds** toggle requests screen-grounded hints without speech or
+The menu's **Auto hint every 1 minute** toggle requests screen-grounded hints without speech or
 shortcut input. It starts off on each app launch and retains its selection across Start/Stop in that
 process. `AutoHintSchedule` in `Sources/JarvisCore/Triggers/` owns the interval; `SessionComposition`
 supplies the monotonic clock and timer only while a session is live. Enabling it or starting a session

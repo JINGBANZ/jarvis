@@ -1,7 +1,7 @@
 import Foundation
 
 public struct AutoHintSchedule {
-    public static let interval: TimeInterval = 10
+    public static let interval: TimeInterval = 60
     private var nextTick: TimeInterval?
 
     public init() {}

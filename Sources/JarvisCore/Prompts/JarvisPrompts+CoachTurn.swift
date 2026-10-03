@@ -16,7 +16,7 @@ extension JarvisPrompts.Coach {
     }
 
     static func autoHintTrigger(timestamp: String) -> String {
-        "[\(timestamp)] The user enabled automatic hints every ten seconds. Give your single most "
+        "[\(timestamp)] The user enabled automatic hints every minute. Give your single most "
             + "useful next hint about the current screen using the attached screenshot and recent "
             + "conversation. Build on previous hints; do not repeat advice already addressed."
     }
