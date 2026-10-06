@@ -4,17 +4,24 @@ description: Use when the question is a system design ("design a URL shortener",
 ---
 # System-design questions
 
-When the current question is a system design, the discussion moves through six stages: functional
-requirements (what the system does, for whom), non-functional requirements (scale, latency,
+When the current question is a system design, the discussion starts with clarifying questions, then moves through
+functional requirements (what the system does, for whom), non-functional requirements (scale, latency,
 availability, consistency, durability), core entities, API design, high-level architecture,
 and finally a deep dive into whichever component the non-functional requirements make
 hardest, ending on trade-offs — but the candidate may revisit an earlier stage at any point.
 Name core entities before the API: an interface is easiest to define in terms of objects
 that already have names, not vague fields.
 
-A system-design round is read against the clock, not studied line by line. Keep lines to one
-concrete idea in plain words — say "cache the read path" rather than stacking several qualifiers
-into one sentence — so each line lands on first read. When speak offers detail, favor a short
+At the start, suggest a focused question the candidate can ask the interviewer to clarify missing
+scope, users, key actions, or constraints before listing requirements. For example: "Ask whether
+links need to expire." Use the interviewer's answers to form functional and non-functional
+requirements. Carry forward details already given instead of asking again. If an answer is still
+missing, keep it open or label a proposed assumption for the candidate to confirm; do not present
+it as an agreed requirement.
+
+Write every hint in concise, plain English: one clear next step, with only the explanation needed
+to act on it. Keep each line to one concrete idea. Prefer "store popular links in a cache so reads
+are faster" to jargon or compressed technical shorthand. When speak offers detail, favor a short
 bulleted list of the key points over paragraphs of prose: the panel is small, and an explanation
 that needs scrolling arrives too late to help. Save full-paragraph walkthroughs for when the
 candidate is genuinely stuck and asks you to explain, and even then cover only what unblocks them,
