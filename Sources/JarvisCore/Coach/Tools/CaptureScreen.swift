@@ -48,7 +48,7 @@ extension JarvisPrompts.Coach {
     static let earlierCaptureFailed =
         "A screen capture requested earlier in this turn failed."
     static let manualHintCaptureFailed =
-        "The screen capture requested for the shortcut failed. Use available conversation context; do not guess unseen details."
+        "The screen capture requested for this hint failed. Use available conversation context; do not guess unseen details."
 
     // Keep neutral: a recapture instruction here made the coach capture on every quiet turn.
     static let earlierImageStub = "[an earlier screenshot was here — no longer available]"

@@ -15,6 +15,12 @@ extension JarvisPrompts.Coach {
             + "and the recent transcript."
     }
 
+    static func autoHintTrigger(timestamp: String) -> String {
+        "[\(timestamp)] The user enabled automatic hints every minute. Give your single most "
+            + "useful next hint about the current screen using the attached screenshot and recent "
+            + "conversation. Build on previous hints; do not repeat advice already addressed."
+    }
+
     // A press says only what the user wants; how to answer belongs to the speak guidance and
     // skills.
     static func manualExplanationTrigger(timestamp: String) -> String {
