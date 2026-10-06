@@ -1026,9 +1026,13 @@ rather than a per-turn screenshot.
   (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
   Customer-scenario-design supplies workflow-automation discovery, architecture, evaluation, and
   change guidance for enterprise customer role-play (see [Capabilities](#capabilities)).
-  System-design supplies the stage vocabulary from requirements through trade-offs and checks
-  state ownership, durable background-work creation, replenishment, and recovery against the current
-  requirements. It targets the highest-impact missing mechanism at the current stage and asks for
+  System-design leads clarification hints with an unresolved question for the interviewer. At a
+  clear transition into functional or non-functional requirements, it supplies a short visible cue
+  derived from prior answers, separating agreed facts, proposals, and unknown targets. This makes
+  discovery usable without requiring the candidate to ask for a recap. Productive lists and already
+  delivered transition cues remain silent. From entities onward it checks state ownership, durable
+  background-work creation, replenishment, and recovery against the current requirements.
+  It targets the highest-impact missing mechanism at the current stage and asks for
   a diagram in the one stage that benefits. An explicitly requested stage takes precedence over
   screen notes; generic hints continue the stage established in conversation. Architecture hints
   describe component responsibilities and a request or data flow. Canvas navigation controls are
@@ -1036,8 +1040,10 @@ rather than a per-turn screenshot.
   drawing calls for a conversation-grounded hint with its visual limitation stated. Unresolved
   requirements call for a specific question the candidate can put to the interviewer, without needing
   to answer Jarvis during the interview. The base prompt keeps what is
-  true of every session: when to speak or stay silent, hint length, and comprehension before
-  strategy. Finishing code alone still does not trigger a hint, and there is no runtime classifier
+  true of every session: when to speak or stay silent and hint length. Loaded skills own their
+  stage-specific reply format; comprehension before strategy remains the default elsewhere.
+  A skill-defined transition cue may speak once after a finished thought and before substantive
+  work in the next stage, while fragment and screen-context gates retain priority. Finishing code alone still does not trigger a hint, and there is no runtime classifier
   or persisted question classification.
 
   A skill body describes a *kind of question*, never "this session", because a load can arrive

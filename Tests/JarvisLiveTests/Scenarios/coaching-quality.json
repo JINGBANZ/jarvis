@@ -350,5 +350,77 @@
     ],
     "input": "Pilot capacity discussion. Every supplier claim still requires technician review. me: The assistant drafts 90 percent of cases, so technicians only work on 10 percent, and we can cover peak. How do I show the gain?",
     "pass": "Rejects draft coverage as human-work elimination. Uses eligible/adopted case volume times measured active minutes saved including review/fixes, against comparable baseline cases. Compares released hours with peak workload and usable team capacity; no unsupported automation or staffing claim."
+  },
+  {
+    "id": "design-stage-opening",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Fresh problem, no earlier Jarvis tip. them: Design a parcel dispatch service between shops and carriers. Pickup booking happens immediately but delivery reports arrive later. No scale, lifecycle or failure guarantees are established. me: Jarvis, give me a hint.",
+    "pass": "Speaks with a concrete clarifying question to ask the interviewer as the first visible line. Does not start with a problem recap or invent carrier behavior."
+  },
+  {
+    "id": "design-stage-unfamiliar-domain",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Earlier: them: Design a parcel dispatch service. Pickup booking happens now; manifests are sent nightly. me: I have never integrated with carriers. I am still clarifying. New since last turn: me: Jarvis, what should I ask next?",
+    "pass": "Leads with one useful question establishing the external lifecycle or guarantee. Does not answer the interviewer on behalf of carriers or assume their behavior."
+  },
+  {
+    "id": "design-stage-functional-transition",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Earlier conversation: them: Design a parcel dispatch service between shops and independent carriers. Shops submit pickup requests. A carrier may accept, reject, or leave the outcome unknown when the call times out. Accepted pickups go into a nightly manifest. Manifest acknowledgment is not delivery; later per-parcel reports can succeed or fail independently. Shops need status lookup and an auditable event history. me: Are retries safe? them: Manifest submissions use stable IDs, deduplicated for 24 hours. Booking retry guarantees are not specified. me: How fast and how much traffic? them: Carriers usually answer within one second, sometimes slower. Propose a three-second shop response deadline with pending allowed. Peak volume is not decided. Preserve accepted requests during outages, prevent duplicate bookings, protect addresses, and detect missing carrier reports. me: Are returns included? them: No. New since last turn: me: That answers my questions. Let's move to functional requirements. The candidate has finished speaking and has not started listing requirements. No previous requirements cue was given.",
+    "pass": "Speaks at this explicit transition without requiring a help request. Visible lines contain concrete functional requirements drawn from prior answers (booking outcomes, nightly submission, status/report tracking). Does not merely say summarize answers, invent facts, or move to architecture."
+  },
+  {
+    "id": "design-stage-nonfunctional-transition",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Earlier conversation: them: Design a parcel dispatch service between shops and independent carriers. Shops submit pickup requests. A carrier may accept, reject, or leave the outcome unknown when the call times out. Accepted pickups go into a nightly manifest. Manifest acknowledgment is not delivery; later per-parcel reports can succeed or fail independently. Shops need status lookup and an auditable event history. me: Are retries safe? them: Manifest submissions use stable IDs, deduplicated for 24 hours. Booking retry guarantees are not specified. me: How fast and how much traffic? them: Carriers usually answer within one second, sometimes slower. Propose a three-second shop response deadline with pending allowed. Peak volume is not decided. Preserve accepted requests during outages, prevent duplicate bookings, protect addresses, and detect missing carrier reports. me: Are returns included? them: No. Earlier: me: Functional scope is booking, nightly manifests, status lookup, and reconciling reports. New since last turn: me: Now for non-functional requirements. The candidate has finished speaking and has not started a list. No non-functional cue was given.",
+    "pass": "Speaks with concise visible guarantees grounded in answers: correctness/durability and a proposed response deadline allowing pending. Distinguishes the proposed deadline from guaranteed carrier completion. Does not invent throughput or assume booking deduplication from manifest guarantees."
+  },
+  {
+    "id": "design-stage-candidate-priority",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Earlier conversation: them: Design a parcel dispatch service between shops and independent carriers. Shops submit pickup requests. A carrier may accept, reject, or leave the outcome unknown when the call times out. Accepted pickups go into a nightly manifest. Manifest acknowledgment is not delivery; later per-parcel reports can succeed or fail independently. Shops need status lookup and an auditable event history. me: Are retries safe? them: Manifest submissions use stable IDs, deduplicated for 24 hours. Booking retry guarantees are not specified. me: How fast and how much traffic? them: Carriers usually answer within one second, sometimes slower. Propose a three-second shop response deadline with pending allowed. Peak volume is not decided. Preserve accepted requests during outages, prevent duplicate bookings, protect addresses, and detect missing carrier reports. me: Are returns included? them: No. Earlier: me: I am still clarifying carrier guarantees before requirements. New since last turn: them: Let's draw the database now. me: Not yet; I am still clarifying. Jarvis, what question matters next?",
+    "pass": "Stays in clarification, using unresolved booking retry guarantees or another genuinely unresolved design-affecting question. Does not switch to entities/schema or repeat settled questions."
+  },
+  {
+    "id": "design-stage-productive-list",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Earlier conversation: them: Design a parcel dispatch service between shops and independent carriers. Shops submit pickup requests. A carrier may accept, reject, or leave the outcome unknown when the call times out. Accepted pickups go into a nightly manifest. Manifest acknowledgment is not delivery; later per-parcel reports can succeed or fail independently. Shops need status lookup and an auditable event history. me: Are retries safe? them: Manifest submissions use stable IDs, deduplicated for 24 hours. Booking retry guarantees are not specified. me: How fast and how much traffic? them: Carriers usually answer within one second, sometimes slower. Propose a three-second shop response deadline with pending allowed. Peak volume is not decided. Preserve accepted requests during outages, prevent duplicate bookings, protect addresses, and detect missing carrier reports. me: Are returns included? them: No. Earlier: Jarvis already suggested booking outcomes, nightly manifests, and status tracking. New since last turn: me: Functional requirements: shops book pickups and see accepted, rejected or pending. Accepted parcels enter nightly manifests, and we track each later carrier report. I am adding status lookup next. No help request; the candidate is steadily building a correct list.",
+    "pass": "Calls stay_silent. Does not repeat the transition cue, dump a checklist, or interrupt productive progress."
+  },
+  {
+    "id": "design-stage-repeat-transition",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Earlier conversation: them: Design a parcel dispatch service between shops and independent carriers. Shops submit pickup requests. A carrier may accept, reject, or leave the outcome unknown when the call times out. Accepted pickups go into a nightly manifest. Manifest acknowledgment is not delivery; later per-parcel reports can succeed or fail independently. Shops need status lookup and an auditable event history. me: Are retries safe? them: Manifest submissions use stable IDs, deduplicated for 24 hours. Booking retry guarantees are not specified. me: How fast and how much traffic? them: Carriers usually answer within one second, sometimes slower. Propose a three-second shop response deadline with pending allowed. Peak volume is not decided. Preserve accepted requests during outages, prevent duplicate bookings, protect addresses, and detect missing carrier reports. me: Are returns included? them: No. Earlier: me: Now functional requirements. Jarvis: Accept shop bookings and report accepted, rejected or pending. Submit accepted pickups in nightly manifests. Track carrier results and let shops check status. New since last turn: me: Okay, functional requirements. The candidate pauses briefly to think; there is no new help request or substantive change.",
+    "pass": "Does not repeat the requirements cue. stay_silent is appropriate; a screen check is only appropriate if genuinely needed to assess unclear progress, never a duplicate spoken list."
+  },
+  {
+    "id": "design-stage-explicit-list",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Earlier conversation: them: Design a parcel dispatch service between shops and independent carriers. Shops submit pickup requests. A carrier may accept, reject, or leave the outcome unknown when the call times out. Accepted pickups go into a nightly manifest. Manifest acknowledgment is not delivery; later per-parcel reports can succeed or fail independently. Shops need status lookup and an auditable event history. me: Are retries safe? them: Manifest submissions use stable IDs, deduplicated for 24 hours. Booking retry guarantees are not specified. me: How fast and how much traffic? them: Carriers usually answer within one second, sometimes slower. Propose a three-second shop response deadline with pending allowed. Peak volume is not decided. Preserve accepted requests during outages, prevent duplicate bookings, protect addresses, and detect missing carrier reports. me: Are returns included? them: No. New since last turn: me: Jarvis, list both functional and non-functional requirements from those answers.",
+    "pass": "Returns useful requirements in visible lines and both categorized lists in detail when offered. Preserves unknown booking retry guarantee, proposed deadline and unspecified volume. Does not make the visible lines only a pointer to detail."
+  },
+  {
+    "id": "design-stage-missing-screen",
+    "skills": [
+      "system-design"
+    ],
+    "input": "No question or screenshot is available. me: Jarvis, what requirements does this diagram miss?",
+    "pass": "Calls capture_screen rather than inventing the diagram or giving generic requirements."
   }
 ]

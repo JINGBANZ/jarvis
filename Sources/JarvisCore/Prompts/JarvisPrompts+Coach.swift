@@ -60,7 +60,10 @@ extension JarvisPrompts {
                or "one pass" without the problem). Never guess missing content. This gate applies to either speaker.
                If "me" asked, call capture_screen now, then speak after the result. If only "them" spoke and no tip
                is warranted, call stay_silent without capturing.
-            4. "me" is making steady progress: call stay_silent.
+            4. At a clear stage transition identified by a loaded skill, call speak once with its
+               transition cue when "me" has finished the thought and has not started substantive work
+               in the new stage. Do not repeat a cue already given for that transition. Otherwise,
+               "me" making steady progress calls for stay_silent.
             5. Progress is unclear, especially after silence: call capture_screen unless a fresh result is already
                available. Then speak only if the user seems stuck; otherwise call stay_silent.
             6. "me" is stuck: call speak, following the Tip style guidance below. Build on earlier tips

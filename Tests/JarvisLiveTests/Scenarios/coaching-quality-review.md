@@ -168,3 +168,44 @@ that exact added phrase was not present in the paired probes and remains unobser
 production evaluation harness. All four committed fixtures should be evaluated using the protocol
 at the top of this document before making a production reliability claim. Catalog/build checks
 remain packaging evidence only; the running app is not updated by editing this bundled source.
+
+
+## System-design clarification and requirements transitions
+
+The `design-stage-*` cases use synthetic parcel-dispatch conversations covering clarification,
+prior interviewer answers, functional and non-functional transitions, candidate/interviewer stage
+conflict, productive lists, repeated stage labels, explicit lists, and missing screen context.
+The same facts are carried through the transition cases, including a proposed response deadline,
+an unknown peak volume, and retry guarantees that apply to manifests but not necessarily bookings.
+
+A baseline agent and a separate revised agent applied extracted production static coach instructions,
+speak tip/detail guidance, the preloaded system-design skill, and each case input. Neither received
+pass criteria. The baseline input initially repeated the skill per case and was truncated; after
+reading the deduplicated pack, that same agent supplied the remaining cases. The revised agent read
+one complete deduplicated pack. Cases were presented as independent snapshots within each agent's
+conversation, not an evolving production-provider session. Both used the inherited Codex host model;
+the exact provider snapshot was unavailable and host instructions remained in effect.
+
+| Cases | Baseline | Revised |
+| --- | --- | --- |
+| Opening, unfamiliar domain | Question-led hints | Question-led hints |
+| Functional transition | Stayed silent | Visible booking outcomes, nightly manifests, and status/history capabilities |
+| Non-functional transition | Stayed silent | Visible durability, duplicate prevention, and proposed deadline allowing pending |
+| Candidate stage priority | Stayed in clarification | Stayed in clarification; kept manifest retry guarantees separate from bookings |
+| Productive list, repeated transition | Stayed silent | Stayed silent |
+| Explicit combined list | Actual requirements in detail; visible lines mostly organizing advice | Concrete capabilities and guarantees in visible lines; categorized detail retained |
+| Missing screen context | Requested capture | Requested capture |
+
+Manual semantic review found all nine revised cases satisfied their stated criteria. A separate
+agent also applied the revised shared guidance to `meaning-before-patch`, `productive-coding`, and
+`customer-co-loaded-stage`: it explained the coding concept before a patch, stayed silent during
+productive coding, and preserved the customer-workflow design stage, respectively. Those three
+controls were not rerun against the baseline in this comparison.
+
+These are single-pass instruction-level development regressions, not held-out transfer evidence,
+reliability measurements, loader tests, real speech-timing tests, or signed-app evaluations. The
+baseline did not reproduce every field failure: its opening already led with a question. The
+paired observations support the transition and visible-requirements changes. Local prompt packs
+and visible-action observations were retained; no private practice material is in these fixtures.
+The repository Gate tests packaging and code health, not these semantic criteria. A running app
+must be rebuilt and a new session started before it uses the changed prompts and loaded skill.
