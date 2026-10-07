@@ -41,6 +41,11 @@ cd jarvis
 
 See [Build and run](./wiki/build-and-run.md) for signing, permissions, and troubleshooting.
 
+## Community
+
+Join our [Telegram community](https://t.me/+-FDYU99oXTBlZmQx) to share your thoughts, ask questions,
+and help shape Jarvis. Everyone is welcome!
+
 ## Project links
 
 [Wiki](./wiki/index.md) · [Contributing](./CONTRIBUTING.md) · [Security](./SECURITY.md) ·
