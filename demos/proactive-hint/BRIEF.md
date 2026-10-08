@@ -18,6 +18,7 @@ Show how Jarvis offers a useful, quiet hint during a coding conversation. The us
 - Use synthetic content only. No screen recording, real call, or provider requests.
 - First pass is silent. Dialogue captions are part of the film, not Jarvis UI.
 - Deliver a playable local preview before producing a final video.
+- Mimic a macOS desktop with a separate Zoom interview window, code editor, and Jarvis overlay at the side.
 
 ## Story
 
@@ -27,7 +28,9 @@ English, landscape format, and this coding example carry forward the proposed fi
 
 ## Visual truth
 
-The surrounding call and editor are illustrative. The Jarvis overlay follows the app's compact dark panel, Jarvis header, timestamp, and hint hierarchy. It appears without stealing focus or announcing itself.
+The full frame mimics a macOS desktop with wallpaper, a menu bar, and a Dock. Zoom Workplace has a two-person meeting, participant names, a speaking outline, and a bottom meeting toolbar. This pass uses cameras-off participant avatars. Visual Studio Code is a separate window beside the meeting. Jarvis floats independently on the right, partly over the editor's empty margin, with its compact dark panel, header, timestamp, and hint hierarchy. It appears without stealing focus or announcing itself.
+
+The desktop and third-party app interfaces are illustrative HTML mocks. Zoom's meeting layout follows its [desktop app reference](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0064516).
 
 ## Completion criteria
 

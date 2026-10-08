@@ -1,6 +1,6 @@
 # Jarvis proactive hint scene
 
-A silent, ten-second HTML mock for reviewing the Jarvis demo's layout and pacing. An interviewer asks about a Two Sum solution; Jarvis offers a proactive hash-map hint while the conversation continues. All content is synthetic.
+A silent, ten-second macOS desktop mock for reviewing the Jarvis demo's layout and pacing. A two-person Zoom interview sits beside Visual Studio Code; Jarvis floats on the right and offers a proactive hash-map hint while the conversation continues. All content is synthetic.
 
 ## Preview
 
@@ -25,4 +25,4 @@ Open [HyperFrames Studio](http://localhost:4318/#project/proactive-hint) and sel
 
 Run `npm run snapshots` to inspect four key frames. After visual approval, `npm run render` can export the scene at 30 fps. FFmpeg and HyperFrames' browser runtime are required for rendering.
 
-The call and code editor are illustrative. The floating Jarvis panel follows the app's header and timestamp hierarchy. Dialogue captions belong to the film; they are not a product feature.
+The desktop, Zoom meeting, and Visual Studio Code window are illustrative HTML. This pass shows Zoom participants with their cameras off. The floating Jarvis panel follows the app's header and timestamp hierarchy. Dialogue captions belong to the film; they are not a product feature.
