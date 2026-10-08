@@ -358,11 +358,14 @@ private func speakResponseBody(arguments: String) -> Data {
         }
     }
 
-    @Test func everySelectableOpenAIModelRespectsItsEffortFloor() async throws {
-        for model in BrainModelCatalog.models(for: .openAI) {
+    @Test(arguments: [BrainProvider.openAI, .codexSubscription])
+    func everySelectableOpenAIModelRespectsItsEffortFloor(provider: BrainProvider) async throws {
+        let reasoningRequired = Set(["gpt-6.1-sol", "gpt-6-astra"])
+        for model in BrainModelCatalog.models(for: provider) {
             for effort in ReasoningEffort.allCases {
                 let box = CapturedBody()
                 let client = BrainAccessor(
+                    provider: provider,
                     apiKey: "sk-x",
                     model: model.id,
                     reasoningEffort: effort.rawValue,
@@ -378,18 +381,19 @@ private func speakResponseBody(arguments: String) -> Data {
                 #expect(request["model"] as? String == model.id)
                 #expect(
                     (request["reasoning"] as? [String: Any])?["effort"] as? String
-                        == (model.id == "gpt-6-astra" && effort == .none ? "low" : effort.rawValue))
+                        == (reasoningRequired.contains(model.id) && effort == .none ? "low" : effort.rawValue))
                 #expect(request["max_output_tokens"] as? Int
-                    == (model.id == "gpt-6-astra" && effort == .none
+                    == (reasoningRequired.contains(model.id) && effort == .none
                         ? ReasoningEffort.low.maxOutputTokens : effort.maxOutputTokens))
             }
         }
     }
 
-    @Test func astraClampsNoneWithoutReducingALargerOutputBudget() async throws {
+    @Test(arguments: ["gpt-6.1-sol", "gpt-6-astra"])
+    func requiredReasoningClampsNoneWithoutReducingALargerOutputBudget(model: String) async throws {
         let box = CapturedBody()
         let client = BrainAccessor(
-            apiKey: "sk-x", model: "gpt-6-astra", reasoningEffort: "none",
+            apiKey: "sk-x", model: model, reasoningEffort: "none",
             maxOutputTokens: 25_000,
             send: sending { request in
                 box.set(request.httpBody)

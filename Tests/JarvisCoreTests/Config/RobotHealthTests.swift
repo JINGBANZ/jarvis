@@ -2,8 +2,8 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct RobotHealthTests {
-    private let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol")
-    private let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6-sol")
+    private let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol")
+    private let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
     private let claude = BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5")
 
     private func health(

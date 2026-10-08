@@ -1,8 +1,8 @@
 # The pinned CLIProxyAPI subscription helper, shared by build-app.sh and package-app.sh.
 # To bump, take the version and darwin_aarch64 checksum from checksums.txt at
 # https://github.com/router-for-me/CLIProxyAPI/releases.
-CLIPROXYAPI_VERSION="7.3.15"
-CLIPROXYAPI_SHA256_ARM64="c1e49c148a94c476dc43a6a0eed28bca34239d5153ebb7792048d8c18f3b92f0"
+CLIPROXYAPI_VERSION="8.0.20"
+CLIPROXYAPI_SHA256_ARM64="abb68051528506076561298ae3c4f3797c360f1d37127c2e459afdecce454df0"
 
 # The binary goes in Contents/MacOS for Bundle.url(forAuxiliaryExecutable:), and its MIT license
 # must ship with it. The cached archive is re-verified on every use.

@@ -423,7 +423,7 @@ final class LiveE2ERunner: BrainCompositionHost {
     /// A lighter model per line: the run checks the harness, not the model's best answer.
     private static func target(for provider: BrainProvider) -> BrainTarget {
         let modelID = switch provider {
-        case .claudeSubscription: "claude-sonnet-5"
+        case .claudeSubscription: "claude-sonnet-5-5"
         case .openAI, .codexSubscription: "gpt-6-luna"
         case .gemini: BrainModelCatalog.defaultModel(for: .gemini).id
         }

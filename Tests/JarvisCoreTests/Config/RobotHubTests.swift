@@ -6,7 +6,7 @@ import Testing
         let state = RobotHub.state(for: .fixture())
         #expect(Set(state.slots.keys) == Set(RobotPart.allCases))
         #expect(state.slots[.brain]
-            == RobotSlotState(value: "GPT-6 Sol", detail: "VIA CODEX", tone: .normal, level: 3))
+            == RobotSlotState(value: "GPT-6.1 Sol", detail: "VIA CODEX", tone: .normal, level: 3))
         #expect(state.slots[.ear]
             == RobotSlotState(value: "OpenAI · GPT-4o", detail: "HEARS EN", tone: .normal, level: nil))
         #expect(state.slots[.eye]?.detail == "CHROME TEXT OFF")
@@ -41,8 +41,8 @@ import Testing
     }
 
     @Test func aLiveSessionNamesTheBrainInUse() {
-        let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol")
-        let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6-sol")
+        let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol")
+        let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
         let route = BrainRoute(primary: codex, fallbackTargets: [openAI])
         let onPrimary = RobotHub.state(for: .fixture(route: route, readiness: .fixture(), activeTarget: codex))
         #expect(onPrimary.isLive)
@@ -60,7 +60,7 @@ import Testing
     }
 
     @Test func aBrainProblemOutranksTheLiveLine() {
-        let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6-sol")
+        let openAI = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
         let state = RobotHub.state(for: .fixture(
             route: BrainRoute(primary: openAI, fallbackTargets: []),
             readiness: .fixture(credentials: []),

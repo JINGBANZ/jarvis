@@ -3,7 +3,7 @@
 extension RobotHubInputs {
     static func fixture(
         route: BrainRoute = BrainRoute(
-            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol"), fallbackTargets: []),
+            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol"), fallbackTargets: []),
         effort: ReasoningEffort = .high,
         transcriptionProvider: TranscriptionProvider = .openAI,
         readiness: RobotReadiness? = nil,

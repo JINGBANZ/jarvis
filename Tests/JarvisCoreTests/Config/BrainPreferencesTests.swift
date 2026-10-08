@@ -87,6 +87,31 @@ import Foundation
         #expect(d.string(forKey: "brain.model") == "gpt-removed-from-catalog")
     }
 
+    @Test(arguments: [
+        BrainTarget(provider: .openAI, modelID: "gpt-6-sol"),
+        BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol"),
+        BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5"),
+    ])
+    func replacedModelsUseTheDefaultAndLeaveValidFallbacksInOrder(stale: BrainTarget) {
+        let d = freshDefaults()
+        d.set(stale.provider.rawValue, forKey: Defaults.Brain.providerKey)
+        d.set(stale.modelID, forKey: Defaults.Brain.modelKey(for: stale.provider))
+        let valid = [
+            BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini"),
+            BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash"),
+        ]
+        d.set(([valid[0], stale, valid[1]]).map {
+            ["provider": $0.provider.rawValue, "modelID": $0.modelID]
+        }, forKey: Defaults.Brain.fallbackTargetsKey)
+        let p = BrainPreferences(defaults: d)
+
+        #expect(p.primaryTarget == BrainTarget(
+            provider: stale.provider, modelID: BrainModelCatalog.defaultModel(for: stale.provider).id))
+        #expect(p.fallbackTargets == valid)
+        #expect(d.string(forKey: Defaults.Brain.modelKey(for: stale.provider)) == stale.modelID)
+        #expect((d.array(forKey: Defaults.Brain.fallbackTargetsKey) ?? []).count == valid.count)
+    }
+
     @Test func unknownStoredEffortFallsBackToDefault() {
         let d = freshDefaults()
         d.set("extreme", forKey: "brain.reasoningEffort")
@@ -114,13 +139,13 @@ import Foundation
         let d = freshDefaults()
         d.set("claude-code", forKey: "brain.provider")
         d.set([
-            ["provider": "codex-cli", "modelID": "gpt-6-sol"],
-            ["provider": BrainProvider.codexSubscription.rawValue, "modelID": "gpt-6-sol"],
+            ["provider": "codex-cli", "modelID": "gpt-6.1-sol"],
+            ["provider": BrainProvider.codexSubscription.rawValue, "modelID": "gpt-6.1-sol"],
         ], forKey: "brain.fallbackTargets")
 
         let p = BrainPreferences(defaults: d)
         #expect(p.primaryTarget.provider == Defaults.Brain.provider)
-        #expect(p.fallbackTargets == [BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol")])
+        #expect(p.fallbackTargets == [BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol")])
     }
 
     @Test func orderedFallbackTargetsRoundTrip() {
@@ -186,7 +211,7 @@ import Foundation
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
         let route = BrainRoute(
-            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol"),
+            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol"),
             fallbackTargets: [
                 BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini"),
                 BrainTarget(provider: .codexSubscription, modelID: "gpt-5.6-terra"),
@@ -202,10 +227,10 @@ import Foundation
     @Test func atomicPrimaryTargetChangePreservesADifferentModelFromTheSameProvider() {
         let p = BrainPreferences(defaults: freshDefaults())
         p.setModel(
-            BrainModelCatalog.model(id: "claude-sonnet-5", for: .claudeSubscription)!,
+            BrainModelCatalog.model(id: "claude-sonnet-5-5", for: .claudeSubscription)!,
             for: .claudeSubscription)
         p.fallbackTargets = [
-            BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5"),
+            BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5"),
         ]
 
         p.route = BrainRoute(
@@ -215,7 +240,7 @@ import Foundation
         #expect(p.primaryTarget == BrainTarget(
             provider: .claudeSubscription, modelID: "claude-opus-5-5"))
         #expect(p.fallbackTargets == [
-            BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5"),
+            BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5"),
         ])
     }
 
@@ -260,7 +285,7 @@ import Foundation
     @Test func reorderingThePrimaryPersistsTheNewOrder() throws {
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
-        let primary = BrainTarget(provider: .openAI, modelID: "gpt-6-sol")
+        let primary = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
         let fallback = BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini")
         p.route = BrainRoute(primary: primary, fallbackTargets: [fallback])
 

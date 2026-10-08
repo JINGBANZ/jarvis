@@ -10,7 +10,7 @@ import JarvisBrainProviders
 /// the final target speaks. Trigger 2: the final target fails twice, then fails permanently.
 enum CoachingParityHarness {
     static let primaryTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
-    static let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5")
+    static let unavailableTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5")
     static let finalTarget = BrainTarget(provider: .openAI, modelID: "gpt-5.5-mini")
 
     struct EvidenceObservers {

@@ -10,7 +10,7 @@ import Testing
 
     @Test func sharedOpenAIListIncludesLatestModel() {
         #expect(BrainModelCatalog.all.map(\.id) == [
-            "gpt-6-sol",
+            "gpt-6.1-sol",
             "gpt-6-astra",
             "gpt-5.6-terra",
             "gpt-6-luna",
@@ -19,10 +19,10 @@ import Testing
     }
 
     /// CLIProxyAPI routes Haiku only by its dated id; the undated alias reads as unknown.
-    @Test func claudeSubscriptionListsOnlyTheLatestReleaseOfEachLine() {
+    @Test func claudeSubscriptionListsOnlyTheLatestSupportedReleaseOfEachLine() {
         #expect(BrainModelCatalog.models(for: .claudeSubscription).map(\.id) == [
             "claude-opus-5-5",
-            "claude-sonnet-5",
+            "claude-sonnet-5-5",
             "claude-fable-5-1",
             "claude-haiku-4-5-20251001",
         ])
@@ -34,9 +34,13 @@ import Testing
     }
 
     @Test func lookupFindsKnownModelsAndRejectsUnknown() {
+        #expect(BrainModelCatalog.model(id: "gpt-6.1-sol")?.displayName == "GPT-6.1 Sol")
         #expect(BrainModelCatalog.model(id: "gpt-5.6-terra")?.displayName == "GPT-5.6 Terra")
         #expect(BrainModelCatalog.model(id: "gpt-5.4-mini")?.displayName == "GPT-5.4 mini")
         #expect(BrainModelCatalog.model(id: "gpt-9000") == nil)
+        #expect(BrainModelCatalog.model(id: "gpt-6-sol") == nil)
+        #expect(BrainModelCatalog.model(id: "claude-sonnet-5", for: .claudeSubscription) == nil)
+        #expect(BrainModelCatalog.model(id: "claude-haiku-5-5", for: .claudeSubscription) == nil)
     }
 
     @Test func everyProviderUsesItsFirstCatalogEntryAsDefault() {
@@ -50,8 +54,8 @@ import Testing
     }
 
     @Test func providerDefaultsFollowCatalogOrder() {
-        #expect(BrainModelCatalog.defaultModel(for: .openAI).id == "gpt-6-sol")
-        #expect(BrainModelCatalog.defaultModel(for: .codexSubscription).id == "gpt-6-sol")
+        #expect(BrainModelCatalog.defaultModel(for: .openAI).id == "gpt-6.1-sol")
+        #expect(BrainModelCatalog.defaultModel(for: .codexSubscription).id == "gpt-6.1-sol")
         #expect(BrainModelCatalog.defaultModel(for: .claudeSubscription).id == "claude-opus-5-5")
     }
 
@@ -61,7 +65,7 @@ import Testing
                 == "Claude Opus 5.5")
         #expect(BrainModelCatalog.model(id: "sonnet", for: .claudeSubscription) == nil)
         #expect(BrainModelCatalog.model(id: "", for: .codexSubscription) == nil)
-        #expect(BrainModelCatalog.model(id: "gpt-6-sol", for: .claudeSubscription) == nil)
+        #expect(BrainModelCatalog.model(id: "gpt-6.1-sol", for: .claudeSubscription) == nil)
     }
 
     @Test func summarizerModelsUseVerifiedProviderBehavior() {
@@ -80,7 +84,7 @@ import Testing
     }
 
     @Test func effortFloorsAreModelData() {
-        let floored: Set<String> = ["gpt-6-astra", "gemini-3.8-flash", "gemini-3.7-flash"]
+        let floored: Set<String> = ["gpt-6.1-sol", "gpt-6-astra", "gemini-3.8-flash", "gemini-3.7-flash"]
         for provider in BrainProvider.allCases {
             for model in BrainModelCatalog.models(for: provider) {
                 #expect(model.reasoningEffortFloor == (floored.contains(model.id) ? .low : nil),
