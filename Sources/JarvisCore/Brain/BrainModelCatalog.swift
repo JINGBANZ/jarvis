@@ -2,7 +2,8 @@ import Foundation
 
 public enum BrainModelCatalog {
     public static let all: [BrainModel] = [
-        BrainModel(id: "gpt-6-sol", displayName: "GPT-6 Sol"),
+        // Rejects `none`.
+        BrainModel(id: "gpt-6.1-sol", displayName: "GPT-6.1 Sol", reasoningEffortFloor: .low),
         // Rejects `none`.
         BrainModel(id: "gpt-6-astra", displayName: "GPT-6 Astra", reasoningEffortFloor: .low),
         BrainModel(id: "gpt-5.6-terra", displayName: "GPT-5.6 Terra"),
@@ -16,8 +17,9 @@ public enum BrainModelCatalog {
 
     private static let claude: [BrainModel] = [
         BrainModel(id: "claude-opus-5-5", displayName: "Claude Opus 5.5"),
-        BrainModel(id: "claude-sonnet-5", displayName: "Claude Sonnet 5"),
+        BrainModel(id: "claude-sonnet-5-5", displayName: "Claude Sonnet 5.5"),
         BrainModel(id: "claude-fable-5-1", displayName: "Claude Fable 5.1"),
+        // The bundled helper has no route for Haiku 5.5.
         BrainModel(id: "claude-haiku-4-5-20251001", displayName: "Claude Haiku 4.5"),
     ]
 
@@ -31,8 +33,8 @@ public enum BrainModelCatalog {
         BrainModel(id: "gemini-3.5-flash-lite", displayName: "Gemini 3.5 Flash-Lite"),
     ]
 
-    /// Only the newest release of each model line is listed; a saved route naming a dropped one
-    /// reads as unknown. A model Codex doesn't serve fails with `model_not_found`.
+    /// Only the newest supported release of each model line is listed; a saved route naming a
+    /// dropped one reads as unknown. A model Codex doesn't serve fails with `model_not_found`.
     /// Invitation-only Mythos releases and rolling aliases are excluded.
     public static func models(for provider: BrainProvider) -> [BrainModel] {
         switch provider {

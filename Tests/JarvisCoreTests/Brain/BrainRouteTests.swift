@@ -3,11 +3,11 @@ import Testing
 
 @Suite struct BrainRouteTests {
     @Test func preservesOrderedSameProviderDifferentModelTargets() {
-        let primary = BrainTarget(provider: .openAI, modelID: "gpt-6-sol")
+        let primary = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
         let fallbacks = [
             BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5"),
             BrainTarget(provider: .claudeSubscription, modelID: "claude-haiku-4-5-20251001"),
-            BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol"),
+            BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol"),
         ]
 
         let route = BrainRoute(primary: primary, fallbackTargets: fallbacks)
@@ -18,7 +18,7 @@ import Testing
     }
 
     @Test func removesUnknownAndExactDuplicateFallbackTargets() {
-        let primary = BrainTarget(provider: .openAI, modelID: "gpt-6-sol")
+        let primary = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
         let valid = BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5")
 
         let route = BrainRoute(primary: primary, fallbackTargets: [
@@ -46,8 +46,8 @@ import Testing
     }
 
     @Test func movingThePrimaryDownPromotesTheFirstFallback() {
-        let primary = BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol")
-        let first = BrainTarget(provider: .openAI, modelID: "gpt-6-sol")
+        let primary = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol")
+        let first = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
         let second = BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5")
         let route = BrainRoute(primary: primary, fallbackTargets: [first, second])
 
@@ -58,8 +58,8 @@ import Testing
     }
 
     @Test func movingTheFirstFallbackUpMakesItThePrimary() {
-        let primary = BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol")
-        let first = BrainTarget(provider: .openAI, modelID: "gpt-6-sol")
+        let primary = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol")
+        let first = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
         let route = BrainRoute(primary: primary, fallbackTargets: [first])
 
         let moved = route.movingTarget(at: 1, by: -1)
@@ -70,7 +70,7 @@ import Testing
 
     @Test func movingPastEitherEndIsRefused() {
         let route = BrainRoute(
-            primary: BrainTarget(provider: .openAI, modelID: "gpt-6-sol"),
+            primary: BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol"),
             fallbackTargets: [BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini")])
 
         #expect(route.movingTarget(at: 0, by: -1) == nil)
@@ -83,13 +83,13 @@ import Testing
         let mixed = BrainRoute(
             primary: BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5"),
             fallbackTargets: [
-                BrainTarget(provider: .openAI, modelID: "gpt-6-sol"),
-                BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol"),
+                BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol"),
+                BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol"),
                 BrainTarget(provider: .openAI, modelID: "gpt-6-luna"),
             ])
         #expect(mixed.requiredCredentials == [.openAIAPIKey])
         let subscriptionsOnly = BrainRoute(
-            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-6-sol"),
+            primary: BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol"),
             fallbackTargets: [BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5")])
         #expect(subscriptionsOnly.requiredCredentials.isEmpty)
     }
