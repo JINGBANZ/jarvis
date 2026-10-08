@@ -1,0 +1,9 @@
+{
+  "duration": 10,
+  "assertions": [
+    { "kind": "appearsBy", "selector": "#headline", "bySec": 0.6 },
+    { "kind": "appearsBy", "selector": "#coach", "bySec": 5 },
+    { "kind": "before", "a": "#headline", "b": "#coach" },
+    { "kind": "staysInFrame", "selector": "#coach" }
+  ]
+}

@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=1920, height=1080">
+    <title>Jarvis — a quiet coach</title>
+    <script src="assets/gsap.min.js"></script>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #eeeae2; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; color: #25352e; font-family: system-ui, sans-serif; }
+      .scene { position: absolute; inset: 0; }
+      .brand-row { position: absolute; top: 54px; left: 88px; right: 88px; display: flex; justify-content: space-between; align-items: center; }
+      .brand { display: flex; gap: 12px; align-items: center; font-size: 26px; font-weight: 600; letter-spacing: -0.025em; }
+      .brand svg { width: 32px; height: 32px; }
+      .demo-label { font-size: 19px; color: #59685e; }
+      #headline { position: absolute; top: 112px; left: 88px; margin: 0; font-size: 72px; line-height: 1.1; font-weight: 600; letter-spacing: -0.045em; }
+      #subheading { position: absolute; top: 202px; left: 92px; margin: 0; font-size: 27px; color: #59685e; }
+      #world { position: absolute; inset: 0; transform-origin: 72% 58%; }
+      #desktop { position: absolute; top: 292px; left: 88px; width: 1744px; height: 596px; border-radius: 18px; overflow: hidden; background: #faf8f3; box-shadow: 0 24px 60px rgba(37,53,46,.12), 0 3px 12px rgba(37,53,46,.08); }
+      .window-bar { height: 52px; position: relative; display: flex; align-items: center; justify-content: center; font-size: 19px; color: #59685e; border-bottom: 1px solid rgba(37,53,46,.08); }
+      .traffic-lights { position: absolute; left: 24px; display: flex; gap: 10px; }
+      .traffic-lights span { width: 13px; height: 13px; border-radius: 50%; }
+      .traffic-lights span:nth-child(1) { background: #ff6058; }
+      .traffic-lights span:nth-child(2) { background: #febc2e; }
+      .traffic-lights span:nth-child(3) { background: #28c840; }
+      .desktop-content { display: grid; grid-template-columns: 370px 1fr; height: 544px; }
+      .call-pane { background: #e5ece5; padding: 27px 24px; display: flex; flex-direction: column; gap: 17px; }
+      .call-heading { display: flex; justify-content: space-between; font-size: 18px; color: #59685e; margin-bottom: 2px; }
+      .participant { position: relative; height: 181px; border-radius: 12px; background: #d3ddd1; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 15px; }
+      .participant.you { background: #eeeae2; }
+      .avatar { width: 76px; height: 76px; border-radius: 50%; display: flex; justify-content: center; align-items: center; background: #faf8f3; color: #37694d; font-size: 30px; font-weight: 500; }
+      .participant-name { font-size: 21px; }
+      .speaking-frame { position: absolute; inset: 0; border: 3px solid #37694d; border-radius: 12px; opacity: 0; }
+      .call-foot { color: #59685e; font-size: 18px; margin-top: 2px; }
+      .editor { position: relative; background: #171f1c; color: #d8e2d9; }
+      .editor-tab { height: 51px; padding: 0 27px; display: flex; align-items: center; gap: 14px; background: #243029; font-size: 18px; }
+      .file-symbol { color: #b7d7a9; font-family: ui-monospace, monospace; }
+      .language { margin-left: auto; color: #8ca295; }
+      .problem { padding: 24px 31px 15px; }
+      .problem-title { font-size: 26px; color: #f1f5ef; font-weight: 600; margin-bottom: 9px; }
+      .problem-example { font-family: ui-monospace, monospace; font-size: 20px; color: #8ca295; }
+      .code-area { position: relative; margin: 18px 28px; width: 830px; height: 355px; }
+      .code-slot { position: absolute; inset: 0; }
+      .code-line { position: relative; height: 42px; display: flex; align-items: center; font-family: ui-monospace, monospace; font-size: 26px; line-height: 42px; white-space: pre; }
+      .line-number { width: 45px; flex-shrink: 0; font-size: 20px; color: #8ca295; text-align: right; padding-right: 20px; }
+      .kw { color: #aecac5; }
+      .fn { color: #b7d7a9; }
+      .num { color: #d6c1a2; }
+      .loop-highlight { position: absolute; z-index: 0; top: 0; left: 47px; width: 650px; height: 42px; border-radius: 4px; background: rgba(183,215,169,.1); opacity: 0; }
+      .code-text { position: relative; z-index: 1; }
+      .caret { display: inline-block; width: 2px; height: 26px; margin-left: 3px; vertical-align: -4px; background: #b7d7a9; }
+      .editor-status { position: absolute; bottom: 0; height: 32px; left: 0; right: 0; background: #243029; display: flex; align-items: center; justify-content: space-between; padding: 0 27px; font-size: 16px; color: #8ca295; }
+      .coach-slot { position: absolute; top: 471px; right: 113px; width: 468px; height: 243px; z-index: 3; }
+      #coach { width: 100%; height: 100%; overflow: hidden; border-radius: 12px; background: rgba(26,26,26,.95); color: #f5f5f5; border: 1px solid rgba(245,245,245,.13); box-shadow: 0 18px 45px rgba(0,0,0,.26), 0 2px 6px rgba(0,0,0,.2); }
+      .coach-header { position: relative; height: 35px; display: flex; align-items: center; justify-content: center; color: #b8b8b8; font-size: 15px; font-weight: 500; }
+      .coach-header svg { position: absolute; width: 15px; height: 15px; }
+      .collapse-icon { left: 15px; }
+      .clear-icon { right: 15px; }
+      .coach-body { padding: 16px 20px; }
+      .hint-time { font-size: 18px; color: #b8b8b8; margin-bottom: 10px; }
+      #hint-text { margin: 0; font-size: 29px; font-weight: 600; line-height: 1.35; letter-spacing: -0.015em; }
+      .caption-slot { position: absolute; left: 88px; right: 88px; top: 930px; height: 91px; }
+      .caption { display: flex; align-items: baseline; gap: 25px; }
+      .speaker { width: 165px; flex-shrink: 0; font-size: 20px; font-weight: 600; color: #37694d; letter-spacing: .05em; }
+      .dialogue { font-size: 34px; line-height: 1.3; letter-spacing: -0.025em; }
+    </style>
+  </head>
+  <body>
+    <div data-hf-id="hf-gajd" id="root" data-composition-id="proactive-hint" data-start="0" data-duration="10" data-width="1920" data-height="1080" data-fps="30">
+      <div data-hf-id="hf-epxl" id="conversation-scene" class="scene clip" data-start="0" data-duration="10" data-track-index="0">
+        <div data-hf-id="hf-1l90" class="brand-row">
+          <div data-hf-id="hf-oojr" class="brand">
+            <svg data-hf-id="hf-1ybw" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect data-hf-id="hf-rhnh" x="5" y="8" width="22" height="19" rx="7" /><path data-hf-id="hf-2mz1" d="M16 8V4M2 15v6M30 15v6M11 22h10" /><circle data-hf-id="hf-lzzp" cx="11" cy="15" r="1" fill="currentColor" /><circle data-hf-id="hf-mo3c" cx="21" cy="15" r="1" fill="currentColor" /></svg>
+            <span data-hf-id="hf-fcqg">Jarvis</span>
+          </div>
+          <span data-hf-id="hf-iyv2" class="demo-label">Illustrative demo</span>
+        </div>
+        <h1 data-hf-id="hf-1dld" id="headline">Stay in the conversation.</h1>
+        <p data-hf-id="hf-xsky" id="subheading">A quiet nudge, right when you need it.</p>
+        <div data-hf-id="hf-j427" id="world">
+          <div data-hf-id="hf-nuev" id="desktop">
+            <div data-hf-id="hf-85t8" class="window-bar">
+              <div data-hf-id="hf-d6yi" class="traffic-lights" aria-hidden="true"><span data-hf-id="hf-uckh"></span><span data-hf-id="hf-l73p"></span><span data-hf-id="hf-me0s"></span></div>
+              <span data-hf-id="hf-amnn">Technical conversation</span>
+            </div>
+            <div data-hf-id="hf-b2s8" class="desktop-content">
+              <div data-hf-id="hf-8lvv" class="call-pane">
+                <div data-hf-id="hf-chjl" class="call-heading"><span data-hf-id="hf-jg8f">Audio call</span><span data-hf-id="hf-ss1o">12:08</span></div>
+                <div data-hf-id="hf-rlsf" class="participant">
+                  <div data-hf-id="hf-93ry" class="avatar">A</div>
+                  <div data-hf-id="hf-ljkk" class="participant-name">Alex · Interviewer</div>
+                  <div data-hf-id="hf-vd1f" id="interviewer-speaking" class="speaking-frame"></div>
+                </div>
+                <div data-hf-id="hf-8ps2" class="participant you">
+                  <div data-hf-id="hf-5xbq" class="avatar">Y</div>
+                  <div data-hf-id="hf-j15c" class="participant-name">You</div>
+                  <div data-hf-id="hf-e71y" id="candidate-speaking" class="speaking-frame"></div>
+                </div>
+                <div data-hf-id="hf-diev" class="call-foot">Two Sum · Python</div>
+              </div>
+              <div data-hf-id="hf-6k2j" class="editor">
+                <div data-hf-id="hf-ngsh" class="editor-tab"><span data-hf-id="hf-h6xm" class="file-symbol">{ }</span><span data-hf-id="hf-f2qy">two_sum.py</span><span data-hf-id="hf-3fyd" class="language">Python</span></div>
+                <div data-hf-id="hf-fu39" class="problem"><div data-hf-id="hf-vefd" class="problem-title">Two Sum</div><div data-hf-id="hf-n80z" class="problem-example">nums = [2, 7, 11, 15] · target = 9</div></div>
+                <div data-hf-id="hf-foj7" class="code-area">
+                  <div data-hf-id="hf-61tm" id="initial-solution" class="code-slot clip" data-start="0" data-duration="7.2" data-track-index="1">
+                    <div data-hf-id="hf-lawi" id="before-code">
+                      <div data-hf-id="hf-pnna" class="code-line"><span data-hf-id="hf-9j4e" class="line-number">1</span><span data-hf-id="hf-s05d" class="code-text"><span data-hf-id="hf-czhm" class="kw">def</span> <span data-hf-id="hf-0lfh" class="fn">two_sum</span>(nums, target):</span></div>
+                      <div data-hf-id="hf-2esa" class="code-line"><div data-hf-id="hf-glg2" id="loop-one" class="loop-highlight"></div><span data-hf-id="hf-9xff" class="line-number">2</span><span data-hf-id="hf-tqes" class="code-text">    <span data-hf-id="hf-dtgu" class="kw">for</span> i <span data-hf-id="hf-ue7s" class="kw">in</span> <span data-hf-id="hf-joj6" class="fn">range</span>(<span data-hf-id="hf-vzu4" class="fn">len</span>(nums)):</span></div>
+                      <div data-hf-id="hf-2t3b" class="code-line"><div data-hf-id="hf-bwyc" id="loop-two" class="loop-highlight"></div><span data-hf-id="hf-abqg" class="line-number">3</span><span data-hf-id="hf-oujt" class="code-text">        <span data-hf-id="hf-toc2" class="kw">for</span> j <span data-hf-id="hf-pykw" class="kw">in</span> <span data-hf-id="hf-qqpi" class="fn">range</span>(i + <span data-hf-id="hf-kud6" class="num">1</span>, <span data-hf-id="hf-yitg" class="fn">len</span>(nums)):</span></div>
+                      <div data-hf-id="hf-37ec" class="code-line"><span data-hf-id="hf-7jl9" class="line-number">4</span><span data-hf-id="hf-9w2j" class="code-text">            <span data-hf-id="hf-xko0" class="kw">if</span> nums[i] + nums[j] == target:</span></div>
+                      <div data-hf-id="hf-3lpd" class="code-line"><span data-hf-id="hf-7xwa" class="line-number">5</span><span data-hf-id="hf-1c6r" class="code-text">                <span data-hf-id="hf-l6xl" class="kw">return</span> [i, j]<span data-hf-id="hf-vlyv" id="before-caret" class="caret"></span></span></div>
+                    </div>
+                  </div>
+                  <div data-hf-id="hf-8pj4" id="revised-solution" class="code-slot clip" data-start="7.2" data-duration="2.8" data-track-index="1">
+                    <div data-hf-id="hf-gsjd" id="after-code">
+                      <div data-hf-id="hf-jjta" class="code-line solution-line"><span data-hf-id="hf-07iq" class="line-number">1</span><span data-hf-id="hf-151x" class="code-text"><span data-hf-id="hf-2tf2" class="kw">def</span> <span data-hf-id="hf-wt5d" class="fn">two_sum</span>(nums, target):</span></div>
+                      <div data-hf-id="hf-w8b6" class="code-line solution-line"><span data-hf-id="hf-cyez" class="line-number">2</span><span data-hf-id="hf-hdpe" class="code-text">    seen = {}</span></div>
+                      <div data-hf-id="hf-wmm7" class="code-line solution-line"><span data-hf-id="hf-bu8w" class="line-number">3</span><span data-hf-id="hf-d6dg" class="code-text">    <span data-hf-id="hf-u2n3" class="kw">for</span> i, value <span data-hf-id="hf-ornt" class="kw">in</span> <span data-hf-id="hf-8t2d" class="fn">enumerate</span>(nums):</span></div>
+                      <div data-hf-id="hf-x0x8" class="code-line solution-line"><span data-hf-id="hf-mcgx" class="line-number">4</span><span data-hf-id="hf-m7bg" class="code-text">        complement = target - value</span></div>
+                      <div data-hf-id="hf-xf89" class="code-line solution-line"><span data-hf-id="hf-t472" class="line-number">5</span><span data-hf-id="hf-i6o1" class="code-text">        <span data-hf-id="hf-l5ug" class="kw">if</span> complement <span data-hf-id="hf-p5yu" class="kw">in</span> seen:</span></div>
+                      <div data-hf-id="hf-xtja" class="code-line solution-line"><span data-hf-id="hf-8c7b" class="line-number">6</span><span data-hf-id="hf-od5a" class="code-text">            <span data-hf-id="hf-g8bx" class="kw">return</span> [seen[complement], i]</span></div>
+                      <div data-hf-id="hf-y7ub" class="code-line solution-line"><span data-hf-id="hf-8qic" class="line-number">7</span><span data-hf-id="hf-7m7a" class="code-text">        seen[value] = i<span data-hf-id="hf-cmq8" id="after-caret" class="caret"></span></span></div>
+                    </div>
+                  </div>
+                </div>
+                <div data-hf-id="hf-edw2" class="editor-status"><span data-hf-id="hf-4res">main</span><span data-hf-id="hf-kofo">UTF-8 · Python</span></div>
+              </div>
+            </div>
+          </div>
+          <div data-hf-id="hf-cl16" id="proactive-hint-panel" class="coach-slot clip" data-start="4.5" data-duration="5.5" data-track-index="2">
+            <div data-hf-id="hf-ujr5" id="coach">
+              <div data-hf-id="hf-djb4" class="coach-header">
+                <svg data-hf-id="hf-uhqv" class="collapse-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path data-hf-id="hf-gtpo" d="m4 6 4 4 4-4" /></svg>
+                <span data-hf-id="hf-q1ow">Jarvis</span>
+                <svg data-hf-id="hf-h2pb" class="clear-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path data-hf-id="hf-i6vn" d="m3 9 5-6 5 4-5 6H6zM6 6l5 4M9 13h5" /></svg>
+              </div>
+              <div data-hf-id="hf-6jfj" class="coach-body"><div data-hf-id="hf-c4l4" class="hint-time">12:08:04</div><p data-hf-id="hf-ewer" id="hint-text">Look up the complement in a hash map. One pass, O(n).</p></div>
+            </div>
+          </div>
+        </div>
+        <div data-hf-id="hf-sgnn" id="question-caption" class="caption-slot clip" data-start="0.55" data-duration="2.35" data-track-index="3"><div data-hf-id="hf-9q2h" class="caption" id="caption-one"><span data-hf-id="hf-k130" class="speaker">INTERVIEWER</span><span data-hf-id="hf-wurh" class="dialogue">Can you improve the time complexity?</span></div></div>
+        <div data-hf-id="hf-ya9t" id="thinking-caption" class="caption-slot clip" data-start="3" data-duration="3.2" data-track-index="3"><div data-hf-id="hf-9cm7" class="caption" id="caption-two"><span data-hf-id="hf-72cf" class="speaker">YOU</span><span data-hf-id="hf-gppx" class="dialogue">Right now, I’m checking every pair…</span></div></div>
+        <div data-hf-id="hf-h0qe" id="answer-caption" class="caption-slot clip" data-start="6.5" data-duration="3.5" data-track-index="3"><div data-hf-id="hf-bmgt" class="caption" id="caption-three"><span data-hf-id="hf-qdcv" class="speaker">YOU</span><span data-hf-id="hf-b6dy" class="dialogue">I could look up the complement.</span></div></div>
+      </div>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo('#headline', { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.55, ease: 'power3.out' }, 0);
+      tl.fromTo('#subheading', { opacity: 0 }, { opacity: 1, duration: 0.4, ease: 'power1.out' }, 0.18);
+      tl.fromTo('#desktop', { opacity: 0, y: 18 }, { opacity: 1, y: 0, duration: 0.65, ease: 'power2.out' }, 0.05);
+      tl.to('#interviewer-speaking', { opacity: 1, duration: 0.18 }, 0.55);
+      tl.to('#interviewer-speaking', { opacity: 0, duration: 0.18 }, 2.75);
+      tl.to('#candidate-speaking', { opacity: 1, duration: 0.18 }, 3);
+      tl.to('.loop-highlight', { opacity: 1, duration: 0.4 }, 3.2);
+      tl.to('.loop-highlight', { opacity: 0, duration: 0.3 }, 6.6);
+      tl.fromTo('#coach', { opacity: 0, y: 7 }, { opacity: 1, y: 0, duration: 0.32, ease: 'power2.out' }, 4.5);
+      tl.fromTo('#world', { scale: 1 }, { scale: 1.055, duration: 1.5, ease: 'power2.inOut' }, 4.65);
+
+      const hint = document.querySelector('#hint-text');
+      const fullHint = hint.textContent;
+      const typing = { characters: 0 };
+      hint.textContent = '';
+      tl.to(typing, { characters: fullHint.length, duration: 1, ease: 'none', onUpdate: () => {
+        hint.textContent = fullHint.slice(0, Math.floor(typing.characters));
+      } }, 4.6);
+
+      tl.fromTo('#before-code', { opacity: 1 }, { opacity: 0, duration: 0.2 }, 7);
+      tl.fromTo('.solution-line', { opacity: 0 }, { opacity: 1, duration: 0.12, stagger: 0.07, ease: 'none' }, 7.2);
+
+      const blink = { phase: 0 };
+      const carets = document.querySelectorAll('.caret');
+      tl.to(blink, { phase: 25 * Math.PI, duration: 10, ease: 'none', onUpdate: () => {
+        for (const caret of carets) caret.style.opacity = Math.sin(blink.phase) >= 0 ? '1' : '0';
+      } }, 0);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines['proactive-hint'] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>

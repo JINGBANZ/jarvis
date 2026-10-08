@@ -1,0 +1,18 @@
+{
+  "name": "jarvis-proactive-hint-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "prepare": "node scripts/prepare.mjs",
+    "dev": "hyperframes preview",
+    "preview": "hyperframes preview --background --port 4318",
+    "stop": "hyperframes preview --stop",
+    "check": "hyperframes check",
+    "snapshots": "hyperframes snapshot --at 0.6,3.2,5.8,8.8",
+    "render": "hyperframes render --fps 30 --quality delivery"
+  },
+  "devDependencies": {
+    "gsap": "3.15.0",
+    "hyperframes": "0.8.140"
+  }
+}
