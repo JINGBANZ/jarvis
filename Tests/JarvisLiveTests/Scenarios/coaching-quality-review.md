@@ -168,3 +168,41 @@ that exact added phrase was not present in the paired probes and remains unobser
 production evaluation harness. All four committed fixtures should be evaluated using the protocol
 at the top of this document before making a production reliability claim. Catalog/build checks
 remain packaging evidence only; the running app is not updated by editing this bundled source.
+
+## System-design progression and comprehension probes
+
+The eight `system-*` cases added for architecture entry, scaling comprehension, batch replay,
+proposed batching, gateway-owned ingestion, deep-dive entry, productive design, and requirements
+stage are synthetic development regressions. They check diagram delivery, responsibility ownership,
+concrete explanations, stable advice, and restraint. They contain no private interview records.
+
+One fresh-context subagent read the baseline production coach/action and speak source guidance plus
+system-design skill and answered all eight inputs. A separate fresh-context subagent read the same
+sources with the revised skill and answered the same inputs. Pass criteria were hidden. Each agent
+answered the group in one conversation, not a fresh conversation per case. These inherited host-model
+probes retain host instructions; they do not execute the production prompt composer, provider,
+tool loop, renderer, or signed app. They are not held-out transfer or reliability measurements.
+
+| Case | Baseline observation | Revised observation |
+|---|---|---|
+| Architecture entry | Diagram present, but validation ownership not stated. | Diagram names ingestion validation and lines put success after durable logging. |
+| Scaling comprehension | Explains many events per upload, but omits batching delay and flush bounds. | Concrete 100-event example; downstream batching, durable API acceptance, size/time flush, and archival lag distinguished. |
+| Batch replay | Same range/name explained; conditional creation not explicit. | Fixed range, create-if-absent, replay and offset commit explained in one example. |
+| Proposed batching | Keeps downstream batching and explains memory-loss risk. | Also distinguishes delaying acknowledgment from acknowledging before durability. |
+| Gateway-owned ingestion | Accepts managed integration, with an unnecessary unchanged-flow diagram. | Accepts existing responsibility with a brief text answer. |
+| Deep-dive entry | Names a crash but leaves response/recovery to the candidate. | Gives a concrete archival retry mechanism and replay/lag trade-off. |
+| Productive design | Silent. | Silent. |
+| Requirements stage | Scope question, no architecture. | Scope question, no architecture. |
+
+The baseline already produced a graph in this short synthetic context, so these samples do not
+establish improved diagram frequency in a long session. The revised architecture opening still has
+one 12-word line, missing the generic under-12-word guideline. The archival examples assume an
+exclusive object namespace and repeatable batch contents; they are coaching illustrations, not a
+complete storage protocol. Other existing cases were not rerun semantically. Evaluate the fixtures
+with the fresh-conversation protocol above before claiming production-provider improvement.
+
+Whole-file SHA-256 revisions: baseline
+`97b0edacb21ec354ba150ebdc1ed98968e54990896d9640a8bfffe327c30c20c`; revised
+`b6e87dd1c005f58ee409fe811af227be8969187875c8e1d6379bb35b7486c7256`.
+The repository Gate verifies packaging and code behavior separately; it neither scores these
+semantic cases nor installs the revised skill into a running app.

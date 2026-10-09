@@ -1030,8 +1030,16 @@ rather than a per-turn screenshot.
   state ownership, durable background-work creation, replenishment, and recovery against the current
   requirements. It targets the highest-impact missing mechanism at the current stage and asks for
   a diagram in the one stage that benefits. An explicitly requested stage takes precedence over
-  screen notes; generic hints continue the stage established in conversation. Architecture hints
-  describe component responsibilities and a request or data flow. Canvas navigation controls are
+  screen notes; generic hints continue the stage established in conversation. Warranted stage-entry
+  hints provide a usable starting structure and one next move. Architecture flow hints include a
+  compact diagram in detail, including on the ordinary hint shortcut, because naming disconnected
+  steps leaves the candidate to assemble the design under pressure. They identify application-work
+  and durable-write ownership before suggesting connections, without forcing redundant services.
+  Deep dives keep the current question, operation and retry boundary distinct; alternatives are
+  explained before replacing the candidate's approach. Scaling hints locate batching and parallelism
+  in that approach and explain the work saved and latency trade-off. Expressed confusion prompts a
+  small worked example immediately rather than repeated terminology or an extra shortcut press.
+  Productive progress remains silent; these are skill instructions, not runtime stage tracking. Canvas navigation controls are
   interface state and become the answer when navigation is what the candidate asks for; an unseen
   drawing calls for a conversation-grounded hint with its visual limitation stated. Unresolved
   requirements call for a specific question the candidate can put to the interviewer, without needing

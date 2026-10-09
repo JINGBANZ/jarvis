@@ -350,5 +350,69 @@
     ],
     "input": "Pilot capacity discussion. Every supplier claim still requires technician review. me: The assistant drafts 90 percent of cases, so technicians only work on 10 percent, and we can cover peak. How do I show the gain?",
     "pass": "Rejects draft coverage as human-work elimination. Uses eligible/adopted case volume times measured active minutes saved including review/fixes, against comparable baseline cases. Compares released hours with peak workload and usable team capacity; no unsupported automation or staffing claim."
+  },
+  {
+    "id": "system-architecture-entry",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Agreed requirements: ingest application events durably, show live counts, and archive raw events for later reporting. Entities and APIs are settled. The gateway only authenticates and routes. No architecture is drawn yet. me: Jarvis, I am starting the high-level design. What should I draw first?",
+    "pass": "Includes a compact Mermaid flow in detail with an ingestion service owning validation and durable publication between the gateway and log, and clear downstream live-count/archive responsibilities. Lines explain one useful drawing move. Does not claim to see a drawing or dive into offsets."
+  },
+  {
+    "id": "system-scaling-comprehension",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Current design: ingestion service publishes individual events to Kafka; analytical consumers write Parquet files to S3, then commit Kafka offsets. them: Would waiting for S3 writes scale to millions of events per second? Earlier hint: batch writes and parallelize consumers. me: I do not understand. Should the API service collect the batch before sending it to Kafka?",
+    "pass": "Explains that the analytical consumer batches here, with a small illustrative many-events-to-one-file example and why it reduces upload overhead; preserves durable ingestion first and commit after upload. Names the latency or size/time-flush trade-off. Does not claim a measured throughput or prescribe a new ingestion buffer."
+  },
+  {
+    "id": "system-batch-replay",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Current design: Kafka consumer writes batches as Parquet objects in S3. Previous hints mentioned client event IDs and deduplicating later in Spark. them: The upload succeeds, then the consumer crashes before committing. How does retry avoid storing that batch twice? me: Jarvis, I cannot follow the hints. Explain one batch.",
+    "pass": "Separates retrying one stored batch from duplicate client submissions. Uses one concrete stable batch/range and S3 object key, explains recovering the same contents and conditional creation or equivalent retry-safe handling, then committing. Does not present event IDs within Parquet or downstream payout dedup as preventing duplicate object writes."
+  },
+  {
+    "id": "system-proposed-batching",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Current design durably accepts events into Kafka and batches in the archival consumer. The interviewer asks how retrying one file avoids duplicates. me: Maybe I should move batching into the API service and buffer requests in memory until a batch fills. Jarvis, would that solve it?",
+    "pass": "Answers the proposal directly: moving batching does not itself solve replay identity and adds pre-durability buffering/recovery or latency concerns. Keeps the existing downstream approach as the simpler option and explains preserving the same batch on retry. Does not silently flip between alternatives or claim buffering is categorically impossible."
+  },
+  {
+    "id": "system-gateway-owned-ingestion",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Agreed design: a managed gateway integration validates event schemas and publishes directly to a durable stream; it returns success only after durable acceptance. me: Jarvis, do I need a separate ingestion service just because the gateway points to the stream?",
+    "pass": "Recognizes the required ownership already exists; does not demand another box or assert gateway-to-stream is inherently wrong. Explains the relevant responsibility/acknowledgment boundary briefly."
+  },
+  {
+    "id": "system-deep-dive-entry",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Architecture is agreed: ingestion service, durable event log, independent live-count and archival consumers. them: Go deeper on fault tolerance. me: Jarvis, where should I start?",
+    "pass": "Provides a focused failure case with the known component, durable state, response and recovery mechanism; links it to the agreed durability need. Avoids an exhaustive checklist, restarting requirements, or a new architecture."
+  },
+  {
+    "id": "system-productive-design",
+    "skills": [
+      "system-design"
+    ],
+    "input": "The candidate has a coherent architecture and is making steady progress. No question or shortcut. me: The ingestion service validates events and waits for the replicated log acknowledgment. Now I am drawing the two independent consumers and explaining the live-count store and archival path. No missing responsibility or new error is evident.",
+    "pass": "Stays silent; the diagram rule does not force interruption of productive progress."
+  },
+  {
+    "id": "system-requirements-stage",
+    "skills": [
+      "system-design"
+    ],
+    "input": "The current stage is requirements for a document sharing service; scope is still open. me: Jarvis, what should I clarify before naming entities?",
+    "pass": "Offers a focused scope or access/sharing question grounded in this task. Does not jump to an architecture diagram, database, or deep-dive recipe."
   }
 ]
