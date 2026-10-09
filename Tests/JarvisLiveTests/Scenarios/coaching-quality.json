@@ -253,7 +253,7 @@
       "customer-scenario-design"
     ],
     "input": "Discovery playback in a public library network: 1,600 damaged-book reports weekly, rare-book cases wait four days in the ordinary replacement queue, and the preservation lead owns rare-book decisions. Ordinary replacements take six minutes of handling. me: Jarvis, help me play that back before we choose the first slice.",
-    "pass": "Gives one customer-specific takeaway, two supporting facts, and one confirmation question. Uses those facts to check the bottleneck; does not reproduce the discovery checklist, invent a goal, add architecture, or give a full spoken script."
+    "pass": "Gives a compact recap of the problem, known goal and boundaries, followed by one confirmation question. Does not invent missing goals or authority, reproduce the discovery checklist, add architecture, or give a full spoken script."
   },
   {
     "id": "customer-overload-cue",
@@ -350,5 +350,77 @@
     ],
     "input": "Pilot capacity discussion. Every supplier claim still requires technician review. me: The assistant drafts 90 percent of cases, so technicians only work on 10 percent, and we can cover peak. How do I show the gain?",
     "pass": "Rejects draft coverage as human-work elimination. Uses eligible/adopted case volume times measured active minutes saved including review/fixes, against comparable baseline cases. Compares released hours with peak workload and usable team capacity; no unsupported automation or staffing claim."
+  },
+  {
+    "id": "customer-proactive-opening",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "them: We run equipment rentals. Staff switch between booking and maintenance systems to check availability and prepare quotes. We want an assistant but no unauthorized reservations. I will play the customer and save feedback until the end. What would you ask first?",
+    "pass": "Speaks with one usable discovery question about a recent request, optionally a brief orientation. Does not treat the interviewer saving feedback as disabling Jarvis coaching, require a help request, or propose architecture."
+  },
+  {
+    "id": "customer-proactive-followup",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer discovery. me: Can you walk me through a recent request? them: Yesterday a customer requested twelve forklifts. The coordinator checked bookings, maintenance status and pricing, then asked the depot manager to confirm availability before drafting a quote.",
+    "pass": "Speaks with one grounded next question about effort or waiting in that workflow. Does not repeat the answered walkthrough question, assume which step is slow, or give a checklist."
+  },
+  {
+    "id": "customer-proactive-scope",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer discovery. Confirmed: coordinators spend most active time gathering booking and maintenance facts for availability replies; reliable read access exists; success means less gathering time. me: What must stay with your team? them: Managers must still authorize reservations and price exceptions.",
+    "pass": "Speaks proactively to stop discovery and cue a problem/goal/boundaries recap plus a read-only availability-assistance scope for confirmation. Does not ask for unnecessary exact volumes, assume scope is already approved, start architecture, or add reservation writes."
+  },
+  {
+    "id": "customer-proactive-candidate-progress",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer discovery. them: We check bookings, maintenance and ask the depot manager before quoting. me: Which of those steps takes the most effort or causes the longest wait?",
+    "pass": "Stays silent: the candidate has already asked the useful follow-up; does not replace or repeat it."
+  },
+  {
+    "id": "customer-proactive-no-repeat",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer discovery. them: We check bookings and maintenance before quoting. Jarvis already showed: Ask which step takes the most effort or causes the longest wait. New input: (no speech for 20s). No new customer facts or help request.",
+    "pass": "Stays silent without repeating or advancing past the unanswered cue; does not infer confusion from quiet alone."
+  },
+  {
+    "id": "customer-explicit-no-coaching",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "me: Jarvis, stay silent during this mock and give feedback only when I ask afterward. Jarvis acknowledged. New speech: them: We want an assistant for equipment rentals. What would you ask first?",
+    "pass": "Stays silent because the candidate explicitly disabled live Jarvis coaching, even though this would otherwise warrant an opening cue."
+  },
+  {
+    "id": "customer-proactive-acknowledgment",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer discovery. me: Which step causes the longest wait? them: Let me think for a moment.",
+    "pass": "Stays silent while the customer is considering the question; does not treat an acknowledgment as a substantive answer."
+  },
+  {
+    "id": "customer-proactive-material-gap",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer discovery. Staff spend time checking equipment availability. The goal is faster replies; reservations stay with managers. me: Can we access the booking and maintenance records? them: We do not know whether those systems expose reliable current information.",
+    "pass": "Asks one targeted feasibility question or recommends a clearly bounded data-access validation step. Does not claim readiness for a live availability assistant, invent access, or keep collecting unrelated metrics."
+  },
+  {
+    "id": "customer-discovery-guides-design",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Earlier discovery briefing: equipment coordinators lose time gathering availability evidence; booking data is current but maintenance records refresh overnight. Goal: faster supported replies. Agreed pilot: read-only drafts with source timestamps; managers authorize reservations and price exceptions. Automated chasing was discussed but excluded. Exact weekly volume is unknown. them: That scope works. Show us how it would work.",
+    "pass": "Cues a sketch and one case grounded in the collected facts: booking and maintenance evidence, freshness checks, draft reply, human handling when current availability cannot be established. Preserves read-only scope and manager authority; does not invent live maintenance access, automated chasing, or restart discovery for exact volume."
   }
 ]

@@ -168,3 +168,17 @@ that exact added phrase was not present in the paired probes and remains unobser
 production evaluation harness. All four committed fixtures should be evaluated using the protocol
 at the top of this document before making a production reliability claim. Catalog/build checks
 remain packaging evidence only; the running app is not updated by editing this bundled source.
+
+## Proactive consulting regression coverage
+
+The `customer-proactive-*`, `customer-explicit-no-coaching`, and
+`customer-discovery-guides-design` cases exercise unsolicited opening/follow-up cues, discovery
+sufficiency and recap, a material feasibility gap, candidate progress, acknowledgments, repetition,
+explicit coaching opt-out, and discovery evidence carried into design. Run them with the same
+production policy and loaded skill as the other cases. A passing Gate checks packaging and harness
+behavior; it does not execute these semantic cases or establish live coaching quality.
+
+The reported session supplies a baseline failure: a complete scenario and later workflow answer
+reached the model with this skill loaded, and the model returned `stay_silent`. Synthetic before/after
+model evaluation of this change is not observed; external evaluation requires approval. No private
+session transcripts or screenshots are included in the regression fixtures.
