@@ -28,8 +28,11 @@ struct DiagramHintLayout {
             height: margin * 2 + CGFloat(breadth) * (box.height + 16) - 16
                 + CGFloat(graph.edges.filter { ranks[$0.to]! != ranks[$0.from]! + 1 }.count) * 8)
         horizontal = graph.direction == .leftToRight && across.width <= available.width
+        let hasReturns = graph.edges.contains { ranks[$0.to]! <= ranks[$0.from]! }
+        let labelGutters = !horizontal && available.width >= box.width + 2 * (edgeLabel.width + 24)
+        let leftSpace = labelGutters && hasReturns ? edgeLabel.width + 24 : margin
         var columns = max(1, min(breadth, Int(
-            (available.width - margin * 2 + columnGap) / (box.width + columnGap))))
+            (available.width - leftSpace - margin + columnGap) / (box.width + columnGap))))
         var rows: [[DiagramHint.Node]] = []
         var sideSpace = margin
         while true {
@@ -42,19 +45,19 @@ struct DiagramHintLayout {
                 nodes.map { ($0.id, index) }
             })
             let outsideEdges = graph.edges.filter { rowIndex[$0.to]! != rowIndex[$0.from]! + 1 }.count
-            sideSpace = margin + CGFloat(outsideEdges) * 8
+            sideSpace = (labelGutters && outsideEdges > 0 ? edgeLabel.width + 24 : margin) + CGFloat(outsideEdges) * 8
             let fittingColumns = max(1, Int(
-                (available.width - margin - sideSpace + columnGap) / (box.width + columnGap)))
+                (available.width - leftSpace - sideSpace + columnGap) / (box.width + columnGap)))
             if fittingColumns >= columns { break }
             columns = fittingColumns
         }
         // Reserve outer lanes before sizing boxes so return arrows stay inside the viewport.
-        sideSpace = min(sideSpace, max(margin, available.width - box.width - margin))
+        sideSpace = min(sideSpace, max(margin, available.width - box.width - leftSpace))
         let actualBox = CGSize(width: horizontal ? box.width
-            : min(box.width, max(1, available.width - margin - sideSpace)), height: box.height)
+            : min(box.width, max(1, available.width - leftSpace - sideSpace)), height: box.height)
         let verticalGaps = rows.map { gap(after: $0, labelExtent: edgeLabel.height) + 16 }
         size = horizontal ? across : CGSize(
-            width: margin + sideSpace + CGFloat(columns) * (actualBox.width + columnGap) - columnGap,
+            width: leftSpace + sideSpace + CGFloat(columns) * (actualBox.width + columnGap) - columnGap,
             height: margin * 2 + CGFloat(rows.count) * box.height + verticalGaps.reduce(0, +))
         var frames: [String: CGRect] = [:]
         var position = margin
@@ -67,7 +70,7 @@ struct DiagramHintLayout {
                             + CGFloat(offset) * (box.height + 16))
                 } else {
                     origin = CGPoint(
-                        x: (size.width - sideSpace + margin - CGFloat(nodes.count) * (actualBox.width + columnGap) + columnGap) / 2
+                        x: (size.width - sideSpace + leftSpace - CGFloat(nodes.count) * (actualBox.width + columnGap) + columnGap) / 2
                             + CGFloat(offset) * (actualBox.width + columnGap), y: position)
                 }
                 if !horizontal && nodes.count == 1 {
@@ -75,7 +78,7 @@ struct DiagramHintLayout {
                     if !parents.isEmpty {
                         let center = parents.reduce(0, +) / CGFloat(parents.count)
                         origin.x = min(size.width - sideSpace - actualBox.width,
-                                       max(margin, center - actualBox.width / 2))
+                                       max(leftSpace, center - actualBox.width / 2))
                     }
                 }
                 frames[node.id] = CGRect(origin: origin, size: actualBox)

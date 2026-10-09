@@ -113,8 +113,18 @@ put one box declaration or arrow per line. Use simple alphanumeric IDs starting 
 rectangular boxes like `api["API service"]`, and arrows like `api --> db` or
 `api -->|read| db["Database"]`. Declare every box, either separately or on an arrow. Prefer 3–8
 boxes; the limit is 12 boxes and 24 arrows. Keep box labels under 48 characters and arrow labels
-under 32. Inside the block, do not use chained arrows, subgraphs, styles, directives, HTML, links,
+under 32. Inside the block, do not use chained arrows, subgraphs, arbitrary styles, directives, HTML, links,
 or other shapes. Example:
+
+
+Label connections with the operation, including bypasses and correction/retry paths; color alone
+must never carry meaning. Use `worker -.->|Retry failed events| queue` for a dashed connection.
+To distinguish a small number of important paths, append `linkStyle 0,1 stroke:#EAB308,stroke-width:3px`
+after the arrows (zero-based arrow indices, excluding box declarations). Only six-digit hex stroke
+colors and optional widths 1–4px are supported. Keep normal flow neutral; use amber `#EAB308` for a
+highlighted forward path and purple `#C084FC` for a return/retry path. Do not color every edge or invent
+an operation to justify styling. In narrow windows labels stay near their source; wider layouts put
+long-path labels in side gutters.
 
 ```mermaid
 flowchart LR

@@ -35,14 +35,14 @@ enum DiagramHintImage {
         let transform = NSAffineTransform()
         transform.scale(by: scale)
         transform.concat()
-        for route in layout.routes { drawEdge(route) }
+        for (edge, route) in zip(graph.edges, layout.routes) { drawEdge(route, edge: edge) }
         for (edge, route) in zip(graph.edges, layout.routes) {
             guard let label = edge.label else { continue }
             drawLabel(label, in: CGRect(
                 x: min(max(0, route.labelCenter.x - edgeLabel.width / 2), max(0, natural.width - edgeLabel.width)),
                 y: route.labelCenter.y - edgeLabel.height / 2,
                 width: min(edgeLabel.width, natural.width), height: edgeLabel.height),
-                fontSize: 12, background: true)
+                fontSize: 12, background: true, color: edge.stroke == nil ? .white : strokeColor(edge))
         }
         for node in graph.nodes {
             guard let frame = frames[node.id] else { continue }
@@ -58,12 +58,13 @@ enum DiagramHintImage {
         return image
     }
 
-    private static func drawEdge(_ route: DiagramHintEdgeRoute) {
+    private static func drawEdge(_ route: DiagramHintEdgeRoute, edge: DiagramHint.Edge) {
         let path = NSBezierPath()
         path.move(to: route.points[0])
         for point in route.points.dropFirst() { path.line(to: point) }
-        NSColor(white: 0.75, alpha: 1).setStroke()
-        path.lineWidth = 2
+        strokeColor(edge).setStroke()
+        path.lineWidth = edge.strokeWidth
+        if edge.dashed { path.setLineDash([6, 4], count: 2, phase: 0) }
         path.stroke()
         let end = route.points.last!
         let previous = route.points[route.points.count - 2]
@@ -75,17 +76,25 @@ enum DiagramHintImage {
         arrow.move(to: CGPoint(x: end.x - ux * 8 - uy * 5, y: end.y - uy * 8 + ux * 5))
         arrow.line(to: end)
         arrow.line(to: CGPoint(x: end.x - ux * 8 + uy * 5, y: end.y - uy * 8 - ux * 5))
-        arrow.lineWidth = 2
+        arrow.lineWidth = edge.strokeWidth
         arrow.stroke()
     }
 
-    private static func drawLabel(_ label: String, in rect: NSRect, fontSize: CGFloat, background: Bool) {
+    private static func strokeColor(_ edge: DiagramHint.Edge) -> NSColor {
+        guard let rgb = edge.stroke else { return NSColor(white: 0.75, alpha: 1) }
+        return NSColor(calibratedRed: CGFloat((rgb >> 16) & 255) / 255,
+                       green: CGFloat((rgb >> 8) & 255) / 255,
+                       blue: CGFloat(rgb & 255) / 255, alpha: 1)
+    }
+
+    private static func drawLabel(_ label: String, in rect: NSRect, fontSize: CGFloat,
+                                  background: Bool, color: NSColor = .white) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         paragraph.lineBreakMode = .byWordWrapping
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: fontSize, weight: .medium),
-            .foregroundColor: NSColor.white, .paragraphStyle: paragraph,
+            .foregroundColor: color, .paragraphStyle: paragraph,
         ]
         let text = NSAttributedString(string: label, attributes: attributes)
         let measured = text.boundingRect(with: rect.size, options: [.usesLineFragmentOrigin, .usesFontLeading])

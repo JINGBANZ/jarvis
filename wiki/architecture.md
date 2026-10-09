@@ -509,7 +509,12 @@ strip visible. It never changes the outer panel's size or position. A manually c
 proportion still takes precedence. Diagrams keep one reading direction: a requested horizontal flow
 stays horizontal only when it fits the available width; otherwise it reads top to bottom. Wide ranks
 wrap into rows, and a continuing branch keeps its column. Direct connections use straight arrows;
-bypasses and returns use exterior lanes with separate tracks for independent workflows. Layout
+bypasses and returns use opposite exterior sides with separate tracks for independent workflows.
+Long-path labels sit in side gutters when width allows; narrow windows retain source-adjacent labels
+and readable boxes. Clear side approaches use side-entry arrowheads to distinguish them from normal
+incoming flow. Dashed Mermaid arrows and restricted `linkStyle` declarations (six-digit hex stroke,
+optional 1–4px width, zero-based edge indices) are inert parsed data; arbitrary CSS remains rejected.
+Labels share the explicit edge color, while unlabeled/default flow stays neutral. Layout
 preserves every node, label, and directed connection. Readability takes precedence over compactness:
 node and edge labels retain their native readable size, with vertical scrolling when the graph cannot
 fit the remaining height. Prose beside a diagram keeps its configured compact size rather than

@@ -4,6 +4,31 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct DiagramHintRenderingTests {
+    @MainActor @Test func coloredDashedArrowsRenderTheirStyle() throws {
+        func coloredPixels(_ arrow: String) throws -> Int {
+            let graph = try #require(DiagramHint(mermaid:
+                "flowchart TD\nA[API] \(arrow) B[Queue]\nlinkStyle 0 stroke:#EAB308,stroke-width:3px"))
+            let image = DiagramHintImage.render(graph, fitting: CGSize(width: 200, height: 1))
+            let data = try #require(image.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data: data))
+            var count = 0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide {
+                    let color = try #require(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                    if color.redComponent > 0.7 && color.greenComponent > 0.4 && color.blueComponent < 0.2 {
+                        count += 1
+                    }
+                }
+            }
+            return count
+        }
+        let solid = try coloredPixels("-->")
+        let dashed = try coloredPixels("-.->")
+        #expect(solid > 100)
+        #expect(dashed > 40)
+        #expect(dashed < solid, "dashed strokes leave visible gaps while preserving colored arrowheads")
+    }
+
     @MainActor @Test func asyncDiagramDeliveryDrawsInsideThePrivatePanel() async throws {
         let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel()

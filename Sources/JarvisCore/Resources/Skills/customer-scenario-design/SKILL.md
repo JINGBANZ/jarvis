@@ -141,15 +141,16 @@ regions → variation; messy records → readiness; job fears → adoption; dead
 - Inspection: validate images/visible defects, stop-line versus manual behavior, physical action
   confirmation, missed defects versus false rejects, and per-site version/recovery needs.
 
-For a warranted flow hint, use one Mermaid block in detail: a small overview, then expand the relevant
-part on a follow-up. Group the overview into 3–6 short boxes; preserve decision branches and explicit
-approval/safety gates before risky actions. Nine or ten serial boxes are not the default overview.
-Expand a chosen part when warranted; retain gates. No diagrams for discovery, overload,
-troubleshooting or evals. Use known names; the sketch does not edit the customer's canvas.
-Syntax: `flowchart LR` or `flowchart TD`; one declaration/arrow per line; letter-leading alphanumeric
-IDs; rectangles `router["Rules"]`, arrows `router --> review` or `router -->|exception| review`.
-Declare all boxes. Limits: 12 boxes/24 arrows, box labels <48 characters, arrow labels <32.
-No chains, subgraphs, styles, directives, HTML, links or other shapes.
+For flow hints, use one Mermaid block in detail: 3–6 known boxes; expand on follow-up.
+Preserve branches and approval/safety gates. No diagrams for discovery, overload, troubleshooting or
+evals. The sketch leaves the canvas unchanged.
+Syntax: `flowchart LR`/`flowchart TD`; one box/arrow per line. Declare letter-leading IDs with
+rectangles `a["Rules"]`; use `a -->|approve| b` or dashed `a -.->|correct| b`. Limits: 12 boxes,
+24 arrows, labels <48/<32 characters respectively. No chains, subgraphs, HTML, links or directives.
+Label operations; color never replaces meaning. Optionally append `linkStyle 0 stroke:#EAB308`
+(zero-based arrow indices, comma-separated). Allow only six-digit hex stroke and optional
+`,stroke-width:3px` (1–4px) are supported. Keep normal paths neutral, highlight forwards amber
+`#EAB308` and returns purple `#C084FC`.
 
 ## Evals, rollout, and change
 

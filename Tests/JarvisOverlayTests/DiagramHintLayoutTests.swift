@@ -4,6 +4,56 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct DiagramHintLayoutTests {
+    @Test func horizontalReturnsAndBypassesUseOppositeSides() throws {
+        let graph = try #require(DiagramHint(mermaid: """
+        flowchart LR
+        A[API] --> B[Worker]
+        B --> C[Store]
+        A -->|Bypass| C
+        C -.->|Retry| A
+        """))
+        let layout = DiagramHintLayout(graph, fitting: CGSize(width: 1200, height: 300),
+            box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
+        #expect(layout.horizontal)
+        let top = layout.frames.values.map(\.minY).min()!
+        let bottom = layout.frames.values.map(\.maxY).max()!
+        #expect(layout.routes[2].points.contains { $0.y > bottom })
+        #expect(layout.routes[3].points.contains { $0.y < top })
+        for route in layout.routes {
+            #expect(route.points.allSatisfy { CGRect(origin: .zero, size: layout.size).contains($0) })
+        }
+    }
+
+    @Test(arguments: [200.0, 520.0, 740.0])
+    func returnsAndBypassesUseOppositeSides(_ width: Double) throws {
+        let graph = try #require(DiagramHint(mermaid: """
+        flowchart TD
+        A[Intake] --> B[Extract]
+        B --> C[Verify]
+        C --> D[Record]
+        D --> E[Audit]
+        A -->|Bypass| D
+        E -.->|Correction| B
+        """))
+        let layout = DiagramHintLayout(graph, fitting: CGSize(width: width, height: 300),
+            box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
+        let left = layout.frames.values.map(\.minX).min()!
+        let right = layout.frames.values.map(\.maxX).max()!
+        #expect(layout.routes[5].points.contains { $0.x < left })
+        #expect(layout.routes[4].points.contains { $0.x > right })
+        let extract = layout.frames["B"]!, record = layout.frames["D"]!
+        #expect(layout.routes[5].points.last == CGPoint(x: extract.minX, y: extract.midY))
+        #expect(layout.routes[4].points.last == CGPoint(x: record.maxX, y: record.midY))
+        #expect(layout.size.width <= width)
+        for route in layout.routes {
+            #expect(route.points.allSatisfy { CGRect(origin: .zero, size: layout.size).contains($0) })
+        }
+        if width >= 520 {
+            #expect(layout.routes[5].labelCenter.x + 50 < left)
+            #expect(layout.routes[4].labelCenter.x - 50 > right)
+        }
+    }
+
     @Test(arguments: [320.0, 520.0, 740.0])
     func longFlowKeepsOneReadingDirection(_ width: Double) throws {
         let graph = try #require(DiagramHint(mermaid: "flowchart LR\n" + (0..<8).map {
@@ -140,7 +190,9 @@ import Testing
             let to = try #require(layout.frames[edge.to])
             #expect(route.points.first == CGPoint(x: from.midX, y: from.maxY))
             let end = try #require(route.points.last)
-            #expect(end == CGPoint(x: to.midX, y: to.minY))
+            #expect(end == CGPoint(x: to.midX, y: to.minY)
+                || end == CGPoint(x: to.minX, y: to.midY)
+                || end == CGPoint(x: to.maxX, y: to.midY))
             #expect(route.points.allSatisfy { bounds.contains($0) })
             for (a, b) in zip(route.points, route.points.dropFirst()) {
                 #expect(a.x == b.x || a.y == b.y)
