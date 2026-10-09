@@ -506,13 +506,15 @@ the box hides both sections and expanding restores them.
 
 A shown diagram gives the detail area most of the existing panel, leaving a compact hint-history
 strip visible. It never changes the outer panel's size or position. A manually chosen divider
-proportion still takes precedence. Diagrams adapt their flow to the available width: long workflows
-can fold into alternating rows when that reduces their height and keeps connections distinct;
-otherwise, a horizontal chain can become vertical and wide ranks wrap into rows. Layout preserves
-every node, label, and directed connection. Node and edge labels retain their native readable size,
-with vertical scrolling when the graph cannot fit the remaining height. Prose beside a diagram keeps
-its configured compact size rather than shrinking to compensate for the graph. See `OverlayBoxPanel`,
-`DetailDocumentView`, `DiagramHintLayout`, `FoldedDiagramHintLayout`, and `DiagramHintImage` for sizing.
+proportion still takes precedence. Diagrams keep one reading direction: a requested horizontal flow
+stays horizontal only when it fits the available width; otherwise it reads top to bottom. Wide ranks
+wrap into rows, and a continuing branch keeps its column. Direct connections use straight arrows;
+bypasses and returns use exterior lanes with separate tracks for independent workflows. Layout
+preserves every node, label, and directed connection. Readability takes precedence over compactness:
+node and edge labels retain their native readable size, with vertical scrolling when the graph cannot
+fit the remaining height. Prose beside a diagram keeps its configured compact size rather than
+shrinking to compensate for the graph. See `OverlayBoxPanel`, `DetailDocumentView`,
+`DiagramHintLayout`, `DiagramHintEdgeRoute`, and `DiagramHintImage` for sizing.
 
 Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
 reports back what reached the screen. A detail the box could not accept, because it is hidden or
