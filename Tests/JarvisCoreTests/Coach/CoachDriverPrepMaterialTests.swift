@@ -196,6 +196,43 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         #expect(!finalRetryRequest.contains { ($0.text ?? "").contains("result-from-query-A") })
     }
 
+    @Test(arguments: [false, true])
+    func failedReadPreservesSearchObservationForRetry(invalidOffset: Bool) async throws {
+        let index = PrepMaterialIndex(documents: [
+            PrepMaterialDocument(sourceDisplayName: "notes.md", text: "retained token bucket details"),
+        ])
+        let documentID = invalidOffset
+            ? try #require(index.search(query: "notes.md").first?.documentID) : "missing"
+        let offset = invalidOffset ? Int.max : 0
+        let arguments = String(decoding: try JSONSerialization.data(withJSONObject: [
+            "name": "read_prep_note", "arguments": ["document_id": documentID, "offset": offset],
+        ]), as: UTF8.self)
+        let brain = ScriptedThrowBrain(script: [
+            .init(toolCalls: [.searchPrepNotes(callId: "search", query: "notes.md")],
+                  rawToolCalls: [RawToolCall(id: "search", name: "call_tool",
+                      argumentsJSON: #"{"name":"search_prep_notes","arguments":{"query":"notes.md"}}"#)]),
+            .init(toolCalls: [.readPrepNote(callId: "read", documentID: documentID, offset: offset)],
+                  rawToolCalls: [RawToolCall(id: "read", name: "call_tool", argumentsJSON: arguments)]),
+            nil,
+            .init(toolCalls: [.speak(callId: "reply", lines: ["Use a token bucket."])],
+                  rawToolCalls: [RawToolCall(id: "reply", name: "speak",
+                      argumentsJSON: #"{"lines":["Use a token bucket."]}"#)]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: index)
+        transcript.append(.init(speaker: .them, text: "Read my rate limiter notes", at: 100))
+
+        _ = await driver.handleTrigger(.turnEnd)
+
+        try #require(brain.calls.count == 4)
+        #expect(brain.calls[2].contains {
+            $0.role == .tool && $0.toolCallId == "read" && $0.text == JarvisPrompts.Coach.prepNoteReadFailed
+        })
+        #expect(brain.calls[3].contains {
+            $0.role == .user && $0.text?.contains("retained token bucket details") == true
+        })
+        #expect(!brain.calls[3].contains { $0.text == JarvisPrompts.Coach.prepNoteReadFailed })
+    }
+
     @Test func noMatchesRendersAnExplicitNoResultsMessage() async {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.searchPrepNotes(callId: "p1", query: "quantum computing")],

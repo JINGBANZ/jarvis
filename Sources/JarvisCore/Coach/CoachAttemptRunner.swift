@@ -667,6 +667,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     if let prepMaterial = attempt.prepMaterial {
                         if let page = prepMaterial.read(documentID: documentID, offset: offset) {
                             resultText = JarvisPrompts.Coach.prepNotePage(page)
+                            work.prepNotesObservation = .user(resultText)
                             activity?.record(.prepNoteRead(sourceDisplayName: page.sourceDisplayName))
                             jlog("📎 read prep document at offset \(offset) — \(page.text.count) characters")
                         } else {
@@ -676,7 +677,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         resultText = JarvisPrompts.Coach.prepNotesUnavailable
                         activity?.record(.prepNotesUnavailable)
                     }
-                    work.prepNotesObservation = .user(resultText)
                     appendToolContinuation(toolCallId: callID, resultText: resultText,
                                            newPhase: .readPrepNoteContinuation)
 
