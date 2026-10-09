@@ -15,14 +15,17 @@ public enum Onboarding {
         return steps
     }
 
-    /// True when the saved setup calls a provider whose key isn't saved, which is exactly when Start
-    /// would refuse. Read through the chained store, so `OPENAI_API_KEY` or `GEMINI_API_KEY` counts.
+    /// Transcription requires its own key; the brain needs at least one target with a saved key or
+    /// a subscription target. Subscription health is checked separately at Start.
     /// A new install calls OpenAI by default; a subscription brain with Apple Speech needs no key.
     public static func needsAPIKey(
         secrets: any SecretStore, brain: BrainPreferences, transcription: TranscriptionPreferences
     ) -> Bool {
-        !transcription.provider.requiredCredentials(for: brain.route)
-            .allSatisfy { secrets.apiKey(for: $0) != nil }
+        if let credential = transcription.provider.ownCredential,
+           secrets.apiKey(for: credential)?.isEmpty != false { return true }
+        return !brain.route.targets.contains { target in
+            target.provider.credential.map { secrets.apiKey(for: $0)?.isEmpty == false } ?? true
+        }
     }
 
     public static func brainProvider(for credential: Credential) -> BrainProvider {

@@ -29,6 +29,10 @@ final class ConnectionsSection: NSObject, SettingsSection {
         super.init()
         subscriptions.onStatusChanged = { [weak self] in self?.renderPageStatus() }
         subscriptions.onProbeAnswered = { [weak self] readiness in self?.signIns.record(readiness) }
+        signIns.observe { [weak self] in
+            guard let self, let readiness = self.signIns.readiness else { return }
+            self.subscriptions.record(readiness)
+        }
     }
 
     func makePage() -> SettingsPageView {

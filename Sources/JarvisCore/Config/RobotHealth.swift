@@ -14,27 +14,22 @@ public enum RobotHealth {
     }
 
     private static func brain(_ route: BrainRoute, _ readiness: RobotReadiness) -> RobotPartHealth {
-        // Start requires every keyed target's key (`BrainRoute.requiredCredentials`), so a missing
-        // key is never skipped.
-        for (index, target) in route.targets.enumerated() {
-            guard let credential = target.provider.credential,
-                  !readiness.availableCredentials.contains(credential) else { continue }
-            let user = index == 0 ? "my primary brain" : "Fallback \(index)"
+        let canServe = { (target: BrainTarget) in
+            target.credentialFailure(available: readiness.availableCredentials) == nil
+                && !readiness.signedOutSubscriptions.contains(target.provider)
+        }
+        let primary = route.primary
+        guard !canServe(primary) else { return .ready }
+        if let credential = primary.provider.credential {
             let vendor = credential.vendorName
             let key = "\(article(for: vendor)) \(vendor) key"
             return .needsAttention(
                 reason: "ADD \(key.uppercased())",
-                advice: "I need \(key) to start, because \(user) uses the "
-                    + "\(target.provider.displayName). Add it in Connections.",
+                advice: route.fallbackTargets.contains(where: canServe)
+                    ? "My primary brain needs \(key). I'll skip it and use the next brain in the route. Add it in Connections."
+                    : "No brain in the route can answer right now. Add \(key) in Connections, then Start again.",
                 fix: .openConnections)
         }
-        // Past the key check, only a signed-out subscription can't serve, and the route skips it.
-        let canServe = { (target: BrainTarget) in
-            !target.provider.servedByLocalProxy
-                || !readiness.signedOutSubscriptions.contains(target.provider)
-        }
-        let primary = route.primary
-        guard !canServe(primary) else { return .ready }
         let name = primary.provider.displayName
         return .needsAttention(
             reason: "\(name.uppercased()) IS SIGNED OUT",

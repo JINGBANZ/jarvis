@@ -611,7 +611,7 @@ session and consumes the matched click through release. See
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit automatic attempts only when both transcription streams are settled through the selected context, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
-| **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
+| **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, read passive credential health and refresh an expired renewable credential at Start, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped, as the session's scrollable history. Movable, resizable, translucent, excluded from capture, and with no off switch. Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. It is the `OverlayRendering` sink `CoachDriver` speaks to. On a streamed reply ([Latency](#latency)) the box opens a live entry on the reply's first character, stamped with that moment, and when the model writes the detail first the entry shows `Writing…` until line 1 starts; each snapshot rewrites its text (the closed lines, then the open line) and grows its detail in the section below, `deliver` replaces both with the delivered lines and detail, and a `nil` progress removes both. A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
@@ -657,7 +657,8 @@ every Start runs is what catches it.
 
 Each step shows only when what it collects is missing
 (`Onboarding.steps(needsAPIKey:holdsEveryGrant:)`). The key step shows when the saved setup calls a
-provider whose key isn't saved, which is exactly when Start would refuse: a new install, which calls
+transcription provider whose key isn't saved, or when no brain target has a key or subscription
+target to check at Start: a new install, which calls
 OpenAI by default, always sees it, and a setup of a subscription brain with Apple Speech never does.
 A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` counts, and an install
 that already has what it needs completes onboarding without a window. Closing the window before the
@@ -758,9 +759,10 @@ policing, which contradicts the rule above, or a timer. The next Start refuses w
 
 ### Failure surfacing — startup loud, runtime ghost
 
-Every user-facing failure flows through one `ErrorReporter`: severity on a Foundation-only
+Provider failures and other startup failures flow through one `ErrorReporter`: severity on a Foundation-only
 `UserFacingError` decides the lifecycle consequence while an explicit context captured at the
-failure site decides presentation. Startup failures caused by an explicit Start may alert; every
+failure site decides presentation. Startup failures caused by an explicit Start may alert. An
+unavailable brain route instead uses the red readiness status and its typed cause; every
 runtime context suppresses alerts unconditionally, including after teardown, so a queued main-actor
 report cannot reveal Jarvis during screen sharing. Permanent brain, microphone-transcription, and
 audio-capture failures stop without presenting UI; the system-audio failure degrades to
@@ -1189,17 +1191,25 @@ is about 60 MB on disk and 20 MB per update.
   retried until asked. A Jarvis that ended without Quit leaves
   its helper and configuration behind; the next launch stops that helper, once its process is proven
   to be this executable, and removes the files.
-- **Readiness is the model list.** One probe per Start or reapply: the helper lists a vendor's models
-  only while it holds a credential for that vendor, so an `owned_by` of `openai` or `anthropic` proves
-  the Codex or Claude sign-in. A subscription the probe cannot serve becomes an unavailable route
-  target carrying a permanent failure, authentication when signed out and unavailable with the
-  helper's own reason when it would not start, and the route skips it when the cursor reaches it, so
-  a fallback still coaches. A Start or route edit is refused only when no target in the route can
-  coach (`UserFacingError.brainRouteUnavailable`). A reapply that is not a topology edit never retires
-  a target on the probe's word: if the helper does not answer, the running route keeps the clients it
-  has and the edit is recorded as not applied, and if it answers without naming a vendor the
-  subscription stays available, because the helper lists a vendor's models only once it has loaded that
-  credential and a restart or a token refresh can answer for a moment without it.
+- **Readiness uses passive credential health.** Every Start reads the helper's runtime credential
+  status through its loopback-only management API; the model list proves only helper liveness.
+  Healthy credentials require no fresh upstream authentication request. An expired access token
+  that has no permanent rejection or active cooldown gets one targeted refresh, bounded by a
+  ten-second total deadline per subscription, followed by another passive check. The helper owns
+  OAuth and token rotation. Jarvis decodes only health fields and discards refresh response bodies,
+  which can contain tokens. Rejected refresh credentials require Sign in; network failures,
+  cooldowns, incomplete metadata, and an unanswered health endpoint remain temporary uncertainty.
+  A subscription the check cannot serve becomes an unavailable target, so the route goes directly
+  to the first usable configured fallback without a synthetic failed request. A missing API key
+  makes only that brain target unavailable; the transcription provider's own key remains mandatory.
+  No usable target blocks Start with a red icon and a specific redacted readiness cause in the menu
+  and Activity, without an alert. Saved primary and fallback order remain unchanged.
+  A topology edit uses the same passive health; an effort or key reapply preserves working
+  subscription clients. Runtime permanent authentication failures request another passive health
+  snapshot for the shared Settings state while the existing fresh-attempt failover policy runs.
+  Start generations, cancellation, and credential revisions discard superseded checks across
+  Stop, new Start, edits, and sign-in/out. A passive check describes current helper knowledge;
+  revocation or an outage after it still fails through the normal runtime provider boundary.
 - **Tool choice per target.** Every target declares the runner's tool list unchanged. The OpenAI
   API and Codex enforce a narrowed choice with `allowed_tools`, a forced function, strict tools, and
   verbatim reasoning replay through the Codex path intact; the Gemini API enforces it with
@@ -1268,7 +1278,9 @@ is about 60 MB on disk and 20 MB per update.
   minutes for the provider to redirect to the helper's fixed
   callback port, 1455 for Codex and 54545 for Claude. A busy port ends the login with the helper's
   message. The credential lands in the auth directory the running helper watches, so no restart is
-  needed, and Jarvis narrows it to owner-only. Cancel ends the login and closing Settings does not,
+  needed, and Jarvis narrows it to owner-only. One account per subscription is supported; a successful
+  login replaces the previous account, and ambiguous multiple credentials are unavailable rather
+  than rotated. Cancel ends the login and closing Settings does not,
   because the browser still has to redirect; Sign out deletes that subscription's credential files.
 - **Latency sits in the vendors' own band.** Through the helper a Codex turn beats the Codex CLI on the
   same machine and a Claude press trails the Claude CLI; the

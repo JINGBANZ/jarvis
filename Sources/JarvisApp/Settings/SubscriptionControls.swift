@@ -29,8 +29,8 @@ final class SubscriptionControls: NSObject {
     /// Subscriptions the last probe proved signed in; `nil` before the first probe answers.
     var signedIn: Set<BrainProvider>? {
         switch readiness {
-        case .ready(_, let signedIn): signedIn
-        case .unavailable: []
+        case .ready(_, let signedIn, _): signedIn
+        case .unavailable, .superseded: []
         case nil: nil
         }
     }
@@ -92,11 +92,20 @@ final class SubscriptionControls: NSObject {
             // A sign-in or sign-out that finished meanwhile cleared this task and started its own
             // probe; this stale answer must not paint over it.
             guard !Task.isCancelled, let self, refreshTask != nil else { return }
+            guard readiness != .superseded else { refreshTask = nil; return }
             self.readiness = readiness
             refreshTask = nil
             onProbeAnswered?(readiness)
             render()
         }
+    }
+
+    func record(_ readiness: LocalProxySupervisor.Readiness) {
+        guard readiness != .superseded else { return }
+        refreshTask?.cancel()
+        refreshTask = nil
+        self.readiness = readiness
+        render()
     }
 
     func windowWillClose() {
@@ -114,10 +123,15 @@ final class SubscriptionControls: NSObject {
             return
         }
         switch readiness {
-        case .unavailable:
+        case .unavailable, .superseded:
             refresh()
-        case .ready(_, let signedIn) where signedIn.contains(provider):
+        case .ready(_, let signedIn, _) where signedIn.contains(provider):
             signOut(provider)
+        case .ready where supervisor.accountFiles(for: provider).count > 1:
+            signOut(provider)
+        case .ready where !supervisor.accountFiles(for: provider).isEmpty
+            && readiness?.unavailability(for: provider)?.disposition == .temporary:
+            refresh()
         case .ready, nil:
             signIn(provider)
         }
@@ -141,6 +155,7 @@ final class SubscriptionControls: NSObject {
             } else {
                 failure = "the sign-in service isn't running"
             }
+            await supervisor.credentialsDidChange()
             guard let self else { return }
             signIns[provider] = nil
             if let failure, !Task.isCancelled {
@@ -158,9 +173,13 @@ final class SubscriptionControls: NSObject {
     }
 
     private func signOut(_ provider: BrainProvider) {
+        Task { await performSignOut(provider) }
+    }
+
+    private func performSignOut(_ provider: BrainProvider) async {
         actionFailures[provider] = nil
         do {
-            try supervisor.signOut(provider)
+            try await supervisor.signOut(provider)
         } catch {
             // Redacted: the message quotes the credential's path, which contains the account's
             // email.
@@ -205,15 +224,18 @@ final class SubscriptionControls: NSObject {
             [file.email, file.plan].compactMap { $0 }.joined(separator: " · ")
         }.flatMap { $0.isEmpty ? nil : $0 }
         switch readiness {
+        case .superseded:
+            return ("Checking…", SettingsTheme.mutedText, "Try again", true)
         case .unavailable(let reason):
             return ("Not running. The sign-in service \(reason)", SettingsTheme.amber, "Try again", true)
-        case .ready(_, let signedIn) where signedIn.contains(provider):
+        case .ready(_, let signedIn, _) where signedIn.contains(provider):
             return (["Signed in", who].compactMap { $0 }.joined(separator: " · "),
                     SettingsTheme.teal, "Sign out", true)
         case .ready where account != nil:
-            return ("Not usable. \(who.map { "\($0) is" } ?? "The account is") saved but can't be used "
-                        + "right now, so sign in again.",
-                    SettingsTheme.amber, "Sign in", true)
+            let failure = readiness.unavailability(for: provider)
+            return (failure?.activitySentence ?? "Credential health is unavailable.", SettingsTheme.amber,
+                    supervisor.accountFiles(for: provider).count > 1 ? "Sign out"
+                        : failure?.disposition == .temporary ? "Try again" : "Sign in", true)
         case .ready:
             return ("Signed out. \(Self.accountHint(provider)).", SettingsTheme.mutedText, "Sign in", true)
         }

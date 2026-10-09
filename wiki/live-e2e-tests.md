@@ -372,8 +372,9 @@ it as unverified in its description.
   socket with no user-visible notice.
 - **Transcription configuration,** when credential requirements or transcription provider selection
   change, because it needs Settings and Apple Speech on macOS 26. Confirm Apple Speech with a
-  subscription-only brain route starts without an API key while any OpenAI or Gemini transcription or brain target still
-  requires its key, a transcription setting changed mid-session leaves the running snapshot active until the next
+  subscription-only brain route starts without an API key, the transcription provider's own key is
+  mandatory, and brain targets with missing keys are skipped when another configured target can
+  serve. Confirm a transcription setting changed mid-session leaves the running snapshot active until the next
   Start, and a forced Apple analyzer failure never sends audio to OpenAI as a fallback.
 - **Shortcut bindings and the detail box's controls,** because the run requests shortcuts without
   the global hotkeys and never clicks the box. Press all three shortcuts from another app and confirm
@@ -401,7 +402,10 @@ it as unverified in its description.
   multiple fallbacks, force a temporary
   budget transition, a permanent one-attempt transition, an unavailable-target skip, and final route
   exhaustion; exercise a failed replacement with a pending conversation and Stop during a retry; and
-  confirm a successful fallback stays active without changing preferences.
+  confirm a successful fallback stays active without changing preferences. With invalidated Codex
+  credentials, confirm Start uses a working fallback directly; with no usable fallback, confirm a
+  red menu-bar icon and readiness cause with no popup. Healthy credentials need no fresh upstream
+  authentication request at Start; an expired renewable access token gets one bounded refresh.
 - **Audio-route switch,** because it needs a real device change. Switch devices mid-session and confirm
   Activity says listening continues, the next turn includes any unsent speech, and capture recovers
   without rotating the session.

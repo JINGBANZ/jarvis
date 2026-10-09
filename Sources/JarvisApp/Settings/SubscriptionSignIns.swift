@@ -10,7 +10,8 @@ final class SubscriptionSignIns {
     private(set) var selectable: Set<BrainProvider>?
 
     /// A helper that couldn't answer proves nothing, so it leaves this alone.
-    private var provenSignedIn: Set<BrainProvider>?
+    private var provenSignedOut: Set<BrainProvider> = []
+    private(set) var readiness: LocalProxySupervisor.Readiness?
     private let supervisor: LocalProxySupervisor
     private var probe: Task<Void, Never>?
     private var observers: [UUID: () -> Void] = [:]
@@ -19,13 +20,17 @@ final class SubscriptionSignIns {
         self.supervisor = supervisor
     }
 
-    func refresh() {
+    func refresh(replacingPending: Bool = false) {
+        if replacingPending {
+            probe?.cancel()
+            probe = nil
+        }
         guard probe == nil else { return }
         let hasSavedSignIn = BrainProvider.allCases.filter(\.servedByLocalProxy).contains {
             !supervisor.accountFiles(for: $0).isEmpty
         }
         guard hasSavedSignIn else {
-            update(selectable: [], provenSignedIn: provenSignedIn)
+            update(selectable: [], provenSignedOut: provenSignedOut)
             return
         }
         probe = Task { [weak self, supervisor] in
@@ -37,21 +42,29 @@ final class SubscriptionSignIns {
     }
 
     func record(_ readiness: LocalProxySupervisor.Readiness) {
+        guard readiness != .superseded else { return }
         probe?.cancel()
         probe = nil
+        self.readiness = readiness
         switch readiness {
-        case .ready(_, let signedIn):
-            update(selectable: signedIn, provenSignedIn: signedIn)
+        case .superseded: break
+        case .ready(_, let signedIn, _):
+            let signedOut = Set(BrainProvider.allCases.filter { provider in
+                guard provider.servedByLocalProxy else { return false }
+                let failure = readiness.unavailability(for: provider)
+                return failure?.category == .authentication && failure?.disposition == .permanent
+            })
+            update(selectable: signedIn, provenSignedOut: signedOut)
         case .unavailable:
-            update(selectable: [], provenSignedIn: provenSignedIn)
+            update(selectable: [], provenSignedOut: provenSignedOut)
         }
     }
 
-    /// Of `providers`, the ones proven signed out: no saved sign-in, or the last real answer lacked them.
+    /// Of `providers`, the ones proven signed out: no saved sign-in or rejected credentials.
     func signedOut(among providers: Set<BrainProvider>) -> Set<BrainProvider> {
         providers.filter { provider in
             supervisor.accountFiles(for: provider).isEmpty
-                || (provenSignedIn.map { !$0.contains(provider) } ?? false)
+                || provenSignedOut.contains(provider)
         }
     }
 
@@ -68,11 +81,10 @@ final class SubscriptionSignIns {
 
     private func update(
         selectable newSelectable: Set<BrainProvider>,
-        provenSignedIn newProven: Set<BrainProvider>?
+        provenSignedOut newProven: Set<BrainProvider>
     ) {
-        guard newSelectable != selectable || newProven != provenSignedIn else { return }
         selectable = newSelectable
-        provenSignedIn = newProven
+        provenSignedOut = newProven
         for handler in observers.values { handler() }
     }
 }

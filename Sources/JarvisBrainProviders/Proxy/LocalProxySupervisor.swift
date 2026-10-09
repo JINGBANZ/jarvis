@@ -26,22 +26,32 @@ public actor LocalProxySupervisor {
     }
 
     public enum Readiness: Sendable, Equatable {
+        case superseded
         case unavailable(reason: String)
-        case ready(Endpoint, signedIn: Set<BrainProvider>)
+        case ready(Endpoint, signedIn: Set<BrainProvider>, failures: [BrainProvider: ProviderFailure] = [:])
 
-        public var endpoint: Endpoint? {
-            if case .ready(let endpoint, _) = self { endpoint } else { nil }
+        public var signedIn: Set<BrainProvider> {
+            if case .ready(_, let providers, _) = self { providers } else { [] }
         }
 
-        /// The permanent failure a route skips `provider` with, or nil when it can serve now.
+        public var endpoint: Endpoint? {
+            if case .ready(let endpoint, _, _) = self { endpoint } else { nil }
+        }
+
+        /// The failure a route skips `provider` with, or nil when it can serve now.
         public func unavailability(for provider: BrainProvider) -> ProviderFailure? {
             switch self {
+            case .superseded:
+                return ProviderFailure(
+                    source: .brain(provider), stage: .process, category: .unavailable,
+                    disposition: .temporary, identity: .init(), message: "Credential check was superseded.")
             case .unavailable(let reason):
                 return ProviderFailure(
                     source: .brain(provider), stage: .process, category: .unavailable,
-                    disposition: .permanent, identity: .init(),
+                    disposition: .temporary, identity: .init(),
                     message: "the sign-in service \(reason)")
-            case .ready(_, let signedIn):
+            case .ready(_, let signedIn, let failures):
+                if let failure = failures[provider] { return failure }
                 guard !signedIn.contains(provider) else { return nil }
                 return ProviderFailure(
                     source: .brain(provider), stage: .process, category: .authentication,
@@ -61,6 +71,8 @@ public actor LocalProxySupervisor {
     // Fresh per instance; never persisted outside this launch's owner-only configuration.
     private let key = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }
         .joined()
+    private let managementKey = UUID().uuidString
+    private var credentialRevision = 0
 
     public private(set) var state: State = .stopped
     private var port: Int?
@@ -116,15 +128,55 @@ public actor LocalProxySupervisor {
     }
 
     /// Starts the helper if needed.
-    public func readiness() async -> Readiness {
+    public func readiness(refreshing providers: Set<BrainProvider> = []) async -> Readiness {
         switch await ensureRunning() {
         case .running(let endpoint):
+            let launched = generation
+            let revision = credentialRevision
             do {
-                let owners = try await Self.modelOwners(at: endpoint)
-                return .ready(endpoint, signedIn: Set(BrainProvider.allCases.filter {
-                    $0.proxyModelOwner.map(owners.contains) ?? false
-                }))
+                // Models prove liveness only: the helper can list them for rejected credentials.
+                try await Self.probeModels(at: endpoint)
+                var credentials: [LocalProxyCredential]
+                do {
+                    credentials = try await credentialHealth(at: endpoint)
+                } catch {
+                    return launched == generation && revision == credentialRevision && !stopping
+                        ? unknownHealth(at: endpoint) : .superseded
+                }
+                for provider in providers.sorted(by: { $0.rawValue < $1.rawValue }) {
+                    let matches = matchingCredentials(for: provider, in: credentials)
+                    guard matches.count == 1, let credential = matches.first, credential.needsRefresh else { continue }
+                    guard !Task.isCancelled, launched == generation, revision == credentialRevision else {
+                        return .superseded
+                    }
+                    await refresh(credential, at: endpoint)
+                    do {
+                        credentials = try await credentialHealth(at: endpoint)
+                    } catch {
+                        return launched == generation && revision == credentialRevision && !stopping
+                            ? unknownHealth(at: endpoint) : .superseded
+                    }
+                }
+                guard !Task.isCancelled, launched == generation, revision == credentialRevision, !stopping else {
+                    return .superseded
+                }
+                var signedIn: Set<BrainProvider> = []
+                var failures: [BrainProvider: ProviderFailure] = [:]
+                for provider in BrainProvider.allCases where provider.servedByLocalProxy {
+                    let matches = matchingCredentials(for: provider, in: credentials)
+                    if matches.count > 1 {
+                        failures[provider] = ProviderFailure(
+                            source: .brain(provider), stage: .process, category: .configuration,
+                            disposition: .permanent, identity: .init(),
+                            message: "Only one subscription account is supported. Sign out, then sign in again in Settings → Connections.")
+                    } else if let credential = matches.first {
+                        if let failure = credential.unavailability(for: provider) { failures[provider] = failure }
+                        else { signedIn.insert(provider) }
+                    }
+                }
+                return .ready(endpoint, signedIn: signedIn, failures: failures)
             } catch {
+                guard launched == generation, revision == credentialRevision, !stopping else { return .superseded }
                 // A cancelled probe throws too; don't mistake it for a mute helper and kill it.
                 guard !Task.isCancelled, !(error is CancellationError) else {
                     return .unavailable(reason: "isn't running")
@@ -147,9 +199,14 @@ public actor LocalProxySupervisor {
 
     /// Nil when the helper cannot start.
     public func makeSignIn() async -> LocalProxySignIn? {
+        credentialRevision += 1
         guard case .running = await ensureRunning(), let executable else { return nil }
         return LocalProxySignIn(executable: executable, configURL: configURL,
                                 authDirectory: authDirectory, signInPIDs: signInPIDs)
+    }
+
+    public func credentialsDidChange() {
+        credentialRevision += 1
     }
 
     public nonisolated func accountFiles(for provider: BrainProvider) -> [LocalProxyAccountFile] {
@@ -157,7 +214,8 @@ public actor LocalProxySupervisor {
     }
 
     /// The running helper notices the deleted files and stops serving that subscription.
-    public nonisolated func signOut(_ provider: BrainProvider) throws {
+    public func signOut(_ provider: BrainProvider) throws {
+        credentialRevision += 1
         for file in accountFiles(for: provider) {
             try FileManager.default.removeItem(at: file.url)
         }
@@ -281,7 +339,7 @@ public actor LocalProxySupervisor {
                 return state
             }
             do {
-                _ = try await Self.modelOwners(at: endpoint)
+                try await Self.probeModels(at: endpoint)
                 guard launched == generation, !stopping else { return state }
                 // `helperExited` leaves an exit during a start to the start, so an exit during the
                 // probe must fail it at the loop's top rather than publish `.running` or nothing.
@@ -376,7 +434,7 @@ public actor LocalProxySupervisor {
         disable-claude-cloak-mode: false
         remote-management:
           allow-remote: false
-          secret-key: ""
+          secret-key: "\(managementKey)"
           disable-control-panel: true
           disable-auto-update-panel: true
 
@@ -435,6 +493,60 @@ public actor LocalProxySupervisor {
 
     // MARK: - Network
 
+    private func matchingCredentials(for provider: BrainProvider, in credentials: [LocalProxyCredential]) -> [LocalProxyCredential] {
+        guard case .localProxy(let identity, _, _) = provider.descriptor.access else { return [] }
+        return credentials.filter {
+            guard ($0.provider ?? $0.type) == identity else { return false }
+            // Deleted credentials can linger in the helper's memory until its watcher catches up.
+            return $0.name == URL(fileURLWithPath: $0.name).lastPathComponent
+                && FileManager.default.fileExists(atPath: authDirectory.appendingPathComponent($0.name).path)
+        }
+    }
+
+    private func credentialHealth(at endpoint: Endpoint) async throws -> [LocalProxyCredential] {
+        struct List: Decodable { let files: [LocalProxyCredential] }
+        var request = URLRequest(url: endpoint.baseURL.appendingPathComponent("v8/management/credentials"),
+                                 timeoutInterval: 2)
+        request.setValue("Bearer \(managementKey)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard (response as? HTTPURLResponse)?.statusCode == 200 else {
+            throw ProbeFailure(errorDescription: "credential health unavailable")
+        }
+        return try JSONDecoder().decode(List.self, from: data).files
+    }
+
+    private func unknownHealth(at endpoint: Endpoint) -> Readiness {
+        .ready(endpoint, signedIn: [], failures: Dictionary(uniqueKeysWithValues:
+            BrainProvider.allCases.filter(\.servedByLocalProxy).map { provider in
+                (provider, ProviderFailure(
+                    source: .brain(provider), stage: .process, category: .unavailable,
+                    disposition: .temporary, identity: .init(),
+                    message: "The sign-in service couldn't determine credential health. Try again."))
+            }))
+    }
+
+    private func refresh(_ credential: LocalProxyCredential, at endpoint: Endpoint) async {
+        var request = URLRequest(url: endpoint.baseURL.appendingPathComponent("v8/management/credentials/refresh"),
+                                 timeoutInterval: 10)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(managementKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "name": credential.name, "auth_index": credential.auth_index ?? "",
+        ])
+        // The refresh response contains token metadata. Discard it and re-read passive health.
+        let refreshRequest = request
+        try? await withThrowingTaskGroup(of: Void.self) { group in
+            defer { group.cancelAll() }
+            group.addTask { _ = try await URLSession.shared.data(for: refreshRequest) }
+            group.addTask {
+                try await Task.sleep(for: .seconds(10))
+                throw URLError(.timedOut)
+            }
+            _ = try await group.next()
+        }
+    }
+
     /// Another process could take the port before the helper binds; that start then fails.
     private static func freePort() throws -> Int {
         let socket = Darwin.socket(AF_INET, SOCK_STREAM, 0)
@@ -464,7 +576,6 @@ public actor LocalProxySupervisor {
     private struct ModelList: Decodable {
         struct Model: Decodable {
             let id: String
-            let owned_by: String?
         }
         let data: [Model]
     }
@@ -473,8 +584,8 @@ public actor LocalProxySupervisor {
         let errorDescription: String?
     }
 
-    /// The helper lists models only for vendors it holds a credential for.
-    private static func modelOwners(at endpoint: Endpoint) async throws -> Set<String> {
+    /// This endpoint checks helper liveness, not upstream authentication.
+    private static func probeModels(at endpoint: Endpoint) async throws {
         var request = URLRequest(url: endpoint.modelsURL, timeoutInterval: 2)
         request.setValue("Bearer \(endpoint.key)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -482,6 +593,6 @@ public actor LocalProxySupervisor {
         guard status == 200 else {
             throw ProbeFailure(errorDescription: "HTTP \(status)")
         }
-        return Set(try JSONDecoder().decode(ModelList.self, from: data).data.compactMap(\.owned_by))
+        _ = try JSONDecoder().decode(ModelList.self, from: data)
     }
 }

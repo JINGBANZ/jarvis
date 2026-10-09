@@ -35,36 +35,37 @@ import Testing
             fix: .openConnections))
     }
 
-    /// Start refuses without the key, so the rule never promises to skip an OpenAI target.
     @Test func anOpenAIPrimaryNeedsAKey() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: openAI, fallbackTargets: [codex]))
         #expect(health(.brain, inputs, .fixture(credentials: [])) == .needsAttention(
             reason: "ADD AN OPENAI KEY",
-            advice: "I need an OpenAI key to start, because my primary brain uses the OpenAI API. Add it in Connections.",
+            advice: "My primary brain needs an OpenAI key. I'll skip it and use the next brain in the route. Add it in Connections.",
             fix: .openConnections))
     }
 
-    @Test func anOpenAIFallbackWithoutAKeyBlocksStart() {
+    @Test func anOpenAIFallbackWithoutAKeyDoesNotBlockAUsablePrimary() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [openAI]))
-        #expect(health(.brain, inputs, .fixture(credentials: [])) == .needsAttention(
-            reason: "ADD AN OPENAI KEY",
-            advice: "I need an OpenAI key to start, because Fallback 1 uses the OpenAI API. Add it in Connections.",
-            fix: .openConnections))
+        #expect(health(.brain, inputs, .fixture(credentials: [])) == .ready)
     }
 
     @Test func aGeminiTargetNeedsTheGeminiKey() {
         let gemini = BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash")
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [gemini]))
-        #expect(health(.brain, inputs, .fixture(credentials: [.openAIAPIKey])) == .needsAttention(
-            reason: "ADD A GEMINI KEY",
-            advice: "I need a Gemini key to start, because Fallback 1 uses the Gemini API. Add it in Connections.",
-            fix: .openConnections))
+        #expect(health(.brain, inputs, .fixture(credentials: [.openAIAPIKey])) == .ready)
         #expect(health(.brain, inputs, .fixture(credentials: [.geminiAPIKey])) == .ready)
     }
 
     @Test func aSignedOutFallbackAloneKeepsTheBrainReady() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: openAI, fallbackTargets: [codex]))
         #expect(health(.brain, inputs, .fixture(signedOut: [.codexSubscription])) == .ready)
+    }
+
+    @Test func aMissingFallbackKeyDoesNotCountAsAWorkingFallback() {
+        let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [openAI]))
+        #expect(health(.brain, inputs, .fixture(signedOut: [.codexSubscription], credentials: [])) == .needsAttention(
+            reason: "CODEX IS SIGNED OUT",
+            advice: "No brain in the route can answer right now. Sign in again in Connections, then Start again.",
+            fix: .openConnections))
     }
 
     @Test func earNeedsItsProvidersKeyFirst() {

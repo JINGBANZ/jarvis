@@ -174,7 +174,7 @@ private extension JarvisReadiness.Blocker {
         switch self {
         case .permissions: "permissions need attention"
         case .credentials: "credentials need attention"
-        case .brain: "the brain provider needs attention"
+        case .brain(.providerUnavailable(let failure)): failure.activitySentence
         case .transcription: "transcription needs attention"
         case .endpoint(.microphone): "microphone transcription is unavailable"
         case .endpoint(.system): "system-audio transcription is unavailable"

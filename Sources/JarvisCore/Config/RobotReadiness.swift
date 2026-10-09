@@ -1,7 +1,7 @@
 import Foundation
 
 public struct RobotReadiness: Sendable, Equatable {
-    /// Subscriptions proven signed out: no saved sign-in, or the helper answered without them. A
+    /// Subscriptions proven signed out: no saved sign-in, or the helper reports rejected credentials. A
     /// helper that couldn't answer proves nothing, so it adds nothing here.
     public var signedOutSubscriptions: Set<BrainProvider>
     public var availableCredentials: Set<Credential>

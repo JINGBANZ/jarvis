@@ -133,6 +133,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         hotkeys = HotkeyController(preferences: hotkeyPreferences)
 
         let signIns = SubscriptionSignIns(supervisor: supervisor)
+        brain.onProxyReadiness = { [weak signIns] in signIns?.record($0) }
+        brain.onSubscriptionFailure = { [weak signIns] in signIns?.refresh(replacingPending: true) }
         brainSection = BrainSection(
             preferences: brain.preferences,
             signIns: signIns,
@@ -220,9 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             }
         }
 
-        if !transcriptionPreferences.provider.requiredCredentials(
-            for: brain.preferences.route
-        ).allSatisfy({ secrets.apiKey(for: $0)?.isEmpty == false }) {
+        if Onboarding.needsAPIKey(secrets: secrets, brain: brain.preferences, transcription: transcriptionPreferences) {
             jlog("Jarvis: missing an API key — paste it in Settings, then press Start.")
         } else {
             jlog("Jarvis: ready — press Start in the menu bar to begin coaching.")
@@ -251,7 +251,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let brainKeys = brain.savedKeys(for: brainRoute)
         let transcriptionKey = transcriptionProvider.ownCredential
             .flatMap { secrets.apiKey(for: $0) } ?? ""
-        let requiredCredentials = transcriptionProvider.requiredCredentials(for: brainRoute)
+        let requiredCredentials = Set([transcriptionProvider.ownCredential].compactMap { $0 })
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
         // System audio is left to the probe below: requiring its last answer here would let one
         // failed probe refuse every later Start until relaunch.
@@ -360,7 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self.composition.observeReadiness(
                     .transcriptionPreparation(.ready), for: readinessSession)
             }
-            let proxy = await self.brain.proxyReadiness(for: brainRoute)
+            let proxy = await self.brain.proxyReadiness(for: brainRoute, preparingStart: true)
             guard !Task.isCancelled,
                   self.pendingStartRevision == revision,
                   self.readiness.activeSession == readinessSession else {
@@ -372,6 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 (self.secrets.apiKey(for: $0) ?? "") == transcriptionKey
             } ?? true
             guard brainKeysAreCurrent, transcriptionCredentialIsCurrent,
+                  proxy != .superseded,
                   self.transcriptionPreferences.configuration == transcriptionConfiguration,
                   self.brain.preferences.route == brainRoute else {
                 self.pendingStartTask = nil
@@ -379,6 +380,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 return
             }
             self.pendingStartTask = nil
+            if let proxy { self.brain.onProxyReadiness?(proxy) }
             _ = self.installPreparedStart(
                 brainKeys: brainKeys,
                 transcriptionKey: transcriptionKey,
@@ -446,21 +448,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         readinessSession: JarvisReadiness.Session
     ) -> Bool {
         guard readiness.activeSession == readinessSession else { return false }
-        if let failure = brain.routeUnavailability(brainRoute, proxy: proxy) {
+        if let failure = brain.routeUnavailability(brainRoute, proxy: proxy, keys: brainKeys) {
             jlog("Jarvis: can't start — no target in the route can coach: "
                  + (failure.errorDescription ?? ""))
             if wasRunning {
                 artifacts.sessionAudit?.record(.settingsChangeNotApplied)
             }
-            errorReporter.reportImmediately(.brainRouteUnavailable(failure: failure), context: reportContext)
             composition.observeReadiness(
-                .brainPreparation(.blocked(.providerUnavailable)),
+                .brainPreparation(.blocked(.providerUnavailable(failure))),
                 for: readinessSession)
             return false
         }
         stop(reason: .replacedByNewSession, preserving: readinessSession)
         showActiveBrainTarget(
-            brain.unavailability(for: brainRoute.primary, proxy: proxy) == nil ? brainRoute.primary : nil)
+            brain.unavailability(for: brainRoute.primary, proxy: proxy, keys: brainKeys) == nil ? brainRoute.primary : nil)
         return composition.start(
             SessionComposition.Inputs(
                 transcription: transcriptionConfiguration,

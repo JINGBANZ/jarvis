@@ -137,11 +137,9 @@ hub header shows a four-segment readiness meter in part order that reads **SYSTE
 with the reason. The rules judge saved settings and grants the way a Start would meet them, and name
 only what Settings can fix or explain:
 
-- **Brain** needs a target's API key whenever any target in the route calls its provider with a key
-  (the OpenAI API or the Gemini API) and that key is not saved. Start refuses in that case, so the
-  hub asks for the key rather than promising to skip that target. Otherwise Brain needs attention
-  when the primary is a subscription proven signed out; the notice says whether the next brain in
-  the route will answer instead, or whether none can.
+- **Brain** needs attention when the primary lacks its API key or its subscription is proven
+  signed out. The notice says whether the next usable configured target will answer instead or
+  none can. An unavailable fallback alone does not block a usable primary.
 - **Ear** needs its transcription provider's own key first, then microphone access.
 - **Eye** needs Screen Recording.
 - **Mouth** never needs the user: the Overlay Box has no off switch.
@@ -149,10 +147,12 @@ only what Settings can fix or explain:
 The exact wording lives in `RobotHealth`.
 
 A subscription counts as signed out only when that is proven: it has no saved sign-in, or the
-helper answered without it. A helper that couldn't answer proves nothing. `SubscriptionSignIns` is
-the one answer the hub and the Brain page share, so they cannot disagree. It asks the bundled helper
+helper reports a permanent authentication rejection. Temporary failures and an unanswered health
+check prove no sign-out. `SubscriptionSignIns` is
+the one answer Connections, the hub, and the Brain page share, so they cannot disagree. It asks the bundled helper
 only when a sign-in is saved, so opening Settings never starts the helper for nothing, and it takes
-the answers Connections gets from its own probes, cancelling any older probe still in flight.
+the answers Connections and Start get from their probes, cancelling any older probe still in flight.
+A runtime permanent subscription authentication failure also refreshes this shared state.
 
 **Refresh.** Visiting the hub and the window becoming key both re-read everything and probe the
 sign-ins; coming back from System Settings is the usual way a grant changes. While the window is
@@ -413,10 +413,11 @@ attempt counts remain in `jarvis-debug.log`.
 
 A signed-out subscription is hidden from new selection while editing; an existing saved row stays
 visible so the user can repair or remove it. A configured target that cannot serve when the session
-starts or the route is edited (a signed-out subscription, or a helper that isn't running) stays in
-the runtime route as an unavailable entry: activation skips it with a notice and moves forward
-without inventing provider requests solely to consume the failure budget. Start is refused, with an
-alert naming the first target's next step, only when no target in the route can serve, because a
+starts or the route is edited (rejected or unavailable subscription credentials, an unanswered
+health check, or a missing API key) stays in the runtime route as an unavailable entry: activation
+skips it with a notice and moves forward without inventing provider requests solely to consume the
+failure budget. Start is refused, with a red menu-bar icon and readiness status naming the first
+target's redacted cause and next step, only when no target in the route can serve, because a
 route with one usable target can still coach. Runtime movement through the route never changes the
 saved list. Stop → Start begins at the saved primary again.
 
@@ -462,9 +463,9 @@ the next attempt.
 
 An edit to a route that names a subscription reads the helper first, so it meets the sign-ins
 Settings showed. A route edit in which no target can serve is refused: the running route stays
-intact, Activity records fixed settings-not-applied copy, and the same alert as a refused Start
-names the next step. An edit whose route names the OpenAI API or the Gemini API while that key is not
-saved is refused the same way, without the alert. Provider-specific partial tool-loop state from a
+intact and Activity records fixed settings-not-applied copy with runtime failure detail.
+A missing brain API key makes that target unavailable; the edit can still apply when another
+configured target is usable. Provider-specific partial tool-loop state from a
 failed attempt is discarded, while provider-neutral pending conversation follows the newly installed
 route on its next attempt. While stopped, persisted changes apply on the **next Start**. The helper's later state is
 not a routing signal: if it stops or a subscription is signed out mid-session, that target's attempt
@@ -612,22 +613,27 @@ reads under the row's title, as the key rows' does, with the row's button on the
 - **Checking…** until the probe answers.
 - **Signed in** (teal), with the account's email and plan, and a **Sign out** button.
 - **Signed out**, with a **Sign in** button.
-- **Not usable** (amber) when a sign-in is saved but the helper does not serve that vendor, which
-  usually means the sign-in expired; **Sign in** replaces it.
+- **Sign in again** (amber) when the helper reports rejected credentials, with the redacted cause
+  and a **Sign in** button.
+- **Temporarily unavailable** (amber) for an expired access token, cooldown, or unknown credential
+  health, with **Try again**; none proves the account signed out.
 - **Not running** (amber), with the helper's own reason and a **Try again** button that probes again.
 - **Signing in…** while a sign-in runs, with a **Cancel** button.
 
 **Sign in** runs the helper's login for that vendor, opens the vendor's sign-in page in the default
 browser, and waits up to ten minutes for the browser to hand the account back. It is the one place
 Jarvis opens a URL, and only because the user pressed the button. A failed sign-in shows the helper's
-redacted reason under the row. **Sign out** deletes that vendor's credential files. Jarvis never
-reads the tokens itself: they stay in the helper's owner-only credential directory, apart from the
+redacted reason under the row. **Sign out** deletes that vendor's credential files. One account per
+subscription is supported; a successful Sign in replaces the previous account.
+Jarvis decodes only passive health fields and discards token-bearing refresh responses. Tokens
+stay in the helper's owner-only credential directory, apart from the
 secrets file ([sandbox.md](./sandbox.md) says where, and what a login reaches). The page's header
 chip counts every managed API key that is saved and every subscription the last probe proved signed
 in.
 
-An API key is required when its provider is selected for transcription or appears anywhere in the
-brain route: the OpenAI key for OpenAI, the Gemini key for Gemini. Apple Speech with a
+An API key is mandatory for the selected transcription provider. Each brain target needs its own
+key to be usable, and Start skips targets whose keys are missing when another target can serve.
+Apple Speech with a
 subscription-only route can start without either key. Saving a managed key while a session runs
 preserves route health: it refreshes the brain clients of every route target that uses that key, and
 the future reconnect credential of a live transcription socket for the same provider. Neither ever

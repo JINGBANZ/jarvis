@@ -226,12 +226,16 @@ import Testing
         #expect(credentials.status == .blocked(.credentials([.openAIAPIKey])))
 
         let brain = JarvisReadiness()
+        let failure = ProviderFailure(
+            source: .brain(.codexSubscription), stage: .process, category: .authentication,
+            disposition: .permanent, identity: .init(errorCode: "refresh_token_invalidated"),
+            message: "Your session has ended. Please log in again.")
         let brainStart = brain.begin(configuration: .init())
         _ = brain.observe(
             .permissions(granted: [.microphone, .systemAudio, .screenRecording]), for: brainStart.session)
         _ = brain.observe(
-            .brainPreparation(.blocked(.providerUnavailable)), for: brainStart.session)
-        #expect(brain.status == .blocked(.brain(.providerUnavailable)))
+            .brainPreparation(.blocked(.providerUnavailable(failure))), for: brainStart.session)
+        #expect(brain.status == .blocked(.brain(.providerUnavailable(failure))))
 
         let transcription = JarvisReadiness()
         let transcriptionStart = transcription.begin(

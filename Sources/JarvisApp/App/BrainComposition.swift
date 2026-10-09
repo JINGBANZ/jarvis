@@ -51,11 +51,14 @@ final class BrainComposition {
     private var activeBrainTarget: BrainTarget?
     private var pendingBrainChangeFrom: BrainTarget?
     private var brainUpdateRevision = 0
+    var onProxyReadiness: ((LocalProxySupervisor.Readiness) -> Void)?
+    var onSubscriptionFailure: (() -> Void)?
 
     /// Nil when the route has no subscription target, so such a route never starts the helper.
-    func proxyReadiness(for route: BrainRoute) async -> LocalProxySupervisor.Readiness? {
+    func proxyReadiness(for route: BrainRoute, preparingStart: Bool = false) async -> LocalProxySupervisor.Readiness? {
         guard route.targets.contains(where: { $0.provider.servedByLocalProxy }) else { return nil }
-        return await supervisor.readiness()
+        let providers = preparingStart ? Set(route.targets.map(\.provider)) : []
+        return await supervisor.readiness(refreshing: providers)
     }
 
     func savedKeys(for route: BrainRoute) -> [Credential: String] {
@@ -68,17 +71,20 @@ final class BrainComposition {
 
     func unavailability(
         for target: BrainTarget,
-        proxy: LocalProxySupervisor.Readiness?
+        proxy: LocalProxySupervisor.Readiness?,
+        keys: [Credential: String]
     ) -> ProviderFailure? {
+        if let failure = target.credentialFailure(available: Set(keys.keys)) { return failure }
         guard target.provider.servedByLocalProxy else { return nil }
         return (proxy ?? .unavailable(reason: "isn't running")).unavailability(for: target.provider)
     }
 
     func routeUnavailability(
         _ route: BrainRoute,
-        proxy: LocalProxySupervisor.Readiness?
+        proxy: LocalProxySupervisor.Readiness?,
+        keys: [Credential: String]
     ) -> ProviderFailure? {
-        let failures = route.targets.map { unavailability(for: $0, proxy: proxy) }
+        let failures = route.targets.map { unavailability(for: $0, proxy: proxy, keys: keys) }
         guard failures.allSatisfy({ $0 != nil }) else { return nil }
         return failures.first.flatMap { $0 }
     }
@@ -93,7 +99,7 @@ final class BrainComposition {
         let factory = BrainClientFactory(
             keys: keys, proxyEndpoint: proxy?.endpoint, traffic: host.liveSessionEvidence)
         let targets = route.targets.map { target -> ConfiguredBrainTarget in
-            if let failure = unavailability(for: target, proxy: proxy) {
+            if let failure = unavailability(for: target, proxy: proxy, keys: keys) {
                 return ConfiguredBrainTarget(unavailable: target, failure: failure)
             }
             let clients = factory.makeClients(for: target, effort: effort)
@@ -126,6 +132,7 @@ final class BrainComposition {
                 }
                 self.host.liveSessionEvidence?.record(.brainRouteAdvanced(
                     previous: previous.provider, current: current.provider, failure: failure))
+                self.refreshSubscriptionHealth(after: failure)
             },
             onSkipped: { [weak self] _, failure in
                 guard let self, self.host.liveCoachDriver != nil,
@@ -141,13 +148,14 @@ final class BrainComposition {
                       self.host.liveSessionDirectory == sessionDirectory else { return }
                 self.host.brainRecoveryDidChange(provider)
             },
-            onExhausted: { [weak self] target, _ in
+            onExhausted: { [weak self] target, failure in
                 guard let self, self.host.liveCoachDriver != nil,
                       self.host.liveSessionDirectory == sessionDirectory else {
                     jlog("Jarvis: ignoring route exhaustion from a stopped or superseded session.")
                     return
                 }
                 self.host.brainCycleDidFail(target.provider)
+                self.refreshSubscriptionHealth(after: failure)
             },
             onTerminated: { [weak self] target, failure in
                 guard let self, self.host.liveCoachDriver != nil,
@@ -168,6 +176,12 @@ final class BrainComposition {
         case credentialRefresh
     }
 
+    private func refreshSubscriptionHealth(after failure: ProviderFailure) {
+        guard case .brain(let provider) = failure.source, provider.servedByLocalProxy,
+              failure.category == .authentication, failure.disposition == .permanent else { return }
+        onSubscriptionFailure?()
+    }
+
     func applyBrainPreferencesToRunningSession(
         savedKey: (credential: Credential, key: String)? = nil,
         update: RunningBrainUpdate
@@ -183,18 +197,12 @@ final class BrainComposition {
         guard let coachDriver = host.liveCoachDriver,
               host.isTranscriptionLive,
               host.liveSessionDirectory == sessionDirectory,
-              revision == brainUpdateRevision
+              revision == brainUpdateRevision,
+              proxy != .superseded
         else { return }
         let route = preferences.route
         var keys = savedKeys(for: route)
         if let savedKey { keys[savedKey.credential] = savedKey.key.isEmpty ? nil : savedKey.key }
-        let missing = route.requiredCredentials.subtracting(keys.keys)
-        guard missing.isEmpty else {
-            jlog("Jarvis: can't apply brain settings: no saved key for "
-                 + missing.map(\.displayName).sorted().joined(separator: ", ") + ".")
-            host.liveSessionEvidence?.record(.settingsChangeNotApplied)
-            return
-        }
         let provider = route.primary.provider
         // Refuse only an effort edit: rebuilding on a failed probe would retire working
         // subscription clients. A credential refresh swaps only the clients that use the saved
@@ -206,16 +214,16 @@ final class BrainComposition {
             host.liveSessionEvidence?.record(.settingsChangeNotApplied)
             return
         }
-        if update == .topologyEdit, let failure = routeUnavailability(route, proxy: proxy) {
+        if let proxy { onProxyReadiness?(proxy) }
+        if update == .topologyEdit, let failure = routeUnavailability(route, proxy: proxy, keys: keys) {
             jlog("Jarvis: can't apply brain settings — no target in the route can coach: "
                  + (failure.errorDescription ?? ""))
             host.liveSessionEvidence?.record(.settingsChangeNotApplied)
             host.reportBrainError(.brainRouteUnavailable(failure: failure), context: .runtime)
             return
         }
-        // The helper lists a vendor only once its credential loads, so a restart can briefly omit
-        // it. Only a topology edit trusts that list; a reapply treats every subscription as signed
-        // in.
+        // Only topology edits replace route availability. An effort or key edit must preserve
+        // working subscription clients through a transient credential-health failure.
         let availability: LocalProxySupervisor.Readiness?
         if update == .topologyEdit {
             availability = proxy
