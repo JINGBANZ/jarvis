@@ -247,12 +247,20 @@ the customer's shared drawing.
 
 Guidance follows one customer item from current work through decisions and error costs to the proposed
 system. Delivery defaults to the next usable cue: discovery asks one next question, with a short
-reason when helpful; playback gives one takeaway, two customer facts, and one confirmation question;
+reason when helpful; playback frames the problem, goal, and boundaries with a scope confirmation;
 overload replaces the earlier explanation with one plain sentence and one next move while preserving
 approval and safety constraints. Full scripts require an explicit request and begin with a short complete plain-English answer.
-Guided practice identifies the current step and one next move; an uncoached mock leaves the candidate
-to lead. A short recap precedes scope agreement, and the latest scope persists through design and
-evaluation. The candidate sketches while explaining, then walks a concrete case through what happened,
+Guided practice identifies the current step and one next move. After a complete scenario or substantive
+customer answer, consulting coaching uses the evidence to select the next unresolved question without
+requiring a help request. When the problem, goal, feasible first slice, and human boundaries are clear,
+it cues a recap and scope recommendation instead of exhausting a discovery checklist. Material gaps
+still need clarification; incidental missing numbers do not block the recap. Only the candidate's
+explicit request to pause Jarvis coaching makes a mock uncoached; the interviewer's feedback arrangement
+does not. Useful candidate follow-ups, acknowledgments, and still-unanswered cues call for silence.
+A short recap precedes scope agreement. Discovery evidence and its material unknowns ground the design,
+deep dives and evaluation; history briefings retain those decision-relevant facts and distinguish
+customer agreement from coach proposals. Corrections supersede older facts without fabricating answers.
+The candidate sketches while explaining, then walks a concrete case through what happened,
 what evidence is checked, what it means, and the resulting action. Coaching distinguishes accurate
 extraction from a justified business decision. Corrections require code recalculation, refreshed
 drafts and renewed approval; capacity claims use measured human effort and actual adoption rather
