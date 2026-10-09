@@ -58,4 +58,35 @@ import Testing
         let index = PrepMaterialIndex(chunks: chunks)
         #expect(index.search(query: "rate limiter").count == 3)
     }
+    @Test func namedDocumentSearchRetrievesDesignContentInsteadOfOtherIntroductions() {
+        let chunks = PrepMaterialChunker.chunk(text: """
+            # Payment System Design
+
+            Staff+ system design walkthrough · Session: October 5–8, 2026
+
+            ## Architecture
+
+            Requirements: authorization, settlement, and reconciliation. Use durable operations.
+            """, sourceDisplayName: "Payment System Design.md") + [
+                PrepMaterialChunk(sourceDisplayName: "Chat System Design.md",
+                                  text: "Staff+ system design walkthrough architecture requirements"),
+            ]
+        let results = PrepMaterialIndex(chunks: chunks).search(
+            query: "Payment System Design.md payment system design requirements architecture")
+        #expect(results.first?.text.contains("Use durable operations.") == true)
+        #expect(results.allSatisfy { $0.sourceDisplayName == "Payment System Design.md" })
+    }
+
+    @Test func namedDocumentDoesNotAlsoMatchItsFilenameSuffix() {
+        let index = PrepMaterialIndex(documents: [
+            PrepMaterialDocument(sourceDisplayName: "Payment System Design.md", text: "authorization architecture"),
+            PrepMaterialDocument(sourceDisplayName: "System Design.md", text: "architecture architecture architecture"),
+        ])
+        let results = index.search(query: "Payment System Design.md architecture")
+        #expect(!results.isEmpty)
+        #expect(results.allSatisfy { $0.sourceDisplayName == "Payment System Design.md" })
+        let both = index.search(query: "Compare Payment System Design.md with System Design.md architecture")
+        #expect(Set(both.map(\.sourceDisplayName)) == ["Payment System Design.md", "System Design.md"])
+    }
+
 }

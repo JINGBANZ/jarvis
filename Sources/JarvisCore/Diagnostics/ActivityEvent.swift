@@ -21,6 +21,7 @@ public enum ActivityEvent: Sendable {
         case brainRouteAdvanced
         case brainRouteTargetSkipped
         case prepNotesSearched
+        case prepNoteRead
         case capabilityLoaded
         case prepNotesUnavailable
     }
@@ -52,6 +53,7 @@ public enum ActivityEvent: Sendable {
     case brainRouteTargetSkipped(failure: ProviderFailure)
     /// `matchCount` 0 means nothing scored usefully.
     case prepNotesSearched(query: String, matchCount: Int)
+    case prepNoteRead(sourceDisplayName: String)
     case capabilityLoaded(kind: CapabilityKind, name: String)
     /// Not a zero-match search, which would claim the notes were read. States no timing; whether
     /// the index is still building belongs in `jlog`.
@@ -135,6 +137,8 @@ public enum ActivityEvent: Sendable {
                     + "\(matchCount == 1 ? "" : "es")"
                 : "📎 checked prep notes for \"\(query)\" — nothing relevant found"
             return (.prepNotesSearched, message, nil)
+        case .prepNoteRead(let name):
+            return (.prepNoteRead, "📎 read prep note \(name)", nil)
         case .capabilityLoaded(let kind, let name):
             return (.capabilityLoaded, "📎 loaded the \(name) \(kind.rawValue)", nil)
         case .prepNotesUnavailable:

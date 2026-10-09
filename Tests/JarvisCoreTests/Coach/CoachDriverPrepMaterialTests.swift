@@ -10,6 +10,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
     let results: [PrepMaterialSearchResult]
     var resultsByQuery: [String: [PrepMaterialSearchResult]] = [:]
     init(results: [PrepMaterialSearchResult] = []) { self.results = results }
+    func read(documentID: String, offset: Int) -> PrepMaterialPage? { nil }
     func search(query: String) -> [PrepMaterialSearchResult] {
         lock.withLock { _queries.append(query) }
         return resultsByQuery[query] ?? results
@@ -214,4 +215,48 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
             $0.role == .tool && $0.text == JarvisPrompts.Coach.prepNotesNoResults
         })
     }
+    @Test func readDocumentReturnsOriginalContentToTheBrain() async throws {
+        let original = "# Design\n\n## Architecture\n\nPersist an operation before calling the network.\n"
+        let index = PrepMaterialIndex(documents: [
+            PrepMaterialDocument(sourceDisplayName: "design.md", text: original),
+        ])
+        let documentID = try #require(index.search(query: "design.md").first?.documentID)
+        let arguments = String(decoding: try JSONSerialization.data(withJSONObject: [
+            "name": "read_prep_note", "arguments": ["document_id": documentID, "offset": 0],
+        ]), as: UTF8.self)
+        let call = try #require(ToolInvocation.parse(callId: "read", name: "call_tool", argumentsJSON: arguments))
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [call], rawToolCalls: [RawToolCall(
+                id: "read", name: "call_tool", argumentsJSON: arguments)]),
+            .init(toolCalls: [.speak(callId: "reply", lines: ["Persist before calling."])],
+                  rawToolCalls: [RawToolCall(id: "reply", name: "speak",
+                                            argumentsJSON: #"{"lines":["Persist before calling."]}"#)]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: index)
+        transcript.append(.init(speaker: .me, text: "Read the whole design document", at: 100))
+        _ = await driver.handleTrigger(.turnEnd)
+        let result = try #require(brain.calls[1].first { $0.toolCallId == "read" && $0.role == .tool })
+        #expect(result.text?.contains(original) == true)
+        #expect(result.text?.contains("End of document") == true)
+        #expect(brain.requestContexts.compactMap { $0 }.map(\.phase) == [.initial, .readPrepNoteContinuation])
+    }
+
+    @Test func readWithoutIndexReportsUnavailableInsteadOfClaimingEmptyFile() async throws {
+        let arguments = #"{"name":"read_prep_note","arguments":{"document_id":"missing","offset":0}}"#
+        let call = try #require(ToolInvocation.parse(callId: "read", name: "call_tool", argumentsJSON: arguments))
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [call], rawToolCalls: [RawToolCall(
+                id: "read", name: "call_tool", argumentsJSON: arguments)]),
+            .init(toolCalls: [.staySilent(callId: "s")],
+                  rawToolCalls: [RawToolCall(id: "s", name: "stay_silent", argumentsJSON: "{}")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain,
+            capabilities: .compose(disabledTools: [], prepSourcesConfigured: true))
+        transcript.append(.init(speaker: .me, text: "Read my notes", at: 100))
+        _ = await driver.handleTrigger(.turnEnd)
+        #expect(brain.calls[1].contains {
+            $0.toolCallId == "read" && $0.text == JarvisPrompts.Coach.prepNotesUnavailable
+        })
+    }
+
 }

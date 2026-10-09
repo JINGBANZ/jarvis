@@ -127,7 +127,7 @@ moments the model judges worthwhile.
    (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the session's
    switched-on tool set. `capture_screen`, `speak`, and `stay_silent` are always there; `load_tool`,
-   `call_tool`, and a one-line catalog entry for `search_prep_notes` join them when prep sources are configured
+   `call_tool`, and catalog entries for `search_prep_notes` and `read_prep_note` join them when prep sources are configured
    and the user has not switched that capability off (see [Capabilities](#capabilities)). The timing
    is what lets the model tell "thinking" from "stuck."
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
@@ -148,7 +148,7 @@ moments the model judges worthwhile.
    ("final empty. no. final.") that polluted the conversation and was imitated on later turns;
    requiring a tool call prevents the emission rather than filtering it afterwards.
 6. Activity records every brain action, through the session's one evidence handle: successful or
-   failed `capture_screen`, `speak`, `stay_silent`, each prep-notes search, each capability load, and
+   failed `capture_screen`, `speak`, `stay_silent`, each prep-notes search or document read, each capability load, and
    the fixed notice that a tip went out without the user's prepared notes. Heard rows and
    model-facing transcript deltas share `ConversationChronology`:
    occurrence time is authoritative, and insertion order breaks timestamp ties. A late-finalizing
@@ -288,7 +288,7 @@ a turn. An attempt that fails simply loads again, at the cost of one round trip,
 "already loaded" is true exactly when the loaded content is in history the model can still read. Compaction
 keeps those pairs verbatim under the summary for the same reason ([`CoachHistory`](../Sources/JarvisCore/Coach/CoachHistory.swift)).
 
-`search_prep_notes` is the first deferred tool. It is in the catalog when prep-material *sources* are
+`search_prep_notes` and `read_prep_note` are deferred tools. They are in the catalog when prep-material *sources* are
 configured and the user has not switched it off. "Configured" is deliberately not "an index exists":
 building the index reads files and shells out to `textutil`, so it runs off the Start path and the
 search port arrives after the first
@@ -335,13 +335,25 @@ constructs retain paragraph behavior. Long prose paragraphs, fenced code, indivi
 headers, and a heading plus its first content block can exceed the target; long sections can still span chunks
 (see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
 
-Search guidance normally calls for one query per topic. When the results only point to a named
-story or section and lack usable facts, the model may make one focused follow-up using that title
-and identifying details, then stops searching. Empty or unavailable results do not authorize a
-retry. Resolving an explicit reference lets the coach supply the answer content instead of asking
-the candidate to consult a document index during the interview. This bounded exception is shared
-by all prep formats and interview topics; it changes guidance, not the search index or runtime
-scheduling (see [`SearchPrepNotes`](../Sources/JarvisCore/Coach/Tools/SearchPrepNotes.swift)).
+A query naming a source filename scopes ranking to that document and scores the remaining topic
+terms, so a title-heavy query can reach the design sections instead of other files' introductions.
+Search hits carry opaque document identities. The index retains the original extracted text in
+memory alongside its chunks; full reads therefore preserve Markdown and document order, including
+text omitted or repeated by search chunking. Two files with the same display name have different
+identities. Repeated selections of the same file are deduplicated before extraction.
+
+Search guidance normally calls for one query per topic. A hit that only names a story or section,
+or an explicit request for a full document or summary, calls for `read_prep_note` with the hit's
+identity. This read never accepts a filesystem path or reads from disk during a coaching attempt.
+It returns a bounded page and an explicit continuation offset or end marker; the model can continue
+within the existing tool budget and must disclose partial coverage if it cannot finish. A short
+excerpt does not imply an unreadable file or a need to upload again. Unknown identities, invalid
+offsets, and an unavailable index return explicit results without retries. Both tools share the
+prep switch and the untrusted-reference boundary, and retrieved text goes only to the selected
+brain and the existing session evidence. See
+[`PrepMaterialIndex`](../Sources/JarvisCore/PrepMaterial/PrepMaterialIndex.swift),
+[`SearchPrepNotes`](../Sources/JarvisCore/Coach/Tools/SearchPrepNotes.swift), and
+[`ReadPrepNote`](../Sources/JarvisCore/Coach/Tools/ReadPrepNote.swift).
 
 The behavioral skill evaluates all returned excerpts against the exact question and distinguishes
 personal events from drafts, hypothetical approaches, and criteria. For a new question, the opening

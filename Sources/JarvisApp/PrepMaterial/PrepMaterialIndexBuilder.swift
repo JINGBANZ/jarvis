@@ -10,27 +10,29 @@ enum PrepMaterialIndexBuilder {
     /// Skips files that fail to extract. Nil when nothing yielded text, so no port is installed.
     /// Extraction blocks, so it runs on detached tasks off the cooperative executor.
     static func build(from sources: [PrepMaterialSource]) async -> PrepMaterialIndex? {
-        let files = sources.flatMap(expand)
+        let files = Array(Set(sources.flatMap(expand).map(\.standardizedFileURL)))
+            .sorted { $0.path < $1.path }
         guard !files.isEmpty else { return nil }
 
-        var chunks: [PrepMaterialChunk] = []
+        var documents: [PrepMaterialDocument] = []
         for batchStart in stride(from: 0, to: files.count, by: maxConcurrentExtractions) {
             // Detached tasks ignore cancellation, so check before each batch to stop after a Stop.
             guard !Task.isCancelled else { break }
             let batch = files[batchStart..<min(batchStart + maxConcurrentExtractions, files.count)]
             let extractions = batch.map { file in
-                Task.detached(priority: .utility) { () -> [PrepMaterialChunk] in
-                    guard let text = extractText(from: file) else { return [] }
-                    return PrepMaterialChunker.chunk(text: text, sourceDisplayName: file.lastPathComponent)
+                Task.detached(priority: .utility) { () -> PrepMaterialDocument? in
+                    guard let text = extractText(from: file),
+                          !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                    return PrepMaterialDocument(sourceDisplayName: file.lastPathComponent, text: text)
                 }
             }
             for extraction in extractions {
-                chunks.append(contentsOf: await extraction.value)
+                if let document = await extraction.value { documents.append(document) }
             }
         }
 
-        guard !chunks.isEmpty else { return nil }
-        return PrepMaterialIndex(chunks: chunks)
+        guard !documents.isEmpty else { return nil }
+        return PrepMaterialIndex(documents: documents)
     }
 
     /// Folders yield regular files only, so a package bundle named like a document is skipped.
