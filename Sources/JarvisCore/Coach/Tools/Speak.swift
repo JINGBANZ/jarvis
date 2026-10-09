@@ -22,6 +22,7 @@ private let tipStyle = """
     Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
     understand under pressure.
 
+    Follow a loaded skill's stage-specific delivery guidance when it applies. Otherwise:
     If "me" has not yet engaged with an approach — no attempt visible in the code, speech, or
     notes — lead with orientation, not a step. If the question itself is long or dense, spend
     the first tip entirely on its meaning: what is given, what the output is, and what each rule

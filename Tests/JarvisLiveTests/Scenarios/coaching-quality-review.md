@@ -206,3 +206,17 @@ Whole-file SHA-256 revisions: baseline
 `b6e87dd1c005f58ee409fe811af227be8969187875c8e1d6379bb35b7486c7256`.
 The repository Gate verifies packaging and code behavior separately; it neither scores these
 semantic cases nor installs the revised skill into a running app.
+
+## Proactive consulting regression coverage
+
+The `customer-proactive-*`, `customer-explicit-no-coaching`, and
+`customer-discovery-guides-design` cases exercise unsolicited opening/follow-up cues, discovery
+sufficiency and recap, a material feasibility gap, candidate progress, acknowledgments, repetition,
+explicit coaching opt-out, and discovery evidence carried into design. Run them with the same
+production policy and loaded skill as the other cases. A passing Gate checks packaging and harness
+behavior; it does not execute these semantic cases or establish live coaching quality.
+
+The reported session supplies a baseline failure: a complete scenario and later workflow answer
+reached the model with this skill loaded, and the model returned `stay_silent`. Synthetic before/after
+model evaluation of this change is not observed; external evaluation requires approval. No private
+session transcripts or screenshots are included in the regression fixtures.
