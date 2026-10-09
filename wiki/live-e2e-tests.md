@@ -96,7 +96,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|C|D|R|F01|F02|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|D|P|R|F01|F02|all] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -156,11 +156,12 @@ layout in the Gate.
 | B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
+| P | Codex | An explicit full-document request over the existing prep fixture; verifies search → read → reply and complete extracted text in the brain request. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
 
-Only Scenario A's second half runs on Codex, and B's second half runs on the Gemini API, a few Flash
+Scenario P and Scenario A's second half run on Codex, and B's second half runs on the Gemini API, a few Flash
 calls; every other scenario and the evaluation run on Claude. The ChatGPT plan's usage limit is the
 one a day of runs exhausts, and A's Codex stretch (a behavioral search, a spoken screen question, two
 presses, and a design follow-up) is enough to keep that subscription covered.
@@ -296,6 +297,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C31 | Technical preparation is searched when relevant and reused; unrelated coding skips search | A: design, cache invalidation, and one-pass questions |
 | C32 | Cold unrelated coding hints and small talk do not force prep retrieval | A: initial hint and logistics line |
 | C33 | Code hints retain a preceding placement header with an inline code anchor | C: both hint presses |
+| C34 | An explicit full-document request reads the complete selected note before replying | P |
 
 C31 checks Scenario A's selective technical retrieval: the existing design question searches before
 answering, its cache-invalidation follow-up reuses the excerpt, and the one-pass coding question

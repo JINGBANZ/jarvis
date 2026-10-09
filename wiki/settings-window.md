@@ -483,13 +483,14 @@ without screen capture and a turn cannot end without one of the other two. Its o
 **Search my prep notes** switch and, below it, the list of local note files and folders the search
 reads, with **Add files or folders…** and a remove button per source. The switch is always enabled.
 When it is on with no sources, its detail asks the user to add notes, because the runtime offers
-`search_prep_notes` only when sources exist
-([architecture.md → Capabilities](./architecture.md#capabilities)). Switching it off hides the list
+`search_prep_notes` and `read_prep_note` only when sources exist
+([architecture.md → Capabilities](./architecture.md#capabilities)). Switching it off disables search and document reads, hides the list
 and keeps it; switching it back on shows the same list.
 
 Jarvis stores only the chosen paths (`PrepMaterialPreferences`), never a copy of their contents, and
-reads them fresh when needed, so removing a source only forgets it. The search runs on this Mac,
-but the passages it finds join the coaching request to the brain provider, so the card header says
+reads them into the session index at Start, so source changes apply on the next Start and removing a
+source only forgets it. Search and document reads run on this Mac,
+but retrieved text joins the coaching request to the brain provider, so the card header says
 only where the search runs and the callout under the card says where matches go. The file picker accepts the formats prep indexing can read. Whether each source still exists is
 checked off the main thread, because a stat can block on a network volume or a sleeping disk; a
 missing source shows its title and path in amber. The page re-checks every time it becomes visible.

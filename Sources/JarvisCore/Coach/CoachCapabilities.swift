@@ -34,7 +34,8 @@ public struct CoachCapabilities: Sendable, Equatable {
                                prepSourcesConfigured: Bool,
                                skills: [Skill] = []) -> CoachCapabilities {
         let disabled = disabledTools.subtracting(fixedToolNames)
-        let extras = (prepSourcesConfigured ? [searchPrepNotesTool] : [])
+        let prepEnabled = prepSourcesConfigured && !disabled.contains(searchPrepNotesTool.name)
+        let extras = (prepEnabled ? [searchPrepNotesTool, readPrepNoteTool] : [])
             .filter { !disabled.contains($0.name) }
         let deferred = extras.filter(\.deferLoading)
         let offeredSkills = skills

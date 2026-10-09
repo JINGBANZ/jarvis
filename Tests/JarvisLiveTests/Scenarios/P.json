@@ -1,0 +1,32 @@
+{
+  "id": "P",
+  "audio": "fixture",
+  "brain": {
+    "primary": "codex-subscription",
+    "fallbacks": []
+  },
+  "capabilities": {
+    "disabledTools": [],
+    "disabledSkills": []
+  },
+  "prepNotes": "prep-notes.md",
+  "transcription": {
+    "model": "gpt-4o-transcribe",
+    "key": "standard"
+  },
+  "voices": {
+    "them": "Samantha",
+    "me": "Daniel"
+  },
+  "steps": [
+    {
+      "say": {
+        "speaker": "me",
+        "text": "Jarvis, please read the entire prep-notes.md document and summarize all its sections, including the final section. I already added it in Settings."
+      }
+    },
+    {
+      "stop": true
+    }
+  ]
+}

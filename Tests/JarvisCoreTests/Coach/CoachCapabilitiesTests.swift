@@ -7,7 +7,7 @@ import Testing
         let offered = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
         #expect(offered.tools.map(\.name)
             == ["capture_screen", "speak", "stay_silent", "load_tool", "call_tool"])
-        #expect(offered.catalogNames == ["search_prep_notes"])
+        #expect(offered.catalogNames == ["search_prep_notes", "read_prep_note"])
         #expect(CoachCapabilities.default.tools.map(\.name)
             == ["capture_screen", "speak", "stay_silent"])
         #expect(CoachCapabilities.default.deferredTools.isEmpty)
@@ -59,7 +59,7 @@ import Testing
         let properties = try #require(schema["properties"] as? [String: Any])
         let name = try #require(properties["name"] as? [String: Any])
 
-        #expect(name["enum"] as? [String] == ["search_prep_notes"])
+        #expect(name["enum"] as? [String] == ["search_prep_notes", "read_prep_note"])
         #expect(!loader.deferLoading)
     }
 
@@ -75,7 +75,7 @@ import Testing
 
     @Test func prepSearchIsPresentOnlyWhenConfiguredAndNotSwitchedOff() {
         #expect(CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
-            .catalogNames == ["search_prep_notes"])
+            .catalogNames == ["search_prep_notes", "read_prep_note"])
         #expect(!CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: false)
             .catalogNames.contains("search_prep_notes"))
         #expect(!CoachCapabilities.compose(
@@ -114,9 +114,9 @@ import Testing
             == ["capture_screen", "speak", "stay_silent", "load_tool", "load_skill"])
         #expect(capabilities.callableNames(loaded: Set(skillKeys))
             == ["capture_screen", "speak", "stay_silent", "load_tool"])
-        #expect(capabilities.callableNames(loaded: ["search_prep_notes"])
+        #expect(capabilities.callableNames(loaded: ["search_prep_notes", "read_prep_note"])
             == ["capture_screen", "speak", "stay_silent", "call_tool", "load_skill"])
-        #expect(capabilities.callableNames(loaded: Set(skillKeys + ["search_prep_notes"]))
+        #expect(capabilities.callableNames(loaded: Set(skillKeys + ["search_prep_notes", "read_prep_note"]))
             == ["capture_screen", "speak", "stay_silent", "call_tool"])
     }
 
@@ -126,10 +126,10 @@ import Testing
         let capabilities = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: true, skills: skills)
         #expect(capabilities.sessionState(loaded: [])
-            == "Session state: Not loaded yet: tool search_prep_notes.")
+            == "Session state: Not loaded yet: tool search_prep_notes, tool read_prep_note.")
         #expect(capabilities.sessionState(
-            loaded: ["search_prep_notes", CoachCapabilities.loadedKey(forSkill: "behavioral")])
-            == "Session state: Already loaded, never load again: skill behavioral, tool search_prep_notes.")
+            loaded: ["search_prep_notes", "read_prep_note", CoachCapabilities.loadedKey(forSkill: "behavioral")])
+            == "Session state: Already loaded, never load again: skill behavioral, tool search_prep_notes, tool read_prep_note.")
 
         let skillsOnly = CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: false, skills: skills)
@@ -139,7 +139,7 @@ import Testing
     @Test func callToolRoutesOnlyToTheCatalogAndTakesArgumentsAsText() throws {
         let capabilities = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
         let callTool = try #require(capabilities.tool(named: "call_tool"))
-        #expect(callTool.parametersJSON.contains(#""enum":["search_prep_notes"]"#))
+        #expect(callTool.parametersJSON.contains(#""enum":["search_prep_notes","read_prep_note"]"#))
         #expect(callTool.parametersJSON.contains(#""arguments":{"type":"string""#))
         #expect(!capabilities.tools.contains { $0.name == "search_prep_notes" })
     }
@@ -162,4 +162,13 @@ import Testing
         #expect(verdict("call_tool", #"{"name":"search_prep_notes","arguments":"{\"query\":\"q\"}"}"#) == nil)
         #expect(verdict("speak", #"{"lines":["a hint"]}"#) == nil)
     }
+    @Test func disablingPrepSearchAlsoDisablesDocumentReads() {
+        for configured in [false, true] {
+            let capabilities = CoachCapabilities.compose(
+                disabledTools: ["search_prep_notes"], prepSourcesConfigured: configured)
+            #expect(capabilities.tool(named: "read_prep_note") == nil)
+            #expect(capabilities.deferredTools.isEmpty)
+        }
+    }
+
 }

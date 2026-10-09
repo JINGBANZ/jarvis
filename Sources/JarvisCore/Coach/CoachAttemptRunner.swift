@@ -661,6 +661,25 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         resultText: JarvisPrompts.Coach.prepNotesResult(results),
                         newPhase: .searchPrepNotesContinuation)
 
+                case .readPrepNote(let callID, let documentID, let offset):
+                    if Task.isCancelled { return .cancelled }
+                    let resultText: String
+                    if let prepMaterial = attempt.prepMaterial {
+                        if let page = prepMaterial.read(documentID: documentID, offset: offset) {
+                            resultText = JarvisPrompts.Coach.prepNotePage(page)
+                            work.prepNotesObservation = .user(resultText)
+                            activity?.record(.prepNoteRead(sourceDisplayName: page.sourceDisplayName))
+                            jlog("📎 read prep document at offset \(offset) — \(page.text.count) characters")
+                        } else {
+                            resultText = JarvisPrompts.Coach.prepNoteReadFailed
+                        }
+                    } else {
+                        resultText = JarvisPrompts.Coach.prepNotesUnavailable
+                        activity?.record(.prepNotesUnavailable)
+                    }
+                    appendToolContinuation(toolCallId: callID, resultText: resultText,
+                                           newPhase: .readPrepNoteContinuation)
+
                 case .loadTool(let callID, let name):
                     let resultText: String
                     if let tool = capabilities.tool(named: name), tool.deferLoading {

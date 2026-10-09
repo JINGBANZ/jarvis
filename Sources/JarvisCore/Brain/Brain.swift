@@ -69,6 +69,7 @@ public enum ToolInvocation: Sendable, Equatable {
     /// A tool call, not an absence, so `tool_choice: required` can forbid plain-text replies.
     case staySilent(callId: String)
     case searchPrepNotes(callId: String, query: String)
+    case readPrepNote(callId: String, documentID: String, offset: Int)
     case loadTool(callId: String, name: String)
     case loadSkill(callId: String, name: String)
 }

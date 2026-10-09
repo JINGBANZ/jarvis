@@ -4,7 +4,7 @@ public let searchPrepNotesTool = ToolDef(
     name: "search_prep_notes",
     description: "Search the user's prepared behavioral stories, coding approaches, and system designs "
         + "when the current question, including a shortcut hint, resembles preparation they may have "
-        + "and no excerpt already in this conversation covers it.",
+        + "and no excerpt already in this conversation covers it. Also find a named note to read or summarize.",
     parametersJSON: #"{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}"#,
     guidance: """
         # Prep material
@@ -18,7 +18,11 @@ public let searchPrepNotesTool = ToolDef(
         Reuse excerpts already in context while they cover the current question. Search again when a
         new question, topic, or design stage needs evidence those excerpts do not contain.
         If results only point to a named story or section and lack the facts needed to answer,
-        make at most one focused follow-up using that title and its identifying details.
+        use read_prep_note with the returned document_id to read that document instead of searching
+        its title or date again. Load that tool first if needed. Also read when the user asks for a
+        whole document or its summary. A search excerpt is not the full file; a short hit does not mean
+        the file is unreadable or needs to be uploaded again.
+        If no document_id is available, make at most one focused follow-up using the section topic.
         Otherwise stop searching for this topic. Empty, unrelated, or unavailable results are not
         grounds to retry or delay the answer. Use relevant evidence and supplement uncovered technical
         topics with your own reasoning, without attributing that reasoning to the notes or inventing
@@ -33,7 +37,8 @@ extension JarvisPrompts.Coach {
     static func prepNotesResult(_ results: [PrepMaterialSearchResult]) -> String {
         guard !results.isEmpty else { return prepNotesNoResults }
         return prepNotesResultHeader + "\n\n" + results.enumerated().map { index, result in
-            "[\(index + 1)] from \(result.sourceDisplayName):\n\(result.text)"
+            let identity = result.documentID.map { " (document_id: \($0))" } ?? ""
+            return "[\(index + 1)] from \(result.sourceDisplayName)\(identity):\n\(result.text)"
         }.joined(separator: "\n\n")
     }
 

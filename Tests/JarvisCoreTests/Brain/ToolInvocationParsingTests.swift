@@ -45,4 +45,20 @@ import Testing
             callId: "p1", name: "search_prep_notes", argumentsJSON: #"{"query":"q"}"#)
         #expect(parsed == .searchPrepNotes(callId: "p1", query: "q"))
     }
+    @Test func readPrepNoteArgumentsAreValidatedThroughDispatcher() {
+        let valid = ToolInvocation.parse(callId: "read", name: "call_tool",
+            argumentsJSON: #"{"name":"read_prep_note","arguments":{"document_id":"opaque-id","offset":0}}"#)
+        #expect(valid != nil)
+        for arguments in [
+            #"{"document_id":"","offset":0}"#,
+            #"{"document_id":"id","offset":-1}"#,
+            #"{"document_id":"id","offset":1.5}"#,
+            #"{"document_id":"id","offset":true}"#,
+            #"{"document_id":"id","offset":"zero"}"#,
+        ] {
+            #expect(ToolInvocation.parse(callId: "read", name: "read_prep_note",
+                                        argumentsJSON: arguments) == nil)
+        }
+    }
+
 }

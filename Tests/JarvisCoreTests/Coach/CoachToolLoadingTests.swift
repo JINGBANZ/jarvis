@@ -283,8 +283,8 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
 
         #expect(brain.toolChoices == [
             .allowed(["speak", "load_tool"]),
-            .allowed(["speak", "call_tool"]),
-            .allowed(["speak", "call_tool"]),
+            .allowed(["speak", "load_tool", "call_tool"]),
+            .allowed(["speak", "load_tool", "call_tool"]),
         ])
         #expect(search.queries == ["disagreement"])
     }
