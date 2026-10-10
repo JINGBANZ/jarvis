@@ -4,35 +4,12 @@ import JarvisCore
 @MainActor
 enum DiagramHintImage {
     static func render(_ graph: DiagramHint, fitting available: NSSize) -> NSImage {
-        let margin = min(16, max(0, (available.width - 1) / 2))
-        let width = min(144, max(1, available.width - margin * 2))
-        let nodeHeight = graph.nodes.map {
-            labelHeight($0.label, width: max(1, width - 16), fontSize: 15) + 16
-        }.max() ?? 36
-        let box = NSSize(width: width, height: max(36, nodeHeight))
-        let edgeWidth = min(100, max(1, available.width - 16))
-        let edgeHeight = graph.edges.compactMap(\.label).map {
-            labelHeight($0, width: edgeWidth, fontSize: 12)
-        }.max() ?? 0
-        var edgeLabel = NSSize(width: edgeWidth, height: max(20, edgeHeight))
-        var layout = DiagramHintLayout(graph, fitting: available, box: box,
-                                       edgeLabel: edgeLabel, margin: margin)
-        let fittedWidth = layout.frames.values.first?.width ?? box.width
-        if fittedWidth < box.width {
-            edgeLabel.width = min(edgeLabel.width, fittedWidth)
-            edgeLabel.height = max(20, graph.edges.compactMap(\.label).map {
-                labelHeight($0, width: edgeLabel.width, fontSize: 12)
-            }.max() ?? 0)
-            let fittedHeight = graph.nodes.map {
-                labelHeight($0.label, width: max(1, fittedWidth - 16), fontSize: 15) + 16
-            }.max() ?? box.height
-            layout = DiagramHintLayout(graph, fitting: available,
-                box: NSSize(width: box.width, height: max(box.height, fittedHeight)),
-                edgeLabel: edgeLabel, margin: margin)
-        }
+        let drawing = fittedDrawing(graph, fitting: available)
+        let layout = drawing.layout
+        let edgeLabel = drawing.edgeLabel
         let frames = layout.frames
         let natural = layout.size
-        // Layout fits the width at native font sizes; only vertical overflow scrolls.
+        // The chosen typography has a hard minimum; remaining vertical overflow scrolls.
         let scale = max(1, min(max(1, available.width) / natural.width, max(1, available.height) / natural.height))
         let image = NSImage(size: NSSize(width: natural.width * scale, height: natural.height * scale))
         image.lockFocusFlipped(true)
@@ -46,24 +23,78 @@ enum DiagramHintImage {
                 x: min(max(0, route.labelCenter.x - edgeLabel.width / 2), max(0, natural.width - edgeLabel.width)),
                 y: route.labelCenter.y - edgeLabel.height / 2,
                 width: min(edgeLabel.width, natural.width), height: edgeLabel.height),
-                fontSize: 12, background: true, color: edge.stroke == nil ? .white : strokeColor(edge))
+                fontSize: drawing.edgeFontSize, background: true, color: edge.stroke == nil ? .white : strokeColor(edge))
         }
         for node in graph.nodes {
             guard let frame = frames[node.id] else { continue }
-            drawNode(node.label, in: frame)
+            drawNode(node.label, in: frame, fontSize: drawing.nodeFontSize, padding: drawing.padding)
         }
         image.unlockFocus()
         return image
     }
 
-    private static func drawNode(_ label: String, in frame: CGRect) {
+    struct Drawing {
+        let layout: DiagramHintLayout
+        let edgeLabel: CGSize
+        let nodeFontSize: CGFloat
+        let edgeFontSize: CGFloat
+        let padding: CGFloat
+    }
+
+    static func fittedDrawing(_ graph: DiagramHint, fitting available: CGSize) -> Drawing {
+        var best = makeDrawing(graph, fitting: available, nodeFontSize: 15)
+        guard graph.nodes.count >= 5 else { return best }
+        for fontSize: CGFloat in [14, 13] {
+            if best.layout.size.width <= available.width && best.layout.size.height <= available.height { break }
+            let candidate = makeDrawing(graph, fitting: available, nodeFontSize: fontSize)
+            if candidate.layout.size.height < best.layout.size.height { best = candidate }
+        }
+        return best
+    }
+
+    private static func makeDrawing(_ graph: DiagramHint, fitting available: CGSize,
+                                    nodeFontSize: CGFloat) -> Drawing {
+        let ratio = nodeFontSize / 15
+        let edgeFontSize = (nodeFontSize + 9) / 2
+        let padding = 8 * ratio
+        let margin = min(16 * ratio, max(0, (available.width - 1) / 2))
+        let width = min(144 * ratio, max(1, available.width - margin * 2))
+        let nodeHeight = graph.nodes.map {
+            labelHeight($0.label, width: max(1, width - padding * 2), fontSize: nodeFontSize) + padding * 2
+        }.max() ?? 36 * ratio
+        let box = NSSize(width: width, height: max(36 * ratio, nodeHeight))
+        let edgeWidth = min(100 * ratio, max(1, available.width - padding * 2))
+        let edgeHeight = graph.edges.compactMap(\.label).map {
+            labelHeight($0, width: edgeWidth, fontSize: edgeFontSize)
+        }.max() ?? 0
+        var edgeLabel = NSSize(width: edgeWidth, height: max(20 * ratio, edgeHeight))
+        var layout = DiagramHintLayout(graph, fitting: available, box: box,
+                                       edgeLabel: edgeLabel, margin: margin)
+        let fittedWidth = layout.frames.values.first?.width ?? box.width
+        if fittedWidth < box.width {
+            edgeLabel.width = min(edgeLabel.width, fittedWidth)
+            edgeLabel.height = max(20 * ratio, graph.edges.compactMap(\.label).map {
+                labelHeight($0, width: edgeLabel.width, fontSize: edgeFontSize)
+            }.max() ?? 0)
+            let fittedHeight = graph.nodes.map {
+                labelHeight($0.label, width: max(1, fittedWidth - padding * 2), fontSize: nodeFontSize) + padding * 2
+            }.max() ?? box.height
+            layout = DiagramHintLayout(graph, fitting: available,
+                box: NSSize(width: box.width, height: max(box.height, fittedHeight)),
+                edgeLabel: edgeLabel, margin: margin)
+        }
+        return Drawing(layout: layout, edgeLabel: edgeLabel, nodeFontSize: nodeFontSize,
+                       edgeFontSize: edgeFontSize, padding: padding)
+    }
+
+    private static func drawNode(_ label: String, in frame: CGRect, fontSize: CGFloat, padding: CGFloat) {
         let box = NSBezierPath(roundedRect: frame, xRadius: 7, yRadius: 7)
         NSColor(calibratedRed: 0.12, green: 0.22, blue: 0.30, alpha: 1).setFill()
         box.fill()
         NSColor(calibratedRed: 0.4, green: 0.75, blue: 0.9, alpha: 1).setStroke()
         box.lineWidth = 1.5
         box.stroke()
-        drawLabel(label, in: frame.insetBy(dx: 8, dy: 8), fontSize: 15, background: false)
+        drawLabel(label, in: frame.insetBy(dx: padding, dy: padding), fontSize: fontSize, background: false)
     }
 
     private static func drawEdge(_ route: DiagramHintEdgeRoute, edge: DiagramHint.Edge) {

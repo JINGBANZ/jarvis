@@ -520,8 +520,8 @@ A shown diagram gives the detail area most of the existing panel, leaving a comp
 strip visible. It never changes the outer panel's size or position. A manually chosen divider
 proportion still takes precedence. Diagrams keep one reading direction: a requested horizontal flow
 stays horizontal only when it fits the available width; otherwise it reads top to bottom. Small
-branching ranks keep up to three columns at narrow usable widths, wrapping box names at native font
-size and growing vertically. Wider ranks wrap into rows. Parents align with their children when
+branching ranks keep up to three columns at narrow usable widths, wrapping box names and growing
+vertically. Wider ranks wrap into rows. Parents align with their children when
 space permits; branch labels sit above their destinations so shared stems remain legible. Direct
 connections use straight arrows; bypasses and returns use opposite exterior sides with separate
 tracks for independent workflows. Every supplied node and edge stays in one connected view without
@@ -534,8 +534,9 @@ incoming flow. Dashed Mermaid arrows and restricted `linkStyle` declarations (si
 optional 1–4px width, zero-based edge indices) are inert parsed data; arbitrary CSS remains rejected.
 Labels share the explicit edge color, while unlabeled/default flow stays neutral. Layout
 preserves every node, label, and directed connection. Readability takes precedence over compactness:
-node and edge labels retain their native readable size, with vertical scrolling when the graph cannot
-fit the remaining height. Prose beside a diagram keeps its configured compact size rather than
+graphs with five or more nodes try progressively smaller text, boxes, and padding only when they
+overflow, choosing the largest fitting size. Box text stops at 13 points and edge labels at 11 points;
+remaining overflow scrolls vertically. Smaller graphs and graphs that already fit keep normal sizing. Prose beside a diagram keeps its configured compact size rather than
 shrinking to compensate for the graph. See `OverlayBoxPanel`, `DetailDocumentView`,
 `DiagramHintLayout`, `DiagramHintEdgeRoute`, and `DiagramHintImage` for sizing.
 

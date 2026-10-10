@@ -4,6 +4,24 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct DiagramHintRenderingTests {
+    @MainActor @Test func denseGraphCompactsBeforeScrollingAndStopsAtReadableSize() throws {
+        let graph = try #require(DiagramHint(mermaid: "flowchart TD\n" + (0..<7).map {
+            "N\($0)[Step \($0)] -->|Continue| N\($0 + 1)[Step \($0 + 1)]"
+        }.joined(separator: "\n")))
+        let roomy = DiagramHintImage.render(graph, fitting: CGSize(width: 320, height: 700))
+        let compact = DiagramHintImage.render(graph, fitting: CGSize(width: 320, height: 600))
+        let tiny = DiagramHintImage.render(graph, fitting: CGSize(width: 320, height: 40))
+        #expect(compact.size.height < roomy.size.height)
+        #expect(tiny.size.height == compact.size.height, "once at the minimum, scroll instead of shrinking further")
+        #expect(tiny.size.height > 400, "all eight nodes and labels remain legible rather than fitting forty pixels")
+        #expect(tiny.size.width <= 320)
+        let minimum = DiagramHintImage.fittedDrawing(graph, fitting: CGSize(width: 320, height: 40))
+        #expect(minimum.nodeFontSize >= 13)
+        #expect(minimum.edgeFontSize >= 11)
+        let spacious = DiagramHintImage.fittedDrawing(graph, fitting: CGSize(width: 520, height: 1000))
+        #expect(spacious.nodeFontSize == 15, "a graph that fits retains normal text size")
+    }
+
     @MainActor @Test func narrowFocusedGraphRendersThreeConnectedBranches() throws {
         let graph = try #require(DiagramHint(mermaid: """
         flowchart TD
@@ -115,8 +133,7 @@ import Testing
             G --> H[Notify]
             """))
         let available = CGSize(width: 520, height: 200)
-        let layout = DiagramHintLayout(graph, fitting: available, box: CGSize(width: 144, height: 36),
-                                      edgeLabel: CGSize(width: 100, height: 20), margin: 16)
+        let layout = DiagramHintImage.fittedDrawing(graph, fitting: available).layout
         let routes = layout.routes
         let center = routes[2].labelCenter
         let image = DiagramHintImage.render(graph, fitting: available)
