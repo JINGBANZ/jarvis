@@ -99,13 +99,27 @@ public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkOb
         quietPeriod: TimeInterval,
         timeout: TimeInterval
     ) async throws {
-        let deadline = Date().timeIntervalSince1970 + timeout
+        try await waitForFinalStreamToSettle(
+            minimumCount: minimumCount,
+            quietPeriod: quietPeriod, timeout: timeout,
+            now: { Date().timeIntervalSince1970 },
+            poll: { try await Task.sleep(for: .milliseconds(50)) })
+    }
+
+    func waitForFinalStreamToSettle(
+        minimumCount: Int,
+        quietPeriod: TimeInterval,
+        timeout: TimeInterval,
+        now: () -> TimeInterval,
+        poll: () async throws -> Void
+    ) async throws {
+        let deadline = now() + timeout
         var observedFinalCount: Int?
         var lastChangeAt: TimeInterval?
-        while Date().timeIntervalSince1970 < deadline {
+        while now() < deadline {
             try Task.checkCancellation()
             let current = try checkedSnapshot()
-            let now = Date().timeIntervalSince1970
+            let now = now()
             let finalCount = current.events.count(where: { $0.kind == .finalized })
             if finalCount != observedFinalCount {
                 observedFinalCount = finalCount
@@ -116,7 +130,7 @@ public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkOb
                now - lastChangeAt >= quietPeriod {
                 return
             }
-            try await Task.sleep(for: .milliseconds(50))
+            try await poll()
         }
         throw Failure.timedOut("a settled finalized transcript stream")
     }
@@ -129,14 +143,29 @@ public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkOb
         quietPeriod: TimeInterval,
         timeout: TimeInterval
     ) async throws {
+        try await waitForRecognizedReconnectFinalStreamToSettle(
+            phraseIDs, inGeneration: generation,
+            quietPeriod: quietPeriod, timeout: timeout,
+            now: { Date().timeIntervalSince1970 },
+            poll: { try await Task.sleep(for: .milliseconds(50)) })
+    }
+
+    func waitForRecognizedReconnectFinalStreamToSettle(
+        _ phraseIDs: [String],
+        inGeneration generation: Int,
+        quietPeriod: TimeInterval,
+        timeout: TimeInterval,
+        now: () -> TimeInterval,
+        poll: () async throws -> Void
+    ) async throws {
         let expected = Set(phraseIDs)
-        let deadline = Date().timeIntervalSince1970 + timeout
+        let deadline = now() + timeout
         var observedFinalCount: Int?
         var lastChangeAt: TimeInterval?
-        while Date().timeIntervalSince1970 < deadline {
+        while now() < deadline {
             try Task.checkCancellation()
             let snapshot = try checkedSnapshot()
-            let now = Date().timeIntervalSince1970
+            let now = now()
             let finalCount = snapshot.events.count {
                 $0.kind == .finalized && $0.generation == generation
             }
@@ -153,7 +182,7 @@ public final class TranscriptionBenchmarkEventRecorder: TranscriptionBenchmarkOb
                now - lastChangeAt >= quietPeriod {
                 return
             }
-            try await Task.sleep(for: .milliseconds(50))
+            try await poll()
         }
         throw Failure.timedOut("a settled reconnect final stream containing all expected phrases")
     }

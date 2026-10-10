@@ -12,19 +12,20 @@ struct TranscriptionBenchmarkEventRecorderTests {
     @Test("a standard final stream settles only after the latest final stays quiet")
     func finalStreamSettlementIncludesLateFragments() async throws {
         let recorder = TranscriptionBenchmarkEventRecorder()
-        let waiter = Task {
-            try await recorder.waitForFinalStreamToSettle(
-                minimumCount: 1,
-                quietPeriod: 0.12,
-                timeout: 10)
-            return recorder.snapshot().events.filter { $0.kind == .finalized }.count
-        }
-
+        let clock = ManualClock()
         recorder.record(event(text: "first", observedAt: 1))
-        try await Task.sleep(for: .milliseconds(60))
-        recorder.record(event(text: "second", observedAt: 2))
+        try await recorder.waitForFinalStreamToSettle(
+            minimumCount: 1, quietPeriod: 0.12, timeout: 10,
+            now: clock.now,
+            poll: {
+                clock.advance(by: 0.05)
+                if clock.now() == 0.1 {
+                    recorder.record(event(text: "second", observedAt: 2))
+                }
+            })
 
-        #expect(try await waiter.value == 2)
+        #expect(recorder.snapshot().events.filter { $0.kind == .finalized }.count == 2)
+        #expect(clock.now() == 0.25, "the late final restarts the quiet period")
     }
 
     @Test("a terminal failure after settlement remains in the final snapshot")
@@ -52,21 +53,21 @@ struct TranscriptionBenchmarkEventRecorderTests {
             TranscriptionBenchmark.phrases.first { $0.id == id }!
         }
         let recorder = TranscriptionBenchmarkEventRecorder()
-        let waiter = Task {
-            try await recorder.waitForRecognizedReconnectFinalStreamToSettle(
-                phraseIDs,
-                inGeneration: 1,
-                quietPeriod: 0.12,
-                timeout: 10)
-            return recorder.snapshot().events.filter { $0.kind == .finalized }.count
-        }
-
+        let clock = ManualClock()
         recorder.record(event(text: phrases[0].text, observedAt: 1))
         recorder.record(event(text: phrases[1].text, observedAt: 2))
-        try await Task.sleep(for: .milliseconds(60))
-        recorder.record(event(text: "Unrelated late final", observedAt: 3))
+        try await recorder.waitForRecognizedReconnectFinalStreamToSettle(
+            phraseIDs, inGeneration: 1, quietPeriod: 0.12, timeout: 10,
+            now: clock.now,
+            poll: {
+                clock.advance(by: 0.05)
+                if clock.now() == 0.1 {
+                    recorder.record(event(text: "Unrelated late final", observedAt: 3))
+                }
+            })
 
-        #expect(try await waiter.value == 3)
+        #expect(recorder.snapshot().events.filter { $0.kind == .finalized }.count == 3)
+        #expect(clock.now() == 0.25, "the unrelated late final restarts the quiet period")
     }
 
     @Test("snapshot returns all content-free benchmark observations")
