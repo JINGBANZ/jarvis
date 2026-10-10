@@ -57,7 +57,8 @@ documents; Eye and Activity use the page shell without an outer scroll view.
 The pages share these AppKit primitives rather than styling their controls independently:
 
 - `SettingsTheme` owns every Settings color: purple for structure, teal for what is on, selected, or
-  live, amber for what needs the user. Each color resolves per appearance, including the Increase
+  live, amber for attention or checking, and red for an unavailable configured brain route. Each
+  color resolves per appearance, including the Increase
   Contrast appearances, where card lines draw at full strength, so every view follows light and dark
   mode without observing the change.
 - `SettingsBackgroundView` draws the radial backdrop behind the hub and every page. Onboarding reuses
@@ -131,15 +132,19 @@ never makes the pose jump.
 
 ### Status
 
-Each slot has a status light, teal when the part is ready and amber when it needs the user, and the
-hub header shows a four-segment readiness meter in part order that reads **SYSTEMS READY 4/4** or
-**NEEDS YOU n/4**. A part that needs the user turns its slot amber and replaces the slot's detail
-with the reason. The rules judge saved settings and grants the way a Start would meet them, and name
-only what Settings can fix or explain:
+Each slot has a status light: teal when ready, amber when checking or needing attention, and red
+when no target in the configured brain route is usable. The hub header shows the same signals in a
+four-segment meter, with **SYSTEMS READY 4/4**, **CHECKING n/4**, **NEEDS YOU n/4**, or **NOT READY n/4**.
+A problem replaces the slot's detail with its reason. The rules judge saved settings and grants the
+way a Start would meet them, and name only what Settings can fix or explain:
 
-- **Brain** needs attention when the primary lacks its API key or its subscription is proven
-  signed out. The notice says whether the next usable configured target will answer instead or
-  none can. An unavailable fallback alone does not block a usable primary.
+- **Brain** is ready when its primary is usable. An unavailable primary with a usable configured
+  fallback is amber, **PRIMARY UNAVAILABLE**; its notice carries the redacted cause and names the
+  fallback. With no usable configured target it is red, **NO BRAIN AVAILABLE**, with the cause and
+  next action. An unanswered initial credential check is amber, **CHECKING CONNECTIONS**. Temporary
+  subscription failures affect readiness without claiming the account is signed out. Saved keys
+  for providers outside the route do not count; an unavailable fallback alone does not block a
+  usable primary.
 - **Ear** needs its transcription provider's own key first, then microphone access.
 - **Eye** needs Screen Recording.
 - **Mouth** never needs the user: the Overlay Box has no off switch.
@@ -148,9 +153,10 @@ The exact wording lives in `RobotHealth`.
 
 A subscription counts as signed out only when that is proven: it has no saved sign-in, or the
 helper reports a permanent authentication rejection. Temporary failures and an unanswered health
-check prove no sign-out. `SubscriptionSignIns` is
-the one answer Connections, the hub, and the Brain page share, so they cannot disagree. It asks the bundled helper
-only when a sign-in is saved, so opening Settings never starts the helper for nothing, and it takes
+check prove no sign-out. `SubscriptionSignIns` shares the full passive credential-health answer
+with Connections, the hub, and the Brain page, including temporary failures and an unchecked state.
+It asks the bundled helper only when a sign-in is saved, so opening Settings never starts the helper
+for nothing, and it takes
 the answers Connections and Start get from their probes, cancelling any older probe still in flight.
 A runtime permanent subscription authentication failure also refreshes this shared state.
 
@@ -195,7 +201,7 @@ pages it moves.
 | `TranscriptionSection` | **Ear**: "How I turn the conversation into text." | The transcription provider and its model, language, vocabulary, mode, or locale rows ([Ear](#ear)). Applies on the next Start. |
 | `DisplaySection` | **Eye**: "What I look at when I check your screen." | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — and the optional Chrome text switch, followed by a short fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot ([Capture Scope](#capture-scope)). |
 | `OverlaySection` | **Mouth**: "How my hints show up on your screen." | One **Overlay Box** card (the persistent response history) with an icon, description, text size and opacity rows, and the detail box's own rows. It has no On/Off switch: the box shows for every session. Its live sample appears only while the Mouth page is visible (`didBecomeActive`/`didResignActive`). The header's live chip says the sliders act on screen. Persists via `OverlayAppearance` ([Overlay Appearance](#overlay-appearance)). |
-| `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts what is ready. |
+| `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts saved managed API keys. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | Prep notes search, with its switch and its list of local note files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
 | `HotkeySection` | **Shortcuts**: "Ask me for help, or step through my details." | One card with a row each for **Give me a hint**, **Explain more**, **Show code**, **Previous detail**, and **Next detail**: keyboard keycaps and **Record**, an optional mouse row with **Record**/**Clear**, and per-row failure feedback ([Shortcuts](#shortcuts)). |
@@ -620,6 +626,11 @@ reads under the row's title, as the key rows' does, with the row's button on the
 - **Not running** (amber), with the helper's own reason and a **Try again** button that probes again.
 - **Signing in…** while a sign-in runs, with a **Cancel** button.
 
+Subscription rows retain the full redacted failure text. The text wraps, is selectable, and has
+space between lines; each row and its card measure the message at the current width and grow to
+fit. Actions remain aligned at the top right, and the outer page scrolls when needed. This keeps
+the cause and next step readable at both the default and minimum window width.
+
 **Sign in** runs the helper's login for that vendor, opens the vendor's sign-in page in the default
 browser, and waits up to ten minutes for the browser to hand the account back. It is the one place
 Jarvis opens a URL, and only because the user pressed the button. A failed sign-in shows the helper's
@@ -628,8 +639,8 @@ subscription is supported; a successful Sign in replaces the previous account.
 Jarvis decodes only passive health fields and discards token-bearing refresh responses. Tokens
 stay in the helper's owner-only credential directory, apart from the
 secrets file ([sandbox.md](./sandbox.md) says where, and what a login reaches). The page's header
-chip counts every managed API key that is saved and every subscription the last probe proved signed
-in.
+chip reads **n keys saved** (or **1 key saved**), counting only managed API keys. It describes saved
+connections; the hub judges whether the configured session route can start.
 
 An API key is mandatory for the selected transcription provider. Each brain target needs its own
 key to be usable, and Start skips targets whose keys are missing when another target can serve.

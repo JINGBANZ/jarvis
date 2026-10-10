@@ -14,29 +14,32 @@ public enum RobotHealth {
     }
 
     private static func brain(_ route: BrainRoute, _ readiness: RobotReadiness) -> RobotPartHealth {
-        let canServe = { (target: BrainTarget) in
-            target.credentialFailure(available: readiness.availableCredentials) == nil
-                && !readiness.signedOutSubscriptions.contains(target.provider)
-        }
-        let primary = route.primary
-        guard !canServe(primary) else { return .ready }
-        if let credential = primary.provider.credential {
-            let vendor = credential.vendorName
-            let key = "\(article(for: vendor)) \(vendor) key"
-            return .needsAttention(
-                reason: "ADD \(key.uppercased())",
-                advice: route.fallbackTargets.contains(where: canServe)
-                    ? "My primary brain needs \(key). I'll skip it and use the next brain in the route. Add it in Connections."
-                    : "No brain in the route can answer right now. Add \(key) in Connections, then Start again.",
+        switch connection(route.primary, readiness) {
+        case .ready: return .ready
+        case .checking: return .checking
+        case .unavailable(let failure):
+            if let fallback = route.fallbackTargets.first(where: { connection($0, readiness) == .ready }) {
+                return .needsAttention(
+                    reason: "PRIMARY UNAVAILABLE",
+                    advice: failure.activitySentence + " I'll use \(fallback.provider.displayName) until the primary is available.",
+                    fix: .openConnections)
+            }
+            if route.fallbackTargets.contains(where: { connection($0, readiness) == .checking }) {
+                return .checking
+            }
+            return .blocked(
+                reason: "NO BRAIN AVAILABLE",
+                advice: failure.activitySentence + " No configured fallback is available.",
                 fix: .openConnections)
         }
-        let name = primary.provider.displayName
-        return .needsAttention(
-            reason: "\(name.uppercased()) IS SIGNED OUT",
-            advice: route.fallbackTargets.contains(where: canServe)
-                ? "\(name) is signed out. I'll skip it and use the next brain in the route until you sign in again."
-                : "No brain in the route can answer right now. Sign in again in Connections, then Start again.",
-            fix: .openConnections)
+    }
+
+    private static func connection(_ target: BrainTarget, _ readiness: RobotReadiness) -> RobotReadiness.ConnectionHealth {
+        if let failure = target.credentialFailure(available: readiness.availableCredentials) {
+            return .unavailable(failure)
+        }
+        guard target.provider.servedByLocalProxy else { return .ready }
+        return readiness.subscriptions[target.provider] ?? .checking
     }
 
     private static func ear(_ provider: TranscriptionProvider, _ readiness: RobotReadiness) -> RobotPartHealth {

@@ -9,8 +9,6 @@ final class SubscriptionSignIns {
     /// `nil` before any answer. A helper that isn't running serves nothing, so it empties this.
     private(set) var selectable: Set<BrainProvider>?
 
-    /// A helper that couldn't answer proves nothing, so it leaves this alone.
-    private var provenSignedOut: Set<BrainProvider> = []
     private(set) var readiness: LocalProxySupervisor.Readiness?
     private let supervisor: LocalProxySupervisor
     private var probe: Task<Void, Never>?
@@ -30,7 +28,7 @@ final class SubscriptionSignIns {
             !supervisor.accountFiles(for: $0).isEmpty
         }
         guard hasSavedSignIn else {
-            update(selectable: [], provenSignedOut: provenSignedOut)
+            update(selectable: [])
             return
         }
         probe = Task { [weak self, supervisor] in
@@ -49,23 +47,26 @@ final class SubscriptionSignIns {
         switch readiness {
         case .superseded: break
         case .ready(_, let signedIn, _):
-            let signedOut = Set(BrainProvider.allCases.filter { provider in
-                guard provider.servedByLocalProxy else { return false }
-                let failure = readiness.unavailability(for: provider)
-                return failure?.category == .authentication && failure?.disposition == .permanent
-            })
-            update(selectable: signedIn, provenSignedOut: signedOut)
+            update(selectable: signedIn)
         case .unavailable:
-            update(selectable: [], provenSignedOut: provenSignedOut)
+            update(selectable: [])
         }
     }
 
-    /// Of `providers`, the ones proven signed out: no saved sign-in or rejected credentials.
-    func signedOut(among providers: Set<BrainProvider>) -> Set<BrainProvider> {
-        providers.filter { provider in
-            supervisor.accountFiles(for: provider).isEmpty
-                || provenSignedOut.contains(provider)
-        }
+    func health(among providers: Set<BrainProvider>) -> [BrainProvider: RobotReadiness.ConnectionHealth] {
+        Dictionary(uniqueKeysWithValues: providers.map { provider in
+            let health: RobotReadiness.ConnectionHealth
+            if supervisor.accountFiles(for: provider).isEmpty {
+                health = .unavailable(ProviderFailure(
+                    source: .brain(provider), stage: .process, category: .authentication,
+                    disposition: .permanent, identity: .init(), message: "Sign in in Settings → Connections."))
+            } else if let readiness {
+                health = readiness.unavailability(for: provider).map { .unavailable($0) } ?? .ready
+            } else {
+                health = .checking
+            }
+            return (provider, health)
+        })
     }
 
     @discardableResult
@@ -79,12 +80,8 @@ final class SubscriptionSignIns {
         observers[id] = nil
     }
 
-    private func update(
-        selectable newSelectable: Set<BrainProvider>,
-        provenSignedOut newProven: Set<BrainProvider>
-    ) {
+    private func update(selectable newSelectable: Set<BrainProvider>) {
         selectable = newSelectable
-        provenSignedOut = newProven
         for handler in observers.values { handler() }
     }
 }

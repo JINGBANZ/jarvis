@@ -5,7 +5,7 @@ import JarvisCore
 final class ReadinessMeterView: NSView {
     private let label = NSTextField(labelWithString: "")
     private let segments = (0..<RobotPart.allCases.count).map { _ in CALayer() }
-    private var ready: [Bool] = []
+    private var signals: [RobotSlotState.Tone] = []
 
     override var isFlipped: Bool { true }
     override var wantsUpdateLayer: Bool { true }
@@ -35,11 +35,12 @@ final class ReadinessMeterView: NSView {
     func render(_ meter: RobotHubMeter?) {
         isHidden = meter == nil
         guard let meter else { return }
-        ready = meter.ready
+        signals = meter.signals
         let tone = switch meter.tone {
         case .normal: SettingsTheme.mutedText
         case .live: SettingsTheme.teal
         case .attention: SettingsTheme.amber
+        case .blocked: SettingsTheme.red
         }
         label.attributedStringValue = NSAttributedString(string: meter.label, attributes: [
             .kern: 2, .font: NSFont.systemFont(ofSize: 10.5), .foregroundColor: tone,
@@ -64,8 +65,12 @@ final class ReadinessMeterView: NSView {
 
     override func updateLayer() {
         for (index, segment) in segments.enumerated() {
-            let isReady = ready.indices.contains(index) ? ready[index] : true
-            let color = (isReady ? SettingsTheme.teal : SettingsTheme.amber).cgColor
+            let tone = signals.indices.contains(index) ? signals[index] : .normal
+            let color = switch tone {
+            case .normal, .live: SettingsTheme.teal.cgColor
+            case .attention: SettingsTheme.amber.cgColor
+            case .blocked: SettingsTheme.red.cgColor
+            }
             segment.backgroundColor = color
             segment.shadowColor = color
         }

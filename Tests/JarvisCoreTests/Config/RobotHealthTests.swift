@@ -20,27 +20,33 @@ import Testing
 
     @Test func aSignedOutPrimaryWithAWorkingFallbackSaysItWillBeSkipped() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [openAI]))
-        #expect(health(.brain, inputs, .fixture(signedOut: [.codexSubscription])) == .needsAttention(
-            reason: "CODEX IS SIGNED OUT",
-            advice: "Codex is signed out. I'll skip it and use the next brain in the route until you sign in again.",
-            fix: .openConnections))
+        let result = health(.brain, inputs, .fixture(signedOut: [.codexSubscription]))
+        #expect(result.reason == "PRIMARY UNAVAILABLE")
+        #expect(result.tone == .attention)
+        #expect(result.advice?.contains("OpenAI API") == true)
+        #expect(result.advice?.contains("Sign in again") == true)
+        #expect(result.fix == .openConnections)
     }
 
     @Test func aRouteNobodyCanServeSaysSo() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [claude]))
         let readiness = RobotReadiness.fixture(signedOut: [.codexSubscription, .claudeSubscription])
-        #expect(health(.brain, inputs, readiness) == .needsAttention(
-            reason: "CODEX IS SIGNED OUT",
-            advice: "No brain in the route can answer right now. Sign in again in Connections, then Start again.",
-            fix: .openConnections))
+        let result = health(.brain, inputs, readiness)
+        #expect(result.reason == "NO BRAIN AVAILABLE")
+        #expect(result.tone == .blocked)
+        #expect(result.advice?.contains("Codex") == true)
+        #expect(result.advice?.contains("No configured fallback") == true)
+        #expect(result.fix == .openConnections)
     }
 
     @Test func anOpenAIPrimaryNeedsAKey() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: openAI, fallbackTargets: [codex]))
-        #expect(health(.brain, inputs, .fixture(credentials: [])) == .needsAttention(
-            reason: "ADD AN OPENAI KEY",
-            advice: "My primary brain needs an OpenAI key. I'll skip it and use the next brain in the route. Add it in Connections.",
-            fix: .openConnections))
+        let result = health(.brain, inputs, .fixture(credentials: []))
+        #expect(result.reason == "PRIMARY UNAVAILABLE")
+        #expect(result.tone == .attention)
+        #expect(result.advice?.contains(Credential.openAIAPIKey.displayName) == true)
+        #expect(result.advice?.contains("Codex") == true)
+        #expect(result.fix == .openConnections)
     }
 
     @Test func anOpenAIFallbackWithoutAKeyDoesNotBlockAUsablePrimary() {
@@ -62,10 +68,36 @@ import Testing
 
     @Test func aMissingFallbackKeyDoesNotCountAsAWorkingFallback() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [openAI]))
-        #expect(health(.brain, inputs, .fixture(signedOut: [.codexSubscription], credentials: [])) == .needsAttention(
-            reason: "CODEX IS SIGNED OUT",
-            advice: "No brain in the route can answer right now. Sign in again in Connections, then Start again.",
-            fix: .openConnections))
+        let result = health(.brain, inputs, .fixture(signedOut: [.codexSubscription], credentials: []))
+        #expect(result.reason == "NO BRAIN AVAILABLE")
+        #expect(result.tone == .blocked)
+        #expect(result.advice?.contains("No configured fallback") == true)
+        #expect(result.fix == .openConnections)
+    }
+
+    @Test(arguments: [ProviderFailure.Category.authentication, .unavailable, .quota, .configuration])
+    func allUnavailablePrimaryCausesUseTheConfiguredFallback(category: ProviderFailure.Category) {
+        let failure = ProviderFailure(
+            source: .brain(.claudeSubscription), stage: .process, category: category,
+            disposition: .temporary, identity: .init(), message: "Cannot serve right now.")
+        var readiness = RobotReadiness.fixture()
+        readiness.subscriptions[.claudeSubscription] = .unavailable(failure)
+        let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: claude, fallbackTargets: [openAI]))
+        let result = health(.brain, inputs, readiness)
+        #expect(result.reason == "PRIMARY UNAVAILABLE")
+        #expect(result.tone == .attention)
+        #expect(result.advice?.contains(failure.activitySentence) == true)
+        #expect(result.advice?.contains("OpenAI API") == true)
+    }
+
+    @Test func uncheckedSubscriptionsShowCheckingUntilAUsableRouteIsKnown() {
+        var readiness = RobotReadiness.fixture()
+        readiness.subscriptions[.claudeSubscription] = nil
+        #expect(health(.brain, .fixture(route: BrainRoute(primary: claude, fallbackTargets: [])), readiness) == .checking)
+        readiness.subscriptions[.codexSubscription] = RobotReadiness.fixture(signedOut: [.codexSubscription])
+            .subscriptions[.codexSubscription]
+        #expect(health(.brain, .fixture(route: BrainRoute(primary: codex, fallbackTargets: [claude])), readiness) == .checking)
+        #expect(health(.brain, .fixture(route: BrainRoute(primary: openAI, fallbackTargets: [claude])), readiness) == .ready)
     }
 
     @Test func earNeedsItsProvidersKeyFirst() {

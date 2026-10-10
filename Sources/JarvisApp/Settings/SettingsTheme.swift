@@ -5,6 +5,7 @@ enum SettingsTheme {
     static let purple = dynamic(light: 0x7C4DFF, dark: 0xB18CFF)
     static let teal = dynamic(light: 0x0E9F87, dark: 0x36E2C5)
     static let amber = dynamic(light: 0xB86E00, dark: 0xFFB547)
+    static let red = dynamic(light: 0xC83B49, dark: 0xFF6B78)
     static let text = dynamic(light: 0x1C1535, dark: 0xF1EAFF)
     static let mutedText = dynamic(light: 0x6B5F95, dark: 0xA594CC)
     static let dimText = dynamic(light: 0xA39AC4, dark: 0x6F6396)

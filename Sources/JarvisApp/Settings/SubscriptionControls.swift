@@ -6,7 +6,7 @@ import JarvisCore
 final class SubscriptionControls: NSObject {
     static let providers: [BrainProvider] = [.codexSubscription, .claudeSubscription]
 
-    let preferredHeight = SettingsStyle.cardHeaderHeight
+    private(set) var preferredHeight = SettingsStyle.cardHeaderHeight
         + CGFloat(SubscriptionControls.providers.count) * SettingsStyle.rowHeight
 
     private struct Row {
@@ -16,6 +16,8 @@ final class SubscriptionControls: NSObject {
 
     private let supervisor: LocalProxySupervisor
     private var rows: [BrainProvider: Row] = [:]
+    private var card: SettingsCardView?
+    private var onHeightChanged: ((CGFloat) -> Void)?
     private var readiness: LocalProxySupervisor.Readiness?
     private var refreshTask: Task<Void, Never>?
     private var signIns: [BrainProvider: Task<Void, Never>] = [:]
@@ -26,22 +28,15 @@ final class SubscriptionControls: NSObject {
     /// could be older than a check already under way elsewhere.
     var onProbeAnswered: ((LocalProxySupervisor.Readiness) -> Void)?
 
-    /// Subscriptions the last probe proved signed in; `nil` before the first probe answers.
-    var signedIn: Set<BrainProvider>? {
-        switch readiness {
-        case .ready(_, let signedIn, _): signedIn
-        case .unavailable, .superseded: []
-        case nil: nil
-        }
-    }
-
     init(supervisor: LocalProxySupervisor) {
         self.supervisor = supervisor
     }
 
-    func makeView() -> NSView {
+    func makeView(onHeightChanged: @escaping (CGFloat) -> Void) -> NSView {
         rows.removeAll()
+        self.onHeightChanged = onHeightChanged
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
+        self.card = card
         card.setHeader(title: "Subscriptions", detail: "Use your ChatGPT or Claude plan as my brain")
         guard let content = card.contentView else { return card }
 
@@ -63,25 +58,33 @@ final class SubscriptionControls: NSObject {
                 title: provider.displayName,
                 detail: "Checking…",
                 controlView: controls,
-                controlSize: NSSize(width: 240, height: 32),
+                controlSize: NSSize(width: 132, height: 32),
+                wrapsDetail: true,
                 showsSeparator: index > 0)
             content.addSubview(row)
             rows[provider] = Row(view: row, button: button)
         }
-        card.onLayout = { [weak self, weak card] in
-            guard let self, let card else { return }
-            let body = card.bodyFrame
-            for (index, provider) in Self.providers.enumerated() {
-                rows[provider]?.view.frame = NSRect(
-                    x: body.minX,
-                    y: body.maxY - CGFloat(index + 1) * SettingsStyle.rowHeight,
-                    width: body.width,
-                    height: SettingsStyle.rowHeight)
-            }
-        }
-        card.onLayout?()
+        card.onLayout = { [weak self] in self?.layout() }
         render()
         return card
+    }
+
+    private func layout() {
+        guard let card else { return }
+        let heights = Self.providers.map {
+            rows[$0]?.view.height(for: card.bodyFrame.width) ?? SettingsStyle.rowHeight
+        }
+        let height = SettingsStyle.cardHeaderHeight + heights.reduce(0, +)
+        if preferredHeight != height {
+            preferredHeight = height
+            onHeightChanged?(height)
+        }
+        let body = card.bodyFrame
+        var top = body.maxY
+        for (provider, rowHeight) in zip(Self.providers, heights) {
+            top -= rowHeight
+            rows[provider]?.view.frame = NSRect(x: body.minX, y: top, width: body.width, height: rowHeight)
+        }
     }
 
     /// Also starts the helper if it isn't running, which is how a stopped helper is retried.
@@ -111,6 +114,8 @@ final class SubscriptionControls: NSObject {
     func windowWillClose() {
         refreshTask?.cancel()
         refreshTask = nil
+        card = nil
+        rows.removeAll()
         // Sign-ins outlive the window on purpose: cancelling one signals the login holding the
         // OAuth callback port, so the browser's redirect would land on nothing.
     }
@@ -207,6 +212,8 @@ final class SubscriptionControls: NSObject {
                 row.view.setDetail(presentation.status, color: presentation.color)
             }
         }
+        layout()
+        card?.needsLayout = true
         onStatusChanged?()
     }
 
@@ -228,7 +235,7 @@ final class SubscriptionControls: NSObject {
             return ("Checking…", SettingsTheme.mutedText, "Try again", true)
         case .unavailable(let reason):
             return ("Not running. The sign-in service \(reason)", SettingsTheme.amber, "Try again", true)
-        case .ready(_, let signedIn, _) where signedIn.contains(provider):
+        case .ready(_, let signedIn, _) where signedIn.contains(provider) && account != nil:
             return (["Signed in", who].compactMap { $0 }.joined(separator: " · "),
                     SettingsTheme.teal, "Sign out", true)
         case .ready where account != nil:
