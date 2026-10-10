@@ -534,5 +534,29 @@
     ],
     "input": "Agreed architecture scope: course-store backend owns orders and entitlements; external provider handles payment, confirms asynchronously. them: Architecture next. Walk me through purchase and payment confirmation.",
     "pass": "Short architecture hint plus supported Mermaid in detail. Explicit operation labels; highlights discussed forward path in amber and distinguishes confirmation return in purple using valid zero-based linkStyle indices. Does not label confirmation a retry or infer dashed means retry by itself."
+  },
+  {
+    "id": "system-focused-download-sketch",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Synthetic software marketplace with agreed browse, purchase, owned-library, download, update and online launch checks. Existing overview includes Client, Download service, Ownership service, Manifest service, CDN and File storage; it shows temporary links returning to Client and a separate launch ownership check. them: Focus just on downloading now. me: Help me draw that clearly.",
+    "pass": "One connected focused Mermaid sketch with shared components once, required ownership check and file-delivery path, short operation labels and explicit path highlighting. Ordinary manifest/link response appears as brief text below rather than a backward arrow. Separate launch authorization is omitted from this focused view; no repeated source/destination pairs or claim the entire architecture is complete."
+  },
+  {
+    "id": "system-overview-scope-coverage",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Synthetic software marketplace scope agreed: browse packages, purchase through an external payment provider, owned library, authorized download and updates, online launch ownership checks. No service boundaries chosen. them: Give the initial high-level architecture. me: Help me start the overview.",
+    "pass": "Compact connected proposed overview, normally 3–6 logical boxes grouping responsibilities. Agreed journeys are covered by diagram or brief mapping below, including library/ownership, download/update and launch; unresolved mechanisms remain open. Does not expand every endpoint, data store, response arrow and deep-dive mechanism into the overview."
+  },
+  {
+    "id": "customer-focused-approved-flow",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Synthetic supplier-email pilot agreed: intake, extract, check identity/evidence/rules, draft routine response or hand off manually, mandatory human verification/approval before send, record/audit. them: Now sketch just the normal approved reply flow. me: Help me keep it clear.",
+    "pass": "Connected focused flow with 3–6 short logical boxes, shared boxes once, explicit checks and required approval before sending. Keeps ordinary returned fields/records in brief supporting text rather than reciprocal arrows. Does not reproduce every exception branch or separate each connection into duplicated component rows; current operation labels and explicit highlight remain."
   }
 ]

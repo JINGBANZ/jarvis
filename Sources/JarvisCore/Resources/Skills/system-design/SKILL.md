@@ -115,8 +115,13 @@ consequence rather than saying only "consider reliability" or declaring a partia
 When a warranted high-level architecture hint introduces or changes a component flow, include one
 focused ```mermaid block in detail, including for an ordinary hint shortcut. This is a reason to
 provide detail, not conditional on choosing prose detail first. Pair it with short lines explaining
-what to draw and why. Begin with the smallest connected overview; later sketches focus on the
-relevant branch, preserving the agreed components and boundaries. A text-only clarification need
+what to draw and why. Begin with a connected overview covering the agreed user journeys, grouping
+related responsibilities into 3–6 short boxes. Briefly map any scoped journey not obvious from the
+arrows beneath the graph; label unresolved owners or mechanisms as open, not complete.
+Later sketches show the current flow with shared components drawn once and unrelated flows omitted.
+Keep safety/authorization gates on that flow. Describe ordinary response data beneath the graph
+instead of adding a return arrow; when confirmation, retry or recovery is the topic, show that path
+explicitly. Use short operation labels and add payload details below. A text-only clarification need
 not redraw an unchanged flow. The graph is a private suggested sketch, not a claim about what is
 already drawn or an edit to the shared canvas. If detail is unavailable, name the boxes and flow
 in lines. Keep requirements, entities, APIs, and deep-dive explanations text-only. Do not interrupt
@@ -125,7 +130,7 @@ productive progress or repeat an adequate hint merely to provide a diagram.
 Supported Mermaid syntax is deliberately small: start with `flowchart LR` or `flowchart TD`, then
 put one box declaration or arrow per line. Use simple alphanumeric IDs starting with a letter,
 rectangular boxes like `api["API service"]`, and arrows like `api --> db` or
-`api -->|read| db["Database"]`. Declare every box, either separately or on an arrow. Prefer 3–8
+`api -->|read| db["Database"]`. Declare every box, either separately or on an arrow. Prefer 3–6
 boxes; the limit is 12 boxes and 24 arrows. Keep box labels under 48 characters and arrow labels
 under 32. Inside the block, do not use chained arrows, subgraphs, arbitrary styles, directives, HTML, links,
 or other shapes.

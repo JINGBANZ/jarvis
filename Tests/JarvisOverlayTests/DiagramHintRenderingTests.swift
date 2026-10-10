@@ -4,20 +4,38 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct DiagramHintRenderingTests {
-    @MainActor @Test func crowdedGraphActuallyUsesConnectionRows() throws {
+    @MainActor @Test func narrowFocusedGraphRendersThreeConnectedBranches() throws {
         let graph = try #require(DiagramHint(mermaid: """
-        flowchart LR
-        A[Client] -->|Request| B[Service]
-        B -->|Check| C[Access]
-        B -->|Read| D[Manifest]
-        B -->|Respond| A
-        A -->|Fetch bytes| E[Edge cache]
-        E -->|Miss| F[Object store]
-        A -->|Authorize| C
+        flowchart TD
+        A[Client] -->|Request links| B[Package service]
+        A -->|Fetch files| C[Edge cache]
+        B -->|Check rights| D[Rights service]
+        B -->|Read manifest| E[Version metadata]
+        C -->|Cache miss| F[File storage]
         """))
-        let image = DiagramHintImage.render(graph, fitting: CGSize(width: 520, height: 350))
-        #expect(image.size.width == 360)
-        #expect(image.size.height > 350, "readable rows scroll instead of shrinking")
+        let image = DiagramHintImage.render(graph, fitting: CGSize(width: 320, height: 350))
+        #expect(image.size.width <= 320)
+        let data = try #require(image.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: data))
+        let scale = CGFloat(bitmap.pixelsWide) / image.size.width
+        var maximumBoxes = 0
+        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 2) {
+            var run = 0, boxes = 0
+            for x in 0...bitmap.pixelsWide {
+                let color = x < bitmap.pixelsWide ? bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) : nil
+                let fill = color.map {
+                    $0.alphaComponent > 0.9 && $0.redComponent < 0.3
+                        && $0.blueComponent > $0.redComponent + 0.08
+                        && $0.blueComponent < 0.5
+                } ?? false
+                if fill { run += 1 } else {
+                    if CGFloat(run) >= 60 * scale { boxes += 1 }
+                    run = 0
+                }
+            }
+            maximumBoxes = max(maximumBoxes, boxes)
+        }
+        #expect(maximumBoxes == 3, "the renderer retains the three leaf boxes on one row")
     }
 
     @MainActor @Test func coloredDashedArrowsRenderTheirStyle() throws {

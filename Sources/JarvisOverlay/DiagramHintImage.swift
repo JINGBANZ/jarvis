@@ -14,20 +14,21 @@ enum DiagramHintImage {
         let edgeHeight = graph.edges.compactMap(\.label).map {
             labelHeight($0, width: edgeWidth, fontSize: 12)
         }.max() ?? 0
-        let edgeLabel = NSSize(width: edgeWidth, height: max(20, edgeHeight))
+        var edgeLabel = NSSize(width: edgeWidth, height: max(20, edgeHeight))
         var layout = DiagramHintLayout(graph, fitting: available, box: box,
                                        edgeLabel: edgeLabel, margin: margin)
         let fittedWidth = layout.frames.values.first?.width ?? box.width
         if fittedWidth < box.width {
+            edgeLabel.width = min(edgeLabel.width, fittedWidth)
+            edgeLabel.height = max(20, graph.edges.compactMap(\.label).map {
+                labelHeight($0, width: edgeLabel.width, fontSize: 12)
+            }.max() ?? 0)
             let fittedHeight = graph.nodes.map {
                 labelHeight($0.label, width: max(1, fittedWidth - 16), fontSize: 15) + 16
             }.max() ?? box.height
             layout = DiagramHintLayout(graph, fitting: available,
                 box: NSSize(width: box.width, height: max(box.height, fittedHeight)),
                 edgeLabel: edgeLabel, margin: margin)
-        }
-        if layout.prefersConnectionRows {
-            return renderConnections(graph, fitting: available)
         }
         let frames = layout.frames
         let natural = layout.size
@@ -55,7 +56,7 @@ enum DiagramHintImage {
         return image
     }
 
-    static func drawNode(_ label: String, in frame: CGRect) {
+    private static func drawNode(_ label: String, in frame: CGRect) {
         let box = NSBezierPath(roundedRect: frame, xRadius: 7, yRadius: 7)
         NSColor(calibratedRed: 0.12, green: 0.22, blue: 0.30, alpha: 1).setFill()
         box.fill()
@@ -65,7 +66,7 @@ enum DiagramHintImage {
         drawLabel(label, in: frame.insetBy(dx: 8, dy: 8), fontSize: 15, background: false)
     }
 
-    static func drawEdge(_ route: DiagramHintEdgeRoute, edge: DiagramHint.Edge) {
+    private static func drawEdge(_ route: DiagramHintEdgeRoute, edge: DiagramHint.Edge) {
         let path = NSBezierPath()
         path.move(to: route.points[0])
         for point in route.points.dropFirst() { path.line(to: point) }
@@ -87,14 +88,14 @@ enum DiagramHintImage {
         arrow.stroke()
     }
 
-    static func strokeColor(_ edge: DiagramHint.Edge) -> NSColor {
+    private static func strokeColor(_ edge: DiagramHint.Edge) -> NSColor {
         guard let rgb = edge.stroke else { return NSColor(white: 0.75, alpha: 1) }
         return NSColor(calibratedRed: CGFloat((rgb >> 16) & 255) / 255,
                        green: CGFloat((rgb >> 8) & 255) / 255,
                        blue: CGFloat(rgb & 255) / 255, alpha: 1)
     }
 
-    static func drawLabel(_ label: String, in rect: NSRect, fontSize: CGFloat,
+    private static func drawLabel(_ label: String, in rect: NSRect, fontSize: CGFloat,
                                   background: Bool, color: NSColor = .white) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
@@ -113,7 +114,7 @@ enum DiagramHintImage {
         text.draw(with: centered, options: [.usesLineFragmentOrigin, .usesFontLeading])
     }
 
-    static func labelHeight(_ label: String, width: CGFloat, fontSize: CGFloat) -> CGFloat {
+    private static func labelHeight(_ label: String, width: CGFloat, fontSize: CGFloat) -> CGFloat {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byWordWrapping
         return ceil((label as NSString).boundingRect(

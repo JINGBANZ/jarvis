@@ -519,13 +519,15 @@ the box hides both sections and expanding restores them.
 A shown diagram gives the detail area most of the existing panel, leaving a compact hint-history
 strip visible. It never changes the outer panel's size or position. A manually chosen divider
 proportion still takes precedence. Diagrams keep one reading direction: a requested horizontal flow
-stays horizontal only when it fits the available width; otherwise it reads top to bottom. Wide ranks
-wrap into rows, and a continuing branch keeps its column. Direct connections use straight arrows;
-bypasses and returns use opposite exterior sides with separate tracks for independent workflows.
-When at least three connections need multi-bend detours, the image uses separate labeled
-source-to-destination rows instead of crowded routing lanes. Repeated boxes denote the same component;
-every edge and isolated node remains present, explicit edge styles are retained, and rows scroll at
-readable font sizes within the available width. Simple graphs keep the connected view.
+stays horizontal only when it fits the available width; otherwise it reads top to bottom. Small
+branching ranks keep up to three columns at narrow usable widths, wrapping box names at native font
+size and growing vertically. Wider ranks wrap into rows. Parents align with their children when
+space permits; branch labels sit above their destinations so shared stems remain legible. Direct
+connections use straight arrows; bypasses and returns use opposite exterior sides with separate
+tracks for independent workflows. Every supplied node and edge stays in one connected view without
+repeating components as connection rows. The coaching skills choose a connected overview or the
+current focused flow and can describe ordinary responses in nearby text; the renderer never drops
+connections to simplify the graph.
 Long-path labels in the connected view sit in side gutters when width allows; narrow windows retain source-adjacent labels
 and readable boxes. Clear side approaches use side-entry arrowheads to distinguish them from normal
 incoming flow. Dashed Mermaid arrows and restricted `linkStyle` declarations (six-digit hex stroke,

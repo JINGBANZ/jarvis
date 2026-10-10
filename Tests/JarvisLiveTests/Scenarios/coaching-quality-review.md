@@ -239,3 +239,25 @@ a reliability estimate. They do not exercise production prompt composition, stre
 rendering. The revised API reference used an eight-row, three-column table; actual interview usability
 and panel density still require a live session. The runtime Gate separately checks packaging and
 existing rendering behavior; it does not score these semantic fixtures.
+
+## Connected overview and focused-flow probes
+
+The three `system-focused-download-sketch`, `system-overview-scope-coverage`, and
+`customer-focused-approved-flow` fixtures check connected architecture, scope coverage, and focused
+views that retain required gates. These are synthetic development cases, not private session records.
+
+A fresh-context host subagent read the baseline skills and returned three grouped responses; another
+read the revised skills and answered the same synthetic download, initial-overview and routine-reply
+scenarios. Pass criteria were hidden. Baseline download retained both the temporary-link return and
+an unrelated launch check; revised download used five forward connections and put returned links in
+text. Baseline overview had eight boxes and twelve arrows; revised overview grouped responsibilities
+into six boxes, covering library, launch and updates and marking unresolved behavior open. Baseline
+RRK retained reciprocal extraction/evidence returns and a manual branch; revised RRK omitted those
+and preserved required approval before send. It retained an explicit send-outcome audit write, which
+is a state-changing operation rather than ordinary response data.
+
+These are one grouped sample per revision, not five independent repetitions, production-provider
+runs or a reliability estimate. They used full skill text but not the production coach prompt/tool
+loop. The probes establish an observed shape change, not guaranteed coaching quality; the fixture
+protocol above remains the production evaluation procedure. Gate checks catalog packaging and code,
+not these semantic outcomes. Rendering and visual checks are reported separately.

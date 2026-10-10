@@ -30,7 +30,11 @@ struct DiagramHintEdgeRoute {
             }.count
             let labelExtent = horizontal ? edgeLabel.width : edgeLabel.height
             let offset = edge.label == nil ? 12 : 4 + (CGFloat(labelIndex) + 0.5) * (labelExtent + 8)
-            let track = start.y + offset + rowOffset(from)
+            let siblings = graph.edges.filter { $0.from == edge.from }.compactMap { boxes[$0.to] }
+            let split = !horizontal && siblings.count > 1
+                && siblings.allSatisfy { $0.minY == to.minY && $0.minY > from.maxY }
+                && graph.edges.filter { $0.to == edge.to }.count == 1
+            let track = split ? start.y + 12 : start.y + offset + rowOffset(from)
             let path = [start, CGPoint(x: start.x, y: track), CGPoint(x: end.x, y: track), end]
             let obstructed = boxes.contains { id, box in
                 guard id != edge.from && id != edge.to else { return false }
@@ -40,7 +44,10 @@ struct DiagramHintEdgeRoute {
                     return segment.intersects(box.insetBy(dx: 1, dy: 1))
                 }
             }
-            return (path: path, label: CGPoint(x: start.x, y: track), outside: end.y <= track || obstructed, returning: to.minY <= from.minY, hasLabel: edge.label != nil, target: to, arrival: end.y - 12 + rowOffset(to))
+            let label = split && !obstructed
+                ? CGPoint(x: end.x, y: track + edgeLabel.height / 2 + 8)
+                : CGPoint(x: start.x, y: track)
+            return (path: path, track: track, label: label, outside: end.y <= track || obstructed, returning: to.minY <= from.minY, hasLabel: edge.label != nil, target: to, arrival: end.y - 12 + rowOffset(to))
         }
         let outerCount = candidates.filter(\.outside).count
         let laneSpacing = min(8, max(0, breadth - 4 - outerStart) / CGFloat(max(1, outerCount - 1)))
@@ -52,7 +59,7 @@ struct DiagramHintEdgeRoute {
 
         return candidates.map { candidate in
             var path = candidate.path
-            let start = path.first!, end = path.last!, track = candidate.label.y
+            let start = path.first!, end = path.last!, track = candidate.track
             var label = candidate.label
             if candidate.outside {
                 let left = candidate.returning
