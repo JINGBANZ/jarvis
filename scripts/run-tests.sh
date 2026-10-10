@@ -11,9 +11,10 @@ cd "$(dirname "$0")/.."
 source scripts/lib/swift-test-flags.sh
 mkdir -p .build
 log=.build/run-tests.log
+# Shared AppKit/WebKit and subprocess tests need isolation from suite-wide contention.
 # The live target hits real providers, so only scripts/run-live-tests.sh runs it.
 set +e
-swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} --skip JarvisLiveTests "$@" 2>&1 | tee "$log"
+swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} --no-parallel --skip JarvisLiveTests "$@" 2>&1 | tee "$log"
 test_status=${PIPESTATUS[0]}
 set -e
 if (( test_status != 0 )); then

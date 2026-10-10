@@ -1,6 +1,6 @@
 import Foundation
 
-/// An inert Mermaid flowchart subset. Directives, links, HTML, and styling are excluded on purpose,
+/// An inert Mermaid flowchart subset. Directives, links, HTML, and arbitrary CSS are excluded on purpose,
 /// so rendering never runs model-supplied code or loads remote resources.
 public struct DiagramHint: Sendable, Equatable {
     public enum Direction: Sendable { case leftToRight, topDown }
@@ -12,6 +12,9 @@ public struct DiagramHint: Sendable, Equatable {
         public let from: String
         public let to: String
         public let label: String?
+        public var dashed: Bool = false
+        public var stroke: UInt32? = nil
+        public var strokeWidth: Double = 2
     }
     public let direction: Direction
     public let nodes: [Node]
@@ -31,10 +34,11 @@ public struct DiagramHint: Sendable, Equatable {
         let endpoint = #"([A-Za-z][A-Za-z0-9_]{0,31})(?:\[(?:"([^"\[\]<>\p{Cc}]{1,48})"|([^"\[\]<>\p{Cc}]{1,48}))\])?"#
         guard let nodePattern = try? NSRegularExpression(pattern: "^" + endpoint + "$"),
               let edgePattern = try? NSRegularExpression(
-                pattern: "^" + endpoint + #"\s*-->\s*(?:\|([^|<>\p{Cc}]{1,32})\|\s*)?"# + endpoint + "$")
+                pattern: "^" + endpoint + #"\s*(-->|-\.->)\s*(?:\|([^|<>\p{Cc}]{1,32})\|\s*)?"# + endpoint + "$")
         else { return nil }
         var nodes: [Node] = []
         var edges: [Edge] = []
+        var styles: [DiagramHintLinkStyle] = []
         func readEndpoint(_ captures: [String?], at index: Int) -> String? {
             guard let id = captures[index] else { return nil }
             if let rawLabel = captures[index + 1] ?? captures[index + 2] {
@@ -49,10 +53,13 @@ public struct DiagramHint: Sendable, Equatable {
             return id
         }
         for line in lines.dropFirst() {
-            if let captures = Self.captures(edgePattern, in: line) {
+            if line.hasPrefix("linkStyle ") {
+                guard let style = DiagramHintLinkStyle(line) else { return nil }
+                styles.append(style)
+            } else if let captures = Self.captures(edgePattern, in: line) {
                 guard let from = readEndpoint(captures, at: 0),
-                      let to = readEndpoint(captures, at: 4), from != to else { return nil }
-                edges.append(Edge(from: from, to: to, label: captures[3]))
+                      let to = readEndpoint(captures, at: 5), from != to else { return nil }
+                edges.append(Edge(from: from, to: to, label: captures[4], dashed: captures[3] == "-.->"))
             } else if let captures = Self.captures(nodePattern, in: line) {
                 guard readEndpoint(captures, at: 0) != nil,
                       captures[1] != nil || captures[2] != nil else { return nil }
@@ -64,6 +71,13 @@ public struct DiagramHint: Sendable, Equatable {
         let ids = Set(nodes.map(\.id))
         guard !nodes.isEmpty, edges.allSatisfy({ ids.contains($0.from) && ids.contains($0.to) }) else {
             return nil
+        }
+        for style in styles {
+            for index in style.indices {
+                guard edges.indices.contains(index) else { return nil }
+                edges[index].stroke = style.stroke
+                if let width = style.width { edges[index].strokeWidth = width }
+            }
         }
         self.nodes = nodes
         self.edges = edges

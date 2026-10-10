@@ -6,7 +6,7 @@ description: Use when an enterprise customer role-play asks about workflow autom
 
 Coach understand today → agree scope → sketch/walkthrough → deep dives → evaluate → rollout.
 Spoken transitions govern staging, not time or old notes. This skill owns customer role-play staging
-even with system-design loaded. Use cloud-neutral tradeoffs; never invent company rules.
+even with system-design loaded. Use cloud-neutral tradeoffs; invent no rules.
 
 ## Delivery
 
@@ -77,15 +77,14 @@ manual process. Automated chasing is later unless explicitly included; do not ad
 
 ## Design
 
-After scope agreement, sketch the main boxes while talking, then walk one case through that sketch.
-Use about six logical boxes, not separate services: input, workflow, sources, model, review, send/update.
-Explain normal flow then scoped exceptions. Tell one case as what happened → what we check → what we
-learn → what we do: why evidence changes the action, not a list of model calls. Add depth later.
+After scope agreement, sketch logical boxes: input, workflow, sources, model, review, send/update.
+Walk one normal case, then scoped exceptions: what happened → what we check → what we learn →
+what we do. Explain why evidence changes the action; add depth later.
 The model can extract candidate references or propose tool calls; code checks identity/access and
 executes authorized lookups. Verify the account before exposing records; ambiguous matches need review.
 Layers alone aren't a design. Known steps → workflow; unknown paths → bounded agent steps. Rules handle proven
 routine decisions, models judgment/extraction. Establish the split from the actual work; preserve risk gates.
-Propose technical choices; confirm business constraints without asking the customer to design.
+Propose technology; confirm business constraints without asking the customer to design.
 After the walkthrough, offer about two risk-driven deep dives; adapt to interviewer steering.
 
 Silent responsibility checks: entry/auth, routing, Orchestration/state, model, tools/data,
@@ -147,13 +146,15 @@ regions → variation; messy records → readiness; job fears → adoption; dead
 - Inspection: validate images/visible defects, stop-line versus manual behavior, physical action
   confirmation, missed defects versus false rejects, and per-site version/recovery needs.
 
-For a warranted flow hint, use one Mermaid block in detail: 3–6 short overview boxes, then expand
-on follow-up. Preserve branches and approval/safety gates before risky actions at every depth.
-No diagrams for discovery, overload, troubleshooting or evals. Use known names; no canvas edits.
-Syntax: `flowchart LR` or `flowchart TD`; one declaration/arrow per line; letter-leading alphanumeric
-IDs; rectangles `router["Rules"]`, arrows `router --> review` or `router -->|exception| review`.
-Declare all boxes. Limits: 12 boxes/24 arrows, box labels <48 characters, arrow labels <32.
-No chains, subgraphs, styles, directives, HTML, links or other shapes.
+Flow hints: one connected Mermaid overview in detail, 3–6 short boxes. Later show only the current
+flow, shared boxes once, preserving its safety/approval gates. Put ordinary response data below;
+show return/retry arrows when those mechanisms are the topic. Label operations briefly.
+No graphs for discovery, overload, troubleshooting or evals; no canvas edits.
+Syntax: `flowchart LR`/`flowchart TD`; one box/arrow per line; letter-leading IDs; declare all boxes.
+Rectangles `a["Rules"]`; arrows `a -->|approve| b` or `a -.->|correct| b`.
+Max 12 boxes/24 arrows, labels <48/<32 chars. No chains, subgraphs, HTML, links or directives.
+Use `linkStyle 0,1 stroke:#EAB308,stroke-width:3px`: zero-based edges, six-digit hex, optional 1–4px.
+Current path amber `#EAB308`, returns purple `#C084FC`, others neutral. Color never replaces labels.
 
 ## Evals, rollout, and change
 
