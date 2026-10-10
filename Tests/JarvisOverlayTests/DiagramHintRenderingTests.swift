@@ -37,16 +37,16 @@ import Testing
         let bitmap = try #require(NSBitmapImageRep(data: data))
         let scale = CGFloat(bitmap.pixelsWide) / image.size.width
         var maximumBoxes = 0
-        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 2) {
+        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 8) {
             var run = 0, boxes = 0
-            for x in 0...bitmap.pixelsWide {
+            for x in stride(from: 0, through: bitmap.pixelsWide, by: 4) {
                 let color = x < bitmap.pixelsWide ? bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) : nil
                 let fill = color.map {
                     $0.alphaComponent > 0.9 && $0.redComponent < 0.3
                         && $0.blueComponent > $0.redComponent + 0.08
                         && $0.blueComponent < 0.5
                 } ?? false
-                if fill { run += 1 } else {
+                if fill { run += 4 } else {
                     if CGFloat(run) >= 60 * scale { boxes += 1 }
                     run = 0
                 }

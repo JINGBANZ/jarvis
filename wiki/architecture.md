@@ -522,17 +522,20 @@ proportion still takes precedence. Diagrams keep one reading direction: a reques
 stays horizontal only when it fits the available width; otherwise it reads top to bottom. Small
 branching ranks keep up to three columns at narrow usable widths, wrapping box names and growing
 vertically. Wider ranks wrap into rows. Parents align with their children when
-space permits; branch labels sit above their destinations so shared stems remain legible. Direct
-connections use straight arrows; bypasses and returns use opposite exterior sides with separate
+space permits; ranks follow their incoming connections to keep independent paths separate, and
+branch labels sit above their destinations so shared stems remain legible. Connections use orthogonal
+routes, straight when their endpoints align; bypasses and returns use opposite exterior sides with separate
 tracks for independent workflows. Every supplied node and edge stays in one connected view without
 repeating components as connection rows. The coaching skills choose a connected overview or the
 current focused flow and can describe ordinary responses in nearby text; the renderer never drops
 connections to simplify the graph.
 Long-path labels in the connected view sit in side gutters when width allows; narrow windows retain source-adjacent labels
 and readable boxes. Clear side approaches use side-entry arrowheads to distinguish them from normal
-incoming flow. Dashed Mermaid arrows and restricted `linkStyle` declarations (six-digit hex stroke,
-optional 1–4px width, zero-based edge indices) are inert parsed data; arbitrary CSS remains rejected.
-Labels share the explicit edge color, while unlabeled/default flow stays neutral. Layout
+incoming flow. Dashed Mermaid arrows and the parser's restricted `linkStyle` subset are inert parsed
+data; arbitrary CSS remains rejected (see
+[`DiagramHintLinkStyle`](../Sources/JarvisCore/Overlay/DiagramHintLinkStyle.swift)).
+Labels share the explicit edge color and use a contrasting background for dark text, while
+unlabeled/default flow stays neutral. Layout
 preserves every node, label, and directed connection. Readability takes precedence over compactness:
 graphs with five or more nodes try progressively smaller text, boxes, and padding only when they
 overflow, choosing the largest fitting size. Box text stops at 13 points and edge labels at 11 points;

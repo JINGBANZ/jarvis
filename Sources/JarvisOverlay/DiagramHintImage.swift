@@ -23,7 +23,7 @@ enum DiagramHintImage {
                 x: min(max(0, route.labelCenter.x - edgeLabel.width / 2), max(0, natural.width - edgeLabel.width)),
                 y: route.labelCenter.y - edgeLabel.height / 2,
                 width: min(edgeLabel.width, natural.width), height: edgeLabel.height),
-                fontSize: drawing.edgeFontSize, background: true, color: edge.stroke == nil ? .white : strokeColor(edge))
+                fontSize: drawing.edgeFontSize, background: true, backgroundColor: labelBackground(for: edge.stroke), color: edge.stroke == nil ? .white : strokeColor(edge))
         }
         for node in graph.nodes {
             guard let frame = frames[node.id] else { continue }
@@ -126,8 +126,18 @@ enum DiagramHintImage {
                        blue: CGFloat(rgb & 255) / 255, alpha: 1)
     }
 
+    private static func labelBackground(for stroke: UInt32?) -> NSColor {
+        guard let stroke else { return NSColor(white: 0.10, alpha: 1) }
+        let red = CGFloat((stroke >> 16) & 255) / 255
+        let green = CGFloat((stroke >> 8) & 255) / 255
+        let blue = CGFloat(stroke & 255) / 255
+        let brightness = 0.299 * red + 0.587 * green + 0.114 * blue
+        return NSColor(white: brightness < 0.5 ? 0.90 : 0.10, alpha: 1)
+    }
+
     private static func drawLabel(_ label: String, in rect: NSRect, fontSize: CGFloat,
-                                  background: Bool, color: NSColor = .white) {
+                                  background: Bool, backgroundColor: NSColor = NSColor(white: 0.10, alpha: 1),
+                                  color: NSColor = .white) {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .center
         paragraph.lineBreakMode = .byWordWrapping
@@ -139,7 +149,7 @@ enum DiagramHintImage {
         let measured = text.boundingRect(with: rect.size, options: [.usesLineFragmentOrigin, .usesFontLeading])
         let centered = NSRect(x: rect.minX, y: rect.midY - measured.height / 2, width: rect.width, height: measured.height)
         if background {
-            NSColor(white: 0.10, alpha: 1).setFill()
+            backgroundColor.setFill()
             NSBezierPath(roundedRect: centered, xRadius: 3, yRadius: 3).fill()
         }
         text.draw(with: centered, options: [.usesLineFragmentOrigin, .usesFontLeading])

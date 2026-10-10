@@ -10,8 +10,20 @@ struct DiagramHintLayout {
     init(_ graph: DiagramHint, fitting available: CGSize, box: CGSize,
          edgeLabel: CGSize, margin: CGFloat) {
         let ranks = Self.ranks(graph)
-        let groups = (0...ranks.values.max()!).map { rank in
+        var groups = (0...ranks.values.max()!).map { rank in
             graph.nodes.filter { ranks[$0.id] == rank }
+        }
+        for rank in groups.indices.dropFirst() {
+            let parents = Dictionary(uniqueKeysWithValues: groups[rank - 1].enumerated().map { ($0.element.id, $0.offset) })
+            let ordered = groups[rank].enumerated().map { offset, node in
+                let positions = graph.edges.filter { $0.to == node.id }.compactMap { parents[$0.from] }
+                let center = positions.isEmpty ? Double(offset)
+                    : Double(positions.reduce(0, +)) / Double(positions.count)
+                return (node: node, center: center, offset: offset)
+            }
+            groups[rank] = ordered.sorted {
+                $0.center == $1.center ? $0.offset < $1.offset : $0.center < $1.center
+            }.map(\.node)
         }
         func gap(after nodes: [DiagramHint.Node], labelExtent: CGFloat) -> CGFloat {
             let outputs = nodes.map { node in
