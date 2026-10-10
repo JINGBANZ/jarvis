@@ -14,6 +14,7 @@ private final class ProgressRecordingOverlay: OverlayRendering, @unchecked Senda
 
     private let lock = NSLock()
     private var log: [Event] = []
+    let progressUpdates = AsyncStream<BrainReplyProgress>.makeStream()
     var events: [Event] { lock.withLock { log } }
     var snapshots: [BrainReplyProgress] {
         events.compactMap { if case .progress(let snapshot) = $0 { snapshot } else { nil } }
@@ -33,6 +34,7 @@ private final class ProgressRecordingOverlay: OverlayRendering, @unchecked Senda
 
     @MainActor func showReplyProgress(_ progress: BrainReplyProgress?) {
         lock.withLock { log.append(progress.map(Event.progress) ?? .withdraw) }
+        if let progress { progressUpdates.continuation.yield(progress) }
     }
 }
 
@@ -490,11 +492,12 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         let brain = StreamingBrain(turns: [.init(prefixes: [#"{"lines":["Sort by"#], outcome: .hang)])
         let (driver, _) = makeDriver(brain: brain, overlay: overlay)
 
-        let attempt = Task { await driver.handleTrigger(.manualHint) }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
-        while overlay.snapshots.isEmpty, ContinuousClock.now < deadline {
-            try await Task.sleep(for: .milliseconds(5))
+        let attempt = Task {
+            defer { overlay.progressUpdates.continuation.finish() }
+            return await driver.handleTrigger(.manualHint)
         }
+        var updates = overlay.progressUpdates.stream.makeAsyncIterator()
+        _ = await updates.next()
         #expect(overlay.snapshots.last?.openLine == "Sort by", "the live reply was on screen")
         attempt.cancel()
 
