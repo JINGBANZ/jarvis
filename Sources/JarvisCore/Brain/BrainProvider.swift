@@ -24,7 +24,7 @@ public enum BrainProvider: String, CaseIterable, Sendable {
             BrainProviderDescriptor(
                 displayName: "Codex",
                 access: .localProxy(
-                    modelOwner: "openai", loginFlag: "-codex-login", accountFilePrefix: "codex-"),
+                    credentialProvider: "codex", loginFlag: "-codex-login", accountFilePrefix: "codex-"),
                 wire: .responses,
                 failureTable: .openAI,
                 reasoningEffortFloor: nil)
@@ -33,7 +33,7 @@ public enum BrainProvider: String, CaseIterable, Sendable {
             BrainProviderDescriptor(
                 displayName: "Claude Code",
                 access: .localProxy(
-                    modelOwner: "anthropic", loginFlag: "-claude-login", accountFilePrefix: "claude-"),
+                    credentialProvider: "claude", loginFlag: "-claude-login", accountFilePrefix: "claude-"),
                 wire: .messages,
                 failureTable: .anthropic,
                 reasoningEffortFloor: .low)
@@ -55,10 +55,6 @@ public enum BrainProvider: String, CaseIterable, Sendable {
     public var displayName: String { descriptor.displayName }
 
     public var servedByLocalProxy: Bool { descriptor.servedByLocalProxy }
-
-    public var proxyModelOwner: String? {
-        if case .localProxy(let owner, _, _) = descriptor.access { owner } else { nil }
-    }
 
     public var credential: Credential? { descriptor.credential }
 

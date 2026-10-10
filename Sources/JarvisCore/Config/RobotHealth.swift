@@ -14,34 +14,32 @@ public enum RobotHealth {
     }
 
     private static func brain(_ route: BrainRoute, _ readiness: RobotReadiness) -> RobotPartHealth {
-        // Start requires every keyed target's key (`BrainRoute.requiredCredentials`), so a missing
-        // key is never skipped.
-        for (index, target) in route.targets.enumerated() {
-            guard let credential = target.provider.credential,
-                  !readiness.availableCredentials.contains(credential) else { continue }
-            let user = index == 0 ? "my primary brain" : "Fallback \(index)"
-            let vendor = credential.vendorName
-            let key = "\(article(for: vendor)) \(vendor) key"
-            return .needsAttention(
-                reason: "ADD \(key.uppercased())",
-                advice: "I need \(key) to start, because \(user) uses the "
-                    + "\(target.provider.displayName). Add it in Connections.",
+        switch connection(route.primary, readiness) {
+        case .ready: return .ready
+        case .checking: return .checking
+        case .unavailable(let failure):
+            if let fallback = route.fallbackTargets.first(where: { connection($0, readiness) == .ready }) {
+                return .needsAttention(
+                    reason: "PRIMARY UNAVAILABLE",
+                    advice: failure.activitySentence + " I'll use \(fallback.provider.displayName) until the primary is available.",
+                    fix: .openConnections)
+            }
+            if route.fallbackTargets.contains(where: { connection($0, readiness) == .checking }) {
+                return .checking
+            }
+            return .blocked(
+                reason: "NO BRAIN AVAILABLE",
+                advice: failure.activitySentence + " No configured fallback is available.",
                 fix: .openConnections)
         }
-        // Past the key check, only a signed-out subscription can't serve, and the route skips it.
-        let canServe = { (target: BrainTarget) in
-            !target.provider.servedByLocalProxy
-                || !readiness.signedOutSubscriptions.contains(target.provider)
+    }
+
+    private static func connection(_ target: BrainTarget, _ readiness: RobotReadiness) -> RobotReadiness.ConnectionHealth {
+        if let failure = target.credentialFailure(available: readiness.availableCredentials) {
+            return .unavailable(failure)
         }
-        let primary = route.primary
-        guard !canServe(primary) else { return .ready }
-        let name = primary.provider.displayName
-        return .needsAttention(
-            reason: "\(name.uppercased()) IS SIGNED OUT",
-            advice: route.fallbackTargets.contains(where: canServe)
-                ? "\(name) is signed out. I'll skip it and use the next brain in the route until you sign in again."
-                : "No brain in the route can answer right now. Sign in again in Connections, then Start again.",
-            fix: .openConnections)
+        guard target.provider.servedByLocalProxy else { return .ready }
+        return readiness.subscriptions[target.provider] ?? .checking
     }
 
     private static func ear(_ provider: TranscriptionProvider, _ readiness: RobotReadiness) -> RobotPartHealth {

@@ -13,8 +13,6 @@ import Testing
         #expect(BrainProvider.allCases == [.openAI, .codexSubscription, .claudeSubscription, .gemini])
         #expect(BrainProvider.allCases.filter(\.servedByLocalProxy)
             == [.codexSubscription, .claudeSubscription])
-        #expect(BrainProvider.codexSubscription.proxyModelOwner == "openai")
-        #expect(BrainProvider.claudeSubscription.proxyModelOwner == "anthropic")
         #expect(BrainProvider.codexSubscription.rawValue == "codex-subscription")
         #expect(BrainProvider.claudeSubscription.rawValue == "claude-subscription")
         #expect(BrainProvider.codexSubscription.displayName == "Codex")
@@ -28,9 +26,9 @@ import Testing
             credential: .openAIAPIKey,
             endpoint: BrainProviderDescriptor.openAIResponsesEndpoint, auth: .bearer))
         #expect(BrainProvider.codexSubscription.descriptor.access == .localProxy(
-            modelOwner: "openai", loginFlag: "-codex-login", accountFilePrefix: "codex-"))
+            credentialProvider: "codex", loginFlag: "-codex-login", accountFilePrefix: "codex-"))
         #expect(BrainProvider.claudeSubscription.descriptor.access == .localProxy(
-            modelOwner: "anthropic", loginFlag: "-claude-login", accountFilePrefix: "claude-"))
+            credentialProvider: "claude", loginFlag: "-claude-login", accountFilePrefix: "claude-"))
         for provider in [BrainProvider.openAI, .codexSubscription] {
             #expect(provider.descriptor.wire == .responses)
             #expect(provider.descriptor.failureTable == .openAI)

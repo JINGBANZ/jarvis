@@ -2,6 +2,7 @@ import Foundation
 import JarvisBrainProviders
 import JarvisCore
 import Testing
+import os
 
 /// The test serves the model list itself, so a stub script may still be starting when the
 /// supervisor reports it running.
@@ -21,6 +22,7 @@ import Testing
         script: String,
         clock: any _Concurrency.Clock<Swift.Duration> = ContinuousClock(),
         models: String = openAIModels,
+        credentials: String? = nil,
         _ body: (LocalProxySupervisor, LocalProxySupervisor.State, URL) async throws -> Void
     ) async throws {
         let home = tmp()
@@ -30,8 +32,16 @@ import Testing
         let starting = Task { await supervisor.ensureRunning() }
         var stub: ModelListStub?
         do {
-            stub = try ModelListStub(port: try await configuredPort(supervisor), body: models)
-            try await body(supervisor, await starting.value, home)
+            if let credentials {
+                stub = try ModelListStub(port: try await configuredPort(supervisor), respond: { request in
+                    (200, request.contains("/v8/management/credentials") ? credentials : models)
+                })
+            } else {
+                stub = try ModelListStub(port: try await configuredPort(supervisor), body: models)
+            }
+            let state = await starting.value
+            try Data("{}".utf8).write(to: supervisor.authDirectory.appendingPathComponent("codex-fixture.json"))
+            try await body(supervisor, state, home)
         } catch {
             Issue.record(error)
         }
@@ -115,7 +125,7 @@ import Testing
     @Test func readinessNamesTheSubscriptionsTheHelperServes() async throws {
         try await withSupervisor(script: "idle") { supervisor, _, _ in
             let readiness = await supervisor.readiness()
-            guard case .ready(_, let signedIn) = readiness else {
+            guard case .ready(_, let signedIn, _) = readiness else {
                 Issue.record("expected a ready helper, got \(readiness)")
                 return
             }
@@ -126,6 +136,121 @@ import Testing
             #expect(signedOut.disposition == .permanent)
             #expect(signedOut.source == .brain(.claudeSubscription))
         }
+    }
+
+    @Test func aListedModelDoesNotProveRejectedCredentialsAreUsable() async throws {
+        try await withSupervisor(script: "idle", credentials: #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"unauthorized","cooldowns":[]}]}"#) { supervisor, _, _ in
+            let readiness = await supervisor.readiness()
+            let failure = try #require(readiness.unavailability(for: .codexSubscription))
+            #expect(failure.category == .authentication)
+            #expect(failure.disposition == .permanent)
+            #expect(failure.message.contains("sign in again"))
+        }
+    }
+
+    @Test func aRemovedAccountCannotRemainSignedInThroughTheHelpersMemory() async throws {
+        try await withSupervisor(script: "idle", credentials: #"{"files":[{"name":"codex-fixture.json","provider":"codex","source":"memory","status":"active","disabled":false,"unavailable":false}]}"#) { supervisor, _, _ in
+            #expect(await supervisor.readiness().unavailability(for: .codexSubscription) == nil)
+            try await supervisor.signOut(.codexSubscription)
+            let failure = try #require(await supervisor.readiness().unavailability(for: .codexSubscription))
+            #expect(failure.category == .authentication)
+            #expect(failure.disposition == .permanent)
+        }
+    }
+
+    @Test(arguments: [
+        #"{"name":"codex-fixture.json","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"invalid grant (retrying)","cooldowns":[]}"#,
+        #"{"name":"codex-fixture.json","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"rate limited","cooldowns":[{"scope":"credential","reason":"quota","remaining_seconds":60}]}"#,
+        #"{"name":"codex-fixture.json","provider":"codex"}"#,
+    ])
+    func uncertainHealthDoesNotDeclareTheAccountSignedOut(credential: String) async throws {
+        try await withSupervisor(script: "idle", credentials: "{\"files\":[\(credential)]}") { supervisor, _, _ in
+            let failure = try #require(await supervisor.readiness().unavailability(for: .codexSubscription))
+            #expect(failure.category != .authentication)
+            #expect(failure.disposition == .temporary)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func onlyAnExpiredRenewableCredentialIsRefreshedWhenStarting(rejectRefresh: Bool) async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let supervisor = LocalProxySupervisor(
+            executable: try proxyStubExecutable(in: home, script: "idle"), home: home)
+        let calls = OSAllocatedUnfairLock(initialState: [String]())
+        let starting = Task { await supervisor.ensureRunning() }
+        let stub = try ModelListStub(port: try await configuredPort(supervisor), respond: { request in
+            let refreshed = calls.withLock { requests in
+                requests.append(request)
+                return requests.contains { $0.hasPrefix("POST ") }
+            }
+            if request.hasPrefix("POST ") { return (rejectRefresh ? 500 : 200, #"{"auth":{"Metadata":{"access_token":"must-not-be-decoded"}}}"#) }
+            if request.contains("/v8/management/credentials") {
+                let status = !refreshed ? "token expired" : rejectRefresh ? "unauthorized (refresh token invalid)" : ""
+                return (200, "{\"files\":[{\"name\":\"codex-fixture.json\",\"auth_index\":\"one\",\"provider\":\"codex\",\"status\":\"\(refreshed && !rejectRefresh ? "active" : "error")\",\"disabled\":false,\"unavailable\":\(refreshed && !rejectRefresh ? "false" : "true"),\"status_message\":\"\(status)\",\"cooldowns\":[]}]}")
+            }
+            return (200, Self.openAIModels)
+        })
+        _ = await starting.value
+        try Data("{}".utf8).write(to: supervisor.authDirectory.appendingPathComponent("codex-fixture.json"))
+        let passive = await supervisor.readiness()
+        #expect(passive.unavailability(for: .codexSubscription)?.disposition == .temporary)
+        #expect(calls.withLock { !$0.contains { $0.hasPrefix("POST ") } })
+        let prepared = await supervisor.readiness(refreshing: [.codexSubscription])
+        if rejectRefresh {
+            #expect(prepared.unavailability(for: .codexSubscription)?.category == .authentication)
+            #expect(prepared.unavailability(for: .codexSubscription)?.disposition == .permanent)
+        } else {
+            #expect(prepared.unavailability(for: .codexSubscription) == nil)
+        }
+        #expect(calls.withLock { $0.filter { $0.hasPrefix("POST ") }.count } == 1)
+        _ = await supervisor.readiness(refreshing: [.codexSubscription])
+        #expect(calls.withLock { $0.filter { $0.hasPrefix("POST ") }.count } == 1)
+        await supervisor.stop()
+        stub.stop()
+    }
+
+    @Test func failedHealthEndpointKeepsTheLiveHelperAndReportsUncertainty() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let supervisor = LocalProxySupervisor(
+            executable: try proxyStubExecutable(in: home, script: "idle"), home: home)
+        let starting = Task { await supervisor.ensureRunning() }
+        let stub = try ModelListStub(port: try await configuredPort(supervisor), respond: { request in
+            request.contains("/v8/management/credentials") ? (503, "unavailable") : (200, Self.openAIModels)
+        })
+        let running = await starting.value
+        let readiness = await supervisor.readiness(refreshing: [.codexSubscription])
+        #expect(readiness.unavailability(for: .codexSubscription)?.disposition == .temporary)
+        #expect(await supervisor.state == running)
+        await supervisor.stop()
+        stub.stop()
+    }
+
+    @Test func aSignOutSupersedesAnInFlightCredentialAnswer() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let supervisor = LocalProxySupervisor(
+            executable: try proxyStubExecutable(in: home, script: "idle"), home: home)
+        let held = OSAllocatedUnfairLock(initialState: false)
+        let release = DispatchSemaphore(value: 0)
+        let starting = Task { await supervisor.ensureRunning() }
+        let stub = try ModelListStub(port: try await configuredPort(supervisor), respond: { request in
+            if request.contains("/v8/management/credentials") {
+                held.withLock { $0 = true }
+                _ = release.wait(timeout: .now() + 5)
+                return (200, #"{"files":[]}"#)
+            }
+            return (200, Self.openAIModels)
+        })
+        _ = await starting.value
+        let probe = Task { await supervisor.readiness() }
+        #expect(await eventually { held.withLock { $0 } })
+        try await supervisor.signOut(.codexSubscription)
+        release.signal()
+        #expect(await probe.value == .superseded)
+        await supervisor.stop()
+        stub.stop()
     }
 
     @Test func aHelperThatExitsBeforeAnsweringFailsTheStart() async throws {
@@ -326,7 +451,7 @@ import Testing
 
         stub = try ModelListStub(port: port, body: Self.openAIModels)
         let recovered = await supervisor.readiness()
-        guard case .ready(let replacement, _) = recovered else {
+        guard case .ready(let replacement, _, _) = recovered else {
             Issue.record("expected a replacement helper, got \(recovered)")
             return
         }
@@ -386,7 +511,7 @@ import Testing
         }
     }
 
-    @Test func signOutRemovesOnlyThatSubscriptionsCredentials() throws {
+    @Test func signOutRemovesOnlyThatSubscriptionsCredentials() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
         let supervisor = LocalProxySupervisor(executable: nil, home: home)
@@ -396,7 +521,7 @@ import Testing
                 atPath: supervisor.authDirectory.appendingPathComponent(name).path, contents: Data("{}".utf8))
         }
 
-        try supervisor.signOut(.claudeSubscription)
+        try await supervisor.signOut(.claudeSubscription)
 
         #expect(supervisor.accountFiles(for: .claudeSubscription).isEmpty)
         #expect(supervisor.accountFiles(for: .codexSubscription).count == 1)

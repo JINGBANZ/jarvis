@@ -199,7 +199,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         // capture start when that grant is gone.
         let begun = readiness.begin(configuration: JarvisReadiness.Configuration(
             requiredPermissions: Set(JarvisReadiness.Permission.allCases).subtracting([.systemAudio]),
-            requiredCredentials: TranscriptionProvider.openAI.requiredCredentials(for: route)))
+            requiredCredentials: [.openAIAPIKey]))
         let readinessSession = begun.session
         composition.applyReadinessEffects(begun.effects)
         composition.observeReadiness(
@@ -212,8 +212,8 @@ final class LiveE2ERunner: BrainCompositionHost {
         if case .blocked(let blocker) = readiness.status {
             throw Failure.notReadyToStart(String(describing: blocker))
         }
-        let proxy = await brain.proxyReadiness(for: route)
-        if let failure = brain.routeUnavailability(route, proxy: proxy) {
+        let proxy = await brain.proxyReadiness(for: route, preparingStart: true)
+        if let failure = brain.routeUnavailability(route, proxy: proxy, keys: brain.savedKeys(for: route)) {
             throw Failure.notReadyToStart(failure.activitySentence)
         }
 

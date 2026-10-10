@@ -41,7 +41,7 @@ public final class JarvisReadiness {
     }
 
     public enum BrainBlocker: Sendable, Equatable {
-        case providerUnavailable
+        case providerUnavailable(ProviderFailure)
     }
 
     public enum TranscriptionBlocker: Sendable, Equatable {

@@ -50,6 +50,8 @@ public struct LocalProxySignIn: Sendable {
             events.yield(.failed(message: "\(provider.displayName) has no sign-in"))
             return
         }
+        let previous = Dictionary(uniqueKeysWithValues: LocalProxyAccountFile.all(
+            in: authDirectory, for: provider).map { ($0.url, modificationDate(of: $0.url)) })
 
         let process = Process()
         process.executableURL = executable
@@ -115,6 +117,13 @@ public struct LocalProxySignIn: Sendable {
             guard !Task.isCancelled else { return }
             if status == 0 {
                 protectCredentials()
+                do {
+                    try retainNewAccount(for: provider, replacing: previous)
+                } catch {
+                    events.yield(.failed(message: "the previous account couldn't be replaced: "
+                        + ProviderMessageRedaction.redact(error.localizedDescription)))
+                    return
+                }
                 events.yield(.finished(accountFiles: LocalProxyAccountFile.all(
                     in: authDirectory, for: provider)))
             } else if timedOut.withLock({ $0 }) {
@@ -125,6 +134,22 @@ public struct LocalProxySignIn: Sendable {
             }
         } onCancel: {
             kill(pid, SIGTERM)
+        }
+    }
+
+    private func modificationDate(of url: URL) -> Date? {
+        try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate
+    }
+
+    private func retainNewAccount(for provider: BrainProvider, replacing previous: [URL: Date?]) throws {
+        let accounts = LocalProxyAccountFile.all(in: authDirectory, for: provider)
+        let changed = accounts.filter {
+            guard let date = previous[$0.url] else { return true }
+            return date != modificationDate(of: $0.url)
+        }
+        guard accounts.count > 1, changed.count == 1, let current = changed.first else { return }
+        for account in accounts where account.url != current.url {
+            try FileManager.default.removeItem(at: account.url)
         }
     }
 

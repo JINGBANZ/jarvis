@@ -68,6 +68,25 @@ import Testing
         #expect(seen.last == .failed(message: "claude authentication failed: state mismatch"))
     }
 
+    @Test func aSuccessfulCodexSignInReplacesThePreviousAccount() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let auth = home.appendingPathComponent("auth")
+        try FileManager.default.createDirectory(at: auth, withIntermediateDirectories: true)
+        let old = auth.appendingPathComponent("codex-old@example.com-free.json")
+        let new = auth.appendingPathComponent("codex-new@example.com-plus.json")
+        let claude = auth.appendingPathComponent("claude-other@example.com.json")
+        try Data("{}".utf8).write(to: old)
+        try Data("{}".utf8).write(to: claude)
+        let login = try proxyStubExecutable(in: home, script: "printf '{}' > '\(new.path)'\nexit 0")
+        let signIn = LocalProxySignIn(executable: login, configURL: home.appendingPathComponent("config.yaml"), authDirectory: auth)
+        let seen = await events(signIn.run(.codexSubscription))
+        #expect(seen.last == .finished(accountFiles: LocalProxyAccountFile.all(in: auth, for: .codexSubscription)))
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(FileManager.default.fileExists(atPath: new.path))
+        #expect(FileManager.default.fileExists(atPath: claude.path))
+    }
+
     @Test func anAddressJarvisWontOpenEndsTheLogin() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
