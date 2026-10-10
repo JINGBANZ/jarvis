@@ -4,6 +4,23 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct DiagramHintLayoutTests {
+    @Test(arguments: [320.0, 520.0, 740.0])
+    func crowdedConnectionsAvoidSharedRoutingLanes(_ width: Double) throws {
+        let graph = try #require(DiagramHint(mermaid: """
+        flowchart LR
+        client[Client] -->|Request package| api[Package service]
+        api -->|Check permission| access[Access service]
+        api -->|Read package manifest| manifest[Manifest store]
+        api -->|Return temporary links| client
+        client -->|Fetch package bytes| edge[Edge cache]
+        edge -->|Fetch missing objects| origin[Object store]
+        client -->|Check current access| access
+        """))
+        let layout = DiagramHintLayout(graph, fitting: CGSize(width: width, height: 350),
+            box: CGSize(width: 144, height: 52), edgeLabel: CGSize(width: 100, height: 36), margin: 16)
+        #expect(layout.prefersConnectionRows)
+    }
+
     @Test func horizontalReturnsAndBypassesUseOppositeSides() throws {
         let graph = try #require(DiagramHint(mermaid: """
         flowchart LR

@@ -6,6 +6,9 @@ struct DiagramHintLayout {
     let size: CGSize
     let horizontal: Bool
     let routes: [DiagramHintEdgeRoute]
+    var prefersConnectionRows: Bool {
+        routes.filter { $0.points.count >= 5 }.count >= 3
+    }
 
     init(_ graph: DiagramHint, fitting available: CGSize, box: CGSize,
          edgeLabel: CGSize, margin: CGFloat) {

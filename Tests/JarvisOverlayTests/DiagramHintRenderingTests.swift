@@ -4,6 +4,22 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct DiagramHintRenderingTests {
+    @MainActor @Test func crowdedGraphActuallyUsesConnectionRows() throws {
+        let graph = try #require(DiagramHint(mermaid: """
+        flowchart LR
+        A[Client] -->|Request| B[Service]
+        B -->|Check| C[Access]
+        B -->|Read| D[Manifest]
+        B -->|Respond| A
+        A -->|Fetch bytes| E[Edge cache]
+        E -->|Miss| F[Object store]
+        A -->|Authorize| C
+        """))
+        let image = DiagramHintImage.render(graph, fitting: CGSize(width: 520, height: 350))
+        #expect(image.size.width == 360)
+        #expect(image.size.height > 350, "readable rows scroll instead of shrinking")
+    }
+
     @MainActor @Test func coloredDashedArrowsRenderTheirStyle() throws {
         func coloredPixels(_ arrow: String) throws -> Int {
             let graph = try #require(DiagramHint(mermaid:
