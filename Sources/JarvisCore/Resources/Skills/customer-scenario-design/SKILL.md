@@ -152,9 +152,8 @@ gates. No graphs for discovery, overload, troubleshooting or evals; no canvas ed
 Syntax: `flowchart LR`/`flowchart TD`, one box/arrow per line, letter-leading IDs,
 rectangles `a["Rules"]`, arrows `a -->|approve| b` or `a -.->|correct| b`. Declare all boxes.
 Max: 12 boxes/24 arrows; labels <48/<32 chars. No chains, subgraphs, HTML, links or directives.
-Label operations, not just colors. Optional `linkStyle 0,1 stroke:#EAB308,stroke-width:3px`:
-0-based edges; six-digit hex; optional 1–4px. Normal paths neutral;
-forwards amber `#EAB308`, returns purple `#C084FC`.
+Label operations, not just colors. Use `linkStyle 0,1 stroke:#EAB308,stroke-width:3px`:
+0-based edges; six-digit hex; optional 1–4px. Other paths neutral; current path amber `#EAB308`, returns purple `#C084FC`.
 
 ## Evals, rollout, and change
 

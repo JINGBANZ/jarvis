@@ -429,7 +429,11 @@ field optional under strict Structured Outputs.
 Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
 all, and the skill that owns a domain says what its blocks are: the `coding` skill carries the code
 block rules and the `diff` correction shape; the design skills (`system-design` and
-`customer-scenario-design`) carry the mermaid guidance. That is why the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
+`customer-scenario-design`) carry the mermaid guidance. System-design stage-entry/help replies pair
+short upper-panel coaching with a lower-panel reference: grouped requirements, entities with
+responsibilities, or APIs with key inputs/outputs. Material decisions refresh the current reference;
+unchanged small hints leave it in place. Proposed and agreed items remain distinct. Architecture
+references highlight the discussed path and distinguish return paths with explicit Mermaid styles. That is why the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
 a session that never loads the skill never pays for it in its cached prefix.
 
 The general detail default defers to the loaded skill so brevity does not make the user press

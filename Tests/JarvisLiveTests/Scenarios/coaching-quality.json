@@ -486,5 +486,53 @@
     ],
     "input": "Earlier discovery briefing: equipment coordinators lose time gathering availability evidence; booking data is current but maintenance records refresh overnight. Goal: faster supported replies. Agreed pilot: read-only drafts with source timestamps; managers authorize reservations and price exceptions. Automated chasing was discussed but excluded. Exact weekly volume is unknown. them: That scope works. Show us how it would work.",
     "pass": "Cues a sketch and one case grounded in the collected facts: booking and maintenance evidence, freshness checks, draft reply, human handling when current availability cannot be established. Preserves read-only scope and manager authority; does not invent live maintenance access, automated chasing, or restart discovery for exact volume."
+  },
+  {
+    "id": "system-requirements-reference",
+    "skills": [
+      "system-design"
+    ],
+    "input": "An online course store lets authenticated users browse, buy via an external payment provider, view owned courses, and request refunds. Playback runs on the client. Scale and latency are unanswered. me: Requirements now, Jarvis. Help me organize what we agreed.",
+    "pass": "Short coaching lines plus a lower-panel requirements reference grouped into functional, non-functional, non-goals and open questions. Preserves known facts; scale/latency stay open, with no invented agreed numbers."
+  },
+  {
+    "id": "system-entities-reference",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Online course store: authenticated users browse, purchase, view owned courses and request refunds via an external payment provider. me: Moving to entities. What should I start with?",
+    "pass": "Short next-step hint plus a compact entity reference with each entity purpose and key identity/relationship. Proposed entities are labeled proposals; excludes speculative features."
+  },
+  {
+    "id": "system-api-reference",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Online course store supports browsing, purchasing through an external payment provider, owned-course listing and refunds. Agreed entities: Course, Order, Payment, Refund, Entitlement. me: Now APIs. Give me a starting point.",
+    "pass": "Short hint plus a coherent proposed API reference covering agreed operations, each with method/path, purpose, key input and output. Authenticated identity, asynchronous payment completion and retries are explicit where relevant; no architecture diagram."
+  },
+  {
+    "id": "system-reference-update",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Current requirements detail lists proposed 200ms read latency and refund revocation as open. them: Agreed, 200ms p95 reads, and revoke online access on confirmed refund. me: Help me update the requirements.",
+    "pass": "Refreshes the requirements reference with these decisions marked agreed, removes superseded uncertainty, and preserves other known scope. Upper lines highlight one next move rather than read the whole reference."
+  },
+  {
+    "id": "system-reference-productive-silence",
+    "skills": [
+      "system-design"
+    ],
+    "input": "An entity reference is already shown. The candidate steadily names the listed entities and their relationships correctly. No question, new decision or error.",
+    "pass": "Stays silent; does not regenerate the reference or interrupt solely to refresh the panel."
+  },
+  {
+    "id": "system-colored-purchase-flow",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Agreed architecture scope: course-store backend owns orders and entitlements; external provider handles payment, confirms asynchronously. them: Architecture next. Walk me through purchase and payment confirmation.",
+    "pass": "Short architecture hint plus supported Mermaid in detail. Explicit operation labels; highlights discussed forward path in amber and distinguishes confirmation return in purple using valid zero-based linkStyle indices. Does not label confirmation a retry or infer dashed means retry by itself."
   }
 ]

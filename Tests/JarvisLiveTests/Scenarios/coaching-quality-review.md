@@ -220,3 +220,22 @@ The reported session supplies a baseline failure: a complete scenario and later 
 reached the model with this skill loaded, and the model returned `stay_silent`. Synthetic before/after
 model evaluation of this change is not observed; external evaluation requires approval. No private
 session transcripts or screenshots are included in the regression fixtures.
+
+## Stage-reference and diagram-style probes
+
+The six `system-*-reference`, `system-reference-*`, and `system-colored-purchase-flow` cases cover
+requirements, entities, APIs, material updates, productive silence, and explicit diagram styling.
+They use a synthetic course-store scenario, not private session content.
+
+Two fresh-context host subagents read the baseline/revised system-design skill and production speak
+guidance respectively, then simulated the same six scenarios as a group. Criteria were not supplied.
+The baseline returned `detail: null` for all four reference scenarios; the revised probe supplied
+grouped requirements, proposed entities, proposed APIs, and updated confirmed requirements. Both
+stayed silent on productive progress. The baseline architecture diagram had no styles; the revised
+one included amber purchase edges and purple confirmation-path edges, with explicit operation labels.
+
+These grouped host probes are development evidence, not six independent production conversations or
+a reliability estimate. They do not exercise production prompt composition, streaming, or panel
+rendering. The revised API reference used an eight-row, three-column table; actual interview usability
+and panel density still require a live session. The runtime Gate separately checks packaging and
+existing rendering behavior; it does not score these semantic fixtures.
