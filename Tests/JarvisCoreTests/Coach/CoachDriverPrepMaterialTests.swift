@@ -10,6 +10,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
     let results: [PrepMaterialSearchResult]
     var resultsByQuery: [String: [PrepMaterialSearchResult]] = [:]
     init(results: [PrepMaterialSearchResult] = []) { self.results = results }
+    var catalog: [PrepMaterialDocumentReference] { [] }
     func read(documentID: String, offset: Int) -> PrepMaterialPage? { nil }
     func search(query: String) -> [PrepMaterialSearchResult] {
         lock.withLock { _queries.append(query) }
@@ -23,7 +24,8 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         prepMaterial: (any PrepMaterialSearching)? = nil,
         capabilities: CoachCapabilities? = nil,
         screen: ScreenCapturing = FakeScreen(),
-        clock: Clock = ManualClock(now: 100)
+        clock: Clock = ManualClock(now: 100),
+        config: Config = .default
     ) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let target = BrainTarget(
@@ -31,7 +33,7 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         let route = ConfiguredBrainRoute(
             targets: [ConfiguredBrainTarget(target: target, brain: brain)])
         let driver = CoachDriver(
-            config: .default, transcript: transcript, route: route,
+            config: config, transcript: transcript, route: route,
             screen: screen, overlay: FakeOverlay(), clock: clock,
             automaticAttemptDelay: { _ in },
             capabilities: capabilities ?? .compose(
@@ -231,6 +233,64 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
             $0.role == .user && $0.text?.contains("retained token bucket details") == true
         })
         #expect(!brain.calls[3].contains { $0.text == JarvisPrompts.Coach.prepNoteReadFailed })
+    }
+
+
+    @Test(arguments: [false, true])
+    func catalogExposesIdentitiesWithoutDocumentContents(disabled: Bool) async {
+        let first = PrepMaterialDocument(sourceDisplayName: "design.md", text: "private architecture alpha")
+        let second = PrepMaterialDocument(sourceDisplayName: "design.md", text: "private architecture beta")
+        let brain = ScriptedBrain(script: [
+            .init(toolCalls: [.staySilent(callId: "s")],
+                  rawToolCalls: [RawToolCall(id: "s", name: "stay_silent", argumentsJSON: "{}")]),
+        ])
+        let (driver, transcript) = makeDriver(
+            brain: brain, prepMaterial: PrepMaterialIndex(documents: [first, second]),
+            capabilities: .compose(disabledTools: disabled ? ["search_prep_notes"] : [],
+                                   prepSourcesConfigured: true))
+        transcript.append(.init(speaker: .me, text: "What design notes do you have?", at: 100))
+        _ = await driver.handleTrigger(.turnEnd)
+        let sent = brain.calls[0].compactMap(\.text).joined(separator: "\n")
+        #expect(sent.contains(first.id) == !disabled)
+        #expect(sent.contains(second.id) == !disabled)
+        #expect(sent.contains("design.md") == !disabled)
+        #expect(!sent.contains("private architecture"))
+    }
+
+    @Test func spokenDocumentReadReservesFinalResponseForAnswer() async throws {
+        let document = PrepMaterialDocument(sourceDisplayName: "design.md",
+            text: String(repeating: "Architecture and tradeoffs.\n", count: 5000))
+        let reads = (0..<6).map { page in
+            let offset = page * 16_000
+            return BrainResponse(
+                toolCalls: [.readPrepNote(callId: "r\(page)", documentID: document.id, offset: offset)],
+                rawToolCalls: [RawToolCall(id: "r\(page)", name: "call_tool",
+                    argumentsJSON: #"{"name":"read_prep_note","arguments":{"document_id":"\#(document.id)","offset":\#(offset)}}"#)])
+        }
+        let brain = ScriptedBrain(script: reads + [
+            .init(toolCalls: [.speak(callId: "s", lines: ["I could only read part of the design."])],
+                  rawToolCalls: [RawToolCall(id: "s", name: "speak",
+                      argumentsJSON: #"{"lines":["I could only read part of the design."]}"#)]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain,
+            prepMaterial: PrepMaterialIndex(documents: [document]),
+            config: Config(historyCompactionTokenThreshold: 100_000))
+        transcript.append(.init(speaker: .me, text: "Jarvis, read my whole design", at: 100))
+
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+
+        try #require(brain.calls.count == 7)
+        #expect(brain.toolChoices.last == .force("speak"))
+        #expect(brain.calls[6].contains {
+            $0.role == .tool && $0.toolCallId == "r5" && $0.text?.contains("next_offset: 96000") == true
+        })
+        #expect(brain.calls[0].contains { $0.text?.contains(document.id) == true })
+        let completion = JarvisPrompts.Coach.finalAnswerCycle(prepEnabled: true)
+        #expect(brain.calls[6].contains { $0.text == completion })
+        transcript.append(.init(speaker: .me, text: "Now explain the tradeoffs", at: 101))
+        _ = await driver.handleTrigger(.turnEnd)
+        try #require(brain.calls.count > 7)
+        #expect(!brain.calls[7].contains { $0.text == completion })
     }
 
     @Test func noMatchesRendersAnExplicitNoResultsMessage() async {

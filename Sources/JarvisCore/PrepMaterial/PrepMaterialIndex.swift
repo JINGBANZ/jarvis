@@ -55,6 +55,10 @@ public struct PrepMaterialIndex: PrepMaterialSearching {
             : Double(indexed.map(\.length).reduce(0, +)) / Double(indexed.count)
     }
 
+    public var catalog: [PrepMaterialDocumentReference] {
+        documents.map { PrepMaterialDocumentReference(documentID: $0.id, sourceDisplayName: $0.sourceDisplayName) }
+    }
+
     public func search(query: String) -> [PrepMaterialSearchResult] {
         guard !indexed.isEmpty else { return [] }
         let queryTerms = Set(Self.tokenize(query))
@@ -68,9 +72,13 @@ public struct PrepMaterialIndex: PrepMaterialSearching {
         }
         // Consume longer names first so their suffixes do not select unrelated files.
         for name in filenames where !name.isEmpty {
-            if unmatched.range(of: name, options: .caseInsensitive) != nil {
+            let pattern = #"(?<![\p{L}\p{N}\p{M}_./\\-])"#
+                + NSRegularExpression.escapedPattern(for: name)
+                + #"(?![\p{L}\p{N}\p{M}_/\\-]|\.[\p{L}\p{N}\p{M}_-])"#
+            let options: String.CompareOptions = [.regularExpression, .caseInsensitive]
+            if unmatched.range(of: pattern, options: options) != nil {
                 matchedNames.insert(name)
-                unmatched = unmatched.replacingOccurrences(of: name, with: " ", options: .caseInsensitive)
+                unmatched = unmatched.replacingOccurrences(of: pattern, with: " ", options: options)
             }
         }
         let named = documents.filter { matchedNames.contains($0.sourceDisplayName) }

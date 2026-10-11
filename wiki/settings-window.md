@@ -489,9 +489,10 @@ and keeps it; switching it back on shows the same list.
 
 Jarvis stores only the chosen paths (`PrepMaterialPreferences`), never a copy of their contents, and
 reads them into the session index at Start, so source changes apply on the next Start and removing a
-source only forgets it. Search and document reads run on this Mac,
-but retrieved text joins the coaching request to the brain provider, so the card header says
-only where the search runs and the callout under the card says where matches go. The file picker accepts the formats prep indexing can read. Whether each source still exists is
+source only forgets it. Search and document reads run on this Mac. A filename-and-ID catalog joins
+coaching requests once indexing finishes, and requested excerpts or pages join them when retrieved.
+The card header says where search runs; its callout discloses both filename and document-text egress
+to the brain provider. The file picker accepts the formats prep indexing can read. Whether each source still exists is
 checked off the main thread, because a stat can block on a network volume or a sleeping disk; a
 missing source shows its title and path in amber. The page re-checks every time it becomes visible.
 

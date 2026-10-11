@@ -296,10 +296,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // `turnMessages` so history never replays it. It stays fixed for the attempt, so its
         // continuations keep their cached prefix.
         let sessionState = capabilities.sessionState(loaded: alreadyLoaded.union(loadedThisAttempt))
+        let prepCatalog = capabilities.tool(named: readPrepNoteTool.name) == nil ? nil
+            : JarvisPrompts.Coach.prepDocumentCatalog(attempt.prepMaterial?.catalog ?? [])
         let sessionStateIndex = turnMessages.count
-        func request() -> [ChatMessage] {
+        func request(finalResponse: Bool = false) -> [ChatMessage] {
             var messages = turnMessages
+            if let prepCatalog { messages.insert(.user(prepCatalog), at: sessionStateIndex) }
             if let sessionState { messages.insert(.user(sessionState), at: sessionStateIndex) }
+            if finalResponse {
+                messages.append(.user(JarvisPrompts.Coach.finalAnswerCycle(
+                    prepEnabled: capabilities.tool(named: readPrepNoteTool.name) != nil)))
+            }
             return historyBase + messages
         }
 
@@ -368,11 +375,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // A press must end in a hint and already sent the screen, so it never gets
                 // stay_silent or capture_screen.
                 let toolChoice: ToolChoice
-                if reason.isManual {
+                if iterations == maxToolIterations {
+                    toolChoice = .force(speakToolName)
+                } else if reason.isManual {
                     let permitted = capabilities.callableNames(loaded: loaded).filter {
                         $0 != staySilentTool.name && $0 != captureScreenTool.name
                     }
-                    toolChoice = iterations == maxToolIterations || permitted == [speakToolName]
+                    toolChoice = permitted == [speakToolName]
                         ? .force(speakToolName)
                         : .allowed(permitted)
                 } else {
@@ -389,7 +398,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         sequence: requestSequence)
                     response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
-                            messages: request(),
+                            messages: request(finalResponse: iterations == maxToolIterations),
                             tools: tools,
                             toolChoice: toolChoice)
                     }
@@ -512,11 +521,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         call = parsed
                     } else if atCap, let spoken = Self.spokenProse(
                         response.outputText, permitted: permitted) {
-                        jlog("⚠️ \(called) isn't allowed on a shortcut's last response — "
+                        jlog("⚠️ \(called) isn't allowed on the last response — "
                              + "speaking the reply's text")
                         call = spoken
                     } else if atCap {
-                        jlog("⚠️ \(called) isn't allowed on a shortcut's last response — "
+                        jlog("⚠️ \(called) isn't allowed on the last response — "
                              + "scheduling fresh attempt")
                         await withdraw()
                         return .failed(
@@ -666,7 +675,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     let resultText: String
                     if let prepMaterial = attempt.prepMaterial {
                         if let page = prepMaterial.read(documentID: documentID, offset: offset) {
-                            resultText = JarvisPrompts.Coach.prepNotePage(page)
+                            resultText = JarvisPrompts.Coach.prepNotePage(page, offset: offset)
                             work.prepNotesObservation = .user(resultText)
                             activity?.record(.prepNoteRead(sourceDisplayName: page.sourceDisplayName))
                             jlog("📎 read prep document at offset \(offset) — \(page.text.count) characters")

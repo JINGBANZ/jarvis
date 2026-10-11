@@ -78,7 +78,7 @@ final class ToolsSection: NSObject, SettingsSection {
         self.switchRow = switchRow
 
         let callout = SettingsCalloutView(text: "I read these files where they are and never change "
-            + "them. When I search or read a note, I send the retrieved text to my Brain provider. "
+            + "them. I send their filenames to my Brain provider, and send document text when I search or read a note. "
             + "Removing a file here doesn't delete it.")
         let stack = SettingsCardStack()
         stack.install([(card, cardHeight), (callout, SettingsCalloutView.preferredHeight)])

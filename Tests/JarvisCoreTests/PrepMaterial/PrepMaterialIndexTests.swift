@@ -89,4 +89,24 @@ import Testing
         #expect(Set(both.map(\.sourceDisplayName)) == ["Payment System Design.md", "System Design.md"])
     }
 
+
+    @Test(arguments: ["OtherPayment.md", "Payment.md.bak", "Payment.md-copy", "支付Payment.md"])
+    func filenameFragmentsDoNotScopeSearch(query: String) {
+        let index = PrepMaterialIndex(documents: [
+            PrepMaterialDocument(sourceDisplayName: "Payment.md", text: "authorization settlement"),
+            PrepMaterialDocument(sourceDisplayName: "Other.md", text: "needle recommendation"),
+        ])
+        let results = index.search(query: query + " needle")
+        #expect(results.first?.sourceDisplayName == "Other.md")
+    }
+
+    @Test(arguments: ["Read Payment.md.", "Read \"Payment.md\"", "Read (Payment.md)"])
+    func filenameWithSentencePunctuationStillScopesSearch(query: String) {
+        let index = PrepMaterialIndex(documents: [
+            PrepMaterialDocument(sourceDisplayName: "Payment.md", text: "authorization settlement"),
+            PrepMaterialDocument(sourceDisplayName: "Other.md", text: "needle recommendation"),
+        ])
+        let results = index.search(query: query + " needle")
+        #expect(results.first?.sourceDisplayName == "Payment.md")
+    }
 }

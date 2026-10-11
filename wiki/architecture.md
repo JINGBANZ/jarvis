@@ -335,19 +335,34 @@ constructs retain paragraph behavior. Long prose paragraphs, fenced code, indivi
 headers, and a heading plus its first content block can exceed the target; long sections can still span chunks
 (see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
 
-A query naming a source filename scopes ranking to that document and scores the remaining topic
-terms, so a title-heavy query can reach the design sections instead of other files' introductions.
+A query naming a complete source filename scopes ranking to that document and scores the remaining
+topic terms. Filename boundaries exclude embedded names and extra filename suffixes, so mentioning
+OtherPayment.md does not select Payment.md; sentence punctuation is accepted. Longer configured
+names are consumed first so a shared suffix does not select another source. A title-heavy query
+can therefore reach the design sections instead of other files' introductions.
 Search hits carry opaque document identities. The index retains the original extracted text in
 memory alongside its chunks; full reads therefore preserve Markdown and document order, including
 text omitted or repeated by search chunking. Two files with the same display name have different
 identities. Repeated selections of the same file are deduplicated before extraction.
 
-Search guidance normally calls for one query per topic. A hit that only names a story or section,
-or an explicit request for a full document or summary, calls for `read_prep_note` with the hit's
-identity. This read never accepts a filesystem path or reads from disk during a coaching attempt.
-It returns a bounded page and an explicit continuation offset or end marker; the model can continue
+Once the index is available, each attempt includes a compact JSON document catalog beside session
+state: filenames and opaque IDs, without document text or filesystem paths. It stays fixed across
+that attempt's continuations and out of committed history. A uniquely named document can be read
+directly by its catalog ID, saving the search round trip; topical questions still use search.
+Duplicate filenames remain distinct entries and require relevant evidence or user clarification,
+never selection by list order. Filenames are escaped as JSON and explicitly marked as untrusted
+data. Disabling prep removes the catalog as well as both tools. The metadata reaches the selected
+brain provider; the Settings disclosure names that egress.
+
+Search guidance normally calls for one query per topic. A hit that only names a story or section
+calls for `read_prep_note` with the hit's
+identity; an explicit named-document request can instead use its catalog identity. This read never accepts a filesystem path or reads from disk during a coaching attempt.
+It returns a bounded page with its starting offset and an explicit continuation offset or end marker; the model can continue
 within the existing tool budget and must disclose partial coverage if it cannot finish. A short
-excerpt does not imply an unreadable file or a need to upload again. Unknown identities, invalid
+excerpt does not imply an unreadable file or a need to upload again. Reaching the end alone does not
+prove full coverage: the model must have the text from offset zero through the end. Design answers
+identify the document and available section, distinguish source claims from recommendations, and
+expose conflicts between versions instead of silently combining them. Unknown identities, invalid
 offsets, and an unavailable index return explicit results without retries. Both tools share the
 prep switch and the untrusted-reference boundary, and retrieved text goes only to the selected
 brain and the existing session evidence. See
@@ -370,8 +385,11 @@ or authorize invention.
 A call to a tool the session does not offer, or a load naming something it does not have, is answered
 with a plain "no tool named X is available" rather than failing the attempt; a deferred tool called
 by its own name is answered with a pointer to `call_tool`. The per-attempt response
-cap is 7, leaving room for loading a skill and tool, an initial search and its permitted reference
-follow-up, a capture, and a terminal coaching action.
+cap is 7. Every trigger reserves the final response for speak, with a final-answer reminder that is excluded from committed history;
+no further retrieval or capture runs on that response. Prep-enabled attempts also remind the model
+to disclose incomplete document coverage and limit conclusions to available evidence. Earlier
+responses can still terminate with stay_silent on automatic turns. This completion guard spends
+the existing budget rather than adding calls or changing provider routing.
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
 capture, and a turn cannot end without one of the other two. Neither loader has one either, nor does
@@ -387,7 +405,7 @@ since its screen is already in the first request, and the response at the cap is
 A press therefore always ends in a tip and never runs out of responses. When `speak` is the only tool
 left, the request is the plain forced `speak`, one round trip. On Claude Code, which cannot force,
 a forced `speak` is a request for it: a reply that calls anything else is refused and asked again,
-and at the cap its text is spoken or the attempt retried. On the OpenAI API, Codex, and the Gemini
+and at the cap its text is spoken or the attempt retried. The same final-response guard applies to spoken requests. On the OpenAI API, Codex, and the Gemini
 API the narrowing is an `allowed_tools` choice over the unchanged declared array, which keeps the cached prefix of automatic
 attempts (`ResponsesWireFormat`, `InteractionsWireFormat`). Claude Code can neither force nor
 narrow a call, so its request sends `tool_choice: auto` over the same declared array and leaves the
@@ -416,7 +434,7 @@ Markdown intact, is the detail when the session has one, recorded in history as 
 When a response carries several calls, the first runs and each other one is answered as not
 executed, so a replayed call never lacks a result. The forced response at the cap has no later
 response to answer into, so an unusable reply there with no prose fails the attempt and the
-[ordered route](#ordered-provider-route) retries. An automatic turn whose reply is prose alone fails
+[ordered route](#ordered-provider-route) retries. Before the final response, an automatic turn whose reply is prose alone fails
 the same way, since it must choose between `speak` and `stay_silent`. Answering instead of failing is
 deliberate: a failed attempt costs the route's retry delay, and on a press it leaves the user waiting
 for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/CoachAttemptRunner.swift)).
@@ -1220,7 +1238,7 @@ is about 60 MB on disk and 20 MB per update.
   tools asks for `auto` with parallel calls off, whatever the runner's choice
   (`MessagesWireFormat.encode`; the tool-less summarizer sends no choice). The runner enforces the
   narrowed choice itself: a call the request did not permit is answered as not available on a
-  shortcut press and asked again, and a wrong call on a press's last response is spoken from the
+  shortcut press and asked again, and a wrong call on the last response is spoken from the
   reply's text or retried ([Capabilities](#capabilities)). Declaring only the permitted tools
   instead was rejected: it costs the prompt cache from the tools block on and, on Fable 5.1,
   invalidates every replayed thinking block bound to the earlier list. Neither enforcement is

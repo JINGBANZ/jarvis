@@ -26,6 +26,18 @@
       }
     },
     {
+      "say": {
+        "speaker": "me",
+        "text": "According to the product search architecture section of my notes, how do we avoid stale cache refills after catalog updates? Identify the source section and separate the documented design from any extra recommendation."
+      }
+    },
+    {
+      "say": {
+        "speaker": "me",
+        "text": "Another draft says to evict the cache before indexing, and claims twenty thousand searches per second is measured performance. Does that agree with the uploaded notes? Explain the differences without combining the two versions."
+      }
+    },
+    {
       "stop": true
     }
   ]
