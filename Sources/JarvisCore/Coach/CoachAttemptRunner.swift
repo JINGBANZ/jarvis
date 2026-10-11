@@ -83,13 +83,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
         /// A retry of a failed press is automatic, so it clears this unless another press joins.
         var bypassesTranscriptionSettlement: Bool
         var wake: CoachingAttemptAuditEvent.Wake = .trigger
-        /// Carried into retries, so each tool gets one replaceable slot: a second search replaces
-        /// the first's stale result. Plain user context only, never reasoning, tool ids, or call
-        /// linkage.
+        /// Retry context excludes reasoning and tool-call linkage. Searches replace stale hits;
+        /// document pages accumulate because a later page cannot replace earlier document text.
         var screenObservation: [ChatMessage] = []
         var prepNotesObservation: ChatMessage?
+        var prepDocumentPages: [String] = []
         var observations: [ChatMessage] {
-            screenObservation + (prepNotesObservation.map { [$0] } ?? [])
+            screenObservation + (prepNotesObservation.map { [$0] } ?? []) + prepDocumentPages.map(ChatMessage.user)
         }
         var preparedManualReason: TriggerReason?
         /// Speech finalized during inference lies past this boundary, so a failure cannot discard
@@ -305,7 +305,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
             if let sessionState { messages.insert(.user(sessionState), at: sessionStateIndex) }
             if finalResponse {
                 messages.append(.user(JarvisPrompts.Coach.finalAnswerCycle(
-                    prepEnabled: capabilities.tool(named: readPrepNoteTool.name) != nil)))
+                    prepEnabled: capabilities.tool(named: readPrepNoteTool.name) != nil,
+                    allowsSilence: !reason.isManual)))
             }
             return historyBase + messages
         }
@@ -376,7 +377,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // stay_silent or capture_screen.
                 let toolChoice: ToolChoice
                 if iterations == maxToolIterations {
-                    toolChoice = .force(speakToolName)
+                    toolChoice = reason.isManual ? .force(speakToolName)
+                        : .allowed([speakToolName, staySilentTool.name])
                 } else if reason.isManual {
                     let permitted = capabilities.callableNames(loaded: loaded).filter {
                         $0 != staySilentTool.name && $0 != captureScreenTool.name
@@ -676,7 +678,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     if let prepMaterial = attempt.prepMaterial {
                         if let page = prepMaterial.read(documentID: documentID, offset: offset) {
                             resultText = JarvisPrompts.Coach.prepNotePage(page, offset: offset)
-                            work.prepNotesObservation = .user(resultText)
+                            if !work.prepDocumentPages.contains(resultText) {
+                                work.prepDocumentPages.append(resultText)
+                            }
                             activity?.record(.prepNoteRead(sourceDisplayName: page.sourceDisplayName))
                             jlog("📎 read prep document at offset \(offset) — \(page.text.count) characters")
                         } else {

@@ -198,6 +198,34 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         #expect(!finalRetryRequest.contains { ($0.text ?? "").contains("result-from-query-A") })
     }
 
+    @Test func retryRetainsEverySuccessfulDocumentPage() async throws {
+        let document = PrepMaterialDocument(sourceDisplayName: "design.md",
+            text: String(repeating: "A", count: 16_000) + "FINAL SECTION")
+        let index = PrepMaterialIndex(documents: [document])
+        let reads = [0, 0, 16_000].enumerated().map { number, offset in
+            BrainResponse(
+                toolCalls: [.readPrepNote(callId: "r\(number)", documentID: document.id, offset: offset)],
+                rawToolCalls: [RawToolCall(id: "r\(number)", name: "call_tool",
+                    argumentsJSON: #"{"name":"read_prep_note","arguments":{"document_id":"\#(document.id)","offset":\#(offset)}}"#)])
+        }
+        let brain = ScriptedThrowBrain(script: reads.map(Optional.some) + [nil,
+            .init(toolCalls: [.speak(callId: "s", lines: ["Both sections are available."])],
+                  rawToolCalls: [RawToolCall(id: "s", name: "speak",
+                      argumentsJSON: #"{"lines":["Both sections are available."]}"#)]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: index,
+            config: Config(historyCompactionTokenThreshold: 100_000))
+        transcript.append(.init(speaker: .me, text: "Read all of design.md", at: 100))
+        #expect(await driver.handleTrigger(.turnEnd) == .spoke)
+        try #require(brain.calls.count == 5)
+        let retry = brain.calls[4]
+        for offset in [0, 16_000] {
+            let page = try #require(index.read(documentID: document.id, offset: offset))
+            let text = JarvisPrompts.Coach.prepNotePage(page, offset: offset)
+            #expect(retry.filter { $0.role == .user && $0.text == text }.count == 1)
+        }
+    }
+
     @Test(arguments: [false, true])
     func failedReadPreservesSearchObservationForRetry(invalidOffset: Bool) async throws {
         let index = PrepMaterialIndex(documents: [
@@ -280,12 +308,12 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
         try #require(brain.calls.count == 7)
-        #expect(brain.toolChoices.last == .force("speak"))
+        #expect(brain.toolChoices.last == .allowed(["speak", "stay_silent"]))
         #expect(brain.calls[6].contains {
             $0.role == .tool && $0.toolCallId == "r5" && $0.text?.contains("next_offset: 96000") == true
         })
         #expect(brain.calls[0].contains { $0.text?.contains(document.id) == true })
-        let completion = JarvisPrompts.Coach.finalAnswerCycle(prepEnabled: true)
+        let completion = JarvisPrompts.Coach.finalAnswerCycle(prepEnabled: true, allowsSilence: true)
         #expect(brain.calls[6].contains { $0.text == completion })
         transcript.append(.init(speaker: .me, text: "Now explain the tradeoffs", at: 101))
         _ = await driver.handleTrigger(.turnEnd)

@@ -363,7 +363,10 @@ excerpt does not imply an unreadable file or a need to upload again. Reaching th
 prove full coverage: the model must have the text from offset zero through the end. Design answers
 identify the document and available section, distinguish source claims from recommendations, and
 expose conflicts between versions instead of silently combining them. Unknown identities, invalid
-offsets, and an unavailable index return explicit results without retries. Both tools share the
+offsets, and an unavailable index return explicit results without retries. Successful pages remain
+in pending work across existing provider retries, deduplicated and separate from the latest search
+observation. They are bounded by the existing attempt and route budgets and released with pending
+work; a later page or search cannot discard earlier document text. Both tools share the
 prep switch and the untrusted-reference boundary, and retrieved text goes only to the selected
 brain and the existing session evidence. See
 [`PrepMaterialIndex`](../Sources/JarvisCore/PrepMaterial/PrepMaterialIndex.swift),
@@ -385,11 +388,14 @@ or authorize invention.
 A call to a tool the session does not offer, or a load naming something it does not have, is answered
 with a plain "no tool named X is available" rather than failing the attempt; a deferred tool called
 by its own name is answered with a pointer to `call_tool`. The per-attempt response
-cap is 7. Every trigger reserves the final response for speak, with a final-answer reminder that is excluded from committed history;
-no further retrieval or capture runs on that response. Prep-enabled attempts also remind the model
-to disclose incomplete document coverage and limit conclusions to available evidence. Earlier
-responses can still terminate with stay_silent on automatic turns. This completion guard spends
-the existing budget rather than adding calls or changing provider routing.
+cap is defined by `CoachAttemptRunner.maxToolIterations` in
+[`CoachAttemptRunner.swift`](../Sources/JarvisCore/Coach/CoachAttemptRunner.swift). Every trigger
+reserves the final response for a terminal action, with a completion reminder excluded from committed
+history: manual requests force speak, while automatic turns permit speak or stay_silent. No further
+retrieval or capture runs on that response. Prep-enabled attempts also remind the model to disclose
+incomplete document coverage and limit conclusions to available evidence. Automatic turns retain the
+choice to stay silent even after inspecting context. This completion guard spends the existing budget
+rather than adding calls or changing provider routing.
 
 `capture_screen`, `speak`, and `stay_silent` have no switch: Jarvis cannot start without screen
 capture, and a turn cannot end without one of the other two. Neither loader has one either, nor does
@@ -432,7 +438,7 @@ later request or reaches the summarizer. Prose becomes the reply itself only onc
 spent, or on the response at the cap whatever it called: its first line is the hint and the rest,
 Markdown intact, is the detail when the session has one, recorded in history as a `speak` call.
 When a response carries several calls, the first runs and each other one is answered as not
-executed, so a replayed call never lacks a result. The forced response at the cap has no later
+executed, so a replayed call never lacks a result. The terminal response at the cap has no later
 response to answer into, so an unusable reply there with no prose fails the attempt and the
 [ordered route](#ordered-provider-route) retries. Before the final response, an automatic turn whose reply is prose alone fails
 the same way, since it must choose between `speak` and `stay_silent`. Answering instead of failing is

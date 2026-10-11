@@ -40,8 +40,11 @@ extension JarvisPrompts.Coach {
             """
     }
 
-    static func finalAnswerCycle(prepEnabled: Bool) -> String {
-        let answer = "This is the final response for this attempt. Answer now with speak using the evidence "
+    static func finalAnswerCycle(prepEnabled: Bool, allowsSilence: Bool) -> String {
+        let action = allowsSilence
+            ? "Finish now with speak, or stay_silent if no useful coaching is needed,"
+            : "Answer now with speak"
+        let answer = "This is the final response for this attempt. " + action + " using the evidence "
             + "already available; do not request another tool or page."
         guard prepEnabled else { return answer }
         return answer + "\n" + """

@@ -340,6 +340,23 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(activity.kinds == [.prepNotesUnavailable, .tip])
     }
 
+    @Test func finalAutomaticResponseCanStaySilent() async {
+        let capture = BrainResponse(
+            toolCalls: [.captureScreen(callId: "c")],
+            rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")])
+        let silent = BrainResponse(
+            toolCalls: [.staySilent(callId: "s")],
+            rawToolCalls: [RawToolCall(id: "s", name: "stay_silent", argumentsJSON: "{}")])
+        let brain = ScriptedBrain(script: Array(repeating: capture, count: 6) + [silent])
+        let result = await run(makeRunner(capabilities: .default), brain: brain)
+        guard case .completed(let outcome) = result else {
+            Issue.record("expected the final automatic decision to stay silent"); return
+        }
+        #expect(outcome == .silentByModel)
+        #expect(brain.calls.count == 7)
+        #expect(brain.toolChoices.last == .allowed(["speak", "stay_silent"]))
+    }
+
     @Test(arguments: [(6, true), (7, false)])
     func finalResponseMustAnswerInsteadOfCapturingAgain(captures: Int, commits: Bool) async {
         let capture = BrainResponse(
@@ -362,7 +379,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
             }
             #expect(outcome == .brainError)
         }
-        #expect(brain.toolChoices.last == .force("speak"))
+        #expect(brain.toolChoices.last == .allowed(["speak", "stay_silent"]))
         #expect(activity.kinds.filter { $0 == .screenViewed }.count == 6)
         #expect(brain.calls.count == min(captures + 1, 7))
     }
