@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.5](https://github.com/JINGBANZ/jarvis/compare/v0.5.4...v0.5.5) (2026-10-11)
+
+
+### Bug Fixes
+
+* **coaching:** clarify system design hints and diagram layouts ([#433](https://github.com/JINGBANZ/jarvis/issues/433)) ([d02a6ca](https://github.com/JINGBANZ/jarvis/commit/d02a6ca7aac5bf3d033307aa485ed377b8681a48))
+* **coaching:** guide rrk discovery through scope and design ([#434](https://github.com/JINGBANZ/jarvis/issues/434)) ([dd72d1b](https://github.com/JINGBANZ/jarvis/commit/dd72d1b729b324e03cf6da8a7f15495cba30b051))
+
 ## [0.5.4](https://github.com/JINGBANZ/jarvis/compare/v0.5.3...v0.5.4) (2026-10-06)
 
 
