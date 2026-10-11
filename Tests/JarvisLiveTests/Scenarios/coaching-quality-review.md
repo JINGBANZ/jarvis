@@ -169,6 +169,44 @@ production evaluation harness. All four committed fixtures should be evaluated u
 at the top of this document before making a production reliability claim. Catalog/build checks
 remain packaging evidence only; the running app is not updated by editing this bundled source.
 
+## System-design progression and comprehension probes
+
+The eight `system-*` cases added for architecture entry, scaling comprehension, batch replay,
+proposed batching, gateway-owned ingestion, deep-dive entry, productive design, and requirements
+stage are synthetic development regressions. They check diagram delivery, responsibility ownership,
+concrete explanations, stable advice, and restraint. They contain no private interview records.
+
+One fresh-context subagent read the baseline production coach/action and speak source guidance plus
+system-design skill and answered all eight inputs. A separate fresh-context subagent read the same
+sources with the revised skill and answered the same inputs. Pass criteria were hidden. Each agent
+answered the group in one conversation, not a fresh conversation per case. These inherited host-model
+probes retain host instructions; they do not execute the production prompt composer, provider,
+tool loop, renderer, or signed app. They are not held-out transfer or reliability measurements.
+
+| Case | Baseline observation | Revised observation |
+|---|---|---|
+| Architecture entry | Diagram present, but validation ownership not stated. | Diagram names ingestion validation and lines put success after durable logging. |
+| Scaling comprehension | Explains many events per upload, but omits batching delay and flush bounds. | Concrete 100-event example; downstream batching, durable API acceptance, size/time flush, and archival lag distinguished. |
+| Batch replay | Same range/name explained; conditional creation not explicit. | Fixed range, create-if-absent, replay and offset commit explained in one example. |
+| Proposed batching | Keeps downstream batching and explains memory-loss risk. | Also distinguishes delaying acknowledgment from acknowledging before durability. |
+| Gateway-owned ingestion | Accepts managed integration, with an unnecessary unchanged-flow diagram. | Accepts existing responsibility with a brief text answer. |
+| Deep-dive entry | Names a crash but leaves response/recovery to the candidate. | Gives a concrete archival retry mechanism and replay/lag trade-off. |
+| Productive design | Silent. | Silent. |
+| Requirements stage | Scope question, no architecture. | Scope question, no architecture. |
+
+The baseline already produced a graph in this short synthetic context, so these samples do not
+establish improved diagram frequency in a long session. The revised architecture opening still has
+one 12-word line, missing the generic under-12-word guideline. The archival examples assume an
+exclusive object namespace and repeatable batch contents; they are coaching illustrations, not a
+complete storage protocol. Other existing cases were not rerun semantically. Evaluate the fixtures
+with the fresh-conversation protocol above before claiming production-provider improvement.
+
+Whole-file SHA-256 revisions: baseline
+`97b0edacb21ec354ba150ebdc1ed98968e54990896d9640a8bfffe327c30c20c`; revised
+`b6e87dd1c005f58ee409fe811af227be8969187875c8e1d6379bb35b7486c7256`.
+The repository Gate verifies packaging and code behavior separately; it neither scores these
+semantic cases nor installs the revised skill into a running app.
+
 ## Proactive consulting regression coverage
 
 The `customer-proactive-*`, `customer-explicit-no-coaching`, and
@@ -182,3 +220,44 @@ The reported session supplies a baseline failure: a complete scenario and later 
 reached the model with this skill loaded, and the model returned `stay_silent`. Synthetic before/after
 model evaluation of this change is not observed; external evaluation requires approval. No private
 session transcripts or screenshots are included in the regression fixtures.
+
+## Stage-reference and diagram-style probes
+
+The six `system-*-reference`, `system-reference-*`, and `system-colored-purchase-flow` cases cover
+requirements, entities, APIs, material updates, productive silence, and explicit diagram styling.
+They use a synthetic course-store scenario, not private session content.
+
+Two fresh-context host subagents read the baseline/revised system-design skill and production speak
+guidance respectively, then simulated the same six scenarios as a group. Criteria were not supplied.
+The baseline returned `detail: null` for all four reference scenarios; the revised probe supplied
+grouped requirements, proposed entities, proposed APIs, and updated confirmed requirements. Both
+stayed silent on productive progress. The baseline architecture diagram had no styles; the revised
+one included amber purchase edges and purple confirmation-path edges, with explicit operation labels.
+
+These grouped host probes are development evidence, not six independent production conversations or
+a reliability estimate. They do not exercise production prompt composition, streaming, or panel
+rendering. The revised API reference used an eight-row, three-column table; actual interview usability
+and panel density still require a live session. The runtime Gate separately checks packaging and
+existing rendering behavior; it does not score these semantic fixtures.
+
+## Connected overview and focused-flow probes
+
+The three `system-focused-download-sketch`, `system-overview-scope-coverage`, and
+`customer-focused-approved-flow` fixtures check connected architecture, scope coverage, and focused
+views that retain required gates. These are synthetic development cases, not private session records.
+
+A fresh-context host subagent read the baseline skills and returned three grouped responses; another
+read the revised skills and answered the same synthetic download, initial-overview and routine-reply
+scenarios. Pass criteria were hidden. Baseline download retained both the temporary-link return and
+an unrelated launch check; revised download used five forward connections and put returned links in
+text. Baseline overview had eight boxes and twelve arrows; revised overview grouped responsibilities
+into six boxes, covering library, launch and updates and marking unresolved behavior open. Baseline
+RRK retained reciprocal extraction/evidence returns and a manual branch; revised RRK omitted those
+and preserved required approval before send. It retained an explicit send-outcome audit write, which
+is a state-changing operation rather than ordinary response data.
+
+These are one grouped sample per revision, not five independent repetitions, production-provider
+runs or a reliability estimate. They used full skill text but not the production coach prompt/tool
+loop. The probes establish an observed shape change, not guaranteed coaching quality; the fixture
+protocol above remains the production evaluation procedure. Gate checks catalog packaging and code,
+not these semantic outcomes. Rendering and visual checks are reported separately.

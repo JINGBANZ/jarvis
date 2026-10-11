@@ -429,7 +429,11 @@ field optional under strict Structured Outputs.
 Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
 all, and the skill that owns a domain says what its blocks are: the `coding` skill carries the code
 block rules and the `diff` correction shape; the design skills (`system-design` and
-`customer-scenario-design`) carry the mermaid guidance. That is why the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
+`customer-scenario-design`) carry the mermaid guidance. System-design stage-entry/help replies pair
+short upper-panel coaching with a lower-panel reference: grouped requirements, entities with
+responsibilities, or APIs with key inputs/outputs. Material decisions refresh the current reference;
+unchanged small hints leave it in place. Proposed and agreed items remain distinct. Architecture
+references highlight the discussed path and distinguish return paths with explicit Mermaid styles. That is why the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
 a session that never loads the skill never pays for it in its cached prefix.
 
 The general detail default defers to the loaded skill so brevity does not make the user press
@@ -514,13 +518,30 @@ the box hides both sections and expanding restores them.
 
 A shown diagram gives the detail area most of the existing panel, leaving a compact hint-history
 strip visible. It never changes the outer panel's size or position. A manually chosen divider
-proportion still takes precedence. Diagrams adapt their flow to the available width: long workflows
-can fold into alternating rows when that reduces their height and keeps connections distinct;
-otherwise, a horizontal chain can become vertical and wide ranks wrap into rows. Layout preserves
-every node, label, and directed connection. Node and edge labels retain their native readable size,
-with vertical scrolling when the graph cannot fit the remaining height. Prose beside a diagram keeps
-its configured compact size rather than shrinking to compensate for the graph. See `OverlayBoxPanel`,
-`DetailDocumentView`, `DiagramHintLayout`, `FoldedDiagramHintLayout`, and `DiagramHintImage` for sizing.
+proportion still takes precedence. Diagrams keep one reading direction: a requested horizontal flow
+stays horizontal only when it fits the available width; otherwise it reads top to bottom. Small
+branching ranks keep up to three columns at narrow usable widths, wrapping box names and growing
+vertically. Wider ranks wrap into rows. Parents align with their children when
+space permits; ranks follow their incoming connections to keep independent paths separate, and
+branch labels sit above their destinations so shared stems remain legible. Connections use orthogonal
+routes, straight when their endpoints align; bypasses and returns use opposite exterior sides with separate
+tracks for independent workflows. Every supplied node and edge stays in one connected view without
+repeating components as connection rows. The coaching skills choose a connected overview or the
+current focused flow and can describe ordinary responses in nearby text; the renderer never drops
+connections to simplify the graph.
+Long-path labels in the connected view sit in side gutters when width allows; narrow windows retain source-adjacent labels
+and readable boxes. Clear side approaches use side-entry arrowheads to distinguish them from normal
+incoming flow. Dashed Mermaid arrows and the parser's restricted `linkStyle` subset are inert parsed
+data; arbitrary CSS remains rejected (see
+[`DiagramHintLinkStyle`](../Sources/JarvisCore/Overlay/DiagramHintLinkStyle.swift)).
+Labels share the explicit edge color and use a contrasting background for dark text, while
+unlabeled/default flow stays neutral. Layout
+preserves every node, label, and directed connection. Readability takes precedence over compactness:
+graphs with five or more nodes try progressively smaller text, boxes, and padding only when they
+overflow, choosing the largest fitting size. Box text stops at 13 points and edge labels at 11 points;
+remaining overflow scrolls vertically. Smaller graphs and graphs that already fit keep normal sizing. Prose beside a diagram keeps its configured compact size rather than
+shrinking to compensate for the graph. See `OverlayBoxPanel`, `DetailDocumentView`,
+`DiagramHintLayout`, `DiagramHintEdgeRoute`, and `DiagramHintImage` for sizing.
 
 Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
 reports back what reached the screen. A detail the box could not accept, because it is hidden or
@@ -1038,8 +1059,16 @@ rather than a per-turn screenshot.
   state ownership, durable background-work creation, replenishment, and recovery against the current
   requirements. It targets the highest-impact missing mechanism at the current stage and asks for
   a diagram in the one stage that benefits. An explicitly requested stage takes precedence over
-  screen notes; generic hints continue the stage established in conversation. Architecture hints
-  describe component responsibilities and a request or data flow. Canvas navigation controls are
+  screen notes; generic hints continue the stage established in conversation. Warranted stage-entry
+  hints provide a usable starting structure and one next move. Architecture flow hints include a
+  compact diagram in detail, including on the ordinary hint shortcut, because naming disconnected
+  steps leaves the candidate to assemble the design under pressure. They identify application-work
+  and durable-write ownership before suggesting connections, without forcing redundant services.
+  Deep dives keep the current question, operation and retry boundary distinct; alternatives are
+  explained before replacing the candidate's approach. Scaling hints locate batching and parallelism
+  in that approach and explain the work saved and latency trade-off. Expressed confusion prompts a
+  small worked example immediately rather than repeated terminology or an extra shortcut press.
+  Productive progress remains silent; these are skill instructions, not runtime stage tracking. Canvas navigation controls are
   interface state and become the answer when navigation is what the candidate asks for; an unseen
   drawing calls for a conversation-grounded hint with its visual limitation stated. Unresolved
   requirements call for a specific question the candidate can put to the interviewer, without needing

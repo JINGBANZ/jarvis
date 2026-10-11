@@ -4,6 +4,83 @@ import Testing
 @testable import JarvisOverlay
 
 @Suite struct DiagramHintRenderingTests {
+    @MainActor @Test func denseGraphCompactsBeforeScrollingAndStopsAtReadableSize() throws {
+        let graph = try #require(DiagramHint(mermaid: "flowchart TD\n" + (0..<7).map {
+            "N\($0)[Step \($0)] -->|Continue| N\($0 + 1)[Step \($0 + 1)]"
+        }.joined(separator: "\n")))
+        let roomy = DiagramHintImage.render(graph, fitting: CGSize(width: 320, height: 700))
+        let compact = DiagramHintImage.render(graph, fitting: CGSize(width: 320, height: 600))
+        let tiny = DiagramHintImage.render(graph, fitting: CGSize(width: 320, height: 40))
+        #expect(compact.size.height < roomy.size.height)
+        #expect(tiny.size.height == compact.size.height, "once at the minimum, scroll instead of shrinking further")
+        #expect(tiny.size.height > 400, "all eight nodes and labels remain legible rather than fitting forty pixels")
+        #expect(tiny.size.width <= 320)
+        let minimum = DiagramHintImage.fittedDrawing(graph, fitting: CGSize(width: 320, height: 40))
+        #expect(minimum.nodeFontSize >= 13)
+        #expect(minimum.edgeFontSize >= 11)
+        let spacious = DiagramHintImage.fittedDrawing(graph, fitting: CGSize(width: 520, height: 1000))
+        #expect(spacious.nodeFontSize == 15, "a graph that fits retains normal text size")
+    }
+
+    @MainActor @Test func narrowFocusedGraphRendersThreeConnectedBranches() throws {
+        let graph = try #require(DiagramHint(mermaid: """
+        flowchart TD
+        A[Client] -->|Request links| B[Package service]
+        A -->|Fetch files| C[Edge cache]
+        B -->|Check rights| D[Rights service]
+        B -->|Read manifest| E[Version metadata]
+        C -->|Cache miss| F[File storage]
+        """))
+        let image = DiagramHintImage.render(graph, fitting: CGSize(width: 320, height: 350))
+        #expect(image.size.width <= 320)
+        let data = try #require(image.tiffRepresentation)
+        let bitmap = try #require(NSBitmapImageRep(data: data))
+        let scale = CGFloat(bitmap.pixelsWide) / image.size.width
+        var maximumBoxes = 0
+        for y in stride(from: 0, to: bitmap.pixelsHigh, by: 8) {
+            var run = 0, boxes = 0
+            for x in stride(from: 0, through: bitmap.pixelsWide, by: 4) {
+                let color = x < bitmap.pixelsWide ? bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) : nil
+                let fill = color.map {
+                    $0.alphaComponent > 0.9 && $0.redComponent < 0.3
+                        && $0.blueComponent > $0.redComponent + 0.08
+                        && $0.blueComponent < 0.5
+                } ?? false
+                if fill { run += 4 } else {
+                    if CGFloat(run) >= 60 * scale { boxes += 1 }
+                    run = 0
+                }
+            }
+            maximumBoxes = max(maximumBoxes, boxes)
+        }
+        #expect(maximumBoxes == 3, "the renderer retains the three leaf boxes on one row")
+    }
+
+    @MainActor @Test func coloredDashedArrowsRenderTheirStyle() throws {
+        func coloredPixels(_ arrow: String) throws -> Int {
+            let graph = try #require(DiagramHint(mermaid:
+                "flowchart TD\nA[API] \(arrow) B[Queue]\nlinkStyle 0 stroke:#EAB308,stroke-width:3px"))
+            let image = DiagramHintImage.render(graph, fitting: CGSize(width: 200, height: 1))
+            let data = try #require(image.tiffRepresentation)
+            let bitmap = try #require(NSBitmapImageRep(data: data))
+            var count = 0
+            for y in 0..<bitmap.pixelsHigh {
+                for x in 0..<bitmap.pixelsWide {
+                    let color = try #require(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                    if color.redComponent > 0.7 && color.greenComponent > 0.4 && color.blueComponent < 0.2 {
+                        count += 1
+                    }
+                }
+            }
+            return count
+        }
+        let solid = try coloredPixels("-->")
+        let dashed = try coloredPixels("-.->")
+        #expect(solid > 100)
+        #expect(dashed > 40)
+        #expect(dashed < solid, "dashed strokes leave visible gaps while preserving colored arrowheads")
+    }
+
     @MainActor @Test func asyncDiagramDeliveryDrawsInsideThePrivatePanel() async throws {
         let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
         let panel = OverlayBoxPanel()
@@ -37,7 +114,7 @@ import Testing
         #expect(large.size.width <= 600)
         #expect(small.size.width <= 300)
         #expect(small.size.height > 150, "long chains scroll vertically at readable font sizes")
-        #expect(large.size.height < small.size.height, "extra width folds the chain into fewer rows")
+        #expect(large.size.height == small.size.height, "both narrow viewports keep the same readable vertical flow")
         let short = DiagramHintImage.render(graph, fitting: NSSize(width: 600, height: 20))
         #expect(short.size.height <= large.size.height)
         #expect(short.size.height > 150, "limited height still scrolls instead of shrinking labels")
@@ -56,9 +133,8 @@ import Testing
             G --> H[Notify]
             """))
         let available = CGSize(width: 520, height: 200)
-        let layout = DiagramHintLayout(graph, fitting: available, box: CGSize(width: 144, height: 36),
-                                      edgeLabel: CGSize(width: 100, height: 20), margin: 16)
-        let routes = try #require(layout.foldedRoutes)
+        let layout = DiagramHintImage.fittedDrawing(graph, fitting: available).layout
+        let routes = layout.routes
         let center = routes[2].labelCenter
         let image = DiagramHintImage.render(graph, fitting: available)
         let data = try #require(image.tiffRepresentation)
@@ -162,11 +238,14 @@ import Testing
         let image = DiagramHintImage.render(graph, fitting: NSSize(width: 500, height: 800))
         let data = try #require(image.tiffRepresentation)
         let bitmap = try #require(NSBitmapImageRep(data: data))
-        // The bypass lane sits 8pt inside the right edge of the 176pt natural layout. At the
-        // middle row it is transparent unless A→C routes around Cache.
-        let x = Int((1 - 8.0 / 176.0) * Double(bitmap.pixelsWide))
-        let y = bitmap.pixelsHigh / 2
-        #expect((bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.5)
+        let layout = DiagramHintLayout(graph, fitting: CGSize(width: 500, height: 800),
+            box: CGSize(width: 144, height: 36), edgeLabel: CGSize(width: 100, height: 20), margin: 16)
+        let cache = try #require(layout.frames["B"])
+        let route = layout.routes[2]
+        let side = try #require(route.points.map(\.x).max())
+        #expect(side > cache.maxX)
+        let scale = CGFloat(bitmap.pixelsWide) / layout.size.width
+        #expect((bitmap.colorAt(x: Int(side * scale), y: Int(cache.midY * scale))?.alphaComponent ?? 0) > 0.5)
     }
 
     @MainActor @Test func wrappedBranchesKeepBothEdgeLabelsVisible() throws {

@@ -352,6 +352,70 @@
     "pass": "Rejects draft coverage as human-work elimination. Uses eligible/adopted case volume times measured active minutes saved including review/fixes, against comparable baseline cases. Compares released hours with peak workload and usable team capacity; no unsupported automation or staffing claim."
   },
   {
+    "id": "system-architecture-entry",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Agreed requirements: ingest application events durably, show live counts, and archive raw events for later reporting. Entities and APIs are settled. The gateway only authenticates and routes. No architecture is drawn yet. me: Jarvis, I am starting the high-level design. What should I draw first?",
+    "pass": "Includes a compact Mermaid flow in detail with an ingestion service owning validation and durable publication between the gateway and log, and clear downstream live-count/archive responsibilities. Lines explain one useful drawing move. Does not claim to see a drawing or dive into offsets."
+  },
+  {
+    "id": "system-scaling-comprehension",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Current design: ingestion service publishes individual events to Kafka; analytical consumers write Parquet files to S3, then commit Kafka offsets. them: Would waiting for S3 writes scale to millions of events per second? Earlier hint: batch writes and parallelize consumers. me: I do not understand. Should the API service collect the batch before sending it to Kafka?",
+    "pass": "Explains that the analytical consumer batches here, with a small illustrative many-events-to-one-file example and why it reduces upload overhead; preserves durable ingestion first and commit after upload. Names the latency or size/time-flush trade-off. Does not claim a measured throughput or prescribe a new ingestion buffer."
+  },
+  {
+    "id": "system-batch-replay",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Current design: Kafka consumer writes batches as Parquet objects in S3. Previous hints mentioned client event IDs and deduplicating later in Spark. them: The upload succeeds, then the consumer crashes before committing. How does retry avoid storing that batch twice? me: Jarvis, I cannot follow the hints. Explain one batch.",
+    "pass": "Separates retrying one stored batch from duplicate client submissions. Uses one concrete stable batch/range and S3 object key, explains recovering the same contents and conditional creation or equivalent retry-safe handling, then committing. Does not present event IDs within Parquet or downstream payout dedup as preventing duplicate object writes."
+  },
+  {
+    "id": "system-proposed-batching",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Current design durably accepts events into Kafka and batches in the archival consumer. The interviewer asks how retrying one file avoids duplicates. me: Maybe I should move batching into the API service and buffer requests in memory until a batch fills. Jarvis, would that solve it?",
+    "pass": "Answers the proposal directly: moving batching does not itself solve replay identity and adds pre-durability buffering/recovery or latency concerns. Keeps the existing downstream approach as the simpler option and explains preserving the same batch on retry. Does not silently flip between alternatives or claim buffering is categorically impossible."
+  },
+  {
+    "id": "system-gateway-owned-ingestion",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Agreed design: a managed gateway integration validates event schemas and publishes directly to a durable stream; it returns success only after durable acceptance. me: Jarvis, do I need a separate ingestion service just because the gateway points to the stream?",
+    "pass": "Recognizes the required ownership already exists; does not demand another box or assert gateway-to-stream is inherently wrong. Explains the relevant responsibility/acknowledgment boundary briefly."
+  },
+  {
+    "id": "system-deep-dive-entry",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Architecture is agreed: ingestion service, durable event log, independent live-count and archival consumers. them: Go deeper on fault tolerance. me: Jarvis, where should I start?",
+    "pass": "Provides a focused failure case with the known component, durable state, response and recovery mechanism; links it to the agreed durability need. Avoids an exhaustive checklist, restarting requirements, or a new architecture."
+  },
+  {
+    "id": "system-productive-design",
+    "skills": [
+      "system-design"
+    ],
+    "input": "The candidate has a coherent architecture and is making steady progress. No question or shortcut. me: The ingestion service validates events and waits for the replicated log acknowledgment. Now I am drawing the two independent consumers and explaining the live-count store and archival path. No missing responsibility or new error is evident.",
+    "pass": "Stays silent; the diagram rule does not force interruption of productive progress."
+  },
+  {
+    "id": "system-requirements-stage",
+    "skills": [
+      "system-design"
+    ],
+    "input": "The current stage is requirements for a document sharing service; scope is still open. me: Jarvis, what should I clarify before naming entities?",
+    "pass": "Offers a focused scope or access/sharing question grounded in this task. Does not jump to an architecture diagram, database, or deep-dive recipe."
+  },
+  {
     "id": "customer-proactive-opening",
     "skills": [
       "customer-scenario-design"
@@ -422,5 +486,77 @@
     ],
     "input": "Earlier discovery briefing: equipment coordinators lose time gathering availability evidence; booking data is current but maintenance records refresh overnight. Goal: faster supported replies. Agreed pilot: read-only drafts with source timestamps; managers authorize reservations and price exceptions. Automated chasing was discussed but excluded. Exact weekly volume is unknown. them: That scope works. Show us how it would work.",
     "pass": "Cues a sketch and one case grounded in the collected facts: booking and maintenance evidence, freshness checks, draft reply, human handling when current availability cannot be established. Preserves read-only scope and manager authority; does not invent live maintenance access, automated chasing, or restart discovery for exact volume."
+  },
+  {
+    "id": "system-requirements-reference",
+    "skills": [
+      "system-design"
+    ],
+    "input": "An online course store lets authenticated users browse, buy via an external payment provider, view owned courses, and request refunds. Playback runs on the client. Scale and latency are unanswered. me: Requirements now, Jarvis. Help me organize what we agreed.",
+    "pass": "Short coaching lines plus a lower-panel requirements reference grouped into functional, non-functional, non-goals and open questions. Preserves known facts; scale/latency stay open, with no invented agreed numbers."
+  },
+  {
+    "id": "system-entities-reference",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Online course store: authenticated users browse, purchase, view owned courses and request refunds via an external payment provider. me: Moving to entities. What should I start with?",
+    "pass": "Short next-step hint plus a compact entity reference with each entity purpose and key identity/relationship. Proposed entities are labeled proposals; excludes speculative features."
+  },
+  {
+    "id": "system-api-reference",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Online course store supports browsing, purchasing through an external payment provider, owned-course listing and refunds. Agreed entities: Course, Order, Payment, Refund, Entitlement. me: Now APIs. Give me a starting point.",
+    "pass": "Short hint plus a coherent proposed API reference covering agreed operations, each with method/path, purpose, key input and output. Authenticated identity, asynchronous payment completion and retries are explicit where relevant; no architecture diagram."
+  },
+  {
+    "id": "system-reference-update",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Current requirements detail lists proposed 200ms read latency and refund revocation as open. them: Agreed, 200ms p95 reads, and revoke online access on confirmed refund. me: Help me update the requirements.",
+    "pass": "Refreshes the requirements reference with these decisions marked agreed, removes superseded uncertainty, and preserves other known scope. Upper lines highlight one next move rather than read the whole reference."
+  },
+  {
+    "id": "system-reference-productive-silence",
+    "skills": [
+      "system-design"
+    ],
+    "input": "An entity reference is already shown. The candidate steadily names the listed entities and their relationships correctly. No question, new decision or error.",
+    "pass": "Stays silent; does not regenerate the reference or interrupt solely to refresh the panel."
+  },
+  {
+    "id": "system-colored-purchase-flow",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Agreed architecture scope: course-store backend owns orders and entitlements; external provider handles payment, confirms asynchronously. them: Architecture next. Walk me through purchase and payment confirmation.",
+    "pass": "Short architecture hint plus supported Mermaid in detail. Explicit operation labels; highlights discussed forward path in amber and distinguishes confirmation return in purple using valid zero-based linkStyle indices. Does not label confirmation a retry or infer dashed means retry by itself."
+  },
+  {
+    "id": "system-focused-download-sketch",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Synthetic software marketplace with agreed browse, purchase, owned-library, download, update and online launch checks. Existing overview includes Client, Download service, Ownership service, Manifest service, CDN and File storage; it shows temporary links returning to Client and a separate launch ownership check. them: Focus just on downloading now. me: Help me draw that clearly.",
+    "pass": "One connected focused Mermaid sketch with shared components once, required ownership check and file-delivery path, short operation labels and explicit path highlighting. Ordinary manifest/link response appears as brief text below rather than a backward arrow. Separate launch authorization is omitted from this focused view; no repeated source/destination pairs or claim the entire architecture is complete."
+  },
+  {
+    "id": "system-overview-scope-coverage",
+    "skills": [
+      "system-design"
+    ],
+    "input": "Synthetic software marketplace scope agreed: browse packages, purchase through an external payment provider, owned library, authorized download and updates, online launch ownership checks. No service boundaries chosen. them: Give the initial high-level architecture. me: Help me start the overview.",
+    "pass": "Compact connected proposed overview, normally 3–6 logical boxes grouping responsibilities. Agreed journeys are covered by diagram or brief mapping below, including library/ownership, download/update and launch; unresolved mechanisms remain open. Does not expand every endpoint, data store, response arrow and deep-dive mechanism into the overview."
+  },
+  {
+    "id": "customer-focused-approved-flow",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Synthetic supplier-email pilot agreed: intake, extract, check identity/evidence/rules, draft routine response or hand off manually, mandatory human verification/approval before send, record/audit. them: Now sketch just the normal approved reply flow. me: Help me keep it clear.",
+    "pass": "Connected focused flow with 3–6 short logical boxes, shared boxes once, explicit checks and required approval before sending. Keeps ordinary returned fields/records in brief supporting text rather than reciprocal arrows. Does not reproduce every exception branch or separate each connection into duplicated component rows; current operation labels and explicit highlight remain."
   }
 ]
