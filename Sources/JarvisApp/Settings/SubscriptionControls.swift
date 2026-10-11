@@ -88,10 +88,10 @@ final class SubscriptionControls: NSObject {
     }
 
     /// Also starts the helper if it isn't running, which is how a stopped helper is retried.
-    func refresh() {
+    func refresh(refreshing providers: Set<BrainProvider> = []) {
         guard refreshTask == nil else { return }
         refreshTask = Task { [weak self, supervisor] in
-            let readiness = await supervisor.readiness()
+            let readiness = await supervisor.readiness(refreshing: providers)
             // A sign-in or sign-out that finished meanwhile cleared this task and started its own
             // probe; this stale answer must not paint over it.
             guard !Task.isCancelled, let self, refreshTask != nil else { return }
@@ -129,14 +129,14 @@ final class SubscriptionControls: NSObject {
         }
         switch readiness {
         case .unavailable, .superseded:
-            refresh()
+            refresh(refreshing: [provider])
         case .ready(_, let signedIn, _) where signedIn.contains(provider):
             signOut(provider)
         case .ready where supervisor.accountFiles(for: provider).count > 1:
             signOut(provider)
         case .ready where !supervisor.accountFiles(for: provider).isEmpty
             && readiness?.unavailability(for: provider)?.disposition == .temporary:
-            refresh()
+            refresh(refreshing: [provider])
         case .ready, nil:
             signIn(provider)
         }

@@ -626,6 +626,10 @@ reads under the row's title, as the key rows' does, with the row's button on the
 - **Not running** (amber), with the helper's own reason and a **Try again** button that probes again.
 - **Signing in…** while a sign-in runs, with a **Cancel** button.
 
+**Try again** checks the clicked subscription and requests one targeted refresh if its access token
+has expired and can still be renewed. Opening Connections keeps the check passive; healthy credentials
+and rejected refresh tokens do not trigger a refresh request.
+
 Subscription rows retain the full redacted failure text. The text wraps, is selectable, and has
 space between lines; each row and its card measure the message at the current width and grow to
 fit. Actions remain aligned at the top right, and the outer page scrolls when needed. This keeps
