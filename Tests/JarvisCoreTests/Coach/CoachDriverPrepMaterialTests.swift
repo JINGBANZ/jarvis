@@ -209,9 +209,9 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
                     argumentsJSON: #"{"name":"read_prep_note","arguments":{"document_id":"\#(document.id)","offset":\#(offset)}}"#)])
         }
         let brain = ScriptedThrowBrain(script: reads.map(Optional.some) + [nil,
-            .init(toolCalls: [.speak(callId: "s", lines: ["Both sections are available."])],
+            .init(toolCalls: [.speak(callId: "s", hint: "Both sections are available.")],
                   rawToolCalls: [RawToolCall(id: "s", name: "speak",
-                      argumentsJSON: #"{"lines":["Both sections are available."]}"#)]),
+                      argumentsJSON: #"{"hint":"Both sections are available."}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, prepMaterial: index,
             config: Config(historyCompactionTokenThreshold: 100_000))
@@ -244,9 +244,9 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
             .init(toolCalls: [.readPrepNote(callId: "read", documentID: documentID, offset: offset)],
                   rawToolCalls: [RawToolCall(id: "read", name: "call_tool", argumentsJSON: arguments)]),
             nil,
-            .init(toolCalls: [.speak(callId: "reply", lines: ["Use a token bucket."])],
+            .init(toolCalls: [.speak(callId: "reply", hint: "Use a token bucket.")],
                   rawToolCalls: [RawToolCall(id: "reply", name: "speak",
-                      argumentsJSON: #"{"lines":["Use a token bucket."]}"#)]),
+                      argumentsJSON: #"{"hint":"Use a token bucket."}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, prepMaterial: index)
         transcript.append(.init(speaker: .them, text: "Read my rate limiter notes", at: 100))
@@ -293,9 +293,9 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
             .init(toolCalls: [.readPrepNote(callId: "r", documentID: document.id, offset: 0)],
                   rawToolCalls: [RawToolCall(id: "r", name: "call_tool",
                     argumentsJSON: #"{"name":"read_prep_note","arguments":{"document_id":"\#(document.id)","offset":0}}"#)]),
-            .init(toolCalls: [.speak(callId: "s", lines: ["Design details"])],
+            .init(toolCalls: [.speak(callId: "s", hint: "Design details")],
                   rawToolCalls: [RawToolCall(id: "s", name: "speak",
-                    argumentsJSON: #"{"lines":["Design details"]}"#)]),
+                    argumentsJSON: #"{"hint":"Design details"}"#)]),
             .init(toolCalls: [.staySilent(callId: "done")],
                   rawToolCalls: [RawToolCall(id: "done", name: "stay_silent", argumentsJSON: "{}")]),
         ])
@@ -327,9 +327,9 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
                     argumentsJSON: #"{"name":"read_prep_note","arguments":{"document_id":"\#(document.id)","offset":\#(offset)}}"#)])
         }
         let brain = ScriptedBrain(script: reads + [
-            .init(toolCalls: [.speak(callId: "s", lines: ["I could only read part of the design."])],
+            .init(toolCalls: [.speak(callId: "s", hint: "I could only read part of the design.")],
                   rawToolCalls: [RawToolCall(id: "s", name: "speak",
-                      argumentsJSON: #"{"lines":["I could only read part of the design."]}"#)]),
+                      argumentsJSON: #"{"hint":"I could only read part of the design."}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: brain,
             prepMaterial: PrepMaterialIndex(documents: [document]),
@@ -384,9 +384,9 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [call], rawToolCalls: [RawToolCall(
                 id: "read", name: "call_tool", argumentsJSON: arguments)]),
-            .init(toolCalls: [.speak(callId: "reply", lines: ["Persist before calling."])],
+            .init(toolCalls: [.speak(callId: "reply", hint: "Persist before calling.")],
                   rawToolCalls: [RawToolCall(id: "reply", name: "speak",
-                                            argumentsJSON: #"{"lines":["Persist before calling."]}"#)]),
+                                            argumentsJSON: #"{"hint":"Persist before calling."}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, prepMaterial: index)
         transcript.append(.init(speaker: .me, text: "Read the whole design document", at: 100))
