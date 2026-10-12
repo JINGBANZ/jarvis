@@ -20,7 +20,8 @@ final class ConnectionsSection: NSObject, SettingsSection {
         supervisor: LocalProxySupervisor,
         keyStore: FileSecretStore,
         signIns: SubscriptionSignIns,
-        onKeySaved: @escaping (Credential, String) -> Void
+        onKeySaved: @escaping (Credential, String) -> Void,
+        onSubscriptionWillSignOut: @escaping (BrainProvider) -> Void
     ) {
         self.apiKeyControls = Dictionary(uniqueKeysWithValues: Self.credentialOrder.map { credential in
             (credential, APIKeyControls(credential: credential, store: keyStore, onKeySaved: onKeySaved))
@@ -28,6 +29,7 @@ final class ConnectionsSection: NSObject, SettingsSection {
         self.subscriptions = SubscriptionControls(supervisor: supervisor)
         self.signIns = signIns
         super.init()
+        subscriptions.onWillSignOut = onSubscriptionWillSignOut
         subscriptions.onStatusChanged = { [weak self] in self?.renderPageStatus() }
         subscriptions.onProbeAnswered = { [weak self] readiness in self?.signIns.record(readiness) }
         signIns.observe { [weak self] in

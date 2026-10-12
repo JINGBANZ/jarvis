@@ -23,6 +23,7 @@ final class SubscriptionControls: NSObject {
     private var signIns: [BrainProvider: Task<Void, Never>] = [:]
     private var actionFailures: [BrainProvider: String] = [:]
     var onStatusChanged: (() -> Void)?
+    var onWillSignOut: ((BrainProvider) -> Void)?
 
     /// Fires only for this card's own probe answers: an answer replayed when the page is rebuilt
     /// could be older than a check already under way elsewhere.
@@ -178,6 +179,7 @@ final class SubscriptionControls: NSObject {
     }
 
     private func signOut(_ provider: BrainProvider) {
+        onWillSignOut?(provider)
         Task { await performSignOut(provider) }
     }
 

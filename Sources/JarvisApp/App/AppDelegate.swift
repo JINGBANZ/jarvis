@@ -152,6 +152,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self?.composition.applySavedAPIKey(key, for: credential)
                 // A saved key writes a file, not UserDefaults, so nothing else would re-judge the hub.
                 self?.settingsHub.refresh(probe: false)
+            },
+            onSubscriptionWillSignOut: { [weak self] provider in
+                self?.cancelPendingStart(using: provider)
             })
         let mouseHotkeys = MouseHotkeyController(preferences: hotkeyPreferences)
         self.mouseHotkeys = mouseHotkeys
@@ -543,6 +546,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private func renderReadinessStatus(_ status: JarvisReadiness.Status) {
         menuBar?.setStatus(status)
         activityViewer?.readinessDidChange(status)
+    }
+
+    private func cancelPendingStart(using provider: BrainProvider) {
+        guard pendingStartTask != nil,
+              brain.preferences.route.targets.contains(where: { $0.provider == provider }) else {
+            return
+        }
+        pendingStartRevision &+= 1
+        pendingStartTask?.cancel()
+        pendingStartTask = nil
+        if let session = readiness.activeSession {
+            cancelReadinessAttempt(session)
+        }
     }
 
     private func cancelReadinessAttempt(_ session: JarvisReadiness.Session) {

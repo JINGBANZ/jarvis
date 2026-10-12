@@ -638,8 +638,11 @@ the cause and next step readable at both the default and minimum window width.
 **Sign in** runs the helper's login for that vendor, opens the vendor's sign-in page in the default
 browser, and waits up to ten minutes for the browser to hand the account back. It is the one place
 Jarvis opens a URL, and only because the user pressed the button. A failed sign-in shows the helper's
-redacted reason under the row. **Sign out** deletes that vendor's credential files. One account per
-subscription is supported; a successful Sign in replaces the previous account. The previous credentials
+redacted reason under the row. **Sign out** cancels a pending Start whose configured route uses that
+subscription before deleting the vendor's credential files, so a captured healthy answer cannot start
+with removed credentials. The user presses Start again to recheck the route and use an available
+configured fallback. One account per subscription is supported; a successful Sign in replaces the
+previous account. The previous credentials
 stay saved during browser sign-in and remain saved if the login fails or is canceled.
 Jarvis decodes only passive health fields and discards token-bearing refresh responses. Tokens
 stay in the helper's owner-only credential directory, apart from the
