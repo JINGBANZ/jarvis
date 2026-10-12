@@ -168,7 +168,7 @@ public actor LocalProxySupervisor {
                         failures[provider] = ProviderFailure(
                             source: .brain(provider), stage: .process, category: .configuration,
                             disposition: .permanent, identity: .init(),
-                            message: "Only one subscription account is supported. Sign out, then sign in again in Settings → Connections.")
+                            message: "Only one subscription account is supported.")
                     } else if let credential = matches.first {
                         if let failure = credential.unavailability(for: provider) { failures[provider] = failure }
                         else { signedIn.insert(provider) }
@@ -521,7 +521,7 @@ public actor LocalProxySupervisor {
                 (provider, ProviderFailure(
                     source: .brain(provider), stage: .process, category: .unavailable,
                     disposition: .temporary, identity: .init(),
-                    message: "The sign-in service couldn't determine credential health. Try again."))
+                    message: "The sign-in service couldn't determine credential health."))
             }))
     }
 

@@ -144,7 +144,8 @@ import os
             let failure = try #require(readiness.unavailability(for: .codexSubscription))
             #expect(failure.category == .authentication)
             #expect(failure.disposition == .permanent)
-            #expect(failure.message.contains("sign in again"))
+            #expect(failure.message == "Your session has ended.")
+            #expect(failure.activityAdvice.contains("Sign in"))
         }
     }
 
@@ -168,6 +169,8 @@ import os
             let failure = try #require(await supervisor.readiness().unavailability(for: .codexSubscription))
             #expect(failure.category != .authentication)
             #expect(failure.disposition == .temporary)
+            #expect(!failure.message.contains("Try again"))
+            #expect(!failure.message.contains("Settings"))
         }
     }
 
@@ -222,6 +225,8 @@ import os
         let running = await starting.value
         let readiness = await supervisor.readiness(refreshing: [.codexSubscription])
         #expect(readiness.unavailability(for: .codexSubscription)?.disposition == .temporary)
+        #expect(readiness.unavailability(for: .codexSubscription)?.message
+                == "The sign-in service couldn't determine credential health.")
         #expect(await supervisor.state == running)
         await supervisor.stop()
         stub.stop()

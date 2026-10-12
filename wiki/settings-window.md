@@ -154,9 +154,9 @@ and session Start. `RobotHealth` turns that result into the hub's wording and co
 
 A subscription counts as signed out only when that is proven: it has no saved sign-in, or the
 helper reports a permanent authentication rejection. Temporary failures and an unanswered health
-check prove no sign-out. Foundation-only `SubscriptionSignIns` owns Settings health checks and their
-cached answer, shared by Connections, the hub, and the Brain page. The answer includes temporary
-failures and an unchecked state. Hub and Brain visits ask the helper only when a sign-in is saved;
+check prove no sign-out. Foundation-only `SubscriptionSignIns` owns Settings health checks, explicit
+connection actions, and their cached answer, shared by Connections, the hub, and the Brain page.
+The answer includes temporary failures and an unchecked state. Hub and Brain visits ask the helper only when a sign-in is saved;
 an explicit Connections visit can also start the helper to check empty accounts. Passive checks
 share one pending task. Answers from Start replace a pending passive check, while an explicit
 Settings retry keeps priority until it finishes. Closing Settings releases its views without
@@ -617,30 +617,46 @@ The **Subscriptions** card (`SubscriptionControls`) has one row each for **Codex
 and **Claude Code**. Opening Connections probes the bundled helper, starting it if it is
 not running, through `SubscriptionSignIns`, so each row says what a Start would find. The card
 renders that shared owner's answer, so the hub and the Brain page agree with it. The state
-reads under the row's title, as the key rows' does, with the row's button on the right:
+reads under the row's title, as the key rows' does, with actions on the right. Foundation-only
+`SubscriptionConnectionState` in Core derives those actions from saved accounts, health, and the
+operation in progress. `SubscriptionSignIns` uses the same decision to accept clicks, so a stale
+button cannot perform a different action. AppKit renders the result and opens a sign-in URL only
+on the user's explicit request:
 
-- **Checking…** until the probe answers.
+- **Checking…** until the probe answers, with **Sign out** available for a saved account.
 - **Signed in** (teal), with the account's email and plan, and a **Sign out** button.
-- **Signed out**, with a **Sign in** button.
+- **Signed out**, with a **Sign in** button that starts the helper if needed. No saved credentials
+  means Sign in stays available even when an old health answer named that account healthy.
 - **Sign in again** (amber) when the helper reports rejected credentials, with the redacted cause
   and a **Sign in** button.
 - **Temporarily unavailable** (amber) for an expired access token, cooldown, or unknown credential
-  health, with **Try again**; none proves the account signed out.
-- **Not running** (amber), with the helper's own reason and a **Try again** button that probes again.
+  health, with **Try again** and **Sign out**; none proves the account signed out. Retry keeps the
+  saved credentials; Sign out removes them so the user can start a fresh login.
+- **Not running** (amber), with the helper's own reason and **Try again** plus **Sign out** when
+  credentials exist, or **Sign in** when none exist. Local sign-out does not need a working helper.
+- **Disabled credentials** or **multiple saved accounts** (amber), with the cause and only
+  **Sign out**. Rejected authentication instead offers only Sign in, which replaces the old account
+  on success; two actions would offer redundant recovery paths in that case.
 - **Signing in…** while a sign-in runs, with a **Cancel** button.
+- **Signing out…** while credentials are removed, with its action disabled.
 
 **Try again** checks the clicked subscription and requests one targeted refresh if its access token
 has expired and can still be renewed. It replaces a pending passive check immediately, and the
 canceled check's late answer is ignored. While the requested retry runs, its button reads
-**Trying again…**, retry buttons are disabled, and the previous error stays visible until the new
-answer arrives. Completion publishes the new answer and enables retry actions again; failure does
-not schedule another retry. Opening Connections keeps the check passive; healthy credentials and
+**Trying again…**, retry and account-change buttons are disabled, and the previous health error
+stays visible until the new answer arrives. The helper's check is shared by both rows, so account
+changes wait for that bounded check to finish; a credential refresh must not race a deletion.
+Retry stays disabled while a sign-in or sign-out is running. Completion publishes the new answer
+and enables actions again; failure does not schedule another retry. Opening Connections keeps the check passive; healthy credentials and
 rejected refresh tokens do not trigger a refresh request.
 
-Subscription rows retain the full redacted failure text. The text wraps, is selectable, and has
-space between lines; each row and its card measure the message at the current width and grow to
+Subscription rows retain the redacted failure identity and cause without button instructions or
+navigation advice; Activity retains the relevant next-step advice. Starting a new action clears
+the previous action's error, so a recovered account cannot remain covered by a stale sign-in or
+sign-out failure. The text wraps, is selectable, and has space between lines; each row and its card
+measure the message at the current width and grow to
 fit. Actions remain aligned at the top right, and the outer page scrolls when needed. This keeps
-the cause and next step readable at both the default and minimum window width.
+the cause readable at both the default and minimum window width.
 
 **Sign in** runs the helper's login for that vendor, opens the vendor's sign-in page in the default
 browser, and waits up to ten minutes for the browser to hand the account back. It is the one place
@@ -650,7 +666,9 @@ subscription before deleting the vendor's credential files, so a captured health
 with removed credentials. The user presses Start again to recheck the route and use an available
 configured fallback. One account per subscription is supported; a successful Sign in replaces the
 previous account. The previous credentials
-stay saved during browser sign-in and remain saved if the login fails or is canceled.
+stay saved during browser sign-in and remain saved if the login fails or is canceled. A failed
+sign-out reports the redacted cause and derives the available actions from whichever credentials
+remain. Repeated clicks cannot start another operation for the same row.
 Jarvis decodes only passive health fields and discards token-bearing refresh responses. Tokens
 stay in the helper's owner-only credential directory, apart from the
 secrets file ([sandbox.md](./sandbox.md) says where, and what a login reaches). The page's header
@@ -744,7 +762,8 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/Home/HomeDockButton.swift` | One chamfered dock button |
 | `Sources/JarvisApp/Settings/Home/ReadinessMeterView.swift` | The hub header's readiness meter |
 | `Sources/JarvisApp/Settings/Home/RobotPart+Presentation.swift` | Each part's title and symbol |
-| `Sources/JarvisBrainProviders/Proxy/SubscriptionSignIns.swift` | Owns Settings health checks, explicit retry priority, and the answer shared by Connections, the hub, and the Brain page |
+| `Sources/JarvisBrainProviders/Proxy/SubscriptionSignIns.swift` | Owns Settings health checks, sign-in/sign-out/retry operations, and the answer shared by Connections, the hub, and the Brain page |
+| `Sources/JarvisCore/Config/SubscriptionConnectionState.swift` | Saved accounts, health, and current operation → Connections text and allowed actions |
 | `Sources/JarvisCore/Brain/BrainRouteAvailability.swift` | Target eligibility and ordered fallback selection shared by readiness and Start |
 | `Sources/JarvisCore/Config/RobotHub.swift` | Inputs → hub state, the hub's one decision point |
 | `Sources/JarvisCore/Config/RobotHealth.swift` | The hub's status rules |
@@ -759,7 +778,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SkillCardGridView.swift` | Responsive skill card grid |
 | `Sources/JarvisCore/Config/Skill+DisplayTitle.swift` | A skill's card title from its folder name |
 | `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini) + the Subscriptions card |
-| `Sources/JarvisApp/Settings/SubscriptionControls.swift` | Subscriptions card: per-subscription status, Sign in, Sign out, and Cancel |
+| `Sources/JarvisApp/Settings/SubscriptionControls.swift` | Renders the Subscriptions card's shared state and dispatches explicit actions |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySupervisor.swift` | Starts, probes, and restarts the bundled helper; owns its credential directory |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySignIn.swift` | Runs one browser sign-in through the helper and reports its URL and outcome |
 | `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The one models-list request behind a saved key's verdict |
