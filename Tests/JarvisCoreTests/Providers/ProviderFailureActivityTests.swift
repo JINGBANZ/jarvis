@@ -42,6 +42,17 @@ import Testing
                 == "OpenAI API rejected the API key; check Settings → Connections")
     }
 
+    @Test(arguments: [BrainProvider.openAI, .gemini])
+    func aMissingBrainKeyIsDescribedAsMissing(provider: BrainProvider) throws {
+        let target = BrainTarget(
+            provider: provider, modelID: BrainModelCatalog.defaultModel(for: provider).id)
+        let failure = try #require(target.credentialFailure(available: []))
+
+        #expect(failure.activitySentence.hasPrefix("\(provider.displayName) has no API key saved"))
+        #expect(failure.activityAdvice == "; add it in Settings → Connections")
+        #expect(!failure.activitySentence.contains("rejected"))
+    }
+
     @Test func subscriptionsNameTheirOwnNextStep() {
         let signIn = "open Settings → Connections, press Sign in for it, then press Start"
         #expect(make(source: .brain(.claudeSubscription), category: .authentication).activitySentence
@@ -67,6 +78,18 @@ import Testing
         #expect(make(source: .brain(.claudeSubscription), category: .unavailable,
                      identity: .init(httpStatus: 503)).activitySentence
                 == "Claude Code is unavailable (HTTP 503)")
+    }
+
+    @Test(arguments: [BrainProvider.codexSubscription, .claudeSubscription])
+    func subscriptionQuotaAdviceNamesThePlanLimit(provider: BrainProvider) {
+        let failure = ProviderFailure(
+            source: .brain(provider), stage: .process, category: .quota,
+            disposition: .temporary, identity: .init(),
+            message: "The subscription is temporarily unavailable. Try again after its cooldown.")
+
+        #expect(failure.activitySentence.contains("\(provider.displayName) reached its usage limit"))
+        #expect(failure.activityAdvice.contains("wait for the limit to reset"))
+        #expect(!failure.activitySentence.contains("check billing"))
     }
 
     @Test func theRemainingClausesReadAsWritten() {

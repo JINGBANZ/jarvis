@@ -93,4 +93,38 @@ import Testing
             fallbackTargets: [BrainTarget(provider: .claudeSubscription, modelID: "claude-opus-5-5")])
         #expect(subscriptionsOnly.requiredCredentials.isEmpty)
     }
+
+    @Test(arguments: [false, true])
+    func missingKeysForEveryTargetBlockTheRoute(hasFallback: Bool) throws {
+        let primary = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
+        let fallback = BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash")
+        let route = BrainRoute(primary: primary, fallbackTargets: hasFallback ? [fallback] : [])
+
+        let failure = try #require(route.credentialFailure(available: []))
+
+        #expect(failure.source == .brain(primary.provider))
+        #expect(failure.category == .missingCredential)
+        #expect(failure.disposition == .permanent)
+    }
+
+    @Test(arguments: [Credential.openAIAPIKey, .geminiAPIKey])
+    func aSavedKeyForEitherTargetKeepsTheRouteEligible(credential: Credential) {
+        let route = BrainRoute(
+            primary: BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol"),
+            fallbackTargets: [BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash")])
+
+        #expect(route.credentialFailure(available: [credential]) == nil)
+    }
+
+    @Test(arguments: [BrainProvider.codexSubscription, .claudeSubscription])
+    func aSubscriptionStillNeedsItsHealthCheckedWhenAPIKeysAreMissing(provider: BrainProvider) {
+        let subscription = BrainTarget(
+            provider: provider, modelID: BrainModelCatalog.defaultModel(for: provider).id)
+        let api = BrainTarget(provider: .openAI, modelID: "gpt-6.1-sol")
+
+        #expect(BrainRoute(primary: api, fallbackTargets: [subscription])
+            .credentialFailure(available: []) == nil)
+        #expect(BrainRoute(primary: subscription, fallbackTargets: [api])
+            .credentialFailure(available: []) == nil)
+    }
 }

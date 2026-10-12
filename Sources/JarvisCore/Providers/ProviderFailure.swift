@@ -51,6 +51,7 @@ public struct ProviderFailure: Error, LocalizedError, Sendable, Equatable {
 
     /// `unknown` still renders identity and message, never just the word "unknown".
     public enum Category: String, Sendable, CaseIterable {
+        case missingCredential
         case authentication
         case quota
         case access

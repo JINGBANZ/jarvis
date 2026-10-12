@@ -1,4 +1,5 @@
 import Foundation
+import JarvisBrainProviders
 import JarvisCore
 
 // Design: wiki/settings-window.md#status
@@ -93,7 +94,7 @@ final class SettingsHubModel {
             browserTextEnabled: screenPreferences.browserTextEnabled && BrowserAccessibilityPermission.isGranted,
             boxFontSize: appearance.boxFontSize,
             readiness: RobotReadiness(
-                signedOutSubscriptions: signIns.signedOut(
+                subscriptions: signIns.health(
                     among: Set(route.targets.map(\.provider).filter(\.servedByLocalProxy))),
                 availableCredentials: Set(Credential.allCases.filter {
                     secrets.apiKey(for: $0)?.isEmpty == false

@@ -23,6 +23,9 @@ extension ProviderFailure {
         let clause: String
         var advice: String?
         switch category {
+        case .missingCredential:
+            clause = "\(name) has no API key saved"
+            advice = "add it in Settings → Connections"
         case .authentication:
             clause = "\(name) rejected the API key"
             advice = "check Settings → Connections"
@@ -60,9 +63,13 @@ extension ProviderFailure {
         let name = source.displayName
         let signIn = (clause: "\(name) isn't signed in",
                       advice: "open Settings → Connections, press Sign in for it, then press Start")
+        let usageLimit = (clause: "\(name) reached its usage limit",
+                          advice: "wait for the limit to reset, or add a fallback in Settings → Brain")
         switch category {
         case .authentication:
             return signIn
+        case .quota:
+            return usageLimit
         // The sign-in service restarts itself after a crash, so the first advice is to wait.
         case .unreachable:
             return ("\(name) couldn't reach the sign-in service",
@@ -76,8 +83,7 @@ extension ProviderFailure {
             return ("\(name) rejected the \(source.surfaceNoun) configuration",
                     "check Settings → Brain, or sign in again in Settings → Connections")
         case .rejected where identity.httpStatus == 429:
-            return ("\(name) reached its usage limit",
-                    "wait for the limit to reset, or add a fallback in Settings → Brain")
+            return usageLimit
         default:
             return nil
         }

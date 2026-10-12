@@ -102,7 +102,8 @@ empty), and optionally delete the now-orphaned item with `security delete-generi
 The subscription sign-ins are the same class of secret and live beside the key under
 `~/Library/Application Support/Jarvis/proxy/`, all `0700` directories: `auth/` holds the OAuth token
 files the bundled helper writes, which Jarvis narrows to `0600` after each sign-in, and `run/` holds
-the launch's `0600` helper configuration, whose loopback key exists only for that launch. The helper
+the launch's `0600` helper configuration, whose inference and management loopback keys exist only
+for that launch. The helper
 also writes its own capped logs under `auth/logs/`, which hold no request or response bodies (see
 [Data Egress](#data-egress) for the setting that keeps them out); each start narrows that directory to
 owner-only and removes dumps an older build left. Sign out in Connections deletes that subscription's
@@ -131,18 +132,22 @@ Narrow and explicit. Data leaves the machine only via:
   behind a key that exists only for the running launch, which forwards it under the user's own
   signed-in account and that vendor's consumer retention terms. The helper's egress is
   `chatgpt.com` and `api.anthropic.com` for coaching, and `auth.openai.com`, `claude.ai`, or
-  `console.anthropic.com`, the three authorize hosts Jarvis will open a login page on, only
-  during a sign-in the user started from Connections. That sign-in also asks public IP lookup
+  `console.anthropic.com`, the three authorize hosts Jarvis will open a login page on, during sign-in
+  and the helper's OAuth refresh operations. Jarvis opens an authorize page only on an
+  explicit Sign in click in Connections. That sign-in also asks public IP lookup
   services (`api.ipify.org`, falling back to `ifconfig.me`, `icanhazip.com`, and `ipinfo.io`) for the
   Mac's address, because the helper's login prints SSH tunnel hints; Jarvis ignores them. One
   connection is the helper's own: it fetches its upstream project's Antigravity version manifest from
   `antigravity-hub-auto-updater-*.us-central1.run.app` a second after it loads credentials, and again
   every three hours for as long as it runs, which is until Quit. The request carries no credential and
   happens with no account configured at all, and the configuration's own update switches
-  (`disable-control-panel`, `disable-auto-update-panel`) do not govern it. What that
-  configuration does stop: it keeps the embedded model catalog instead of fetching one, turns off the
-  management API and its downloadable panel, and disables usage statistics. It also runs the
-  helper in `commercial-mode`, so no request or response body is written to disk: the helper would
+  (`disable-control-panel`, `disable-auto-update-panel`) do not govern it. The configuration
+  keeps the embedded model catalog instead of fetching one, enables the management API only on
+  loopback behind a separate per-launch key for passive
+  credential health and targeted expired-token refresh, turns off its downloadable panel, and
+  disables usage statistics. Jarvis decodes only health fields and discards refresh response bodies
+  without logging or persisting them; the helper owns OAuth tokens and refresh requests. It also
+  runs the helper in `commercial-mode`, so no request or response body is written to disk: the helper would
   otherwise dump a failed call, transcript and captured screen text included, into its own log
   directory, which no session owns and Clear history never reaches. Each start narrows that directory
   to owner-only and removes dumps an older build left; the helper's own `main.log` holds no bodies. On the Codex

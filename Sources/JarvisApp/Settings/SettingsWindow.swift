@@ -183,11 +183,11 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     private func applyNotice() {
         guard let page = pages[current] else { return }
         guard let part = current.part,
-              case .needsAttention(_, let advice, let fix)? = hub.state.slots[part]?.health else {
+              let health = hub.state.slots[part]?.health, let advice = health.advice else {
             page.setNotice(text: nil)
             return
         }
-        switch fix {
+        switch health.fix {
         case .openConnections:
             page.setNotice(text: advice, actionTitle: "Open Connections") { [weak self] in
                 self?.open(.connections)

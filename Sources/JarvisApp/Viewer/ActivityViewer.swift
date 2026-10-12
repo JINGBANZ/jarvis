@@ -516,6 +516,8 @@ private extension JarvisReadiness.Status {
         switch self {
         case .checking:
             ("Starting", "starting")
+        case .blocked(.brain(.providerUnavailable(let failure))):
+            (failure.activitySentence, "blocked")
         case .blocked:
             ("Blocked", "blocked")
         case .cycleFailed(let provider):

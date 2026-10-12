@@ -53,6 +53,9 @@ import Testing
     @Test func aFailedLoginCarriesTheCommandsLastWords() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
+        let previous = home.appendingPathComponent("codex-previous.json")
+        let saved = Data(#"{"fixture":"previous"}"#.utf8)
+        try saved.write(to: previous)
         let login = try proxyStubExecutable(in: home, script: """
             \(Self.noise)
             echo 'claude authentication failed: state mismatch' >&2
@@ -66,6 +69,80 @@ import Testing
 
         #expect(seen.count == 2)
         #expect(seen.last == .failed(message: "claude authentication failed: state mismatch"))
+        #expect(try Data(contentsOf: previous) == saved)
+    }
+
+    @Test func aSuccessfulCodexSignInReplacesThePreviousAccount() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let auth = home.appendingPathComponent("auth")
+        try FileManager.default.createDirectory(at: auth, withIntermediateDirectories: true)
+        let old = auth.appendingPathComponent("codex-old@example.com-free.json")
+        let new = auth.appendingPathComponent("codex-new@example.com-plus.json")
+        let claude = auth.appendingPathComponent("claude-other@example.com.json")
+        try Data("{}".utf8).write(to: old)
+        try Data("{}".utf8).write(to: claude)
+        let login = try proxyStubExecutable(in: home, script: "printf '{}' > '\(new.path)'\nexit 0")
+        let signIn = LocalProxySignIn(executable: login, configURL: home.appendingPathComponent("config.yaml"), authDirectory: auth)
+        let seen = await events(signIn.run(.codexSubscription))
+        #expect(seen.last == .finished(accountFiles: LocalProxyAccountFile.all(in: auth, for: .codexSubscription)))
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(FileManager.default.fileExists(atPath: new.path))
+        #expect(FileManager.default.fileExists(atPath: claude.path))
+    }
+
+    @Test func aBackgroundRefreshCannotPreventReplacingThePreviousAccount() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let old = home.appendingPathComponent("codex-previous.json")
+        let new = home.appendingPathComponent("codex-new.json")
+        let claude = home.appendingPathComponent("claude-other.json")
+        try Data("{}".utf8).write(to: old)
+        try Data("{}".utf8).write(to: claude)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1)], ofItemAtPath: old.path)
+        let login = try proxyStubExecutable(in: home, script: """
+            printf '{}' > '\(old.path)'
+            printf '{}' > '\(new.path)'
+            exit 0
+            """)
+        let signIn = LocalProxySignIn(
+            executable: login, configURL: home.appendingPathComponent("config.yaml"),
+            authDirectory: home)
+
+        let seen = await events(signIn.run(.codexSubscription))
+
+        guard case .finished(let accounts) = seen.last else {
+            Issue.record("expected the sign-in to finish, got \(seen)")
+            return
+        }
+        #expect(accounts.map { $0.url.lastPathComponent } == [new.lastPathComponent])
+        #expect(!FileManager.default.fileExists(atPath: old.path))
+        #expect(FileManager.default.fileExists(atPath: claude.path))
+    }
+
+    @Test func signingInToTheSameAccountKeepsItsUpdatedCredentials() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let account = home.appendingPathComponent("codex-previous.json")
+        try Data(#"{"fixture":"previous"}"#.utf8).write(to: account)
+        let updated = #"{"fixture":"updated"}"#
+        let login = try proxyStubExecutable(in: home, script: """
+            printf '%s' '\(updated)' > '\(account.path)'
+            exit 0
+            """)
+        let signIn = LocalProxySignIn(
+            executable: login, configURL: home.appendingPathComponent("config.yaml"),
+            authDirectory: home)
+
+        let seen = await events(signIn.run(.codexSubscription))
+
+        guard case .finished(let accounts) = seen.last else {
+            Issue.record("expected the sign-in to finish, got \(seen)")
+            return
+        }
+        #expect(accounts.map { $0.url.lastPathComponent } == [account.lastPathComponent])
+        #expect(try String(contentsOf: account, encoding: .utf8) == updated)
     }
 
     @Test func anAddressJarvisWontOpenEndsTheLogin() async throws {
@@ -94,6 +171,9 @@ import Testing
     @Test func cancellingTheSignInEndsTheLogin() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
+        let previous = home.appendingPathComponent("claude-previous.json")
+        let saved = Data(#"{"fixture":"previous"}"#.utf8)
+        try saved.write(to: previous)
         let pidFile = home.appendingPathComponent("pid")
         let login = try proxyStubExecutable(in: home, script: """
             echo $$ > '\(pidFile.path)'
@@ -111,9 +191,11 @@ import Testing
             return false
         }
         #expect(await consumer.value)
+        #expect(try Data(contentsOf: previous) == saved)
         let pid = try #require(Int32(
             try String(contentsOf: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
 
         #expect(await eventually { !processExists(pid) })
+        #expect(try Data(contentsOf: previous) == saved)
     }
 }
