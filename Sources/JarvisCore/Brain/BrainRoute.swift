@@ -28,6 +28,14 @@ public struct BrainRoute: Sendable, Equatable {
         Set(targets.compactMap(\.provider.credential))
     }
 
+    public func credentialFailure(available: Set<Credential>) -> ProviderFailure? {
+        guard let failure = primary.credentialFailure(available: available),
+              fallbackTargets.allSatisfy({ $0.credentialFailure(available: available) != nil }) else {
+            return nil
+        }
+        return failure
+    }
+
     /// Index 0 is the primary; `nil` when either position is outside the route. Rebuilding through
     /// `init` keeps the result normalized.
     public func movingTarget(at index: Int, by offset: Int) -> BrainRoute? {

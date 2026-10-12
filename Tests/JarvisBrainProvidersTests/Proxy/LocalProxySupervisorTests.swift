@@ -227,6 +227,60 @@ import os
         stub.stop()
     }
 
+    @Test func stoppingDuringCredentialHealthDoesNotStartARefresh() async throws {
+        let home = tmp()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let stopping = home.appendingPathComponent("stopping")
+        let ready = home.appendingPathComponent("ready")
+        let exit = home.appendingPathComponent("exit")
+        let supervisor = LocalProxySupervisor(
+            executable: try proxyStubExecutable(in: home, script: """
+                dir="$(dirname "$0")"
+                trap ': > "$dir/stopping"' TERM
+                : > "$dir/ready"
+                wait_for "$dir/exit"
+                """), home: home)
+        let held = OSAllocatedUnfairLock(initialState: false)
+        let posts = OSAllocatedUnfairLock(initialState: 0)
+        let release = DispatchSemaphore(value: 0)
+        let starting = Task { await supervisor.ensureRunning() }
+        let stub = try ModelListStub(port: try await configuredPort(supervisor), respond: { request in
+            if request.hasPrefix("POST ") {
+                posts.withLock { $0 += 1 }
+                return (200, "{}")
+            }
+            if request.contains("/v8/management/credentials") {
+                let shouldHold = held.withLock { value in
+                    guard !value else { return false }
+                    value = true
+                    return true
+                }
+                if shouldHold { _ = release.wait(timeout: .now() + 5) }
+                return (200, #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"token expired","cooldowns":[]}]}"#)
+            }
+            return (200, Self.openAIModels)
+        })
+        defer {
+            release.signal()
+            _ = FileManager.default.createFile(atPath: exit.path, contents: nil)
+            stub.stop()
+        }
+        _ = await starting.value
+        #expect(await eventually { FileManager.default.fileExists(atPath: ready.path) })
+        try Data("{}".utf8).write(to: supervisor.authDirectory.appendingPathComponent("codex-fixture.json"))
+        let probe = Task { await supervisor.readiness(refreshing: [.codexSubscription]) }
+        #expect(await eventually { held.withLock { $0 } })
+        let stop = Task { await supervisor.stop() }
+        #expect(await eventually { FileManager.default.fileExists(atPath: stopping.path) })
+        release.signal()
+
+        #expect(await probe.value == .superseded)
+        #expect(posts.withLock { $0 } == 0)
+
+        try Data().write(to: exit)
+        await stop.value
+    }
+
     @Test func aSignOutSupersedesAnInFlightCredentialAnswer() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }

@@ -1152,8 +1152,8 @@ of their API family (`ResponsesWireFormat`, `MessagesWireFormat`), and the attem
 provider-neutral reply. Only the route, the key, the wire format, and the failure table differ, and
 each provider's
 [`BrainProviderDescriptor`](../Sources/JarvisCore/Brain/BrainProviderDescriptor.swift) names them,
-together with its display name and effort floor, and for a subscription the helper's model owner,
-login flag, and account-file prefix.
+together with its display name and effort floor, and for a subscription the helper's credential
+provider, login flag, and account-file prefix.
 
 A proxy rather than the vendors' own CLIs: driving `claude` and `codex` as coaching processes meant
 imitating native function calls with a text protocol the model had to follow and Jarvis had to parse
@@ -1177,7 +1177,7 @@ is about 60 MB on disk and 20 MB per update.
   reaches. Each start also narrows that directory to owner-only and deletes dumps an older build
   left. The helper and its logins inherit only `HOME`, `PATH`, `TMPDIR`, and `LANG`: the binary reads
   database, object-store, and proxy variables that would move a credential off this Mac or reroute
-  traffic the configuration pins to the vendors. It is ready when its model list answers, within ten
+  traffic the configuration pins to the vendors. It is live when its model list answers, within ten
   seconds.
 - **Crashes keep the endpoint.** A helper that exits after it answered restarts on the same port
   with the same key after 1, 5, then 15 seconds, so a session composed against it keeps working; a

@@ -23,6 +23,9 @@ extension ProviderFailure {
         let clause: String
         var advice: String?
         switch category {
+        case .missingCredential:
+            clause = "\(name) has no API key saved"
+            advice = "add it in Settings → Connections"
         case .authentication:
             clause = "\(name) rejected the API key"
             advice = "check Settings → Connections"

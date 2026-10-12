@@ -42,6 +42,17 @@ import Testing
                 == "OpenAI API rejected the API key; check Settings → Connections")
     }
 
+    @Test(arguments: [BrainProvider.openAI, .gemini])
+    func aMissingBrainKeyIsDescribedAsMissing(provider: BrainProvider) throws {
+        let target = BrainTarget(
+            provider: provider, modelID: BrainModelCatalog.defaultModel(for: provider).id)
+        let failure = try #require(target.credentialFailure(available: []))
+
+        #expect(failure.activitySentence.hasPrefix("\(provider.displayName) has no API key saved"))
+        #expect(failure.activityAdvice == "; add it in Settings → Connections")
+        #expect(!failure.activitySentence.contains("rejected"))
+    }
+
     @Test func subscriptionsNameTheirOwnNextStep() {
         let signIn = "open Settings → Connections, press Sign in for it, then press Start"
         #expect(make(source: .brain(.claudeSubscription), category: .authentication).activitySentence

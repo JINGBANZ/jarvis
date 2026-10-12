@@ -100,6 +100,32 @@ import Testing
         #expect(health(.brain, .fixture(route: BrainRoute(primary: openAI, fallbackTargets: [claude])), readiness) == .ready)
     }
 
+    @Test func anEarlierUncheckedFallbackMustAnswerBeforeNamingALaterReadyFallback() {
+        let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [claude, openAI]))
+        var readiness = RobotReadiness.fixture(signedOut: [.codexSubscription])
+        readiness.subscriptions[.claudeSubscription] = .checking
+
+        #expect(health(.brain, inputs, readiness) == .checking)
+
+        readiness.subscriptions[.claudeSubscription] = .ready
+        #expect(health(.brain, inputs, readiness).advice?.contains("I'll use Claude Code") == true)
+
+        readiness.subscriptions[.claudeSubscription] = RobotReadiness.fixture(signedOut: [.claudeSubscription])
+            .subscriptions[.claudeSubscription]
+        #expect(health(.brain, inputs, readiness).advice?.contains("I'll use OpenAI API") == true)
+    }
+
+    @Test func aLaterUncheckedFallbackDoesNotDelayAnEarlierReadyFallback() {
+        let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [openAI, claude]))
+        var readiness = RobotReadiness.fixture(signedOut: [.codexSubscription])
+        readiness.subscriptions[.claudeSubscription] = .checking
+
+        let result = health(.brain, inputs, readiness)
+
+        #expect(result.reason == "PRIMARY UNAVAILABLE")
+        #expect(result.advice?.contains("I'll use OpenAI API") == true)
+    }
+
     @Test func earNeedsItsProvidersKeyFirst() {
         let inputs = RobotHubInputs.fixture(transcriptionProvider: .gemini)
         #expect(health(.ear, inputs, .fixture(credentials: [.openAIAPIKey], granted: [])) == .needsAttention(

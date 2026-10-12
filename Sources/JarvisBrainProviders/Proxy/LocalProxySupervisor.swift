@@ -146,7 +146,7 @@ public actor LocalProxySupervisor {
                 for provider in providers.sorted(by: { $0.rawValue < $1.rawValue }) {
                     let matches = matchingCredentials(for: provider, in: credentials)
                     guard matches.count == 1, let credential = matches.first, credential.needsRefresh else { continue }
-                    guard !Task.isCancelled, launched == generation, revision == credentialRevision else {
+                    guard !Task.isCancelled, launched == generation, revision == credentialRevision, !stopping else {
                         return .superseded
                     }
                     await refresh(credential, at: endpoint)

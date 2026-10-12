@@ -18,14 +18,16 @@ public enum RobotHealth {
         case .ready: return .ready
         case .checking: return .checking
         case .unavailable(let failure):
-            if let fallback = route.fallbackTargets.first(where: { connection($0, readiness) == .ready }) {
-                return .needsAttention(
-                    reason: "PRIMARY UNAVAILABLE",
-                    advice: failure.activitySentence + " I'll use \(fallback.provider.displayName) until the primary is available.",
-                    fix: .openConnections)
-            }
-            if route.fallbackTargets.contains(where: { connection($0, readiness) == .checking }) {
-                return .checking
+            for fallback in route.fallbackTargets {
+                switch connection(fallback, readiness) {
+                case .ready:
+                    return .needsAttention(
+                        reason: "PRIMARY UNAVAILABLE",
+                        advice: failure.activitySentence + " I'll use \(fallback.provider.displayName) until the primary is available.",
+                        fix: .openConnections)
+                case .checking: return .checking
+                case .unavailable: continue
+                }
             }
             return .blocked(
                 reason: "NO BRAIN AVAILABLE",

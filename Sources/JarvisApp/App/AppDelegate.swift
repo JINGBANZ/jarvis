@@ -263,6 +263,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let readinessSession = readinessStart.session
         composition.applyReadinessEffects(readinessStart.effects)
 
+        if let failure = brainRoute.credentialFailure(available: Set(brainKeys.keys)) {
+            jlog("Jarvis: can't start — no target in the route can coach: "
+                 + (failure.errorDescription ?? ""))
+            if wasRunning {
+                artifacts.sessionAudit?.record(.settingsChangeNotApplied)
+            }
+            composition.observeReadiness(
+                .brainPreparation(.blocked(.providerUnavailable(failure))),
+                for: readinessSession)
+            return false
+        }
+
         let grantedPermissions = Permissions.grantedReadinessPermissions()
         composition.observeReadiness(.permissions(granted: grantedPermissions), for: readinessSession)
         let missingPermissions = readinessConfiguration.requiredPermissions

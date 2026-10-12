@@ -17,7 +17,7 @@ public struct BrainTarget: Sendable, Hashable {
     public func credentialFailure(available: Set<Credential>) -> ProviderFailure? {
         guard let credential = provider.credential, !available.contains(credential) else { return nil }
         return ProviderFailure(
-            source: .brain(provider), stage: .process, category: .authentication,
+            source: .brain(provider), stage: .process, category: .missingCredential,
             disposition: .permanent, identity: .init(),
             message: "No \(credential.displayName) is saved. Add it in Settings → Connections.")
     }
