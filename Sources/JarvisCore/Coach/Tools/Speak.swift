@@ -4,23 +4,23 @@ public let speakToolName = "speak"
 
 public let speakTool = ToolDef(
     name: speakToolName,
-    description: "Show a coaching reply: up to 3 short overlay lines, one idea each, under 12 "
-        + "words. Call only when a reply is useful. Use detail for Markdown content required by a "
+    description: "Show one direct coaching hint in at most 36 words total. "
+        + "Call only when a reply is useful. Use detail for Markdown content required by a "
         + "loaded skill or a warranted explanation; otherwise null.",
     // Line breaks and the indentation after them are stripped, so no JSON string here may
     // contain a line break.
     parametersJSON: #"""
         {"type":"object","properties":{
-            "lines":{"type":"array","items":{"type":"string"}},
+            "hint":{"type":"string","description":"One direct, connected coaching hint; the box handles wrapping."},
             "detail":{"type":["string","null"],"description":"Markdown shown under the hint in the box. Follow loaded skill guidance; otherwise null unless an explanation is warranted."}
-        },"required":["lines","detail"],"additionalProperties":false}
+        },"required":["hint","detail"],"additionalProperties":false}
         """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
     guidance: tipStyle + "\n\n" + detailGuidance)
 
 private let tipStyle = """
     # Tip style
     Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
-    understand under pressure.
+    understand under pressure. Connect related sentences naturally.
 
     Follow a loaded skill's stage-specific delivery guidance when it applies. Otherwise:
     If "me" has not yet engaged with an approach — no attempt visible in the code, speech, or
@@ -43,10 +43,10 @@ private let tipStyle = """
 
 private let detailGuidance = """
     # Detail
-    The lines are the coaching. Keep the hint and its brief rationale there. Include detail when a
+    The hint is the coaching. Keep its brief rationale there. Include detail when a
     loaded skill calls for supporting content or an explanation is warranted; otherwise leave it null.
-    detail is Markdown shown under the hint in the persistent box. Use it for what a line cannot
-    hold and a loaded skill asks for, on that skill's own terms for when it applies.
+    detail is Markdown shown under the hint in the persistent box. Use it for supporting content
+    beyond the hint that a loaded skill asks for, on that skill's own terms for when it applies.
     Beyond that, write prose there only when the user asks you to explain, or is clearly lost:
     they ask why, they restate something wrongly, or
     they say they can't follow earlier advice. Silence or unchanged work is not confusion, and you

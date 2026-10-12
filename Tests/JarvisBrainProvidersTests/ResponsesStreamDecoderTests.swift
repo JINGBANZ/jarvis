@@ -10,7 +10,7 @@ import JarvisCore
     static let terminalResponse = #"""
     {"id":"resp_1","object":"response","status":"completed","incomplete_details":null,
      "output":[{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"},
-               {"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\"lines\":[\"Try a hash map.\"],\"detail\":null}"}],
+               {"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\"hint\":\"Try a hash map.\",\"detail\":null}"}],
      "usage":{"input_tokens":10,"input_tokens_details":{"cached_tokens":4},"output_tokens":7,"output_tokens_details":{"reasoning_tokens":3}}}
     """#
 
@@ -20,10 +20,10 @@ import JarvisCore
         .init(event: "response.output_item.added", data: #"{"type":"response.output_item.added","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[]}}"#),
         .init(event: "response.output_item.done", data: #"{"type":"response.output_item.done","output_index":0,"item":{"type":"reasoning","id":"rs_1","summary":[],"encrypted_content":"opaque"}}"#),
         .init(event: "response.output_item.added", data: #"{"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":""}}"#),
-        .init(event: "response.function_call_arguments.delta", data: #"{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"{\"lines\":[\"Try a ","sequence_number":5}"#),
-        .init(event: "response.function_call_arguments.delta", data: #"{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"hash map.\"],\"detail\":null}","sequence_number":6}"#),
-        .init(event: "response.function_call_arguments.done", data: #"{"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":1,"arguments":"{\"lines\":[\"Try a hash map.\"],\"detail\":null}"}"#),
-        .init(event: "response.output_item.done", data: #"{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\"lines\":[\"Try a hash map.\"],\"detail\":null}"}}"#),
+        .init(event: "response.function_call_arguments.delta", data: #"{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"{\"hint\":\"Try a ","sequence_number":5}"#),
+        .init(event: "response.function_call_arguments.delta", data: #"{"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":1,"delta":"hash map.\",\"detail\":null}","sequence_number":6}"#),
+        .init(event: "response.function_call_arguments.done", data: #"{"type":"response.function_call_arguments.done","item_id":"fc_1","output_index":1,"arguments":"{\"hint\":\"Try a hash map.\",\"detail\":null}"}"#),
+        .init(event: "response.output_item.done", data: #"{"type":"response.output_item.done","output_index":1,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\"hint\":\"Try a hash map.\",\"detail\":null}"}}"#),
         .init(event: "response.completed", data: #"{"type":"response.completed","sequence_number":9,"response":"# + terminalResponse + "}"),
     ]
 
@@ -39,13 +39,13 @@ import JarvisCore
     @Test func forwardsArgumentDeltasAndEndsWithTheTerminalResponse() throws {
         let (deltas, body) = try run(Self.log)
         #expect(deltas == [
-            ToolCallDelta(index: 0, name: "speak", arguments: #"{"lines":["Try a "#),
-            ToolCallDelta(index: 0, name: "speak", arguments: #"{"lines":["Try a hash map."],"detail":null}"#),
+            ToolCallDelta(index: 0, name: "speak", arguments: #"{"hint":"Try a "#),
+            ToolCallDelta(index: 0, name: "speak", arguments: #"{"hint":"Try a hash map.","detail":null}"#),
         ])
         let streamed = try wire.decode(body)
         let unstreamed = try wire.decode(Data(Self.terminalResponse.utf8))
         #expect(streamed.toolCalls == unstreamed.toolCalls)
-        #expect(streamed.toolCalls == [.speak(callId: "call_1", lines: ["Try a hash map."])])
+        #expect(streamed.toolCalls == [.speak(callId: "call_1", hint: "Try a hash map.")])
         #expect(streamed.rawToolCalls == unstreamed.rawToolCalls)
         #expect(streamed.incompleteReason == nil && unstreamed.incompleteReason == nil)
         // Re-serialized items carry their keys in any order; the provider re-parses them on replay.

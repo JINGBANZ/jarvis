@@ -9,7 +9,7 @@ private final class ProgressRecordingOverlay: OverlayRendering, @unchecked Senda
     enum Event: Equatable {
         case progress(BrainReplyProgress)
         case withdraw
-        case deliver(lines: [String], detail: String?)
+        case deliver(hint: String, detail: String?)
     }
 
     private let lock = NSLock()
@@ -19,16 +19,16 @@ private final class ProgressRecordingOverlay: OverlayRendering, @unchecked Senda
     var snapshots: [BrainReplyProgress] {
         events.compactMap { if case .progress(let snapshot) = $0 { snapshot } else { nil } }
     }
-    var delivered: [[String]] {
-        events.compactMap { if case .deliver(let lines, _) = $0 { lines } else { nil } }
+    var delivered: [String] {
+        events.compactMap { if case .deliver(let hint, _) = $0 { hint } else { nil } }
     }
 
     @MainActor var acceptsDetail: Bool { true }
 
-    func render(_ lines: [String]) {}
+    func render(_ hint: String) {}
 
-    @MainActor func deliver(_ lines: [String], detail: ReplyDetail?) -> ReplyDetail? {
-        lock.withLock { log.append(.deliver(lines: lines, detail: detail?.deliveredMarkdown)) }
+    @MainActor func deliver(_ hint: String, detail: ReplyDetail?) -> ReplyDetail? {
+        lock.withLock { log.append(.deliver(hint: hint, detail: detail?.deliveredMarkdown)) }
         return detail
     }
 
@@ -98,7 +98,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
 }
 
 @Suite struct CoachDriverStreamingTests {
-    private static let arguments = #"{"lines":["Sort by start.","Then merge overlaps."],"detail":"Keep the last interval as the cursor."}"#
+    private static let arguments = #"{"hint":"Sort by start. Then merge overlaps.","detail":"Keep the last interval as the cursor."}"#
     /// Every scalar-count prefix of the arguments, as a stream of deltas would leave them.
     private static let prefixes: [String] = {
         let scalars = Array(arguments.unicodeScalars)
@@ -107,7 +107,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
     }()
     /// What the speak reply's own prefixes scan to; coalescing decides which of them paint.
     private static let speakSnapshots = prefixes.compactMap(SpeakArgumentsScanner.progress(in:))
-    private static let linesClosed = String(arguments.prefix(#"{"lines":["Sort by start.","Then merge overlaps."],"detail":"Keep the"#.count))
+    private static let hintClosed = String(arguments.prefix(#"{"hint":"Sort by start. Then merge overlaps.","detail":"Keep the"#.count))
 
     private func reply(_ raw: RawToolCall..., incompleteReason: String? = nil) -> BrainResponse {
         BrainResponse(
@@ -153,12 +153,12 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
     /// Coalescing may drop intermediate snapshots, never reorder them.
     private func expectOrdered(_ snapshots: [BrainReplyProgress]) {
         for (earlier, later) in zip(snapshots, snapshots.dropFirst()) {
-            #expect(later.closedLines.starts(with: earlier.closedLines), "closed lines only grow")
-            #expect(!earlier.linesComplete || later.linesComplete, "lines never reopen")
+            #expect(later.hint.hasPrefix(earlier.hint), "completed hint only grow")
+            #expect(!earlier.hintComplete || later.hintComplete, "the hint never reopens")
         }
     }
 
-    @Test func streamedLinesReachTheOverlayInOrderBeforeDeliverFinalizesThem() async throws {
+    @Test func streamedHintReachesTheOverlayInOrderBeforeDeliverFinalizesIt() async throws {
         let overlay = ProgressRecordingOverlay()
         let brain = StreamingBrain(turns: [.init(prefixes: Self.prefixes, outcome: .reply(speak))])
         let (driver, _) = makeDriver(brain: brain, overlay: overlay)
@@ -171,19 +171,19 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(snapshots.allSatisfy { $0.hasText }, "nothing is painted before the first character")
         expectOrdered(snapshots)
         let last = try #require(snapshots.last)
-        #expect(last.closedLines == ["Sort by start.", "Then merge overlaps."])
-        #expect(last.linesComplete)
+        #expect(last.hint == "Sort by start. Then merge overlaps.")
+        #expect(last.hintComplete)
         #expect(last.detailMarkdown == "Keep the last interval as the cursor.")
-        #expect(events.last == .deliver(lines: ["Sort by start.", "Then merge overlaps."],
+        #expect(events.last == .deliver(hint: "Sort by start. Then merge overlaps.",
                                         detail: "Keep the last interval as the cursor."))
         #expect(!events.contains(.withdraw), "a delivered reply is never withdrawn")
         #expect(events.firstIndex { if case .deliver = $0 { true } else { false } } == events.count - 1)
     }
 
-    @Test func aFailureBeforeTheLinesCloseWithdrawsAndFails() async {
+    @Test func aFailureBeforeTheHintClosesWithdrawsAndFails() async {
         let overlay = ProgressRecordingOverlay()
         let brain = StreamingBrain(turns: [.init(
-            prefixes: [#"{"lines":["Sort by"#],
+            prefixes: [#"{"hint":"Sort by"#],
             outcome: .failure(URLError(.networkConnectionLost)))])
 
         guard case .failed(let outcome, _, _) = await runAttempt(.manualHint, brain: brain, overlay: overlay) else {
@@ -192,14 +192,14 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(outcome == .brainError)
         #expect(overlay.events.last == .withdraw)
         #expect(overlay.delivered.isEmpty)
-        #expect(overlay.snapshots.last?.openLine == "Sort by")
+        #expect(overlay.snapshots.last?.hint == "Sort by")
     }
 
-    @Test func aFailureAfterTheLinesCloseCommitsTheHintFromTheSnapshot() async throws {
+    @Test func aFailureAfterTheHintClosesCommitsTheHintFromTheSnapshot() async throws {
         let overlay = ProgressRecordingOverlay()
         let activity = RecordingActivity()
         let brain = StreamingBrain(turns: [
-            .init(prefixes: [Self.linesClosed], outcome: .failure(URLError(.timedOut))),
+            .init(prefixes: [Self.hintClosed], outcome: .failure(URLError(.timedOut))),
             .init(outcome: .reply(speak)),
         ])
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, activity: activity)
@@ -207,10 +207,10 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
         #expect(brain.calls.count == 1, "no fresh attempt follows a hint the user has read")
-        #expect(overlay.events.last == .deliver(lines: ["Sort by start.", "Then merge overlaps."], detail: "Keep the"))
+        #expect(overlay.events.last == .deliver(hint: "Sort by start. Then merge overlaps.", detail: "Keep the"))
         #expect(!overlay.events.contains(.withdraw))
         #expect(activity.events.contains {
-            if case .tip(let lines, let detail) = $0 { lines == ["Sort by start.", "Then merge overlaps."] && detail == "Keep the" } else { false }
+            if case .tip(let hint, let detail) = $0 { hint == "Sort by start. Then merge overlaps." && detail == "Keep the" } else { false }
         })
 
         // The committed turn replays the rebuilt call with the detail as read.
@@ -218,24 +218,37 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         let replayed = try #require(brain.calls[1].flatMap { $0.toolCalls ?? [] }.first { $0.name == speakToolName })
         let object = try #require(JSONSerialization.jsonObject(with: Data(replayed.argumentsJSON.utf8)) as? [String: Any])
-        #expect(object["lines"] as? [String] == ["Sort by start.", "Then merge overlaps."])
+        #expect(object["hint"] as? String == "Sort by start. Then merge overlaps.")
         #expect(object["detail"] as? String == "Keep the")
         #expect(replayed.id.hasPrefix("runner_"))
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == replayed.id })
     }
 
+    @Test func aFailureAtTheHintsClosingQuoteKeepsTheHintWithoutDetail() async {
+        let overlay = ProgressRecordingOverlay()
+        let arguments = #"{"hint":"Check equality."}"#
+        let brain = StreamingBrain(turns: [.init(
+            prefixes: [String(arguments.dropLast())], outcome: .failure(URLError(.timedOut)))])
+
+        guard case .completed(.spoke) = await runAttempt(.turnEnd, brain: brain, overlay: overlay) else {
+            Issue.record("expected the completed hint to survive the interruption"); return
+        }
+        #expect(overlay.events.last == .deliver(hint: "Check equality.", detail: nil))
+        #expect(brain.calls.count == 1)
+    }
+
     /// Claude's `stop_reason: refusal` reaches the runner as a `.rejected` failure: the provider
-    /// stopped the reply on purpose, so its closed lines are withdrawn, nothing is committed, and a
+    /// stopped the reply on purpose, so its completed hint is withdrawn, nothing is committed, and a
     /// fresh attempt follows as after any failure. The target is OpenAI because the runner only
     /// reads the category.
-    @Test func aRejectedReplyAfterTheLinesCloseIsWithdrawnAndFails() async throws {
+    @Test func aRejectedReplyAfterTheHintClosesIsWithdrawnAndFails() async throws {
         let overlay = ProgressRecordingOverlay()
         let activity = RecordingActivity()
         let refusal = ProviderFailure(
             source: .brain(.openAI), stage: .response, category: .rejected, disposition: .temporary,
             identity: .init(errorType: "refusal", errorCode: "harmful_content"), message: "")
         let brain = StreamingBrain(turns: [
-            .init(prefixes: [Self.linesClosed], outcome: .failure(refusal)),
+            .init(prefixes: [Self.hintClosed], outcome: .failure(refusal)),
             .init(prefixes: Self.prefixes, outcome: .reply(speak)),
         ])
         let (driver, _) = makeDriver(brain: brain, overlay: overlay, activity: activity)
@@ -245,26 +258,26 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(brain.calls.count == 2, "a fresh attempt follows the refusal")
         let events = overlay.events
         let withdraw = try #require(events.firstIndex(of: .withdraw))
-        #expect(events[..<withdraw].contains { if case .progress(let snapshot) = $0 { snapshot.linesComplete } else { false } },
-                "the withdrawn lines had closed")
+        #expect(events[..<withdraw].contains { if case .progress(let snapshot) = $0 { snapshot.hintComplete } else { false } },
+                "the withdrawn hint had closed")
         #expect(!brain.calls[1].contains { ($0.toolCalls ?? []).contains { $0.name == speakToolName } },
                 "nothing from the refused reply was committed")
-        #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
+        #expect(overlay.delivered == ["Sort by start. Then merge overlaps."])
         #expect(activity.events.filter { if case .tip = $0 { true } else { false } }.count == 1)
     }
 
     /// OpenAI's safety stop ends a streamed reply `incomplete` with `content_filter`; through the real
-    /// accessor it arrives as a rejection, so the closed lines are withdrawn, not kept.
+    /// accessor it arrives as a rejection, so the completed hint is withdrawn, not kept.
     @Test func aStreamedReplyTheContentFilterStopsAfterItsLinesCloseIsWithdrawn() async throws {
         let events = #"""
         event: response.output_item.added
         data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":""}}
 
         event: response.function_call_arguments.delta
-        data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"lines\":[\"Sort by start.\",\"Then merge overlaps.\"],\"detail\":\"Keep the"}
+        data: {"type":"response.function_call_arguments.delta","item_id":"fc_1","output_index":0,"delta":"{\"hint\":\"Sort by start. Then merge overlaps.\",\"detail\":\"Keep the"}
 
         event: response.incomplete
-        data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\"lines\":[\"Sort by start.\",\"Then merge overlaps.\"],\"detail\":\"Keep the"}]}}
+        data: {"type":"response.incomplete","response":{"status":"incomplete","incomplete_details":{"reason":"content_filter"},"output":[{"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\"hint\":\"Sort by start. Then merge overlaps.\",\"detail\":\"Keep the"}]}}
 
 
         """#
@@ -286,22 +299,22 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(outcome == .brainError)
         #expect(failure.category == .rejected)
         #expect(failure.identity.errorCode == "content_filter")
-        #expect(overlay.snapshots.last?.linesComplete == true, "the lines had reached the overlay")
+        #expect(overlay.snapshots.last?.hintComplete == true, "the hint had reached the overlay")
         #expect(overlay.delivered.isEmpty)
         #expect(overlay.events.last == .withdraw)
     }
 
-    @Test func anIncompleteReplyAfterTheLinesCloseCommitsTheHint() async {
+    @Test func anIncompleteReplyAfterTheHintClosesCommitsTheHint() async {
         let overlay = ProgressRecordingOverlay()
         let brain = StreamingBrain(turns: [.init(
-            prefixes: [Self.linesClosed],
+            prefixes: [Self.hintClosed],
             outcome: .reply(reply(incompleteReason: "max_tokens")))])
 
         guard case .completed(let outcome) = await runAttempt(.turnEnd, brain: brain, overlay: overlay) else {
-            Issue.record("expected the closed lines to be spoken"); return
+            Issue.record("expected the completed hint to be spoken"); return
         }
         #expect(outcome == .spoke)
-        #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
+        #expect(overlay.delivered == ["Sort by start. Then merge overlaps."])
     }
 
     /// A cut inside a diagram fence commits the detail as the box showed it: the text before the
@@ -309,7 +322,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
     @Test func anIncompleteReplyCutInsideADiagramCommitsNoDiagram() async throws {
         let overlay = ProgressRecordingOverlay()
         let activity = RecordingActivity()
-        let cut = #"{"lines":["Sort by start.","Then merge overlaps."],"detail":"Sketch it.\n\n```mermaid\nflowchart LR\nclient[Client] --> api[API]\napi --> "#
+        let cut = #"{"hint":"Sort by start. Then merge overlaps.","detail":"Sketch it.\n\n```mermaid\nflowchart LR\nclient[Client] --> api[API]\napi --> "#
         let brain = StreamingBrain(turns: [
             .init(prefixes: [cut], outcome: .reply(reply(incompleteReason: "max_tokens"))),
             .init(outcome: .reply(speak)),
@@ -318,9 +331,9 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
-        #expect(overlay.events.last == .deliver(lines: ["Sort by start.", "Then merge overlaps."], detail: "Sketch it."))
+        #expect(overlay.events.last == .deliver(hint: "Sort by start. Then merge overlaps.", detail: "Sketch it."))
         #expect(activity.events.contains {
-            if case .tip(let lines, let detail) = $0 { lines == ["Sort by start.", "Then merge overlaps."] && detail == "Sketch it." } else { false }
+            if case .tip(let hint, let detail) = $0 { hint == "Sort by start. Then merge overlaps." && detail == "Sketch it." } else { false }
         })
 
         transcript.append(.init(speaker: .them, text: "And the complexity?", at: 101))
@@ -334,7 +347,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
     func anInterruptedCodeBlockIsOmittedFromDeliveryActivityAndHistory(timeout: Bool) async throws {
         let overlay = ProgressRecordingOverlay()
         let activity = RecordingActivity()
-        let cut = #"{"lines":["Sort by start.","Then merge overlaps."],"detail":"Try this.\n\n```python\na = 1\nb = "#
+        let cut = #"{"hint":"Sort by start. Then merge overlaps.","detail":"Try this.\n\n```python\na = 1\nb = "#
         let brain = StreamingBrain(turns: [
             .init(prefixes: [cut], outcome: timeout
                 ? .failure(URLError(.timedOut)) : .reply(reply(incompleteReason: "max_tokens"))),
@@ -345,7 +358,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(await driver.handleTrigger(.manualCode) == .spoke)
         #expect(brain.calls.count == 1)
         let detail = "Try this.\n\nCode was interrupted. Press Show code to request it again."
-        #expect(overlay.events.last == .deliver(lines: ["Sort by start.", "Then merge overlaps."], detail: detail))
+        #expect(overlay.events.last == .deliver(hint: "Sort by start. Then merge overlaps.", detail: detail))
         #expect(activity.events.contains {
             if case .tip(_, let shown) = $0 { shown == detail } else { false }
         })
@@ -359,38 +372,38 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
 
     @Test func aCompletedCodeBlockSurvivesATransportFailure() async {
         let overlay = ProgressRecordingOverlay()
-        let cut = #"{"lines":["Sort by start."],"detail":"```python\na = 1\n```"#
+        let cut = #"{"hint":"Sort by start.","detail":"```python\na = 1\n```"#
         let brain = StreamingBrain(turns: [.init(prefixes: [cut], outcome: .failure(URLError(.timedOut)))])
 
         guard case .completed(let outcome) = await runAttempt(.manualCode, brain: brain, overlay: overlay) else {
-            Issue.record("expected the closed lines to be spoken"); return
+            Issue.record("expected the completed hint to be spoken"); return
         }
         #expect(outcome == .spoke)
-        #expect(overlay.events.last == .deliver(lines: ["Sort by start."], detail: "```python\na = 1\n```"))
+        #expect(overlay.events.last == .deliver(hint: "Sort by start.", detail: "```python\na = 1\n```"))
     }
 
-    /// An array that closed empty showed no hint, so there is nothing to keep: the attempt fails
+    /// A hint that closed blank showed no hint, so there is nothing to keep: the attempt fails
     /// like any other and the route is not credited.
     @Test func anEmptyLinesArrayIsNeverCommittedFromTheSnapshot() async {
-        let emptyLines = #"{"lines":[],"detail":"Only a detail"#
+        let blankHint = #"{"hint":"","detail":"Only a detail"#
         for outcome in [StreamingBrain.Outcome.failure(URLError(.timedOut)),
                         .reply(reply(incompleteReason: "max_tokens"))] {
             let overlay = ProgressRecordingOverlay()
-            let brain = StreamingBrain(turns: [.init(prefixes: [emptyLines], outcome: outcome)])
+            let brain = StreamingBrain(turns: [.init(prefixes: [blankHint], outcome: outcome)])
 
             guard case .failed = await runAttempt(.turnEnd, brain: brain, overlay: overlay) else {
-                Issue.record("expected the empty array to fail the attempt"); return
+                Issue.record("expected the blank hint to fail the attempt"); return
             }
             #expect(overlay.delivered.isEmpty)
-            #expect(overlay.snapshots.last?.linesComplete == true, "the detail had opened a live entry")
+            #expect(overlay.snapshots.last?.hintComplete == true, "the detail had opened a live entry")
             #expect(overlay.events.last == .withdraw)
         }
     }
 
-    @Test func anIncompleteReplyBeforeTheLinesCloseWithdrawsAndFails() async {
+    @Test func anIncompleteReplyBeforeTheHintClosesWithdrawsAndFails() async {
         let overlay = ProgressRecordingOverlay()
         let brain = StreamingBrain(turns: [.init(
-            prefixes: [#"{"lines":["Sort by start.","Then"#],
+            prefixes: [#"{"hint":"Sort by start. Then"#],
             outcome: .reply(reply(incompleteReason: "max_tokens")))])
 
         guard case .failed(let outcome, _, _) = await runAttempt(.turnEnd, brain: brain, overlay: overlay) else {
@@ -427,14 +440,14 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(!overlay.snapshots.isEmpty)
         #expect(overlay.snapshots.allSatisfy(Self.speakSnapshots.contains),
                 "only the speak reply reached the overlay")
-        #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
+        #expect(overlay.delivered == ["Sort by start. Then merge overlaps."])
     }
 
-    /// Claude without strict tools can double-encode `lines`: the scanner shows nothing early and
+    /// A provider without strict tools can return an array for `hint`: the scanner shows nothing early and
     /// the runner's schema re-ask handles the completed call.
     @Test func doubleEncodedLinesShowNothingBeforeTheReask() async {
         let overlay = ProgressRecordingOverlay()
-        let malformed = #"{"lines":"[\"a\"]"}"#
+        let malformed = #"{"hint":["a"]}"#
         let brain = StreamingBrain(turns: [
             .init(prefixes: [String(malformed.prefix(12)), malformed],
                   outcome: .reply(reply(RawToolCall(id: "m1", name: speakToolName, argumentsJSON: malformed)))),
@@ -447,15 +460,15 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(brain.calls.count == 2)
         #expect(!overlay.events.contains(.withdraw))
         #expect(overlay.snapshots.allSatisfy(Self.speakSnapshots.contains))
-        #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
+        #expect(overlay.delivered == ["Sort by start. Then merge overlaps."])
     }
 
     /// Text that streamed leaves the overlay when the completed call's arguments fail the parser.
     @Test func aParseFailureWithdrawsTheTextItShowed() async throws {
         let overlay = ProgressRecordingOverlay()
         let brain = StreamingBrain(turns: [
-            .init(prefixes: [#"{"lines":["Sort by"#],
-                  outcome: .reply(reply(RawToolCall(id: "m1", name: speakToolName, argumentsJSON: #"{"lines":["  "]}"#)))),
+            .init(prefixes: [#"{"hint":"Sort by"#],
+                  outcome: .reply(reply(RawToolCall(id: "m1", name: speakToolName, argumentsJSON: #"{"hint":"  "}"#)))),
             .init(prefixes: Self.prefixes, outcome: .reply(speak)),
         ])
         let (driver, _) = makeDriver(brain: brain, overlay: overlay)
@@ -465,10 +478,10 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         #expect(brain.calls.count == 2)
         let events = overlay.events
         let withdraw = try #require(events.firstIndex(of: .withdraw))
-        #expect(events[..<withdraw].contains { if case .progress(let snapshot) = $0 { snapshot.openLine == "Sort by" } else { false } },
+        #expect(events[..<withdraw].contains { if case .progress(let snapshot) = $0 { snapshot.hint == "Sort by" } else { false } },
                 "the withdrawn text had been on screen")
         #expect(events[(withdraw + 1)...].allSatisfy { $0 != .withdraw })
-        #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
+        #expect(overlay.delivered == ["Sort by start. Then merge overlaps."])
     }
 
     @Test func aCallAPressMayNotMakeShowsNothing() async {
@@ -484,12 +497,12 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
 
         #expect(!overlay.events.contains(.withdraw))
         #expect(overlay.snapshots.allSatisfy(Self.speakSnapshots.contains))
-        #expect(overlay.delivered == [["Sort by start.", "Then merge overlaps."]])
+        #expect(overlay.delivered == ["Sort by start. Then merge overlaps."])
     }
 
     @Test func cancellationMidStreamWithdrawsTheLiveReply() async throws {
         let overlay = ProgressRecordingOverlay()
-        let brain = StreamingBrain(turns: [.init(prefixes: [#"{"lines":["Sort by"#], outcome: .hang)])
+        let brain = StreamingBrain(turns: [.init(prefixes: [#"{"hint":"Sort by"#], outcome: .hang)])
         let (driver, _) = makeDriver(brain: brain, overlay: overlay)
 
         let attempt = Task {
@@ -498,7 +511,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         }
         var updates = overlay.progressUpdates.stream.makeAsyncIterator()
         _ = await updates.next()
-        #expect(overlay.snapshots.last?.openLine == "Sort by", "the live reply was on screen")
+        #expect(overlay.snapshots.last?.hint == "Sort by", "the live reply was on screen")
         attempt.cancel()
 
         #expect(await attempt.value == .cancelled)

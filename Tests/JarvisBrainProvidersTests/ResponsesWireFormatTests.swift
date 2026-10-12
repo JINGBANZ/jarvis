@@ -35,7 +35,7 @@ import JarvisCore
         #expect(try body([.user("hi")])["parallel_tool_calls"] as? Bool == false)
     }
 
-    /// Models write arguments in schema order, so `lines` must reach the wire before `detail`.
+    /// Models write arguments in schema order, so `hint` must reach the wire before `detail`.
     @Test func toolSchemasKeepTheirAuthoredKeyOrder() throws {
         let wire = ResponsesWireFormat(
             model: "gpt-5.5", reasoningEffort: "low", maxOutputTokens: 2_048, store: true, stream: false)
@@ -43,13 +43,13 @@ import JarvisCore
         let data = try wire.encode(messages: [.user("hi")], tools: tools, toolChoice: .auto)
         let text = String(decoding: data, as: UTF8.self)
         #expect(text.contains(speakTool.parametersJSON))
-        let lines = try #require(text.range(of: #""lines""#))
+        let hint = try #require(text.range(of: #""hint""#))
         let detail = try #require(text.range(of: #""detail""#))
-        #expect(lines.lowerBound < detail.lowerBound)
+        #expect(hint.lowerBound < detail.lowerBound)
         let body = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         let declared = try #require(body["tools"] as? [[String: Any]])
         #expect(declared.compactMap { $0["name"] as? String } == tools.map(\.name))
         let speak = declared[1]["parameters"] as? [String: Any]
-        #expect(speak?["required"] as? [String] == ["lines", "detail"])
+        #expect(speak?["required"] as? [String] == ["hint", "detail"])
     }
 }

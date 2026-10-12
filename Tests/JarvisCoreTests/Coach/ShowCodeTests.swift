@@ -98,7 +98,7 @@ import Testing
     }
 
     private func speak(detail: String?) -> BrainResponse {
-        var arguments: [String: Any] = ["lines": ["Start with the window state."]]
+        var arguments: [String: Any] = ["hint":"Start with the window state."]
         arguments["detail"] = detail as Any? ?? NSNull()
         let json = String(decoding: try! JSONSerialization.data(withJSONObject: arguments), as: UTF8.self)
         return .init(toolCalls: [ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: json)!],

@@ -77,9 +77,9 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(
                     id: "p1", name: "call_tool",
                     argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"rate limiter\"}"}"#)]),
-            .init(toolCalls: [.speak(callId: "s1", lines: ["Use a token bucket."])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "Use a token bucket.")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"lines":["Use a token bucket."]}"#)]),
+                                             argumentsJSON: #"{"hint":"Use a token bucket."}"#)]),
         ])
         let prepMaterial = FakePrepMaterialSearch(results: [
             PrepMaterialSearchResult(sourceDisplayName: "system-design.md", text: "token bucket notes"),
@@ -145,9 +145,9 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
                     id: "p1", name: "call_tool",
                     argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"rate limiter\"}"}"#)]),
             nil,
-            .init(toolCalls: [.speak(callId: "s1", lines: ["done"])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "done")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"lines":["done"]}"#)]),
+                                             argumentsJSON: #"{"hint":"done"}"#)]),
         ])
         let screen = FakeScreen(recognizedText: "visible code")
         let prepMaterial = FakePrepMaterialSearch(results: [
@@ -175,9 +175,9 @@ final class FakePrepMaterialSearch: PrepMaterialSearching, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(id: "p2", name: "call_tool",
                                              argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"B\"}"}"#)]),
             nil,
-            .init(toolCalls: [.speak(callId: "s1", lines: ["done"])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "done")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"lines":["done"]}"#)]),
+                                             argumentsJSON: #"{"hint":"done"}"#)]),
         ])
         let prepMaterial = FakePrepMaterialSearch()
         prepMaterial.resultsByQuery = [

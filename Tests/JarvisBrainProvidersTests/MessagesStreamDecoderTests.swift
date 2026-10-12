@@ -10,7 +10,7 @@ import JarvisCore
     static let unstreamed = #"""
     {"id":"msg_01","type":"message","role":"assistant","model":"claude-opus-5",
      "content":[{"type":"thinking","thinking":"","signature":"EmcKZQER"},
-                {"type":"tool_use","id":"toolu_01","name":"speak","input":{"lines":["Try a hash map."],"detail":null}}],
+                {"type":"tool_use","id":"toolu_01","name":"speak","input":{"hint":"Try a hash map.","detail":null}}],
      "stop_reason":"tool_use","stop_sequence":null,
      "usage":{"input_tokens":20,"cache_read_input_tokens":3360,"cache_creation_input_tokens":0,"output_tokens":60}}
     """#
@@ -24,8 +24,8 @@ import JarvisCore
         .init(event: "content_block_stop", data: #"{"type":"content_block_stop","index":0}"#),
         .init(event: "content_block_start", data: #"{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"toolu_01","name":"speak","input":{}}}"#),
         .init(event: "content_block_delta", data: #"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":""}}"#),
-        .init(event: "content_block_delta", data: #"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"lines\":[\"Try a"}}"#),
-        .init(event: "content_block_delta", data: #"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":" hash map.\"],"}}"#),
+        .init(event: "content_block_delta", data: #"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"hint\":\"Try a"}}"#),
+        .init(event: "content_block_delta", data: #"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":" hash map.\","}}"#),
         .init(event: "content_block_delta", data: #"{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\"detail\":null}"}}"#),
         .init(event: "content_block_stop", data: #"{"type":"content_block_stop","index":1}"#),
         .init(event: "message_delta", data: #"{"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":60}}"#),
@@ -45,16 +45,16 @@ import JarvisCore
         let (deltas, body) = try run(Self.log)
         #expect(deltas == [
             ToolCallDelta(index: 0, name: "speak", arguments: ""),
-            ToolCallDelta(index: 0, name: "speak", arguments: #"{"lines":["Try a"#),
-            ToolCallDelta(index: 0, name: "speak", arguments: #"{"lines":["Try a hash map."],"#),
-            ToolCallDelta(index: 0, name: "speak", arguments: #"{"lines":["Try a hash map."],"detail":null}"#),
+            ToolCallDelta(index: 0, name: "speak", arguments: #"{"hint":"Try a"#),
+            ToolCallDelta(index: 0, name: "speak", arguments: #"{"hint":"Try a hash map.","#),
+            ToolCallDelta(index: 0, name: "speak", arguments: #"{"hint":"Try a hash map.","detail":null}"#),
         ])
         let recorded = try JSONSerialization.jsonObject(with: body) as? NSDictionary
         let original = try JSONSerialization.jsonObject(with: Data(Self.unstreamed.utf8)) as? NSDictionary
         #expect(recorded == original)
         let streamed = try wire.decode(body)
         let expected = try wire.decode(Data(Self.unstreamed.utf8))
-        #expect(streamed.toolCalls == [.speak(callId: "toolu_01", lines: ["Try a hash map."])])
+        #expect(streamed.toolCalls == [.speak(callId: "toolu_01", hint: "Try a hash map.")])
         #expect(streamed.rawToolCalls == expected.rawToolCalls)
         #expect(streamed.outputItemsJSON.count == 2)
         #expect(streamed.outputItemsJSON[0].contains(#""signature":"EmcKZQER""#))

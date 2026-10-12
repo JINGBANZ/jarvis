@@ -9,14 +9,15 @@ import Testing
         defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
         let detail = "The caller needs a result.\n\n```python\nif ready:\n    return values\n```"
-        evidence.record(.tip(lines: ["Return the values."], detail: detail))
+        evidence.record(.tip(hint: "Return the values.", detail: detail))
         _ = await evidence.close()
         let live = log.attach { _ in }
         let script = try #require(live.rows.first)
         let object = try #require(try JSONSerialization.jsonObject(
             with: Data(script.dropFirst("appendRow(".count).dropLast(2).utf8)) as? [String: Any])
         let response = try #require(object["response"] as? [String: Any])
-        #expect(response["lines"] as? [String] == ["Return the values."])
+        #expect(response["hint"] as? String == "Return the values.")
+        #expect(response["lines"] == nil)
         #expect(response["detail"] as? String == detail)
 
         let session = SessionStore.Session(id: "2026-09-10_00-00-00_abcd", label: "test", url: dir,
@@ -24,6 +25,7 @@ import Testing
         let store = SessionStore(base: dir.deletingLastPathComponent(), current: nil)
         let reloaded = try #require(store.entries(for: session).first?.0)
         #expect(reloaded.response?.detail == detail)
+        #expect(reloaded.response?.hint == "Return the values.")
         #expect(reloaded.response?.explanation == nil)
         #expect(reloaded.response?.code == nil)
         #expect(reloaded.message.contains("\n\nDetail\n"))
@@ -42,7 +44,7 @@ import Testing
 
     @Test func exportsKeepSectionsIndentationAndLiteralMarkup() throws {
         let response = ActivityResponse(
-            lines: ["Inspect <input>."],
+            hint: "Inspect <input>.",
             detail: "Keep <tags> literal.\n\n```html\n  <script>literal()</script>\n```")
         let entry = ActivityLog.Entry(time: "00:00", message: response.message, imageFile: nil,
                                       response: response)
@@ -64,6 +66,18 @@ import Testing
         #expect(html.contains("<h3>Detail</h3>"))
         #expect(html.contains("&lt;script&gt;literal()&lt;/script&gt;"))
         #expect(!html.contains("<script>"))
+    }
+
+    @Test func captionRowsDecodeToOneHintAndEncodeOnlyTheNewShape() throws {
+        let response = try JSONDecoder().decode(ActivityResponse.self, from: Data(
+            #"{"lines":["Use values().","Sort before comparing."],"detail":"Keep this detail."}"#.utf8))
+        #expect(response.hint == "Use values(). Sort before comparing.")
+        #expect(response.detail == "Keep this detail.")
+        let data = try JSONEncoder().encode(response)
+        let object = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        #expect(object["hint"] as? String == response.hint)
+        #expect(object["lines"] == nil)
+        #expect(try JSONDecoder().decode(ActivityResponse.self, from: data) == response)
     }
 
     @Test func aRowWrittenBeforeTheDetailBoxStillExportsItsOwnSections() throws {

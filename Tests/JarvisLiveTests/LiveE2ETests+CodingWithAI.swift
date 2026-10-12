@@ -27,9 +27,8 @@ extension LiveE2ETests {
             let tip = evidence.rows(inChain: chain).last { $0.kind == "tip" }
             results.check("C28", [
                 (chain.last?.isCommitted == true, "\(label) committed a reply"),
-                (tip?.response?.lines.contains {
-                    !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                } == true, "\(label) delivered hint text"),
+                (tip?.response?.hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
+                 "\(label) delivered hint text"),
                 (tip.map { !Self.carriesProtocolText($0.message) } ?? false,
                  "\(label) delivered no protocol text"),
             ])

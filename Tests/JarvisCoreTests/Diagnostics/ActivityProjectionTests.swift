@@ -8,7 +8,7 @@ import Testing
         let event = SessionEvent(
             sessionID: UUID(),
             detail: .activity(ActivityAuditEvent(
-                presentation: .tip(lines: ["one", "two"]),
+                presentation: .tip(hint: "one two"),
                 date: occurred)))
 
         #expect(event.kind == .activity)
@@ -41,7 +41,7 @@ import Testing
 
         let heardAt = Date(timeIntervalSince1970: 1_755_000_042)
         evidence.record(.heard(speaker: .them, text: "what's the tradeoff?"), at: heardAt)
-        evidence.record(.tip(lines: ["name the tradeoff"]))
+        evidence.record(.tip(hint: "name the tradeoff"))
         #expect(await evidence.close() == .complete)
 
         let rows = projection.attach { _ in }.rows
@@ -84,7 +84,7 @@ import Testing
 
         evidence.record(.manualHint(prompt: "unblock me"))
         evidence.record(.screenViewFailed)
-        evidence.record(.tip(lines: ["say the number"]))
+        evidence.record(.tip(hint: "say the number"))
         #expect(await evidence.close() == .complete)
 
         let snapshot = activityLog.attach { _ in }
@@ -139,7 +139,7 @@ import Testing
 
         evidence.record(
             .screenViewed(imageBase64JPEG: String(repeating: "A", count: 4_096)))
-        evidence.record(.tip(lines: ["admitted after the oversize row"]))
+        evidence.record(.tip(hint: "admitted after the oversize row"))
         #expect(await evidence.close() == .partial)
 
         let jsonl = try String(
@@ -170,8 +170,8 @@ import Testing
         let snapshot = projection.attach { js in pushedLock.withLock { pushed.append(js) } }
         #expect(snapshot.evidenceIsComplete)
         evidence.record(.screenViewed(imageBase64JPEG: String(repeating: "A", count: 4_096)))
-        evidence.record(.tip(lines: ["first row after the loss"]))
-        evidence.record(.tip(lines: ["second row after the loss"]))
+        evidence.record(.tip(hint: "first row after the loss"))
+        evidence.record(.tip(hint: "second row after the loss"))
         #expect(await evidence.close() == .partial)
 
         let scripts = pushedLock.withLock { pushed }
@@ -190,7 +190,7 @@ import Testing
         var pushed: [String] = []
         _ = projection.attach { js in pushedLock.withLock { pushed.append(js) } }
 
-        evidence.record(.tip(lines: ["a clean session"]))
+        evidence.record(.tip(hint: "a clean session"))
         #expect(await evidence.close() == .complete)
 
         #expect(pushedLock.withLock { pushed }.allSatisfy { !$0.contains("setEvidence(") })
@@ -204,7 +204,7 @@ import Testing
         defer { projection.disable() }
         _ = projection.attach { _ in }
 
-        evidence.record(.tip(lines: ["the last row of a doomed session"]))
+        evidence.record(.tip(hint: "the last row of a doomed session"))
         evidence.abandon()
         #expect(await evidence.close() == .partial)
 
@@ -274,7 +274,7 @@ import Testing
         writer.releaseOpen()
         #expect(await sessionA.close() == .partial)
 
-        sessionB.record(.tip(lines: ["the replacement session is alive"]))
+        sessionB.record(.tip(hint: "the replacement session is alive"))
         #expect(await sessionB.close() == .complete)
 
         let rowsB = try String(
@@ -308,7 +308,7 @@ import Testing
         projection.enable(directory: second, session: sessionB.sessionID)
         #expect(await sessionA.close() == .partial)
 
-        sessionB.record(.tip(lines: ["healthy replacement session"]))
+        sessionB.record(.tip(hint: "healthy replacement session"))
         #expect(await sessionB.close() == .complete)
         #expect(projection.attach { _ in }.evidenceIsComplete)
     }
@@ -323,7 +323,7 @@ import Testing
         let (projection, evidence) = ActivityLog.recordingSession(in: directory)
         defer { projection.disable() }
 
-        evidence.record(.tip(lines: ["before stop"]))
+        evidence.record(.tip(hint: "before stop"))
         evidence.record(.sessionEnded(reason: .stoppedByUser))
         evidence.record(.stayedSilent)
         #expect(await evidence.close() == .complete)

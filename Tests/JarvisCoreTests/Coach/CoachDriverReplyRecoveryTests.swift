@@ -54,7 +54,7 @@ import Testing
     }
 
     private var speak: BrainResponse {
-        reply(call("speak", id: "s1", arguments: #"{"lines":["Start from the read path."]}"#))
+        reply(call("speak", id: "s1", arguments: #"{"hint":"Start from the read path."}"#))
     }
 
     private func toolResult(_ id: String, in request: [ChatMessage]) -> ChatMessage? {
@@ -76,7 +76,7 @@ import Testing
         let answer = try #require(second.firstIndex { $0.role == .tool && $0.toolCallId == "q1" })
         #expect(second[answer].text == JarvisPrompts.Coach.notPermittedOnShortcut(name))
         #expect(second[answer - 1].toolCalls?.map(\.id) == ["q1"])
-        #expect(overlay.rendered == [["Start from the read path."]])
+        #expect(overlay.rendered == ["Start from the read path."])
     }
 
     @Test func aPressWithProseBesideACallItMayNotMakeIsStillAskedAgain() async throws {
@@ -89,7 +89,7 @@ import Testing
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(brain.calls.count == 2)
-        #expect(overlay.rendered == [["Start from the read path."]])
+        #expect(overlay.rendered == ["Start from the read path."])
 
         transcript.append(.init(speaker: .them, text: "Walk me through the complexity.", at: 101))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
@@ -99,7 +99,7 @@ import Testing
         let delivered = try #require(replayed.toolCalls?.first)
         let arguments = try #require(
             JSONSerialization.jsonObject(with: Data(delivered.argumentsJSON.utf8)) as? [String: Any])
-        #expect(arguments["lines"] as? [String] == ["Start from the read path."])
+        #expect(arguments["hint"] as? String == "Start from the read path.")
         #expect(toolResult(delivered.id, in: followUp)?.text == JarvisPrompts.Coach.tipShown())
         #expect(!followUp.contains { $0.toolCalls?.contains { $0.name == "stay_silent" } == true })
     }
@@ -132,7 +132,7 @@ import Testing
         #expect(second.contains {
             $0.role == .user && $0.text == JarvisPrompts.Coach.replyMustCallSpeak
         })
-        #expect(overlay.rendered == [["Start from the read path."]])
+        #expect(overlay.rendered == ["Start from the read path."])
     }
 
     @Test func aRefusedProseReplyLeavesNoTraceInHistory() async throws {
@@ -160,7 +160,7 @@ import Testing
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(brain.calls.count == 2)
-        #expect(overlay.rendered == [["Name the invariant."]])
+        #expect(overlay.rendered == ["Name the invariant."])
     }
 
     @Test func anAutomaticTurnWhoseReplyIsOnlyProseStillFails() async {
@@ -173,10 +173,10 @@ import Testing
         #expect(brain.calls.count == 1)
     }
 
-    /// Claude without strict tools can double-encode `lines` as a JSON string.
+    /// A provider without strict tools can return an array instead of a hint string.
     @Test func aCallWhoseArgumentsDoNotParseIsAnsweredWithItsSchema() async throws {
         let brain = ScriptedBrain(script: [
-            reply(call("speak", id: "m1", arguments: #"{"lines":"[\"a\"]"}"#)),
+            reply(call("speak", id: "m1", arguments: #"{"hint":["a"]}"#)),
             speak,
         ])
         let overlay = FakeOverlay()
@@ -188,15 +188,15 @@ import Testing
         let answer = try #require(toolResult("m1", in: brain.calls[1]))
         #expect(answer.text?.contains("did not match its schema") == true)
         #expect(answer.text?.contains(speakTool.parametersJSON) == true)
-        #expect(overlay.rendered == [["Start from the read path."]])
+        #expect(overlay.rendered == ["Start from the read path."])
     }
 
     private var parameterMarkupArguments: String {
-        #"{"lines":"\n<parameter name=\"detail\">Explain the queue invariant.\n"}"#
+        #"{"hint":["\n<parameter name=\"detail\">Explain the queue invariant.\n"]}"#
     }
 
     @Test(arguments: [TriggerReason.turnEnd, .manualHint])
-    func parameterMarkupInLinesRequiresAValidReplacementBeforeRendering(_ reason: TriggerReason) async throws {
+    func parameterMarkupInAnArrayRequiresAValidReplacementBeforeRendering(_ reason: TriggerReason) async throws {
         let brain = ScriptedBrain(script: [
             reply(call("speak", id: "malformed", arguments: parameterMarkupArguments)),
             speak,
@@ -215,7 +215,7 @@ import Testing
         #expect(continuation.contains {
             $0.toolCalls?.contains { $0.id == "malformed" && $0.argumentsJSON == parameterMarkupArguments } == true
         })
-        #expect(overlay.rendered == [["Start from the read path."]])
+        #expect(overlay.rendered == ["Start from the read path."])
     }
 
     @Test(arguments: [TriggerReason.turnEnd, .manualHint])
@@ -252,7 +252,7 @@ import Testing
     @Test func anExtraParallelCallIsAnsweredAsNotExecuted() async throws {
         let brain = ScriptedBrain(script: [
             reply(call("capture_screen", id: "c1"),
-                  call("speak", id: "s0", arguments: #"{"lines":["Too early."]}"#)),
+                  call("speak", id: "s0", arguments: #"{"hint":"Too early."}"#)),
             speak,
         ])
         let screen = FakeScreen()
@@ -266,12 +266,12 @@ import Testing
         let continuation = brain.calls[1]
         #expect(toolResult("c1", in: continuation) != nil)
         #expect(toolResult("s0", in: continuation)?.text == JarvisPrompts.Coach.extraCallNotExecuted)
-        #expect(overlay.rendered == [["Start from the read path."]])
+        #expect(overlay.rendered == ["Start from the read path."])
     }
 
     @Test func aMalformedFirstCallIsJudgedBeforeAParsedLaterOne() async throws {
         let brain = ScriptedBrain(script: [
-            reply(call("speak", id: "m1", arguments: #"{"lines":"[\"a\"]"}"#),
+            reply(call("speak", id: "m1", arguments: #"{"hint":["a"]}"#),
                   call("stay_silent", id: "q2")),
             speak,
         ])
@@ -285,7 +285,7 @@ import Testing
         let continuation = brain.calls[1]
         #expect(toolResult("m1", in: continuation)?.text?.contains("did not match its schema") == true)
         #expect(toolResult("q2", in: continuation)?.text == JarvisPrompts.Coach.extraCallNotExecuted)
-        #expect(overlay.rendered == [["Start from the read path."]])
+        #expect(overlay.rendered == ["Start from the read path."])
     }
 
     @Test func aPressThatNeverSpeaksFailsAtTheCap() async {
@@ -301,7 +301,7 @@ import Testing
 
     @Test func aPressSpeaksTheProseBesideAMalformedCallAtTheCap() async {
         let silences = (1...6).map { reply(call("stay_silent", id: "q\($0)")) }
-        let malformed = reply(call("speak", id: "m7", arguments: #"{"lines":"[\"a\"]"}"#),
+        let malformed = reply(call("speak", id: "m7", arguments: #"{"hint":["a"]}"#),
                               text: "Try a hash map.")
         let brain = ScriptedBrain(script: silences + [malformed])
         let overlay = FakeOverlay()
@@ -312,6 +312,6 @@ import Testing
         }
         #expect(outcome == .spoke)
         #expect(brain.calls.count == 7)
-        #expect(overlay.rendered == [["Try a hash map."]])
+        #expect(overlay.rendered == ["Try a hash map."])
     }
 }

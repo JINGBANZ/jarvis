@@ -224,7 +224,7 @@ struct LiveE2ETests {
                 let code = detail?.code
                 results.check("C26", [
                     (chain.last?.isCommitted == true, "\(label) committed a reply"),
-                    (reply?.lines.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } == true,
+                    (reply?.hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false,
                      "\(label) delivered hint text"),
                     (code != nil, "\(label) delivered usable code in the same reply "
                         + "(saw \(Self.describeDetail(evidence, chain)))"),
@@ -522,8 +522,8 @@ struct LiveE2ETests {
         let coachRequests = evidence.traffic.filter { $0.tag == "coach" }
         let schemas = Set(coachRequests.compactMap(\.speakParameters))
         results.check("C23", [
-            (schemas == [["detail", "lines"]],
-             "speak is declared with exactly lines and detail (saw \(schemas.sorted { $0.count < $1.count }))"),
+            (schemas == [["detail", "hint"]],
+             "speak is declared with exactly hint and detail (saw \(schemas.sorted { $0.count < $1.count }))"),
             (coachRequests.allSatisfy { ($0.instructions ?? "").contains("# Detail") },
              "every coach request's instructions carry the Detail section"),
         ])

@@ -154,12 +154,12 @@ import Testing
         }
         #expect(verdict("search_prep_notes", #"{"query":"q"}"#) == .notCallableByName("search_prep_notes"))
         #expect(verdict("nope", "{}") == .unavailable("nope"))
-        #expect(verdict("speak", #"{"lines":[]}"#) == .malformed(speakTool))
+        #expect(verdict("speak", #"{"hint":""}"#) == .malformed(speakTool))
         #expect(verdict("call_tool", #"{"name":"search_prep_notes","arguments":"{}"}"#)
             == .malformed(searchPrepNotesTool))
         #expect(verdict("call_tool", #"{"name":"capture_screen","arguments":"{}"}"#) == .malformed(callTool))
         #expect(verdict("call_tool", #"{"name":"nope","arguments":"{}"}"#) == .unavailable("nope"))
         #expect(verdict("call_tool", #"{"name":"search_prep_notes","arguments":"{\"query\":\"q\"}"}"#) == nil)
-        #expect(verdict("speak", #"{"lines":["a hint"]}"#) == nil)
+        #expect(verdict("speak", #"{"hint":"a hint"}"#) == nil)
     }
 }

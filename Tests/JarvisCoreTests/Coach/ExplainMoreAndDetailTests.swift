@@ -5,19 +5,19 @@ import Testing
 @Suite struct ExplainMoreAndDetailTests {
     @Test func parserKeepsDetailAndIgnoresAMalformedOne() throws {
         let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
-            #"{"lines":["Keep a moving range."],"detail":"  Grow the right edge.\n\nMove the left edge past a repeat.  "}"#)
-        guard case .speak(_, let lines, let detail) = call else {
+            #"{"hint":"Keep a moving range.","detail":"  Grow the right edge.\n\nMove the left edge past a repeat.  "}"#)
+        guard case .speak(_, let hint, let detail) = call else {
             Issue.record("Expected a speak call"); return
         }
-        #expect(lines == ["Keep a moving range."])
+        #expect(hint == "Keep a moving range.")
         #expect(detail == "Grow the right edge.\n\nMove the left edge past a repeat.")
         for value in ["null", "42", "\"   \""] {
             let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
-                "{\"lines\":[\"Still useful\"],\"detail\":\(value)}")
-            guard case .speak(_, let lines, let detail) = call else {
+                "{\"hint\":\"Still useful\",\"detail\":\(value)}")
+            guard case .speak(_, let hint, let detail) = call else {
                 Issue.record("A malformed detail must not discard a valid hint"); continue
             }
-            #expect(lines == ["Still useful"])
+            #expect(hint == "Still useful")
             #expect(detail == nil)
         }
     }
@@ -39,7 +39,7 @@ import Testing
 
     @Test(arguments: [TriggerReason.manualExplanation, .turnEnd])
     func detailFlowsThroughHistoryAndOverlayForBothTriggers(_ reason: TriggerReason) async throws {
-        let args = #"{"lines":["Track the current range."],"detail":"A window is the range you are checking.\n\nFor abca, drop the first a when the second a arrives."}"#
+        let args = #"{"hint":"Track the current range.","detail":"A window is the range you are checking.\n\nFor abca, drop the first a when the second a arrives."}"#
         let response = BrainResponse(
             toolCalls: [try #require(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON: args))],
             rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
@@ -57,7 +57,7 @@ import Testing
         #expect(messages.contains { $0.text?.contains("longest substring") == true })
         #expect(messages.contains { $0.text?.contains("left edge") == true })
         #expect(messages.contains { $0.toolCalls?.contains { $0.argumentsJSON.contains("For abca") } == true })
-        #expect(box.lines == ["Track the current range."])
+        #expect(box.hint == "Track the current range.")
         #expect(box.detailText?.contains("For abca") == true)
         if reason == .manualExplanation {
             #expect(screen.captureCount == 2)
@@ -69,7 +69,7 @@ import Testing
     }
 
     @Test func explanationStillRepliesWhenCaptureFails() async {
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Use the context we discussed."])])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Use the context we discussed.")])])
         let driver = makeDriver(brain: brain, transcript: RollingTranscript(), screen: MissingExplanationScreen(), overlay: FakeOverlay())
         #expect(await driver.handleTrigger(.manualExplanation) == .spoke)
         #expect(brain.calls.count == 1)
@@ -79,7 +79,7 @@ import Testing
     @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .manualCode])
     func latestManualIntentSurvivesNaturalWakeWhileBusy(_ latest: TriggerReason) async throws {
         let gate = AsyncGate()
-        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s", lines: ["Continue."])]))
+        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s", hint: "Continue.")]))
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "Let's work through this problem", at: 0))
         let screen = FakeScreen()
@@ -104,7 +104,7 @@ import Testing
     @Test func theDetailCapabilitySurvivesPlanEdits() async {
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [
-            .speak(callId: "s", lines: ["Track the range."], detail: "Move its left edge.")]))
+            .speak(callId: "s", hint: "Track the range.", detail: "Move its left edge.")]))
         let box = DetailSink()
         let driver = makeDriver(brain: brain, transcript: RollingTranscript(), screen: FakeScreen(), overlay: box)
         let task = Task { await driver.handleTrigger(.manualExplanation) }
@@ -121,7 +121,7 @@ import Testing
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "capture")],
                   rawToolCalls: [.init(id: "capture", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s", lines: ["Check the loop bound."], detail: "Fuller detail.")])
+            .init(toolCalls: [.speak(callId: "s", hint: "Check the loop bound.", detail: "Fuller detail.")])
         ])
         let transcript = RollingTranscript()
         transcript.append(.init(speaker: .me, text: "Can you check the loop on my screen?", at: 0))
@@ -134,13 +134,13 @@ import Testing
         let first = brain.calls[0].map { $0.role.rawValue + ":" + ($0.text ?? "") }
         let continuedPrefix = brain.calls[1].prefix(first.count).map { $0.role.rawValue + ":" + ($0.text ?? "") }
         #expect(continuedPrefix == first)
-        #expect(box.lines == ["Check the loop bound."])
+        #expect(box.hint == "Check the loop bound.")
         #expect(box.detailText == "Fuller detail.")
     }
 
     @Test func queuedExplanationDoesNotStrandNextHint() async {
         let gate = AsyncGate()
-        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s", lines: ["Continue."])]))
+        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s", hint: "Continue.")]))
         let driver = makeDriver(brain: brain, transcript: RollingTranscript(), screen: FakeScreen(), overlay: FakeOverlay())
         let explanation = Task { await driver.handleTrigger(.manualExplanation) }
         await gate.waitUntilEntered()
@@ -166,10 +166,10 @@ import Testing
 private final class DetailSink: OverlayRendering, @unchecked Sendable {
     @MainActor var acceptsDetail: Bool { true }
     var detailText: String?
-    var lines: [String] = []
-    func render(_ lines: [String]) {}
-    func render(_ lines: [String], detail: ReplyDetail?) {
-        self.lines = lines
+    var hint = ""
+    func render(_ hint: String) {}
+    func render(_ hint: String, detail: ReplyDetail?) {
+        self.hint = hint
         self.detailText = detail?.deliveredMarkdown
     }
 }

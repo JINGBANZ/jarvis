@@ -19,7 +19,7 @@ extension JarvisPrompts.Coach {
     // skills.
     static func manualExplanationTrigger(timestamp: String) -> String {
         "[\(timestamp)] The user pressed Explain more. They don't follow the question, an earlier "
-            + "hint, or the approach. Explain that gap in detail, with a short summary in lines."
+            + "hint, or the approach. Explain that gap in detail, with a short summary in hint."
     }
 
     static let showCodeSkillName = "coding"
@@ -30,7 +30,7 @@ extension JarvisPrompts.Coach {
     }
 
     static let replyMustCallSpeak = "Plain text is not an answer here. Call the speak tool: the short "
-        + "lines are shown to the user, and anything longer goes in detail."
+        + "hint is shown to the user, and anything longer goes in detail."
 
     static let sessionStateHeader = "Session state:"
 

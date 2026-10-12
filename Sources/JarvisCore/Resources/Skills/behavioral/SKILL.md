@@ -44,14 +44,14 @@ Start with a short “Show…” line naming the specific behavior or reasoning 
 demonstrate. Infer this focus from the question; do not claim knowledge of private interviewer
 intent or invent company criteria. Include this focus for personal, motivation, and hypothetical
 questions too; advice about tone alone does not explain what a strong answer demonstrates.
-Use the remaining lines for concrete supported answer content,
+Use the rest of the hint for concrete supported answer content,
 or one focused recall question when personal evidence is missing. The assessment focus must help
 the candidate choose and emphasize evidence, not just name a generic trait or repeat STAR labels.
 Do not repeat this framing during follow-ups or interrupt a sufficient answer to add it.
 
 Keep the opening hint compact. Every displayed claim must retain its own factual qualifiers;
 omit optional detail before dropping a caveat. Keep each action's owner and status (recommended,
-requested, or implemented) explicit even in short overlay lines. Omit a detail if its owner and
+requested, or implemented) explicit even in the short hint. Omit a detail if its owner and
 status cannot fit; do not combine actions by different people into a candidate-owned action.
 Make every hint self-contained: give the supported answer content the candidate can immediately
 speak from, matched to the question or current gap. Never display prep-document story IDs,
