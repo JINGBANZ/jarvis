@@ -237,7 +237,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
         let systemPrompt = JarvisPrompts.Coach.system(capabilities: capabilities)
-        let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
+        let prepCatalog = capabilities.tool(named: readPrepNoteTool.name) == nil ? nil
+            : JarvisPrompts.Coach.prepDocumentCatalog(attempt.prepMaterial?.catalog ?? [])
+        let historyBase: [ChatMessage] = [.system(systemPrompt)]
+            + (prepCatalog.map { [.user($0)] } ?? []) + history.snapshot()
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
@@ -296,12 +299,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // `turnMessages` so history never replays it. It stays fixed for the attempt, so its
         // continuations keep their cached prefix.
         let sessionState = capabilities.sessionState(loaded: alreadyLoaded.union(loadedThisAttempt))
-        let prepCatalog = capabilities.tool(named: readPrepNoteTool.name) == nil ? nil
-            : JarvisPrompts.Coach.prepDocumentCatalog(attempt.prepMaterial?.catalog ?? [])
         let sessionStateIndex = turnMessages.count
         func request(finalResponse: Bool = false) -> [ChatMessage] {
             var messages = turnMessages
-            if let prepCatalog { messages.insert(.user(prepCatalog), at: sessionStateIndex) }
             if let sessionState { messages.insert(.user(sessionState), at: sessionStateIndex) }
             if finalResponse {
                 messages.append(.user(JarvisPrompts.Coach.finalAnswerCycle(

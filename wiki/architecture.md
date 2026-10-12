@@ -345,9 +345,11 @@ memory alongside its chunks; full reads therefore preserve Markdown and document
 text omitted or repeated by search chunking. Two files with the same display name have different
 identities. Repeated selections of the same file are deduplicated before extraction.
 
-Once the index is available, each attempt includes a compact JSON document catalog beside session
-state: filenames and opaque IDs, without document text or filesystem paths. It stays fixed across
-that attempt's continuations and out of committed history. A uniquely named document can be read
+Once the index is available, each request includes a compact JSON document catalog immediately after
+coaching instructions and before conversation history or live context: filenames and opaque IDs,
+without document text or filesystem paths. Its ordering, IDs, and serialization stay fixed across
+attempts and continuations using the same index. Each payload includes one copy; committed history
+never includes it. This placement preserves the stable prefix before changing conversation content. A uniquely named document can be read
 directly by its catalog ID, saving the search round trip; topical questions still use search.
 Duplicate filenames remain distinct entries and require relevant evidence or user clarification,
 never selection by list order. Filenames are escaped as JSON and explicitly marked as untrusted

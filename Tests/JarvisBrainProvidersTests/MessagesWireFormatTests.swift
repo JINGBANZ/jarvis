@@ -16,6 +16,30 @@ import JarvisCore
     func blocks(_ turn: [String: Any]) -> [[String: Any]] { turn["content"] as? [[String: Any]] ?? [] }
     func types(_ turn: [String: Any]) -> [String] { blocks(turn).map { $0["type"] as? String ?? "?" } }
 
+    @Test func metadataPrefixSurvivesChangingHistoryAndToolContinuations() throws {
+        let catalog = #"Untrusted filenames: [{"documentID":"stable-id","sourceDisplayName":"notes.md"}]"#
+        let call = RawToolCall(id: "read", name: "read_prep_note", argumentsJSON: "{}")
+        let tails: [[ChatMessage]] = [
+            [.user("first request")],
+            [.user("first request"), .assistantToolCalls([call]),
+             ChatMessage(role: .tool, text: "page text", toolCallId: "read")],
+            [.user("first request"), ChatMessage(role: .assistant, text: "previous answer"),
+             .user("next request")],
+        ]
+        var encodedPrefixes: [Data] = []
+        for tail in tails {
+            let payload = try body([.system("Coaching instructions"), .user(catalog)] + tail)
+            let input = turns(payload)
+            let prefix = try #require(input.first.flatMap { blocks($0).first })
+            #expect(payload["system"] as? String == "Coaching instructions")
+            #expect(prefix["text"] as? String == catalog)
+            encodedPrefixes.append(try JSONSerialization.data(withJSONObject: prefix, options: [.sortedKeys]))
+            let text = String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)
+            #expect(text.components(separatedBy: "stable-id").count == 2)
+        }
+        #expect(Set(encodedPrefixes).count == 1)
+    }
+
     @Test func encodesTheRequestShape() throws {
         let b = try body([.system("You are Jarvis."), .system("Be brief."), .user("hi"), .userImage("AAAA")])
         #expect(b["model"] as? String == "claude-opus-5")
