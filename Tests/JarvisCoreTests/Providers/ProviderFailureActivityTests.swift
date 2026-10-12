@@ -80,6 +80,18 @@ import Testing
                 == "Claude Code is unavailable (HTTP 503)")
     }
 
+    @Test(arguments: [BrainProvider.codexSubscription, .claudeSubscription])
+    func subscriptionQuotaAdviceNamesThePlanLimit(provider: BrainProvider) {
+        let failure = ProviderFailure(
+            source: .brain(provider), stage: .process, category: .quota,
+            disposition: .temporary, identity: .init(),
+            message: "The subscription is temporarily unavailable. Try again after its cooldown.")
+
+        #expect(failure.activitySentence.contains("\(provider.displayName) reached its usage limit"))
+        #expect(failure.activityAdvice.contains("wait for the limit to reset"))
+        #expect(!failure.activitySentence.contains("check billing"))
+    }
+
     @Test func theRemainingClausesReadAsWritten() {
         #expect(make(source: .brain(.openAI), category: .quota).activitySentence
                 == "OpenAI API reported an exhausted quota; check billing")
