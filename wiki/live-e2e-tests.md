@@ -8,9 +8,11 @@
 
 `./scripts/run-live-tests.sh` launches `Jarvis Dev.app` once per scenario in an explicit live e2e
 mode. Interviewer and candidate lines are synthesized at run time and fed as audio into real OpenAI
-transcription. The real coach loads skills and tools on demand, switches between the brains
-(Claude Code, OpenAI, Codex, and Gemini), views a fixture screenshot when it asks for the screen,
-delivers to the real Overlay Box, and writes a normal session directory. A test target then reads that directory and records one result per case ID.
+transcription. The real coach uses only the Codex subscription by default, loads skills and tools
+on demand, views a fixture screenshot when it asks for the screen, delivers to the real Overlay Box,
+and writes a normal session directory. A provider option selects another coaching target or enables
+the scenario files' explicit switches between Claude Code, OpenAI, Codex, and Gemini. A test target
+then reads that directory and records one result per case ID.
 
 The mode is a sibling of the [transcription benchmark](./transcription-benchmark.md) and follows its
 conventions: `--live-e2e` in `Sources/JarvisApp/App/main.swift` selects `LiveE2EAppDelegate`
@@ -75,14 +77,15 @@ Set up once per machine:
   transcription uses that key; the invalid-key fixture supplies its own deliberately invalid key.
   `OPENAI_API_KEY` does not serve the run: the app is launched through `open`, and LaunchServices
   does not pass the shell's environment.
-- **A Gemini key** saved in Settings when running Scenario B, whose second half coaches on it.
-- **Codex and Claude Code**, signed in from Settings → Connections when the selected scenario uses
-  them. Preflight checks the scenario's primary brain, fallbacks, explicit brain switches, and
-  transcription key before launch. It reads only the required key and account files, so A does not
-  require Gemini, while B still does. These requirements are derived by
+- **Codex**, signed in from Settings → Connections for the default run. Selecting another coaching
+  provider requires its saved API key or subscription sign-in. Preflight checks the effective scenario's
+  primary brain, fallbacks, explicit brain switches, and transcription key before launch. Single-provider
+  runs require only that brain and the transcription key; `--provider scenario` requires the original
+  scenario targets, including a Gemini key for B. These requirements are derived by
   `LiveE2EScenario+Prerequisites.swift` and covered in the Gate.
-- **The `claude` CLI**, installed and signed in, for `--evaluate` only. It writes the report; it is
-  not the coaching target of the same name, which the bundled helper serves.
+- **The `codex` CLI**, installed and signed in, for `--evaluate` only. `EVAL_AGENT=claude` selects
+  the installed, signed-in `claude` CLI instead. These evaluator CLIs are separate from subscription
+  coaching, which the bundled helper serves.
 
 During a run:
 
@@ -96,7 +99,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|C|D|R|F01|F02|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|D|R|F01|F02|all] [--provider <selection>] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -105,15 +108,21 @@ filtered to the chosen scenarios. `F01` selects both F01 scenario files. Each te
 with its scenario, waits for the app to exit, and asserts on the session folder.
 `Tests/JarvisLiveTests/LiveE2ELauncher.swift` holds the preflight and the launch.
 
+- `--provider` selects `codex-subscription` (the default), `claude-subscription`, `openai`, or
+  `gemini` for all coaching. The launcher removes scenario fallbacks and brain-switch steps, then
+  writes the effective `scenario.json` before launch; preflight, the app, and the checker all use
+  that configuration. `--provider scenario` preserves each scenario file's route and switches.
+  For example, `./scripts/run-live-tests.sh C --provider claude-subscription` runs C on Claude Code,
+  while `./scripts/run-live-tests.sh B --provider scenario` exercises the Gemini switch.
 - `--keep-going` runs every chosen scenario. Without it the run stops after the first scenario that
   writes a `fail` line, since later scenarios spend model calls and a failure deserves a look first.
 - `--evaluate` runs [`scripts/eval-session.sh`](../scripts/eval-session.sh) on Scenario A's session
-  with `EVAL_AGENT=claude`, so the evaluation spends the Claude plan rather than the ChatGPT
-  plan, and adds a G09 line. It is off by default because evaluation is an agentic run of its own, not part
-  of coaching.
+  with Codex by default and adds a G09 line. `EVAL_AGENT=claude` overrides the evaluator independently
+  of `--provider`. Evaluation is off by default because it is an agentic run of its own.
 
-Scenario A's one OpenAI turn and Scenario B's Gemini turns hold the only metered coaching requests;
-every other brain response runs on a subscription.
+Default coaching and evaluation spend only the Codex subscription. Audio transcription still uses
+the OpenAI API key. Selecting an API coaching provider or `--provider scenario` adds metered
+coaching requests.
 
 ## Run directory and results
 
@@ -129,8 +138,9 @@ every other brain response runs on a subscription.
 
 A result line is `<case> pass`, `fail`, `note`, or `skipped`. `pass` and `fail` come from assertions.
 `note` records a model's choice and never affects the exit code (see
-[Notes and the rerun rule](#notes-and-the-rerun-rule)). The `skipped` lines are fixed: G07 (offline),
-G10 (dropped), C21 (optional), and F03, R01, R02, S01 (manual). The exit code counts only `fail`
+[Notes and the rerun rule](#notes-and-the-rerun-rule)). The fixed `skipped` lines are G07 (offline),
+G10 (dropped), C21 (optional), and F03, R01, R02, S01 (manual). Single-provider runs also skip
+C14 and C27, whose assertions require explicit provider switches. The exit code counts only `fail`
 lines, missing finished markers, and a failed test process, so a launch that dies mid-scenario fails
 the run even when no assertion ran.
 
@@ -141,7 +151,8 @@ after decoding, and no audio is archived.
 
 ## Scenarios
 
-Capabilities are fixed at Start, so each switch configuration is its own scenario; brain switches
+Capabilities are fixed at Start, so each capability configuration is its own scenario. All scenarios
+run on Codex by default or on the selected single provider. With `--provider scenario`, brain switches
 happen inside a scenario, applied the way a Settings edit applies them. Steps live in
 `Tests/JarvisLiveTests/Scenarios/`; fixtures in `Tests/JarvisLiveTests/Fixtures/` are the coding
 screenshot `coding-problem.jpg` and fictional `prep-notes.md`, including a short search-design
@@ -150,7 +161,7 @@ again. The manager story stays out of everything a teammate query returns, so th
 search never already answers the second and C08 stays a real check; `LiveE2EScenarioTests` pins that
 layout in the Gate.
 
-| Scenario | Brain | What it drives |
+| Scenario | Brain with `--provider scenario` | What it drives |
 |---|---|---|
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
 | B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
@@ -160,18 +171,12 @@ layout in the Gate.
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
 
-Only Scenario A's second half runs on Codex, and B's second half runs on the Gemini API, a few Flash
-calls; every other scenario and the evaluation run on Claude. The ChatGPT plan's usage limit is the
-one a day of runs exhausts, and A's Codex stretch (a behavioral search, a spoken screen question, two
-presses, and a design follow-up) is enough to keep that subscription covered.
-
 ## How a scenario runs
 
 - **Isolated preferences.** Brain route and capability switches go to the private defaults suite
   `com.jarvis.coach.dev.live-e2e`, cleared per scenario, so a run never reads or changes the
-  developer's own settings. Claude Code runs Claude Sonnet 5 and Codex runs GPT-6 Luna, lighter
-  than the app's defaults because a run checks the harness, not the model's best answer; see
-  `LiveE2ERunner.target(for:)`. Transcription is pinned to `gpt-4o-transcribe`.
+  developer's own settings. Models are selected by `LiveE2ERunner.target(for:)`; the run checks
+  the harness with a lighter model where available. Transcription is pinned to `gpt-4o-transcribe`.
 - **Synthesized speech.** `FixtureSpeech` renders each line with `/usr/bin/say` to 24 kHz PCM16 at
   run time and deletes the file right after decoding. `FixtureAudioSource` feeds both transcription
   streams as audio frames; nothing plays through the speakers.
@@ -228,7 +233,7 @@ review as not evaluated; structural success alone does not establish that the ad
 
 Some cases depend on what the model chose rather than on what the app did, and those write a `note`
 line instead of failing: C02 and G05 (staying silent on small talk), C03 (which skill the model
-picks), the second request in C11, the Codex diagram in C12, C13, how Scenario B's behavioral
+picks), the second request in C11, the follow-up diagram in C12, C13, how Scenario B's behavioral
 question ends in C16, C20, C24 on both scenarios, and C01 on Scenario B's press. C09 and C17 are
 checks on Scenario B, because the preload puts `coding` in the press's own request rather than leaving
 the load to the model. Failing a note would fail a correct app on a model's judgment call.
@@ -263,33 +268,33 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 
 | ID | Case | Where |
 |---|---|---|
-| C01 | A press loads what its screen needs and still ends in one clean tip | A: Claude Code press; B: its press |
+| C01 | A press loads what its screen needs and still ends in one clean tip | A: initial press; B: its press |
 | C02 | Small talk loads nothing | A: the interviewer's logistics line |
 | C03 | The first behavioral question picks the behavioral skill | A: the first behavioral question |
-| C04 | An already-loaded kind never reloads | A: every turn on Codex |
-| C05 | Prep search loads on demand, never runs before its load, and stays callable on every brain | A: the first behavioral question and the OpenAI design question |
+| C04 | An already-loaded kind never reloads | A: every turn |
+| C05 | Prep search loads on demand, never runs before its load, and stays callable on every brain | A: the first behavioral question and the design question |
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
-| C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the OpenAI design question |
-| C08 | A second prepared question searches without loading, on another brain | A: the second behavioral question, on Codex |
+| C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the design question |
+| C08 | A second prepared question searches without loading | A: the second behavioral question |
 | C09 | The coding skill loads on the coding screen | A: the first press; B: the Show code press, through the preload |
 | C10 | The whole session shows four load rows, each once | A, after Stop |
-| C11 | A press after the load is one round trip | A: the two Codex presses |
-| C12 | A diagram arrives at the architecture stage, on OpenAI and on a subscription | A: the OpenAI design question and the Codex follow-up |
+| C11 | A press after the load is one round trip | A: the two later presses |
+| C12 | A diagram arrives at the architecture stage | A: the design question and its follow-up |
 | C13 | No diagram outside that stage | A: the coding and behavioral turns |
-| C14 | A brain switch keeps loaded state, in both directions | A: Claude Code to OpenAI, then OpenAI to Codex |
-| C15 | Coaching continues after loads on both subscriptions | A |
-| C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question, on Gemini |
+| C14 | A brain switch keeps loaded state, in both directions | A with `--provider scenario`: Claude Code to OpenAI, then OpenAI to Codex |
+| C15 | Coaching continues after loads with stable instructions | A: the initial and later behavioral providers |
+| C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question |
 | C17 | The remaining skill still loads when others are off | B: the Show code press |
-| C18 | Prep search off leaves no tool and no catalog line | B: Claude Code instructions |
-| C19 | Switched-off capabilities apply as configured | B: Claude Code instructions list only coding |
+| C18 | Prep search off leaves no tool and no catalog line | B: initial provider instructions |
+| C19 | Switched-off capabilities apply as configured | B: initial provider instructions list only coding |
 | C20 | A reply the runner answered instead of running is reported, never failed | A and B |
 | C21 | Loaded guidance survives compaction | Not scheduled; unit-tested |
-| C22 | A Show code press preloads `coding` in its own request, and preloads nothing once it is loaded | B: the Show code press; A: the Codex Show code press |
+| C22 | A Show code press preloads `coding` in its own request, and preloads nothing once it is loaded | B: the Show code press; A: the Show code press |
 | C23 | Every coach request declares the session's one composed `speak` schema | A: every coach request |
 | C24 | A Show code reply delivers a code block in its detail | A and B: their Show code presses |
 | C25 | Explain more delivers a detail, even when the model first answers in prose | B: the Explain more press |
 | C26 | Ordinary hint presses deliver hint and code in the same reply without Show code | C: both hint presses |
-| C27 | A keyed target coaches after a switch, replaying another provider's calls | B: the behavioral question and the hint press, on Gemini |
+| C27 | A keyed target coaches after a switch, replaying another provider's calls | B with `--provider scenario`: the behavioral question and the hint press, on Gemini |
 | C28 | Code with AI guidance loads before permitted review and ordinary hint presses deliver committed replies | D |
 | C29 | A blocked delegation step delivers supporting detail without an explicit prompt request | D; semantics use `Tests/JarvisLiveTests/Scenarios/D-review.md` |
 | C30 | Review of a valid AI proposal delivers supporting detail without a confusion signal | D; explanation quality uses the same semantic rubric |
@@ -317,7 +322,7 @@ must not be reported as proof of grounded answer content.
 | G06 | Each shortcut works, and a second press advances | A: the two hint presses and the Show code press |
 | G07 | Overlays are excluded from screenshots | Offline, in the Gate |
 | G08 | Stop ends cleanly, the evidence seals, and no subscription helper outlives the app | Every scenario |
-| G09 | Evaluate works on the stopped session | `--evaluate`, on A's session, with Claude Code |
+| G09 | Evaluate works on the stopped session | `--evaluate`, on A's session, with Codex by default |
 | G10 | The development menu has no update item | Dropped; `build-app.sh` strips the feed |
 | G11 | Recorded traffic holds no screenshot bytes for any provider | A and B |
 

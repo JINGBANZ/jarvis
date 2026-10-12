@@ -117,7 +117,7 @@ struct LiveE2ETests {
                 .flatMap { evidence.rows(in: $0).compactMap { $0.loadedCapability?.name } }
             let b1Screens = b1Rows.filter { $0.kind == "screenViewed" }.count
             let b1Tip = b1Rows.contains { $0.kind == "tip" }
-            let b1Summary = "B1 Show code on Claude Code: \(b1Screens) screen view(s), "
+            let b1Summary = "B1 Show code on \(launch.scenario.brain.primary.displayName): \(b1Screens) screen view(s), "
                 + "loads \(b1Loads), " + (b1Tip ? "a tip" : "no tip")
             results.note("C01", b1Summary)
             results.check("C09", b1Loads == ["coding"], "B1 loads exactly coding (saw \(b1Loads))")
@@ -152,7 +152,7 @@ struct LiveE2ETests {
             results.check("C25", b3Detail?.isEmpty == false,
                           "B3's Explain more delivered a detail (saw \(Self.describeDetail(evidence, b3)))")
 
-            let claude = Self.coachTraffic(evidence, on: .claudeSubscription)
+            let initialTraffic = Self.coachTraffic(evidence, on: launch.scenario.brain.primary)
             results.check("C16", [
                 (!evidence.activity.contains {
                     ["behavioral", "system-design", "coding-with-ai"].contains($0.loadedCapability?.name ?? "")
@@ -163,34 +163,37 @@ struct LiveE2ETests {
             results.note("C16", "B2 ended \(b2.last?.terminal ?? "without an attempt"), "
                 + Self.describeDetail(evidence, b2))
             results.check("C18", [
-                (!claude.isEmpty, "Claude Code coach requests were recorded"),
-                (claude.allSatisfy { !($0.instructions ?? "").contains("search_prep_notes") },
+                (!initialTraffic.isEmpty, "initial provider's coach requests were recorded"),
+                (initialTraffic.allSatisfy { !($0.instructions ?? "").contains("search_prep_notes") },
                  "instructions never name search_prep_notes"),
-                (claude.allSatisfy { !($0.instructions ?? "").contains("Tools you can load") },
+                (initialTraffic.allSatisfy { !($0.instructions ?? "").contains("Tools you can load") },
                  "instructions carry no tools catalog or load-tool clause"),
             ])
-            let catalogs = Set(claude.map { Self.skillCatalog(in: $0.instructions ?? "") })
+            let catalogs = Set(initialTraffic.map { Self.skillCatalog(in: $0.instructions ?? "") })
             results.check("C19", catalogs == [["coding"]],
                           "the skills catalog lists only coding (saw \(catalogs.sorted { $0.count < $1.count }))")
+            results.check("B", evidence.rows(inChain: b4).contains { $0.kind == "tip" },
+                          "B4's hint press ended in a tip")
 
-            // C27: Gemini takes over after a switch. Its first request replays the Show code preload
-            // Claude Code's attempt committed, a call Gemini never made, which needs the placeholder
-            // thought.
-            let gemini = Self.coachTraffic(evidence, on: .gemini)
-            let ranOnGemini = [b2, b4].map { chain in
-                chain.contains { evidence.traffic(for: $0).contains { $0.provider == BrainProvider.gemini.rawValue } }
+            if launch.scenario.steps.contains(.switchBrain(.gemini)) {
+                // Gemini needs a placeholder thought for the other provider's runner-written preload.
+                let gemini = Self.coachTraffic(evidence, on: .gemini)
+                let ranOnGemini = [b2, b4].map { chain in
+                    chain.contains { evidence.traffic(for: $0).contains { $0.provider == BrainProvider.gemini.rawValue } }
+                }
+                results.check("C27", [
+                    (evidence.activity.filter { $0.kind == "brainChangeApplied" }.count == 1, "the Gemini switch applied"),
+                    (ranOnGemini == [true, true], "B2 and B4 ran on Gemini (saw \(ranOnGemini))"),
+                    (!gemini.isEmpty && !gemini.contains { $0.status == 400 },
+                     "no Gemini request was refused as malformed "
+                        + "(statuses \(gemini.map { $0.status.map(String.init) ?? "none" }))"),
+                    (gemini.first?.replayedFunctionCalls.contains {
+                        $0.callID.hasPrefix("runner_") && $0.name == "load_skill"
+                    } == true, "the first Gemini request replays the runner-written coding preload"),
+                ])
+            } else {
+                results.skipped("C27", "single provider; use --provider scenario for the Gemini switch")
             }
-            results.check("C27", [
-                (evidence.activity.filter { $0.kind == "brainChangeApplied" }.count == 1, "the Gemini switch applied"),
-                (ranOnGemini == [true, true], "B2 and B4 ran on Gemini (saw \(ranOnGemini))"),
-                (evidence.rows(inChain: b4).contains { $0.kind == "tip" }, "B4's hint press on Gemini ended in a tip"),
-                (!gemini.isEmpty && !gemini.contains { $0.status == 400 },
-                 "no Gemini request was refused as malformed "
-                    + "(statuses \(gemini.map { $0.status.map(String.init) ?? "none" }))"),
-                (gemini.first?.replayedFunctionCalls.contains {
-                    $0.callID.hasPrefix("runner_") && $0.name == "load_skill"
-                } == true, "the first Gemini request replays the runner-written coding preload"),
-            ])
             results.time("B4 press-to-tip", seconds: Self.pressToTip(evidence, b4))
             Self.noteReplyRecoveries(evidence, &results)
             Self.recordTokens(evidence, &results)
@@ -326,16 +329,16 @@ struct LiveE2ETests {
 
         let a3Sequence = sequence(a3)
         let a4Sequence = sequence(a4)
-        let firstOpenAI = a4.flatMap { evidence.traffic(for: $0) }.first {
-            $0.tag == "coach" && $0.provider == BrainProvider.openAI.rawValue
+        let firstDesignRequest = a4.flatMap { evidence.traffic(for: $0) }.first {
+            $0.tag == "coach"
         }
         results.check("C05", [
             (Self.precedes(a3Sequence.firstIndex(of: "load search_prep_notes"),
                            a3Sequence.firstIndex(of: "search")),
              "A3 loads search_prep_notes before searching (saw \(a3Sequence))"),
-            (firstOpenAI?.declaredToolNames.contains("call_tool") == true
-                && firstOpenAI?.declaredToolNames.contains("search_prep_notes") == false,
-             "A4's first OpenAI request declares call_tool and never search_prep_notes"),
+            (firstDesignRequest?.declaredToolNames.contains("call_tool") == true
+                && firstDesignRequest?.declaredToolNames.contains("search_prep_notes") == false,
+             "A4's first request declares call_tool and never search_prep_notes"),
             (evidence.debugLines(containing: "was called before it was loaded").isEmpty,
              "no deferred tool ran before its load"),
         ])
@@ -376,8 +379,8 @@ struct LiveE2ETests {
             (sequence(a5).contains("search"), "A5 searched prep notes (saw \(sequence(a5)))"),
             (loads(a5).isEmpty, "A5 loaded nothing"),
             (a5.contains { evidence.traffic(for: $0).contains {
-                $0.provider == BrainProvider.codexSubscription.rawValue
-            } }, "A5 ran on Codex"),
+                $0.provider == launch.scenario.provider(atStep: says[3]).rawValue
+            } }, "A5 ran on its configured provider"),
         ])
         results.time("A5 question-to-tip", seconds: Self.questionToTip(evidence, a5))
         results.check("C09", loads(a1).contains("coding"), "A1 loaded coding (saw \(loads(a1)))")
@@ -396,42 +399,47 @@ struct LiveE2ETests {
 
         results.check("C12", Self.hasDiagram(evidence, a4),
                       "A4's detail carries a mermaid block (saw \(Self.describeDetail(evidence, a4)))")
-        results.note("C12", "A8 on Codex: \(Self.describeDetail(evidence, a8))")
+        results.note("C12", "A8 on \(launch.scenario.provider(atStep: says[5]).displayName): \(Self.describeDetail(evidence, a8))")
         let unexpectedDiagrams = [("A1", a1), ("A3", a3), ("A5", a5), ("A6", a6),
                                   ("A7", a7[0]), ("A7", a7[1]), ("A9", a9)]
             .filter { Self.hasDiagram(evidence, $0.1) }.map(\.0)
         results.note("C13", unexpectedDiagrams.isEmpty
             ? "no diagram outside the architecture stage" : "diagram at \(unexpectedDiagrams)")
 
-        let loadsBeforeSwitch = a4.first.map { switchAttempt in
-            evidence.attempts
-                .filter { $0.id < switchAttempt.id && $0.isCommitted }
-                .flatMap { evidence.rows(in: $0).compactMap(\.loadedCapability) }
-        } ?? []
-        let replayedCalls = firstOpenAI?.replayedFunctionCalls ?? []
-        let replayedOutputs = Set(firstOpenAI?.replayedFunctionOutputCallIDs ?? [])
-        let unreplayed = loadsBeforeSwitch.filter { load in
-            !replayedCalls.contains { call in
-                call.name == (load.kind == "skill" ? "load_skill" : "load_tool")
-                    && call.arguments.contains(load.name)
-                    && replayedOutputs.contains(call.callID)
+        if launch.scenario.steps.contains(.switchBrain(.openAI)) {
+            let loadsBeforeSwitch = a4.first.map { switchAttempt in
+                evidence.attempts
+                    .filter { $0.id < switchAttempt.id && $0.isCommitted }
+                    .flatMap { evidence.rows(in: $0).compactMap(\.loadedCapability) }
+            } ?? []
+            let replayedCalls = firstDesignRequest?.replayedFunctionCalls ?? []
+            let replayedOutputs = Set(firstDesignRequest?.replayedFunctionOutputCallIDs ?? [])
+            let unreplayed = loadsBeforeSwitch.filter { load in
+                !replayedCalls.contains { call in
+                    call.name == (load.kind == "skill" ? "load_skill" : "load_tool")
+                        && call.arguments.contains(load.name)
+                        && replayedOutputs.contains(call.callID)
+                }
             }
+            let codexInstructions = Self.coachTraffic(evidence, on: .codexSubscription)
+                .compactMap(\.instructions)
+            results.check("C14", [
+                (loadsBeforeSwitch.count == 3,
+                 "three loads committed before the OpenAI switch (saw \(loadsBeforeSwitch.map(\.name)))"),
+                (!loadsBeforeSwitch.isEmpty && unreplayed.isEmpty,
+                 "A4 replays every earlier load pair with its result (missing \(unreplayed.map(\.name)))"),
+                (evidence.activity.filter { $0.kind == "brainChangeApplied" }.count >= 2,
+                 "both brain switches applied"),
+                (!codexInstructions.isEmpty && Set(codexInstructions).count == 1,
+                 "Codex's instructions never change"),
+            ])
+        } else {
+            results.skipped("C14", "single provider; use --provider scenario for brain switches")
         }
-        let codexInstructions = Self.coachTraffic(evidence, on: .codexSubscription)
-            .compactMap(\.instructions)
-        results.check("C14", [
-            (loadsBeforeSwitch.count == 3,
-             "three loads committed before the OpenAI switch (saw \(loadsBeforeSwitch.map(\.name)))"),
-            (!loadsBeforeSwitch.isEmpty && unreplayed.isEmpty,
-             "A4 replays every earlier load pair with its result (missing \(unreplayed.map(\.name)))"),
-            (evidence.activity.filter { $0.kind == "brainChangeApplied" }.count >= 2,
-             "both brain switches applied"),
-            (!codexInstructions.isEmpty && Set(codexInstructions).count == 1,
-             "Codex's instructions never change"),
-        ])
 
         var c15: [LiveE2EResults.Check] = []
-        for provider in [BrainProvider.claudeSubscription, .codexSubscription] {
+        for provider in Set([launch.scenario.brain.primary, launch.scenario.provider(atStep: says[3])])
+            .sorted(by: { $0.rawValue < $1.rawValue }) {
             let records = Self.coachTraffic(evidence, on: provider)
             let later = Set(records.compactMap(\.attemptID))
                 .subtracting([records.first?.attemptID].compactMap { $0 })
@@ -541,6 +549,12 @@ struct LiveE2ETests {
             (launch.finished, "the app finished its scenario" + (launch.failure.map { ": \($0)" } ?? "")),
             (launch.sessionCount == 1, "exactly one session directory (saw \(launch.sessionCount))"),
         ])
+        if let evidence = launch.evidence {
+            let providers = Set(evidence.traffic.filter { $0.tag == "coach" }.map { $0.provider ?? "unknown" })
+            let configured = Set(launch.scenario.requiredBrainProviders.map(\.rawValue))
+            results.check(launch.scenario.id, providers.isSubset(of: configured),
+                          "coach traffic uses only configured providers (saw \(providers.sorted()))")
+        }
         return launch.evidence
     }
 
