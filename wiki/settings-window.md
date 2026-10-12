@@ -639,7 +639,8 @@ the cause and next step readable at both the default and minimum window width.
 browser, and waits up to ten minutes for the browser to hand the account back. It is the one place
 Jarvis opens a URL, and only because the user pressed the button. A failed sign-in shows the helper's
 redacted reason under the row. **Sign out** deletes that vendor's credential files. One account per
-subscription is supported; a successful Sign in replaces the previous account.
+subscription is supported; a successful Sign in replaces the previous account. The previous credentials
+stay saved during browser sign-in and remain saved if the login fails or is canceled.
 Jarvis decodes only passive health fields and discards token-bearing refresh responses. Tokens
 stay in the helper's owner-only credential directory, apart from the
 secrets file ([sandbox.md](./sandbox.md) says where, and what a login reaches). The page's header
