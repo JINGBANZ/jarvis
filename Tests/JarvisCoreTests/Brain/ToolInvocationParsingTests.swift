@@ -21,7 +21,7 @@ import Testing
     func callToolRefusesToRouteAFixedTool(name: String) {
         let parsed = ToolInvocation.parse(
             callId: "c1", name: "call_tool",
-            argumentsJSON: #"{"name":"\#(name)","arguments":"{\"lines\":[\"x\"]}"}"#)
+            argumentsJSON: #"{"name":"\#(name)","arguments":"{\"hint\":\"x\"}"}"#)
         #expect(parsed == nil)
     }
 

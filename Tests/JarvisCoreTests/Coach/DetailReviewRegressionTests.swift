@@ -5,7 +5,7 @@ import Testing
 @Suite struct DetailReviewRegressionTests {
     @Test(arguments: [true, false])
     func changedManualIntentReplacesCarriedScreenWhileKeepingPrep(_ captureSucceeds: Bool) async throws {
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Continue."])])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Continue.")])])
         let runner = CoachAttemptRunner(config: .default, transcript: RollingTranscript(),
             screen: ReviewScreen(succeeds: captureSucceeds), overlay: FakeOverlay(),
             clock: ManualClock(now: 100), sessionStart: 0, coachingAttempts: nil,
@@ -26,8 +26,8 @@ import Testing
     }
 
     @Test func unexecutedSpeakIsNotReplayedAsDelivered() async throws {
-        let shown = #"{"lines":["Shown hint."],"detail":"Shown detail."}"#
-        let unexecuted = #"{"lines":["Unexecuted hint."],"detail":"Unexecuted detail."}"#
+        let shown = #"{"hint":"Shown hint.","detail":"Shown detail."}"#
+        let unexecuted = #"{"hint":"Unexecuted hint.","detail":"Unexecuted detail."}"#
         let calls = [RawToolCall(id: "shown", name: "speak", argumentsJSON: shown),
                      RawToolCall(id: "extra", name: "speak", argumentsJSON: unexecuted)]
         let response = BrainResponse(toolCalls: calls.compactMap {
@@ -46,11 +46,11 @@ import Testing
         let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
         // `FakeOverlay` shows no detail, so the replay records none.
         #expect(object["detail"] is NSNull)
-        #expect(object["lines"] as? [String] == ["Shown hint."])
+        #expect(object["hint"] as? String == "Shown hint.")
     }
 
     @Test @MainActor func hidingBoxDuringRequestScrubsDeliveredHistory() async throws {
-        let args = #"{"lines":["Keep this hint."],"detail":"Hidden explanation."}"#
+        let args = #"{"hint":"Keep this hint.","detail":"Hidden explanation."}"#
         let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(
             callId: "s", name: "speak", argumentsJSON: args))],
             rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
@@ -78,7 +78,7 @@ import Testing
     }
 
     @Test func aPlanEditKeepsDeliveredDetailInHistory() async throws {
-        let args = #"{"lines":["Keep this hint."],"detail":"Delivered explanation."}"#
+        let args = #"{"hint":"Keep this hint.","detail":"Delivered explanation."}"#
         let response = BrainResponse(toolCalls: [try #require(ToolInvocation.parse(
             callId: "s", name: "speak", argumentsJSON: args))],
             rawToolCalls: [.init(id: "s", name: "speak", argumentsJSON: args)])
@@ -97,7 +97,7 @@ import Testing
         let call = try #require(messages.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
         let object = try #require(JSONSerialization.jsonObject(with: Data(call.argumentsJSON.utf8)) as? [String: Any])
         #expect(object["detail"] as? String == "Delivered explanation.")
-        #expect(object["lines"] as? [String] == ["Keep this hint."])
+        #expect(object["hint"] as? String == "Keep this hint.")
     }
 }
 
@@ -115,8 +115,8 @@ private struct ReviewScreen: ScreenCapturing {
 private final class ReviewDetailSink: OverlayRendering {
     @MainActor var acceptsDetail = true
     var detail: ReplyDetail?
-    func render(_ lines: [String]) {}
-    func render(_ lines: [String], detail: ReplyDetail?) {
+    func render(_ hint: String) {}
+    func render(_ hint: String, detail: ReplyDetail?) {
         self.detail = detail
     }
 }

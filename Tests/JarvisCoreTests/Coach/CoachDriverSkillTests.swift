@@ -20,9 +20,9 @@ import Testing
     }
 
     private var speak: BrainResponse {
-        .init(toolCalls: [.speak(callId: "s1", lines: ["Name the situation first."])],
+        .init(toolCalls: [.speak(callId: "s1", hint: "Name the situation first.")],
               rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                         argumentsJSON: #"{"lines":["Name the situation first."]}"#)])
+                                         argumentsJSON: #"{"hint":"Name the situation first."}"#)])
     }
 
     private func makeDriver(

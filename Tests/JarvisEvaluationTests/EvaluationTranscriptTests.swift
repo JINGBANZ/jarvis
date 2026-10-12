@@ -68,7 +68,7 @@ import JarvisCore
                           response: ["status": "completed",
                                      "output": [["type": "reasoning"],
                                                 ["type": "function_call", "call_id": "c2",
-                                                 "name": "speak", "arguments": #"{"lines":["tip"]}"#]],
+                                                 "name": "speak", "arguments": #"{"hint":"tip"}"#]],
                                      "usage": ["output_tokens": 42]])
         let failed = try line(request: ["model": "gpt-5.5", "input": [userItem("hello")]],
                               error: "timed out")
@@ -76,7 +76,7 @@ import JarvisCore
 
         #expect(out.contains("assistant → function_call capture_screen({})"))
         #expect(out.contains("tool result: screenshot captured"))
-        #expect(out.contains(#"→ function_call speak({"lines":["tip"]})"#))
+        #expect(out.contains(#"→ function_call speak({"hint":"tip"})"#))
         #expect(!out.contains("reasoning"))
         #expect(out.contains("TRANSPORT ERROR: timed out"))
         #expect(out.contains("=== call #2"))
@@ -188,7 +188,7 @@ import JarvisCore
     }
 
     @Test func callLabelsTranscriptInputJarvisOutputAndTriggerUnambiguously() throws {
-        let reply = #"{"tool":"speak","arguments":{"lines":["I opened LeetCode."]}}"#
+        let reply = #"{"tool":"speak","arguments":{"hint":"I opened LeetCode."}}"#
         let call = try line(
             request: [
                 "provider": "codex-cli", "model": "gpt-5.6-codex",

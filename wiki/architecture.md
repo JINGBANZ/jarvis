@@ -41,7 +41,7 @@ possible and reinvent nothing.
             │                       ▼                                          │
             │                 CoachDriver ──(brain model + tools)─┐           │
             │                       ▲   │                         │           │
-            │          capture_screen   │ speak(lines)            │           │
+            │          capture_screen   │ speak(hint)             │           │
             │                       │   ▼                         │           │
   screen ◄──┤   ScreenTool ◄────────┘  Overlay (NSPanel) ◄────────┘           │
             │                                                                │
@@ -140,9 +140,11 @@ moments the model judges worthwhile.
    fresh result satisfies the screen gate, so the next model response must speak or stay silent
    rather than capture the same request again. Fully stated questions do not require a reflexive
    capture.
-5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
-   into an array (Structured Outputs / `strict:true`), so the client never splits prose on
-   punctuation — or `stay_silent`. A tool call is **required** on every model response: silence is an
+5. The model calls `speak(hint)` with one direct, connected hint string
+   (Structured Outputs / `strict:true`), within the total word budget in
+   [`Speak.swift`](../Sources/JarvisCore/Coach/Tools/Speak.swift), or calls `stay_silent`.
+   The box wraps the hint to its width, so the model writes readable prose without choosing visual
+   line breaks. A tool call is **required** on every model response: silence is an
    explicit tool, never plain text. Under a "stay silent by calling no tool" contract the model still
    has to emit *something*, and at low reasoning effort that came out as leaked deliberation text
    ("final empty. no. final.") that polluted the conversation and was imitated on later turns;
@@ -247,12 +249,20 @@ the customer's shared drawing.
 
 Guidance follows one customer item from current work through decisions and error costs to the proposed
 system. Delivery defaults to the next usable cue: discovery asks one next question, with a short
-reason when helpful; playback gives one takeaway, two customer facts, and one confirmation question;
+reason when helpful; playback frames the problem, goal, and boundaries with a scope confirmation;
 overload replaces the earlier explanation with one plain sentence and one next move while preserving
 approval and safety constraints. Full scripts require an explicit request and begin with a short complete plain-English answer.
-Guided practice identifies the current step and one next move; an uncoached mock leaves the candidate
-to lead. A short recap precedes scope agreement, and the latest scope persists through design and
-evaluation. The candidate sketches while explaining, then walks a concrete case through what happened,
+Guided practice identifies the current step and one next move. After a complete scenario or substantive
+customer answer, consulting coaching uses the evidence to select the next unresolved question without
+requiring a help request. When the problem, goal, feasible first slice, and human boundaries are clear,
+it cues a recap and scope recommendation instead of exhausting a discovery checklist. Material gaps
+still need clarification; incidental missing numbers do not block the recap. Only the candidate's
+explicit request to pause Jarvis coaching makes a mock uncoached; the interviewer's feedback arrangement
+does not. Useful candidate follow-ups, acknowledgments, and still-unanswered cues call for silence.
+A short recap precedes scope agreement. Discovery evidence and its material unknowns ground the design,
+deep dives and evaluation; history briefings retain those decision-relevant facts and distinguish
+customer agreement from coach proposals. Corrections supersede older facts without fabricating answers.
+The candidate sketches while explaining, then walks a concrete case through what happened,
 what evidence is checked, what it means, and the resulting action. Coaching distinguishes accurate
 extraction from a justified business decision. Corrections require code recalculation, refreshed
 drafts and renewed approval; capacity claims use measured human effort and actual adoption rather
@@ -427,8 +437,8 @@ missed, so it should not be the less capable of the two.
 The runner checks every reply against the tool choice its own request sent instead of trusting the
 transport to enforce it, because Claude Code cannot narrow a call at all and the
 Codex's path forces parallel calls, so a reply can call outside the set or carry more
-than one call. The check runs on the completed reply; a `speak` call's lines may already be on the
-overlay by then ([Latency](#latency)), and a reply the check does not deliver withdraws them. A call outside the permitted set is answered with a tool result saying it is not
+than one call. The check runs on the completed reply; a `speak` call's hint may already be on the
+overlay by then ([Latency](#latency)), and a reply the check does not deliver withdraws it. A call outside the permitted set is answered with a tool result saying it is not
 available on a press, and a call whose arguments the typed parser (`ToolInvocation.parse`) cannot use
 is answered with its tool's schema; either way the model is asked again in the same attempt. The
 parser is deliberately more lenient than the schema, so a call the schema would reject but the parser
@@ -449,8 +459,11 @@ for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/Co
 
 ### The detail box
 
-A reply is short lines plus one optional Markdown `detail`. The lines are the coaching; `detail` is
-for supporting content requested by a loaded skill or the paragraphs an explanation needs.
+A reply is one compact `hint` string plus one optional Markdown `detail`. The hint is the coaching;
+`detail` is for supporting content requested by a loaded skill or the paragraphs an explanation needs.
+Activity persists the delivered hint and detail. Its decoder normalizes older caption arrays when
+reading saved sessions, so session history remains readable without rewriting files; see
+[`ActivityResponse`](../Sources/JarvisCore/Diagnostics/ActivityResponse.swift).
 Every session declares `detail`, because every session has the Overlay Box to show it. A detail that
 arrives while the box is collapsed is not shown, and the replay records none, so the model never reads
 back a detail the user did not see. `detail` is nullable rather than absent, which is what makes a
@@ -459,7 +472,11 @@ field optional under strict Structured Outputs.
 Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
 all, and the skill that owns a domain says what its blocks are: the `coding` skill carries the code
 block rules and the `diff` correction shape; the design skills (`system-design` and
-`customer-scenario-design`) carry the mermaid guidance. That is why the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
+`customer-scenario-design`) carry the mermaid guidance. System-design stage-entry/help replies pair
+short upper-panel coaching with a lower-panel reference: grouped requirements, entities with
+responsibilities, or APIs with key inputs/outputs. Material decisions refresh the current reference;
+unchanged small hints leave it in place. Proposed and agreed items remain distinct. Architecture
+references highlight the discussed path and distinguish return paths with explicit Mermaid styles. That is why the core prompt names neither. A rule only the model can apply belongs where the model reads it, and
 a session that never loads the skill never pays for it in its cached prefix.
 
 The general detail default defers to the loaded skill so brevity does not make the user press
@@ -544,13 +561,30 @@ the box hides both sections and expanding restores them.
 
 A shown diagram gives the detail area most of the existing panel, leaving a compact hint-history
 strip visible. It never changes the outer panel's size or position. A manually chosen divider
-proportion still takes precedence. Diagrams adapt their flow to the available width: long workflows
-can fold into alternating rows when that reduces their height and keeps connections distinct;
-otherwise, a horizontal chain can become vertical and wide ranks wrap into rows. Layout preserves
-every node, label, and directed connection. Node and edge labels retain their native readable size,
-with vertical scrolling when the graph cannot fit the remaining height. Prose beside a diagram keeps
-its configured compact size rather than shrinking to compensate for the graph. See `OverlayBoxPanel`,
-`DetailDocumentView`, `DiagramHintLayout`, `FoldedDiagramHintLayout`, and `DiagramHintImage` for sizing.
+proportion still takes precedence. Diagrams keep one reading direction: a requested horizontal flow
+stays horizontal only when it fits the available width; otherwise it reads top to bottom. Small
+branching ranks keep up to three columns at narrow usable widths, wrapping box names and growing
+vertically. Wider ranks wrap into rows. Parents align with their children when
+space permits; ranks follow their incoming connections to keep independent paths separate, and
+branch labels sit above their destinations so shared stems remain legible. Connections use orthogonal
+routes, straight when their endpoints align; bypasses and returns use opposite exterior sides with separate
+tracks for independent workflows. Every supplied node and edge stays in one connected view without
+repeating components as connection rows. The coaching skills choose a connected overview or the
+current focused flow and can describe ordinary responses in nearby text; the renderer never drops
+connections to simplify the graph.
+Long-path labels in the connected view sit in side gutters when width allows; narrow windows retain source-adjacent labels
+and readable boxes. Clear side approaches use side-entry arrowheads to distinguish them from normal
+incoming flow. Dashed Mermaid arrows and the parser's restricted `linkStyle` subset are inert parsed
+data; arbitrary CSS remains rejected (see
+[`DiagramHintLinkStyle`](../Sources/JarvisCore/Overlay/DiagramHintLinkStyle.swift)).
+Labels share the explicit edge color and use a contrasting background for dark text, while
+unlabeled/default flow stays neutral. Layout
+preserves every node, label, and directed connection. Readability takes precedence over compactness:
+graphs with five or more nodes try progressively smaller text, boxes, and padding only when they
+overflow, choosing the largest fitting size. Box text stops at 13 points and edge labels at 11 points;
+remaining overflow scrolls vertically. Smaller graphs and graphs that already fit keep normal sizing. Prose beside a diagram keeps its configured compact size rather than
+shrinking to compensate for the graph. See `OverlayBoxPanel`, `DetailDocumentView`,
+`DiagramHintLayout`, `DiagramHintEdgeRoute`, and `DiagramHintImage` for sizing.
 
 Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
 reports back what reached the screen. A detail the box could not accept, because it is hidden or
@@ -574,7 +608,7 @@ Clear like any held detail, goes on following the reply, and heads the entry the
 `deliver` replaces the live detail with the delivered one,
 which is where dropped blocks are applied and where a detail the box cannot accept is dropped
 whole, and a withdrawn reply removes it and releases a hold placed on it, so the history holds one
-detail per reply whatever streamed. A reply cut short after its lines closed keeps the hint and
+detail per reply whatever streamed. A reply cut short after its hint's closing quote keeps the hint and
 finalizes its detail through `ReplyDetail(interruptedMarkdown:)`. An open code fence is replaced
 with a fixed interruption notice and a suggestion to press Show code again; completed blocks stay.
 An open diagram contributes no diagram, as in the live parse. Activity and committed history receive
@@ -649,9 +683,9 @@ session and consumes the matched click through release. See
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
 | **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit automatic attempts only when both transcription streams are settled through the selected context, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
-| **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, prove each sign-in from its model list, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
+| **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, read passive credential health and refresh an expired renewable credential at Start, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
-| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped, as the session's scrollable history. Movable, resizable, translucent, excluded from capture, and with no off switch. Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. It is the `OverlayRendering` sink `CoachDriver` speaks to. On a streamed reply ([Latency](#latency)) the box opens a live entry on the reply's first character, stamped with that moment, and when the model writes the detail first the entry shows `Writing…` until line 1 starts; each snapshot rewrites its text (the closed lines, then the open line) and grows its detail in the section below, `deliver` replaces both with the delivered lines and detail, and a `nil` progress removes both. A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
+| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped, as the session's scrollable history. Movable, resizable, translucent, excluded from capture, and with no off switch. Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. It is the `OverlayRendering` sink `CoachDriver` speaks to. On a streamed reply ([Latency](#latency)) the box opens a live entry on the reply's first character, stamped with that moment, and when the model writes the detail first the entry shows `Writing…` until the hint starts; each snapshot rewrites its hint text and grows its detail in the section below, `deliver` replaces both with the delivered hint and detail, and a `nil` progress removes both. A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
 | **HotkeyController / MouseHotkeyController** | Handle the coaching and detail-navigation bindings; AppDelegate routes coaching to the session and navigation to the overlay. See [Settings → Shortcuts](./settings-window.md#shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC) for keyboard; Core Graphics event tap with Accessibility permission for mouse. |
 | **OnboardingGate** | Run first-run onboarding once per install, before the rest of the app is built: one OpenAI or Gemini API key, then the three TCC grants, each step shown only when what it collects is missing. Closing the window before the end quits; completing it sets the one onboarding flag, so later launches go straight to the menu bar. `SystemAudioPermissionProbe` proves the silently enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Onboarding](#onboarding) and [§3 Permissions](#permissions). | AppKit window, `CredentialVerifier`, AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
@@ -695,7 +729,8 @@ every Start runs is what catches it.
 
 Each step shows only when what it collects is missing
 (`Onboarding.steps(needsAPIKey:holdsEveryGrant:)`). The key step shows when the saved setup calls a
-provider whose key isn't saved, which is exactly when Start would refuse: a new install, which calls
+transcription provider whose key isn't saved, or when no brain target has a key or subscription
+target to check at Start: a new install, which calls
 OpenAI by default, always sees it, and a setup of a subscription brain with Apple Speech never does.
 A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` counts, and an install
 that already has what it needs completes onboarding without a window. Closing the window before the
@@ -796,9 +831,10 @@ policing, which contradicts the rule above, or a timer. The next Start refuses w
 
 ### Failure surfacing — startup loud, runtime ghost
 
-Every user-facing failure flows through one `ErrorReporter`: severity on a Foundation-only
+Provider failures and other startup failures flow through one `ErrorReporter`: severity on a Foundation-only
 `UserFacingError` decides the lifecycle consequence while an explicit context captured at the
-failure site decides presentation. Startup failures caused by an explicit Start may alert; every
+failure site decides presentation. Startup failures caused by an explicit Start may alert. An
+unavailable brain route instead uses the red readiness status and its typed cause; every
 runtime context suppresses alerts unconditionally, including after teardown, so a queued main-actor
 report cannot reveal Jarvis during screen sharing. Permanent brain, microphone-transcription, and
 audio-capture failures stop without presenting UI; the system-audio failure degrades to
@@ -863,15 +899,15 @@ in-flight attempt on an unaffected target keeps normal success and failure accou
 A **coaching attempt** snapshots one target and the latest provider-neutral conversation, then keeps
 that target for the complete tool loop. Every provider request in that loop is made once. A complete,
 non-truncated terminal `speak` or `stay_silent` commits the attempt and clears that target's consecutive
-failure count. So does a `speak` reply that fails or is cut off after its `lines` array has closed on
-the stream ([Latency](#latency)): the runner delivers and commits the lines as read with the
+failure count. So does a `speak` reply that fails or is cut off after its `hint` string's closing quote
+arrives on the stream ([Latency](#latency)): the runner delivers and commits the hint as read with the
 interrupted detail finalized ([The detail box](#the-detail-box)), through the same path as a completed
 reply, and logs `Detail: cut short`. Withdrawing
 text the user has already read and running a fresh attempt would risk a second, different hint for
 the same moment. A
 provider rejection, such as Claude's `refusal` stop or an OpenAI reply that ends `incomplete` for
 `content_filter` (which the Responses format reads as a refusal), is excluded: the provider ended
-that reply on purpose, so it is withdrawn and fails like a failure before the lines closed. A
+that reply on purpose, so it is withdrawn and fails like a failure before the hint closed. A
 provider error, an incomplete response, a reply the runner cannot answer within the
 response cap ([Capabilities](#capabilities)), or failure after an intermediate `capture_screen` fails
 the attempt once; cancellation, filler suppression, and local
@@ -1068,8 +1104,16 @@ rather than a per-turn screenshot.
   state ownership, durable background-work creation, replenishment, and recovery against the current
   requirements. It targets the highest-impact missing mechanism at the current stage and asks for
   a diagram in the one stage that benefits. An explicitly requested stage takes precedence over
-  screen notes; generic hints continue the stage established in conversation. Architecture hints
-  describe component responsibilities and a request or data flow. Canvas navigation controls are
+  screen notes; generic hints continue the stage established in conversation. Warranted stage-entry
+  hints provide a usable starting structure and one next move. Architecture flow hints include a
+  compact diagram in detail, including on the ordinary hint shortcut, because naming disconnected
+  steps leaves the candidate to assemble the design under pressure. They identify application-work
+  and durable-write ownership before suggesting connections, without forcing redundant services.
+  Deep dives keep the current question, operation and retry boundary distinct; alternatives are
+  explained before replacing the candidate's approach. Scaling hints locate batching and parallelism
+  in that approach and explain the work saved and latency trade-off. Expressed confusion prompts a
+  small worked example immediately rather than repeated terminology or an extra shortcut press.
+  Productive progress remains silent; these are skill instructions, not runtime stage tracking. Canvas navigation controls are
   interface state and become the answer when navigation is what the candidate asks for; an unseen
   drawing calls for a conversation-grounded hint with its visual limitation stated. Unresolved
   requirements call for a specific question the candidate can put to the interviewer, without needing
@@ -1188,8 +1232,8 @@ of their API family (`ResponsesWireFormat`, `MessagesWireFormat`), and the attem
 provider-neutral reply. Only the route, the key, the wire format, and the failure table differ, and
 each provider's
 [`BrainProviderDescriptor`](../Sources/JarvisCore/Brain/BrainProviderDescriptor.swift) names them,
-together with its display name and effort floor, and for a subscription the helper's model owner,
-login flag, and account-file prefix.
+together with its display name and effort floor, and for a subscription the helper's credential
+provider, login flag, and account-file prefix.
 
 A proxy rather than the vendors' own CLIs: driving `claude` and `codex` as coaching processes meant
 imitating native function calls with a text protocol the model had to follow and Jarvis had to parse
@@ -1213,7 +1257,7 @@ is about 60 MB on disk and 20 MB per update.
   reaches. Each start also narrows that directory to owner-only and deletes dumps an older build
   left. The helper and its logins inherit only `HOME`, `PATH`, `TMPDIR`, and `LANG`: the binary reads
   database, object-store, and proxy variables that would move a credential off this Mac or reroute
-  traffic the configuration pins to the vendors. It is ready when its model list answers, within ten
+  traffic the configuration pins to the vendors. It is live when its model list answers, within ten
   seconds.
 - **Crashes keep the endpoint.** A helper that exits after it answered restarts on the same port
   with the same key after 1, 5, then 15 seconds, so a session composed against it keeps working; a
@@ -1227,17 +1271,25 @@ is about 60 MB on disk and 20 MB per update.
   retried until asked. A Jarvis that ended without Quit leaves
   its helper and configuration behind; the next launch stops that helper, once its process is proven
   to be this executable, and removes the files.
-- **Readiness is the model list.** One probe per Start or reapply: the helper lists a vendor's models
-  only while it holds a credential for that vendor, so an `owned_by` of `openai` or `anthropic` proves
-  the Codex or Claude sign-in. A subscription the probe cannot serve becomes an unavailable route
-  target carrying a permanent failure, authentication when signed out and unavailable with the
-  helper's own reason when it would not start, and the route skips it when the cursor reaches it, so
-  a fallback still coaches. A Start or route edit is refused only when no target in the route can
-  coach (`UserFacingError.brainRouteUnavailable`). A reapply that is not a topology edit never retires
-  a target on the probe's word: if the helper does not answer, the running route keeps the clients it
-  has and the edit is recorded as not applied, and if it answers without naming a vendor the
-  subscription stays available, because the helper lists a vendor's models only once it has loaded that
-  credential and a restart or a token refresh can answer for a moment without it.
+- **Readiness uses passive credential health.** Every Start reads the helper's runtime credential
+  status through its loopback-only management API; the model list proves only helper liveness.
+  Healthy credentials require no fresh upstream authentication request. An expired access token
+  that has no permanent rejection or active cooldown gets one targeted refresh, bounded by a
+  ten-second total deadline per subscription, followed by another passive check. The helper owns
+  OAuth and token rotation. Jarvis decodes only health fields and discards refresh response bodies,
+  which can contain tokens. Rejected refresh credentials require Sign in; network failures,
+  cooldowns, incomplete metadata, and an unanswered health endpoint remain temporary uncertainty.
+  A subscription the check cannot serve becomes an unavailable target, so the route goes directly
+  to the first usable configured fallback without a synthetic failed request. A missing API key
+  makes only that brain target unavailable; the transcription provider's own key remains mandatory.
+  No usable target blocks Start with a red icon and a specific redacted readiness cause in the menu
+  and Activity, without an alert. Saved primary and fallback order remain unchanged.
+  A topology edit uses the same passive health; an effort or key reapply preserves working
+  subscription clients. Runtime permanent authentication failures request another passive health
+  snapshot for the shared Settings state while the existing fresh-attempt failover policy runs.
+  Start generations, cancellation, and credential revisions discard superseded checks across
+  Stop, new Start, edits, and sign-in/out. A passive check describes current helper knowledge;
+  revocation or an outage after it still fails through the normal runtime provider boundary.
 - **Tool choice per target.** Every target declares the runner's tool list unchanged. The OpenAI
   API and Codex enforce a narrowed choice with `allowed_tools`, a forced function, strict tools, and
   verbatim reasoning replay through the Codex path intact; the Gemini API enforces it with
@@ -1267,8 +1319,8 @@ is about 60 MB on disk and 20 MB per update.
   with `eager_input_streaming` on each coach tool ([Latency](#latency)), and no
   `strict`: Anthropic compiles a strict tool set it has not seen for several seconds before the first
   byte, and the catalog enum differs per session, so the first request of every session would pay
-  it. A malformed reply, about one Opus 5 `speak` in ten with `lines` double-encoded as a string, is
-  answered with the schema in the same attempt instead. Within an attempt each reply's content blocks go back unchanged, so a thinking block
+  it. A reply with malformed tool arguments is answered with the schema in the same attempt.
+  Within an attempt each reply's content blocks go back unchanged, so a thinking block
   precedes the `tool_use` it belongs to; committed history keeps the rebuilt calls and drops the
   thinking, which Anthropic allows outside a tool round. The tool-less history summarizer on Haiku 4.5
   sends neither thinking nor effort, which that model rejects. The helper's default cloak stays on:
@@ -1306,7 +1358,9 @@ is about 60 MB on disk and 20 MB per update.
   minutes for the provider to redirect to the helper's fixed
   callback port, 1455 for Codex and 54545 for Claude. A busy port ends the login with the helper's
   message. The credential lands in the auth directory the running helper watches, so no restart is
-  needed, and Jarvis narrows it to owner-only. Cancel ends the login and closing Settings does not,
+  needed, and Jarvis narrows it to owner-only. One account per subscription is supported; a successful
+  login replaces the previous account, and ambiguous multiple credentials are unavailable rather
+  than rotated. Cancel ends the login and closing Settings does not,
   because the browser still has to redirect; Sign out deletes that subscription's credential files.
 - **Latency sits in the vendors' own band.** Through the helper a Codex turn beats the Codex CLI on the
   same machine and a Claude press trails the Claude CLI; the
@@ -1396,7 +1450,7 @@ vendors' own CLIs is in
 and neither subscription promises the direct API target.
 
 The `speak` reply streams to the Overlay Box on the OpenAI API, Codex, and Claude Code: the box
-shows the hint from its first character, follows each line as it is written, and shows its
+shows the hint from its first character, follows its text as it is written, and shows its
 detail as the model writes it ([The detail box](#the-detail-box)). Measured on Claude through
 the helper, the first character of a short hint reached the screen at about 1.1 s
 against 2.2 s for the whole reply, and on a Show code press at about 2.0 s against 5.2 s, since
@@ -1429,22 +1483,22 @@ values (the call's ordinal, name, and argument text so far) through the sink the
 `BrainClient.makeConversation(progress:)`, and the runner turns the first `speak` call's deltas
 into `BrainReplyProgress` snapshots with
 [`SpeakArgumentsScanner`](../Sources/JarvisCore/Coach/Tools/SpeakArgumentsScanner.swift), a pure
-function of the text so far: closed lines with blank ones dropped, the open line, whether the array
-closed, and the detail so far, with JSON escapes decoded only once they are whole. A `lines` value
-that opens with a quote, the double-encoded form some Opus replies take, shows nothing early and
-falls through to the runner's schema re-ask after completion. Snapshots travel through one ordered
-channel per request to one main-actor consumer
+function of the text so far: the hint, whether its closing quote arrived, and the detail so far,
+with JSON escapes decoded only once they are whole. A `hint` value with the wrong type shows
+nothing early and falls through to the runner's schema re-ask after completion. Snapshots travel
+through one ordered channel per request to one main-actor consumer
 ([`ReplyProgressRelay`](../Sources/JarvisCore/Coach/ReplyProgressRelay.swift)), which keeps only the
 newest while it is busy and paints at most once per display frame, so an older state never lands
 after a newer one; the runner drains that channel before it delivers or withdraws, which is what
 orders the final state after the last paint. `deliver` finalizes the live entry
 instead of adding a second one, and the committed history holds the same rebuilt call whatever
-streamed. A request that ends without delivering, a failure or truncation before the lines closed,
-a call the press did not permit, arguments the parser rejected, or Stop, withdraws the live reply,
-even a first line still half written, and takes the path it always took; a failure or truncation after the lines closed keeps the hint,
-see [Ordered provider route](#ordered-provider-route). The runner logs `💬 first text +Xms` when
+streamed. A request that ends without delivering, a failure or truncation before the hint's closing
+quote, a call the press did not permit, arguments the parser rejected, or Stop, withdraws the live reply,
+even a hint still half written, and takes the path it always took; a failure or truncation after
+the hint closes keeps the hint; see [Ordered provider route](#ordered-provider-route).
+The runner logs `💬 first text +Xms` when
 the first character reaches a snapshot, and the recorded traffic's phases gain `first_event_ms`,
-`first_speak_text_ms`, and `speak_lines_ms`; Activity records one tip, at completion.
+`first_speak_text_ms`, and `speak_hint_ms`; Activity records one tip, at completion.
 
 Session auditing adds only best-effort typed-event admission to the live path. Parsing, redaction,
 serialization, file I/O, bounded retention, and close behavior belong to the

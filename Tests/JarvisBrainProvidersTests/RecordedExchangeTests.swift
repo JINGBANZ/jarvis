@@ -13,7 +13,7 @@ import JarvisCore
         {"model":"gpt-5.5","reasoning":{"effort":"low"},"max_output_tokens":2048,
          "tool_choice":{"type":"allowed_tools","mode":"required","tools":[{"type":"function","name":"speak"}]},
          "instructions":"You are Jarvis.",
-         "tools":[{"type":"function","name":"speak","parameters":{"type":"object","properties":{"lines":{},"detail":{}}}}],
+         "tools":[{"type":"function","name":"speak","parameters":{"type":"object","properties":{"hint":{},"detail":{}}}}],
          "input":[{"role":"user","content":[{"type":"input_text","text":"hi"},{"type":"input_image","image_url":"[base64 image omitted]"}]},
                   {"type":"reasoning","id":"rs_1"},
                   {"type":"function_call","call_id":"c1","name":"capture_screen","arguments":"{}"},
@@ -21,7 +21,7 @@ import JarvisCore
         """#)
         let response = json(#"""
         {"status":"completed","output":[{"type":"reasoning","id":"rs_2"},
-          {"type":"function_call","call_id":"c2","name":"speak","arguments":"{\"lines\":[\"Hi\"],\"detail\":\"More.\"}"},
+          {"type":"function_call","call_id":"c2","name":"speak","arguments":"{\"hint\":\"Hi\",\"detail\":\"More.\"}"},
           {"type":"message","content":[{"type":"output_text","text":"prose"}]}],
          "usage":{"input_tokens":10,"input_tokens_details":{"cached_tokens":4},"output_tokens":7}}
         """#)
@@ -32,7 +32,7 @@ import JarvisCore
         #expect(exchange.instructions == "You are Jarvis.")
         #expect(exchange.toolNames == ["speak"])
         #expect(exchange.toolCount == 1)
-        #expect(exchange.speakParameters == ["detail", "lines"])
+        #expect(exchange.speakParameters == ["detail", "hint"])
         #expect(exchange.toolChoiceType == "allowed_tools")
         #expect(exchange.input == [
             .message(role: "user", parts: ["hi", "[base64 image omitted]"]),
@@ -44,7 +44,7 @@ import JarvisCore
         #expect(exchange.status == "completed")
         #expect(exchange.outputs == [
             .reasoning,
-            .call(.init(id: "c2", name: "speak", arguments: #"{"lines":["Hi"],"detail":"More."}"#)),
+            .call(.init(id: "c2", name: "speak", arguments: #"{"hint":"Hi","detail":"More."}"#)),
             .text("prose"),
         ])
         #expect(exchange.usage?.input == 10)
@@ -66,14 +66,14 @@ import JarvisCore
         let request = json(#"""
         {"model":"claude-opus-5","instructions":"You are Jarvis.","reasoning":{"effort":"low"},
          "input":[{"role":"user","content":[{"type":"input_text","text":"hi"}]},
-                  {"type":"function_call","call_id":"c1","name":"speak","arguments":"{\"lines\":[\"Hi\"]}"},
+                  {"type":"function_call","call_id":"c1","name":"speak","arguments":"{\"hint\":\"Hi\"}"},
                   {"type":"function_call_output","call_id":"c1","output":"shown"}]}
         """#)
         let response = json(#"{"status":"completed","output":[{"type":"function_call","call_id":"c2","name":"speak","arguments":"{}"}]}"#)
         let exchange = RecordedExchange.read(request: request, response: response)
         #expect(exchange == ResponsesWireFormat.readRecorded(request: request, response: response))
         #expect(exchange.instructions == "You are Jarvis.")
-        #expect(exchange.input[1] == .call(.init(id: "c1", name: "speak", arguments: #"{"lines":["Hi"]}"#)))
+        #expect(exchange.input[1] == .call(.init(id: "c1", name: "speak", arguments: #"{"hint":"Hi"}"#)))
         #expect(exchange.outputs == [.call(.init(id: "c2", name: "speak", arguments: "{}"))])
     }
 

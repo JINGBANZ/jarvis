@@ -7,7 +7,7 @@ import Testing
         let input = try JarvisPrompts.HistorySummary.input([
             .user("Give me a hint about the screenshot."),
             .assistantToolCalls([.init(id: "reply", name: "speak", argumentsJSON:
-                #"{"lines":["Keep boundary events."],"detail":"Use < cutoff, then test equality."}"#)]),
+                #"{"hint":"Keep boundary events.","detail":"Use < cutoff, then test equality."}"#)]),
             .init(role: .tool, text: "shown to the user", toolCallId: "reply"),
             .user(JarvisPrompts.Coach.earlierImageStub)
         ])

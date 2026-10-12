@@ -135,7 +135,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         let rest = text[first.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)
         return .speak(
             callId: "runner_" + UUID().uuidString.prefix(8).lowercased(),
-            lines: [text[first].trimmingCharacters(in: .whitespaces)],
+            hint: text[first].trimmingCharacters(in: .whitespaces),
             detail: rest.isEmpty ? nil : rest)
     }
 
@@ -325,27 +325,27 @@ final class CoachAttemptRunner: @unchecked Sendable {
             }
 
             /// Delivers one hint, records it, and commits the turn: the attempt's terminal action.
-            func speak(callID: String, lines: [String], detail parsedDetail: ReplyDetail?) async -> AttemptResult {
+            func speak(callID: String, hint: String, detail parsedDetail: ReplyDetail?) async -> AttemptResult {
                 if Task.isCancelled {
                     jlog("… attempt cancelled (stopped) before speaking")
                     await withdraw()
                     return .cancelled
                 }
-                jlog("💬 \(lines.joined(separator: " "))")
+                jlog("💬 \(hint)")
                 for reason in parsedDetail?.dropped ?? [] { jlog("Detail: \(reason)") }
                 let delivery = await MainActor.run { () -> (accepted: Bool, detail: ReplyDetail?) in
                     guard !Task.isCancelled else { return (false, nil) }
-                    return (true, self.overlay.deliver(lines, detail: parsedDetail))
+                    return (true, self.overlay.deliver(hint, detail: parsedDetail))
                 }
                 guard delivery.accepted else {
                     await withdraw()
                     return .cancelled
                 }
                 let delivered = delivery.detail
-                activity?.record(.tip(lines: lines, detail: delivered?.deliveredMarkdown))
+                activity?.record(.tip(hint: hint, detail: delivered?.deliveredMarkdown))
                 // History records the detail actually shown, not blocks the runtime dropped.
                 let arguments: [String: Any] = [
-                    "lines": lines, "detail": delivered?.deliveredMarkdown ?? NSNull(),
+                    "hint": hint, "detail": delivered?.deliveredMarkdown ?? NSNull(),
                 ]
                 let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
                 // Rebuilt, not copied, so a hint spoken from prose still commits a call.
@@ -365,7 +365,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
             func speak(_ streamed: BrainReplyProgress) async -> AttemptResult {
                 await speak(
                     callID: "runner_" + UUID().uuidString.prefix(8).lowercased(),
-                    lines: streamed.closedLines,
+                    hint: streamed.hint.trimmingCharacters(in: .whitespacesAndNewlines),
                     detail: streamed.detailMarkdown.flatMap(ReplyDetail.init(interruptedMarkdown:)))
             }
 
@@ -418,9 +418,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     jlog("Jarvis coach: brain request failed on \(reason) via "
                          + "\(attempt.target.provider.displayName): \(failure.errorDescription ?? "")")
                     // Keep the hint already read, but finalize interrupted code before committing it.
-                    // An array that closed empty showed nothing, so it has nothing to keep, and a
+                    // A hint that closed blank showed nothing, so it has nothing to keep, and a
                     // rejection (Claude's refusal stop) ended the reply on purpose, so nothing is kept.
-                    if let streamed, streamed.linesComplete, !streamed.closedLines.isEmpty,
+                    if let streamed, streamed.hintComplete,
+                       !streamed.hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                        failure.category != .rejected {
                         jlog("Detail: cut short (\(failure.category.rawValue))")
                         return await speak(streamed)
@@ -438,10 +439,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 }
 
                 // Incomplete output can't prove a terminal action, even if it contains one, unless
-                // its lines closed on the way: those stay on screen and commit as they were read.
+                // its hint closed on the way: that stays on screen and commits as it was read.
                 if let incompleteReason = response.incompleteReason {
-                    if let streamed, streamed.linesComplete, !streamed.closedLines.isEmpty {
-                        jlog("⚠️ response incomplete (\(incompleteReason)) after its lines closed — keeping the hint")
+                    if let streamed, streamed.hintComplete,
+                       !streamed.hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        jlog("⚠️ response incomplete (\(incompleteReason)) after its hint closed — keeping the hint")
                         jlog("Detail: cut short (\(incompleteReason))")
                         return await speak(streamed)
                     }
@@ -629,8 +631,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     }
 
-                case .speak(let callID, let lines, let requestedDetail):
-                    return await speak(callID: callID, lines: lines,
+                case .speak(let callID, let hint, let requestedDetail):
+                    return await speak(callID: callID, hint: hint,
                                        detail: requestedDetail.flatMap(ReplyDetail.init(markdown:)))
 
                 case .staySilent:

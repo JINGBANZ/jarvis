@@ -4,8 +4,7 @@ import Foundation
 /// text so far, so every prefix of one reply yields the same snapshot whatever the chunking, and
 /// an escape split at the end is simply not shown yet. See wiki/architecture.md#latency.
 public enum SpeakArgumentsScanner {
-    /// Nil when nothing may be shown early: `lines` opened with a quote instead of a bracket, the
-    /// double-encoded form the runner's schema re-ask handles once the reply completes.
+    /// Nil when the hint has the wrong type; the runner re-asks with the schema after completion.
     public static func progress(in arguments: String) -> BrainReplyProgress? {
         var scanner = Scanner(Array(arguments.unicodeScalars))
         return scanner.run()
@@ -14,9 +13,8 @@ public enum SpeakArgumentsScanner {
     private struct Scanner {
         private let text: [Unicode.Scalar]
         private var index = 0
-        private var closedLines: [String] = []
-        private var openLine: String?
-        private var linesComplete = false
+        private var hint = ""
+        private var hintComplete = false
         private var detail: String?
 
         init(_ text: [Unicode.Scalar]) {
@@ -24,8 +22,7 @@ public enum SpeakArgumentsScanner {
         }
 
         private var snapshot: BrainReplyProgress {
-            BrainReplyProgress(closedLines: closedLines, openLine: openLine,
-                               linesComplete: linesComplete, detailMarkdown: detail)
+            BrainReplyProgress(hint: hint, hintComplete: hintComplete, detailMarkdown: detail)
         }
 
         /// The top-level object, key by key; any key but the two shown is skipped unparsed.
@@ -44,13 +41,12 @@ public enum SpeakArgumentsScanner {
                 skipWhitespace()
                 guard index < text.count else { return snapshot }
                 switch key.value {
-                case "lines":
-                    if text[index] == "\"" { return nil }
-                    guard consume("[") else {
-                        guard skipValue() else { return snapshot }
-                        continue
-                    }
-                    guard lines() else { return snapshot }
+                case "hint":
+                    guard text[index] == "\"" else { return nil }
+                    let value = string()
+                    hint = value.value
+                    hintComplete = value.complete
+                    guard value.complete else { return snapshot }
                 case "detail":
                     if text[index] == "\"" {
                         let value = string()
@@ -61,32 +57,6 @@ public enum SpeakArgumentsScanner {
                     }
                 default:
                     guard skipValue() else { return snapshot }
-                }
-            }
-        }
-
-        /// After the opening bracket. False while the array is still open.
-        private mutating func lines() -> Bool {
-            while true {
-                skipWhitespace()
-                guard index < text.count else { return false }
-                if consume("]") {
-                    linesComplete = true
-                    return true
-                }
-                if consume(",") { continue }
-                guard text[index] == "\"" else {
-                    guard skipValue() else { return false }
-                    continue
-                }
-                let line = string()
-                guard line.complete else {
-                    openLine = line.value
-                    return false
-                }
-                openLine = nil
-                if !line.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    closedLines.append(line.value)
                 }
             }
         }

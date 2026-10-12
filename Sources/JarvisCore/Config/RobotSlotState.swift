@@ -2,7 +2,7 @@ import Foundation
 
 public struct RobotSlotState: Sendable, Equatable {
     public enum Tone: Sendable, Equatable {
-        case normal, live, attention
+        case normal, live, attention, blocked
     }
 
     public let value: String

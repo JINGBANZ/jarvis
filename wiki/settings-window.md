@@ -57,7 +57,8 @@ documents; Eye and Activity use the page shell without an outer scroll view.
 The pages share these AppKit primitives rather than styling their controls independently:
 
 - `SettingsTheme` owns every Settings color: purple for structure, teal for what is on, selected, or
-  live, amber for what needs the user. Each color resolves per appearance, including the Increase
+  live, amber for attention or checking, and red for an unavailable configured brain route. Each
+  color resolves per appearance, including the Increase
   Contrast appearances, where card lines draw at full strength, so every view follows light and dark
   mode without observing the change.
 - `SettingsBackgroundView` draws the radial backdrop behind the hub and every page. Onboarding reuses
@@ -131,28 +132,36 @@ never makes the pose jump.
 
 ### Status
 
-Each slot has a status light, teal when the part is ready and amber when it needs the user, and the
-hub header shows a four-segment readiness meter in part order that reads **SYSTEMS READY 4/4** or
-**NEEDS YOU n/4**. A part that needs the user turns its slot amber and replaces the slot's detail
-with the reason. The rules judge saved settings and grants the way a Start would meet them, and name
-only what Settings can fix or explain:
+Each slot has a status light: teal when ready, amber when checking or needing attention, and red
+when no target in the configured brain route is usable. The hub header shows the same signals in a
+four-segment meter, with **SYSTEMS READY 4/4**, **CHECKING n/4**, **NEEDS YOU n/4**, or **NOT READY n/4**.
+A problem replaces the slot's detail with its reason. The rules judge saved settings and grants the
+way a Start would meet them, and name only what Settings can fix or explain:
 
-- **Brain** needs a target's API key whenever any target in the route calls its provider with a key
-  (the OpenAI API or the Gemini API) and that key is not saved. Start refuses in that case, so the
-  hub asks for the key rather than promising to skip that target. Otherwise Brain needs attention
-  when the primary is a subscription proven signed out; the notice says whether the next brain in
-  the route will answer instead, or whether none can.
+- **Brain** is ready when its primary is usable. An unavailable primary with a usable configured
+  fallback is amber, **PRIMARY UNAVAILABLE**; its notice carries the redacted cause and names the
+  fallback. With no usable configured target it is red, **NO BRAIN AVAILABLE**, with the cause and
+  next action. An unanswered initial credential check is amber, **CHECKING CONNECTIONS**. Temporary
+  subscription failures affect readiness without claiming the account is signed out. Saved keys
+  for providers outside the route do not count; an unavailable fallback alone does not block a
+  usable primary.
 - **Ear** needs its transcription provider's own key first, then microphone access.
 - **Eye** needs Screen Recording.
 - **Mouth** never needs the user: the Overlay Box has no off switch.
 
-The exact wording lives in `RobotHealth`.
+`BrainRouteAvailability` in Core evaluates target eligibility and fallback order for both the hub
+and session Start. `RobotHealth` turns that result into the hub's wording and colors.
 
 A subscription counts as signed out only when that is proven: it has no saved sign-in, or the
-helper answered without it. A helper that couldn't answer proves nothing. `SubscriptionSignIns` is
-the one answer the hub and the Brain page share, so they cannot disagree. It asks the bundled helper
-only when a sign-in is saved, so opening Settings never starts the helper for nothing, and it takes
-the answers Connections gets from its own probes, cancelling any older probe still in flight.
+helper reports a permanent authentication rejection. Temporary failures and an unanswered health
+check prove no sign-out. Foundation-only `SubscriptionSignIns` owns Settings health checks and their
+cached answer, shared by Connections, the hub, and the Brain page. The answer includes temporary
+failures and an unchecked state. Hub and Brain visits ask the helper only when a sign-in is saved;
+an explicit Connections visit can also start the helper to check empty accounts. Passive checks
+share one pending task. Answers from Start replace a pending passive check, while an explicit
+Settings retry keeps priority until it finishes. Closing Settings releases its views without
+canceling the shared check; session Start keeps its own cancellation lifecycle. A runtime permanent
+subscription authentication failure requests a passive refresh of this shared state.
 
 **Refresh.** Visiting the hub and the window becoming key both re-read everything and probe the
 sign-ins; coming back from System Settings is the usual way a grant changes. While the window is
@@ -195,7 +204,7 @@ pages it moves.
 | `TranscriptionSection` | **Ear**: "How I turn the conversation into text." | The transcription provider and its model, language, vocabulary, mode, or locale rows ([Ear](#ear)). Applies on the next Start. |
 | `DisplaySection` | **Eye**: "What I look at when I check your screen." | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — and the optional Chrome text switch, followed by a short fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot ([Capture Scope](#capture-scope)). |
 | `OverlaySection` | **Mouth**: "How my hints show up on your screen." | One **Overlay Box** card (the persistent response history) with an icon, description, text size and opacity rows, and the detail box's own rows. It has no On/Off switch: the box shows for every session. Its live sample appears only while the Mouth page is visible (`didBecomeActive`/`didResignActive`). The header's live chip says the sliders act on screen. Persists via `OverlayAppearance` ([Overlay Appearance](#overlay-appearance)). |
-| `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts what is ready. |
+| `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts saved managed API keys. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | Prep notes search, with its switch and its list of local note files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
 | `HotkeySection` | **Shortcuts**: "Ask me for help, or step through my details." | One card with a row each for **Give me a hint**, **Explain more**, **Show code**, **Previous detail**, and **Next detail**: keyboard keycaps and **Record**, an optional mouse row with **Record**/**Clear**, and per-row failure feedback ([Shortcuts](#shortcuts)). |
@@ -413,10 +422,11 @@ attempt counts remain in `jarvis-debug.log`.
 
 A signed-out subscription is hidden from new selection while editing; an existing saved row stays
 visible so the user can repair or remove it. A configured target that cannot serve when the session
-starts or the route is edited (a signed-out subscription, or a helper that isn't running) stays in
-the runtime route as an unavailable entry: activation skips it with a notice and moves forward
-without inventing provider requests solely to consume the failure budget. Start is refused, with an
-alert naming the first target's next step, only when no target in the route can serve, because a
+starts or the route is edited (rejected or unavailable subscription credentials, an unanswered
+health check, or a missing API key) stays in the runtime route as an unavailable entry: activation
+skips it with a notice and moves forward without inventing provider requests solely to consume the
+failure budget. Start is refused, with a red menu-bar icon and readiness status naming the first
+target's redacted cause and next step, only when no target in the route can serve, because a
 route with one usable target can still coach. Runtime movement through the route never changes the
 saved list. Stop → Start begins at the saved primary again.
 
@@ -462,9 +472,9 @@ the next attempt.
 
 An edit to a route that names a subscription reads the helper first, so it meets the sign-ins
 Settings showed. A route edit in which no target can serve is refused: the running route stays
-intact, Activity records fixed settings-not-applied copy, and the same alert as a refused Start
-names the next step. An edit whose route names the OpenAI API or the Gemini API while that key is not
-saved is refused the same way, without the alert. Provider-specific partial tool-loop state from a
+intact and Activity records fixed settings-not-applied copy with runtime failure detail.
+A missing brain API key makes that target unavailable; the edit can still apply when another
+configured target is usable. Provider-specific partial tool-loop state from a
 failed attempt is discarded, while provider-neutral pending conversation follows the newly installed
 route on its next attempt. While stopped, persisted changes apply on the **next Start**. The helper's later state is
 not a routing signal: if it stops or a subscription is signed out mid-session, that target's attempt
@@ -607,29 +617,51 @@ claim that the account is healthy.
 
 The **Subscriptions** card (`SubscriptionControls`) has one row each for **Codex**
 and **Claude Code**. Opening Connections probes the bundled helper, starting it if it is
-not running, and reads its credential files, so each row says what a Start would find; each answer
-also updates `SubscriptionSignIns`, so the hub and the Brain page agree with this card. The state
+not running, through `SubscriptionSignIns`, so each row says what a Start would find. The card
+renders that shared owner's answer, so the hub and the Brain page agree with it. The state
 reads under the row's title, as the key rows' does, with the row's button on the right:
 
 - **Checking…** until the probe answers.
 - **Signed in** (teal), with the account's email and plan, and a **Sign out** button.
 - **Signed out**, with a **Sign in** button.
-- **Not usable** (amber) when a sign-in is saved but the helper does not serve that vendor, which
-  usually means the sign-in expired; **Sign in** replaces it.
+- **Sign in again** (amber) when the helper reports rejected credentials, with the redacted cause
+  and a **Sign in** button.
+- **Temporarily unavailable** (amber) for an expired access token, cooldown, or unknown credential
+  health, with **Try again**; none proves the account signed out.
 - **Not running** (amber), with the helper's own reason and a **Try again** button that probes again.
 - **Signing in…** while a sign-in runs, with a **Cancel** button.
+
+**Try again** checks the clicked subscription and requests one targeted refresh if its access token
+has expired and can still be renewed. It replaces a pending passive check immediately, and the
+canceled check's late answer is ignored. While the requested retry runs, its button reads
+**Trying again…**, retry buttons are disabled, and the previous error stays visible until the new
+answer arrives. Completion publishes the new answer and enables retry actions again; failure does
+not schedule another retry. Opening Connections keeps the check passive; healthy credentials and
+rejected refresh tokens do not trigger a refresh request.
+
+Subscription rows retain the full redacted failure text. The text wraps, is selectable, and has
+space between lines; each row and its card measure the message at the current width and grow to
+fit. Actions remain aligned at the top right, and the outer page scrolls when needed. This keeps
+the cause and next step readable at both the default and minimum window width.
 
 **Sign in** runs the helper's login for that vendor, opens the vendor's sign-in page in the default
 browser, and waits up to ten minutes for the browser to hand the account back. It is the one place
 Jarvis opens a URL, and only because the user pressed the button. A failed sign-in shows the helper's
-redacted reason under the row. **Sign out** deletes that vendor's credential files. Jarvis never
-reads the tokens itself: they stay in the helper's owner-only credential directory, apart from the
+redacted reason under the row. **Sign out** cancels a pending Start whose configured route uses that
+subscription before deleting the vendor's credential files, so a captured healthy answer cannot start
+with removed credentials. The user presses Start again to recheck the route and use an available
+configured fallback. One account per subscription is supported; a successful Sign in replaces the
+previous account. The previous credentials
+stay saved during browser sign-in and remain saved if the login fails or is canceled.
+Jarvis decodes only passive health fields and discards token-bearing refresh responses. Tokens
+stay in the helper's owner-only credential directory, apart from the
 secrets file ([sandbox.md](./sandbox.md) says where, and what a login reaches). The page's header
-chip counts every managed API key that is saved and every subscription the last probe proved signed
-in.
+chip reads **n keys saved** (or **1 key saved**), counting only managed API keys. It describes saved
+connections; the hub judges whether the configured session route can start.
 
-An API key is required when its provider is selected for transcription or appears anywhere in the
-brain route: the OpenAI key for OpenAI, the Gemini key for Gemini. Apple Speech with a
+An API key is mandatory for the selected transcription provider. Each brain target needs its own
+key to be usable, and Start skips targets whose keys are missing when another target can serve.
+Apple Speech with a
 subscription-only route can start without either key. Saving a managed key while a session runs
 preserves route health: it refreshes the brain clients of every route target that uses that key, and
 the future reconnect credential of a live transcription socket for the same provider. Neither ever
@@ -714,7 +746,8 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/Home/HomeDockButton.swift` | One chamfered dock button |
 | `Sources/JarvisApp/Settings/Home/ReadinessMeterView.swift` | The hub header's readiness meter |
 | `Sources/JarvisApp/Settings/Home/RobotPart+Presentation.swift` | Each part's title and symbol |
-| `Sources/JarvisApp/Settings/SubscriptionSignIns.swift` | The one sign-in answer shared by the hub and the Brain page |
+| `Sources/JarvisBrainProviders/Proxy/SubscriptionSignIns.swift` | Owns Settings health checks, explicit retry priority, and the answer shared by Connections, the hub, and the Brain page |
+| `Sources/JarvisCore/Brain/BrainRouteAvailability.swift` | Target eligibility and ordered fallback selection shared by readiness and Start |
 | `Sources/JarvisCore/Config/RobotHub.swift` | Inputs → hub state, the hub's one decision point |
 | `Sources/JarvisCore/Config/RobotHealth.swift` | The hub's status rules |
 | `Sources/JarvisCore/Config/RobotPartSummaries.swift` | Each slot's saved-setting text |

@@ -49,7 +49,7 @@ import Foundation
         #expect(snap.total == 0)
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
         evidence.record(.screenViewed(imageBase64JPEG: pixel))
-        evidence.record(.tip(lines: ["tip"]))
+        evidence.record(.tip(hint: "tip"))
         _ = await evidence.close()
 
         let jsonl = try String(contentsOf: dir.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
@@ -81,7 +81,7 @@ import Foundation
         let dir = Self.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
 
-        evidence.record(.tip(lines: ["before stop"]))
+        evidence.record(.tip(hint: "before stop"))
         evidence.record(.sessionEnded(reason: .stoppedByUser))
         evidence.record(.stayedSilent)
         _ = await evidence.close()
@@ -99,7 +99,7 @@ import Foundation
         let (log, evidence) = ActivityLog.recordingSession(in: dir)
         let pixel = Data([0xFF, 0xD8, 0xFF, 0xD9]).base64EncodedString()
         evidence.record(.screenViewed(imageBase64JPEG: pixel))
-        evidence.record(.tip(lines: ["tip"]))
+        evidence.record(.tip(hint: "tip"))
         _ = await evidence.close()
         let snap = log.attach { _ in }
         #expect(snap.rows.count == 2)
@@ -126,7 +126,7 @@ import Foundation
             directory: dir,
             worker: SessionAuditWorker(limits: .production, writer: SessionAuditFileWriter()),
             activity: log)
-        evidence.record(.tip(lines: ["should not crash or write anything"]))
+        evidence.record(.tip(hint: "should not crash or write anything"))
         _ = await evidence.close()
         let snap = log.attach { _ in }
         #expect(snap.total == 0)

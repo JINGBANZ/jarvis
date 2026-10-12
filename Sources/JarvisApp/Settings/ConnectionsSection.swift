@@ -14,21 +14,23 @@ final class ConnectionsSection: NSObject, SettingsSection {
     private var pageView: SettingsPageView?
     private var stack: SettingsCardStack?
     private var apiKeyCards: [Credential: NSView] = [:]
+    private var subscriptionsCard: NSView?
 
     init(
         supervisor: LocalProxySupervisor,
         keyStore: FileSecretStore,
         signIns: SubscriptionSignIns,
-        onKeySaved: @escaping (Credential, String) -> Void
+        onKeySaved: @escaping (Credential, String) -> Void,
+        onSubscriptionWillSignOut: @escaping (BrainProvider) -> Void
     ) {
         self.apiKeyControls = Dictionary(uniqueKeysWithValues: Self.credentialOrder.map { credential in
             (credential, APIKeyControls(credential: credential, store: keyStore, onKeySaved: onKeySaved))
         })
-        self.subscriptions = SubscriptionControls(supervisor: supervisor)
+        self.subscriptions = SubscriptionControls(supervisor: supervisor, signIns: signIns)
         self.signIns = signIns
         super.init()
+        subscriptions.onWillSignOut = onSubscriptionWillSignOut
         subscriptions.onStatusChanged = { [weak self] in self?.renderPageStatus() }
-        subscriptions.onProbeAnswered = { [weak self] readiness in self?.signIns.record(readiness) }
     }
 
     func makePage() -> SettingsPageView {
@@ -46,7 +48,12 @@ final class ConnectionsSection: NSObject, SettingsSection {
             apiKeyCards[credential] = card
             cards.append((card, controls.preferredHeight))
         }
-        cards.append((subscriptions.makeView(), subscriptions.preferredHeight))
+        let subscriptionsCard = subscriptions.makeView { [weak self] height in
+            guard let self, let card = self.subscriptionsCard else { return }
+            self.stack?.setHeight(height, for: card)
+        }
+        self.subscriptionsCard = subscriptionsCard
+        cards.append((subscriptionsCard, subscriptions.preferredHeight))
         stack.install(cards)
 
         let page = SettingsPageView(
@@ -59,7 +66,7 @@ final class ConnectionsSection: NSObject, SettingsSection {
     }
 
     func didBecomeActive() {
-        subscriptions.refresh()
+        signIns.refresh(checkingEmptyAccounts: true)
     }
 
     func windowWillClose() {
@@ -68,14 +75,11 @@ final class ConnectionsSection: NSObject, SettingsSection {
         pageView = nil
         stack = nil
         apiKeyCards.removeAll()
+        subscriptionsCard = nil
     }
 
     private func renderPageStatus() {
-        guard let signedIn = subscriptions.signedIn else {
-            pageView?.setChip(nil)
-            return
-        }
         let savedKeyCount = apiKeyControls.values.filter(\.hasSavedKey).count
-        pageView?.setChip(.live("\(signedIn.count + savedKeyCount) ready"))
+        pageView?.setChip(.live("\(savedKeyCount) \(savedKeyCount == 1 ? "key" : "keys") saved"))
     }
 }

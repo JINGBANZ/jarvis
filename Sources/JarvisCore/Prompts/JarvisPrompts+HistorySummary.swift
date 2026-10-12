@@ -19,7 +19,10 @@ extension JarvisPrompts {
         Keep uncertainty and attribution: proposed code, accepted code, user-reported success, and
         observed test results are different evidence. Do not turn a recommendation into an action
         taken, an explanation into proof of understanding, or plausible technical details into facts.
-        Preserve established invariants rather than deriving new advice or algorithms.
+        Preserve established invariants rather than deriving new advice or algorithms. Retain discovery
+        facts that justify the current design: the problem, goal, sources/access, agreed scope, human
+        approval boundaries and material unknowns. Keep customer-confirmed facts distinct from coach
+        proposals; later corrections supersede earlier facts without erasing unresolved assumptions.
 
         Output only a JSON object with these five required fields, using under 250 words in total.
         Keep the entire JSON under 750 estimated tokens (ASCII characters / 4, each non-ASCII scalar

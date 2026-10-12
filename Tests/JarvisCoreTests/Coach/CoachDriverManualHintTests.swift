@@ -38,9 +38,9 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
     @Test func manualHintInjectsScreenshotAndForcesSpeakInOneTrip() async {
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "s1", lines: ["Use a hash map to remember what you've seen."])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "Use a hash map to remember what you've seen.")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"lines":["Use a hash map to remember what you've seen."]}"#)]),
+                                             argumentsJSON: #"{"hint":"Use a hash map to remember what you've seen."}"#)]),
         ])
         let screen = FakeScreen()
         let overlay = FakeOverlay()
@@ -54,7 +54,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(brain.calls.count == 1)
         #expect(brain.toolChoices == [.force("speak")])
         #expect(brain.calls[0].contains { $0.imageBase64JPEG != nil })
-        #expect(overlay.rendered == [["Use a hash map to remember what you've seen."]])
+        #expect(overlay.rendered == ["Use a hash map to remember what you've seen."])
         let userText = brain.calls[0].compactMap { $0.text }.joined(separator: " ")
         #expect(userText.contains("hint shortcut"))
         #expect(userText.contains("two-sum"))
@@ -62,7 +62,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
 
     @Test func manualHintIncludesSpeechFinalizedDuringCaptureWithoutDuplicateAttempt() async throws {
         let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "answer", lines: ["O(1) amortized per event."])]),
+            .init(toolCalls: [.speak(callId: "answer", hint: "O(1) amortized per event.")]),
             .init(toolCalls: [.staySilent(callId: "duplicate")]),
         ])
         let screen = GatedScreen()
@@ -87,9 +87,9 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
 
     @Test func manualHintCarriesRecognizedTextAlongsideTheScreenshot() async {
         let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "s1", lines: ["groupEnd can be null on the last group."])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "groupEnd can be null on the last group.")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"lines":["groupEnd can be null on the last group."]}"#)]),
+                                             argumentsJSON: #"{"hint":"groupEnd can be null on the last group."}"#)]),
         ])
         let screen = FakeScreen(recognizedText: "ListNode next = groupEnd.next;")
         let (driver, _) = makeDriver(brain: brain, screen: screen,
@@ -108,7 +108,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
     @Test func manualHintForcesSpeakEvenWhenScreenshotFails() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "s1", lines: ["Talk me through your current approach."])]),
+            .init(toolCalls: [.speak(callId: "s1", hint: "Talk me through your current approach.")]),
         ])
         let screen = FailingScreen()
         let overlay = FakeOverlay()
@@ -121,13 +121,13 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(brain.calls.count == 1)
         #expect(brain.toolChoices.last == .force("speak"))
         #expect(!brain.calls[0].contains { $0.imageBase64JPEG != nil })
-        #expect(overlay.rendered == [["Talk me through your current approach."]])
+        #expect(overlay.rendered == ["Talk me through your current approach."])
     }
 
     @Test func manualHintCancelDuringCaptureAbortsBeforeAnyBrainCall() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "s", lines: ["stale tip from the stopped run"])]),
+            .init(toolCalls: [.speak(callId: "s", hint: "stale tip from the stopped run")]),
         ])
         let screen = GatedScreen()
         let overlay = FakeOverlay()
@@ -165,9 +165,9 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
     }
 
     private var speak: BrainResponse {
-        .init(toolCalls: [.speak(callId: "s1", lines: ["Start from the read path."])],
+        .init(toolCalls: [.speak(callId: "s1", hint: "Start from the read path.")],
               rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                         argumentsJSON: #"{"lines":["Start from the read path."]}"#)])
+                                         argumentsJSON: #"{"hint":"Start from the read path."}"#)])
     }
 
     @Test func aPressLoadsTheSkillItNeedsAndSpeaksInOneAttempt() async throws {
@@ -186,7 +186,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         #expect(brain.toolChoices == [pressWithSkillsLeft, pressWithSkillsLeft])
         let result = try #require(brain.calls[1].first { $0.toolCallId == "k1" })
         #expect(result.text?.contains("Six stages.") == true)
-        #expect(overlay.rendered == [["Start from the read path."]])
+        #expect(overlay.rendered == ["Start from the read path."])
         #expect(activity.kinds == [.manualHint, .screenViewed, .capabilityLoaded, .tip])
     }
 

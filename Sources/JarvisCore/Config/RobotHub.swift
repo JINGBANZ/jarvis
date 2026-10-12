@@ -4,7 +4,7 @@ import Foundation
 public enum RobotHub {
     public static func state(for inputs: RobotHubInputs) -> RobotHubState {
         var slots: [RobotPart: RobotSlotState] = [:]
-        var ready: [Bool] = []
+        var healths: [RobotPartHealth] = []
         for part in RobotPart.allCases {
             let summary = summary(of: part, inputs)
             let health = inputs.readiness.map {
@@ -16,18 +16,18 @@ public enum RobotHub {
                 detail = liveDetail(activeTarget: active, route: inputs.route)
                 tone = .live
             }
-            if case .needsAttention(let reason, _, _)? = health {
+            if let health, let reason = health.reason {
                 detail = reason
-                tone = .attention
+                tone = health.tone
             }
             slots[part] = RobotSlotState(
                 value: summary.value, detail: detail, tone: tone, level: summary.level, health: health)
-            if let health { ready.append(health.isReady) }
+            if let health { healths.append(health) }
         }
         let isLive = inputs.activeTarget != nil
         return RobotHubState(
             slots: slots,
-            meter: inputs.readiness == nil ? nil : meter(ready: ready, isLive: isLive),
+            meter: inputs.readiness == nil ? nil : meter(healths: healths, isLive: isLive),
             isLive: isLive)
     }
 
@@ -47,14 +47,17 @@ public enum RobotHub {
         }
     }
 
-    private static func meter(ready: [Bool], isLive: Bool) -> RobotHubMeter {
-        let count = ready.filter { $0 }.count
-        if isLive {
-            return RobotHubMeter(ready: ready, label: "ONLINE · COACHING", tone: .live)
-        }
-        return count == ready.count
-            ? RobotHubMeter(ready: ready, label: "SYSTEMS READY \(count)/\(ready.count)", tone: .normal)
-            : RobotHubMeter(ready: ready, label: "NEEDS YOU \(count)/\(ready.count)", tone: .attention)
+    private static func meter(healths: [RobotPartHealth], isLive: Bool) -> RobotHubMeter {
+        let count = healths.filter(\.isReady).count
+        let total = healths.count
+        let blocked = healths.contains { $0.tone == .blocked }
+        let tone: RobotSlotState.Tone = blocked ? .blocked
+            : count < total ? .attention : isLive ? .live : .normal
+        let label = isLive ? "ONLINE · COACHING"
+            : blocked ? "NOT READY \(count)/\(total)"
+            : healths.contains(.checking) ? "CHECKING \(count)/\(total)"
+            : count == total ? "SYSTEMS READY \(count)/\(total)" : "NEEDS YOU \(count)/\(total)"
+        return RobotHubMeter(signals: healths.map(\.tone), label: label, tone: tone)
     }
 
     private static func liveDetail(activeTarget: BrainTarget, route: BrainRoute) -> String {

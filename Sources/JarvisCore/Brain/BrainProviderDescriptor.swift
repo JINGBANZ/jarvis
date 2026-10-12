@@ -5,8 +5,7 @@ import Foundation
 public struct BrainProviderDescriptor: Sendable, Equatable {
     public enum Access: Sendable, Equatable {
         case apiKey(credential: Credential, endpoint: URL, auth: AuthScheme)
-        /// `modelOwner` is the `owned_by` value in the helper's model list that proves the sign-in.
-        case localProxy(modelOwner: String, loginFlag: String, accountFilePrefix: String)
+        case localProxy(credentialProvider: String, loginFlag: String, accountFilePrefix: String)
     }
 
     public enum AuthScheme: Sendable, Equatable {

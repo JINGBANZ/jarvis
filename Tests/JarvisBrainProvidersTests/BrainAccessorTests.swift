@@ -18,17 +18,17 @@ private func speakResponseBody(arguments: String) -> Data {
 }
 
 @Suite struct BrainAccessorTests {
-    @Test func decodesSpeakToolCallWithLinesArray() async throws {
+    @Test func decodesSpeakToolCallWithAHintString() async throws {
         let json = """
         {"output":[
-          {"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\\"lines\\":[\\"Try a hash map.\\",\\"Use `Array.from({length: n + 1}, () => [])` instead.\\"]}"}
+          {"type":"function_call","id":"fc_1","call_id":"call_1","name":"speak","arguments":"{\\"hint\\":\\"Try a hash map. Use `Array.from({length: n + 1}, () => [])` instead.\\"}"}
         ]}
         """
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)
         #expect(resp.toolCalls == [.speak(callId: "call_1",
-            lines: ["Try a hash map.", "Use `Array.from({length: n + 1}, () => [])` instead."])])
+            hint: "Try a hash map. Use `Array.from({length: n + 1}, () => [])` instead.")])
     }
 
     @Test func decodesCaptureScreenToolCall() async throws {
@@ -107,7 +107,7 @@ private func speakResponseBody(arguments: String) -> Data {
 
     /// Dropped, not decoded as an empty speak: an empty overlay would still count as a spoken turn.
     @Test func speakDecodeDropsOffContractArgumentsAsSilence() async throws {
-        for args in [#"{}"#, #"{"lines":"hi"}"#, #"{"lines":[]}"#, #"{"lines":["  "]}"#, "not json"] {
+        for args in [#"{}"#, #"{"hint":["hi"]}"#, #"{"hint":""}"#, #"{"hint":"  "}"#, "not json"] {
             let body = speakResponseBody(arguments: args)
             let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                            send: sending { _ in (body, http(200)) })
@@ -126,7 +126,7 @@ private func speakResponseBody(arguments: String) -> Data {
     }
 
     @Test func decodeCompletedResponseHasNoIncompleteReason() async throws {
-        let json = #"{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"lines\":[\"hi\"]}"}]}"#
+        let json = #"{"status":"completed","output":[{"type":"function_call","id":"f","call_id":"c","name":"speak","arguments":"{\"hint\":\"hi\"}"}]}"#
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                        send: sending { _ in (Data(json.utf8), http(200)) })
         let resp = try await client.respond(messages: [.user("hi")], tools: coachTools)

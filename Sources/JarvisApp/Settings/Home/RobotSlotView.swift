@@ -82,6 +82,7 @@ final class RobotSlotView: NSView {
         case .normal: SettingsTheme.mutedText
         case .live: SettingsTheme.teal
         case .attention: SettingsTheme.amber
+        case .blocked: SettingsTheme.red
         }
         // An attributed value ignores the field's line break mode.
         let truncating = NSMutableParagraphStyle()
@@ -120,7 +121,8 @@ final class RobotSlotView: NSView {
             ? (SettingsTheme.cardFill.blended(withFraction: 0.1, of: .black) ?? SettingsTheme.cardFill)
             : SettingsTheme.cardFill
         layer.backgroundColor = fill.cgColor
-        let border = slot?.tone == .attention ? SettingsTheme.amber
+        let border = slot?.tone == .blocked ? SettingsTheme.red
+            : slot?.tone == .attention ? SettingsTheme.amber
             : lit ? SettingsTheme.teal : SettingsTheme.purple.withAlphaComponent(0.55)
         layer.borderColor = border.cgColor
         layer.borderWidth = lit ? 2 : 1.4
@@ -137,7 +139,8 @@ final class RobotSlotView: NSView {
         }
         let health = slot?.health
         statusLight.isHidden = health == nil
-        statusLight.backgroundColor = (health?.isReady == false ? SettingsTheme.amber : SettingsTheme.teal).cgColor
+        statusLight.backgroundColor = (health?.tone == .blocked ? SettingsTheme.red
+            : health?.isReady == false ? SettingsTheme.amber : SettingsTheme.teal).cgColor
     }
 
     override func drawFocusRingMask() {

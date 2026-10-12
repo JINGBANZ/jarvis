@@ -8,6 +8,16 @@ struct ModelListStub: Sendable {
 
     /// `beforeResponding` runs on the stub's thread for every request, so it can hold an answer back.
     init(port: Int, body: String, beforeResponding: @escaping @Sendable () -> Void = {}) throws {
+        try self.init(port: port, respond: { request in
+            beforeResponding()
+            if request.contains("/v8/management/credentials") {
+                return (200, #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"active","disabled":false,"unavailable":false,"status_message":"","cooldowns":[]}]}"#)
+            }
+            return (200, body)
+        })
+    }
+
+    init(port: Int, respond: @escaping @Sendable (String) -> (Int, String)) throws {
         let descriptor = socket(AF_INET, SOCK_STREAM, 0)
         guard descriptor >= 0 else { throw POSIXError(.EIO) }
         var reuse: Int32 = 1
@@ -27,8 +37,6 @@ struct ModelListStub: Sendable {
             throw POSIXError(.EADDRINUSE)
         }
         self.descriptor = descriptor
-        let response = Array(("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-            + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)").utf8)
         Thread.detachNewThread {
             while true {
                 let client = accept(descriptor, nil, nil)
@@ -38,8 +46,10 @@ struct ModelListStub: Sendable {
                 var noSigPipe: Int32 = 1
                 setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &noSigPipe, socklen_t(MemoryLayout<Int32>.size))
                 var request = [UInt8](repeating: 0, count: 4_096)
-                _ = read(client, &request, request.count)
-                beforeResponding()
+                let count = read(client, &request, request.count)
+                let (status, body) = respond(String(decoding: request.prefix(max(0, count)), as: UTF8.self))
+                let response = Array(("HTTP/1.1 \(status) Response\r\nContent-Type: application/json\r\n"
+                    + "Content-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)").utf8)
                 _ = response.withUnsafeBytes { write(client, $0.baseAddress, $0.count) }
                 close(client)
             }

@@ -70,6 +70,16 @@ import Testing
             transcription: TranscriptionPreferences(defaults: defaults)))
     }
 
+    @Test func aMissingUnusedBrainKeyDoesNotRequireOnboarding() {
+        let defaults = freshDefaults()
+        let brain = BrainPreferences(defaults: defaults)
+        brain.route = BrainRoute(primary: defaultTarget(.codexSubscription), fallbackTargets: [defaultTarget(.gemini)])
+        let transcription = TranscriptionPreferences(defaults: defaults)
+        #expect(!Onboarding.needsAPIKey(
+            secrets: SavedKeys(keys: [.openAIAPIKey: "sk-1"]), brain: brain, transcription: transcription))
+        #expect(Onboarding.needsAPIKey(secrets: SavedKeys(keys: [:]), brain: brain, transcription: transcription))
+    }
+
     @Test func everyCredentialPowersABrainAndAnEar() {
         for credential in Credential.allCases {
             #expect(Onboarding.brainProvider(for: credential).credential == credential)

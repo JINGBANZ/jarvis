@@ -208,10 +208,10 @@ private actor FinishTrackingConversation: BrainConversation {
 /// @unchecked: `lock` guards the log, which the main actor writes while tests read it.
 final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     private let lock = NSLock()
-    private var storedRendered: [[String]] = []
-    var rendered: [[String]] { lock.withLock { storedRendered } }
-    func render(_ lines: [String]) {
-        lock.withLock { storedRendered.append(lines) }
+    private var storedRendered: [String] = []
+    var rendered: [String] { lock.withLock { storedRendered } }
+    func render(_ hint: String) {
+        lock.withLock { storedRendered.append(hint) }
     }
 }
 
@@ -307,9 +307,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s1", lines: ["What's the complexity of that nested loop?"])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "What's the complexity of that nested loop?")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"lines":["What's the complexity of that nested loop?"]}"#)]),
+                                             argumentsJSON: #"{"hint":"What's the complexity of that nested loop?"}"#)]),
         ])
         let screen = FakeScreen()
         let overlay = FakeOverlay()
@@ -319,7 +319,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await driver.handleTrigger(.turnEnd)
 
         #expect(screen.captureCount == 1)
-        #expect(overlay.rendered == [["What's the complexity of that nested loop?"]])
+        #expect(overlay.rendered == ["What's the complexity of that nested loop?"])
         #expect(brain.calls.count == 2)
         #expect(brain.calls[1].contains { $0.role == .assistant && $0.toolCalls?.first?.name == "capture_screen" })
         #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "c1" })
@@ -335,9 +335,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s1", lines: ["Check groupEnd for null before .next"])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "Check groupEnd for null before .next")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"lines":["Check groupEnd for null before .next"]}"#)]),
+                                             argumentsJSON: #"{"hint":"Check groupEnd for null before .next"}"#)]),
         ])
         let screen = FakeScreen(recognizedText: "class Solution {\n    while(true){ cnt--; }")
         let (driver, transcript) = makeDriver(brain: brain, screen: screen,
@@ -364,9 +364,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s1", lines: ["Watch the off-by-one there."])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "Watch the off-by-one there.")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                             argumentsJSON: #"{"lines":["Watch the off-by-one there."]}"#)]),
+                                             argumentsJSON: #"{"hint":"Watch the off-by-one there."}"#)]),
         ])
         let screen = FakeScreen(payload: TestFixtures.tinyJpegBase64)
         let (driver, transcript) = makeDriver(
@@ -398,7 +398,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         defer { activityLog.disable(); try? FileManager.default.removeItem(at: dir) }
 
         let clock = ManualClock(now: 100)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["use a hash map"])])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "use a hash map")])])
         let (driver, transcript) = makeDriver(
             activity: evidence, brain: brain, clock: clock)
         transcript.append(.init(speaker: .me, text: "stuck on two-sum", at: 100))
@@ -421,7 +421,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             defer { JarvisLog.detach() }
 
             let brain = ScriptedBrain(script: [
-                .init(toolCalls: [.speak(callId: "s", lines: ["activity-boundary-tip-417"])])
+                .init(toolCalls: [.speak(callId: "s", hint: "activity-boundary-tip-417")])
             ])
             let (driver, _) = makeDriver(
                 activity: evidence, brain: brain, clock: ManualClock(now: 417))
@@ -453,7 +453,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             script: [
                 nil,
                 nil,
-                .init(toolCalls: [.speak(callId: "recovered", lines: ["recovered coaching"])]),
+                .init(toolCalls: [.speak(callId: "recovered", hint: "recovered coaching")]),
             ],
             error: NSError(domain: "test", code: 500, userInfo: [
                 NSLocalizedDescriptionKey: "app-server refused: Authorization: Bearer abc123token",
@@ -476,7 +476,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = FinishTrackingBrain(finished: finished, script: [
             .init(toolCalls: [.captureScreen(callId: "c")],
                   rawToolCalls: [RawToolCall(id: "c", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s", lines: ["stale tip from the stopped run"])]),
+            .init(toolCalls: [.speak(callId: "s", hint: "stale tip from the stopped run")]),
         ])
         let screen = HeldCleanupScreen()
         let overlay = FakeOverlay()
@@ -519,14 +519,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await brain.recordedCallCount() == 1)
     }
 
-    @Test func emptySpeakLinesStillReportsSpoke() async {
+    @Test func anEmptySyntheticHintStillReportsSpoke() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: [])])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
         transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
-        #expect(overlay.rendered == [[]])
+        #expect(overlay.rendered == [""])
     }
 
     @Test func staySilentToolRendersNothingAndLeavesNoTrace() async {
@@ -694,7 +694,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func interviewerQuestionReachesTheBrain() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", lines: ["Walk through your loop out loud."])])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Walk through your loop out loud.")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
         transcript.append(.init(speaker: .them, text: "那你是怎么做的?", at: 1))
@@ -810,8 +810,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func historyCarriesPriorTurnToNextRequest() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "spk1", lines: ["hi"])],
-                  rawToolCalls: [RawToolCall(id: "spk1", name: "speak", argumentsJSON: #"{"lines":["hi"]}"#)]),
+            .init(toolCalls: [.speak(callId: "spk1", hint: "hi")],
+                  rawToolCalls: [RawToolCall(id: "spk1", name: "speak", argumentsJSON: #"{"hint":"hi"}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
         transcript.append(.init(speaker: .me, text: "the whole problem statement", at: 0))
@@ -827,14 +827,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func brainUpdateAppliesToNextTurnWithoutLosingHistory() async {
         let clock = ManualClock(now: 0)
         let firstBrain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "old", lines: ["first tip"])],
+            .init(toolCalls: [.speak(callId: "old", hint: "first tip")],
                   rawToolCalls: [RawToolCall(id: "old", name: "speak",
-                                             argumentsJSON: #"{"lines":["first tip"]}"#)]),
+                                             argumentsJSON: #"{"hint":"first tip"}"#)]),
         ])
         let nextBrain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "new", lines: ["second tip"])],
+            .init(toolCalls: [.speak(callId: "new", hint: "second tip")],
                   rawToolCalls: [RawToolCall(id: "new", name: "speak",
-                                             argumentsJSON: #"{"lines":["second tip"]}"#)]),
+                                             argumentsJSON: #"{"hint":"second tip"}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: firstBrain, clock: clock)
         transcript.append(.init(speaker: .me, text: "the original problem", at: 0))
@@ -860,14 +860,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.captureScreen(callId: "capture")],
                   rawToolCalls: [RawToolCall(id: "capture", name: "capture_screen",
                                              argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "old", lines: ["old provider finished"])],
+            .init(toolCalls: [.speak(callId: "old", hint: "old provider finished")],
                   rawToolCalls: [RawToolCall(id: "old", name: "speak",
-                                             argumentsJSON: #"{"lines":["old provider finished"]}"#)]),
+                                             argumentsJSON: #"{"hint":"old provider finished"}"#)]),
         ])
         let nextBrain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "new", lines: ["new provider turn"])],
+            .init(toolCalls: [.speak(callId: "new", hint: "new provider turn")],
                   rawToolCalls: [RawToolCall(id: "new", name: "speak",
-                                             argumentsJSON: #"{"lines":["new provider turn"]}"#)]),
+                                             argumentsJSON: #"{"hint":"new provider turn"}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: oldBrain, clock: clock)
         transcript.append(.init(speaker: .me, text: "inspect this code", at: 0))
@@ -889,14 +889,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let clock = ManualClock(now: 0)
         let screen = GatedScreen()
         let oldBrain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "old", lines: ["old provider hint"])],
+            .init(toolCalls: [.speak(callId: "old", hint: "old provider hint")],
                   rawToolCalls: [RawToolCall(id: "old", name: "speak",
-                                             argumentsJSON: #"{"lines":["old provider hint"]}"#)]),
+                                             argumentsJSON: #"{"hint":"old provider hint"}"#)]),
         ])
         let nextBrain = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "new", lines: ["new provider turn"])],
+            .init(toolCalls: [.speak(callId: "new", hint: "new provider turn")],
                   rawToolCalls: [RawToolCall(id: "new", name: "speak",
-                                             argumentsJSON: #"{"lines":["new provider turn"]}"#)]),
+                                             argumentsJSON: #"{"hint":"new provider turn"}"#)]),
         ])
         let (driver, transcript) = makeDriver(
             brain: oldBrain, screen: screen, clock: clock)
@@ -922,7 +922,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let fallbackTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5")
         let primary = ThrowingBrain()
         let fallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "fallback", lines: ["fallback tip"])]),
+            .init(toolCalls: [.speak(callId: "fallback", hint: "fallback tip")]),
         ])
         let transitions = RouteTransitionRecorder()
         let (driver, transcript) = makeRouteDriver(
@@ -960,7 +960,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func successfulFallbackRemainsActiveForLaterConversation() async {
         let primary = ThrowingBrain()
         let fallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "fallback", lines: ["still on fallback"])]),
+            .init(toolCalls: [.speak(callId: "fallback", hint: "still on fallback")]),
         ])
         let (driver, transcript) = makeRouteDriver([
             (BrainTarget(provider: .openAI, modelID: "gpt-5.5"), primary),
@@ -992,7 +992,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let refreshedPrimary = ThrowingBrain()
         let refreshedFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "refreshed", lines: ["new key works"])]),
+            .init(toolCalls: [.speak(callId: "refreshed", hint: "new key works")]),
         ])
         #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(targets: [
             ConfiguredBrainTarget(target: primaryTarget, brain: refreshedPrimary),
@@ -1021,7 +1021,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let reconfiguredPrimary = ThrowingBrain()
         let reconfiguredFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "effort", lines: ["new effort"])]),
+            .init(toolCalls: [.speak(callId: "effort", hint: "new effort")]),
         ])
         #expect(driver.reconfigureBrainRouteClients(ConfiguredBrainRoute(targets: [
             ConfiguredBrainTarget(target: primaryTarget, brain: reconfiguredPrimary),
@@ -1043,7 +1043,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "original-primary")]),
         ])
         let originalFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "original-fallback", lines: ["retained CLI"])]),
+            .init(toolCalls: [.speak(callId: "original-fallback", hint: "retained CLI")]),
         ])
         let (driver, transcript) = makeRouteDriver([
             (primaryTarget, originalPrimary),
@@ -1054,7 +1054,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let refreshedPrimary = ThrowingBrain(error: brainFailure(.permanent, "new credential rejected"))
         let unwantedFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "wrong-client", lines: ["replaced CLI"])]),
+            .init(toolCalls: [.speak(callId: "wrong-client", hint: "replaced CLI")]),
         ])
         #expect(driver.refreshBrainRouteClients(
             ConfiguredBrainRoute(targets: [
@@ -1076,7 +1076,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let failureGate = AsyncGate()
         let originalPrimary = TwoFailuresThenGatedFailureBrain(gate: failureGate)
         let originalFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "old-key", lines: ["wrong OpenAI client"])]),
+            .init(toolCalls: [.speak(callId: "old-key", hint: "wrong OpenAI client")]),
         ])
         let (driver, transcript) = makeRouteDriver([
             (primaryTarget, originalPrimary),
@@ -1088,10 +1088,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await failureGate.waitUntilEntered()
 
         let unwantedPrimary = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "wrong-cli", lines: ["replaced CLI"])]),
+            .init(toolCalls: [.speak(callId: "wrong-cli", hint: "replaced CLI")]),
         ])
         let refreshedFallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "new-key", lines: ["refreshed OpenAI"])]),
+            .init(toolCalls: [.speak(callId: "new-key", hint: "refreshed OpenAI")]),
         ])
         #expect(driver.refreshBrainRouteClients(
             ConfiguredBrainRoute(targets: [
@@ -1311,7 +1311,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let successGate = AsyncGate()
         let originalPrimary = TwoFailuresThenGatedSuccessBrain(gate: successGate)
         let fallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "fallback", lines: ["should not advance"])]),
+            .init(toolCalls: [.speak(callId: "fallback", hint: "should not advance")]),
         ])
         let (driver, transcript) = makeRouteDriver([
             (primaryTarget, originalPrimary),
@@ -1324,7 +1324,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let refreshedPrimary = ScriptedThrowBrain(script: [
             nil,
-            .init(toolCalls: [.speak(callId: "recovered", lines: ["same target recovered"])]),
+            .init(toolCalls: [.speak(callId: "recovered", hint: "same target recovered")]),
         ])
         #expect(driver.refreshBrainRouteClients(ConfiguredBrainRoute(targets: [
             ConfiguredBrainTarget(target: primaryTarget, brain: refreshedPrimary),
@@ -1345,7 +1345,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let successGate = AsyncGate()
         let originalPrimary = TwoFailuresThenGatedSuccessBrain(gate: successGate)
         let fallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "fallback", lines: ["should not advance"])]),
+            .init(toolCalls: [.speak(callId: "fallback", hint: "should not advance")]),
         ])
         let (driver, transcript) = makeRouteDriver([
             (primaryTarget, originalPrimary),
@@ -1358,7 +1358,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         let reconfiguredPrimary = ScriptedThrowBrain(script: [
             nil,
-            .init(toolCalls: [.speak(callId: "recovered", lines: ["same target recovered"])]),
+            .init(toolCalls: [.speak(callId: "recovered", hint: "same target recovered")]),
         ])
         #expect(driver.reconfigureBrainRouteClients(ConfiguredBrainRoute(targets: [
             ConfiguredBrainTarget(target: primaryTarget, brain: reconfiguredPrimary),
@@ -1379,7 +1379,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let failureGate = AsyncGate()
         let originalPrimary = TwoFailuresThenGatedFailureBrain(gate: failureGate)
         let fallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "fallback", lines: ["advanced after third failure"])]),
+            .init(toolCalls: [.speak(callId: "fallback", hint: "advanced after third failure")]),
         ])
         let (driver, transcript) = makeRouteDriver([
             (primaryTarget, originalPrimary),
@@ -1391,7 +1391,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await failureGate.waitUntilEntered()
 
         let reconfiguredPrimary = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "wrong", lines: ["failure was ignored"])]),
+            .init(toolCalls: [.speak(callId: "wrong", hint: "failure was ignored")]),
         ])
         #expect(driver.reconfigureBrainRouteClients(ConfiguredBrainRoute(targets: [
             ConfiguredBrainTarget(target: primaryTarget, brain: reconfiguredPrimary),
@@ -1460,7 +1460,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             error: brainFailure(.permanent, "old route failed"))
         let oldDelivery = RouteExhaustionRecorder()
         let replacement = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "replacement", lines: ["new route recovered"])]),
+            .init(toolCalls: [.speak(callId: "replacement", hint: "new route recovered")]),
         ])
         let transcript = RollingTranscript()
         let driver = CoachDriver(
@@ -1527,7 +1527,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let primary = ThrowingBrain(error: permanent)
         let summarizer = ThrowingBrain()
         let fallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "fallback", lines: ["recovered"])]),
+            .init(toolCalls: [.speak(callId: "fallback", hint: "recovered")]),
         ])
         let transcript = RollingTranscript()
         let driver = CoachDriver(
@@ -1555,7 +1555,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let replacementTarget = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5")
         let failed = ThrowingBrain(error: brainFailure(.temporary, "old route failed"))
         let replacement = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "replacement", lines: ["new route recovered"])]),
+            .init(toolCalls: [.speak(callId: "replacement", hint: "new route recovered")]),
         ])
         let replacementRoute = ConfiguredBrainRoute(targets: [
             ConfiguredBrainTarget(target: replacementTarget, brain: replacement),
@@ -1626,7 +1626,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let finalTarget = BrainTarget(provider: .codexSubscription, modelID: "gpt-5.6-sol")
         let primary = ThrowingBrain(error: brainFailure(.permanent, "primary permanently failed"))
         let final = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "final", lines: ["final target"])]),
+            .init(toolCalls: [.speak(callId: "final", hint: "final target")]),
         ])
         let skipped = RouteTargetRecorder()
         let route = ConfiguredBrainRoute(
@@ -1671,7 +1671,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             nil,
         ])
         let fallback = ScriptedBrain(script: [
-            .init(toolCalls: [.speak(callId: "fallback", lines: ["used observation"])]),
+            .init(toolCalls: [.speak(callId: "fallback", hint: "used observation")]),
         ])
         let screen = FakeScreen(recognizedText: "let answer = 42")
         let (driver, transcript) = makeRouteDriver(
@@ -2053,7 +2053,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")],
                   outputItemsJSON: outputItems),
-            .init(toolCalls: [.speak(callId: "s1", lines: ["tip"])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "tip")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak", argumentsJSON: "{}")]),
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
@@ -2083,11 +2083,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedThrowBrain(script: [
             .init(toolCalls: [.captureScreen(callId: "c1")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s1", lines: ["tip one"])],
+            .init(toolCalls: [.speak(callId: "s1", hint: "tip one")],
                   rawToolCalls: [RawToolCall(id: "s1", name: "speak", argumentsJSON: "{}")]),
             .init(toolCalls: [.captureScreen(callId: "c2")],
                   rawToolCalls: [RawToolCall(id: "c2", name: "capture_screen", argumentsJSON: "{}")]),
-            .init(toolCalls: [.speak(callId: "s2", lines: ["tip two"])],
+            .init(toolCalls: [.speak(callId: "s2", hint: "tip two")],
                   rawToolCalls: [RawToolCall(id: "s2", name: "speak", argumentsJSON: "{}")]),
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
@@ -2239,7 +2239,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func spokeOutcome() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["hi"])])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", hint: "hi")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
         transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
@@ -2255,7 +2255,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func consecutiveTurnsBothReachBrain() async {
         let clock = ManualClock(now: 100)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["first"])])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", hint: "first")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
         transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 100))
@@ -2307,7 +2307,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 ])
         }
         let brain = ScriptedBrain(script: captures + [
-            .init(toolCalls: [.speak(callId: "done", lines: ["bounded context"])]),
+            .init(toolCalls: [.speak(callId: "done", hint: "bounded context")]),
         ])
         let screen = FakeScreen(recognizedText: "latest visible code")
         let overlay = FakeOverlay()
@@ -2325,7 +2325,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(freshAttempt.count(where: {
             ($0.text ?? "").contains("latest visible code")
         }) == 1)
-        #expect(overlay.rendered == [["bounded context"]])
+        #expect(overlay.rendered == ["bounded context"])
     }
 
     @MainActor
@@ -2415,7 +2415,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func unavailableFallbackDoesNotEndRecoverableSession() async {
         let brain = ScriptedThrowBrain(script: [nil, nil, nil, nil,
-            .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])])])
+            .init(toolCalls: [.speak(callId: "recovered", hint: "Use the latest question.")])])
         let primary = BrainTarget(provider: .openAI, modelID: "gpt-5.5")
         let unavailable = BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5")
         let transcript = RollingTranscript()
@@ -2437,7 +2437,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let recorder = RouteFailureRecorder()
         let brain = ScriptedThrowBrain(script: [
             nil, nil, nil, nil, nil,
-            .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])]),
+            .init(toolCalls: [.speak(callId: "recovered", hint: "Use the latest question.")]),
         ])
         let overlay = FakeOverlay()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -2455,7 +2455,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 6)
         #expect(recorder.failures.count == 1)
-        #expect(overlay.rendered == [["Use the latest question."]])
+        #expect(overlay.rendered == ["Use the latest question."])
         _ = await activity.close()
         let rows = try String(contentsOf: directory.appendingPathComponent("jarvis-activity.jsonl"), encoding: .utf8)
         #expect(rows.components(separatedBy: "\n").filter { $0.contains("coachingTurnFailed") }.count == 1)
@@ -2507,7 +2507,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test(arguments: [TriggerReason.manualHint, .manualExplanation, .manualCode])
     func manualHintCanRetryFailedCycleWithoutNewSpeech(reason: TriggerReason) async {
         let brain = ScriptedThrowBrain(script: [nil, nil, nil,
-            .init(toolCalls: [.speak(callId: "later", lines: ["Use the latest question."])])])
+            .init(toolCalls: [.speak(callId: "later", hint: "Use the latest question.")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
         transcript.append(.init(speaker: .them, text: "a question", at: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
@@ -2518,7 +2518,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func permanentTargetIsExcludedFromLaterCycles() async {
         let primary = ThrowingBrain(error: brainFailure(.permanent, "invalid key"))
         let fallback = ScriptedThrowBrain(script: [nil, nil, nil,
-            .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])])])
+            .init(toolCalls: [.speak(callId: "recovered", hint: "Use the latest question.")])])
         let (driver, transcript) = makeRouteDriver([
             (BrainTarget(provider: .openAI, modelID: "gpt-5.5"), primary),
             (BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5"), fallback),
@@ -2601,7 +2601,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let delays = RecoveryDelayProbe()
         let recorder = RouteFailureRecorder()
         let brain = ScriptedThrowBrain(script: [nil, nil, nil,
-            .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])]), nil, nil, nil])
+            .init(toolCalls: [.speak(callId: "recovered", hint: "Use the latest question.")]), nil, nil, nil])
         let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
             route: ConfiguredBrainRoute(targets: [ConfiguredBrainTarget(
                 target: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), brain: brain)],
@@ -2624,7 +2624,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let clock = ManualClock()
         let cooldown = AsyncGate()
         let brain = ScriptedThrowBrain(script: [nil, nil, nil, nil, nil, nil,
-            .init(toolCalls: [.speak(callId: "recovered", lines: ["Use the latest question."])])])
+            .init(toolCalls: [.speak(callId: "recovered", hint: "Use the latest question.")])])
         let transcript = RollingTranscript()
         let driver = CoachDriver(config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: [ConfiguredBrainTarget(
@@ -2679,7 +2679,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func newSpeechWakesFastRetryWithLatestTranscript() async {
         let gate = AsyncGate()
         let brain = ScriptedThrowBrain(script: [nil, nil,
-            .init(toolCalls: [.speak(callId: "complete", lines: ["Latest answer."])])])
+            .init(toolCalls: [.speak(callId: "complete", hint: "Latest answer.")])])
         let (driver, transcript) = makeDriver(
             brain: brain, clock: ManualClock(),
             automaticAttemptDelay: { sequence in
@@ -2717,7 +2717,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(brain.calls[1].contains {
             ($0.text ?? "").contains("first question")
         })
-        #expect(overlay.rendered == [["recovered on the next turn"]])
+        #expect(overlay.rendered == ["recovered on the next turn"])
     }
 
     @Test func pendingTriggerSurvivesTemporaryFailureAndRetriesUnsentSpeech() async {
@@ -2745,7 +2745,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             ($0.text ?? "").contains("first question")
                 && ($0.text ?? "").contains("follow-up while unavailable")
         })
-        #expect(overlay.rendered == [["recovered pending turn"]])
+        #expect(overlay.rendered == ["recovered pending turn"])
     }
 
     @Test func naturalTriggerWakesAutomaticBackoffEarly() async {
@@ -2811,7 +2811,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
     @Test func everyAudioTurnRequiresAToolCall() async {
         let clock = ManualClock(now: 0)
-        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", lines: ["hi"])])])
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", hint: "hi")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
         transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
         await driver.handleTrigger(.turnEnd)
@@ -2821,7 +2821,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func concurrentTriggerIsBusyThenCoalesced() async {
         let clock = ManualClock(now: 0)
         let gate = AsyncGate()
-        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", lines: ["hi"])]))
+        let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", hint: "hi")]))
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
         transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 0))
         async let first = driver.handleTrigger(.turnEnd)
@@ -3066,12 +3066,12 @@ final class TimeoutThenSpeakingBrain: BrainClient, @unchecked Sendable {
             throw URLError(.timedOut)
         }
         return BrainResponse(
-            toolCalls: [.speak(callId: "recovered", lines: ["recovered on the next turn"])],
+            toolCalls: [.speak(callId: "recovered", hint: "recovered on the next turn")],
             rawToolCalls: [
                 RawToolCall(
                     id: "recovered",
                     name: "speak",
-                    argumentsJSON: #"{"lines":["recovered on the next turn"]}"#
+                    argumentsJSON: #"{"hint":"recovered on the next turn"}"#
                 ),
             ]
         )
@@ -3125,11 +3125,11 @@ final class GatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
                 userInfo: [NSLocalizedDescriptionKey: "temporary provider interruption"])
         }
         return BrainResponse(
-            toolCalls: [.speak(callId: "recovered", lines: ["recovered pending turn"])],
+            toolCalls: [.speak(callId: "recovered", hint: "recovered pending turn")],
             rawToolCalls: [
                 RawToolCall(
                     id: "recovered", name: "speak",
-                    argumentsJSON: #"{"lines":["recovered pending turn"]}"#),
+                    argumentsJSON: #"{"hint":"recovered pending turn"}"#),
             ])
     }
 }
@@ -3166,12 +3166,12 @@ final class CaptureThenGatedFailureThenSpeakingBrain: BrainClient, @unchecked Se
                 userInfo: [NSLocalizedDescriptionKey: "temporary provider interruption"])
         default:
             return BrainResponse(
-                toolCalls: [.speak(callId: "recovered", lines: ["used saved observation"])],
+                toolCalls: [.speak(callId: "recovered", hint: "used saved observation")],
                 rawToolCalls: [
                     RawToolCall(
                         id: "recovered",
                         name: "speak",
-                        argumentsJSON: #"{"lines":["used saved observation"]}"#),
+                        argumentsJSON: #"{"hint":"used saved observation"}"#),
                 ])
         }
     }

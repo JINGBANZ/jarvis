@@ -50,6 +50,8 @@ public struct LocalProxySignIn: Sendable {
             events.yield(.failed(message: "\(provider.displayName) has no sign-in"))
             return
         }
+        let previous = Set(LocalProxyAccountFile.all(
+            in: authDirectory, for: provider).map(\.url))
 
         let process = Process()
         process.executableURL = executable
@@ -115,6 +117,13 @@ public struct LocalProxySignIn: Sendable {
             guard !Task.isCancelled else { return }
             if status == 0 {
                 protectCredentials()
+                do {
+                    try retainNewAccount(for: provider, replacing: previous)
+                } catch {
+                    events.yield(.failed(message: "the previous account couldn't be replaced: "
+                        + ProviderMessageRedaction.redact(error.localizedDescription)))
+                    return
+                }
                 events.yield(.finished(accountFiles: LocalProxyAccountFile.all(
                     in: authDirectory, for: provider)))
             } else if timedOut.withLock({ $0 }) {
@@ -125,6 +134,15 @@ public struct LocalProxySignIn: Sendable {
             }
         } onCancel: {
             kill(pid, SIGTERM)
+        }
+    }
+
+    private func retainNewAccount(for provider: BrainProvider, replacing previous: Set<URL>) throws {
+        let accounts = LocalProxyAccountFile.all(in: authDirectory, for: provider)
+        let created = accounts.filter { !previous.contains($0.url) }
+        guard accounts.count > 1, created.count == 1, let current = created.first else { return }
+        for account in accounts where account.url != current.url {
+            try FileManager.default.removeItem(at: account.url)
         }
     }
 

@@ -12,7 +12,7 @@
           {
             "id": "s1",
             "name": "speak",
-            "arguments": "{\"lines\": [\"Keep boundary events.\"], \"detail\": \"Use a case exactly at the cutoff to verify inclusion.\"}"
+            "arguments": "{\"hint\": \"Keep boundary events.\", \"detail\": \"Use a case exactly at the cutoff to verify inclusion.\"}"
           }
         ]
       },
@@ -45,7 +45,7 @@
           {
             "id": "s2",
             "name": "speak",
-            "arguments": "{\"lines\": [\"Each event enters and leaves each deque at most once.\"], \"detail\": \"Amortized O(1) update; no performance test output is available.\"}"
+            "arguments": "{\"hint\": \"Each event enters and leaves each deque at most once.\", \"detail\": \"Amortized O(1) update; no performance test output is available.\"}"
           }
         ]
       },
@@ -74,7 +74,7 @@
           {
             "id": "s3",
             "name": "speak",
-            "arguments": "{\"lines\": [\"Verify the threshold boundary.\"], \"detail\": \"The suggestion is unverified; no execution results are visible.\"}"
+            "arguments": "{\"hint\": \"Verify the threshold boundary.\", \"detail\": \"The suggestion is unverified; no execution results are visible.\"}"
           }
         ]
       },
@@ -99,7 +99,7 @@
           {
             "id": "s4",
             "name": "speak",
-            "arguments": "{\"lines\": [\"Choose a bounded expansion horizon.\"]}"
+            "arguments": "{\"hint\": \"Choose a bounded expansion horizon.\", \"detail\": null}"
           }
         ]
       },
