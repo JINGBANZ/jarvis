@@ -131,7 +131,7 @@ but an AI answer or finished-looking code alone does not warrant interruption.
 When the next useful action is to ask the other AI, provide a short prompt suggestion in `detail`
 when that field is available. Put it in its own list item labeled **Ask AI** so it renders distinct
 from an explanation or implementation. This supporting prompt is warranted without requiring confusion.
-Keep the next move and brief reason in the short hint; do not squeeze the prompt into those lines.
+Keep the next move and brief reason in the short hint; do not squeeze the prompt into that hint.
 
 Give the AI the **what and how**, leaving syntax and routine implementation choices to it.
 The candidate should understand and rephrase the suggestion, not transcribe a specification.

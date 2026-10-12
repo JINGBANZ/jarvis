@@ -64,18 +64,18 @@ import JarvisCore
         #expect(roles(b) == ["user"])
     }
 
-    /// Models write arguments in schema order, so `lines` must reach the wire before `detail`.
+    /// Models write arguments in schema order, so `hint` must reach the wire before `detail`.
     @Test func toolSchemasKeepTheirAuthoredKeyOrder() throws {
         let tools = coachTools
         let data = try wire.encode(messages: [.user("hi")], tools: tools, toolChoice: .auto)
         let text = String(decoding: data, as: UTF8.self)
         #expect(text.contains(speakTool.parametersJSON))
-        let lines = try #require(text.range(of: #""lines""#))
+        let hint = try #require(text.range(of: #""hint""#))
         let detail = try #require(text.range(of: #""detail""#))
-        #expect(lines.lowerBound < detail.lowerBound)
+        #expect(hint.lowerBound < detail.lowerBound)
         let declared = try #require(body([.user("hi")])["tools"] as? [[String: Any]])
         let speak = declared[1]["input_schema"] as? [String: Any]
-        #expect(speak?["required"] as? [String] == ["lines", "detail"])
+        #expect(speak?["required"] as? [String] == ["hint", "detail"])
     }
 
     @Test func rawBlocksReplayVerbatimAndARoundsResultsShareOneUserTurn() throws {
@@ -133,11 +133,11 @@ import JarvisCore
     }
 
     @Test func decodesAToolUseReply() throws {
-        let data = Data(#"{"id":"msg_01","type":"message","role":"assistant","model":"claude-opus-5","content":[{"type":"thinking","thinking":"","signature":"EmcKZQER"},{"type":"tool_use","id":"toolu_01","name":"speak","input":{"lines":["Try a hash map."],"detail":null}}],"stop_reason":"tool_use","stop_details":null,"usage":{"input_tokens":20,"cache_read_input_tokens":3360,"cache_creation_input_tokens":0,"output_tokens":60}}"#.utf8)
+        let data = Data(#"{"id":"msg_01","type":"message","role":"assistant","model":"claude-opus-5","content":[{"type":"thinking","thinking":"","signature":"EmcKZQER"},{"type":"tool_use","id":"toolu_01","name":"speak","input":{"hint":"Try a hash map.","detail":null}}],"stop_reason":"tool_use","stop_details":null,"usage":{"input_tokens":20,"cache_read_input_tokens":3360,"cache_creation_input_tokens":0,"output_tokens":60}}"#.utf8)
         let response = try wire.decode(data)
-        #expect(response.toolCalls == [.speak(callId: "toolu_01", lines: ["Try a hash map."])])
+        #expect(response.toolCalls == [.speak(callId: "toolu_01", hint: "Try a hash map.")])
         #expect(response.rawToolCalls == [RawToolCall(
-            id: "toolu_01", name: "speak", argumentsJSON: #"{"detail":null,"lines":["Try a hash map."]}"#)])
+            id: "toolu_01", name: "speak", argumentsJSON: #"{"detail":null,"hint":"Try a hash map."}"#)])
         #expect(response.incompleteReason == nil)
         #expect(response.outputText == nil)
         #expect(response.outputItemsJSON.count == 2)
@@ -156,7 +156,7 @@ import JarvisCore
         let data = Data(#"""
         {"id":"msg_malformed","type":"message","role":"assistant","model":"claude-opus-5",
          "content":[{"type":"tool_use","id":"toolu_malformed","name":"speak",
-                     "input":{"lines":"\n<parameter name=\"detail\">Explain the queue invariant.\n"}}],
+                     "input":{"hint":["\n<parameter name=\"detail\">Explain the queue invariant.\n"]}}],
          "stop_reason":"tool_use","usage":{"input_tokens":20,"output_tokens":60}}
         """#.utf8)
         let response = try wire.decode(data)
@@ -169,7 +169,7 @@ import JarvisCore
         #expect(raw.name == "speak")
         let arguments = try #require(
             JSONSerialization.jsonObject(with: Data(raw.argumentsJSON.utf8)) as? [String: Any])
-        #expect(arguments["lines"] as? String == "\n<parameter name=\"detail\">Explain the queue invariant.\n")
+        #expect(arguments["hint"] as? [String] == ["\n<parameter name=\"detail\">Explain the queue invariant.\n"])
         #expect(arguments["detail"] == nil)
 
         let continuation = try body([
@@ -191,7 +191,7 @@ import JarvisCore
     }
 
     @Test func anUnfinishedStopReasonIsTruncation() throws {
-        let cut = try wire.decode(Data(#"{"type":"message","content":[{"type":"tool_use","id":"toolu_01","name":"speak","input":{"lines":["Try"]}}],"stop_reason":"max_tokens"}"#.utf8))
+        let cut = try wire.decode(Data(#"{"type":"message","content":[{"type":"tool_use","id":"toolu_01","name":"speak","input":{"hint":"Try"}}],"stop_reason":"max_tokens"}"#.utf8))
         #expect(cut.incompleteReason == "max_tokens")
         #expect(cut.toolCalls.count == 1)
         let overflow = try wire.decode(Data(#"{"type":"message","content":[],"stop_reason":"model_context_window_exceeded"}"#.utf8))
@@ -218,7 +218,7 @@ import JarvisCore
         {"model":"claude-opus-5","max_tokens":2048,"system":"You are Jarvis.",
          "thinking":{"type":"adaptive"},"output_config":{"effort":"low"},
          "tool_choice":{"type":"auto","disable_parallel_tool_use":true},
-         "tools":[{"name":"speak","description":"d","input_schema":{"type":"object","properties":{"lines":{},"detail":{}}}}],
+         "tools":[{"name":"speak","description":"d","input_schema":{"type":"object","properties":{"hint":{},"detail":{}}}}],
          "messages":[{"role":"user","content":[{"type":"text","text":"Session start."}]},
                      {"role":"assistant","content":[{"type":"thinking","thinking":"","signature":"EmcKZQER"},
                                                     {"type":"tool_use","id":"runner_1a2b3c4d","name":"load_skill","input":{"name":"coding"}}]},
@@ -228,7 +228,7 @@ import JarvisCore
         let response = json(#"""
         {"id":"msg_01","type":"message","role":"assistant","stop_reason":"tool_use","stop_details":null,
          "content":[{"type":"thinking","thinking":"","signature":"EmcKZQER"},
-                    {"type":"tool_use","id":"toolu_01","name":"speak","input":{"lines":["Hi"],"detail":"More."}}],
+                    {"type":"tool_use","id":"toolu_01","name":"speak","input":{"hint":"Hi","detail":"More."}}],
          "usage":{"input_tokens":20,"cache_read_input_tokens":3360,"cache_creation_input_tokens":12,"output_tokens":60}}
         """#)
         let exchange = MessagesWireFormat.readRecorded(request: request, response: response)
@@ -237,7 +237,7 @@ import JarvisCore
         #expect(exchange.parameters[1].value == "2048")
         #expect(exchange.instructions == "You are Jarvis.")
         #expect(exchange.toolNames == ["speak"])
-        #expect(exchange.speakParameters == ["detail", "lines"])
+        #expect(exchange.speakParameters == ["detail", "hint"])
         #expect(exchange.toolChoiceType == "auto")
         #expect(exchange.input.count == 5)
         #expect(exchange.inputFingerprints.count == exchange.input.count)
@@ -254,7 +254,7 @@ import JarvisCore
         #expect(refused.status == "refusal")
         #expect(refused.incompleteDetail == #"{"category":"cyber","type":"refusal"}"#)
         #expect(exchange.outputs == [.reasoning, .call(.init(
-            id: "toolu_01", name: "speak", arguments: #"{"detail":"More.","lines":["Hi"]}"#))])
+            id: "toolu_01", name: "speak", arguments: #"{"detail":"More.","hint":"Hi"}"#))])
         #expect(exchange.usage?.input == 20)
         #expect(exchange.usage?.cacheRead == 3360)
         #expect(exchange.usage?.cacheWrite == 12)

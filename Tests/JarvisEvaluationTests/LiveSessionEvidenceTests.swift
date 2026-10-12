@@ -519,7 +519,7 @@ import Testing
         let graph = try detail(openAI([
             reasoning,
             ["type": "function_call", "call_id": "call_1", "name": "speak",
-             "arguments": #"{"lines":["Sketch the write path."],"detail":"```mermaid\ngraph TD\nA-->B\n```"}"#],
+             "arguments": #"{"hint":"Sketch the write path.","detail":"```mermaid\ngraph TD\nA-->B\n```"}"#],
         ]))
         #expect(graph == .present("```mermaid\ngraph TD\nA-->B\n```"))
         #expect(graph.fences.map(\.language) == ["mermaid"])
@@ -527,7 +527,7 @@ import Testing
 
         #expect(try detail(openAI([
             ["type": "function_call", "call_id": "call_2", "name": "speak",
-             "arguments": #"{"lines":["Name the tradeoff."],"detail":null}"#],
+             "arguments": #"{"hint":"Name the tradeoff.","detail":null}"#],
         ])) == .none)
         #expect(try detail(openAI([
             ["type": "function_call", "call_id": "call_3", "name": "stay_silent", "arguments": "{}"],
@@ -559,13 +559,13 @@ import Testing
             "tools": [
                 ["type": "function", "name": "speak",
                  "parameters": ["type": "object",
-                                "properties": ["lines": ["type": "array"],
+                                "properties": ["hint": ["type": "string"],
                                                "detail": ["type": ["string", "null"]]]]],
                 ["type": "function", "name": "stay_silent", "parameters": ["type": "object"]],
             ],
         ], response: ["id": "resp_1", "status": "completed", "output": [[String: Any]]()])
         let evidence = try Self.evidence(traffic: [record])
-        #expect(evidence.traffic[0].speakParameters == ["detail", "lines"])
+        #expect(evidence.traffic[0].speakParameters == ["detail", "hint"])
     }
 
     // MARK: - Debug log, health, and malformed records

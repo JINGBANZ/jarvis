@@ -22,13 +22,13 @@ import Testing
     }
 
     @Test func aMermaidBlockInDetailReachesTheDetailBox() async throws {
-        let arguments = #"{"lines":["Sketch the request path."],"detail":"A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"}"#
+        let arguments = #"{"hint":"Sketch the request path.","detail":"A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments)])
         let overlay = DetailRecordingOverlay()
         let driver = makeDriver(brain: brain, overlay: overlay)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(overlay.lines == ["Sketch the request path."])
+        #expect(overlay.hint == "Sketch the request path.")
         #expect(overlay.detail?.diagram == DiagramHint(mermaid: "flowchart LR\nA[Client] --> B[API]"))
         #expect(overlay.detail?.dropped.isEmpty == true)
 
@@ -36,12 +36,12 @@ import Testing
         let schema = try #require(JSONSerialization.jsonObject(
             with: Data(speak.parametersJSON.utf8)) as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: Any])
-        #expect(properties.keys.sorted() == ["detail", "lines"])
+        #expect(properties.keys.sorted() == ["detail", "hint"])
         #expect(brain.toolChoices.first == .force("speak"))
     }
 
     @Test func replayedArgumentsCarryTheDeliveredDetail() async throws {
-        let arguments = #"{"lines":["Sketch the request path."],"detail":"A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"}"#
+        let arguments = #"{"hint":"Sketch the request path.","detail":"A first sketch.\n\n```mermaid\nflowchart LR\nA[Client] --> B[API]\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
         let driver = makeDriver(brain: brain, overlay: DetailRecordingOverlay())
 
@@ -52,12 +52,12 @@ import Testing
             .first { $0.name == "speak" })
         let object = try #require(JSONSerialization.jsonObject(
             with: Data(call.argumentsJSON.utf8)) as? [String: Any])
-        #expect(object["lines"] as? [String] == ["Sketch the request path."])
+        #expect(object["hint"] as? String == "Sketch the request path.")
         #expect((object["detail"] as? String)?.contains("```mermaid") == true)
     }
 
     @Test func aDroppedBlockLeavesTheReplayAndIsReportedToTheModel() async throws {
-        let arguments = #"{"lines":["Start with the API."],"detail":"Use a queue.\n\n```mermaid\nsequenceDiagram\nA->>B: write\n```"}"#
+        let arguments = #"{"hint":"Start with the API.","detail":"Use a queue.\n\n```mermaid\nsequenceDiagram\nA->>B: write\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments), try response(arguments)])
         let overlay = DetailRecordingOverlay()
         let driver = makeDriver(brain: brain, overlay: overlay)
@@ -65,7 +65,7 @@ import Testing
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
-        #expect(overlay.lines == ["Start with the API."])
+        #expect(overlay.hint == "Start with the API.")
         #expect(overlay.detail?.diagram == nil)
         let last = try #require(brain.calls.last)
         let call = try #require(last.flatMap { $0.toolCalls ?? [] }.first { $0.name == "speak" })
@@ -77,13 +77,13 @@ import Testing
     }
 
     @Test func aMalformedDiagramStillDeliversTheHint() async throws {
-        let arguments = #"{"lines":["Start with the API."],"detail":"```mermaid\nnot a graph\n```"}"#
+        let arguments = #"{"hint":"Start with the API.","detail":"```mermaid\nnot a graph\n```"}"#
         let brain = ScriptedBrain(script: [try response(arguments)])
         let overlay = DetailRecordingOverlay()
         let driver = makeDriver(brain: brain, overlay: overlay)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        #expect(overlay.lines == ["Start with the API."])
+        #expect(overlay.hint == "Start with the API.")
         #expect(overlay.detail?.hasContent != true)
     }
 
@@ -92,11 +92,11 @@ import Testing
 // The driver awaits delivery; this sink is only read after that attempt has completed.
 private final class DetailRecordingOverlay: OverlayRendering, @unchecked Sendable {
     @MainActor var acceptsDetail: Bool { true }
-    var lines: [String] = []
+    var hint = ""
     var detail: ReplyDetail?
-    func render(_ lines: [String]) { self.lines = lines }
-    func render(_ lines: [String], detail: ReplyDetail?) {
-        self.lines = lines
+    func render(_ hint: String) { self.hint = hint }
+    func render(_ hint: String, detail: ReplyDetail?) {
+        self.hint = hint
         self.detail = detail
     }
 }

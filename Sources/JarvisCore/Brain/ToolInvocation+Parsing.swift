@@ -21,7 +21,7 @@ public extension ToolInvocation {
     }
 
     /// Nil for an unknown tool or unusable arguments. Claude Code requests drop `strict`, so
-    /// `speak` needs a non-blank line here or an empty overlay would count as a spoken turn.
+    /// `speak` needs a non-blank hint here or an empty overlay would count as a spoken turn.
     static func parse(callId: String, name: String, argumentsJSON: String) -> ToolInvocation? {
         switch name {
         case captureScreenTool.name:
@@ -29,12 +29,12 @@ public extension ToolInvocation {
         case speakToolName:
             let object = (try? JSONSerialization.jsonObject(
                 with: Data(argumentsJSON.utf8))) as? [String: Any]
-            let lines = (object?["lines"] as? [String] ?? [])
-                .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-            guard !lines.isEmpty else { return nil }
+            let hint = (object?["hint"] as? String ?? "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !hint.isEmpty else { return nil }
             let detail = (object?["detail"] as? String)?
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            return .speak(callId: callId, lines: lines,
+            return .speak(callId: callId, hint: hint,
                           detail: detail.flatMap { $0.isEmpty ? nil : $0 })
         case staySilentTool.name:
             return .staySilent(callId: callId)

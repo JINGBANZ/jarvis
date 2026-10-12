@@ -123,7 +123,7 @@ import Testing
             .rawItems([#"{"type":"function_call","call_id":"q2","name":"stay_silent","arguments":"{}"}"#],
                       calls: [RawToolCall(id: "q2", name: "stay_silent", argumentsJSON: "{}")]),
             .init(role: .tool, text: "not executed", toolCallId: "q2"),
-            .assistantToolCalls([RawToolCall(id: "s1", name: "speak", argumentsJSON: #"{"lines":["Hi."]}"#)]),
+            .assistantToolCalls([RawToolCall(id: "s1", name: "speak", argumentsJSON: #"{"hint":"Hi."}"#)]),
             .init(role: .tool, text: "shown", toolCallId: "s1"),
         ])
 

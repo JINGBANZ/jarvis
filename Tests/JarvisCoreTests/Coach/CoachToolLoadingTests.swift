@@ -30,9 +30,9 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
     }
 
     private var speak: BrainResponse {
-        .init(toolCalls: [.speak(callId: "s1", lines: ["Name the constraint first."])],
+        .init(toolCalls: [.speak(callId: "s1", hint: "Name the constraint first.")],
               rawToolCalls: [RawToolCall(id: "s1", name: "speak",
-                                         argumentsJSON: #"{"lines":["Name the constraint first."]}"#)])
+                                         argumentsJSON: #"{"hint":"Name the constraint first."}"#)])
     }
 
     private func callViaDispatcher(_ name: String, _ argumentsJSON: String, id: String = "c1",

@@ -25,17 +25,17 @@ import Testing
         let hint = "Trace the download path."
         let partial = "```mermaid\n" + source
         panel.showReplyProgress(BrainReplyProgress(
-            closedLines: [hint], openLine: nil, linesComplete: true, detailMarkdown: partial))
+            hint: hint, hintComplete: true, detailMarkdown: partial))
         #expect(panel.currentDetailPlaceholderText == "Drawing diagram…")
         #expect(!panel.showsDiagram)
         #expect(panel.currentFrame == originalFrame)
         let markdown = partial + "\n```"
         panel.showReplyProgress(BrainReplyProgress(
-            closedLines: [hint], openLine: nil, linesComplete: true, detailMarkdown: markdown))
+            hint: hint, hintComplete: true, detailMarkdown: markdown))
         #expect(panel.showsDiagram)
         #expect(panel.currentDetailPlaceholderText == nil)
         let detail = try #require(ReplyDetail(markdown: markdown))
-        #expect(panel.deliver([hint], detail: detail) == detail)
+        #expect(panel.deliver(hint, detail: detail) == detail)
         #expect(panel.entryCount == 1)
         #expect(panel.detailCount == 1)
         #expect(!panel.hasLiveEntry)

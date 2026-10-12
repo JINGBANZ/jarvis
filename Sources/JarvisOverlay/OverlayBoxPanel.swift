@@ -228,15 +228,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     // MARK: - OverlayRendering
 
-    public nonisolated func render(_ lines: [String]) {
-        render(lines, detail: nil)
+    public nonisolated func render(_ hint: String) {
+        render(hint, detail: nil)
     }
 
-    public nonisolated func render(_ lines: [String], detail: ReplyDetail?) {
-        let summary = lines
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-            .joined(separator: " ")
+    public nonisolated func render(_ hint: String, detail: ReplyDetail?) {
+        let summary = hint.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !summary.isEmpty else { return }
         Task { @MainActor in
             self.append(summary, detail: detail)
@@ -331,11 +328,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     /// Returns the detail actually shown, nil when the box can't show one, so an unseen detail is
     /// never recorded as delivered or replayed to the model.
-    public func deliver(_ lines: [String], detail: ReplyDetail?) -> ReplyDetail? {
-        let summary = lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }.joined(separator: " ")
+    public func deliver(_ hint: String, detail: ReplyDetail?) -> ReplyDetail? {
+        let summary = hint.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !summary.isEmpty else {
-            // A reply that delivers no line ends whatever it had opened.
+            // A reply that delivers no hint ends whatever it had opened.
             removeLiveReply()
             return nil
         }
@@ -351,15 +347,12 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         return shown
     }
 
-    /// The entry opens on the reply's first character, in its lines or, when the model writes the
+    /// The entry opens on the reply's first character, in its hint or, when the model writes the
     /// detail first, in its detail, and its text and detail follow every snapshot until `deliver`
     /// finalizes them.
     public func showReplyProgress(_ progress: BrainReplyProgress?) {
         guard let progress else { return removeLiveReply() }
-        let closed = progress.closedLines
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
-        let open = progress.openLine?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let text = (closed + [open]).filter { !$0.isEmpty }.joined(separator: " ")
+        let text = progress.hint.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || progress.detailMarkdown?.isEmpty == false else { return }
         let shown = text.isEmpty ? Self.liveDetailPlaceholder : text
         let entry: Int

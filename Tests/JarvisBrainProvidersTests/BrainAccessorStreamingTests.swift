@@ -40,10 +40,10 @@ private final class DeltaBox: @unchecked Sendable {
     data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_01","name":"speak","input":{}}}
 
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"lines\\":[\\"Try a"}}
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\\"hint\\":\\"Try a"}}
 
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" hash map.\\"],\\"detail\\":null}"}}
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":" hash map.\\",\\"detail\\":null}"}}
 
     event: content_block_stop
     data: {"type":"content_block_stop","index":0}
@@ -79,11 +79,11 @@ private final class DeltaBox: @unchecked Sendable {
             messages: [.user("hi")], tools: coachTools, toolChoice: .auto)
         _ = await traffic.closeForTesting()
 
-        #expect(response.toolCalls == [.speak(callId: "toolu_01", lines: ["Try a hash map."])])
+        #expect(response.toolCalls == [.speak(callId: "toolu_01", hint: "Try a hash map.")])
         #expect(response.outputItemsJSON.count == 1)
         #expect(deltas.deltas == [
-            ToolCallDelta(index: 0, name: "speak", arguments: #"{"lines":["Try a"#),
-            ToolCallDelta(index: 0, name: "speak", arguments: #"{"lines":["Try a hash map."],"detail":null}"#),
+            ToolCallDelta(index: 0, name: "speak", arguments: #"{"hint":"Try a"#),
+            ToolCallDelta(index: 0, name: "speak", arguments: #"{"hint":"Try a hash map.","detail":null}"#),
         ])
         let request = try #require(try JSONSerialization.jsonObject(with: box.get() ?? Data()) as? [String: Any])
         #expect(request["stream"] as? Bool == true)
@@ -105,12 +105,12 @@ private final class DeltaBox: @unchecked Sendable {
         let deltas = DeltaBox()
         let client = BrainAccessor(
             provider: .claudeSubscription, apiKey: "proxy-key", model: "claude-opus-5", stream: true,
-            send: streaming([#"{"type":"message","content":[{"type":"tool_use","id":"t1","name":"speak","input":{"lines":["Whole."]}}],"stop_reason":"tool_use"}"#],
+            send: streaming([#"{"type":"message","content":[{"type":"tool_use","id":"t1","name":"speak","input":{"hint":"Whole."}}],"stop_reason":"tool_use"}"#],
                             contentType: "application/json"))
         let conversation = try await client.makeConversation { delta in deltas.append(delta); return [] }
         let response = try await conversation.respond(
             messages: [.user("hi")], tools: coachTools, toolChoice: .auto)
-        #expect(response.toolCalls == [.speak(callId: "t1", lines: ["Whole."])])
+        #expect(response.toolCalls == [.speak(callId: "t1", hint: "Whole.")])
         #expect(deltas.deltas.isEmpty)
     }
 
@@ -188,7 +188,7 @@ private final class DeltaBox: @unchecked Sendable {
             })
         let started = ContinuousClock.now
         let response = try await client.respond(messages: [.user("hi")], tools: coachTools)
-        #expect(response.toolCalls == [.speak(callId: "toolu_01", lines: ["Try a hash map."])])
+        #expect(response.toolCalls == [.speak(callId: "toolu_01", hint: "Try a hash map.")])
         #expect(started.duration(to: .now) < .seconds(5), "the reply did not wait for the deadline")
     }
 
@@ -211,7 +211,7 @@ private final class DeltaBox: @unchecked Sendable {
                 }, http)
             })
         let response = try await client.respond(messages: [.user("hi")], tools: coachTools)
-        #expect(response.toolCalls == [.speak(callId: "toolu_01", lines: ["Try a hash map."])])
+        #expect(response.toolCalls == [.speak(callId: "toolu_01", hint: "Try a hash map.")])
     }
 
     /// `timeoutInterval` bounds the wait between bytes; a reply that keeps trickling ends at the

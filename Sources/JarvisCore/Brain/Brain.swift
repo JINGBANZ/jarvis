@@ -64,8 +64,7 @@ public struct ToolDef: Sendable, Equatable {
 
 public enum ToolInvocation: Sendable, Equatable {
     case captureScreen(callId: String)
-    /// `lines` arrive split by the model; the client never splits text on punctuation.
-    case speak(callId: String, lines: [String], detail: String? = nil)
+    case speak(callId: String, hint: String, detail: String? = nil)
     /// A tool call, not an absence, so `tool_choice: required` can forbid plain-text replies.
     case staySilent(callId: String)
     case searchPrepNotes(callId: String, query: String)

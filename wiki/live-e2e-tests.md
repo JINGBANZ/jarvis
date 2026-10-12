@@ -209,12 +209,12 @@ presses, and a design follow-up) is enough to keep that subscription covered.
   any other failure, or a chain that times out until the target's failure budget is spent, still
   fails the step's cases. `LiveSessionEvidence.retryChain` implements the rule.
 
-C26 checks the delivered Activity response, after overlay acceptance, for both nonempty hint lines
+C26 checks the delivered Activity response, after overlay acceptance, for both a nonempty hint
 and a code block accepted by `ReplyDetail`. The candidate already understands a viable approach
 and is stuck implementing it, so code accompanies these actionable hints. A missing block is a
 regression failure, not a note; conceptual orientation is covered by other scenarios.
 C33 checks those same delivered replies for prose immediately before the code block containing a
-nonempty inline code anchor. It fails when placement is absent, only in the hint lines, after the
+nonempty inline code anchor. It fails when placement is absent, only in the hint, after the
 code, or missing its inline anchor. It does not require fixed model wording or judge whether the
 anchor names the correct editor location; the Gate's layout test covers rendering separately.
 

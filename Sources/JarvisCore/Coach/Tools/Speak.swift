@@ -4,16 +4,16 @@ public let speakToolName = "speak"
 
 public let speakTool = ToolDef(
     name: speakToolName,
-    description: "Show one direct coaching hint in at most 36 words total, in a single item in "
-        + "lines. Call only when a reply is useful. Use detail for Markdown content required by a "
+    description: "Show one direct coaching hint in at most 36 words total. "
+        + "Call only when a reply is useful. Use detail for Markdown content required by a "
         + "loaded skill or a warranted explanation; otherwise null.",
     // Line breaks and the indentation after them are stripped, so no JSON string here may
     // contain a line break.
     parametersJSON: #"""
         {"type":"object","properties":{
-            "lines":{"type":"array","items":{"type":"string"},"description":"One direct, connected hint in a single item; the box handles wrapping."},
+            "hint":{"type":"string","description":"One direct, connected coaching hint; the box handles wrapping."},
             "detail":{"type":["string","null"],"description":"Markdown shown under the hint in the box. Follow loaded skill guidance; otherwise null unless an explanation is warranted."}
-        },"required":["lines","detail"],"additionalProperties":false}
+        },"required":["hint","detail"],"additionalProperties":false}
         """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
     guidance: tipStyle + "\n\n" + detailGuidance)
 
@@ -43,7 +43,7 @@ private let tipStyle = """
 
 private let detailGuidance = """
     # Detail
-    The lines are the coaching. Keep the hint and its brief rationale there. Include detail when a
+    The hint is the coaching. Keep its brief rationale there. Include detail when a
     loaded skill calls for supporting content or an explanation is warranted; otherwise leave it null.
     detail is Markdown shown under the hint in the persistent box. Use it for supporting content
     beyond the hint that a loaded skill asks for, on that skill's own terms for when it applies.

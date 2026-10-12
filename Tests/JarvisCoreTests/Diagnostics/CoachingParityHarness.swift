@@ -42,7 +42,7 @@ enum CoachingParityHarness {
     struct Snapshot: Equatable {
         let outcomes: [TurnOutcome]
         let providerRequests: [Data]
-        let overlayEvents: [[String]]
+        let overlayEvents: [String]
         let routeTransitions: [RouteTransition]
     }
 
@@ -74,7 +74,7 @@ enum CoachingParityHarness {
             })
 
         let speakResponse = Data(
-            #"{"status":"completed","output":[{"type":"function_call","call_id":"s1","name":"speak","arguments":"{\"lines\":[\"same tip\"]}"}]}"#.utf8)
+            #"{"status":"completed","output":[{"type":"function_call","call_id":"s1","name":"speak","arguments":"{\"hint\":\"same tip\"}"}]}"#.utf8)
         let finalCalls = CallCounter()
         let final = BrainAccessor(
             apiKey: "parity-key",

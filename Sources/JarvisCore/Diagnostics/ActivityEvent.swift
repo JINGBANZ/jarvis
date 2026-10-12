@@ -38,7 +38,7 @@ public enum ActivityEvent: Sendable {
     case screenViewed(imageBase64JPEG: String)
     /// Fixed recovery guidance only; raw failure detail stays in the debug log.
     case screenViewFailed
-    case tip(lines: [String], detail: String? = nil)
+    case tip(hint: String, detail: String? = nil)
     case stayedSilent
     /// The single terminal event. A closed reason set, so a producer cannot author copy.
     case sessionEnded(reason: SessionEndReason)
@@ -58,8 +58,8 @@ public enum ActivityEvent: Sendable {
     case prepNotesUnavailable
 
     var response: ActivityResponse? {
-        guard case .tip(let lines, let detail) = self else { return nil }
-        return ActivityResponse(lines: lines, detail: detail)
+        guard case .tip(let hint, let detail) = self else { return nil }
+        return ActivityResponse(hint: hint, detail: detail)
     }
 
     /// One exhaustive mapping, so an event's persisted kind can't disagree with its copy.
@@ -81,8 +81,8 @@ public enum ActivityEvent: Sendable {
                 "👁 couldn't view your screen — screen capture failed; check Screen Recording permission",
                 nil
             )
-        case .tip(let lines, let detail):
-            return (.tip, ActivityResponse(lines: lines, detail: detail).message, nil)
+        case .tip(let hint, let detail):
+            return (.tip, ActivityResponse(hint: hint, detail: detail).message, nil)
         case .stayedSilent:
             return (.stayedSilent, "🤫 stayed silent — nothing useful to add", nil)
         case .sessionEnded(let reason):

@@ -2,7 +2,7 @@ import Foundation
 
 extension ActivityResponse {
     var plainText: String {
-        var parts = ["Hint\n\(lines.joined(separator: "\n"))"]
+        var parts = ["Hint\n\(hint)"]
         if let detail { parts.append("Detail\n\(detail)") }
         if let explanation { parts.append("Explanation\n\(explanation)") }
         if let code { parts.append("Code\n\(code.language)\n\(code.placement)\n\(code.code)") }
@@ -10,7 +10,7 @@ extension ActivityResponse {
     }
 
     var markdown: String {
-        var parts = ["### Hint\n\n\(lines.joined(separator: "\n"))"]
+        var parts = ["### Hint\n\n\(hint)"]
         if let detail { parts.append("### Detail\n\n\(detail)") }
         if let explanation { parts.append("### Explanation\n\n\(explanation)") }
         if let code {
@@ -28,7 +28,7 @@ extension ActivityResponse {
                 .replacingOccurrences(of: "<", with: "&lt;")
                 .replacingOccurrences(of: ">", with: "&gt;")
         }
-        var result = "<section><h3>Hint</h3><p>\(escape(lines.joined(separator: "\n")))</p></section>"
+        var result = "<section><h3>Hint</h3><p>\(escape(hint))</p></section>"
         if let detail {
             // Markdown, so its fences and indentation are content: keep them literal.
             result += "<section><h3>Detail</h3><pre><code>\(escape(detail))</code></pre></section>"

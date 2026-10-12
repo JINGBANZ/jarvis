@@ -426,8 +426,8 @@ public final class ActivityLog: @unchecked Sendable {
             parent.appendChild(body);
           }
           function renderResponse(parent,response){
-            if(response.lines && response.lines.length){
-              responseText(responseSection(parent,'Hint'),response.lines.join('\\n'));
+            if(response.hint && response.hint.length){
+              responseText(responseSection(parent,'Hint'),response.hint);
             }
             if(response.detail && response.detail.trim()){
               responseText(responseSection(parent,'Detail'),response.detail);

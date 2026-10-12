@@ -50,11 +50,11 @@ import Testing
 
     private static func speakReply(_ callID: String, _ line: String) -> BrainResponse {
         BrainResponse(
-            toolCalls: [.speak(callId: callID, lines: [line])],
+            toolCalls: [.speak(callId: callID, hint: line)],
             rawToolCalls: [
                 RawToolCall(
                     id: callID, name: "speak",
-                    argumentsJSON: "{\"lines\":[\"\(line)\"]}"),
+                    argumentsJSON: "{\"hint\":\"\(line)\"]}"),
             ])
     }
 

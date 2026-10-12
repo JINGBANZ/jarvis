@@ -53,18 +53,18 @@ import JarvisCore
         #expect(config(b)["tool_choice"] == nil)
     }
 
-    /// Models write arguments in schema order, so `lines` must reach the wire before `detail`.
+    /// Models write arguments in schema order, so `hint` must reach the wire before `detail`.
     @Test func toolSchemasKeepTheirAuthoredKeyOrder() throws {
         let tools = coachTools
         let data = try wire.encode(messages: [.user("hi")], tools: tools, toolChoice: .required)
         let text = String(decoding: data, as: UTF8.self)
         #expect(text.contains(speakTool.parametersJSON))
-        let lines = try #require(text.range(of: #""lines""#))
+        let hint = try #require(text.range(of: #""hint""#))
         let detail = try #require(text.range(of: #""detail""#))
-        #expect(lines.lowerBound < detail.lowerBound)
+        #expect(hint.lowerBound < detail.lowerBound)
         let declared = try #require(body([.user("hi")])["tools"] as? [[String: Any]])
         let speak = declared[1]["parameters"] as? [String: Any]
-        #expect(speak?["required"] as? [String] == ["lines", "detail"])
+        #expect(speak?["required"] as? [String] == ["hint", "detail"])
     }
 
     @Test func noneEffortIsMinimal() throws {
@@ -127,13 +127,13 @@ import JarvisCore
     }
 
     @Test func decodesACallReplyAndMakesItsIdUnique() throws {
-        let data = Data(#"{"status":"requires_action","object":"interaction","model":"gemini-3.8-flash","steps":[{"signature":"EmcKZQER","type":"thought"},{"id":"call_326665","type":"function_call","name":"speak","arguments":{"lines":["Try a hash map."],"detail":null}}],"usage":{"total_input_tokens":2020,"total_cached_tokens":0,"total_output_tokens":16,"total_thought_tokens":44}}"#.utf8)
+        let data = Data(#"{"status":"requires_action","object":"interaction","model":"gemini-3.8-flash","steps":[{"signature":"EmcKZQER","type":"thought"},{"id":"call_326665","type":"function_call","name":"speak","arguments":{"hint":"Try a hash map.","detail":null}}],"usage":{"total_input_tokens":2020,"total_cached_tokens":0,"total_output_tokens":16,"total_thought_tokens":44}}"#.utf8)
         let first = try wire.decode(data)
         let second = try wire.decode(data)
         let id = try #require(first.rawToolCalls.first?.id)
         #expect(id.hasPrefix("call_326665_"))
         #expect(id != second.rawToolCalls.first?.id)
-        #expect(first.toolCalls == [.speak(callId: id, lines: ["Try a hash map."])])
+        #expect(first.toolCalls == [.speak(callId: id, hint: "Try a hash map.")])
         #expect(first.incompleteReason == nil)
         #expect(first.outputText == nil)
         #expect(first.outputItemsJSON.count == 2)
@@ -183,7 +183,7 @@ import JarvisCore
         {"model":"gemini-3.8-flash","store":false,"system_instruction":"You are Jarvis.",
          "generation_config":{"thinking_level":"low","thinking_summaries":"none","max_output_tokens":2048,
            "tool_choice":{"allowed_tools":{"mode":"any","tools":["speak"]}}},
-         "tools":[{"type":"function","name":"speak","parameters":{"type":"object","properties":{"lines":{},"detail":{}}}}],
+         "tools":[{"type":"function","name":"speak","parameters":{"type":"object","properties":{"hint":{},"detail":{}}}}],
          "input":[{"type":"user_input","content":[{"type":"text","text":"Session start."}]},
                   {"type":"thought","signature":"skip_thought_signature_validator"},
                   {"type":"function_call","id":"runner_1a2b3c4d","name":"load_skill","arguments":{"name":"coding"}},
@@ -192,7 +192,7 @@ import JarvisCore
         """#)
         let response = json(#"""
         {"status":"requires_action","steps":[{"type":"thought","signature":"EmcKZQER"},
-          {"type":"function_call","id":"call_1_ab12cd34","name":"speak","arguments":{"lines":["Hi"],"detail":"More."}}],
+          {"type":"function_call","id":"call_1_ab12cd34","name":"speak","arguments":{"hint":"Hi","detail":"More."}}],
          "usage":{"total_input_tokens":2020,"total_cached_tokens":0,"total_output_tokens":16,"total_thought_tokens":44}}
         """#)
         let exchange = InteractionsWireFormat.readRecorded(request: request, response: response)
@@ -200,7 +200,7 @@ import JarvisCore
         #expect(exchange.parameters.map(\.name) == ["thinking_level", "max_output_tokens", "tool_choice"])
         #expect(exchange.instructions == "You are Jarvis.")
         #expect(exchange.toolNames == ["speak"])
-        #expect(exchange.speakParameters == ["detail", "lines"])
+        #expect(exchange.speakParameters == ["detail", "hint"])
         #expect(exchange.toolChoiceType == "allowed_tools")
         #expect(exchange.input.count == 5)
         #expect(exchange.input[0] == .message(role: "user", parts: ["Session start."]))
@@ -211,7 +211,7 @@ import JarvisCore
         #expect(exchange.input[4] == .message(role: "user", parts: ["[base64 image omitted]"]))
         #expect(exchange.status == "requires_action")
         #expect(exchange.outputs == [.reasoning, .call(.init(
-            id: "call_1_ab12cd34", name: "speak", arguments: #"{"detail":"More.","lines":["Hi"]}"#))])
+            id: "call_1_ab12cd34", name: "speak", arguments: #"{"detail":"More.","hint":"Hi"}"#))])
         #expect(exchange.usage?.input == 2020)
         #expect(exchange.usage?.cacheRead == 0)
         #expect(exchange.usage?.output == 60)

@@ -236,18 +236,18 @@ import Testing
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown: "Use a window.\n\n```python\nleft = 0\n```"))
-        #expect(box.deliver(["Move the left edge."], detail: detail) == detail)
+        #expect(box.deliver("Move the left edge.", detail: detail) == detail)
         #expect(box.currentText.contains("Move the left edge."))
         #expect(box.currentText.contains("detail below"))
         #expect(!box.currentText.contains("left = 0"))
         #expect(box.currentDetailCodeText.string == "left = 0")
         #expect(box.currentSharingType == .none)
 
-        _ = box.deliver(["A plain hint."], detail: nil)
+        _ = box.deliver("A plain hint.", detail: nil)
         #expect(box.currentDetail == detail, "a hint without a detail leaves the box as it is")
 
         box.clickCollapseButton()
-        #expect(box.deliver(["While collapsed."], detail: ReplyDetail(markdown: "Not shown.")) == nil)
+        #expect(box.deliver("While collapsed.", detail: ReplyDetail(markdown: "Not shown.")) == nil)
         box.clickCollapseButton()
         #expect(box.currentDetail == detail)
     }
@@ -257,10 +257,10 @@ import Testing
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         let good = try #require(ReplyDetail(markdown: "Here.\n\n```python\nleft = 0\n```"))
-        _ = box.deliver(["First."], detail: good)
+        _ = box.deliver("First.", detail: good)
         let bad = try #require(ReplyDetail(markdown: "```mermaid\nsequenceDiagram\nA->>B: x\n```"))
         #expect(!bad.hasContent)
-        #expect(box.deliver(["Second."], detail: bad) == nil)
+        #expect(box.deliver("Second.", detail: bad) == nil)
         #expect(box.currentDetail == good)
     }
 
@@ -268,14 +268,14 @@ import Testing
         let box = OverlayBoxPanel()
         box.setSessionLive(true)
         let detail = try #require(ReplyDetail(markdown: "A window is the current range."))
-        _ = box.deliver(["Move the left edge."], detail: detail)
+        _ = box.deliver("Move the left edge.", detail: detail)
         #expect(box.detailCount == 1)
         box.clickClearButton()
         #expect(box.currentText.isEmpty)
         #expect(box.detailCount == 0)
         #expect(box.currentDetail == nil)
 
-        _ = box.deliver(["Again."], detail: detail)
+        _ = box.deliver("Again.", detail: detail)
         box.setSessionLive(false)
         #expect(!box.isPanelVisible)
         box.setSessionLive(true)

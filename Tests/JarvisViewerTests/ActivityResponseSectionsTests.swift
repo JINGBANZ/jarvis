@@ -7,7 +7,7 @@ import WebKit
         let h = WebViewHarness()
         try await h.load(ActivityLog.htmlShell())
         try await h.eval(ActivityLog.rowScript(time: "12:00", message: "legacy fallback", imageBase64: nil,
-            response: ActivityResponse(lines: ["Return result after the loop."],
+            response: ActivityResponse(hint: "Return result after the loop.",
                 detail: "The caller otherwise receives None.\n\n```python\nif value < 2:\n"
                     + "    return \"<script>bad()</script>\"\n```")))
         let headings = try await h.eval(
@@ -25,7 +25,7 @@ import WebKit
         let h = WebViewHarness()
         try await h.load(ActivityLog.htmlShell())
         try await h.eval(ActivityLog.rowScript(time: "12:00", message: "💬 Return result.", imageBase64: nil,
-            response: ActivityResponse(lines: ["Return result."], detail: "  ")))
+            response: ActivityResponse(hint: "Return result.", detail: "  ")))
         let headings = try await h.eval(
             "Array.from(document.querySelectorAll('.response-section h3')).map(x=>x.textContent).join('|')"
         ) as? String

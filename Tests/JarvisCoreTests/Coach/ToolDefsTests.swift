@@ -12,14 +12,15 @@ import Testing
 
     @Test func theSpeakSchemaIsStrict() {
         let withDetail = speakTool.parametersJSON
-        #expect(withDetail.contains("\"lines\""))
+        #expect(withDetail.contains("\"hint\""))
+        #expect(withDetail.contains(#""hint":{"type":"string""#))
+        #expect(!withDetail.contains("\"lines\""))
         // Strict Structured Outputs requires every property in `required`, so optional means
         // nullable.
         #expect(withDetail.contains(#""detail":{"type":["string","null"]"#))
-        #expect(withDetail.contains(#""required":["lines","detail"]"#))
+        #expect(withDetail.contains(#""required":["hint","detail"]"#))
         #expect(withDetail.contains("\"additionalProperties\":false"))
 
-        #expect(!withDetail.contains("\"maxItems\""))
     }
 
     @Test func theDetailFieldIsGovernedByPromptTextAlone() {
@@ -36,7 +37,6 @@ import Testing
         #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
         #expect(captureScreenTool.description.contains("one fresh result satisfies that request"))
         #expect(speakTool.description.contains("at most 36 words total"))
-        #expect(speakTool.description.contains("single item in lines"))
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
     }
 
@@ -187,17 +187,18 @@ import Testing
     @Test func parseMapsEachCoachTool() {
         if case .captureScreen? = ToolInvocation.parse(callId: "c", name: "capture_screen", argumentsJSON: "{}") {} else { Issue.record("capture_screen") }
         if case .staySilent? = ToolInvocation.parse(callId: "c", name: "stay_silent", argumentsJSON: "{}") {} else { Issue.record("stay_silent") }
-        guard case .speak(_, let lines, nil)? = ToolInvocation.parse(
-            callId: "c", name: "speak", argumentsJSON: #"{"lines":["a","b"]}"#) else {
+        guard case .speak(_, let hint, nil)? = ToolInvocation.parse(
+            callId: "c", name: "speak", argumentsJSON: #"{"hint":"a b"}"#) else {
             Issue.record("speak"); return
         }
-        #expect(lines == ["a", "b"])
+        #expect(hint == "a b")
     }
 
     @Test func parseRejectsUnknownToolsAndMalformedSpeak() {
         #expect(ToolInvocation.parse(callId: "c", name: "self_destruct", argumentsJSON: "{}") == nil)
         // A request without `strict` has no Structured Outputs guarantee, so these can arrive.
-        for args in [#"{}"#, #"{"lines":[]}"#, #"{"lines":["", "  "]}"#, #"{"text":"hi"}"#, "junk"] {
+        for args in [#"{}"#, #"{"hint":""}"#, #"{"hint":"   "}"#, #"{"hint":["hi"]}"#,
+                     #"{"hint":null}"#, #"{"lines":["old caption"]}"#, #"{"text":"hi"}"#, "junk"] {
             #expect(ToolInvocation.parse(callId: "c", name: "speak", argumentsJSON: args) == nil,
                     "args=\(args)")
         }

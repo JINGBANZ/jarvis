@@ -64,8 +64,8 @@ final class ReplyProgressRelay: @unchecked Sendable {
                 phases.append("first_speak_text_ms")
                 firstTextMs = Int(Date().timeIntervalSince(current.started) * 1000)
             }
-            if snapshot.linesComplete, current.last?.linesComplete != true {
-                phases.append("speak_lines_ms")
+            if snapshot.hintComplete, current.last?.hintComplete != true {
+                phases.append("speak_hint_ms")
             }
             current.last = snapshot
             if snapshot.hasText {

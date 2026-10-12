@@ -69,11 +69,11 @@ import Testing
 
     @Test func aDiagramTravelsInDetailAndAnUndeclaredFieldIsIgnored() {
         let call = ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
-            #"{"lines":["Sketch the request path."],"detail":"```mermaid\nflowchart LR\nA[API]\n```"}"#)
-        #expect(call == .speak(callId: "s", lines: ["Sketch the request path."],
+            #"{"hint":"Sketch the request path.","detail":"```mermaid\nflowchart LR\nA[API]\n```"}"#)
+        #expect(call == .speak(callId: "s", hint: "Sketch the request path.",
                                detail: "```mermaid\nflowchart LR\nA[API]\n```"))
         #expect(ToolInvocation.parse(callId: "s", name: "speak", argumentsJSON:
-            #"{"lines":["Keep this hint."],"mermaid":"flowchart LR\nA[API]"}"#)
-            == .speak(callId: "s", lines: ["Keep this hint."]))
+            #"{"hint":"Keep this hint.","mermaid":"flowchart LR\nA[API]"}"#)
+            == .speak(callId: "s", hint: "Keep this hint."))
     }
 }

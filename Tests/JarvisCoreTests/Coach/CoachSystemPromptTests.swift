@@ -22,7 +22,7 @@ import Testing
         let with = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
             disabledTools: [], prepSourcesConfigured: false))
         #expect(with.contains("# Detail"))
-        #expect(with.contains("The lines are the coaching."))
+        #expect(with.contains("The hint is the coaching."))
         #expect(with.contains("# Tip style"))
     }
 
@@ -33,6 +33,7 @@ import Testing
         #expect(!prompt.contains("codeSnippet"))
         #expect(!prompt.contains("highlightedLines"))
         #expect(!prompt.contains("# Code accompanies"))
+        #expect(!prompt.contains("Use concise code expressions"))
         #expect(!prompt.contains("# Explain when understanding is missing"))
     }
 
