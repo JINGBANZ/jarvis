@@ -140,9 +140,11 @@ moments the model judges worthwhile.
    fresh result satisfies the screen gate, so the next model response must speak or stay silent
    rather than capture the same request again. Fully stated questions do not require a reflexive
    capture.
-5. The model calls `speak(lines)` — a tip of up to ~3 short lines, returned **already split**
-   into an array (Structured Outputs / `strict:true`), so the client never splits prose on
-   punctuation — or `stay_silent`. A tool call is **required** on every model response: silence is an
+5. The model calls `speak(lines)` with one direct, connected hint in a single array item
+   (Structured Outputs / `strict:true`), within the total word budget in
+   [`Speak.swift`](../Sources/JarvisCore/Coach/Tools/Speak.swift), or calls `stay_silent`.
+   The box wraps the hint to its width, so the model writes readable prose without choosing visual
+   line breaks. A tool call is **required** on every model response: silence is an
    explicit tool, never plain text. Under a "stay silent by calling no tool" contract the model still
    has to emit *something*, and at low reasoning effort that came out as leaked deliberation text
    ("final empty. no. final.") that polluted the conversation and was imitated on later turns;
@@ -419,8 +421,8 @@ for a hint they asked for ([`CoachAttemptRunner`](../Sources/JarvisCore/Coach/Co
 
 ### The detail box
 
-A reply is short lines plus one optional Markdown `detail`. The lines are the coaching; `detail` is
-for supporting content requested by a loaded skill or the paragraphs an explanation needs.
+A reply is one compact hint in `lines` plus one optional Markdown `detail`. The hint is the coaching;
+`detail` is for supporting content requested by a loaded skill or the paragraphs an explanation needs.
 Every session declares `detail`, because every session has the Overlay Box to show it. A detail that
 arrives while the box is collapsed is not shown, and the replay records none, so the model never reads
 back a detail the user did not see. `detail` is nullable rather than absent, which is what makes a

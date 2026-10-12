@@ -35,7 +35,8 @@ import Testing
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
         #expect(captureScreenTool.description.contains("one fresh result satisfies that request"))
-        #expect(speakTool.description.contains("up to 3 short overlay lines"))
+        #expect(speakTool.description.contains("at most 36 words total"))
+        #expect(speakTool.description.contains("single item in lines"))
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
     }
 

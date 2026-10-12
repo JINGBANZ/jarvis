@@ -382,8 +382,8 @@ it as unverified in its description.
   each takes the click without moving focus off the editor.
 - **Mixed practice,** because it judges coaching on a screen a person changes. With the OpenAI brain,
   work through demonstrated understanding, a local block, a visible bug, completion without tests, and
-  valid progress; confirm the overlay stays at most three short lines and healthy progress stays
-  silent.
+  valid progress; confirm hints stay direct, connect related sentences naturally, and follow
+  [the total word budget](./architecture.md#the-turn), while healthy progress stays silent.
 - **Browser screen text,** when screen capture, OCR, or Chrome Accessibility extraction changes,
   because the run views a fixture screenshot instead of Chrome. Follow
   [build-and-run.md → Browser screen-text validation](./build-and-run.md#browser-screen-text-validation).
