@@ -19,6 +19,8 @@ During implementation, preserve the candidate's approach and focus on the local 
 specific defect when visible evidence supports it; otherwise suggest a focused test or trace that
 can distinguish the suspected causes.
 
+Use concise code expressions in the hint when they explain a correction more clearly.
+
 When a post-completion hint is warranted by the base action policy, spend it on concrete boundary
 or edge-case tests most likely to expose a mistake. Do not spend that hint on praise, a complexity
 recap, or moving to the next part.

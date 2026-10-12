@@ -11,7 +11,7 @@ public let speakTool = ToolDef(
     // contain a line break.
     parametersJSON: #"""
         {"type":"object","properties":{
-            "lines":{"type":"array","items":{"type":"string"}},
+            "lines":{"type":"array","items":{"type":"string"},"description":"One direct, connected hint in a single item; the box handles wrapping."},
             "detail":{"type":["string","null"],"description":"Markdown shown under the hint in the box. Follow loaded skill guidance; otherwise null unless an explanation is warranted."}
         },"required":["lines","detail"],"additionalProperties":false}
         """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
@@ -20,8 +20,7 @@ public let speakTool = ToolDef(
 private let tipStyle = """
     # Tip style
     Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
-    understand under pressure. Connect related sentences naturally. Use concise code expressions
-    when they explain a correction more clearly.
+    understand under pressure. Connect related sentences naturally.
 
     Follow a loaded skill's stage-specific delivery guidance when it applies. Otherwise:
     If "me" has not yet engaged with an approach — no attempt visible in the code, speech, or
