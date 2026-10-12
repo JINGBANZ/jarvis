@@ -463,7 +463,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         readinessSession: JarvisReadiness.Session
     ) -> Bool {
         guard readiness.activeSession == readinessSession else { return false }
-        if let failure = brain.routeUnavailability(brainRoute, proxy: proxy, keys: brainKeys) {
+        let availability = brain.availability(for: brainRoute, proxy: proxy, keys: brainKeys)
+        if let failure = availability.blockingFailure {
             jlog("Jarvis: can't start — no target in the route can coach: "
                  + (failure.errorDescription ?? ""))
             if wasRunning {
@@ -476,7 +477,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         stop(reason: .replacedByNewSession, preserving: readinessSession)
         showActiveBrainTarget(
-            brain.unavailability(for: brainRoute.primary, proxy: proxy, keys: brainKeys) == nil ? brainRoute.primary : nil)
+            availability.failure(for: brainRoute.primary) == nil ? brainRoute.primary : nil)
         return composition.start(
             SessionComposition.Inputs(
                 transcription: transcriptionConfiguration,

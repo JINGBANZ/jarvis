@@ -69,24 +69,19 @@ final class BrainComposition {
         return keys
     }
 
-    func unavailability(
-        for target: BrainTarget,
+    func availability(
+        for route: BrainRoute,
         proxy: LocalProxySupervisor.Readiness?,
         keys: [Credential: String]
-    ) -> ProviderFailure? {
-        if let failure = target.credentialFailure(available: Set(keys.keys)) { return failure }
-        guard target.provider.servedByLocalProxy else { return nil }
-        return (proxy ?? .unavailable(reason: "isn't running")).unavailability(for: target.provider)
-    }
-
-    func routeUnavailability(
-        _ route: BrainRoute,
-        proxy: LocalProxySupervisor.Readiness?,
-        keys: [Credential: String]
-    ) -> ProviderFailure? {
-        let failures = route.targets.map { unavailability(for: $0, proxy: proxy, keys: keys) }
-        guard failures.allSatisfy({ $0 != nil }) else { return nil }
-        return failures.first.flatMap { $0 }
+    ) -> BrainRouteAvailability {
+        let proxy = proxy ?? .unavailable(reason: "isn't running")
+        let subscriptions = Dictionary(uniqueKeysWithValues: Set(route.targets
+            .map(\.provider).filter(\.servedByLocalProxy)).map { provider in
+                (provider, proxy.unavailability(for: provider)
+                    .map { BrainRouteAvailability.ConnectionHealth.unavailable($0) } ?? .ready)
+            })
+        return BrainRouteAvailability(
+            route: route, availableCredentials: Set(keys.keys), subscriptions: subscriptions)
     }
 
     func makeConfiguredRoute(
@@ -98,8 +93,9 @@ final class BrainComposition {
     ) -> ConfiguredBrainRoute {
         let factory = BrainClientFactory(
             keys: keys, proxyEndpoint: proxy?.endpoint, traffic: host.liveSessionEvidence)
+        let availability = availability(for: route, proxy: proxy, keys: keys)
         let targets = route.targets.map { target -> ConfiguredBrainTarget in
-            if let failure = unavailability(for: target, proxy: proxy, keys: keys) {
+            if let failure = availability.failure(for: target) {
                 return ConfiguredBrainTarget(unavailable: target, failure: failure)
             }
             let clients = factory.makeClients(for: target, effort: effort)
@@ -215,7 +211,7 @@ final class BrainComposition {
             return
         }
         if let proxy { onProxyReadiness?(proxy) }
-        if update == .topologyEdit, let failure = routeUnavailability(route, proxy: proxy, keys: keys) {
+        if update == .topologyEdit, let failure = availability(for: route, proxy: proxy, keys: keys).blockingFailure {
             jlog("Jarvis: can't apply brain settings — no target in the route can coach: "
                  + (failure.errorDescription ?? ""))
             host.liveSessionEvidence?.record(.settingsChangeNotApplied)

@@ -15,22 +15,21 @@ final class SubscriptionControls: NSObject {
     }
 
     private let supervisor: LocalProxySupervisor
+    private let subscriptionSignIns: SubscriptionSignIns
     private var rows: [BrainProvider: Row] = [:]
     private var card: SettingsCardView?
     private var onHeightChanged: ((CGFloat) -> Void)?
-    private var readiness: LocalProxySupervisor.Readiness?
-    private var refreshTask: Task<Void, Never>?
+    private var readiness: LocalProxySupervisor.Readiness? { subscriptionSignIns.readiness }
     private var signIns: [BrainProvider: Task<Void, Never>] = [:]
     private var actionFailures: [BrainProvider: String] = [:]
     var onStatusChanged: (() -> Void)?
     var onWillSignOut: ((BrainProvider) -> Void)?
 
-    /// Fires only for this card's own probe answers: an answer replayed when the page is rebuilt
-    /// could be older than a check already under way elsewhere.
-    var onProbeAnswered: ((LocalProxySupervisor.Readiness) -> Void)?
-
-    init(supervisor: LocalProxySupervisor) {
+    init(supervisor: LocalProxySupervisor, signIns: SubscriptionSignIns) {
         self.supervisor = supervisor
+        self.subscriptionSignIns = signIns
+        super.init()
+        signIns.observe { [weak self] in self?.render() }
     }
 
     func makeView(onHeightChanged: @escaping (CGFloat) -> Void) -> NSView {
@@ -88,33 +87,7 @@ final class SubscriptionControls: NSObject {
         }
     }
 
-    /// Also starts the helper if it isn't running, which is how a stopped helper is retried.
-    func refresh(refreshing providers: Set<BrainProvider> = []) {
-        guard refreshTask == nil else { return }
-        refreshTask = Task { [weak self, supervisor] in
-            let readiness = await supervisor.readiness(refreshing: providers)
-            // A sign-in or sign-out that finished meanwhile cleared this task and started its own
-            // probe; this stale answer must not paint over it.
-            guard !Task.isCancelled, let self, refreshTask != nil else { return }
-            guard readiness != .superseded else { refreshTask = nil; return }
-            self.readiness = readiness
-            refreshTask = nil
-            onProbeAnswered?(readiness)
-            render()
-        }
-    }
-
-    func record(_ readiness: LocalProxySupervisor.Readiness) {
-        guard readiness != .superseded else { return }
-        refreshTask?.cancel()
-        refreshTask = nil
-        self.readiness = readiness
-        render()
-    }
-
     func windowWillClose() {
-        refreshTask?.cancel()
-        refreshTask = nil
         card = nil
         rows.removeAll()
         // Sign-ins outlive the window on purpose: cancelling one signals the login holding the
@@ -130,14 +103,14 @@ final class SubscriptionControls: NSObject {
         }
         switch readiness {
         case .unavailable, .superseded:
-            refresh(refreshing: [provider])
+            subscriptionSignIns.retry(provider)
         case .ready(_, let signedIn, _) where signedIn.contains(provider):
             signOut(provider)
         case .ready where supervisor.accountFiles(for: provider).count > 1:
             signOut(provider)
         case .ready where !supervisor.accountFiles(for: provider).isEmpty
             && readiness?.unavailability(for: provider)?.disposition == .temporary:
-            refresh(refreshing: [provider])
+            subscriptionSignIns.retry(provider)
         case .ready, nil:
             signIn(provider)
         }
@@ -167,13 +140,8 @@ final class SubscriptionControls: NSObject {
             if let failure, !Task.isCancelled {
                 actionFailures[provider] = "Sign-in failed: \(ProviderMessageRedaction.redact(failure))"
             }
-            readiness = nil
-            // A probe started before this sign-in is stale, and while it holds the gate `refresh()`
-            // won't start a new one.
-            refreshTask?.cancel()
-            refreshTask = nil
-            render()
-            refresh()
+            subscriptionSignIns.invalidate()
+            subscriptionSignIns.refresh(checkingEmptyAccounts: true)
         }
         render()
     }
@@ -193,12 +161,8 @@ final class SubscriptionControls: NSObject {
             actionFailures[provider] = "Sign-out failed: "
                 + ProviderMessageRedaction.redact(error.localizedDescription)
         }
-        readiness = nil
-        // A probe still in flight answers for the credential just removed.
-        refreshTask?.cancel()
-        refreshTask = nil
-        render()
-        refresh()
+        subscriptionSignIns.invalidate()
+        subscriptionSignIns.refresh(checkingEmptyAccounts: true)
     }
 
     private func render() {
@@ -225,6 +189,10 @@ final class SubscriptionControls: NSObject {
         if signIns[provider] != nil {
             return ("Signing in. Finish in your browser.", SettingsTheme.mutedText, "Cancel", true)
         }
+        if subscriptionSignIns.retrying == provider {
+            return (readiness?.unavailability(for: provider)?.activitySentence ?? "Checking…",
+                    SettingsTheme.amber, "Trying again…", false)
+        }
         guard let readiness else {
             return ("Checking…", SettingsTheme.mutedText, "Sign in", false)
         }
@@ -234,17 +202,18 @@ final class SubscriptionControls: NSObject {
         }.flatMap { $0.isEmpty ? nil : $0 }
         switch readiness {
         case .superseded:
-            return ("Checking…", SettingsTheme.mutedText, "Try again", true)
+            return ("Checking…", SettingsTheme.mutedText, "Try again", subscriptionSignIns.retrying == nil)
         case .unavailable(let reason):
-            return ("Not running. The sign-in service \(reason)", SettingsTheme.amber, "Try again", true)
+            return ("Not running. The sign-in service \(reason)", SettingsTheme.amber, "Try again", subscriptionSignIns.retrying == nil)
         case .ready(_, let signedIn, _) where signedIn.contains(provider) && account != nil:
             return (["Signed in", who].compactMap { $0 }.joined(separator: " · "),
                     SettingsTheme.teal, "Sign out", true)
         case .ready where account != nil:
             let failure = readiness.unavailability(for: provider)
+            let needsRetry = supervisor.accountFiles(for: provider).count == 1 && failure?.disposition == .temporary
             return (failure?.activitySentence ?? "Credential health is unavailable.", SettingsTheme.amber,
                     supervisor.accountFiles(for: provider).count > 1 ? "Sign out"
-                        : failure?.disposition == .temporary ? "Try again" : "Sign in", true)
+                        : needsRetry ? "Try again" : "Sign in", !needsRetry || subscriptionSignIns.retrying == nil)
         case .ready:
             return ("Signed out. \(Self.accountHint(provider)).", SettingsTheme.mutedText, "Sign in", true)
         }

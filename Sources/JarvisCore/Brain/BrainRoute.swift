@@ -29,8 +29,9 @@ public struct BrainRoute: Sendable, Equatable {
     }
 
     public func credentialFailure(available: Set<Credential>) -> ProviderFailure? {
-        guard let failure = primary.credentialFailure(available: available),
-              fallbackTargets.allSatisfy({ $0.credentialFailure(available: available) != nil }) else {
+        let availability = BrainRouteAvailability(
+            route: self, availableCredentials: available, subscriptions: [:])
+        guard case .unavailable(let failure) = availability.state else {
             return nil
         }
         return failure

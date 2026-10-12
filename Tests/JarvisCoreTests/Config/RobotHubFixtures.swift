@@ -33,8 +33,8 @@ extension RobotReadiness {
         granted: Set<JarvisReadiness.Permission> = [.microphone, .screenRecording]
     ) -> RobotReadiness {
         let subscriptions = Dictionary(uniqueKeysWithValues: BrainProvider.allCases.filter(\.servedByLocalProxy).map {
-            provider -> (BrainProvider, ConnectionHealth) in
-            let health: ConnectionHealth = signedOut.contains(provider) ? .unavailable(ProviderFailure(
+            provider -> (BrainProvider, BrainRouteAvailability.ConnectionHealth) in
+            let health: BrainRouteAvailability.ConnectionHealth = signedOut.contains(provider) ? .unavailable(ProviderFailure(
                 source: .brain(provider), stage: .process, category: .authentication,
                 disposition: .permanent, identity: .init(), message: "Sign in again in Connections.")) : .ready
             return (provider, health)

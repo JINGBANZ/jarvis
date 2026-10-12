@@ -213,7 +213,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             throw Failure.notReadyToStart(String(describing: blocker))
         }
         let proxy = await brain.proxyReadiness(for: route, preparingStart: true)
-        if let failure = brain.routeUnavailability(route, proxy: proxy, keys: brain.savedKeys(for: route)) {
+        if let failure = brain.availability(for: route, proxy: proxy, keys: brain.savedKeys(for: route)).blockingFailure {
             throw Failure.notReadyToStart(failure.activitySentence)
         }
 

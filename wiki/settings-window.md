@@ -149,16 +149,19 @@ way a Start would meet them, and name only what Settings can fix or explain:
 - **Eye** needs Screen Recording.
 - **Mouth** never needs the user: the Overlay Box has no off switch.
 
-The exact wording lives in `RobotHealth`.
+`BrainRouteAvailability` in Core evaluates target eligibility and fallback order for both the hub
+and session Start. `RobotHealth` turns that result into the hub's wording and colors.
 
 A subscription counts as signed out only when that is proven: it has no saved sign-in, or the
 helper reports a permanent authentication rejection. Temporary failures and an unanswered health
-check prove no sign-out. `SubscriptionSignIns` shares the full passive credential-health answer
-with Connections, the hub, and the Brain page, including temporary failures and an unchecked state.
-It asks the bundled helper only when a sign-in is saved, so opening Settings never starts the helper
-for nothing, and it takes
-the answers Connections and Start get from their probes, cancelling any older probe still in flight.
-A runtime permanent subscription authentication failure also refreshes this shared state.
+check prove no sign-out. Foundation-only `SubscriptionSignIns` owns Settings health checks and their
+cached answer, shared by Connections, the hub, and the Brain page. The answer includes temporary
+failures and an unchecked state. Hub and Brain visits ask the helper only when a sign-in is saved;
+an explicit Connections visit can also start the helper to check empty accounts. Passive checks
+share one pending task. Answers from Start replace a pending passive check, while an explicit
+Settings retry keeps priority until it finishes. Closing Settings releases its views without
+canceling the shared check; session Start keeps its own cancellation lifecycle. A runtime permanent
+subscription authentication failure requests a passive refresh of this shared state.
 
 **Refresh.** Visiting the hub and the window becoming key both re-read everything and probe the
 sign-ins; coming back from System Settings is the usual way a grant changes. While the window is
@@ -612,8 +615,8 @@ claim that the account is healthy.
 
 The **Subscriptions** card (`SubscriptionControls`) has one row each for **Codex**
 and **Claude Code**. Opening Connections probes the bundled helper, starting it if it is
-not running, and reads its credential files, so each row says what a Start would find; each answer
-also updates `SubscriptionSignIns`, so the hub and the Brain page agree with this card. The state
+not running, through `SubscriptionSignIns`, so each row says what a Start would find. The card
+renders that shared owner's answer, so the hub and the Brain page agree with it. The state
 reads under the row's title, as the key rows' does, with the row's button on the right:
 
 - **Checking…** until the probe answers.
@@ -627,8 +630,12 @@ reads under the row's title, as the key rows' does, with the row's button on the
 - **Signing in…** while a sign-in runs, with a **Cancel** button.
 
 **Try again** checks the clicked subscription and requests one targeted refresh if its access token
-has expired and can still be renewed. Opening Connections keeps the check passive; healthy credentials
-and rejected refresh tokens do not trigger a refresh request.
+has expired and can still be renewed. It replaces a pending passive check immediately, and the
+canceled check's late answer is ignored. While the requested retry runs, its button reads
+**Trying again…**, retry buttons are disabled, and the previous error stays visible until the new
+answer arrives. Completion publishes the new answer and enables retry actions again; failure does
+not schedule another retry. Opening Connections keeps the check passive; healthy credentials and
+rejected refresh tokens do not trigger a refresh request.
 
 Subscription rows retain the full redacted failure text. The text wraps, is selectable, and has
 space between lines; each row and its card measure the message at the current width and grow to
@@ -737,7 +744,8 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/Home/HomeDockButton.swift` | One chamfered dock button |
 | `Sources/JarvisApp/Settings/Home/ReadinessMeterView.swift` | The hub header's readiness meter |
 | `Sources/JarvisApp/Settings/Home/RobotPart+Presentation.swift` | Each part's title and symbol |
-| `Sources/JarvisApp/Settings/SubscriptionSignIns.swift` | The one sign-in answer shared by the hub and the Brain page |
+| `Sources/JarvisBrainProviders/Proxy/SubscriptionSignIns.swift` | Owns Settings health checks, explicit retry priority, and the answer shared by Connections, the hub, and the Brain page |
+| `Sources/JarvisCore/Brain/BrainRouteAvailability.swift` | Target eligibility and ordered fallback selection shared by readiness and Start |
 | `Sources/JarvisCore/Config/RobotHub.swift` | Inputs → hub state, the hub's one decision point |
 | `Sources/JarvisCore/Config/RobotHealth.swift` | The hub's status rules |
 | `Sources/JarvisCore/Config/RobotPartSummaries.swift` | Each slot's saved-setting text |

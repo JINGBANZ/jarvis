@@ -14,34 +14,23 @@ public enum RobotHealth {
     }
 
     private static func brain(_ route: BrainRoute, _ readiness: RobotReadiness) -> RobotPartHealth {
-        switch connection(route.primary, readiness) {
-        case .ready: return .ready
+        let availability = BrainRouteAvailability(
+            route: route, availableCredentials: readiness.availableCredentials,
+            subscriptions: readiness.subscriptions)
+        switch availability.state {
+        case .ready(_, primaryFailure: nil): return .ready
         case .checking: return .checking
+        case .ready(let fallback, primaryFailure: .some(let failure)):
+            return .needsAttention(
+                reason: "PRIMARY UNAVAILABLE",
+                advice: failure.activitySentence + " I'll use \(fallback.provider.displayName) until the primary is available.",
+                fix: .openConnections)
         case .unavailable(let failure):
-            for fallback in route.fallbackTargets {
-                switch connection(fallback, readiness) {
-                case .ready:
-                    return .needsAttention(
-                        reason: "PRIMARY UNAVAILABLE",
-                        advice: failure.activitySentence + " I'll use \(fallback.provider.displayName) until the primary is available.",
-                        fix: .openConnections)
-                case .checking: return .checking
-                case .unavailable: continue
-                }
-            }
             return .blocked(
                 reason: "NO BRAIN AVAILABLE",
                 advice: failure.activitySentence + " No configured fallback is available.",
                 fix: .openConnections)
         }
-    }
-
-    private static func connection(_ target: BrainTarget, _ readiness: RobotReadiness) -> RobotReadiness.ConnectionHealth {
-        if let failure = target.credentialFailure(available: readiness.availableCredentials) {
-            return .unavailable(failure)
-        }
-        guard target.provider.servedByLocalProxy else { return .ready }
-        return readiness.subscriptions[target.provider] ?? .checking
     }
 
     private static func ear(_ provider: TranscriptionProvider, _ readiness: RobotReadiness) -> RobotPartHealth {

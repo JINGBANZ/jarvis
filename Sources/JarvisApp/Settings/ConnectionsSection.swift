@@ -26,16 +26,11 @@ final class ConnectionsSection: NSObject, SettingsSection {
         self.apiKeyControls = Dictionary(uniqueKeysWithValues: Self.credentialOrder.map { credential in
             (credential, APIKeyControls(credential: credential, store: keyStore, onKeySaved: onKeySaved))
         })
-        self.subscriptions = SubscriptionControls(supervisor: supervisor)
+        self.subscriptions = SubscriptionControls(supervisor: supervisor, signIns: signIns)
         self.signIns = signIns
         super.init()
         subscriptions.onWillSignOut = onSubscriptionWillSignOut
         subscriptions.onStatusChanged = { [weak self] in self?.renderPageStatus() }
-        subscriptions.onProbeAnswered = { [weak self] readiness in self?.signIns.record(readiness) }
-        signIns.observe { [weak self] in
-            guard let self, let readiness = self.signIns.readiness else { return }
-            self.subscriptions.record(readiness)
-        }
     }
 
     func makePage() -> SettingsPageView {
@@ -71,7 +66,7 @@ final class ConnectionsSection: NSObject, SettingsSection {
     }
 
     func didBecomeActive() {
-        subscriptions.refresh()
+        signIns.refresh(checkingEmptyAccounts: true)
     }
 
     func windowWillClose() {
