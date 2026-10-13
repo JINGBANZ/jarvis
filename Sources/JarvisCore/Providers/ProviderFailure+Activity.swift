@@ -77,6 +77,9 @@ extension ProviderFailure {
         // Only the supervisor raises this at `.process`; an upstream 5xx reads as any outage.
         case .unavailable where stage == .process:
             return ("\(name) is unavailable", "press Try again in Settings → Connections")
+        case .configuration where stage == .process:
+            return ("\(name)'s saved sign-in can't be used",
+                    "open Settings → Connections, press Sign out for it, then sign in again")
         // CLIProxyAPI answers `unknown provider for model` both for a signed-out vendor and for an
         // unserved model, and a token can lapse mid-session, so the advice names both.
         case .configuration:

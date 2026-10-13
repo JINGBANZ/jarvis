@@ -159,6 +159,37 @@ import os
         }
     }
 
+    @Test(arguments: [BrainProvider.codexSubscription, .claudeSubscription], [false, true])
+    func unusableSavedAccountsKeepSignOutAdviceInActivity(provider: BrainProvider, multiple: Bool) async throws {
+        guard case .localProxy(let identity, _, _) = provider.descriptor.access else {
+            Issue.record("expected a subscription provider")
+            return
+        }
+        let names = ["\(identity)-fixture.json"] + (multiple ? ["\(identity)-extra.json"] : [])
+        let files = names.map { name in
+            ["name": name, "provider": identity, "status": multiple ? "active" : "disabled",
+             "disabled": !multiple, "unavailable": false] as [String: Any]
+        }
+        let credentials = String(decoding: try JSONSerialization.data(withJSONObject: ["files": files]), as: UTF8.self)
+        try await withSupervisor(script: "idle", credentials: credentials) { supervisor, _, _ in
+            for name in names {
+                try Data("{}".utf8).write(to: supervisor.authDirectory.appendingPathComponent(name))
+            }
+            let failure = try #require(await supervisor.readiness().unavailability(for: provider))
+            #expect(failure.stage == .process)
+            #expect(failure.category == .configuration)
+            #expect(failure.disposition == .permanent)
+            #expect(failure.activityAdvice
+                == "; open Settings → Connections, press Sign out for it, then sign in again")
+            #expect(failure.activitySentence.contains(failure.message))
+            let connection = SubscriptionConnectionState(
+                provider: provider, savedAccountCount: names.count, health: .unavailable(failure))
+            #expect(connection.buttons == [.init(.signOut)])
+            #expect(!connection.detail.contains("Sign out"))
+            #expect(!connection.detail.contains("Settings"))
+        }
+    }
+
     @Test(arguments: [
         #"{"name":"codex-fixture.json","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"invalid grant (retrying)","cooldowns":[]}"#,
         #"{"name":"codex-fixture.json","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"rate limited","cooldowns":[{"scope":"credential","reason":"quota","remaining_seconds":60}]}"#,
