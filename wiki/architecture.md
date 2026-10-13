@@ -141,6 +141,9 @@ moments the model judges worthwhile.
    rather than capture the same request again. Fully stated questions do not require a reflexive
    capture. An ambiguous current-task reference calls for inspection instead of a conditional answer
    about an earlier topic.
+   A described proposal supplies evidence for conceptual review even when its implementation is not
+   visible. An unrelated capture does not replace the user's stated task; the coach explains the
+   reported proposal while qualifying the uninspected implementation.
 5. The model calls `speak(hint)` with one direct, connected hint string
    (Structured Outputs / `strict:true`), within the total word budget in
    [`Speak.swift`](../Sources/JarvisCore/Coach/Tools/Speak.swift), or calls `stay_silent`.

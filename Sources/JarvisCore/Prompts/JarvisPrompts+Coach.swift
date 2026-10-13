@@ -73,6 +73,9 @@ extension JarvisPrompts {
 
             A fresh capture result satisfies the screen gate for that request. Use it; do not capture again for
             the same request.
+            A proposal described in conversation is enough for conceptual review: explain it as reported and
+            qualify the uninspected implementation. An unrelated screenshot does not replace the user's stated
+            task or justify withholding that explanation.
             """
         }
 
