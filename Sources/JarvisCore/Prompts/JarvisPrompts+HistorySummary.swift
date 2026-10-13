@@ -2,6 +2,9 @@ import Foundation
 
 extension JarvisPrompts {
     public enum HistorySummary {
+        static let targetTokens = 600
+        static let maximumTokens = 750
+
         public static let system = """
         You condense an older span of a live coaching session's history into a briefing the coach will \
         rely on for the rest of the session. Preserve durable context: the participants and goal; the \
@@ -24,8 +27,10 @@ extension JarvisPrompts {
         approval boundaries and material unknowns. Keep customer-confirmed facts distinct from coach
         proposals; later corrections supersede earlier facts without erasing unresolved assumptions.
 
-        Output only a JSON object with these five required fields, using under 250 words in total.
-        Keep the entire JSON under 750 estimated tokens (ASCII characters / 4, each non-ASCII scalar
+        Output only a JSON object with these five required fields. Aim for about \(targetTokens)
+        estimated tokens to leave room below the limit. Compress repeated and resolved detail first;
+        preserve established decisions, unresolved questions, and the source of verification claims.
+        Keep the entire JSON under \(maximumTokens) estimated tokens (ASCII characters / 4, each non-ASCII scalar
         counts as one token):
         {"context":"participants, goal and active topic", "decisions":["established decisions and constraints"],
          "coaching":["useful advice already given"], "openQuestions":["unresolved questions or unknowns"],
@@ -52,11 +57,6 @@ extension JarvisPrompts {
             let coaching: [String]
             let openQuestions: [String]
             let verification: [String]
-
-            var wordCount: Int {
-                ([context] + decisions + coaching + openQuestions + verification)
-                    .reduce(0) { $0 + $1.split(whereSeparator: \.isWhitespace).count }
-            }
         }
 
         static func input(_ messages: [ChatMessage]) throws -> String {
@@ -82,10 +82,9 @@ extension JarvisPrompts {
             }
             guard let briefing = try? JSONDecoder().decode(Briefing.self, from: Data(json.utf8)),
                   !briefing.context.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  briefing.wordCount < 250,
                   let data = try? JSONEncoder().encode(briefing) else { return nil }
             let summary = String(decoding: data, as: UTF8.self)
-            guard CoachHistory.estimatedTextTokens(summary) < 750 else { return nil }
+            guard CoachHistory.estimatedTextTokens(summary) < maximumTokens else { return nil }
             return summary
         }
     }

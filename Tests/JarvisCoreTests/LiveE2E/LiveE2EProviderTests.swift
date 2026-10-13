@@ -8,7 +8,7 @@ import Testing
         .appendingPathComponent("JarvisLiveTests", isDirectory: true)
     private static let fixtures = liveTests.appendingPathComponent("Fixtures", isDirectory: true)
 
-    @Test(arguments: ["A", "B", "C", "D", "R", "F01-system", "F01-microphone", "F02"],
+    @Test(arguments: ["A", "B", "C", "D", "H", "P", "R", "F01-system", "F01-microphone", "F02"],
           BrainProvider.allCases)
     func providerSelectionSurvivesSerialization(id: String, provider: BrainProvider) throws {
         let source = try data(id)
@@ -25,6 +25,7 @@ import Testing
         #expect(selected.audio == original.audio)
         #expect(selected.capabilities == original.capabilities)
         #expect(selected.prepNotes == original.prepNotes)
+        #expect(selected.historyCompactionTokenThreshold == original.historyCompactionTokenThreshold)
         #expect(selected.transcription == original.transcription)
         #expect(selected.voices == original.voices)
         var credentials = Set([provider.credential].compactMap { $0 })

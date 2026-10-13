@@ -607,15 +607,15 @@ struct LiveE2ETests {
 
     /// Per provider, because OpenAI's input count includes cached input and Anthropic's excludes
     /// both cache reads and cache writes.
-    static func recordTokens(_ evidence: Evidence, _ results: inout LiveE2EResults) {
-        let providers = Set(evidence.traffic.filter { $0.tag == "coach" }.compactMap(\.provider)).sorted()
+    static func recordTokens(_ evidence: Evidence, _ results: inout LiveE2EResults, tag: String = "coach") {
+        let providers = Set(evidence.traffic.filter { $0.tag == tag }.compactMap(\.provider)).sorted()
         for provider in providers {
-            let records = evidence.traffic.filter { $0.tag == "coach" && $0.provider == provider }
+            let records = evidence.traffic.filter { $0.tag == tag && $0.provider == provider }
             let usages = records.compactMap(\.usage)
             func total(_ count: (RecordedExchange.Usage) -> Int?) -> Int {
                 usages.reduce(0) { $0 + (count($1) ?? 0) }
             }
-            results.tokens("\(provider) coach", calls: records.count,
+            results.tokens("\(provider) \(tag)", calls: records.count,
                            withoutUsage: records.count - usages.count,
                            input: total(\.input), cacheRead: total(\.cacheRead),
                            cacheWrite: total(\.cacheWrite), output: total(\.output))
