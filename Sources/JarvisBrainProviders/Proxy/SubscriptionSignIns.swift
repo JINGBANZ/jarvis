@@ -9,6 +9,9 @@ public final class SubscriptionSignIns {
 
     private let supervisor: LocalProxySupervisor
     private var probe: Task<Void, Never>?
+    private var signIns: [BrainProvider: Task<Void, Never>] = [:]
+    private var signingOut: Set<BrainProvider> = []
+    private var actionFailures: [BrainProvider: String] = [:]
     private var observers: [UUID: () -> Void] = [:]
 
     public init(supervisor: LocalProxySupervisor) {
@@ -32,8 +35,93 @@ public final class SubscriptionSignIns {
     }
 
     public func retry(_ provider: BrainProvider) {
-        guard provider.servedByLocalProxy, retrying == nil else { return }
+        guard provider.servedByLocalProxy, retrying == nil,
+              signIns.isEmpty, signingOut.isEmpty else { return }
+        actionFailures[provider] = nil
         check(refreshing: provider)
+    }
+
+    public func connection(for provider: BrainProvider) -> SubscriptionConnectionState {
+        let accounts = supervisor.accountFiles(for: provider)
+        let accountDescription = accounts.first.map {
+            [$0.email, $0.plan].compactMap { $0 }.joined(separator: " · ")
+        }.flatMap { $0.isEmpty ? nil : $0 }
+        let health = readiness.map {
+            $0.unavailability(for: provider).map { BrainRouteAvailability.ConnectionHealth.unavailable($0) } ?? .ready
+        } ?? .checking
+        let operation: SubscriptionConnectionState.Operation?
+        if signIns[provider] != nil { operation = .signingIn }
+        else if signingOut.contains(provider) { operation = .signingOut }
+        else if retrying == provider { operation = .retrying }
+        else { operation = nil }
+        return SubscriptionConnectionState(
+            provider: provider, savedAccountCount: accounts.count, accountDescription: accountDescription,
+            health: health, operation: operation,
+            retryAvailable: retrying == nil && signIns.isEmpty && signingOut.isEmpty,
+            accountActionsAvailable: retrying == nil,
+            actionFailure: actionFailures[provider])
+    }
+
+    public func perform(
+        _ action: SubscriptionConnectionState.Action, for provider: BrainProvider,
+        openURL: @escaping (URL) -> Void, willSignOut: (BrainProvider) -> Void
+    ) {
+        guard provider.servedByLocalProxy,
+              connection(for: provider).buttons.contains(where: { $0.action == action && $0.isEnabled }) else { return }
+        switch action {
+        case .retry:
+            retry(provider)
+        case .cancelSignIn:
+            signIns[provider]?.cancel()
+        case .signIn:
+            signIn(provider, openURL: openURL)
+        case .signOut:
+            actionFailures[provider] = nil
+            signingOut.insert(provider)
+            willSignOut(provider)
+            notifyObservers()
+            Task { await signOut(provider) }
+        }
+    }
+
+    private func signIn(_ provider: BrainProvider, openURL: @escaping (URL) -> Void) {
+        actionFailures[provider] = nil
+        // The login owns the OAuth callback port even after Settings releases its views.
+        signIns[provider] = Task { [weak self, supervisor] in
+            var failure: String?
+            if let signIn = await supervisor.makeSignIn() {
+                for await event in signIn.run(provider) {
+                    switch event {
+                    case .openURL(let url): openURL(url)
+                    case .finished: break
+                    case .failed(let message): failure = message
+                    }
+                }
+            } else {
+                failure = "the sign-in service isn't running"
+            }
+            await supervisor.credentialsDidChange()
+            guard let self else { return }
+            signIns[provider] = nil
+            if let failure, !Task.isCancelled {
+                actionFailures[provider] = "Sign-in failed: \(ProviderMessageRedaction.redact(failure))"
+            }
+            invalidate()
+            refresh(checkingEmptyAccounts: true)
+        }
+        notifyObservers()
+    }
+
+    private func signOut(_ provider: BrainProvider) async {
+        do {
+            try await supervisor.signOut(provider)
+        } catch {
+            actionFailures[provider] = "Sign-out failed: "
+                + ProviderMessageRedaction.redact(error.localizedDescription)
+        }
+        signingOut.remove(provider)
+        invalidate()
+        refresh(checkingEmptyAccounts: true)
     }
 
     private func check(refreshing provider: BrainProvider?) {

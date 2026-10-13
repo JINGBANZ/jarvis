@@ -17,7 +17,6 @@ final class ConnectionsSection: NSObject, SettingsSection {
     private var subscriptionsCard: NSView?
 
     init(
-        supervisor: LocalProxySupervisor,
         keyStore: FileSecretStore,
         signIns: SubscriptionSignIns,
         onKeySaved: @escaping (Credential, String) -> Void,
@@ -26,7 +25,7 @@ final class ConnectionsSection: NSObject, SettingsSection {
         self.apiKeyControls = Dictionary(uniqueKeysWithValues: Self.credentialOrder.map { credential in
             (credential, APIKeyControls(credential: credential, store: keyStore, onKeySaved: onKeySaved))
         })
-        self.subscriptions = SubscriptionControls(supervisor: supervisor, signIns: signIns)
+        self.subscriptions = SubscriptionControls(signIns: signIns)
         self.signIns = signIns
         super.init()
         subscriptions.onWillSignOut = onSubscriptionWillSignOut
