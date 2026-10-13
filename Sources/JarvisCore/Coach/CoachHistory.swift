@@ -8,12 +8,25 @@ public final class CoachHistory: @unchecked Sendable {
     /// Bumped on in-place rewrites. A summary started before one must be dropped, or it would
     /// reintroduce the screen text the rewrite retired.
     private var rewriteRevision: UInt = 0
+    private var rewriteReason: CoachingContextRewriteReason?
 
     public init() {}
 
     public func snapshot() -> [ChatMessage] {
         lock.lock(); defer { lock.unlock() }
         return messages
+    }
+
+    struct Snapshot: Sendable {
+        let messages: [ChatMessage]
+        let revision: UInt
+        let rewriteReason: CoachingContextRewriteReason?
+    }
+
+    func snapshotWithRevision() -> Snapshot {
+        lock.withLock {
+            Snapshot(messages: messages, revision: rewriteRevision, rewriteReason: rewriteReason)
+        }
     }
 
     /// Drops `stay_silent` calls and refused prose, which would otherwise replay on every later
@@ -33,10 +46,13 @@ public final class CoachHistory: @unchecked Sendable {
         let screenTextHeader = JarvisPrompts.Coach.screenTextHeader
         if let newest = turn.lastIndex(where: { $0.text?.contains(screenTextHeader) == true }) {
             messages = messages.map(Self.collapsingSupersededScreenText)
-            rewriteRevision &+= 1
             for i in turn.indices where i < newest {
                 turn[i] = Self.collapsingSupersededScreenText(turn[i])
             }
+        }
+        if turn.contains(where: { $0.imageBase64JPEG != nil || $0.text?.contains(screenTextHeader) == true }) {
+            rewriteRevision &+= 1
+            rewriteReason = .screenRetirement
         }
         messages.append(contentsOf: turn.map { m in
             m.imageBase64JPEG != nil
@@ -192,6 +208,8 @@ public final class CoachHistory: @unchecked Sendable {
         let head = ChatMessage.user(JarvisPrompts.Coach.condensedHistory(summary))
         let retained = Self.retainedPairs(in: Array(messages.prefix(prefixCount)))
         messages.replaceSubrange(0..<prefixCount, with: [head] + retained)
+        rewriteRevision &+= 1
+        rewriteReason = .compaction
         return true
     }
 }

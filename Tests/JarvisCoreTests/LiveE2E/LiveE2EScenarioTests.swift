@@ -11,7 +11,7 @@ struct LiveE2EScenarioTests {
 
     @Test(
         "every shipped scenario decodes and validates",
-        arguments: ["A", "B", "C", "D", "R", "F01-system", "F01-microphone", "F02"])
+        arguments: ["A", "B", "C", "D", "P", "R", "F01-system", "F01-microphone", "F02", "CACHE"])
     func shippedScenarioValidates(id: String) throws {
         let url = Self.liveTests.appendingPathComponent("Scenarios/\(id).json")
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
@@ -21,6 +21,23 @@ struct LiveE2EScenarioTests {
         let scenario = try LiveE2EScenario.load(from: url, fixturesDirectory: fixtures)
 
         #expect(scenario.id == id)
+    }
+
+    @Test("cache scenario rejects a different paid model or a fallback")
+    func cacheScenarioPinsItsTarget() throws {
+        let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
+        let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        for replacement in [
+            ["primary": "openai", "model": "gpt-6-luna", "fallbacks": []] as [String: Any],
+            ["primary": "openai", "model": "gpt-6.1-sol", "fallbacks": ["codex-subscription"]],
+        ] {
+            var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+            object["brain"] = replacement
+            let data = try JSONSerialization.data(withJSONObject: object)
+            #expect(throws: LiveE2EScenario.Failure.self) {
+                try LiveE2EScenario.decode(data, fixturesDirectory: fixtures)
+            }
+        }
     }
 
     @Test("scenario A ships the specified settings and steps")

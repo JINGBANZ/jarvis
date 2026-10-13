@@ -21,17 +21,20 @@ final class BrainComposition {
     let supervisor: LocalProxySupervisor
     private let secrets: any SecretStore
     private unowned let host: BrainCompositionHost
+    private let send: BrainAccessor.Sender?
 
     init(
         secrets: any SecretStore,
         host: BrainCompositionHost,
         supervisor: LocalProxySupervisor,
-        preferences: BrainPreferences = BrainPreferences()
+        preferences: BrainPreferences = BrainPreferences(),
+        send: BrainAccessor.Sender? = nil
     ) {
         self.secrets = secrets
         self.host = host
         self.supervisor = supervisor
         self.preferences = preferences
+        self.send = send
     }
 
     /// Leaves the active target nil rather than the primary: the primary may be skipped as
@@ -92,7 +95,8 @@ final class BrainComposition {
         sessionDirectory: URL
     ) -> ConfiguredBrainRoute {
         let factory = BrainClientFactory(
-            keys: keys, proxyEndpoint: proxy?.endpoint, traffic: host.liveSessionEvidence)
+            keys: keys, proxyEndpoint: proxy?.endpoint, traffic: host.liveSessionEvidence,
+            send: send)
         let availability = availability(for: route, proxy: proxy, keys: keys)
         let targets = route.targets.map { target -> ConfiguredBrainTarget in
             if let failure = availability.failure(for: target) {

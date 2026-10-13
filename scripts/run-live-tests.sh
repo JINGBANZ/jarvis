@@ -6,7 +6,7 @@ umask 077
 cd "$(dirname "$0")/.."
 
 usage() {
-  echo "usage: $0 [A|B|C|D|P|R|F01|F02|all] [--evaluate] [--keep-going]" >&2
+  echo "usage: $0 [A|B|C|D|P|R|F01|F02|CACHE|all] [--evaluate] [--keep-going]" >&2
 }
 
 SCENARIO="all"
@@ -14,7 +14,7 @@ EVALUATE=0
 KEEP_GOING=0
 for arg in "$@"; do
   case "$arg" in
-    A|B|C|D|P|R|F01|F02|all) SCENARIO="$arg" ;;
+    A|B|C|D|P|R|F01|F02|CACHE|all) SCENARIO="$arg" ;;
     --evaluate) EVALUATE=1 ;;
     --keep-going) KEEP_GOING=1 ;;
     *) usage; exit 2 ;;
@@ -59,8 +59,12 @@ find "$BASE" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort -r | tail -n +11 \
       rm -rf "$old_run"
     done
 
+SKIP_CACHE=()
 case "$SCENARIO" in
-  all) FILTER='JarvisLiveTests\.LiveE2ETests/' ;;
+  all)
+    FILTER='JarvisLiveTests\.LiveE2ETests/'
+    SKIP_CACHE=(--skip 'JarvisLiveTests\.LiveE2ETests/scenarioCACHE')
+    ;;
   *) FILTER="JarvisLiveTests\\.LiveE2ETests/scenario$SCENARIO" ;;
 esac
 
@@ -94,7 +98,7 @@ trap abort_run INT TERM
 source scripts/lib/swift-test-flags.sh
 echo "▶ running live e2e scenarios ($SCENARIO) into $RUN_DIR"
 set +e
-swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} --filter "$FILTER" 2>&1 \
+swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} ${SKIP_CACHE[@]+"${SKIP_CACHE[@]}"} --filter "$FILTER" 2>&1 \
   | tee "$RUN_DIR/swift-test.log"
 test_status=${PIPESTATUS[0]}
 set -e

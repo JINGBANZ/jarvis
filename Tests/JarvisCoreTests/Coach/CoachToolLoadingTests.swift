@@ -187,23 +187,25 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         #expect(brain.offeredTools.allSatisfy { $0.map(\.name) == prepConfigured.tools.map(\.name) })
     }
 
-    @Test func eachAttemptEndsItsOpeningInCurrentStateThatHistoryNeverKeeps() async throws {
+    @Test func laterAttemptsReuseLoadedGuidanceWithoutMovingTheirOpeningPrefix() async throws {
         let runner = makeRunner(capabilities: prepConfigured)
         let brain = ScriptedBrain(script: [loadCall("search_prep_notes"), speak, speak])
 
         _ = await run(runner, brain: brain)
         _ = await run(runner, brain: brain)
 
-        func stateLines(_ request: [ChatMessage]) -> [String] {
-            request.compactMap(\.text).filter { $0.hasPrefix(JarvisPrompts.Coach.sessionStateHeader) }
-        }
-        #expect(brain.calls[0].last?.text == prepConfigured.sessionState(loaded: []))
-        #expect(stateLines(brain.calls[1]) == [prepConfigured.sessionState(loaded: [])])
-        #expect(brain.calls[2].last?.text == prepConfigured.sessionState(loaded: ["search_prep_notes"]))
-        #expect(stateLines(brain.calls[2]).count == 1)
+        #expect(brain.calls[0].last?.text == "a question is pending")
+        let guidance = try #require(brain.calls[1].first { $0.toolCallId == "l1" }?.text)
+        #expect(guidance.contains(searchPrepNotesTool.parametersJSON))
+        #expect(brain.calls[2].first { $0.toolCallId == "l1" }?.text == guidance)
+        #expect(brain.calls[2].prefix(brain.calls[0].count).map(\.role) == brain.calls[0].map(\.role))
+        #expect(brain.calls[2].prefix(brain.calls[0].count).map(\.text) == brain.calls[0].map(\.text))
+        #expect(brain.calls.allSatisfy { request in
+            !request.contains { $0.role == .user && $0.text?.hasPrefix("Session state:") == true }
+        })
     }
 
-    @Test func aSilentQuietCheckLeavesNoTraceEvenWithTheStateLine() async throws {
+    @Test func aSilentQuietCheckLeavesNoTraceInLaterAttempts() async throws {
         let runner = makeRunner(capabilities: prepConfigured)
         let brain = ScriptedBrain(script: [
             .init(toolCalls: [.staySilent(callId: "q1")],

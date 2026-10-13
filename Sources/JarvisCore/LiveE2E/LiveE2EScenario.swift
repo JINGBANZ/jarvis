@@ -23,6 +23,13 @@ public struct LiveE2EScenario: Sendable, Equatable {
     public struct Brain: Sendable, Equatable {
         public let primary: BrainProvider
         public let fallbacks: [BrainProvider]
+        public let model: String?
+
+        public init(primary: BrainProvider, fallbacks: [BrainProvider], model: String? = nil) {
+            self.primary = primary
+            self.fallbacks = fallbacks
+            self.model = model
+        }
     }
 
     public struct Capabilities: Sendable, Equatable {
@@ -105,7 +112,10 @@ extension LiveE2EScenario {
 
         id = raw.id
         self.audio = audio
-        brain = Brain(primary: primary, fallbacks: fallbacks)
+        if let model = raw.brain.model, BrainModelCatalog.model(id: model, for: primary) == nil {
+            throw Failure.invalid("brain.model is unavailable for \(primary.rawValue): \(model)")
+        }
+        brain = Brain(primary: primary, fallbacks: fallbacks, model: raw.brain.model)
         capabilities = Capabilities(
             disabledTools: raw.capabilities.disabledTools,
             disabledSkills: raw.capabilities.disabledSkills)
@@ -113,6 +123,12 @@ extension LiveE2EScenario {
         transcription = Transcription(model: model, key: key)
         voices = Voices(them: raw.voices.them, me: raw.voices.me)
         steps = try Self.steps(from: raw.steps, primary: primary, fixturesDirectory: fixturesDirectory)
+        if id == LiveE2ECacheCheck.scenarioID {
+            guard primary == .openAI, fallbacks.isEmpty,
+                  raw.brain.model == LiveE2ECacheCheck.modelID else {
+                throw Failure.invalid("CACHE requires its fixed paid OpenAI model without fallbacks")
+            }
+        }
 
         // A line on a stream that isn't played would leave the runner waiting for an attempt
         // forever.
@@ -260,6 +276,7 @@ private struct RawScenario: Decodable {
     struct Brain: Decodable {
         let primary: String
         let fallbacks: [String]
+        let model: String?
     }
 
     struct Capabilities: Decodable {

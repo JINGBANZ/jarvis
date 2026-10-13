@@ -120,20 +120,18 @@ import Testing
             == ["capture_screen", "speak", "stay_silent", "call_tool"])
     }
 
-    @Test func sessionStateNamesWhatIsLoadedAndWhatStillNeedsALoad() {
-        #expect(CoachCapabilities.default.sessionState(loaded: []) == nil)
-
+    @Test func skillAndToolLoadsHaveIndependentCallablePolicy() {
+        let skill = Skill(name: "search_prep_notes", description: "Coaching policy", body: "Skill guidance")
         let capabilities = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true, skills: skills)
-        #expect(capabilities.sessionState(loaded: [])
-            == "Session state: Not loaded yet: tool search_prep_notes, tool read_prep_note.")
-        #expect(capabilities.sessionState(
-            loaded: ["search_prep_notes", "read_prep_note", CoachCapabilities.loadedKey(forSkill: "behavioral")])
-            == "Session state: Already loaded, never load again: skill behavioral, tool search_prep_notes, tool read_prep_note.")
-
-        let skillsOnly = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false, skills: skills)
-        #expect(skillsOnly.sessionState(loaded: []) == nil)
+            disabledTools: [], prepSourcesConfigured: true, skills: [skill])
+        let skillLoaded = capabilities.callableNames(loaded: [CoachCapabilities.loadedKey(forSkill: skill.name)])
+        #expect(!skillLoaded.contains("load_skill"))
+        #expect(skillLoaded.contains("load_tool"))
+        #expect(!skillLoaded.contains("call_tool"))
+        let toolLoaded = capabilities.callableNames(loaded: ["search_prep_notes", "read_prep_note"])
+        #expect(toolLoaded.contains("load_skill"))
+        #expect(!toolLoaded.contains("load_tool"))
+        #expect(toolLoaded.contains("call_tool"))
     }
 
     @Test func callToolRoutesOnlyToTheCatalogAndTakesArgumentsAsText() throws {

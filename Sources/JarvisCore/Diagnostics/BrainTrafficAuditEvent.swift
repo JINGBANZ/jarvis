@@ -19,6 +19,7 @@ public struct BrainTrafficAuditEvent: Sendable {
     public let phases: [String: Int]?
     public let kind: Kind
     public let requestContext: CoachingRequestContext?
+    public var cacheObserver: (any BrainCacheObserving)? = nil
     public let date: Date
 
     var approximateRetainedBytes: Int {
@@ -33,6 +34,7 @@ public struct BrainTrafficAuditEvent: Sendable {
         if let requestContext {
             bytes = Self.adding(bytes, requestContext.approximateRetainedBytes)
         }
+        if cacheObserver != nil { bytes = Self.adding(bytes, 32) }
         return bytes
     }
 

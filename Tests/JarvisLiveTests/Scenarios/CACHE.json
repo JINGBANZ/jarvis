@@ -1,0 +1,20 @@
+{
+  "id": "CACHE",
+  "audio": "fixture",
+  "brain": { "primary": "openai", "model": "gpt-6.1-sol", "fallbacks": [] },
+  "capabilities": { "disabledTools": [], "disabledSkills": [] },
+  "prepNotes": "cache-prep-notes.md",
+  "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "steps": [
+    { "say": { "speaker": "me", "text": "Jarvis, help with my fictional Harbor Ledger receipt-replay interview. Load the cache-coaching reference and search my preparation notes for Harbor Ledger before advising me. I am stuck explaining duplicate receipts. Give me one short hint using the label in the reference." } },
+    { "say": { "speaker": "me", "text": "Jarvis, I have the Harbor Ledger preparation now. I am stuck explaining what identifies an identical receipt replay. Give me one short hint using the reference label." } },
+    { "say": { "speaker": "me", "text": "Jarvis, what should I say happens when an identical receipt is delivered again? I need a short hint using the label in the Harbor Ledger reference." } },
+    { "say": { "speaker": "me", "text": "Jarvis, I am stuck explaining how to store the receipt identity and outcome together. Give me a short hint using the reference label." } },
+    { "say": { "speaker": "me", "text": "Jarvis, what should I say when the same receipt identity has a different amount? Give me a short hint using the Harbor Ledger reference label." } },
+    { "say": { "speaker": "me", "text": "Jarvis, I am stuck explaining why a process restart must still recognize a duplicate receipt. Give me a short hint using the reference label." } },
+    { "say": { "speaker": "me", "text": "Jarvis, what should I say about retaining the receipt identity until its replay window ends? Give me a short hint using the reference label." } },
+    { "say": { "speaker": "me", "text": "Jarvis, give me one final short hint about duplicate receipt handling and its recorded outcome. Use the Harbor Ledger reference label." } },
+    { "stop": true }
+  ]
+}

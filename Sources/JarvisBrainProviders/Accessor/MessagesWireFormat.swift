@@ -112,10 +112,14 @@ struct MessagesWireFormat: BrainWireFormat {
         let stopReason = message["stop_reason"] as? String ?? ""
         let finished = Self.finishedStopReasons.contains(stopReason)
         if let usage = message["usage"] as? [String: Any] {
-            func count(_ key: String) -> Int { (usage[key] as? NSNumber)?.intValue ?? 0 }
-            jlog("Jarvis coach: tokens: input \(count("input_tokens")) "
-                 + "(\(count("cache_read_input_tokens")) cached), output \(count("output_tokens")), "
-                 + "cap \(maxOutputTokens)" + (finished ? "" : " [\(stopReason)]"))
+            let counts = RecordedExchange.Usage(
+                input: RecordedExchange.int(usage["input_tokens"]),
+                cacheRead: RecordedExchange.int(usage["cache_read_input_tokens"]),
+                cacheWrite: RecordedExchange.int(usage["cache_creation_input_tokens"]),
+                output: RecordedExchange.int(usage["output_tokens"]),
+                rendered: "", inputAccounting: .excludesCaches)
+            jlog("Jarvis coach: tokens — \(counts.debugSummary), cap \(maxOutputTokens)"
+                 + (finished ? "" : " [\(stopReason)]"))
         }
         if stopReason == "refusal" {
             let details = message["stop_details"] as? [String: Any]

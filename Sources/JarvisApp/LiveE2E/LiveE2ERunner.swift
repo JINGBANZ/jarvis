@@ -126,15 +126,26 @@ final class LiveE2ERunner: BrainCompositionHost {
         try speech.prepareDirectory()
         let clips = try synthesizeLines(of: scenario)
         try removeGeneratedAudio()
+        let preferences = try makePreferences(for: scenario)
+        var send: BrainAccessor.Sender?
+        if scenario.id == LiveE2ECacheCheck.scenarioID {
+            guard scenario.brain.primary == .openAI, scenario.brain.fallbacks.isEmpty,
+                  scenario.brain.model == LiveE2ECacheCheck.modelID else {
+                throw Failure.notReadyToStart("cache scenario requires its fixed paid OpenAI target")
+            }
+            runDeadline = Date().addingTimeInterval(LiveE2ECacheBudget.maximumDuration)
+            preferences.effort = .low
+            send = LiveE2ECacheTransport.sender(budget: LiveE2ECacheBudget())
+        }
         brain = BrainComposition(
             secrets: secrets, host: self, supervisor: supervisor,
-            preferences: try makePreferences(for: scenario))
+            preferences: preferences, send: send)
         prepSources = scenario.prepNotes.map {
             [PrepMaterialSource(
                 path: options.fixturesDirectory.appendingPathComponent($0).path,
                 isDirectory: false)]
         } ?? []
-        composition = makeComposition(audio: scenario.audio)
+        composition = makeComposition(for: scenario)
 
         let steps = scenario.steps
         var index = 0
@@ -249,8 +260,10 @@ final class LiveE2ERunner: BrainCompositionHost {
         }
     }
 
-    private func makeComposition(audio: LiveE2EScenario.Audio) -> SessionComposition {
+    private func makeComposition(for scenario: LiveE2EScenario) -> SessionComposition {
         let box = OverlayBoxPanel()
+        let audio = scenario.audio
+        let isCache = scenario.id == LiveE2ECacheCheck.scenarioID
 
         let (events, continuation) = AsyncStream.makeStream(of: CoachingAttemptAuditEvent.self)
         Task { @MainActor [weak self] in
@@ -264,6 +277,8 @@ final class LiveE2ERunner: BrainCompositionHost {
             overlayBox: box,
             readiness: readiness,
             errorReporter: errorReporter,
+            config: isCache ? LiveE2ECacheFixture.config : .default,
+            loadSkills: { isCache ? [LiveE2ECacheFixture.skill] : SkillCatalog.bundled() },
             makeAttemptAuditing: { evidence in
                 LiveE2EAttemptObserver(evidence: evidence, observe: { continuation.yield($0) })
             },
@@ -303,8 +318,8 @@ final class LiveE2ERunner: BrainCompositionHost {
         defaults.removePersistentDomain(forName: Self.defaultsSuite)
         let preferences = BrainPreferences(defaults: defaults)
         preferences.route = BrainRoute(
-            primary: Self.target(for: scenario.brain.primary),
-            fallbackTargets: scenario.brain.fallbacks.map(Self.target(for:)))
+            primary: Self.target(for: scenario.brain.primary, modelID: scenario.brain.model),
+            fallbackTargets: scenario.brain.fallbacks.map { Self.target(for: $0) })
         preferences.disabledTools = Set(scenario.capabilities.disabledTools)
         preferences.disabledSkills = Set(scenario.capabilities.disabledSkills)
         return preferences
@@ -421,13 +436,13 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     /// A lighter model per line: the run checks the harness, not the model's best answer.
-    private static func target(for provider: BrainProvider) -> BrainTarget {
-        let modelID = switch provider {
+    private static func target(for provider: BrainProvider, modelID: String? = nil) -> BrainTarget {
+        let defaultModel = switch provider {
         case .claudeSubscription: "claude-sonnet-5-5"
         case .openAI, .codexSubscription: "gpt-6-luna"
         case .gemini: BrainModelCatalog.defaultModel(for: .gemini).id
         }
-        return BrainTarget(provider: provider, modelID: modelID)
+        return BrainTarget(provider: provider, modelID: modelID ?? defaultModel)
     }
 
     private static func stream(for speaker: Speaker) -> AudioTimeline.Stream {

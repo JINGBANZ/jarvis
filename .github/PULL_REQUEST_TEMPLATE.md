@@ -25,6 +25,7 @@ coaching-attempt and provider-route boundaries.
 
 - [ ] `swift build && ./scripts/run-tests.sh` passes — output pasted below
 - [ ] Behavior changes are covered by swift-testing cases
+- [ ] Context/serializer/provider changes declare lifetimes and rewrites, pass completed-attempt wire-prefix regressions, and include focused live cache evidence with read/write/uncached/output accounting (or explain why not applicable)
 - [ ] Commits follow Conventional Commits (`type(scope): summary`, lowercase imperative)
 
 <!-- Paste the gate result below, including the test count. -->
