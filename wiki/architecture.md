@@ -139,8 +139,8 @@ moments the model judges worthwhile.
    tree is added as a complementary source. That
    fresh result satisfies the screen gate, so the next model response must speak or stay silent
    rather than capture the same request again. Fully stated questions do not require a reflexive
-   capture. An ambiguous current-task reference calls for inspection instead of a conditional answer
-   about an earlier topic.
+   capture. A reference to an unnamed current problem, code, or error calls for inspection; an earlier
+   topic does not resolve that reference.
    A described proposal supplies evidence for conceptual review even when its implementation is not
    visible. An unrelated capture does not replace the user's stated task; the coach explains the
    reported proposal while qualifying the uninspected implementation.

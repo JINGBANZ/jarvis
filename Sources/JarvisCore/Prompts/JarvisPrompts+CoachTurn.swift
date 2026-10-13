@@ -11,7 +11,8 @@ extension JarvisPrompts.Coach {
 
     static func manualHintTrigger(timestamp: String) -> String {
         "[\(timestamp)] The user pressed the hint shortcut. They want your single most useful "
-            + "hint for their current task — answer using the recent transcript and the attached screenshot."
+            + "hint for the task they most recently described in conversation. Use the attached screenshot "
+            + "for relevant visible details; if it shows an earlier task, continue the conversational task."
     }
 
     // A press says only what the user wants; how to answer belongs to the speak guidance and
