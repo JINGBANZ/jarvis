@@ -5,6 +5,7 @@ public struct TranscriptionBenchmarkOptions: Sendable {
         case standard
         case reconnect
         case turns
+        case languages
     }
 
     public enum Failure: Error, CustomStringConvertible {
@@ -34,7 +35,7 @@ public struct TranscriptionBenchmarkOptions: Sendable {
     public init(arguments: [String] = CommandLine.arguments) throws {
         guard let rawMode = Self.value(after: "--benchmark-mode", in: arguments),
               let mode = Mode(rawValue: rawMode) else {
-            throw Failure.missing("--benchmark-mode standard|reconnect|turns")
+            throw Failure.missing("--benchmark-mode standard|reconnect|turns|languages")
         }
         guard let rawOutput = Self.value(after: "--benchmark-output-dir", in: arguments) else {
             throw Failure.missing("--benchmark-output-dir")
@@ -77,10 +78,11 @@ public struct TranscriptionBenchmarkOptions: Sendable {
             throw Failure.invalid("--benchmark-repetitions must be at least 3")
         }
         let armFilter = Self.value(after: "--benchmark-arm-filter", in: arguments)
-        if armFilter != nil, mode != .standard {
-            throw Failure.invalid("--benchmark-arm-filter applies only to standard mode")
+        if armFilter != nil, mode != .standard && mode != .languages {
+            throw Failure.invalid("--benchmark-arm-filter applies only to standard and languages modes")
         }
-        let standardArms = TranscriptionBenchmark.standardArms.filter { arm in
+        let matrix = mode == .languages ? TranscriptionBenchmark.languageArms : TranscriptionBenchmark.standardArms
+        let standardArms = matrix.filter { arm in
             armFilter.map { arm.id.contains($0) } ?? true
         }
         // An empty selection would pass acceptance with nothing measured.

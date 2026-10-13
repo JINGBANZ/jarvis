@@ -10,6 +10,7 @@ public struct TranscriptionBenchmarkEvent: Codable, Equatable, Sendable {
         case finalized
         case reconnectPrepared = "reconnect-prepared"
         case bufferEviction = "buffer-eviction"
+        case usage
     }
 
     public let kind: Kind
@@ -30,6 +31,8 @@ public struct TranscriptionBenchmarkEvent: Codable, Equatable, Sendable {
     public let replayedChunks: Int?
     public let evictedChunks: Int?
     public let oldestReplaySequence: UInt64?
+    public let setupAcceptance: TranscriptionSetupAcceptance?
+    public let usage: TranscriptionUsage?
 
     public init(
         kind: Kind,
@@ -49,7 +52,9 @@ public struct TranscriptionBenchmarkEvent: Codable, Equatable, Sendable {
         reconnectAttempt: Int? = nil,
         replayedChunks: Int? = nil,
         evictedChunks: Int? = nil,
-        oldestReplaySequence: UInt64? = nil
+        oldestReplaySequence: UInt64? = nil,
+        setupAcceptance: TranscriptionSetupAcceptance? = nil,
+        usage: TranscriptionUsage? = nil
     ) {
         self.kind = kind
         self.provider = provider
@@ -69,5 +74,7 @@ public struct TranscriptionBenchmarkEvent: Codable, Equatable, Sendable {
         self.replayedChunks = replayedChunks
         self.evictedChunks = evictedChunks
         self.oldestReplaySequence = oldestReplaySequence
+        self.setupAcceptance = setupAcceptance
+        self.usage = usage
     }
 }

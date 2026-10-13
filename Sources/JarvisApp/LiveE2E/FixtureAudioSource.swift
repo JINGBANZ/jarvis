@@ -25,15 +25,12 @@ final class FixtureAudioSource: AudioSource, @unchecked Sendable {
         audioFormat: TranscriptionAudioFormat,
         delivery: AudioDelivery
     ) {
-        timeline = AudioTimeline(liveStreams: liveStreams)
+        timeline = AudioTimeline(liveStreams: liveStreams, sampleRate: audioFormat.sampleRate)
         self.audioFormat = audioFormat
         self.delivery = delivery
     }
 
     func start() -> String? {
-        guard audioFormat.sampleRate == AudioTimeline.sampleRate else {
-            return "Fixture speech is synthesized at \(AudioTimeline.sampleRate) Hz only."
-        }
         queue.sync {
             timer?.cancel()
             startedAt = Date().timeIntervalSince1970

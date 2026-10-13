@@ -232,7 +232,9 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
             model: model.rawValue,
             speaker: speaker.rawValue,
             generation: lease.generation,
-            observedAt: clock.now()))
+            observedAt: clock.now(),
+            setupAcceptance: .init(target: .gemini(model),
+                expectation: .init(languages: expectedLanguages))))
         updateWorkFlag()
         pumpIfPossible()
     }
@@ -420,7 +422,14 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
         // replaced. `isCurrent` also covers `stopped`, plus task identity and generation.
         lock.lock(); let isStopped = stopped; lock.unlock()
         guard !isStopped, connection.isCurrent(lease) else { return }
+        if let benchmark, let usage = TranscriptionUsage.gemini(from: message) {
+            benchmark.observer.record(.init(kind: .usage,
+                provider: TranscriptionProvider.gemini.rawValue, model: model.rawValue,
+                speaker: speaker.rawValue, generation: lease.generation,
+                observedAt: clock.now(), usage: usage))
+        }
         if GeminiLiveSession.isSetupComplete(message) {
+            jlog("Jarvis Gemini [\(speaker.rawValue)]: transcription setup acknowledged; settings are not echoed")
             connection.acknowledgeReady(lease)
             return
         }

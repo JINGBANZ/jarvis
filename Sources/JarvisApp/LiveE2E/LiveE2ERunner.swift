@@ -192,14 +192,15 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     private func startSession(_ scenario: LiveE2EScenario) async throws {
-        let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
-        guard !key.isEmpty else { throw Failure.credentialUnavailable }
+        let credential = scenario.transcription.target.provider.ownCredential
+        let key = credential.flatMap { secrets.apiKey(for: $0) } ?? ""
+        guard credential == nil || !key.isEmpty else { throw Failure.credentialUnavailable }
         let route = brain.preferences.route
         // No system-audio probe: fixtures never open the tap, and the device scenario fails at
         // capture start when that grant is gone.
         let begun = readiness.begin(configuration: JarvisReadiness.Configuration(
             requiredPermissions: Set(JarvisReadiness.Permission.allCases).subtracting([.systemAudio]),
-            requiredCredentials: [.openAIAPIKey]))
+            requiredCredentials: Set([credential].compactMap { $0 })))
         let readinessSession = begun.session
         composition.applyReadinessEffects(begun.effects)
         composition.observeReadiness(
@@ -219,16 +220,23 @@ final class LiveE2ERunner: BrainCompositionHost {
 
         expectsSessionEnd = scenario.audio == .fixtureNoMicrophone
             || scenario.transcription.key == .invalid
+        let appleLocale: Locale?
+        if case .appleSpeech(let locale) = scenario.transcription.target {
+            if #available(macOS 26.0, *) {
+                appleLocale = try await AppleSpeechModelPreparation.prepare(localeIdentifier: locale)
+            } else {
+                throw Failure.notReadyToStart("Apple Speech requires macOS 26")
+            }
+        } else {
+            appleLocale = nil
+        }
         let inputs = SessionComposition.Inputs(
-            transcription: TranscriptionConfiguration(
-                provider: .openAI,
-                openAIModel: scenario.transcription.model,
-                openAIExpectedLanguages: [],
-                appleSpeechLocaleIdentifier: Defaults.Transcription.appleSpeechLocaleIdentifier),
+            transcription: scenario.transcription.target.configuration(
+                expectedLanguages: scenario.transcription.expectedLanguages),
             transcriptionKey: key,
             brainKeys: brain.savedKeys(for: route),
             brainRoute: route,
-            appleSpeechLocale: nil,
+            appleSpeechLocale: appleLocale,
             screen: SessionPlan.default.screen,
             prepSources: prepSources)
         guard composition.start(
@@ -318,9 +326,11 @@ final class LiveE2ERunner: BrainCompositionHost {
         for (index, step) in scenario.steps.enumerated() {
             guard case .say(let line, let overlap, _) = step else { continue }
             clips[index] = SpokenClips(
-                line: try speech.samples(for: line.text, voice: voice(for: line.speaker)),
+                line: try speech.samples(for: line.text, voice: voice(for: line.speaker),
+                    sampleRate: scenario.transcription.target.provider.audioFormat.sampleRate),
                 overlap: try overlap.map {
-                    try speech.samples(for: $0.text, voice: voice(for: $0.speaker))
+                    try speech.samples(for: $0.text, voice: voice(for: $0.speaker),
+                        sampleRate: scenario.transcription.target.provider.audioFormat.sampleRate)
                 })
         }
         return clips

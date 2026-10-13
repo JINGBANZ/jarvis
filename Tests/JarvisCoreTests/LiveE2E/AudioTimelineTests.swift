@@ -6,6 +6,21 @@ import Testing
 struct AudioTimelineTests {
     private static let silence = [Int16](repeating: 0, count: AudioTimeline.chunkSampleCount)
 
+    @Test func geminiRateKeepsTwentyMillisecondBoundariesAndBothStreams() {
+        var timeline = AudioTimeline(liveStreams: [.microphone, .system], sampleRate: 16_000)
+        let accepted = timeline.schedule([Int16](repeating: 1, count: 400), on: .microphone)
+        #expect(accepted)
+        let first = timeline.tick()
+        let second = timeline.tick()
+        #expect(first.map(\.samples.count) == [320, 320])
+        #expect(first[0].clipStarted && !first[0].clipEnded)
+        #expect(!second[0].clipStarted && second[0].clipEnded)
+        #expect(second[0].samples.prefix(80).allSatisfy { $0 == 1 })
+        #expect(second[0].samples.dropFirst(80).allSatisfy { $0 == 0 })
+        #expect(second.map(\.sequence) == [2, 2])
+        #expect(timeline.isIdle)
+    }
+
     @Test("silence-only ticks emit full zero chunks with per-stream sequences, microphone first")
     func silenceOnly() {
         var timeline = AudioTimeline(liveStreams: [.microphone, .system])

@@ -20,7 +20,7 @@ enum TranscriptionSessionFactory {
             RealtimeTranscriber(
                 apiKey: apiKey,
                 model: configuration.openAIModel,
-                expectedLanguages: configuration.openAIExpectedLanguages,
+                expectedLanguages: configuration.languageExpectation.languages,
                 vocabularyKeywords: configuration.openAIVocabularyKeywords,
                 speaker: speaker,
                 transcript: transcript,
@@ -70,7 +70,7 @@ enum TranscriptionSessionFactory {
             GeminiLiveTranscriber(
                 apiKey: apiKey,
                 model: configuration.geminiModel,
-                expectedLanguages: configuration.geminiExpectedLanguages,
+                expectedLanguages: configuration.languageExpectation.languages,
                 vocabularyKeywords: configuration.geminiVocabularyKeywords,
                 mode: configuration.geminiMode,
                 audioFormat: configuration.provider.audioFormat,

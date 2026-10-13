@@ -5,13 +5,13 @@ extension TranscriptionBenchmarkRunner {
     func runReconnect(
         fixtures: SyntheticSpeechFixtures
     ) async -> TranscriptionBenchmark.Summary {
-        guard apiKey != nil else {
+        guard apiKey(for: .openAI) != nil else {
             return .init(
                 mode: TranscriptionBenchmarkOptions.Mode.reconnect.rawValue,
                 repetitionsPerArm: options.repetitions,
                 arms: [],
                 reconnect: OpenAITranscriptionModel.allCases.map { model in
-                    failedReconnect(model: model, error: Failure.apiKeyUnavailable)
+                    failedReconnect(model: model, error: Failure.apiKeyUnavailable(.openAI))
                 })
         }
 
@@ -40,10 +40,8 @@ extension TranscriptionBenchmarkRunner {
         let transportControl = TranscriptionBenchmarkTransportControl()
         let arm = TranscriptionBenchmark.Arm(
             id: "reconnect--\(model.rawValue)",
-            provider: .openAI,
-            model: model,
+            target: .openAI(model),
             languageProfile: .englishAndMandarinChinese,
-            localeIdentifier: nil,
             phrase: phrases[0])
         let session = makeSession(
             arm: arm,
@@ -56,6 +54,8 @@ extension TranscriptionBenchmarkRunner {
         session.connect()
         var failure: String?
         do {
+            let capture = try startCapture(for: arm.target)
+            defer { capture.stop() }
             let firstReady = try await recorder.waitForReady(timeout: 20)
             guard transportControl.beginInterruption() else {
                 throw Failure.transportInterruptionUnavailable

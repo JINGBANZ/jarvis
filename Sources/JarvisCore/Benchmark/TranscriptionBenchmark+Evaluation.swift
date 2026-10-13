@@ -39,7 +39,7 @@ public extension TranscriptionBenchmark {
         let expected = normalize(input.arm.phrase.text)
         let actual = normalize(finalTexts.joined(separator: " "))
         let distance = actual.isEmpty ? nil : editDistance(expected, actual)
-        let rate = distance.map { expected.isEmpty ? 0 : Double($0) / Double(expected.count) }
+        let rate = expected.isEmpty ? nil : distance.map { Double($0) / Double(expected.count) }
 
         let providerUsableFinals = providerFinals.filter {
             !$0.transcriptUnavailable
@@ -97,7 +97,7 @@ public extension TranscriptionBenchmark {
             spokenStartOffsetSeconds: input.speechStartedAt.flatMap { startedAt in
                 usableFinals.compactMap(\.spokenAt).min().map { $0 - startedAt }
             },
-            missing: usableFinals.isEmpty,
+            missing: !input.arm.phrase.text.isEmpty && usableFinals.isEmpty,
             duplicateCount: duplicateCount,
             providerDuplicateCount: providerDuplicateCount,
             revisionCount: revisionCount,
@@ -114,7 +114,22 @@ public extension TranscriptionBenchmark {
                 && capturedSampleCount > 0
                 && captureSequenceGapCount == 0
                 && evictedChunkCount == 0,
-            failure: failure)
+            failure: failure,
+            setupAcceptance: ready?.setupAcceptance,
+            reportedUsage: orderedEvents.compactMap(\.usage),
+            unexpectedScriptCharacterCount: unexpectedScriptCharacterCount(in: finalTexts.joined()))
+    }
+
+    static func unexpectedScriptCharacterCount(in text: String) -> Int {
+        text.unicodeScalars.count { scalar in
+            guard scalar.properties.isAlphabetic else { return false }
+            let value = scalar.value
+            return !(0x0041...0x024F).contains(value)
+                && !(0x1E00...0x1EFF).contains(value)
+                && !(0x3400...0x9FFF).contains(value)
+                && !(0xF900...0xFAFF).contains(value)
+                && !(0x20000...0x323AF).contains(value)
+        }
     }
 
     /// Scores one uninterrupted session that spoke more than once. A final belongs to the turn that
@@ -164,8 +179,8 @@ public extension TranscriptionBenchmark {
         return TurnsSummary(
             armID: input.arm.id,
             provider: input.arm.provider,
-            model: input.arm.model,
-            localeIdentifier: input.arm.localeIdentifier,
+            model: input.arm.target.modelID,
+            localeIdentifier: input.arm.target.localeIdentifier,
             turns: turns,
             duplicateCount: duplicateDeliveryCount(in: usableFinals),
             unavailableCount: Set(unavailableEvents.compactMap(\.itemID)).count

@@ -8,22 +8,22 @@ struct TranscriptionBenchmarkTests {
     func standardPlanCoverage() {
         let arms = TranscriptionBenchmark.standardArms
 
-        #expect(arms.count == 12)
+        #expect(arms.count == (TranscriptionTarget.remoteTargets.count + 1) * TranscriptionBenchmark.standardPhrases.count)
         for model in OpenAITranscriptionModel.allCases {
-            let modelArms = arms.filter { $0.model == model }
+            let modelArms = arms.filter { $0.target == .openAI(model) }
             #expect(Set(modelArms.map(\.phrase.language)) == Set(TranscriptionBenchmark.Language.allCases))
         }
         let appleArms = arms.filter { $0.provider == .appleSpeech }
         #expect(Set(appleArms.map(\.phrase.language)) == Set(TranscriptionBenchmark.Language.allCases))
-        #expect(appleArms.first { $0.phrase.language == .english }?.localeIdentifier == "en_US")
-        #expect(appleArms.first { $0.phrase.language == .mandarin }?.localeIdentifier == "zh_CN")
-        #expect(appleArms.first { $0.phrase.language == .bilingual }?.localeIdentifier == "zh_CN")
+        #expect(appleArms.first { $0.phrase.language == .english }?.target.localeIdentifier == "en_US")
+        #expect(appleArms.first { $0.phrase.language == .mandarin }?.target.localeIdentifier == "zh_CN")
+        #expect(appleArms.first { $0.phrase.language == .bilingual }?.target.localeIdentifier == "zh_CN")
     }
 
     @Test("evaluation measures distinct lifecycle boundaries and quality")
     func lifecycleBoundaries() {
         let arm = TranscriptionBenchmark.standardArms.first {
-            $0.model == .gptTranscribe && $0.phrase.language == .english
+            $0.target == .openAI(.gptTranscribe) && $0.phrase.language == .english
         }!
         let input = TranscriptionBenchmark.RepetitionInput(
             arm: arm,
@@ -32,12 +32,12 @@ struct TranscriptionBenchmarkTests {
             connectStartedAt: 10,
             speechEndedAt: 20,
             events: [
-                event(.ready, observedAt: 11, model: arm.model?.rawValue),
-                event(.clientCommit, observedAt: 20.2, model: arm.model?.rawValue),
+                event(.ready, observedAt: 11, model: arm.target.modelID),
+                event(.clientCommit, observedAt: 20.2, model: arm.target.modelID),
                 event(
                     .finalized,
                     observedAt: 21.5,
-                    model: arm.model?.rawValue,
+                    model: arm.target.modelID,
                     itemID: "item-1",
                     text: arm.phrase.text,
                     spokenAt: 12),
@@ -67,7 +67,7 @@ struct TranscriptionBenchmarkTests {
     @Test("split finalized fragments are not duplicate deliveries")
     func splitFragments() {
         let arm = TranscriptionBenchmark.standardArms.first {
-            $0.model == .gpt4oTranscribe && $0.phrase.language == .english
+            $0.target == .openAI(.gpt4oTranscribe) && $0.phrase.language == .english
         }!
         let result = TranscriptionBenchmark.evaluate(.init(
             arm: arm,
@@ -79,13 +79,13 @@ struct TranscriptionBenchmarkTests {
                 event(
                     .finalized,
                     observedAt: 4,
-                    model: arm.model?.rawValue,
+                    model: arm.target.modelID,
                     itemID: "fragment-1",
                     text: "The actor preserves ordered audio"),
                 event(
                     .finalized,
                     observedAt: 4.1,
-                    model: arm.model?.rawValue,
+                    model: arm.target.modelID,
                     itemID: "fragment-2",
                     text: "while the socket reconnects."),
             ]))
@@ -98,20 +98,20 @@ struct TranscriptionBenchmarkTests {
     @Test("the earliest final's spoken start is measured against playback start")
     func spokenStartOffset() {
         let arm = TranscriptionBenchmark.standardArms.first {
-            $0.model == .gpt4oTranscribe && $0.phrase.language == .english
+            $0.target == .openAI(.gpt4oTranscribe) && $0.phrase.language == .english
         }!
         let events = [
             event(
                 .finalized,
                 observedAt: 4,
-                model: arm.model?.rawValue,
+                model: arm.target.modelID,
                 itemID: "fragment-2",
                 text: "while the socket reconnects.",
                 spokenAt: 2.5),
             event(
                 .finalized,
                 observedAt: 4.1,
-                model: arm.model?.rawValue,
+                model: arm.target.modelID,
                 itemID: "fragment-1",
                 text: "The actor preserves ordered audio",
                 spokenAt: 1.25),
@@ -139,7 +139,7 @@ struct TranscriptionBenchmarkTests {
     @Test("a reconnect contaminates a standard repetition")
     func standardReconnectIsFailure() {
         let arm = TranscriptionBenchmark.standardArms.first {
-            $0.model == .gptTranscribe && $0.phrase.language == .english
+            $0.target == .openAI(.gptTranscribe) && $0.phrase.language == .english
         }!
         let result = TranscriptionBenchmark.evaluate(.init(
             arm: arm,
@@ -151,7 +151,7 @@ struct TranscriptionBenchmarkTests {
                 event(
                     .finalized,
                     observedAt: 4,
-                    model: arm.model?.rawValue,
+                    model: arm.target.modelID,
                     itemID: "final",
                     text: arm.phrase.text),
             ],
@@ -164,50 +164,50 @@ struct TranscriptionBenchmarkTests {
     @Test("evaluation reports missing unavailable duplicate and revised finals")
     func anomalies() {
         let arm = TranscriptionBenchmark.standardArms.first {
-            $0.model == .gpt4oTranscribe && $0.phrase.language == .mandarin
+            $0.target == .openAI(.gpt4oTranscribe) && $0.phrase.language == .mandarin
         }!
         let events = [
-            event(.serverEndpoint, observedAt: 3.1, model: arm.model?.rawValue, itemID: "one"),
+            event(.serverEndpoint, observedAt: 3.1, model: arm.target.modelID, itemID: "one"),
             event(
                 .providerFinal,
                 observedAt: 3.15,
-                model: arm.model?.rawValue,
+                model: arm.target.modelID,
                 itemID: "one",
                 text: "系统在网络恢复后按顺序提交音频"),
             event(
                 .providerFinal,
                 observedAt: 3.16,
-                model: arm.model?.rawValue,
+                model: arm.target.modelID,
                 itemID: "one",
                 text: "系统在网络恢复后按顺序发送音频"),
             event(
                 .providerFinal,
                 observedAt: 3.17,
-                model: arm.model?.rawValue,
+                model: arm.target.modelID,
                 itemID: "replay",
                 text: "系统在网络恢复后按顺序发送音频"),
             event(
                 .finalized,
                 observedAt: 3.2,
-                model: arm.model?.rawValue,
+                model: arm.target.modelID,
                 itemID: "one",
                 text: "系统在网络恢复后按顺序提交音频"),
             event(
                 .finalized,
                 observedAt: 3.3,
-                model: arm.model?.rawValue,
+                model: arm.target.modelID,
                 itemID: "one",
                 text: "系统在网络恢复后按顺序提交音频。"),
             event(
                 .finalized,
                 observedAt: 3.4,
-                model: arm.model?.rawValue,
+                model: arm.target.modelID,
                 itemID: "two",
                 unavailable: true),
             event(
                 .providerFinal,
                 observedAt: 3.41,
-                model: arm.model?.rawValue,
+                model: arm.target.modelID,
                 itemID: "two",
                 unavailable: true),
         ]
@@ -232,7 +232,7 @@ struct TranscriptionBenchmarkTests {
     @Test("an unavailable final adds neither a provider duplicate nor accepted-final latency")
     func unavailableAfterEmptyCompletion() {
         let arm = TranscriptionBenchmark.standardArms.first {
-            $0.model == .gpt4oTranscribe && $0.phrase.language == .english
+            $0.target == .openAI(.gpt4oTranscribe) && $0.phrase.language == .english
         }!
         let result = TranscriptionBenchmark.evaluate(.init(
             arm: arm,
@@ -244,14 +244,14 @@ struct TranscriptionBenchmarkTests {
                 event(
                     .providerFinal,
                     observedAt: 3.1,
-                    model: arm.model?.rawValue,
+                    model: arm.target.modelID,
                     itemID: "empty",
                     text: " … ",
                     unavailable: true),
                 event(
                     .finalized,
                     observedAt: 3.2,
-                    model: arm.model?.rawValue,
+                    model: arm.target.modelID,
                     itemID: "empty",
                     unavailable: true),
             ]))
@@ -280,7 +280,7 @@ struct TranscriptionBenchmarkTests {
 
         #expect(forward == reverse)
         let object = try #require(JSONSerialization.jsonObject(with: forward) as? [String: Any])
-        #expect(object["schemaVersion"] as? Int == 1)
+        #expect(object["schemaVersion"] as? Int == TranscriptionBenchmark.schemaVersion)
         #expect(object["armFilter"] == nil)
     }
 
@@ -896,12 +896,12 @@ struct TranscriptionBenchmarkTests {
             connectStartedAt: 10,
             speechEndedAt: 20,
             events: [
-                event(.ready, observedAt: 11, model: arm.model?.rawValue),
-                event(.clientCommit, observedAt: 20.2, model: arm.model?.rawValue),
+                event(.ready, observedAt: 11, model: arm.target.modelID),
+                event(.clientCommit, observedAt: 20.2, model: arm.target.modelID),
                 event(
                     .finalized,
                     observedAt: 21.5,
-                    model: arm.model?.rawValue,
+                    model: arm.target.modelID,
                     itemID: "item-\(repetition)",
                     text: arm.phrase.text,
                     spokenAt: 12),

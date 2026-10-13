@@ -7,8 +7,8 @@
 ## What the run is and is not
 
 `./scripts/run-live-tests.sh` launches `Jarvis Dev.app` once per scenario in an explicit live e2e
-mode. Interviewer and candidate lines are synthesized at run time and fed as audio into real OpenAI
-transcription. The real coach loads skills and tools on demand, switches between the brains
+mode. Interviewer and candidate lines are synthesized at run time and fed as audio into the scenario-selected real
+transcription provider. The real coach loads skills and tools on demand, switches between the brains
 (Claude Code, OpenAI, Codex, and Gemini), views a fixture screenshot when it asks for the screen,
 delivers to the real Overlay Box, and writes a normal session directory. A test target then reads that directory and records one result per case ID.
 
@@ -50,8 +50,9 @@ The run is not:
   asserted, and never summed across providers because OpenAI's input count includes cached input
   and Anthropic's excludes cache reads and writes. Totals cover the calls that reported usage, and the line counts the calls that did
   not, such as a timed-out request, rather than reading them as zero.
-- **A transcription comparison.** It uses one transcription model as configured. The benchmark owns
-  model comparison, Apple Speech, and reconnect.
+- **A transcription accuracy comparison.** The benchmark owns isolated recognition comparisons and
+  reconnect. Scenario L verifies that bilingual speech from both speakers reaches real coaching on
+  every remote transcription target.
 - **A UI test.** Nothing asserts on Settings, the menu, or overlay rendering. Overlay rendering and
   capture exclusion are covered by the overlay tests in the Gate.
 - **A way to force rare paths.** A real model cannot be made to hit the response cap, load inside a
@@ -75,7 +76,8 @@ Set up once per machine:
   transcription uses that key; the invalid-key fixture supplies its own deliberately invalid key.
   `OPENAI_API_KEY` does not serve the run: the app is launched through `open`, and LaunchServices
   does not pass the shell's environment.
-- **A Gemini key** saved in Settings when running Scenario B, whose second half coaches on it.
+- **A Gemini key** saved in Settings when running Scenario B, whose second half coaches on it,
+  or Scenario L, which includes Gemini transcription.
 - **Codex and Claude Code**, signed in from Settings → Connections when the selected scenario uses
   them. Preflight checks the scenario's primary brain, fallbacks, explicit brain switches, and
   transcription key before launch. It reads only the required key and account files, so A does not
@@ -96,7 +98,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|C|D|P|R|F01|F02|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|D|L|P|R|F01|F02|all] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -156,6 +158,7 @@ layout in the Gate.
 | B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
+| L | Codex | The same bilingual technical conversation on every remote transcription target, with both speaker streams retaining Mandarin and English technical terms in coach input, provider-specific setup confirmation, and a clean end. |
 | P | Codex | An explicit full-document request over the existing prep fixture; verifies direct catalog read → reply without search and complete extracted text in the brain request. Design follow-ups exercise source attribution, cache invalidation, and a conflicting draft reported in speech. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
@@ -172,8 +175,11 @@ presses, and a design follow-up) is enough to keep that subscription covered.
   `com.jarvis.coach.dev.live-e2e`, cleared per scenario, so a run never reads or changes the
   developer's own settings. Claude Code runs Claude Sonnet 5 and Codex runs GPT-6 Luna, lighter
   than the app's defaults because a run checks the harness, not the model's best answer; see
-  `LiveE2ERunner.target(for:)`. Transcription is pinned to `gpt-4o-transcribe`.
-- **Synthesized speech.** `FixtureSpeech` renders each line with `/usr/bin/say` to 24 kHz PCM16 at
+  `LiveE2ERunner.target(for:)`. Transcription provider, model or locale, and expected languages come
+  from the scenario. Existing scenarios default to OpenAI; Scenario L enumerates the shared remote
+  target catalog over one fixture file.
+- **Synthesized speech.** `FixtureSpeech` renders each line with `/usr/bin/say` to the selected
+  provider's PCM16 wire rate at
   run time and deletes the file right after decoding. `FixtureAudioSource` feeds both transcription
   streams as audio frames; nothing plays through the speakers.
 - **Waits on attempts, never timers.** A spoken step waits for the next `turn_end` attempt to finish,
@@ -186,8 +192,9 @@ presses, and a design follow-up) is enough to keep that subscription covered.
 
 ## Evidence rules
 
-- **Order and count, never wording or duration.** Model phrasing and latency vary between runs, so
-  every assertion is an ordering or a count, labeled with its case ID so a failure names the case.
+- **Coaching order and count, never model wording or duration.** Model phrasing and latency vary
+  between runs. Scenario L additionally checks the fixed input's Mandarin script and English technical
+  terms in the transcript sent to coaching, rather than the model's answer wording.
 - **Stored order is not spoken order.** Activity rows and attempt transcripts keep insertion order,
   and `ConversationChronology` orders them by speech time for the viewer and the model, so a
   chronology case compares speech times rather than positions in a file.
@@ -368,7 +375,8 @@ it as unverified in its description.
 - **Provider failure with Wi-Fi off,** because the run never takes the network away. With a valid key
   and Wi-Fi off, confirm Start ends the session within about fifteen seconds naming the network cause,
   with no system-audio degradation row before it.
-- **Gemini transcription,** because the run transcribes only through OpenAI. Confirm that selecting
+- **Gemini Settings and rotation,** because Scenario L covers transcription but does not interact
+  with Settings or wait for the provider's session cap. Confirm that selecting
   Gemini with no Gemini key saved refuses Start and names the missing credential, and that switching
   back to OpenAI starts cleanly. Leave a Gemini session past ten minutes and confirm the `goAway` rotation replaces the
   socket with no user-visible notice.

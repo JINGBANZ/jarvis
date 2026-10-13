@@ -8,7 +8,7 @@ import Testing
 /// `swift test` never reaches a provider.
 struct LiveE2ELauncher {
     let scenarioID: String
-    let scenarioFile: String
+    let scenarioData: Data
     let runDirectory: URL
     let app: URL
     let keepGoing: Bool
@@ -31,7 +31,10 @@ struct LiveE2ELauncher {
     }
 
     /// Nil when the scenario must not launch; the issue or skipped line is already recorded.
-    static func begin(scenario scenarioID: String, file: String? = nil) async -> LiveE2ELauncher? {
+    static func begin(
+        scenario scenarioID: String, file: String? = nil,
+        transcriptionTarget: TranscriptionTarget? = nil
+    ) async -> LiveE2ELauncher? {
         let environment = ProcessInfo.processInfo.environment
         guard let run = environment["JARVIS_LIVE_E2E_RUN_DIR"],
               let app = environment["JARVIS_LIVE_E2E_APP"] else {
@@ -48,10 +51,24 @@ struct LiveE2ELauncher {
             return nil
         }
         let scenario: LiveE2EScenario
+        let scenarioData: Data
         do {
-            scenario = try LiveE2EScenario.load(
-                from: scenariosDirectory.appendingPathComponent("\(file ?? scenarioID).json"),
-                fixturesDirectory: fixturesDirectory)
+            let data = try Data(contentsOf: scenariosDirectory.appendingPathComponent("\(file ?? scenarioID).json"))
+            if let target = transcriptionTarget {
+                guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      var transcription = json["transcription"] as? [String: Any] else {
+                    throw LiveE2EScenario.Failure.invalid("missing transcription settings")
+                }
+                transcription["provider"] = target.provider.rawValue
+                transcription["model"] = target.modelID
+                transcription["locale"] = target.localeIdentifier
+                json["transcription"] = transcription
+                json["id"] = scenarioID
+                scenarioData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+            } else {
+                scenarioData = data
+            }
+            scenario = try LiveE2EScenario.decode(scenarioData, fixturesDirectory: fixturesDirectory)
         } catch {
             Issue.record(error)
             return nil
@@ -61,7 +78,7 @@ struct LiveE2ELauncher {
             return nil
         }
         return LiveE2ELauncher(
-            scenarioID: scenarioID, scenarioFile: file ?? scenarioID,
+            scenarioID: scenarioID, scenarioData: scenarioData,
             runDirectory: runDirectory, app: URL(fileURLWithPath: app, isDirectory: true),
             keepGoing: keepGoing)
     }
@@ -93,10 +110,9 @@ struct LiveE2ELauncher {
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        let source = Self.scenariosDirectory.appendingPathComponent("\(scenarioFile).json")
-        let scenario = try LiveE2EScenario.load(from: source, fixturesDirectory: Self.fixturesDirectory)
+        let scenario = try LiveE2EScenario.decode(scenarioData, fixturesDirectory: Self.fixturesDirectory)
         let scenarioCopy = directory.appendingPathComponent("scenario.json")
-        try fileManager.copyItem(at: source, to: scenarioCopy)
+        try scenarioData.write(to: scenarioCopy)
 
         let processesBefore = Self.processIDs(matching: helperProcessPattern)
         var arguments = [
@@ -160,12 +176,13 @@ struct LiveE2ELauncher {
             leftoverHelperIDs: leftovers.sorted())
     }
 
-    func makeInvalidKeyDirectory() throws -> URL {
+    func makeInvalidKeyDirectory(for provider: TranscriptionProvider = .openAI) throws -> URL {
         let secrets = runDirectory.appendingPathComponent("\(scenarioID)-secrets", isDirectory: true)
         try FileManager.default.createDirectory(
             at: secrets, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        guard FileSecretStore(directoryURL: secrets)
-            .setApiKey("sk-jarvis-live-e2e-invalid-key", for: .openAIAPIKey) else {
+        guard let credential = provider.ownCredential,
+              FileSecretStore(directoryURL: secrets)
+            .setApiKey("jarvis-live-e2e-invalid-key", for: credential) else {
             throw CocoaError(.fileWriteUnknown)
         }
         return secrets

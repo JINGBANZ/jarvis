@@ -2,7 +2,7 @@ import Foundation
 
 // Design: wiki/transcription-benchmark.md
 public enum TranscriptionBenchmark {
-    public static let schemaVersion = 1
+    public static let schemaVersion = 2
     public static let retainedRunCount = 10
 
     public enum Language: String, Codable, CaseIterable, Sendable {
@@ -44,7 +44,14 @@ public enum TranscriptionBenchmark {
     }
 
     /// Fixed, non-user input. Only each fixture's hash is persisted.
-    public static let phrases: [Phrase] = standardPhrases + [followUpPhrase]
+    public static let phrases: [Phrase] = standardPhrases + [followUpPhrase] + languageControlPhrases
+
+    public static let languageControlPhrases: [Phrase] = [
+        .init(id: "english-acknowledgement", language: .english, text: "Okay.", voice: "Samantha"),
+        .init(id: "mandarin-acknowledgement", language: .mandarin, text: "好的。", voice: "Tingting"),
+        .init(id: "silence", language: .bilingual, text: "", voice: ""),
+        .init(id: "noise", language: .bilingual, text: "", voice: ""),
+    ]
 
     /// One phrase per session, so language coverage stays comparable across providers.
     public static let standardPhrases: [Phrase] = [
@@ -77,10 +84,9 @@ public enum TranscriptionBenchmark {
 
     public struct Arm: Codable, Equatable, Sendable {
         public let id: String
-        public let provider: TranscriptionProvider
-        public let model: OpenAITranscriptionModel?
+        public let target: TranscriptionTarget
+        public var provider: TranscriptionProvider { target.provider }
         public let languageProfile: LanguageProfile?
-        public let localeIdentifier: String?
         public let phrase: Phrase
         /// Only the turns matrix speaks twice in one session; every other arm leaves this empty.
         public let followUpPhrase: Phrase?
@@ -91,76 +97,98 @@ public enum TranscriptionBenchmark {
 
         public init(
             id: String,
-            provider: TranscriptionProvider,
-            model: OpenAITranscriptionModel?,
+            target: TranscriptionTarget,
             languageProfile: LanguageProfile?,
-            localeIdentifier: String?,
             phrase: Phrase,
             followUpPhrase: Phrase? = nil
         ) {
             self.id = id
-            self.provider = provider
-            self.model = model
+            self.target = target
             self.languageProfile = languageProfile
-            self.localeIdentifier = localeIdentifier
             self.phrase = phrase
             self.followUpPhrase = followUpPhrase
         }
+
+        private enum CodingKeys: String, CodingKey {
+            case id, target, languageProfile, phrase, followUpPhrase
+            case provider, model, localeIdentifier
+        }
+
+        public init(from decoder: any Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            id = try values.decode(String.self, forKey: .id)
+            languageProfile = try values.decodeIfPresent(LanguageProfile.self, forKey: .languageProfile)
+            phrase = try values.decode(Phrase.self, forKey: .phrase)
+            followUpPhrase = try values.decodeIfPresent(Phrase.self, forKey: .followUpPhrase)
+            if let target = try values.decodeIfPresent(TranscriptionTarget.self, forKey: .target) {
+                self.target = target
+            } else {
+                // Retained benchmark runs use the schema-version-1 arm shape.
+                switch try values.decode(TranscriptionProvider.self, forKey: .provider) {
+                case .openAI:
+                    target = .openAI(try values.decode(OpenAITranscriptionModel.self, forKey: .model))
+                case .appleSpeech:
+                    target = .appleSpeech(localeIdentifier: try values.decode(String.self, forKey: .localeIdentifier))
+                case .gemini:
+                    throw DecodingError.keyNotFound(CodingKeys.target,
+                        .init(codingPath: decoder.codingPath, debugDescription: "Gemini arm requires a target"))
+                }
+            }
+        }
+
+        public func encode(to encoder: any Encoder) throws {
+            var values = encoder.container(keyedBy: CodingKeys.self)
+            try values.encode(id, forKey: .id)
+            try values.encode(target, forKey: .target)
+            try values.encodeIfPresent(languageProfile, forKey: .languageProfile)
+            try values.encode(phrase, forKey: .phrase)
+            try values.encodeIfPresent(followUpPhrase, forKey: .followUpPhrase)
+        }
     }
 
-    /// No Gemini arms: `Arm.model` is OpenAI-typed rather than a provider-neutral model id.
     public static var standardArms: [Arm] {
-        let openAI = OpenAITranscriptionModel.allCases.flatMap { model in
+        let remote = TranscriptionTarget.remoteTargets.flatMap { target in
             standardPhrases.map { phrase in
                 let profile: LanguageProfile = switch phrase.language {
                 case .english: .english
                 case .mandarin: .mandarinChinese
                 case .bilingual: .englishAndMandarinChinese
                 }
-                return Arm(
-                    id: "openai--\(model.rawValue)--\(phrase.id)",
-                    provider: .openAI,
-                    model: model,
-                    languageProfile: profile,
-                    localeIdentifier: nil,
-                    phrase: phrase)
+                return Arm(id: "\(target.provider.rawValue)--\(target.modelID!)--\(phrase.id)",
+                    target: target, languageProfile: profile, phrase: phrase)
             }
         }
         let apple = standardPhrases.map { phrase in
             let locale = phrase.language == .english ? "en_US" : "zh_CN"
-            return Arm(
-                id: "apple-speech--\(locale)--\(phrase.id)",
-                provider: .appleSpeech,
-                model: nil,
-                languageProfile: nil,
-                localeIdentifier: locale,
-                phrase: phrase)
+            return Arm(id: "apple-speech--\(locale)--\(phrase.id)",
+                target: .appleSpeech(localeIdentifier: locale), languageProfile: nil, phrase: phrase)
         }
-        return openAI + apple
+        return remote + apple
     }
 
-    /// Every selectable path speaks twice in one session. The standard matrix opens a fresh session
-    /// per phrase, so a provider that loses the speech after its first finalization looks healthy
-    /// there and fails in every real session.
     public static var turnArms: [Arm] {
-        let openAI = OpenAITranscriptionModel.allCases.map { model in
-            Arm(
-                id: "turns--openai--\(model.rawValue)",
-                provider: .openAI,
-                model: model,
-                languageProfile: .english,
-                localeIdentifier: nil,
-                phrase: englishPhrase,
-                followUpPhrase: followUpPhrase)
+        let remote = TranscriptionTarget.remoteTargets.flatMap { target in
+            [Arm(id: "turns--\(target.provider.rawValue)--\(target.modelID!)",
+                target: target, languageProfile: .english, phrase: englishPhrase,
+                followUpPhrase: followUpPhrase),
+             Arm(id: "turns--\(target.provider.rawValue)--\(target.modelID!)--bilingual",
+                target: target, languageProfile: .englishAndMandarinChinese,
+                phrase: standardPhrases[2], followUpPhrase: standardPhrases[1])]
         }
-        let apple = Arm(
-            id: "turns--apple-speech--en_US",
-            provider: .appleSpeech,
-            model: nil,
-            languageProfile: nil,
-            localeIdentifier: "en_US",
-            phrase: englishPhrase,
-            followUpPhrase: followUpPhrase)
-        return openAI + [apple]
+        let apple = Arm(id: "turns--apple-speech--en_US",
+            target: .appleSpeech(localeIdentifier: "en_US"), languageProfile: nil,
+            phrase: englishPhrase, followUpPhrase: followUpPhrase)
+        return remote + [apple]
+    }
+
+    public static var languageArms: [Arm] {
+        TranscriptionTarget.remoteTargets.flatMap { target in
+            [LanguageProfile.automatic, .englishAndMandarinChinese].flatMap { profile in
+                (standardPhrases + languageControlPhrases).map { phrase in
+                    Arm(id: "languages--\(target.provider.rawValue)--\(target.modelID!)--\(profile.rawValue)--\(phrase.id)",
+                        target: target, languageProfile: profile, phrase: phrase)
+                }
+            }
+        }
     }
 }

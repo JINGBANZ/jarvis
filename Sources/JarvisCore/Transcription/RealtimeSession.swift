@@ -17,15 +17,18 @@ public enum RealtimeSession {
         silenceDurationMs: Int = 1000,
         noiseReduction: String? = "near_field"
     ) -> [String: Any] {
-        let expectedLanguages = TranscriptionLanguage.canonicalizing(expectedLanguages)
+        let expectation = TranscriptionLanguageExpectation(languages: expectedLanguages)
+        let expectedLanguages = expectation.languages
         var transcription: [String: Any] = ["model": model.rawValue]
+        if let context = TranscriptionTarget.openAI(model).context(for: speaker, expectation: expectation) {
+            transcription["prompt"] = context
+        }
         switch model {
         case .gpt4oTranscribe:
             if expectedLanguages.count == 1, let language = expectedLanguages.first {
                 transcription["language"] = language.singularHint
             }
         case .gptTranscribe, .gptLiveTranscribe:
-            transcription["prompt"] = JarvisPrompts.Transcription.context(for: speaker)
             if !expectedLanguages.isEmpty {
                 transcription["languages"] = expectedLanguages.map(\.multipleHint)
             }
@@ -78,6 +81,46 @@ public enum RealtimeSession {
     /// `session.created` only proves the handshake opened.
     public static func isConfiguredSessionEventType(_ type: String) -> Bool {
         type == "session.updated" || type == "transcription_session.updated"
+    }
+
+    public static func acceptsConfiguration(
+        event: [String: Any],
+        model: OpenAITranscriptionModel,
+        speaker: Speaker,
+        expectedLanguages: [TranscriptionLanguage]
+    ) -> Bool {
+        guard let type = event["type"] as? String, isConfiguredSessionEventType(type),
+              let session = event["session"] as? [String: Any],
+              session["type"] as? String == "transcription",
+              let audio = session["audio"] as? [String: Any],
+              let input = audio["input"] as? [String: Any],
+              let transcription = input["transcription"] as? [String: Any],
+              transcription["model"] as? String == model.rawValue else { return false }
+        let expectation = TranscriptionLanguageExpectation(languages: expectedLanguages)
+        let prompt = TranscriptionTarget.openAI(model).context(for: speaker, expectation: expectation)
+        guard optionalString(transcription["prompt"], matches: prompt) else { return false }
+        switch model {
+        case .gpt4oTranscribe:
+            let language = expectation.languages.count == 1 ? expectation.languages.first?.singularHint : nil
+            return optionalString(transcription["language"], matches: language)
+                && optionalLanguages(transcription["languages"], match: [])
+        case .gptTranscribe, .gptLiveTranscribe:
+            let expected = expectation.languages.map(\.multipleHint)
+            return optionalLanguages(transcription["languages"], match: expected)
+                && optionalString(transcription["language"], matches: nil)
+        }
+    }
+
+    private static func optionalString(_ value: Any?, matches expected: String?) -> Bool {
+        if value == nil || value is NSNull { return expected == nil }
+        guard let actual = value as? String else { return false }
+        return actual == (expected ?? "")
+    }
+
+    private static func optionalLanguages(_ value: Any?, match expected: [String]) -> Bool {
+        if value == nil || value is NSNull { return expected.isEmpty }
+        guard let actual = value as? [String] else { return false }
+        return actual.sorted() == expected.sorted()
     }
 
     /// Sent at the ~60 min session lifetime. An expected rotation, not a fault.

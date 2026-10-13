@@ -33,8 +33,12 @@ final class SyntheticSpeechFixtures {
                 attributes: [.posixPermissions: 0o700])
             createdDirectory = true
             for phrase in TranscriptionBenchmark.phrases {
-                let url = fixtureDirectory.appendingPathComponent("\(phrase.id).aiff")
-                try Self.synthesize(phrase, to: url)
+                let url = fixtureDirectory.appendingPathComponent("\(phrase.id).caf")
+                if phrase.text.isEmpty {
+                    try Self.writeControl(duration: 3, noise: phrase.id == "noise", to: url)
+                } else {
+                    try Self.synthesize(phrase, to: url)
+                }
                 let data = try Data(contentsOf: url)
                 generated[phrase.id] = Fixture(
                     phrase: phrase,
@@ -45,7 +49,7 @@ final class SyntheticSpeechFixtures {
                 try FileManager.default.setAttributes(
                     [.posixPermissions: 0o600], ofItemAtPath: url.path)
             }
-            try Self.writeSilence(duration: 1.5, to: endpointSilence)
+            try Self.writeControl(duration: 1.5, noise: false, to: endpointSilence)
             try FileManager.default.setAttributes(
                 [.posixPermissions: 0o600], ofItemAtPath: endpointSilence.path)
         } catch {
@@ -119,8 +123,7 @@ final class SyntheticSpeechFixtures {
             "--voice", phrase.voice,
             "--rate", "175",
             "--output-file", url.path,
-            // AIFF stores linear PCM in big-endian order; `say` rejects a little-endian format.
-            "--data-format=BEI16@48000",
+            "--data-format=LEI16@48000",
             phrase.text,
         ]
         process.standardOutput = FileHandle.nullDevice
@@ -132,7 +135,7 @@ final class SyntheticSpeechFixtures {
         }
     }
 
-    private static func writeSilence(duration: TimeInterval, to url: URL) throws {
+    private static func writeControl(duration: TimeInterval, noise: Bool, to url: URL) throws {
         guard let format = AVAudioFormat(
             standardFormatWithSampleRate: 48_000,
             channels: 1),
@@ -146,6 +149,13 @@ final class SyntheticSpeechFixtures {
         // Match AVAudioFile's standard float processing format. Passing an integer buffer to the
         // writer's float conversion path aborts inside AudioToolbox on macOS 26 instead of throwing.
         samples.initialize(repeating: 0, count: Int(buffer.frameLength))
+        if noise {
+            var seed: UInt64 = 444
+            for index in 0..<Int(buffer.frameLength) {
+                seed = seed &* 6_364_136_223_846_793_005 &+ 1
+                samples[index] = (Float(seed >> 40) / Float(1 << 24) - 0.5) * 0.04
+            }
+        }
         let file = try AVAudioFile(forWriting: url, settings: format.settings)
         try file.write(from: buffer)
     }

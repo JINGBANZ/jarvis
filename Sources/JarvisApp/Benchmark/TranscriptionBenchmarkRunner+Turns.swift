@@ -13,17 +13,17 @@ extension TranscriptionBenchmarkRunner {
                 phase: "turns-arm",
                 detail: "\(armIndex + 1)/\(TranscriptionBenchmark.turnArms.count): \(arm.id)",
                 to: options.outputDirectory)
-            if arm.provider == .openAI, apiKey == nil {
+            if arm.provider.ownCredential != nil, apiKey(for: arm.provider) == nil {
                 results.append(unavailableTurns(
                     arm: arm,
-                    reason: Failure.apiKeyUnavailable.description))
+                    reason: Failure.apiKeyUnavailable(arm.provider).description))
                 continue
             }
 
             let appleLocale: Locale?
             if arm.provider == .appleSpeech {
                 do {
-                    appleLocale = try await prepareAppleLocale(arm.localeIdentifier ?? "")
+                    appleLocale = try await prepareAppleLocale(arm.target.localeIdentifier ?? "")
                 } catch {
                     try Task.checkCancellation()
                     guard !isAbortRequested else { throw Failure.benchmarkAborted }
@@ -62,6 +62,8 @@ extension TranscriptionBenchmarkRunner {
         var windows: [TranscriptionBenchmark.TurnWindow] = []
         var failure: String?
         do {
+            let capture = try startCapture(for: arm.target)
+            defer { capture.stop() }
             _ = try await recorder.waitForReady(
                 timeout: arm.provider == .appleSpeech ? 60 : 20)
             try await Task.sleep(for: .milliseconds(150))

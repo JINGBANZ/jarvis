@@ -527,6 +527,16 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
               let type = obj["type"] as? String else { return }
 
         if RealtimeSession.isConfiguredSessionEventType(type) {
+            guard connection.isCurrent(lease), RealtimeSession.acceptsConfiguration(
+                event: obj, model: model, speaker: speaker, expectedLanguages: expectedLanguages
+            ) else {
+                connection.fail(lease, cause: ProviderFailure(
+                    source: source, stage: .readiness, category: .configuration,
+                    disposition: .temporary, identity: .init(),
+                    message: "transcription setup did not confirm the requested model and language guidance"))
+                return
+            }
+            jlog("Jarvis realtime [\(speaker.rawValue)]: effective transcription configuration verified")
             lock.lock()
             pendingSessionID = (obj["session"] as? [String: Any])?["id"] as? String
             lock.unlock()
@@ -625,7 +635,8 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
                 generation: socketGeneration,
                 itemID: itemID,
                 text: transcriptText,
-                observedAt: clock.now()))
+                observedAt: clock.now(),
+                usage: TranscriptionUsage.openAI(from: obj)))
             if let languages = RealtimeSession.detectedLanguageCodes(from: obj) {
                 let detail = languages.isEmpty ? "none-reliable" : languages.joined(separator: ",")
                 jlog("Jarvis realtime [\(speaker.rawValue)]: detected-languages=\(detail) "
@@ -777,7 +788,9 @@ final class RealtimeTranscriber: TranscriptionSession, WebSocketConnectionAdapte
             speaker: speaker.rawValue,
             generation: lease.generation,
             observedAt: clock.now(),
-            replayedChunks: replacement ? bufferedChunks : nil))
+            replayedChunks: replacement ? bufferedChunks : nil,
+            setupAcceptance: .init(target: .openAI(model),
+                expectation: .init(languages: expectedLanguages))))
         // Safe to pump after readiness is visible: a racing producer may claim the head itself but
         // cannot bypass it or strand the chunk it appended.
         pumpAudioIfReady()

@@ -1155,11 +1155,18 @@ rather than a per-turn screenshot.
   Transcription) as literal `keywords`, biasing recognition toward jargon and names; GPT-4o
   Transcribe has no such field and ignores the setting. Automatic is the default language
   selection and sends no language hint. A single expected language guides recognition without
-  translating. Multiple selections are supplied to GPT Transcribe and GPT Live and leave GPT-4o
-  automatic because the older model accepts at most one language hint. GPT Transcribe's completion-language
+  translating. Multiple selections use a bounded role-aware recording-context prompt on GPT-4o,
+  naming the expected languages and within-sentence switching; its unsupported plural field stays
+  absent. GPT Transcribe and GPT Live receive their supported language list and existing role
+  context. These are recognition hints, not a strict language allowlist or translation request. GPT Transcribe's completion-language
   metadata is logged for diagnosis without entering Activity or model context. This is one
   session-level expectation shared by both speakers, not a language decision per turn; either
-  speaker may switch within a sentence. The macOS 26+ opt-in is Apple `SpeechAnalyzer` with one
+  speaker may switch within a sentence. `TranscriptionConfiguration.languageExpectation` distinguishes
+  automatic recognition, a canonical language list, and an Apple locale. `TranscriptionTarget` owns
+  the explicit language capability and setup-confirmation kind for each provider/model; its exhaustive
+  cases require future providers to declare those choices. Provider adapters translate this shared
+  contract into supported wire fields, and the contract tests enumerate every remote target.
+  The macOS 26+ opt-in is Apple `SpeechAnalyzer` with one
   `SpeechTranscriber` locale chosen
   from the framework's runtime-supported list; `SFSpeechRecognizer` is not offered on older macOS,
   because it would be a second Apple adapter with its own authorization, availability, and result
@@ -1189,8 +1196,11 @@ rather than a per-turn screenshot.
   `setup` frame carries the model, expected-language hints (`languageCodes`, `[]` selects automatic
   detection rather than an omission the server would have to guess at), the optional vocabulary
   glossary (`customVocabulary`), and the verbatim/smart mode; the socket is not usable until the
-  server acknowledges it with `setupComplete` — an open socket alone does not prove the format was
-  accepted. Reconnect, ping/pong liveness, and bounded offline audio buffering mirror
+  server acknowledges it with a valid `setupComplete` object. This is setup acknowledgement,
+  not verification of effective settings: Google does not echo those settings. The language hints
+  remain soft guidance, and recognition quality is measured separately in the
+  [transcription benchmark](./transcription-benchmark.md). Reconnect, ping/pong liveness, and bounded
+  offline audio buffering mirror
   `RealtimeTranscriber`'s lifecycle so the two providers fail and recover the same way from the rest
   of the pipeline's perspective, with one deliberate divergence — Gemini's `goAway`-driven
   drain-then-rotate — covered in [Resilience](#resilience). `GeminiLiveTranscriber` is a new,
@@ -1519,8 +1529,8 @@ successful rebuild resets it for a later incident.
 The always-on legs are built to survive transient failure rather than die on it:
 
 - **Transcription selection is explicit and session-scoped.** Start snapshots one complete
-  provider-specific configuration for both speaker endpoints: provider plus OpenAI model and
-  expected-language list, or provider plus Apple locale. Changing Settings affects the next Start, reconnects keep
+  provider-specific configuration for both speaker endpoints, including the model, expected languages,
+  vocabulary, and mode on the selected remote provider, or Apple's selected locale. Changing Settings affects the next Start, reconnects keep
   the same snapshot, and neither adapter silently sends audio to the other provider after failure. A
   microphone-side terminal failure ends the unusable session. A system-audio-side failure degrades to
   microphone-only and says why, unless the failure is one both sockets share (a permanent rejection,
@@ -1533,7 +1543,12 @@ The always-on legs are built to survive transient failure rather than die on it:
 - **An OpenAI Realtime transcription socket *will* drop** (network blips, server resets, the ~60-min
   session cap) and a Realtime session **cannot be resumed** — a dropped connection means a new
   session. A socket is not declared ready at the WebSocket handshake: the transcriber waits for the
-  server's session-configuration acknowledgement under a startup deadline. Once ready, ping/pong
+  server's session-configuration acknowledgement under a startup deadline and verifies the returned
+  model, language hints, and recording-context prompt against the frozen request. A missing or
+  mismatched configuration follows the existing bounded failure path. Every replacement repeats
+  this verification; `session.created` cannot establish readiness. Benchmark evidence distinguishes
+  this effective-configuration verification from Gemini setup acknowledgement and Apple local
+  preparation. Once ready, ping/pong
   probes expose an idle half-open connection before the user's next utterance; send, receive, close,
   startup-timeout, and liveness failures all classify at the edge and enter one idempotent reconnect
   path. A refused WebSocket upgrade whose status proves the request cannot succeed as sent

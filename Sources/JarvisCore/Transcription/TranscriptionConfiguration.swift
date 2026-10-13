@@ -40,4 +40,20 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
     public var turnDetectionStrategy: TranscriptionTurnDetectionStrategy? {
         provider == .openAI ? openAIModel.turnDetectionStrategy : nil
     }
+
+    public var target: TranscriptionTarget {
+        switch provider {
+        case .openAI: .openAI(openAIModel)
+        case .gemini: .gemini(geminiModel)
+        case .appleSpeech: .appleSpeech(localeIdentifier: appleSpeechLocaleIdentifier)
+        }
+    }
+
+    public var languageExpectation: TranscriptionLanguageExpectation {
+        switch provider {
+        case .openAI: .init(languages: openAIExpectedLanguages)
+        case .gemini: .init(languages: geminiExpectedLanguages)
+        case .appleSpeech: .locale(appleSpeechLocaleIdentifier)
+        }
+    }
 }

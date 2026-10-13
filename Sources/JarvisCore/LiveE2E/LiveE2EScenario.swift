@@ -36,7 +36,8 @@ public struct LiveE2EScenario: Sendable, Equatable {
     }
 
     public struct Transcription: Sendable, Equatable {
-        public let model: OpenAITranscriptionModel
+        public let target: TranscriptionTarget
+        public let expectedLanguages: [TranscriptionLanguage]
         public let key: TranscriptionKey
     }
 
@@ -99,8 +100,25 @@ extension LiveE2EScenario {
         if let prepNotes = raw.prepNotes {
             try Self.requireFixture(prepNotes, in: fixturesDirectory, field: "prepNotes")
         }
-        let model = try Self.parse(
-            OpenAITranscriptionModel.self, raw.transcription.model, "transcription.model")
+        let provider = try Self.parse(TranscriptionProvider.self,
+            raw.transcription.provider ?? "openai", "transcription.provider")
+        let languages = TranscriptionLanguage.canonicalizing(try (raw.transcription.languages ?? []).map {
+            try Self.parse(TranscriptionLanguage.self, $0, "transcription.languages")
+        })
+        let target: TranscriptionTarget
+        switch provider {
+        case .openAI:
+            target = .openAI(try Self.parse(OpenAITranscriptionModel.self,
+                raw.transcription.model ?? "", "transcription.model"))
+        case .gemini:
+            target = .gemini(try Self.parse(GeminiTranscriptionModel.self,
+                raw.transcription.model ?? "", "transcription.model"))
+        case .appleSpeech:
+            guard let locale = raw.transcription.locale, !locale.isEmpty, languages.isEmpty else {
+                throw Failure.invalid("Apple Speech requires a locale and no language list")
+            }
+            target = .appleSpeech(localeIdentifier: locale)
+        }
         let key = try Self.parse(TranscriptionKey.self, raw.transcription.key, "transcription.key")
 
         id = raw.id
@@ -110,7 +128,7 @@ extension LiveE2EScenario {
             disabledTools: raw.capabilities.disabledTools,
             disabledSkills: raw.capabilities.disabledSkills)
         prepNotes = raw.prepNotes
-        transcription = Transcription(model: model, key: key)
+        transcription = Transcription(target: target, expectedLanguages: languages, key: key)
         voices = Voices(them: raw.voices.them, me: raw.voices.me)
         steps = try Self.steps(from: raw.steps, primary: primary, fixturesDirectory: fixturesDirectory)
 
@@ -268,7 +286,10 @@ private struct RawScenario: Decodable {
     }
 
     struct Transcription: Decodable {
-        let model: String
+        let provider: String?
+        let model: String?
+        let locale: String?
+        let languages: [String]?
         let key: String
     }
 

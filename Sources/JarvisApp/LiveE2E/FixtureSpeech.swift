@@ -2,7 +2,6 @@
 import AVFoundation
 import Foundation
 
-/// `say` writes the transcription wire format (24 kHz mono PCM16), so nothing is resampled.
 /// Speech files stay owner-only and are deleted once decoded, so no audio outlives the run.
 struct FixtureSpeech {
     enum Failure: Error, CustomStringConvertible {
@@ -25,7 +24,7 @@ struct FixtureSpeech {
             attributes: [.posixPermissions: 0o700])
     }
 
-    func samples(for text: String, voice: String) throws -> [Int16] {
+    func samples(for text: String, voice: String, sampleRate: Int) throws -> [Int16] {
         let url = directory.appendingPathComponent("\(UUID().uuidString).wav")
         defer { try? FileManager.default.removeItem(at: url) }
         let process = Process()
@@ -34,7 +33,7 @@ struct FixtureSpeech {
             "--voice", voice,
             "--rate", "175",
             "--output-file", url.path,
-            "--data-format=LEI16@24000",
+            "--data-format=LEI16@\(sampleRate)",
             text,
         ]
         process.standardOutput = FileHandle.nullDevice
@@ -47,7 +46,7 @@ struct FixtureSpeech {
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
 
         let file = try AVAudioFile(forReading: url, commonFormat: .pcmFormatInt16, interleaved: false)
-        guard file.fileFormat.sampleRate == 24_000, file.fileFormat.channelCount == 1 else {
+        guard file.fileFormat.sampleRate == Double(sampleRate), file.fileFormat.channelCount == 1 else {
             throw Failure.unexpectedFormat(
                 "\(file.fileFormat.sampleRate) Hz, \(file.fileFormat.channelCount) channels")
         }
