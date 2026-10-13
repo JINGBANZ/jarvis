@@ -15,6 +15,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         case noFixtureAudio(Int)
         case unexpectedSessionEnd(String)
         case timedOut(String)
+        case compactionNotAccepted
         case aborted
 
         var description: String {
@@ -27,6 +28,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             case .noFixtureAudio(let step): "Step \(step) speaks, but this scenario has no fixture audio"
             case .unexpectedSessionEnd(let reason): "The session ended unexpectedly: \(reason)"
             case .timedOut(let what): "Timed out waiting for \(what)"
+            case .compactionNotAccepted: "The first history compaction did not accept a summary"
             case .aborted: "Live e2e scenario aborted"
             }
         }
@@ -134,7 +136,11 @@ final class LiveE2ERunner: BrainCompositionHost {
                 path: options.fixturesDirectory.appendingPathComponent($0).path,
                 isDirectory: false)]
         } ?? []
-        composition = makeComposition(audio: scenario.audio)
+        var config = Config.default
+        if let threshold = scenario.historyCompactionTokenThreshold {
+            config.historyCompactionTokenThreshold = threshold
+        }
+        composition = makeComposition(audio: scenario.audio, config: config)
 
         let steps = scenario.steps
         var index = 0
@@ -183,6 +189,8 @@ final class LiveE2ERunner: BrainCompositionHost {
                     primary: Self.target(for: provider), fallbackTargets: [])
                 await brain.applyBrainPreferencesToRunningSession(
                     update: .topologyEdit)
+            case .waitForCompaction:
+                try await awaitCompaction()
             case .stop:
                 drain = composition.stop(reason: .stoppedByUser)
                 await drain?.value
@@ -249,7 +257,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         }
     }
 
-    private func makeComposition(audio: LiveE2EScenario.Audio) -> SessionComposition {
+    private func makeComposition(audio: LiveE2EScenario.Audio, config: Config) -> SessionComposition {
         let box = OverlayBoxPanel()
 
         let (events, continuation) = AsyncStream.makeStream(of: CoachingAttemptAuditEvent.self)
@@ -264,6 +272,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             overlayBox: box,
             readiness: readiness,
             errorReporter: errorReporter,
+            config: config,
             makeAttemptAuditing: { evidence in
                 LiveE2EAttemptObserver(evidence: evidence, observe: { continuation.yield($0) })
             },
@@ -338,6 +347,23 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     // MARK: - Waits
+
+    private func awaitCompaction() async throws {
+        var outcome: String?
+        try await wait(until: Date().addingTimeInterval(BrainWorkloadTimeout.historyCompaction + 5),
+                       for: "first history compaction") {
+            guard let directory = self.artifacts.currentSessionDir,
+                  let log = try? String(contentsOf: directory.appendingPathComponent("jarvis-debug.log"),
+                                        encoding: .utf8) else { return false }
+            outcome = log.split(separator: "\n").map(String.init).first {
+                $0.contains("History compaction:") && !$0.contains("History compaction: started")
+            }
+            return outcome != nil
+        }
+        guard outcome?.contains("History compaction: accepted") == true else {
+            throw Failure.compactionNotAccepted
+        }
+    }
 
     private func awaitAttempt(
         step: Int,

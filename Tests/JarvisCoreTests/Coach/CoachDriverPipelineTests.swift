@@ -2158,12 +2158,16 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await driver.cancelBackgroundWork()?.value
     }
 
-    @Test func malformedBriefingKeepsHistoryAndDoesNotFailTheRoute() async {
+    @Test(arguments: [
+        BrainResponse(toolCalls: [], outputText: "I cannot provide a hint without a screenshot."),
+        BrainResponse(toolCalls: [], incompleteReason: "max_output_tokens", outputText:
+            #"{"context":"never applied","decisions":[],"coaching":[],"openQuestions":[],"verification":[]}"#)
+    ])
+    func invalidBriefingKeepsHistoryAndDoesNotFailTheRoute(_ response: BrainResponse) async {
         let clock = ManualClock(now: 0)
         let recorder = RouteFailureRecorder()
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
-        let summarizer = ScriptedBrain(script: [.init(toolCalls: [], outputText:
-            "I cannot provide a hint without a screenshot.")])
+        let summarizer = ScriptedBrain(script: [response])
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
             config: Config(historyCompactionTokenThreshold: 5),
             onRouteFailure: { recorder.record($0) })
@@ -2178,6 +2182,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             let context = (brain.calls.last ?? []).compactMap(\.text).joined(separator: "\n")
             #expect(context.contains("Keep the inclusive boundary decision"))
             #expect(!context.contains("I cannot provide a hint"))
+            #expect(!context.contains("never applied"))
         }
         #expect(recorder.failures.isEmpty)
         await driver.cancelBackgroundWork()?.value
