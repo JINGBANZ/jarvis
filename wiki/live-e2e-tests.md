@@ -37,7 +37,8 @@ start and finish. The Foundation-only scenario model, launch options, and audio 
 
 The opt-in cache scenario also supplies a synthetic skill catalog, a compaction threshold that keeps
 its measured window intact, and a budgeted provider sender through defaulted composition ports.
-Ordinary scenarios retain the production catalog, configuration, and sender. The budgeted sender
+Scenario H supplies its optional compaction threshold through the same configuration port.
+Other scenarios retain the production catalog, configuration, and sender. The budgeted sender
 forwards the native encoded request, refuses redirects, and cancels its byte producer when the
 consumer ends.
 
@@ -61,11 +62,14 @@ The run is not:
 - **A UI test.** Nothing asserts on Settings, the menu, or overlay rendering. Overlay rendering and
   capture exclusion are covered by the overlay tests in the Gate.
 - **A way to force rare paths.** A real model cannot be made to hit the response cap, load inside a
-  failed attempt, trigger compaction, or call an unknown name on purpose, and the recovery cooldown
+  failed attempt or call an unknown name on purpose, and the recovery cooldown
   and ceiling need a clock the run does not control. Those stay in scripted-brain tests in the Gate.
   So does a failed coaching cycle that keeps listening: the subscription path has no temporary fault
   a scenario can inject and then lift, since a stopped helper restarts by itself and a bad
   credential is permanent, which ends a lone target's session instead of leaving a cycle to recover.
+  Scenario H lowers only the debug scenario's history threshold to exercise ordinary compaction
+  with real transcription and summarizer output. Invalid, unfinished, stale, and cancelled summaries
+  remain scripted-brain cases.
 
 ## Prerequisites and standing conditions
 
@@ -102,7 +106,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|C|D|P|R|F01|F02|CACHE|all] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|D|H|P|R|F01|F02|CACHE|all] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -164,14 +168,16 @@ layout in the Gate.
 | B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
+| H | Codex | A queue decision, an inclusive boundary rule, and unrun tests planted before resolved discussions. A lower debug threshold triggers compaction; the scenario requires the first summary to be accepted before asking for recall. C35/C36 check replacement, size reduction, replay, and delivery; `Scenarios/H-review.md` covers factual quality. |
 | P | Codex | An explicit full-document request over the existing prep fixture; verifies direct catalog read → reply without search and complete extracted text in the brain request. Design follow-ups exercise source attribution, cache invalidation, and a conflicting draft reported in speech. |
 | CACHE | Paid OpenAI, fixed model | Warm-up and measured spoken attempts over a long synthetic retained skill and fictional Harbor Ledger preparation notes. Verifies real loading continuations, committed hints, stable encoded prefixes, and history-cache reuse. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
 
-Scenario P and Scenario A's second half run on Codex, and B's second half runs on the Gemini API, a few Flash
-calls; CACHE uses its fixed paid OpenAI model; every other scenario and the evaluation run on Claude. The ChatGPT plan's usage limit is the
+Scenarios H and P and Scenario A's second half run on Codex, and B's second half runs on the Gemini API, a few Flash
+calls; CACHE uses its fixed paid OpenAI model; every other scenario and the evaluation run on Claude.
+The ChatGPT plan's usage limit is the
 one a day of runs exhausts, and A's Codex stretch (a behavioral search, a spoken screen question, two
 presses, and a design follow-up) is enough to keep that subscription covered.
 
@@ -188,6 +194,10 @@ presses, and a design follow-up) is enough to keep that subscription covered.
 - **Waits on attempts, never timers.** A spoken step waits for the next `turn_end` attempt to finish,
   a press for its manual attempt. Pacing follows the app's own state, which is what lets the
   chronology and in-flight cases land where they are meant to whatever the provider latency.
+  H's `waitForCompaction` step waits on the first compaction outcome in the normal session log and
+  fails if that first outcome rejects or fails, even if a later request could succeed. Its optional
+  `historyCompactionTokenThreshold` affects only that debug scenario; production keeps `Config.default`.
+  H prints coach and summarizer usage separately, plus the accepted before/after history estimates.
 - **An injected screen.** A `screen` step hands a JPEG fixture to `FixtureScreenCapture`, and every
   later capture returns that image with its on-device OCR as current-viewport text evidence, the
   snapshot the window path produces for a non-browser window. Only coding needs one: an interviewer states behavioral and design questions aloud,
@@ -198,6 +208,8 @@ presses, and a design follow-up) is enough to keep that subscription covered.
 - **Order and count.** Model phrasing and latency vary between runs, so ordinary assertions use
   ordering and counts, labeled with their case IDs. CACHE additionally checks the synthetic
   reference's explicit phrase in delivered hints to prove retained guidance is used.
+  H also checks the size budget and reduction and the stable queue identifier in replayed memory.
+  Factual meaning and verification attribution require the separate content review below.
 - **Stored order is not spoken order.** Activity rows and attempt transcripts keep insertion order,
   and `ConversationChronology` orders them by speech time for the viewer and the model, so a
   chronology case compares speech times rather than positions in a file.
@@ -339,6 +351,8 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C32 | Cold unrelated coding hints and small talk do not force prep retrieval | A: initial hint and logistics line |
 | C33 | Code hints retain a preceding placement header with an inline code anchor | C: both hint presses |
 | C34 | A named-document request reads directly from the catalog before replying; design follow-ups deliver answers | P; semantics use Tests/JarvisLiveTests/Scenarios/P-review.md |
+| C35 | The first real summary is accepted within budget and reduces history size | H |
+| C36 | Subsequent coaching replays condensed memory with the queue decision and delivers a reply | H; semantics use Tests/JarvisLiveTests/Scenarios/H-review.md |
 
 C31 checks Scenario A's selective technical retrieval: the existing design question searches before
 answering, its cache-invalidation follow-up reuses the excerpt, and the one-pass coding question

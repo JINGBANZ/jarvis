@@ -83,6 +83,16 @@ The evaluator treats `complete` totals as exact. It treats `partial`, `in_progre
 or malformed records as incomplete evidence and labels surviving values as lower bounds or
 unavailable. Historical sessions without versioned evidence keep their legacy interpretation.
 
+The agentic evaluator assesses the accuracy of user-visible explanations alongside implementation
+correctness. It follows material failures into the preceding source decision or check, explaining
+what it establishes and what the operation requires. A source weakness and its role in a particular
+occurrence are separate claims: unrecorded decisions and UI states stay explicit evidence gaps.
+Recommendations distinguish immediate workarounds from supported product corrections and include a
+concrete trigger and observable outcome. Material timing analysis separates provider-call duration from
+the overall wait for a user-visible result; a measured delay alone does not establish a defect. The
+instructions live in
+[`JarvisPrompts+Evaluation.swift`](../Sources/JarvisEvaluation/JarvisPrompts+Evaluation.swift).
+
 The same record is what the human sees: a session that lost evidence reads as an **incomplete record**
 in the Activity window, live and when browsed in history. A session whose marker cannot be read at all
 shows nothing — unknown is not the same claim as incomplete.

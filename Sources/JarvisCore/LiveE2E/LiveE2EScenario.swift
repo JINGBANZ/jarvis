@@ -68,6 +68,7 @@ public struct LiveE2EScenario: Sendable, Equatable {
         case press(CoachingShortcut)
         case say(Line, overlap: Overlap?, whileAttemptRunning: Bool)
         case switchBrain(BrainProvider)
+        case waitForCompaction
         case stop
     }
 
@@ -79,6 +80,7 @@ public struct LiveE2EScenario: Sendable, Equatable {
     public let prepNotes: String?
     public let transcription: Transcription
     public let voices: Voices
+    public let historyCompactionTokenThreshold: Int?
     public let steps: [Step]
 
     public static func load(from url: URL, fixturesDirectory: URL) throws -> LiveE2EScenario {
@@ -109,6 +111,9 @@ extension LiveE2EScenario {
         let model = try Self.parse(
             OpenAITranscriptionModel.self, raw.transcription.model, "transcription.model")
         let key = try Self.parse(TranscriptionKey.self, raw.transcription.key, "transcription.key")
+        if let threshold = raw.historyCompactionTokenThreshold, threshold <= 0 {
+            throw Failure.invalid("historyCompactionTokenThreshold must be positive")
+        }
 
         id = raw.id
         self.audio = audio
@@ -122,6 +127,7 @@ extension LiveE2EScenario {
         prepNotes = raw.prepNotes
         transcription = Transcription(model: model, key: key)
         voices = Voices(them: raw.voices.them, me: raw.voices.me)
+        historyCompactionTokenThreshold = raw.historyCompactionTokenThreshold
         steps = try Self.steps(from: raw.steps, primary: primary, fixturesDirectory: fixturesDirectory)
         if id == LiveE2ECacheCheck.scenarioID {
             guard primary == .openAI, fallbacks.isEmpty,
@@ -218,6 +224,11 @@ extension LiveE2EScenario {
                 }
                 currentBrain = provider
                 step = .switchBrain(provider)
+            case "waitForCompaction":
+                guard raw.waitForCompaction == true else {
+                    throw invalid("waitForCompaction must be true")
+                }
+                step = .waitForCompaction
             default:
                 guard raw.stop == true else {
                     throw invalid("stop must be true")
@@ -301,6 +312,7 @@ private struct RawScenario: Decodable {
     let prepNotes: String?
     let transcription: Transcription
     let voices: Voices
+    let historyCompactionTokenThreshold: Int?
     let steps: [RawStep]
 }
 
@@ -317,7 +329,7 @@ private struct RawOverlap: Decodable {
 
 /// Keeps unknown keys by name so validation can reject them with the step's index.
 private struct RawStep: Decodable {
-    static let primaryKeyNames = ["screen", "press", "say", "switchBrain", "stop"]
+    static let primaryKeyNames = ["screen", "press", "say", "switchBrain", "waitForCompaction", "stop"]
     static let modifierKeyNames = ["overlap", "whileAttemptRunning"]
 
     private struct Key: CodingKey {
@@ -334,6 +346,7 @@ private struct RawStep: Decodable {
     let press: String?
     let say: RawLine?
     let switchBrain: String?
+    let waitForCompaction: Bool?
     let stop: Bool?
     let overlap: RawOverlap?
     let whileAttemptRunning: Bool?
@@ -349,6 +362,7 @@ private struct RawStep: Decodable {
         press = try container.decodeIfPresent(String.self, forKey: Key("press"))
         say = try container.decodeIfPresent(RawLine.self, forKey: Key("say"))
         switchBrain = try container.decodeIfPresent(String.self, forKey: Key("switchBrain"))
+        waitForCompaction = try container.decodeIfPresent(Bool.self, forKey: Key("waitForCompaction"))
         stop = try container.decodeIfPresent(Bool.self, forKey: Key("stop"))
         overlap = try container.decodeIfPresent(RawOverlap.self, forKey: Key("overlap"))
         whileAttemptRunning = try container.decodeIfPresent(Bool.self, forKey: Key("whileAttemptRunning"))

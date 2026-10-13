@@ -1060,14 +1060,22 @@ rather than a per-turn screenshot.
   Haiku can wrap valid briefing JSON despite the prompt requesting bare JSON. An untagged fence or
   case-insensitive `json` tag is accepted, with LF or CRLF line endings. It strips only that envelope
   before validating the same briefing structure; surrounding prose, other language tags, incomplete
-  fences, and truncated JSON are rejected. The briefing must be under 250 whitespace-delimited words
-  and its normalized JSON under 750 estimated tokens, using the history estimator to bound non-ASCII
-  scripts and JSON overhead. The runner replaces history only with a structurally valid, bounded briefing;
-  malformed output or missing fields leaves the full history intact through the existing fail-soft path. This
+  fences, and truncated JSON are rejected. The prompt aims below the accepted-size limit to leave
+  room for the full briefing; the normalized JSON must fit the token budget defined by
+  `JarvisPrompts.HistorySummary`, using the history estimator to bound non-ASCII scripts and JSON
+  overhead. Word count adds no separate rejection. The provider's generation allowance is separate
+  from the accepted-summary budget, leaving room for completion and reasoning. The runner replaces
+  history only with a complete, structurally valid, bounded briefing; provider-marked incomplete
+  output, malformed output, or missing fields leaves the full history intact through the existing fail-soft path. This
   check establishes structure and size, not factual truth or semantic usefulness: a refusal in the
   expected JSON shape can still pass. Preserving evidence and distinguishing proposals from observed
   results remain summarizer responsibilities. Compaction uses one Core-owned workload
-  deadline across providers; a slow or failed summary also leaves full history for a later attempt. Server-side memory (a Conversations
+  deadline across providers; a slow or failed summary also leaves full history for a later attempt.
+  Compaction runs outside coaching and transcription. Stop and Quit cancel it immediately; Stop's
+  background drain waits only for cancellation cleanup. Debug diagnostics record the first request's
+  outcome and accepted before/after history estimates and summary size, without copying content
+  into Activity. [Scenario H](./live-e2e-tests.md#scenarios) checks the first real-provider replacement
+  and subsequent recall with a debug-only lower threshold. Server-side memory (a Conversations
   API conversation, or `previous_response_id` threading) is deliberately not used: it can only grow,
   so every screenshot and reply is re-billed as input on every later turn of a long session, and its
   single-writer lock turns one slow turn into minutes of `conversation_locked` silence. OpenAI API requests are sent `store:true`
