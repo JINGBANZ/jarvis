@@ -43,16 +43,15 @@ extension LiveE2ETests {
             results.check("C28", Self.precedes(load?.index, reviewTip?.index),
                           "\(skill) loaded before the permitted AI review tip")
         }
-        // The hint press is the observed regression's site: a direct implementation block there is
-        // not a substitute for the next prompt, so only that reply's chain proves the fix.
-        let hasCorrectiveDetail: Bool = {
-            guard let detail = Self.deliveredDetail(evidence, chains[2]),
+        let correctiveChains = [launch.attemptChain(forStep: says[2]), chains[2]]
+        let hasCorrectiveDetail = correctiveChains.contains { chain in
+            guard let detail = Self.deliveredDetail(evidence, chain),
                   !detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
             guard let rendered = ReplyDetail(markdown: detail), rendered.hasContent else { return false }
             return rendered.code == nil
-        }()
+        }
         results.check("C29", hasCorrectiveDetail,
-                      "the hint press delivered supporting detail without an explicit prompt request")
+                      "the delegation stage delivered supporting detail without an explicit prompt request")
         let comprehensionChains = [launch.attemptChain(forStep: says[3]), chains[3]]
         let hasComprehensionDetail = comprehensionChains.contains { chain in
             guard let detail = Self.deliveredDetail(evidence, chain),

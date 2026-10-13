@@ -164,7 +164,7 @@ layout in the Gate.
 | Scenario | Brain with `--provider scenario` | What it drives |
 |---|---|---|
 | A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
-| B | Claude Code, then Gemini API | Behavioral, system design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
+| B | Claude Code, then Gemini API | Behavioral, system design, customer-scenario design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
@@ -222,6 +222,10 @@ C33 checks those same delivered replies for prose immediately before the code bl
 nonempty inline code anchor. It fails when placement is absent, only in the hint, after the
 code, or missing its inline anchor. It does not require fixed model wording or judge whether the
 anchor names the correct editor location; the Gate's layout test covers rendering separately.
+
+C29 and C30 evaluate the automatic reply for their spoken stage together with the following hint
+press. Either can supply the stage's supporting detail; a detail from an earlier stage cannot satisfy
+the check. A subsequent hint can omit detail when the stage's reference is already available.
 
 Scenario D's AI proposal and test output are candidate reports carried through real transcription.
 Its JPEG remains the coding fixture, so its assertions do not establish Chrome panel detection or

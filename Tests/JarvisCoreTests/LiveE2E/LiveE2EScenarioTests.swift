@@ -128,9 +128,12 @@ struct LiveE2EScenarioTests {
             fixturesDirectory: fixtures)
 
         #expect(b.brain == .init(primary: .claudeSubscription, fallbacks: []))
-        #expect(b.capabilities == .init(
-            disabledTools: ["search_prep_notes"],
-            disabledSkills: ["behavioral", "system-design", "coding-with-ai"]))
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: Set(b.capabilities.disabledTools),
+            disabledSkills: Set(b.capabilities.disabledSkills),
+            prepSourcesConfigured: true, skills: SkillCatalog.bundled())
+        #expect(capabilities.skills.map(\.name) == ["coding"])
+        #expect(capabilities.deferredTools.isEmpty)
         #expect(b.steps.contains(.switchBrain(.gemini)))
     }
 
