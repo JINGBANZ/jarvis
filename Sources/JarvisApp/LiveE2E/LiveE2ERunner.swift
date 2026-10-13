@@ -176,7 +176,7 @@ final class LiveE2ERunner: BrainCompositionHost {
                     }
                 }
                 try await awaitAttempt(step: index, since: mark, onStart: onStart) {
-                    $0 == .turnEnd
+                    !$0.isManual
                 }
             case .switchBrain(let provider):
                 brain.preferences.route = BrainRoute(

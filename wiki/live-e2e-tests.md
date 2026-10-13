@@ -182,9 +182,11 @@ presses, and a design follow-up) is enough to keep that subscription covered.
   provider's PCM16 wire rate at
   run time and deletes the file right after decoding. `FixtureAudioSource` feeds both transcription
   streams as audio frames; nothing plays through the speakers.
-- **Waits on attempts, never timers.** A spoken step waits for the next `turn_end` attempt to finish,
+- **Waits on attempts, never timers.** A spoken step waits for the next automatic attempt to finish,
   a press for its manual attempt. Pacing follows the app's own state, which is what lets the
   chronology and in-flight cases land where they are meant to whatever the provider latency.
+  A quiet check can already include finalized speech when its later turn-end event is batched into
+  that attempt; the runner accepts that automatic attempt too.
 - **An injected screen.** A `screen` step hands a JPEG fixture to `FixtureScreenCapture`, and every
   later capture returns that image with its on-device OCR as current-viewport text evidence, the
   snapshot the window path produces for a non-browser window. Only coding needs one: an interviewer states behavioral and design questions aloud,

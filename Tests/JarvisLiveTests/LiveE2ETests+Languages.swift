@@ -13,15 +13,20 @@ extension LiveE2ETests {
             if let evidence = Self.requireEvidence(launch, &results) {
                 let transcript = evidence.attempts.flatMap(\.transcript)
                 for speaker in [Speaker.me, .them] {
-                    let texts = transcript.filter { $0.speaker == speaker.rawValue }.map(\.text).joined()
-                    results.check("L-\(speaker.rawValue)", [
-                        (texts.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) },
-                         "\(speaker.rawValue) retained Mandarin in the coach input"),
-                        (texts.lowercased().contains(speaker == .me ? "commit" : "actor"),
-                         "\(speaker.rawValue) retained the English technical term"),
-                        (TranscriptionBenchmark.unexpectedScriptCharacterCount(in: texts) == 0,
-                         "\(speaker.rawValue) had no unexpected script in the fixed bilingual fixture"),
-                    ])
+                    let activity = evidence.activity.filter {
+                        $0.kind == "heard" && $0.message.hasPrefix("🗣 heard (\(speaker.rawValue))")
+                    }.map(\.message).joined()
+                    let coaching = transcript.filter { $0.speaker == speaker.rawValue }.map(\.text).joined()
+                    for (boundary, texts) in [("Activity", activity), ("coaching", coaching)] {
+                        results.check("L-\(speaker.rawValue)-\(boundary)", [
+                            (texts.unicodeScalars.contains { (0x4E00...0x9FFF).contains($0.value) },
+                             "\(speaker.rawValue) retained Mandarin in \(boundary)"),
+                            (texts.lowercased().contains(speaker == .me ? "commit" : "actor"),
+                             "\(speaker.rawValue) retained the English technical term in \(boundary)"),
+                            (TranscriptionBenchmark.unexpectedScriptCharacterCount(in: texts) == 0,
+                             "\(speaker.rawValue) had no unexpected script in \(boundary)"),
+                        ])
+                    }
                 }
                 let marker = target.confirmation == .effectiveConfiguration
                     ? "effective transcription configuration verified"
