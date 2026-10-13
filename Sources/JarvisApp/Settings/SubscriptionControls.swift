@@ -5,6 +5,8 @@ import JarvisCore
 @MainActor
 final class SubscriptionControls: NSObject {
     static let providers: [BrainProvider] = [.codexSubscription, .claudeSubscription]
+    // A health update must not change the meaning of a click already in flight.
+    private static let actions: [SubscriptionConnectionState.Action] = [.retry, .signIn, .signOut, .cancelSignIn]
 
     private(set) var preferredHeight = SettingsStyle.cardHeaderHeight
         + CGFloat(SubscriptionControls.providers.count) * SettingsStyle.rowHeight
@@ -12,7 +14,6 @@ final class SubscriptionControls: NSObject {
     private struct Row {
         let view: SettingsRowView
         let buttons: [NSButton]
-        var actions: [SubscriptionConnectionState.Action] = []
     }
 
     private let subscriptionSignIns: SubscriptionSignIns
@@ -37,11 +38,11 @@ final class SubscriptionControls: NSObject {
         guard let content = card.contentView else { return card }
 
         for (index, provider) in Self.providers.enumerated() {
-            let buttons = (0..<2).map { slot in
-                let button = NSButton(title: "", target: self, action: #selector(buttonPressed(_:)))
+            let buttons = Self.actions.enumerated().map { slot, action in
+                let button = NSButton(title: action.title, target: self, action: #selector(buttonPressed(_:)))
                 button.bezelStyle = .rounded
-                button.tag = index * 2 + slot
-                let suffix = slot == 0 ? "action" : "sign-out"
+                button.tag = index * Self.actions.count + slot
+                let suffix = action.title.lowercased().replacingOccurrences(of: " ", with: "-")
                 button.identifier = NSUserInterfaceItemIdentifier("\(provider.rawValue)-\(suffix)")
                 return button
             }
@@ -95,12 +96,12 @@ final class SubscriptionControls: NSObject {
     }
 
     @objc private func buttonPressed(_ sender: NSButton) {
-        let index = sender.tag / 2
-        let slot = sender.tag % 2
+        let index = sender.tag / Self.actions.count
+        let slot = sender.tag % Self.actions.count
         guard Self.providers.indices.contains(index) else { return }
         let provider = Self.providers[index]
-        guard let row = rows[provider], row.actions.indices.contains(slot) else { return }
-        subscriptionSignIns.perform(row.actions[slot], for: provider, openURL: { url in
+        guard let row = rows[provider], row.buttons.indices.contains(slot), row.buttons[slot] === sender else { return }
+        subscriptionSignIns.perform(Self.actions[slot], for: provider, openURL: { url in
             NSWorkspace.shared.open(url) // ghost-mode-allowed: the user pressed Sign in inside Settings
         }, willSignOut: { [weak self] provider in
             self?.onWillSignOut?(provider)
@@ -111,11 +112,12 @@ final class SubscriptionControls: NSObject {
         for provider in Self.providers {
             guard let row = rows[provider] else { continue }
             let state = subscriptionSignIns.connection(for: provider)
-            rows[provider]?.actions = state.buttons.map(\.action)
-            for (slot, button) in row.buttons.enumerated() {
-                button.isHidden = !state.buttons.indices.contains(slot)
-                guard !button.isHidden else { continue }
-                let presentation = state.buttons[slot]
+            for (action, button) in zip(Self.actions, row.buttons) {
+                guard let presentation = state.buttons.first(where: { $0.action == action }) else {
+                    button.isHidden = true
+                    continue
+                }
+                button.isHidden = false
                 button.title = presentation.title
                 button.isEnabled = presentation.isEnabled
                 button.setAccessibilityLabel("\(presentation.title) \(provider.displayName)")
