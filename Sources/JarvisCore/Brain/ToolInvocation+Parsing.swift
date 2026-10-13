@@ -7,6 +7,7 @@ public extension ToolInvocation {
         case .speak: speakToolName
         case .staySilent: staySilentTool.name
         case .searchPrepNotes: searchPrepNotesTool.name
+        case .readPrepNote: readPrepNoteTool.name
         case .loadTool: CoachCapabilities.loadToolName
         case .loadSkill: CoachCapabilities.loadSkillName
         }
@@ -15,7 +16,7 @@ public extension ToolInvocation {
     var callID: String {
         switch self {
         case .captureScreen(let id), .staySilent(let id): id
-        case .speak(let id, _, _): id
+        case .speak(let id, _, _), .readPrepNote(let id, _, _): id
         case .searchPrepNotes(let id, _), .loadTool(let id, _), .loadSkill(let id, _): id
         }
     }
@@ -45,6 +46,15 @@ public extension ToolInvocation {
             let query = (object?["query"] as? String ?? "").trimmingCharacters(in: .whitespaces)
             guard !query.isEmpty else { return nil }
             return .searchPrepNotes(callId: callId, query: query)
+        case readPrepNoteTool.name:
+            struct Arguments: Decodable {
+                let document_id: String
+                let offset: Int
+            }
+            guard let arguments = try? JSONDecoder().decode(Arguments.self, from: Data(argumentsJSON.utf8)),
+                  !arguments.document_id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  arguments.offset >= 0 else { return nil }
+            return .readPrepNote(callId: callId, documentID: arguments.document_id, offset: arguments.offset)
         case CoachCapabilities.loadToolName, CoachCapabilities.loadSkillName:
             let object = (try? JSONSerialization.jsonObject(
                 with: Data(argumentsJSON.utf8))) as? [String: Any]

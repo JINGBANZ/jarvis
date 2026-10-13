@@ -17,6 +17,31 @@ import JarvisCore
         }
     }
 
+    @Test func metadataPrefixSurvivesChangingHistoryAndToolContinuations() throws {
+        let catalog = #"Untrusted filenames: [{"documentID":"stable-id","sourceDisplayName":"notes.md"}]"#
+        let call = RawToolCall(id: "read", name: "read_prep_note", argumentsJSON: "{}")
+        let tails: [[ChatMessage]] = [
+            [.user("first request")],
+            [.user("first request"), .assistantToolCalls([call]),
+             ChatMessage(role: .tool, text: "page text", toolCallId: "read")],
+            [.user("first request"), ChatMessage(role: .assistant, text: "previous answer"),
+             .user("next request")],
+        ]
+        var encodedPrefixes: [Data] = []
+        for tail in tails {
+            let payload = try body([.system("Coaching instructions"), .user(catalog)] + tail)
+            let input = try #require(payload["input"] as? [[String: Any]])
+            let content = try #require(input.first?["content"] as? [[String: Any]])
+            let prefix = try #require(content.first)
+            #expect(payload["instructions"] as? String == "Coaching instructions")
+            #expect(prefix["text"] as? String == catalog)
+            encodedPrefixes.append(try JSONSerialization.data(withJSONObject: prefix, options: [.sortedKeys]))
+            let text = String(decoding: try JSONSerialization.data(withJSONObject: input), as: UTF8.self)
+            #expect(text.components(separatedBy: "stable-id").count == 2)
+        }
+        #expect(Set(encodedPrefixes).count == 1)
+    }
+
     @Test func assistantMessagesReplayRawItemsOrCallsOrText() throws {
         let call = RawToolCall(id: "c1", name: "capture_screen", argumentsJSON: "{}")
         let raw = try body([.rawItems(
