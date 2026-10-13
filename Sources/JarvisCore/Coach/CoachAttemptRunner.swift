@@ -83,13 +83,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
         /// A retry of a failed press is automatic, so it clears this unless another press joins.
         var bypassesTranscriptionSettlement: Bool
         var wake: CoachingAttemptAuditEvent.Wake = .trigger
-        /// Carried into retries, so each tool gets one replaceable slot: a second search replaces
-        /// the first's stale result. Plain user context only, never reasoning, tool ids, or call
-        /// linkage.
+        /// Retry context excludes reasoning and tool-call linkage. Searches replace stale hits;
+        /// document pages accumulate because a later page cannot replace earlier document text.
         var screenObservation: [ChatMessage] = []
         var prepNotesObservation: ChatMessage?
+        var prepDocumentPages: [String] = []
         var observations: [ChatMessage] {
-            screenObservation + (prepNotesObservation.map { [$0] } ?? [])
+            screenObservation + (prepNotesObservation.map { [$0] } ?? []) + prepDocumentPages.map(ChatMessage.user)
         }
         var preparedManualReason: TriggerReason?
         /// Speech finalized during inference lies past this boundary, so a failure cannot discard
@@ -237,7 +237,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
         let systemPrompt = JarvisPrompts.Coach.system(capabilities: capabilities)
-        let historyBase: [ChatMessage] = [.system(systemPrompt)] + history.snapshot()
+        let prepCatalog = capabilities.tool(named: readPrepNoteTool.name) == nil ? nil
+            : JarvisPrompts.Coach.prepDocumentCatalog(attempt.prepMaterial?.catalog ?? [])
+        let historyBase: [ChatMessage] = [.system(systemPrompt)]
+            + (prepCatalog.map { [.user($0)] } ?? []) + history.snapshot()
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
@@ -297,9 +300,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
         // continuations keep their cached prefix.
         let sessionState = capabilities.sessionState(loaded: alreadyLoaded.union(loadedThisAttempt))
         let sessionStateIndex = turnMessages.count
-        func request() -> [ChatMessage] {
+        func request(finalResponse: Bool = false) -> [ChatMessage] {
             var messages = turnMessages
             if let sessionState { messages.insert(.user(sessionState), at: sessionStateIndex) }
+            if finalResponse {
+                messages.append(.user(JarvisPrompts.Coach.finalAnswerCycle(
+                    prepEnabled: capabilities.tool(named: readPrepNoteTool.name) != nil,
+                    allowsSilence: !reason.isManual)))
+            }
             return historyBase + messages
         }
 
@@ -367,11 +375,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 // A press must end in a hint and already sent the screen, so it never gets
                 // stay_silent or capture_screen.
                 let toolChoice: ToolChoice
-                if reason.isManual {
+                if iterations == maxToolIterations {
+                    toolChoice = reason.isManual ? .force(speakToolName)
+                        : .allowed([speakToolName, staySilentTool.name])
+                } else if reason.isManual {
                     let permitted = capabilities.callableNames(loaded: loaded).filter {
                         $0 != staySilentTool.name && $0 != captureScreenTool.name
                     }
-                    toolChoice = iterations == maxToolIterations || permitted == [speakToolName]
+                    toolChoice = permitted == [speakToolName]
                         ? .force(speakToolName)
                         : .allowed(permitted)
                 } else {
@@ -388,7 +399,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         sequence: requestSequence)
                     response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
-                            messages: request(),
+                            messages: request(finalResponse: iterations == maxToolIterations),
                             tools: tools,
                             toolChoice: toolChoice)
                     }
@@ -513,11 +524,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         call = parsed
                     } else if atCap, let spoken = Self.spokenProse(
                         response.outputText, permitted: permitted) {
-                        jlog("⚠️ \(called) isn't allowed on a shortcut's last response — "
+                        jlog("⚠️ \(called) isn't allowed on the last response — "
                              + "speaking the reply's text")
                         call = spoken
                     } else if atCap {
-                        jlog("⚠️ \(called) isn't allowed on a shortcut's last response — "
+                        jlog("⚠️ \(called) isn't allowed on the last response — "
                              + "scheduling fresh attempt")
                         await withdraw()
                         return .failed(
@@ -661,6 +672,27 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         toolCallId: callID,
                         resultText: JarvisPrompts.Coach.prepNotesResult(results),
                         newPhase: .searchPrepNotesContinuation)
+
+                case .readPrepNote(let callID, let documentID, let offset):
+                    if Task.isCancelled { return .cancelled }
+                    let resultText: String
+                    if let prepMaterial = attempt.prepMaterial {
+                        if let page = prepMaterial.read(documentID: documentID, offset: offset) {
+                            resultText = JarvisPrompts.Coach.prepNotePage(page, offset: offset)
+                            if !work.prepDocumentPages.contains(resultText) {
+                                work.prepDocumentPages.append(resultText)
+                            }
+                            activity?.record(.prepNoteRead(sourceDisplayName: page.sourceDisplayName))
+                            jlog("📎 read prep document at offset \(offset) — \(page.text.count) characters")
+                        } else {
+                            resultText = JarvisPrompts.Coach.prepNoteReadFailed
+                        }
+                    } else {
+                        resultText = JarvisPrompts.Coach.prepNotesUnavailable
+                        activity?.record(.prepNotesUnavailable)
+                    }
+                    appendToolContinuation(toolCallId: callID, resultText: resultText,
+                                           newPhase: .readPrepNoteContinuation)
 
                 case .loadTool(let callID, let name):
                     let resultText: String

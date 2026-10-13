@@ -447,7 +447,7 @@ private func speakResponseBody(arguments: String) -> Data {
         let callTool = try #require((body["tools"] as? [[String: Any]])?.first { $0["name"] as? String == "call_tool" })
         #expect(callTool["strict"] as? Bool == true)
         let text = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
-        #expect(text.contains("\"enum\":[\"search_prep_notes\"]"))
+        #expect(text.contains("\"enum\":[\"search_prep_notes\",\"read_prep_note\"]"))
     }
 
     @Test func encodesTheSkillLoaderWithItsCatalogEnum() async throws {

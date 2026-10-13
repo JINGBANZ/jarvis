@@ -145,7 +145,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 }
             })
         let connectionsSection = ConnectionsSection(
-            supervisor: supervisor,
             keyStore: secretFile,
             signIns: signIns,
             onKeySaved: { [weak self] credential, key in

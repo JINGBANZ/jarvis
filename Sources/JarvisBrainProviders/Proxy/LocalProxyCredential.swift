@@ -34,7 +34,7 @@ struct LocalProxyCredential: Decodable, Sendable {
     func unavailability(for provider: BrainProvider) -> ProviderFailure? {
         if requiresSignIn {
             return failure(provider, category: .authentication, disposition: .permanent,
-                           code: "unauthorized", message: "Your session has ended; sign in again in Settings → Connections.")
+                           code: "unauthorized", message: "Your session has ended.")
         }
         if disabled == true || status == "disabled" {
             return failure(provider, category: .configuration, disposition: .permanent,
@@ -42,16 +42,18 @@ struct LocalProxyCredential: Decodable, Sendable {
         }
         guard status != nil, disabled != nil, unavailable != nil else {
             return failure(provider, category: .unavailable,
-                           message: "The sign-in service couldn't determine credential health. Try again.")
+                           message: "The sign-in service couldn't determine credential health.")
         }
         if status == "active", unavailable == false { return nil }
         if let cooldown = cooldowns?.first(where: { $0.remaining_seconds > 0 && $0.scope == "credential" }) {
-            return failure(provider, category: ["quota", "credential_quota"].contains(cooldown.reason) ? .quota : .unavailable,
-                           message: "The subscription is temporarily unavailable. Try again after its cooldown.")
+            let quota = ["quota", "credential_quota"].contains(cooldown.reason)
+            return failure(provider, category: quota ? .quota : .unavailable,
+                           message: quota ? "The subscription has reached its usage limit and is cooling down."
+                               : "The subscription is temporarily unavailable during its cooldown.")
         }
         return failure(provider, category: .unavailable,
-                       message: needsRefresh ? "The saved access token has expired; refresh hasn't succeeded. Try again."
-                           : "The subscription is temporarily unavailable. Try again.")
+                       message: needsRefresh ? "The saved access token has expired; refresh hasn't succeeded."
+                           : "The subscription is temporarily unavailable.")
     }
 
     private func failure(

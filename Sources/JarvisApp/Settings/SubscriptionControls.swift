@@ -5,28 +5,25 @@ import JarvisCore
 @MainActor
 final class SubscriptionControls: NSObject {
     static let providers: [BrainProvider] = [.codexSubscription, .claudeSubscription]
+    // A health update must not change the meaning of a click already in flight.
+    private static let actions: [SubscriptionConnectionState.Action] = [.retry, .signIn, .signOut, .cancelSignIn]
 
     private(set) var preferredHeight = SettingsStyle.cardHeaderHeight
         + CGFloat(SubscriptionControls.providers.count) * SettingsStyle.rowHeight
 
     private struct Row {
         let view: SettingsRowView
-        let button: NSButton
+        let buttons: [NSButton]
     }
 
-    private let supervisor: LocalProxySupervisor
     private let subscriptionSignIns: SubscriptionSignIns
     private var rows: [BrainProvider: Row] = [:]
     private var card: SettingsCardView?
     private var onHeightChanged: ((CGFloat) -> Void)?
-    private var readiness: LocalProxySupervisor.Readiness? { subscriptionSignIns.readiness }
-    private var signIns: [BrainProvider: Task<Void, Never>] = [:]
-    private var actionFailures: [BrainProvider: String] = [:]
     var onStatusChanged: (() -> Void)?
     var onWillSignOut: ((BrainProvider) -> Void)?
 
-    init(supervisor: LocalProxySupervisor, signIns: SubscriptionSignIns) {
-        self.supervisor = supervisor
+    init(signIns: SubscriptionSignIns) {
         self.subscriptionSignIns = signIns
         super.init()
         signIns.observe { [weak self] in self?.render() }
@@ -41,28 +38,34 @@ final class SubscriptionControls: NSObject {
         guard let content = card.contentView else { return card }
 
         for (index, provider) in Self.providers.enumerated() {
-            let button = NSButton(title: "Sign in", target: self, action: #selector(buttonPressed(_:)))
-            button.bezelStyle = .rounded
-            button.tag = index
-            button.identifier = NSUserInterfaceItemIdentifier("\(provider.rawValue)-action")
-
+            let buttons = Self.actions.enumerated().map { slot, action in
+                let button = NSButton(title: action.title, target: self, action: #selector(buttonPressed(_:)))
+                button.bezelStyle = .rounded
+                button.tag = index * Self.actions.count + slot
+                let suffix = action.title.lowercased().replacingOccurrences(of: " ", with: "-")
+                button.identifier = NSUserInterfaceItemIdentifier("\(provider.rawValue)-\(suffix)")
+                return button
+            }
+            let actions = NSStackView(views: buttons)
+            actions.orientation = .horizontal
+            actions.spacing = 8
+            actions.translatesAutoresizingMaskIntoConstraints = false
             let controls = NSView()
-            button.translatesAutoresizingMaskIntoConstraints = false
-            controls.addSubview(button)
+            controls.addSubview(actions)
             NSLayoutConstraint.activate([
-                button.leadingAnchor.constraint(greaterThanOrEqualTo: controls.leadingAnchor),
-                button.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
-                button.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
+                actions.leadingAnchor.constraint(greaterThanOrEqualTo: controls.leadingAnchor),
+                actions.trailingAnchor.constraint(equalTo: controls.trailingAnchor),
+                actions.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
             ])
             let row = SettingsRowView(
                 title: provider.displayName,
                 detail: "Checking…",
                 controlView: controls,
-                controlSize: NSSize(width: 132, height: 32),
+                controlSize: NSSize(width: 200, height: 32),
                 wrapsDetail: true,
                 showsSeparator: index > 0)
             content.addSubview(row)
-            rows[provider] = Row(view: row, button: button)
+            rows[provider] = Row(view: row, buttons: buttons)
         }
         card.onLayout = { [weak self] in self?.layout() }
         render()
@@ -90,138 +93,44 @@ final class SubscriptionControls: NSObject {
     func windowWillClose() {
         card = nil
         rows.removeAll()
-        // Sign-ins outlive the window on purpose: cancelling one signals the login holding the
-        // OAuth callback port, so the browser's redirect would land on nothing.
     }
 
     @objc private func buttonPressed(_ sender: NSButton) {
-        guard Self.providers.indices.contains(sender.tag) else { return }
-        let provider = Self.providers[sender.tag]
-        if let signIn = signIns[provider] {
-            signIn.cancel()
-            return
-        }
-        switch readiness {
-        case .unavailable, .superseded:
-            subscriptionSignIns.retry(provider)
-        case .ready(_, let signedIn, _) where signedIn.contains(provider):
-            signOut(provider)
-        case .ready where supervisor.accountFiles(for: provider).count > 1:
-            signOut(provider)
-        case .ready where !supervisor.accountFiles(for: provider).isEmpty
-            && readiness?.unavailability(for: provider)?.disposition == .temporary:
-            subscriptionSignIns.retry(provider)
-        case .ready, nil:
-            signIn(provider)
-        }
-    }
-
-    private func signIn(_ provider: BrainProvider) {
-        actionFailures[provider] = nil
-        signIns[provider] = Task { [weak self, supervisor] in
-            var failure: String?
-            if let signIn = await supervisor.makeSignIn() {
-                for await event in signIn.run(provider) {
-                    switch event {
-                    case .openURL(let url):
-                        NSWorkspace.shared.open(url) // ghost-mode-allowed: the user pressed Sign in inside Settings
-                    case .finished:
-                        break
-                    case .failed(let message):
-                        failure = message
-                    }
-                }
-            } else {
-                failure = "the sign-in service isn't running"
-            }
-            await supervisor.credentialsDidChange()
-            guard let self else { return }
-            signIns[provider] = nil
-            if let failure, !Task.isCancelled {
-                actionFailures[provider] = "Sign-in failed: \(ProviderMessageRedaction.redact(failure))"
-            }
-            subscriptionSignIns.invalidate()
-            subscriptionSignIns.refresh(checkingEmptyAccounts: true)
-        }
-        render()
-    }
-
-    private func signOut(_ provider: BrainProvider) {
-        onWillSignOut?(provider)
-        Task { await performSignOut(provider) }
-    }
-
-    private func performSignOut(_ provider: BrainProvider) async {
-        actionFailures[provider] = nil
-        do {
-            try await supervisor.signOut(provider)
-        } catch {
-            // Redacted: the message quotes the credential's path, which contains the account's
-            // email.
-            actionFailures[provider] = "Sign-out failed: "
-                + ProviderMessageRedaction.redact(error.localizedDescription)
-        }
-        subscriptionSignIns.invalidate()
-        subscriptionSignIns.refresh(checkingEmptyAccounts: true)
+        let index = sender.tag / Self.actions.count
+        let slot = sender.tag % Self.actions.count
+        guard Self.providers.indices.contains(index) else { return }
+        let provider = Self.providers[index]
+        guard let row = rows[provider], row.buttons.indices.contains(slot), row.buttons[slot] === sender else { return }
+        subscriptionSignIns.perform(Self.actions[slot], for: provider, openURL: { url in
+            NSWorkspace.shared.open(url) // ghost-mode-allowed: the user pressed Sign in inside Settings
+        }, willSignOut: { [weak self] provider in
+            self?.onWillSignOut?(provider)
+        })
     }
 
     private func render() {
         for provider in Self.providers {
             guard let row = rows[provider] else { continue }
-            let presentation = presentation(for: provider)
-            row.button.title = presentation.button
-            row.button.isEnabled = presentation.buttonEnabled
-            row.button.setAccessibilityLabel("\(presentation.button) \(provider.displayName)")
-            if let failure = actionFailures[provider] {
-                row.view.setDetail(failure, color: SettingsTheme.amber)
-            } else {
-                row.view.setDetail(presentation.status, color: presentation.color)
+            let state = subscriptionSignIns.connection(for: provider)
+            for (action, button) in zip(Self.actions, row.buttons) {
+                guard let presentation = state.buttons.first(where: { $0.action == action }) else {
+                    button.isHidden = true
+                    continue
+                }
+                button.isHidden = false
+                button.title = presentation.title
+                button.isEnabled = presentation.isEnabled
+                button.setAccessibilityLabel("\(presentation.title) \(provider.displayName)")
             }
+            let color: NSColor = switch state.tone {
+            case .neutral: SettingsTheme.mutedText
+            case .ready: SettingsTheme.teal
+            case .attention: SettingsTheme.amber
+            }
+            row.view.setDetail(state.detail, color: color)
         }
         layout()
         card?.needsLayout = true
         onStatusChanged?()
-    }
-
-    private func presentation(for provider: BrainProvider) -> (
-        status: String, color: NSColor, button: String, buttonEnabled: Bool
-    ) {
-        if signIns[provider] != nil {
-            return ("Signing in. Finish in your browser.", SettingsTheme.mutedText, "Cancel", true)
-        }
-        if subscriptionSignIns.retrying == provider {
-            return (readiness?.unavailability(for: provider)?.activitySentence ?? "Checking…",
-                    SettingsTheme.amber, "Trying again…", false)
-        }
-        guard let readiness else {
-            return ("Checking…", SettingsTheme.mutedText, "Sign in", false)
-        }
-        let account = supervisor.accountFiles(for: provider).first
-        let who = account.map { file in
-            [file.email, file.plan].compactMap { $0 }.joined(separator: " · ")
-        }.flatMap { $0.isEmpty ? nil : $0 }
-        switch readiness {
-        case .superseded:
-            return ("Checking…", SettingsTheme.mutedText, "Try again", subscriptionSignIns.retrying == nil)
-        case .unavailable(let reason):
-            return ("Not running. The sign-in service \(reason)", SettingsTheme.amber, "Try again", subscriptionSignIns.retrying == nil)
-        case .ready(_, let signedIn, _) where signedIn.contains(provider) && account != nil:
-            return (["Signed in", who].compactMap { $0 }.joined(separator: " · "),
-                    SettingsTheme.teal, "Sign out", true)
-        case .ready where account != nil:
-            let failure = readiness.unavailability(for: provider)
-            let needsRetry = supervisor.accountFiles(for: provider).count == 1 && failure?.disposition == .temporary
-            return (failure?.activitySentence ?? "Credential health is unavailable.", SettingsTheme.amber,
-                    supervisor.accountFiles(for: provider).count > 1 ? "Sign out"
-                        : needsRetry ? "Try again" : "Sign in", !needsRetry || subscriptionSignIns.retrying == nil)
-        case .ready:
-            return ("Signed out. \(Self.accountHint(provider)).", SettingsTheme.mutedText, "Sign in", true)
-        }
-    }
-
-    private static func accountHint(_ provider: BrainProvider) -> String {
-        provider == .codexSubscription
-            ? "Signs in with your ChatGPT account"
-            : "Signs in with your Claude account"
     }
 }
