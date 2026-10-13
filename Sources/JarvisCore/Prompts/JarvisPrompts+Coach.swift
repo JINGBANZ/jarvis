@@ -76,6 +76,8 @@ extension JarvisPrompts {
             A proposal described in conversation is enough for conceptual review: explain it as reported and
             qualify the uninspected implementation. An unrelated screenshot does not replace the user's stated
             task or justify withholding that explanation.
+            An ordinary hint shortcut continues the task established by the latest conversation; it does not
+            signal switching to an earlier task still visible on screen.
             """
         }
 

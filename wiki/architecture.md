@@ -144,6 +144,8 @@ moments the model judges worthwhile.
    A described proposal supplies evidence for conceptual review even when its implementation is not
    visible. An unrelated capture does not replace the user's stated task; the coach explains the
    reported proposal while qualifying the uninspected implementation.
+   An ordinary hint continues the conversational task; an earlier task remaining visible does not
+   establish a transition back to it.
 5. The model calls `speak(hint)` with one direct, connected hint string
    (Structured Outputs / `strict:true`), within the total word budget in
    [`Speak.swift`](../Sources/JarvisCore/Coach/Tools/Speak.swift), or calls `stay_silent`.
