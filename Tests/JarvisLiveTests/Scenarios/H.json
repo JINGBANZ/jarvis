@@ -6,7 +6,7 @@
     "disabledTools": ["search_prep_notes", "read_prep_note"],
     "disabledSkills": ["behavioral", "coding", "coding-with-ai", "system-design", "customer-scenario-design"]
   },
-  "historyCompactionTokenThreshold": 1200,
+  "historyCompactionTokenThreshold": 1000,
   "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
   "voices": { "them": "Samantha", "me": "Daniel" },
   "steps": [

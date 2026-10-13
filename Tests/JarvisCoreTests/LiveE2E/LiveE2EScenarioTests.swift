@@ -202,7 +202,7 @@ struct LiveE2EScenarioTests {
             from: Self.liveTests.appendingPathComponent("Scenarios/H.json"),
             fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true))
         #expect(scenario.brain.primary == .codexSubscription)
-        #expect(scenario.historyCompactionTokenThreshold == 1200)
+        #expect(scenario.historyCompactionTokenThreshold == 1000)
         let waitIndex = try #require(scenario.steps.firstIndex(of: .waitForCompaction))
         guard case .say = scenario.steps[waitIndex + 1] else {
             Issue.record("The recall question must follow accepted compaction")
