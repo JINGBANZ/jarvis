@@ -77,17 +77,18 @@ import Testing
         #expect(JarvisPrompts.HistorySummary.validatedSummary("```" + tag + "\n" + json + "\n```") == nil)
     }
 
-    @Test(arguments: [249, 250, 251])
-    func briefingWordLimitIncludesEveryField(_ wordCount: Int) throws {
+    @Test(arguments: [249, 250, 251, 300])
+    func shortWordsAboveFormerLimitAreAccepted(_ wordCount: Int) throws {
         let fields: [String: Any] = [
             "context": "Window review",
             "decisions": ["Keep evidence"],
             "coaching": ["Explain invariant"],
             "openQuestions": ["Tests pending"],
-            "verification": [Array(repeating: "observed", count: wordCount - 8).joined(separator: " ")]
+            "verification": [Array(repeating: "a", count: wordCount - 8).joined(separator: " ")]
         ]
         let json = String(decoding: try JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
-        #expect((JarvisPrompts.HistorySummary.validatedSummary(json) != nil) == (wordCount < 250))
+        #expect(CoachHistory.estimatedTextTokens(json) < 750)
+        #expect(JarvisPrompts.HistorySummary.validatedSummary(json) != nil)
     }
 
     @Test(arguments: ["中", "あ", "한"], [749, 750, 751])

@@ -55,6 +55,21 @@ extension JarvisPrompts {
             anchors. Explain the user impact and confidence. If the available evidence supports no material \
             finding, say that plainly.
 
+            Assess user-visible explanations as well as implementation correctness: a correct result or \
+            code block does not establish that the accompanying explanation is accurate.
+
+            For each material failure, trace the source path back to the preceding decision or check that \
+            allowed the operation. Explain what it checks, what the operation requires, and whether the \
+            check establishes that condition. Separate a source-confirmed weakness from evidence that it \
+            caused this occurrence; do not assume every failure was preventable. Source code alone does \
+            not establish which runtime branch ran or what status the user saw. Keep unrecorded decisions \
+            and UI states explicit as evidence gaps. Preserve the precise recorded failure identity rather \
+            than merging causes with different recovery behavior into a broader label.
+
+            When timing is material, quantify the supported intervals and distinguish provider-call time \
+            from the overall wait for a user-visible result. State the timing anchors and any gaps; a \
+            measured delay alone does not establish a defect without an applicable requirement.
+
             Write a markdown report with exactly these sections:
 
             ## Summary
@@ -71,7 +86,10 @@ extension JarvisPrompts {
             ## Recommendations
             Give at most three concrete actions tied to findings, ordered by expected impact. Do not recommend \
             a code change for an unsupported hypothesis, and name behavior that a change must preserve when \
-            that constraint matters. Write `None.` when no action is justified.
+            that constraint matters. Distinguish an immediate workaround from a source-supported product \
+            correction. For each action, give a concrete trigger or input and the expected observable \
+            outcome that would verify it; when the mechanism is unverified, recommend the investigation \
+            needed to distinguish the possible causes. Write `None.` when no action is justified.
 
             Output only the markdown report. The harness saves it as `\(reportFilename)` and adds its own \
             provenance stamp.

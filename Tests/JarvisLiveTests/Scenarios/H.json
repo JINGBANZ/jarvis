@@ -1,0 +1,22 @@
+{
+  "id": "H",
+  "audio": "fixture",
+  "brain": { "primary": "codex-subscription", "fallbacks": [] },
+  "capabilities": {
+    "disabledTools": ["search_prep_notes", "read_prep_note"],
+    "disabledSkills": ["behavioral", "coding", "coding-with-ai", "system-design", "customer-scenario-design"]
+  },
+  "historyCompactionTokenThreshold": 1000,
+  "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
+  "voices": { "them": "Samantha", "me": "Daniel" },
+  "steps": [
+    { "say": { "speaker": "me", "text": "Jarvis, we are reviewing Project Cedar, a stream processor for customer events. We agreed to use Kafka as the queue. The rolling window includes an event exactly ten seconds old, so the cutoff is inclusive. We have not run any tests; the code is only a proposal. Keep these decisions and that evidence limit in mind. Earlier we considered a database poller, but retired it after checking that it adds delay and repeated reads. We also retired a separate queue for each customer because the operational cost was too high. Those alternatives are settled. Please give me a short reminder of the agreed design and the next verification step." } },
+    { "say": { "speaker": "me", "text": "The naming discussion is now resolved. The first sketch called the worker an event collector, the next sketch called it a stream coordinator, and the last sketch called it a window processor. We chose window processor because it describes the operation directly. These are names for the same component, not three services. We also settled the diagram colors: blue means ingestion, green means processing, and gray means storage. The colors are only presentation choices, not different deployment regions or security levels. Jarvis, help me explain this settled part briefly without reopening the alternatives or claiming we tested anything." } },
+    { "say": { "speaker": "me", "text": "We finished reviewing the sample dashboard layout. The first mockup put the latest event count on the left, the second put it at the top, and the accepted mockup puts it above the timeline. The time axis reads from left to right, and the page shows one customer at a time. We removed the decorative animation because it made the timeline harder to read. None of those mockups changes the backend behavior or proves that the processor is correct. This UI discussion is finished and not the current task. Jarvis, suggest one concise transition back to reviewing the processor, keeping the verification status accurate." } },
+    { "say": { "speaker": "me", "text": "The documentation outline is settled too. We tried organizing the notes by meeting date, then by engineer, then by component. We chose component sections so a reader can find the ingestion path, the window calculation, and the output path in one place. The old meeting notes remain an archive and are not new requirements. We removed repeated paragraphs about the dashboard colors and the worker names. No benchmark numbers or execution results have been added to the document. Jarvis, give me a brief way to describe this cleanup while keeping the distinction between a written proposal and a verified implementation." } },
+    { "say": { "speaker": "me", "text": "We have also finished the example-selection discussion. The draft had a shopping example, a sensor example, and a payment example, but we chose generic customer events to avoid unrelated domain assumptions. The example identifiers are fictional, the timestamps are synthetic, and the arrows only show the intended flow. We removed the claim that the diagram proves ordering or delivery guarantees. Those still need evidence from an implementation. The visual and naming topics are all resolved. Jarvis, give me one useful next step for reviewing the actual boundary behavior rather than spending more time on the presentation." } },
+    { "waitForCompaction": true },
+    { "say": { "speaker": "me", "text": "Jarvis, remind me of our chosen queue and exact boundary rule from the beginning. What have we actually verified? Separate the agreed decisions from the test evidence." } },
+    { "stop": true }
+  ]
+}
