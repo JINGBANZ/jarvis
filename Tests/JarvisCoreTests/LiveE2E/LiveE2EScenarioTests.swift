@@ -11,7 +11,7 @@ struct LiveE2EScenarioTests {
 
     @Test(
         "every shipped scenario decodes and validates",
-        arguments: ["A", "B", "C", "D", "R", "F01-system", "F01-microphone", "F02"])
+        arguments: ["A", "B", "C", "D", "H", "P", "R", "F01-system", "F01-microphone", "F02"])
     func shippedScenarioValidates(id: String) throws {
         let url = Self.liveTests.appendingPathComponent("Scenarios/\(id).json")
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
@@ -192,7 +192,22 @@ struct LiveE2EScenarioTests {
             Data(Self.scenario().utf8), fixturesDirectory: fixtures)
 
         #expect(scenario.prepNotes == nil)
+        #expect(scenario.historyCompactionTokenThreshold == nil)
         #expect(scenario.steps == [.stop])
+    }
+
+    @Test("the compaction scenario lowers the threshold and waits before testing recall")
+    func compactionScenarioWaitsBeforeRecall() throws {
+        let scenario = try LiveE2EScenario.load(
+            from: Self.liveTests.appendingPathComponent("Scenarios/H.json"),
+            fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true))
+        #expect(scenario.brain.primary == .codexSubscription)
+        #expect(scenario.historyCompactionTokenThreshold == 1200)
+        let waitIndex = try #require(scenario.steps.firstIndex(of: .waitForCompaction))
+        guard case .say = scenario.steps[waitIndex + 1] else {
+            Issue.record("The recall question must follow accepted compaction")
+            return
+        }
     }
 
     struct RejectedCase: Sendable, CustomTestStringConvertible {
@@ -209,6 +224,15 @@ struct LiveE2EScenarioTests {
     private static let overlap = #"{ "speaker": "me", "text": "Sure.", "afterSeconds": 1.0 }"#
 
     static let rejectedCases: [RejectedCase] = [
+        RejectedCase(
+            name: "a non-positive compaction threshold",
+            json: scenario().replacingOccurrences(of: "\"prepNotes\": null",
+                with: "\"historyCompactionTokenThreshold\": 0, \"prepNotes\": null"),
+            fragment: "historyCompactionTokenThreshold must be positive"),
+        RejectedCase(
+            name: "a false compaction wait",
+            json: scenario(steps: #"[{ "waitForCompaction": false }, \#(stop)]"#),
+            fragment: "steps[0]: waitForCompaction must be true"),
         RejectedCase(
             name: "an unknown step key",
             json: scenario(steps: #"[{ "shout": "hi" }, \#(stop)]"#),

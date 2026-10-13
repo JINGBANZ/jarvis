@@ -145,6 +145,30 @@ import Testing
         #expect(prefix!.count < h.snapshot().count)
     }
 
+    @Test func firstBoundedBriefingReplacesOlderTurnsAndShrinksHistory() throws {
+        let history = CoachHistory()
+        history.commit([
+            .user("Use Kafka with an inclusive cutoff; tests have not run. "
+                  + String(repeating: "Resolved discussion about the old approach. ", count: 200)),
+            .user("The old approach is retired."),
+            .user("The current question is how to test the boundary.")
+        ])
+        let beforeTokens = history.estimatedTokens
+        let prefix = try #require(history.compactionPrefix())
+        let output = "{\"context\":\"Queue review\",\"decisions\":[\"Kafka; inclusive cutoff\"],"
+            + "\"coaching\":[],\"openQuestions\":[\"Boundary tests\"],\"verification\":[\"Tests not run. "
+            + Array(repeating: "a", count: 260).joined(separator: " ") + "\"]}"
+        let summary = try #require(JarvisPrompts.HistorySummary.validatedSummary(output))
+
+        #expect(history.compact(prefixCount: prefix.count, summary: summary, revision: prefix.revision))
+        #expect(history.estimatedTokens < beforeTokens)
+        let retained = history.snapshot().compactMap(\.text).joined(separator: "\n")
+        #expect(!retained.contains("Resolved discussion about the old approach."))
+        #expect(retained.contains("Kafka; inclusive cutoff"))
+        #expect(retained.contains("Tests not run."))
+        #expect(retained.contains("The current question is how to test the boundary."))
+    }
+
     /// Sized so the greedy 60% budget fits the call at index 5 but not its result at index 6.
     private static let callIndex = 5
     private static let resultIndex = 6

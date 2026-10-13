@@ -850,6 +850,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
         guard let (oldest, count, revision) = history.compactionPrefix() else { return }
         do {
+            jlog("History compaction: started history_tokens=\(history.estimatedTokens)")
             let response = try await client.respond(
                 messages: [
                     .system(JarvisPrompts.HistorySummary.system),
@@ -857,20 +858,24 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 ],
                 tools: [],
                 toolChoice: .auto)
-            guard let output = response.outputText,
+            guard response.incompleteReason == nil,
+                  let output = response.outputText,
                   let summary = JarvisPrompts.HistorySummary.validatedSummary(output) else {
-                jlog("… memory compaction returned an invalid briefing — keeping full history for now")
+                jlog("History compaction: rejected — keeping full history")
                 return
             }
             // A summary that wins the race with teardown must not mutate history.
             guard !Task.isCancelled else { return }
+            let beforeTokens = history.estimatedTokens
             guard history.compact(prefixCount: count, summary: summary, revision: revision) else {
-                jlog("… discarded a summary written against superseded screen text — will retry later")
+                jlog("History compaction: stale — keeping full history")
                 return
             }
-            jlog("… condensed session memory to ~\(history.estimatedTokens) tokens")
+            jlog("History compaction: accepted before_tokens=\(beforeTokens) "
+                 + "after_tokens=\(history.estimatedTokens) "
+                 + "summary_tokens=\(CoachHistory.estimatedTextTokens(summary))")
         } catch {
-            jlog("… memory compaction failed (will retry later): \(error.localizedDescription)")
+            jlog("History compaction: failed (will retry later): \(error.localizedDescription)")
         }
     }
 }
