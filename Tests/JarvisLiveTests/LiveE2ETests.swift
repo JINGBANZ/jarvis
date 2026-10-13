@@ -328,8 +328,8 @@ struct LiveE2ETests {
         ])
 
         let a3Sequence = sequence(a3)
-        let a4Sequence = sequence(a4)
-        let firstDesignRequest = a4.flatMap { evidence.traffic(for: $0) }.first {
+        let a5Sequence = sequence(a5)
+        let firstDesignRequest = a5.flatMap { evidence.traffic(for: $0) }.first {
             $0.tag == "coach"
         }
         results.check("C05", [
@@ -338,7 +338,7 @@ struct LiveE2ETests {
              "A3 loads search_prep_notes before searching (saw \(a3Sequence))"),
             (firstDesignRequest?.declaredToolNames.contains("call_tool") == true
                 && firstDesignRequest?.declaredToolNames.contains("search_prep_notes") == false,
-             "A4's first request declares call_tool and never search_prep_notes"),
+             "A5's first request declares call_tool and never search_prep_notes"),
             (evidence.debugLines(containing: "was called before it was loaded").isEmpty,
              "no deferred tool ran before its load"),
         ])
@@ -348,17 +348,17 @@ struct LiveE2ETests {
         results.check("C07", [
             (a3Sequence == ["load behavioral", "load search_prep_notes", "search", "tip"],
              "A3's chain stays in one attempt (saw \(a3Sequence))"),
-            (a4Sequence.sorted() == ["load system-design", "search", "tip"]
-                && Self.precedes(a4Sequence.firstIndex(of: "load system-design"),
-                                 a4Sequence.lastIndex(of: "tip")),
-             "A4's chain stays in one attempt (saw \(a4Sequence))"),
+            (a5Sequence.sorted() == ["load system-design", "search", "tip"]
+                && Self.precedes(a5Sequence.firstIndex(of: "load system-design"),
+                                 a5Sequence.lastIndex(of: "tip")),
+             "A5's chain stays in one attempt (saw \(a5Sequence))"),
             (evidence.debugLines(containing: "tool loop exhausted").isEmpty, "no tool loop exhausted"),
         ])
         results.time("A3 question-to-tip", seconds: Self.questionToTip(evidence, a3))
-        results.time("A4 question-to-tip", seconds: Self.questionToTip(evidence, a4))
+        results.time("A5 question-to-tip", seconds: Self.questionToTip(evidence, a5))
         results.check("C31", [
-            (Self.precedes(a4Sequence.firstIndex(of: "search"), a4Sequence.lastIndex(of: "tip")),
-             "A4 searches design preparation before answering"),
+            (Self.precedes(a5Sequence.firstIndex(of: "search"), a5Sequence.lastIndex(of: "tip")),
+             "A5 searches design preparation before answering"),
             (tip(a9) != nil && count("prepNotesSearched", in: a9) == 0,
              "A9 answers cache invalidation using the existing design excerpt"),
             (tip(a6) != nil && count("prepNotesSearched", in: a6) == 0,
@@ -370,19 +370,19 @@ struct LiveE2ETests {
             (count("prepNotesSearched", in: a2) == 0,
              "A2's small talk does not search prep notes"),
         ])
-        results.note("C31", "A4 content review: \(tip(a4)?.message ?? "no tip")")
+        results.note("C31", "A5 content review: \(tip(a5)?.message ?? "no tip")")
         results.note("C31", "A9 content review: \(tip(a9)?.message ?? "no tip")")
         results.time("A6 question-to-tip", seconds: Self.questionToTip(evidence, a6))
         results.time("A9 question-to-tip", seconds: Self.questionToTip(evidence, a9))
 
         results.check("C08", [
-            (sequence(a5).contains("search"), "A5 searched prep notes (saw \(sequence(a5)))"),
-            (loads(a5).isEmpty, "A5 loaded nothing"),
-            (a5.contains { evidence.traffic(for: $0).contains {
-                $0.provider == launch.scenario.provider(atStep: says[3]).rawValue
-            } }, "A5 ran on its configured provider"),
+            (sequence(a4).contains("search"), "A4 searched prep notes (saw \(sequence(a4)))"),
+            (loads(a4).isEmpty, "A4 loaded nothing"),
+            (a4.contains { evidence.traffic(for: $0).contains {
+                $0.provider == launch.scenario.provider(atStep: says[2]).rawValue
+            } }, "A4 ran on its configured provider"),
         ])
-        results.time("A5 question-to-tip", seconds: Self.questionToTip(evidence, a5))
+        results.time("A4 question-to-tip", seconds: Self.questionToTip(evidence, a4))
         results.check("C09", loads(a1).contains("coding"), "A1 loaded coding (saw \(loads(a1)))")
         results.check("C10", committed == ["coding", "behavioral", "search_prep_notes", "system-design"],
                       "four loads, each once, in order (saw \(committed))")
@@ -397,17 +397,17 @@ struct LiveE2ETests {
             results.note("C11", "A7 requests per press: \(requestsPerPress)")
         }
 
-        results.check("C12", Self.hasDiagram(evidence, a4),
-                      "A4's detail carries a mermaid block (saw \(Self.describeDetail(evidence, a4)))")
+        results.check("C12", Self.hasDiagram(evidence, a5),
+                      "A5's detail carries a mermaid block (saw \(Self.describeDetail(evidence, a5)))")
         results.note("C12", "A8 on \(launch.scenario.provider(atStep: says[5]).displayName): \(Self.describeDetail(evidence, a8))")
-        let unexpectedDiagrams = [("A1", a1), ("A3", a3), ("A5", a5), ("A6", a6),
+        let unexpectedDiagrams = [("A1", a1), ("A3", a3), ("A4", a4), ("A6", a6),
                                   ("A7", a7[0]), ("A7", a7[1]), ("A9", a9)]
             .filter { Self.hasDiagram(evidence, $0.1) }.map(\.0)
         results.note("C13", unexpectedDiagrams.isEmpty
             ? "no diagram outside the architecture stage" : "diagram at \(unexpectedDiagrams)")
 
         if launch.scenario.steps.contains(.switchBrain(.openAI)) {
-            let loadsBeforeSwitch = a4.first.map { switchAttempt in
+            let loadsBeforeSwitch = a5.first.map { switchAttempt in
                 evidence.attempts
                     .filter { $0.id < switchAttempt.id && $0.isCommitted }
                     .flatMap { evidence.rows(in: $0).compactMap(\.loadedCapability) }
@@ -427,9 +427,9 @@ struct LiveE2ETests {
                 (loadsBeforeSwitch.count == 3,
                  "three loads committed before the OpenAI switch (saw \(loadsBeforeSwitch.map(\.name)))"),
                 (!loadsBeforeSwitch.isEmpty && unreplayed.isEmpty,
-                 "A4 replays every earlier load pair with its result (missing \(unreplayed.map(\.name)))"),
-                (evidence.activity.filter { $0.kind == "brainChangeApplied" }.count >= 2,
-                 "both brain switches applied"),
+                 "A5 replays every earlier load pair with its result (missing \(unreplayed.map(\.name)))"),
+                (evidence.activity.filter { $0.kind == "brainChangeApplied" }.count == 3,
+                 "all three brain switches applied"),
                 (!codexInstructions.isEmpty && Set(codexInstructions).count == 1,
                  "Codex's instructions never change"),
             ])
@@ -438,7 +438,7 @@ struct LiveE2ETests {
         }
 
         var c15: [LiveE2EResults.Check] = []
-        for provider in Set([launch.scenario.brain.primary, launch.scenario.provider(atStep: says[3])])
+        for provider in Set([launch.scenario.brain.primary, launch.scenario.provider(atStep: says[2])])
             .sorted(by: { $0.rawValue < $1.rawValue }) {
             let records = Self.coachTraffic(evidence, on: provider)
             let later = Set(records.compactMap(\.attemptID))

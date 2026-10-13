@@ -158,12 +158,13 @@ happen inside a scenario, applied the way a Settings edit applies them. Steps li
 screenshot `coding-problem.jpg` and fictional `prep-notes.md`, including a short search-design
 section with cache invalidation. Each story is one section with no sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
 again. The manager story stays out of everything a teammate query returns, so the first behavioral
-search never already answers the second and C08 stays a real check; `LiveE2EScenarioTests` pins that
-layout in the Gate.
+search never already answers the second. Both behavioral questions precede the design search,
+which can also return a behavioral story on shared vocabulary, so C08 tests a new lookup rather
+than penalizing valid reuse. `LiveE2EScenarioTests` pins the layout and step order in the Gate.
 
 | Scenario | Brain with `--provider scenario` | What it drives |
 |---|---|---|
-| A | Claude Code, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
+| A | Claude Code, then Codex, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
 | B | Claude Code, then Gemini API | Behavioral, system design, customer-scenario design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
@@ -285,7 +286,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C11 | A press after the load is one round trip | A: the two later presses |
 | C12 | A diagram arrives at the architecture stage | A: the design question and its follow-up |
 | C13 | No diagram outside that stage | A: the coding and behavioral turns |
-| C14 | A brain switch keeps loaded state, in both directions | A with `--provider scenario`: Claude Code to OpenAI, then OpenAI to Codex |
+| C14 | A brain switch keeps loaded state, in both directions | A with `--provider scenario`: Claude Code to Codex to OpenAI, then OpenAI to Codex |
 | C15 | Coaching continues after loads with stable instructions | A: the initial and later behavioral providers |
 | C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question |
 | C17 | The remaining skill still loads when others are off | B: the Show code press |
@@ -310,7 +311,7 @@ C31 checks Scenario A's selective technical retrieval: the existing design quest
 answering, its cache-invalidation follow-up reuses the excerpt, and the one-pass coding question
 answers without a prep search. The Gate checks that the technical section includes the follow-up
 and stays out of the teammate and manager searches. C32 covers the cold coding hint and small talk.
-A4/A9 replies are recorded for the manual content rubric in
+A5/A9 replies are recorded for the manual content rubric in
 [`A-prep-review.md`](../Tests/JarvisLiveTests/Scenarios/A-prep-review.md); a search-count pass alone
 must not be reported as proof of grounded answer content.
 
