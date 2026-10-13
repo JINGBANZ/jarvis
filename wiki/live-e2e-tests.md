@@ -161,6 +161,9 @@ again. The manager story stays out of everything a teammate query returns, so th
 search never already answers the second. Both behavioral questions precede the design search,
 which can also return a behavioral story on shared vocabulary, so C08 tests a new lookup rather
 than penalizing valid reuse. `LiveE2EScenarioTests` pins the layout and step order in the Gate.
+The design question refers explicitly to preparation notes. The later coding question explicitly
+returns to the screen and asks for inspection, so its capture check does not depend on interpreting
+an ambiguous "this" after a design discussion.
 
 | Scenario | Brain with `--provider scenario` | What it drives |
 |---|---|---|
@@ -172,6 +175,10 @@ than penalizing valid reuse. `LiveE2EScenarioTests` pins the layout and step ord
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
+
+F02 retains any required non-OpenAI coaching key in its owner-only fixture store and replaces only
+the OpenAI key. The saved keys stay unchanged; `LiveE2EScenario+Secrets.swift` builds that fixture,
+and the Gate checks it with synthetic credentials for every selectable provider.
 
 ## How a scenario runs
 
@@ -324,7 +331,7 @@ must not be reported as proof of grounded answer content.
 | G01 | Start reaches coaching ready on real frames, and both sides are heard | R; A: the first "them" and "me" lines |
 | G02 | Overlapping speech keeps chronology | A: the reply that starts inside the design question |
 | G03 | Speech during an in-flight attempt waits its turn | A: the cache question |
-| G04 | The screen gate captures once, only when needed, and passes the recognized text | A: the first press and the "solve this in one pass" line; none on stated questions |
+| G04 | The screen gate captures once, only when needed, and passes the recognized text | A: the first press and the explicit return to the coding screen; none on stated questions |
 | G05 | A deliberate no-op is visible | A: the interviewer's logistics line |
 | G06 | Each shortcut works, and a second press advances | A: the two hint presses and the Show code press |
 | G07 | Overlays are excluded from screenshots | Offline, in the Gate |

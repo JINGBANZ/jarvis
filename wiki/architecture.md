@@ -139,13 +139,7 @@ moments the model judges worthwhile.
    tree is added as a complementary source. That
    fresh result satisfies the screen gate, so the next model response must speak or stay silent
    rather than capture the same request again. Fully stated questions do not require a reflexive
-   capture. A reference to an unnamed current problem, code, or error calls for inspection; an earlier
-   topic does not resolve that reference.
-   A described proposal supplies evidence for conceptual review even when its implementation is not
-   visible. An unrelated capture does not replace the user's stated task; the coach explains the
-   reported proposal while qualifying the uninspected implementation.
-   An ordinary hint continues the conversational task; an earlier task remaining visible does not
-   establish a transition back to it.
+   capture.
 5. The model calls `speak(hint)` with one direct, connected hint string
    (Structured Outputs / `strict:true`), within the total word budget in
    [`Speak.swift`](../Sources/JarvisCore/Coach/Tools/Speak.swift), or calls `stay_silent`.
@@ -630,7 +624,7 @@ a smaller example, while productive progress calls for silence. This policy appl
 question without a separate classifier, timer, or model request.
 
 Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
-**⌥⌘J**) requests the next useful hint for the current task; **Explain more** (default **⌥⌘E**) explicitly requests
+**⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
 clarification of the relevant gap, which may span several earlier hints; **Show code** (default
 **⌥⌘K**) requests the next small code block. Each trigger says what the user wants in one line and
 nothing about how to answer it: how is the speak guidance's job and the loaded skill's, so a trigger

@@ -171,13 +171,7 @@ struct LiveE2ELauncher {
 
     func makeInvalidKeyDirectory() throws -> URL {
         let secrets = runDirectory.appendingPathComponent("\(scenarioID)-secrets", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: secrets, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        guard FileSecretStore(directoryURL: secrets)
-            .setApiKey("sk-jarvis-live-e2e-invalid-key", for: .openAIAPIKey) else {
-            throw CocoaError(.fileWriteUnknown)
-        }
-        return secrets
+        return try scenario.makeInvalidKeyDirectory(at: secrets)
     }
 
     // MARK: - Helpers

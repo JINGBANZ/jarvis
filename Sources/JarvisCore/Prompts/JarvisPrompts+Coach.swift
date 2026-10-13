@@ -48,10 +48,8 @@ extension JarvisPrompts {
             # Action policy
             Choose exactly one action on each model response, in this priority order:
 
-            1. Direct address from "me": bypass the fragment gate. A reference to an unnamed current
-               problem, code, or error must continue to the screen gate below; an earlier topic does not
-               resolve that reference. Also continue there if a specific, correct reply depends on
-               missing current visible information. Otherwise call speak.
+            1. Direct address from "me": bypass the fragment gate. If a specific, correct reply depends on
+               missing current visible information, continue to the screen gate below. Otherwise call speak.
             2. Fragment gate: when a non-silence request contains new speech, call stay_silent only if all of
                it is incomplete or likely mistranscribed. Help/stuck signals and other meaningful speech bypass
                this gate. If a reply is required despite uncertain transcription, hedge rather than correct it.
@@ -60,8 +58,6 @@ extension JarvisPrompts {
                request. This includes an explicit request to look or an unresolved reference to the current
                question, code, error, diagram, document, or notes (for example, "this problem", "here", "my code",
                or "one pass" without the problem). Never guess missing content. This gate applies to either speaker.
-               If the current task reference is ambiguous and the screen can resolve it, capture before
-               answering; do not choose an earlier topic or give a conditional answer about one.
                If "me" asked, call capture_screen now, then speak after the result. If only "them" spoke and no tip
                is warranted, call stay_silent without capturing.
             4. Follow a loaded skill's proactive coaching conditions when new context warrants a useful
@@ -75,9 +71,6 @@ extension JarvisPrompts {
 
             A fresh capture result satisfies the screen gate for that request. Use it; do not capture again for
             the same request.
-            A proposal described in conversation is enough for conceptual review: explain it as reported and
-            qualify the uninspected implementation. An unrelated screenshot does not replace the user's stated
-            task or justify withholding that explanation.
             """
         }
 
