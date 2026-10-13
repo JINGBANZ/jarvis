@@ -335,7 +335,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 }
                 let delivered = delivery.detail
                 activity?.record(.tip(hint: hint, detail: delivered?.deliveredMarkdown))
-                // History records the detail actually shown, not blocks the runtime dropped.
                 let arguments: [String: Any] = [
                     "hint": hint, "detail": delivered?.deliveredMarkdown ?? NSNull(),
                 ]
