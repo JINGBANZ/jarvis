@@ -7,7 +7,9 @@ description: Use when the question is a coding problem, including Code with AI; 
 ## Coding with AI
 
 If `coding-with-ai` is listed and the round permits an AI assistant, load it too; see its own
-catalog description for what establishes that.
+catalog description for what establishes that. Reassess when the interviewer changes permission
+or the candidate starts reviewing or delegating AI work. Explicit permission supersedes earlier
+uncertainty; load the companion before coaching that review or delegation.
 
 ## Coding fundamentals
 

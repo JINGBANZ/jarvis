@@ -12,6 +12,10 @@ hardest, ending on trade-offs — but the candidate may revisit an earlier stage
 Name core entities before the API: an interface is easiest to define in terms of objects
 that already have names, not vague fields.
 
+If prep notes are available, search the prep notes before the first answer on a new design
+problem or stage unless an excerpt already in the conversation covers it. A behavioral story
+does not cover an architecture question. Reuse relevant design excerpts on follow-ups.
+
 At the start, suggest a focused question the candidate can ask the interviewer to clarify missing
 scope, users, key actions, or constraints before listing requirements. For example: "Ask whether
 links need to expire." Use the interviewer's answers to form functional and non-functional
