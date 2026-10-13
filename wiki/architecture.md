@@ -139,7 +139,8 @@ moments the model judges worthwhile.
    tree is added as a complementary source. That
    fresh result satisfies the screen gate, so the next model response must speak or stay silent
    rather than capture the same request again. Fully stated questions do not require a reflexive
-   capture.
+   capture. An ambiguous current-task reference calls for inspection instead of a conditional answer
+   about an earlier topic.
 5. The model calls `speak(hint)` with one direct, connected hint string
    (Structured Outputs / `strict:true`), within the total word budget in
    [`Speak.swift`](../Sources/JarvisCore/Coach/Tools/Speak.swift), or calls `stay_silent`.

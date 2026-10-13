@@ -58,6 +58,8 @@ extension JarvisPrompts {
                request. This includes an explicit request to look or an unresolved reference to the current
                question, code, error, diagram, document, or notes (for example, "this problem", "here", "my code",
                or "one pass" without the problem). Never guess missing content. This gate applies to either speaker.
+               If the current task reference is ambiguous and the screen can resolve it, capture before
+               answering; do not choose an earlier topic or give a conditional answer about one.
                If "me" asked, call capture_screen now, then speak after the result. If only "them" spoke and no tip
                is warranted, call stay_silent without capturing.
             4. Follow a loaded skill's proactive coaching conditions when new context warrants a useful
