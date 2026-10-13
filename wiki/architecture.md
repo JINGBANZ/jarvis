@@ -452,7 +452,7 @@ renderer accepts, and the prose before, between, and after them. The segments ke
 model wrote them, so a sentence written after a block reads after it and a line that introduces a
 block sits directly above it. A candidate the box rejects on the way to the accepted one is removed
 from the prose, from the replayed arguments, and from Activity, and the tool result names it, so the
-model reads back what the user actually saw rather than assuming its block landed; the search then
+model reads back what is available in the box rather than assuming its block landed; the search then
 goes on, so a valid block written after a broken one still reaches the box. Everything else stays in
 the prose and renders inline where it was written, including a fence written after the shown one of
 its kind.
@@ -586,7 +586,7 @@ a smaller example, while productive progress calls for silence. This policy appl
 question without a separate classifier, timer, or model request.
 
 Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
-**⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
+**⌥⌘J**) requests the next useful hint for the current task; **Explain more** (default **⌥⌘E**) explicitly requests
 clarification of the relevant gap, which may span several earlier hints; **Show code** (default
 **⌥⌘K**) requests the next small code block. Each trigger says what the user wants in one line and
 nothing about how to answer it: how is the speak guidance's job and the loaded skill's, so a trigger
