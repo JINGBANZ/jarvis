@@ -80,7 +80,8 @@ Mark breaking changes with `!` (`feat!:`) or a `BREAKING CHANGE:` footer. One lo
 
 ## Project overview
 
-Jarvis is a proactive macOS menu-bar coach built with Swift 6, SwiftPM, and macOS 14+ APIs. Keep
+Jarvis is a voice-only macOS menu-bar agent, currently focused on technical-conversation coaching,
+built with Swift 6, SwiftPM, and macOS 14+ APIs. Keep
 Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS-bound code thin in
 `JarvisOverlay` or `JarvisApp`. The event loop starts at `Sources/JarvisCore/Coach/CoachDriver.swift`.
 
@@ -96,6 +97,7 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 
 ## Development rules
 
+- Build every capability around the [voice-only interaction contract](wiki/architecture.md#1-vision).
 - Build the harness, not model or OS intelligence. Add a target only for an isolated test boundary, a
   compiler-enforced boundary, or code shared by another executable.
 - Preserve one brain target for an entire coaching attempt: no in-attempt provider retry or switch.

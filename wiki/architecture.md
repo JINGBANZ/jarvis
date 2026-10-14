@@ -18,11 +18,23 @@
 
 ## 1. Vision
 
-Jarvis is a personal, always-on macOS assistant that **coaches you through technical interviews**:
-behavioral, system-design, and coding questions. It listens to you think aloud, and — when it needs
-visible context — looks at your screen to see the current question, code, diagram, or notes. When it
-has something genuinely useful to add, it speaks up **unprompted** with a short tip rendered in an
-on-screen overlay.
+Jarvis is a personal **voice-only AI agent**. You think aloud, ask questions, and give
+instructions through speech. Jarvis follows both sides of the conversation and offers useful help
+proactively. Its current focus is coaching technical interviews: behavioral, system-design, and
+coding questions. When visible context matters, it looks at your screen to see the current question,
+code, diagram, or notes. Replies appear in the private on-screen overlay.
+
+**Voice-only means spoken input, with on-screen replies.** There is no chat composer or typed-prompt
+path for talking to the agent. Screen context and prepared notes support the spoken conversation;
+Settings fields configure the app. Start/Stop and optional coaching shortcuts are controls, and do
+not require text entry. Keeping interaction in the conversation lets the user continue thinking and
+working without composing prompts in another window.
+
+Every feature is designed around this interaction contract. Skills and tools must be usable from
+spoken requests or conversation context, and follow-ups stay in the same spoken session. New
+capabilities improve listening, understanding, relevant context, or timely on-screen help without
+requiring typed prompts or adding a text-input fallback. Capture and provider failures follow the
+existing [resilience policy](#resilience) and never introduce a typed-prompt path.
 
 The guiding belief: **build the harness, not the intelligence.** The intelligence already exists
 (the selected brain model and transcription provider). The macOS capabilities already exist
