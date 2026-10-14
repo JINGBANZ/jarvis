@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.6](https://github.com/JINGBANZ/jarvis/compare/v0.5.5...v0.5.6) (2026-10-14)
+
+
+### Bug Fixes
+
+* **auth:** align subscription health with session readiness ([#432](https://github.com/JINGBANZ/jarvis/issues/432)) ([3d37550](https://github.com/JINGBANZ/jarvis/commit/3d37550ca1afe8ed1dbbc6e50ccab5bf9b9a0057))
+* **coach:** accept bounded history summaries ([#447](https://github.com/JINGBANZ/jarvis/issues/447)) ([2fd376c](https://github.com/JINGBANZ/jarvis/commit/2fd376c628884df9f90bd94110e926f9dfb46fdc))
+* **coach:** restore history cache reuse ([#449](https://github.com/JINGBANZ/jarvis/issues/449)) ([52ef75c](https://github.com/JINGBANZ/jarvis/commit/52ef75ce9edb14e3586d60c26834f4bc95e62eca))
+* **coach:** retain collapsed details and use codex for live tests ([#440](https://github.com/JINGBANZ/jarvis/issues/440)) ([a6e5833](https://github.com/JINGBANZ/jarvis/commit/a6e5833af26c553f0cc3375c0975d163ea48562a))
+* **coach:** use one connected hint string for box replies ([#437](https://github.com/JINGBANZ/jarvis/issues/437)) ([c55dcea](https://github.com/JINGBANZ/jarvis/commit/c55dceab3e264ea466814a9d1d61374341790280))
+* **eval:** trace failures to preceding source decisions ([#446](https://github.com/JINGBANZ/jarvis/issues/446)) ([cf69e40](https://github.com/JINGBANZ/jarvis/commit/cf69e40af94046e77310589f3bfb456639289ee9))
+* **prep:** read documents directly and reserve the final answer ([#431](https://github.com/JINGBANZ/jarvis/issues/431)) ([1437916](https://github.com/JINGBANZ/jarvis/commit/1437916418fc2dd33b91343752f630d7925819b1))
+* **settings:** restore subscription connection recovery ([#441](https://github.com/JINGBANZ/jarvis/issues/441)) ([2795f33](https://github.com/JINGBANZ/jarvis/commit/2795f33de0de397a6c9fcf21a600715fe66b8787))
+* **transcription:** honor language expectations across providers ([#448](https://github.com/JINGBANZ/jarvis/issues/448)) ([60c7a62](https://github.com/JINGBANZ/jarvis/commit/60c7a62d0eae7c6e369dbb5c79bdd58b0021ceb5))
+
 ## [0.5.5](https://github.com/JINGBANZ/jarvis/compare/v0.5.4...v0.5.5) (2026-10-11)
 
 
