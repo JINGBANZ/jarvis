@@ -18,7 +18,7 @@
 
 ## 1. Vision
 
-Jarvis is a personal **voice-only AI agent for macOS**. You think aloud, ask questions, and give
+Jarvis is a personal **voice-only AI agent**. You think aloud, ask questions, and give
 instructions through speech. Jarvis follows both sides of the conversation and offers useful help
 proactively. Its current focus is coaching technical interviews: behavioral, system-design, and
 coding questions. When visible context matters, it looks at your screen to see the current question,

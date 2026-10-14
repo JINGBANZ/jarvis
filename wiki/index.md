@@ -32,6 +32,6 @@
 
 ## What Jarvis Is, In One Sentence
 
-A personal voice-only AI agent for macOS: talk naturally, get proactive help in a private on-screen
+A personal voice-only AI agent: talk naturally, get proactive help in a private on-screen
 overlay, and enter no typed prompts — currently focused on technical-conversation coaching, with
 every feature guided by the [voice-only interaction contract](./architecture.md#1-vision).

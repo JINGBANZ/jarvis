@@ -1,6 +1,9 @@
 # Jarvis
 
-**Your voice-only AI agent for macOS.**
+**Your voice-only AI agent.**
+
+[![Download the macOS version](https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
+[![Join us on Telegram](https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+-FDYU99oXTBlZmQx)
 
 Think out loud. Ask Jarvis a question. It listens to both sides of the conversation, checks your
 screen when useful, and offers help at the right moment. **No text input. No prompt box.**
@@ -15,9 +18,9 @@ timely help. See the [voice-only product direction](./wiki/architecture.md#1-vis
 
 ## Install Jarvis
 
-Requires an Apple silicon Mac running macOS 14.2 or later.
+Currently available for macOS only. Requires an Apple silicon Mac running macOS 14.2 or later.
 
-[**Download Jarvis**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
+[**Download the macOS version**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
 
 Open Jarvis from **Applications**, configure its providers in **Settings**, then select **Start
 Jarvis**. macOS will request the permissions Jarvis needs.
