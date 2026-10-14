@@ -1,6 +1,6 @@
 # Jarvis
 
-**Your voice-only AI agent.**
+**Your voice-only AI agent. Like Jarvis for Tony Stark.**
 
 [![Download the macOS version](https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
 [![Join us on Telegram](https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+-FDYU99oXTBlZmQx)
