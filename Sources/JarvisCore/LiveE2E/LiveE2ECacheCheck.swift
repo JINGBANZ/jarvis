@@ -3,7 +3,7 @@ import Foundation
 
 public enum LiveE2ECacheCheck {
     public static let scenarioID = "CACHE"
-    public static let modelID = "gpt-6.1-sol"
+    public static let modelID = "gpt-6-luna"
     public static let warmupAttempts = 2
     public static let measuredAttempts = 6
 
@@ -41,7 +41,14 @@ public enum LiveE2ECacheCheck {
         public var passed: Bool { failures.isEmpty }
     }
 
-    public static func evaluate(_ samples: [Sample]) -> Result {
+    public static func prefixTokenAllowance(for provider: BrainProvider) -> Int {
+        // The pinned Codex route uses 1024-token checkpoints and rounds cached reads to 128.
+        // Controlled replay evidence: wiki/live-e2e-tests.md#cache-regression-window
+        provider == .codexSubscription ? 1_024 + 127 : 256
+    }
+
+    public static func evaluate(_ samples: [Sample], provider: BrainProvider = .openAI) -> Result {
+        let allowance = prefixTokenAllowance(for: provider)
         guard samples.count == warmupAttempts + measuredAttempts else {
             return Result(
                 failures: ["expected two warm-up and six measured initial requests, saw \(samples.count)"],
@@ -84,12 +91,12 @@ public enum LiveE2ECacheCheck {
             }
             inputs += total
             reads += read
-            if read >= previousInput - 256 { historyHits += 1 }
+            if read >= previousInput - allowance { historyHits += 1 }
             if read >= staticInput + 1_024 { beyondStaticHits += 1 }
         }
         let rate = !hasMissingUsage && inputs > 0 ? Double(reads) / Double(inputs) : nil
         if historyHits < 5 {
-            failures.append("\(historyHits)/6 initial requests reused the preceding input within 256 tokens; need five")
+            failures.append("\(historyHits)/6 initial requests reused the preceding input within \(allowance) tokens; need five")
         }
         if beyondStaticHits < 5 {
             failures.append("\(beyondStaticHits)/6 cache reads extended at least 1024 tokens beyond the cold static baseline; need five")

@@ -130,9 +130,11 @@ extension LiveE2EScenario {
         historyCompactionTokenThreshold = raw.historyCompactionTokenThreshold
         steps = try Self.steps(from: raw.steps, primary: primary, fixturesDirectory: fixturesDirectory)
         if id == LiveE2ECacheCheck.scenarioID {
-            guard primary == .openAI, fallbacks.isEmpty,
-                  raw.brain.model == LiveE2ECacheCheck.modelID else {
-                throw Failure.invalid("CACHE requires its fixed paid OpenAI model without fallbacks")
+            guard [.codexSubscription, .openAI].contains(primary), fallbacks.isEmpty,
+                  (raw.brain.model ?? LiveE2ECacheCheck.modelID) == LiveE2ECacheCheck.modelID,
+                  !steps.contains(where: { if case .switchBrain = $0 { true } else { false } }) else {
+                throw Failure.invalid(
+                    "CACHE requires Codex subscription or OpenAI on gpt-6-luna without fallbacks or provider switches")
             }
         }
 

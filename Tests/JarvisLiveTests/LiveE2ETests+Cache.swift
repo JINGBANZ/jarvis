@@ -19,6 +19,8 @@ extension LiveE2ETests {
     @Test func scenarioCACHE() async throws {
         guard let launcher = await LiveE2ELauncher.begin(scenario: LiveE2ECacheCheck.scenarioID) else { return }
         let launch = try await launcher.launch()
+        let expectedProvider = launch.scenario.brain.primary
+        let expectedModel = launch.scenario.brain.model ?? LiveE2ECacheCheck.modelID
         var results = LiveE2EResults(scenario: LiveE2ECacheCheck.scenarioID)
         guard let evidence = Self.requireEvidence(launch, &results) else {
             try launcher.finish(results)
@@ -33,16 +35,16 @@ extension LiveE2ETests {
             (Set(attempts.map(\.id)).count == 8, "each spoken step has a distinct attempt"),
             (attempts.allSatisfy { $0.outcome == "spoke" && $0.terminal == "speak" },
              "every selected attempt completed and committed a spoken answer"),
-            (attempts.allSatisfy { $0.provider == BrainProvider.openAI.rawValue
-                && $0.model == LiveE2ECacheCheck.modelID }, "the fixed paid OpenAI target served every attempt"),
+            (attempts.allSatisfy { $0.provider == expectedProvider.rawValue
+                && $0.model == expectedModel }, "the selected Luna target served every attempt"),
             (!evidence.attempts.contains { $0.wake == "pending_work" }, "no failed work was retried"),
             (initial.count == 8 && Set(initial.compactMap(\.attemptID)) == Set(attempts.map(\.id)),
              "exactly one initial provider request per selected attempt, with no extra initial requests"),
             (!traffic.isEmpty && traffic.count <= LiveE2ECacheBudget.maximumRequests,
              "provider calls stayed within the request cap"),
             (traffic.allSatisfy { $0.status == 200 && $0.error == nil && $0.kind == "provider_call"
-                && $0.provider == BrainProvider.openAI.rawValue && $0.exchange.model == LiveE2ECacheCheck.modelID },
-             "all coaching calls succeeded on the fixed paid target"),
+                && $0.provider == expectedProvider.rawValue && $0.exchange.model == expectedModel },
+             "all coaching calls succeeded on the selected target"),
             (evidence.traffic.allSatisfy { $0.tag == "coach" }, "the steady run had no compaction requests"),
             (evidence.malformedRecordCount == 0, "the session evidence has no malformed records"),
         ])
@@ -116,10 +118,11 @@ extension LiveE2ETests {
                 contextRevision: record.contextRevision,
                 inputFingerprints: record.exchange.inputFingerprints))
         }
-        let check = LiveE2ECacheCheck.evaluate(samples)
+        let check = LiveE2ECacheCheck.evaluate(samples, provider: expectedProvider)
         results.check("CACHE-hit", check.passed, check.failures.joined(separator: "; "))
         let rate = check.weightedReadRate.map { String(format: "%.1f%%", $0 * 100) } ?? "unknown"
-        results.note("CACHE-hit", "\(check.historyHits)/6 history hits; weighted initial cache reads \(rate); two warm-ups excluded")
+        results.note("CACHE-hit", "\(check.historyHits)/6 history hits; weighted initial cache reads \(rate); "
+            + "two warm-ups excluded; prefix allowance \(LiveE2ECacheCheck.prefixTokenAllowance(for: expectedProvider)) tokens")
         Self.recordCacheUsage(traffic, warmupIDs: warmupIDs, &results)
         Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         try launcher.finish(results)
@@ -150,17 +153,22 @@ extension LiveE2ETests {
             let usage = record.exchange.usage
             let window = warmupIDs.contains(record.attemptID ?? -1) ? "warm-up" : "measured"
             var cost = "unknown"
-            if let read = usage?.cacheRead, let write = usage?.cacheWrite,
+            if record.provider == BrainProvider.codexSubscription.rawValue {
+                cost = "not applicable (subscription)"
+            } else if record.provider == BrainProvider.openAI.rawValue,
+               record.exchange.model == LiveE2ECacheCheck.modelID,
+               let total = usage?.totalInput, (1...272_000).contains(total),
+               let read = usage?.cacheRead, let write = usage?.cacheWrite,
                let uncached = usage?.uncachedInput, let output = usage?.output,
                read >= 0, write >= 0, uncached >= 0, output >= 0 {
-                let dollars = (Double(uncached) * 2 + Double(read) * 0.1
-                    + Double(write) * 2.5 + Double(output) * 10) / 1_000_000
+                let dollars = (Double(uncached) * 0.1 + Double(read) * 0.01
+                    + Double(write) * 0.125 + Double(output) * 0.5) / 1_000_000
                 cost = String(format: "$%.6f", dollars)
             }
             results.note("CACHE-usage", "\(window) attempt \(count(record.attemptID)) \(record.phase ?? "unknown phase"): "
                 + "total input \(count(usage?.totalInput)), cache read \(count(usage?.cacheRead)), "
                 + "cache write \(count(usage?.cacheWrite)), uncached input \(count(usage?.uncachedInput)), "
-                + "output \(count(usage?.output)); estimated coaching cost \(cost)")
+                + "output \(count(usage?.output)); estimated API coaching cost \(cost)")
         }
     }
 }

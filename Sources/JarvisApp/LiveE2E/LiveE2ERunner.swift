@@ -131,13 +131,16 @@ final class LiveE2ERunner: BrainCompositionHost {
         let preferences = try makePreferences(for: scenario)
         var send: BrainAccessor.Sender?
         if scenario.id == LiveE2ECacheCheck.scenarioID {
-            guard scenario.brain.primary == .openAI, scenario.brain.fallbacks.isEmpty,
-                  scenario.brain.model == LiveE2ECacheCheck.modelID else {
-                throw Failure.notReadyToStart("cache scenario requires its fixed paid OpenAI target")
+            guard [.codexSubscription, .openAI].contains(scenario.brain.primary),
+                  scenario.brain.fallbacks.isEmpty,
+                  (scenario.brain.model ?? LiveE2ECacheCheck.modelID) == LiveE2ECacheCheck.modelID else {
+                throw Failure.notReadyToStart("cache scenario requires Codex or OpenAI on its fixed Luna target")
             }
             runDeadline = Date().addingTimeInterval(LiveE2ECacheBudget.maximumDuration)
             preferences.effort = .low
-            send = LiveE2ECacheTransport.sender(budget: LiveE2ECacheBudget())
+            send = LiveE2ECacheTransport.sender(
+                provider: scenario.brain.primary,
+                budget: LiveE2ECacheBudget(provider: scenario.brain.primary), supervisor: supervisor)
         }
         brain = BrainComposition(
             secrets: secrets, host: self, supervisor: supervisor,

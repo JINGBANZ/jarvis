@@ -23,13 +23,40 @@ struct LiveE2EScenarioTests {
         #expect(scenario.id == id)
     }
 
-    @Test("cache scenario rejects a different paid model or a fallback")
+    @Test("cache scenario ships Codex subscription Luna without a fallback")
+    func cacheScenarioDefault() throws {
+        let scenario = try LiveE2EScenario.load(
+            from: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"),
+            fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true))
+        #expect(scenario.brain == .init(primary: .codexSubscription, fallbacks: [], model: "gpt-6-luna"))
+    }
+
+    @Test("cache scenario accepts subscription and paid Luna overrides", arguments: [BrainProvider.codexSubscription, .openAI])
+    func cacheScenarioAcceptsProviderSelection(provider: BrainProvider) throws {
+        let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
+        let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        let selected = try LiveE2EScenario.selectingProvider(provider, in: fixture, fixturesDirectory: fixtures)
+        let scenario = try LiveE2EScenario.decode(selected, fixturesDirectory: fixtures)
+        #expect(scenario.brain.primary == provider)
+        #expect(scenario.brain.model == nil)
+        #expect(scenario.brain.fallbacks.isEmpty)
+        var explicit = try #require(try JSONSerialization.jsonObject(with: selected) as? [String: Any])
+        explicit["brain"] = ["primary": provider.rawValue, "model": "gpt-6-luna", "fallbacks": []] as [String: Any]
+        let pinned = try LiveE2EScenario.decode(
+            JSONSerialization.data(withJSONObject: explicit), fixturesDirectory: fixtures)
+        #expect(pinned.brain == .init(primary: provider, fallbacks: [], model: "gpt-6-luna"))
+    }
+
+    @Test("cache scenario rejects a different model, provider or fallback")
     func cacheScenarioPinsItsTarget() throws {
         let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
         for replacement in [
-            ["primary": "openai", "model": "gpt-6-luna", "fallbacks": []] as [String: Any],
-            ["primary": "openai", "model": "gpt-6.1-sol", "fallbacks": ["codex-subscription"]],
+            ["primary": "codex-subscription", "model": "gpt-6.1-sol", "fallbacks": []] as [String: Any],
+            ["primary": "openai", "model": "gpt-6.1-sol", "fallbacks": []],
+            ["primary": "openai", "model": "gpt-6-luna", "fallbacks": ["codex-subscription"]],
+            ["primary": "claude-subscription", "fallbacks": []],
+            ["primary": "gemini", "fallbacks": []],
         ] {
             var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
             object["brain"] = replacement
@@ -37,6 +64,19 @@ struct LiveE2EScenarioTests {
             #expect(throws: LiveE2EScenario.Failure.self) {
                 try LiveE2EScenario.decode(data, fixturesDirectory: fixtures)
             }
+        }
+    }
+
+    @Test("cache scenario rejects provider switches")
+    func cacheScenarioRejectsProviderSwitches() throws {
+        let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
+        let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+        let steps = try #require(object["steps"] as? [[String: Any]])
+        object["steps"] = [["switchBrain": "openai"]] + steps
+        let data = try JSONSerialization.data(withJSONObject: object)
+        #expect(throws: LiveE2EScenario.Failure.self) {
+            try LiveE2EScenario.decode(data, fixturesDirectory: fixtures)
         }
     }
 
@@ -57,11 +97,12 @@ struct LiveE2EScenarioTests {
             .press(.hint),
             them("Great, thanks for joining. We'll get started in just a minute."),
             them("Tell me about a time you disagreed with a teammate."),
-            .switchBrain(.openAI),
-            them("Let's move on to design: our product search is slow, and we are redesigning it. We agreed on twenty thousand searches per second, p99 under three hundred milliseconds, and results up to a minute stale, behind one search API. Now sketch the high-level architecture: which components would you put in, and what is the read path for one request?"),
             .switchBrain(.codexSubscription),
             them("Tell me about a time you pushed back on a decision from your manager."),
-            .say(.init(speaker: .me, text: "Jarvis, how can I solve this in one pass?"),
+            .switchBrain(.openAI),
+            them("Let's move on to the product-search design from your preparation notes: our product search is slow, and we are redesigning it. We agreed on twenty thousand searches per second, p99 under three hundred milliseconds, and results up to a minute stale, behind one search API. Now sketch the high-level architecture: which components would you put in, and what is the read path for one request?"),
+            .switchBrain(.codexSubscription),
+            .say(.init(speaker: .me, text: "Jarvis, let's return to the coding problem on my screen. Please look at it and explain how I can solve it in one pass."),
                  overlap: nil, whileAttemptRunning: false),
             .press(.hint),
             .press(.showCode),
@@ -145,9 +186,12 @@ struct LiveE2EScenarioTests {
             fixturesDirectory: fixtures)
 
         #expect(b.brain == .init(primary: .claudeSubscription, fallbacks: []))
-        #expect(b.capabilities == .init(
-            disabledTools: ["search_prep_notes"],
-            disabledSkills: ["behavioral", "system-design", "coding-with-ai"]))
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: Set(b.capabilities.disabledTools),
+            disabledSkills: Set(b.capabilities.disabledSkills),
+            prepSourcesConfigured: true, skills: SkillCatalog.bundled())
+        #expect(capabilities.skills.map(\.name) == ["coding"])
+        #expect(capabilities.deferredTools.isEmpty)
         #expect(b.steps.contains(.switchBrain(.gemini)))
     }
 

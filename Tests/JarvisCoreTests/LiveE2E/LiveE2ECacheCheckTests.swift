@@ -21,12 +21,37 @@ struct LiveE2ECacheCheckTests {
         }
     }
 
-    @Test("six history hits with a stable prefix pass")
-    func stableHistoryPasses() {
-        let result = LiveE2ECacheCheck.evaluate(samples())
+    @Test("six history hits with a stable prefix pass", arguments: [BrainProvider.codexSubscription, .openAI])
+    func stableHistoryPasses(provider: BrainProvider) {
+        let result = LiveE2ECacheCheck.evaluate(samples(), provider: provider)
         #expect(result.passed)
         #expect(result.historyHits == 6)
         #expect((result.weightedReadRate ?? 0) >= 0.8)
+    }
+
+    @Test("subscription checkpoint rounding is tolerated only on its route")
+    func subscriptionCheckpoints() {
+        let allowance = LiveE2ECacheCheck.prefixTokenAllowance(for: .codexSubscription)
+        #expect(allowance == 1_151)
+        #expect(LiveE2ECacheCheck.prefixTokenAllowance(for: .openAI) == 256)
+        let boundary = samples { _, total, _ in (total, total - 128 - allowance) }
+        #expect(LiveE2ECacheCheck.evaluate(boundary, provider: .codexSubscription).passed)
+        #expect(!LiveE2ECacheCheck.evaluate(boundary, provider: .openAI).passed)
+        let missed = samples { _, total, _ in (total, total - 128 - allowance - 1) }
+        #expect(!LiveE2ECacheCheck.evaluate(missed, provider: .codexSubscription).passed)
+    }
+
+    @Test("subscription allowance retains usage, prefix and aggregate guards")
+    func subscriptionStillRejectsRegressions() {
+        for values in [
+            samples { _, _, _ in (2_100, 1_800) },
+            samples { index, total, read in (total, index == 2 || index == 3 ? 0 : read) },
+            samples { index, total, read in (total, index == 2 ? nil : read) },
+            samples(rewriteAt: 4),
+            samples(revisionAt: 4),
+        ] {
+            #expect(!LiveE2ECacheCheck.evaluate(values, provider: .codexSubscription).passed)
+        }
     }
 
     @Test("one cold request is tolerated; two regressions fail")

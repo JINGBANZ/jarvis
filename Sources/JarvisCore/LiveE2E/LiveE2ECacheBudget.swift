@@ -18,10 +18,11 @@ public actor LiveE2ECacheBudget {
     public static let maximumReservedCoachCost = 3.0
     private let deadline: Date
     private var requests = 0
-    private var reservedCost = 0.0
+    private var reservedCost: Double?
 
-    public init(startedAt: Date = Date()) {
+    public init(provider: BrainProvider, startedAt: Date = Date()) {
         deadline = startedAt.addingTimeInterval(Self.maximumDuration)
+        reservedCost = provider == .openAI ? 0 : nil
     }
 
     public func reserve(inputBytes: Int, now: Date = Date()) throws {
@@ -30,15 +31,17 @@ public actor LiveE2ECacheBudget {
         guard inputBytes > 0, inputBytes <= 200_000 else {
             throw Failure.exhausted("request body must contain 1...200000 bytes")
         }
-        // Reserve cache-write pricing for every visible byte plus hidden-input allowance:
-        // https://developers.openai.com/api/docs/models/gpt-6.1-sol
-        let reservation = Double(inputBytes + 4_096) * 2.5 / 1_000_000
-            + Double(Self.maximumOutputTokens) * 10 / 1_000_000
-        guard reservedCost + reservation <= Self.maximumReservedCoachCost else {
-            throw Failure.exhausted("three-dollar standard-tier coaching reservation")
+        if let reservedCost {
+            // Reserve 20x Luna's standard short-context cache-write/output prices for every
+            // visible byte plus hidden input: https://developers.openai.com/api/docs/pricing
+            let reservation = Double(inputBytes + 4_096) * 2.5 / 1_000_000
+                + Double(Self.maximumOutputTokens) * 10 / 1_000_000
+            guard reservedCost + reservation <= Self.maximumReservedCoachCost else {
+                throw Failure.exhausted("three-dollar standard-tier coaching reservation")
+            }
+            self.reservedCost = reservedCost + reservation
         }
         requests += 1
-        reservedCost += reservation
     }
 }
 #endif
