@@ -112,11 +112,11 @@ struct InteractionsWireFormat: BrainWireFormat {
         let status = interaction["status"] as? String ?? ""
         let finished = Self.finishedStatuses.contains(status)
         if let usage = interaction["usage"] as? [String: Any] {
-            func count(_ key: String) -> Int { (usage[key] as? NSNumber)?.intValue ?? 0 }
-            jlog("Jarvis coach: tokens: input \(count("total_input_tokens")) "
-                 + "(\(count("total_cached_tokens")) cached), reasoning \(count("total_thought_tokens")), "
-                 + "output \(count("total_output_tokens")), cap \(maxOutputTokens)"
-                 + (finished ? "" : " [\(status)]"))
+            if let counts = Self.readRecorded(request: nil, response: interaction).usage {
+                let reasoning = RecordedExchange.int(usage["total_thought_tokens"]).map(String.init) ?? "unknown"
+                jlog("Jarvis coach: tokens — \(counts.debugSummary), reasoning \(reasoning), "
+                     + "cap \(maxOutputTokens)" + (finished ? "" : " [\(status)]"))
+            }
         }
         // Returned ids are `call_` plus at most six digits, which a long session can repeat.
         let suffix = "_" + UUID().uuidString.prefix(8).lowercased()

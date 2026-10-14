@@ -6,20 +6,41 @@ umask 077
 cd "$(dirname "$0")/.."
 
 usage() {
-  echo "usage: $0 [A|B|C|D|H|L|P|R|F01|F02|all] [--evaluate] [--keep-going]" >&2
+  echo "usage: $0 [A|B|C|D|H|L|P|R|F01|F02|CACHE|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going]" >&2
 }
 
 SCENARIO="all"
 EVALUATE=0
 KEEP_GOING=0
-for arg in "$@"; do
-  case "$arg" in
-    A|B|C|D|H|L|P|R|F01|F02|all) SCENARIO="$arg" ;;
+PROVIDER="codex-subscription"
+EVALUATION_AGENT="${EVAL_AGENT:-codex}"
+RUN_ARGUMENTS=("$@")
+while (( $# > 0 )); do
+  case "$1" in
+    A|B|C|D|H|L|P|R|F01|F02|CACHE|all) SCENARIO="$1" ;;
+    --provider)
+      if (( $# < 2 )); then usage; exit 2; fi
+      PROVIDER="$2"
+      shift
+      ;;
+    --provider=*) PROVIDER="${1#--provider=}" ;;
     --evaluate) EVALUATE=1 ;;
     --keep-going) KEEP_GOING=1 ;;
+    --help|-h) usage; exit 0 ;;
     *) usage; exit 2 ;;
   esac
+  shift
 done
+case "$PROVIDER" in
+  codex-subscription|claude-subscription|openai|gemini|scenario) ;;
+  *) echo "Unknown live e2e provider: $PROVIDER" >&2; usage; exit 2 ;;
+esac
+if [[ "$EVALUATE" == 1 ]]; then
+  case "$EVALUATION_AGENT" in
+    codex|claude) ;;
+    *) echo "Unknown EVAL_AGENT: $EVALUATION_AGENT (expected codex or claude)" >&2; exit 2 ;;
+  esac
+fi
 # Evaluation reads Scenario A's session, so a run without A could only report G09 as failed.
 if [[ "$EVALUATE" == 1 && "$SCENARIO" != A && "$SCENARIO" != all ]]; then
   echo "--evaluate needs Scenario A: run A or all." >&2
@@ -37,7 +58,7 @@ fi
 if [[ -z "${JARVIS_LIVE_E2E_CAFFEINATED:-}" ]]; then
   export JARVIS_LIVE_E2E_CAFFEINATED=1
   # Not "$0": the cd above moved to the repository root, where a relative $0 no longer resolves.
-  exec /usr/bin/caffeinate -d -i ./scripts/run-live-tests.sh "$@"
+  exec /usr/bin/caffeinate -d -i ./scripts/run-live-tests.sh ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
 fi
 
 echo "▶ building the signed development app"
@@ -59,14 +80,19 @@ find "$BASE" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort -r | tail -n +11 \
       rm -rf "$old_run"
     done
 
+SKIP_CACHE=()
 case "$SCENARIO" in
-  all) FILTER='JarvisLiveTests\.LiveE2ETests/' ;;
+  all)
+    FILTER='JarvisLiveTests\.LiveE2ETests/'
+    SKIP_CACHE=(--skip 'JarvisLiveTests\.LiveE2ETests/scenarioCACHE')
+    ;;
   *) FILTER="JarvisLiveTests\\.LiveE2ETests/scenario$SCENARIO" ;;
 esac
 
 # The script-to-test handshake. The test refuses to run without these two variables.
 export JARVIS_LIVE_E2E_RUN_DIR="$RUN_DIR"
 export JARVIS_LIVE_E2E_APP="$PWD/Jarvis Dev.app"
+export JARVIS_LIVE_E2E_PROVIDER="$PROVIDER"
 if [[ "$KEEP_GOING" == 1 ]]; then
   export JARVIS_LIVE_E2E_KEEP_GOING=1
 fi
@@ -92,9 +118,9 @@ abort_run() {
 trap abort_run INT TERM
 
 source scripts/lib/swift-test-flags.sh
-echo "▶ running live e2e scenarios ($SCENARIO) into $RUN_DIR"
+echo "▶ running live e2e scenarios ($SCENARIO, provider $PROVIDER) into $RUN_DIR"
 set +e
-swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} --filter "$FILTER" 2>&1 \
+swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} ${SKIP_CACHE[@]+"${SKIP_CACHE[@]}"} --filter "$FILTER" 2>&1 \
   | tee "$RUN_DIR/swift-test.log"
 test_status=${PIPESTATUS[0]}
 set -e
@@ -124,9 +150,7 @@ if [[ "$EVALUATE" == 1 ]]; then
   done
   if [[ "$session_count" -ne 1 ]]; then
     echo "G09 fail Scenario A did not leave exactly one session" >> "$RUN_DIR/results.txt"
-  # Claude, not the Codex-first default: evaluation is the run's largest agent spend, and a day of
-  # runs exhausts the ChatGPT plan's limit first.
-  elif EVAL_AGENT=claude ./scripts/eval-session.sh "$evaluated_session" > "$RUN_DIR/evaluate.log" 2>&1 \
+  elif EVAL_AGENT="$EVALUATION_AGENT" ./scripts/eval-session.sh "$evaluated_session" > "$RUN_DIR/evaluate.log" 2>&1 \
       && grep -q '^## Summary' "${evaluated_session}eval-report.md" \
       && grep -q '^## Findings' "${evaluated_session}eval-report.md" \
       && grep -q '^## Evidence gaps' "${evaluated_session}eval-report.md" \

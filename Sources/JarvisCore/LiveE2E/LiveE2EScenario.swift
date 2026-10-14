@@ -23,6 +23,13 @@ public struct LiveE2EScenario: Sendable, Equatable {
     public struct Brain: Sendable, Equatable {
         public let primary: BrainProvider
         public let fallbacks: [BrainProvider]
+        public let model: String?
+
+        public init(primary: BrainProvider, fallbacks: [BrainProvider], model: String? = nil) {
+            self.primary = primary
+            self.fallbacks = fallbacks
+            self.model = model
+        }
     }
 
     public struct Capabilities: Sendable, Equatable {
@@ -128,7 +135,10 @@ extension LiveE2EScenario {
 
         id = raw.id
         self.audio = audio
-        brain = Brain(primary: primary, fallbacks: fallbacks)
+        if let model = raw.brain.model, BrainModelCatalog.model(id: model, for: primary) == nil {
+            throw Failure.invalid("brain.model is unavailable for \(primary.rawValue): \(model)")
+        }
+        brain = Brain(primary: primary, fallbacks: fallbacks, model: raw.brain.model)
         capabilities = Capabilities(
             disabledTools: raw.capabilities.disabledTools,
             disabledSkills: raw.capabilities.disabledSkills)
@@ -137,6 +147,14 @@ extension LiveE2EScenario {
         voices = Voices(them: raw.voices.them, me: raw.voices.me)
         historyCompactionTokenThreshold = raw.historyCompactionTokenThreshold
         steps = try Self.steps(from: raw.steps, primary: primary, fixturesDirectory: fixturesDirectory)
+        if id == LiveE2ECacheCheck.scenarioID {
+            guard [.codexSubscription, .openAI].contains(primary), fallbacks.isEmpty,
+                  Self.target(for: primary, modelID: raw.brain.model) == Self.target(for: primary),
+                  !steps.contains(where: { if case .switchBrain = $0 { true } else { false } }) else {
+                throw Failure.invalid(
+                    "CACHE requires Codex subscription or OpenAI on its default live-test model without fallbacks or provider switches")
+            }
+        }
 
         // A line on a stream that isn't played would leave the runner waiting for an attempt
         // forever.
@@ -289,6 +307,7 @@ private struct RawScenario: Decodable {
     struct Brain: Decodable {
         let primary: String
         let fallbacks: [String]
+        let model: String?
     }
 
     struct Capabilities: Decodable {

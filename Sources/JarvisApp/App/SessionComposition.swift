@@ -24,6 +24,7 @@ final class SessionComposition {
 
     private let clock = SystemClock()
     private let config: Config
+    private let loadSkills: () -> [Skill]
     private let networkDiagnostics = NetworkPathDiagnostics()
     private let brain: BrainComposition
     private let artifacts: SessionArtifacts
@@ -63,6 +64,7 @@ final class SessionComposition {
         readiness: JarvisReadiness,
         errorReporter: ErrorReporter,
         config: Config = .default,
+        loadSkills: @escaping () -> [Skill] = { SkillCatalog.bundled() },
         makeAttemptAuditing: @escaping (FileSessionAudit) -> any CoachingAttemptAuditing = { $0 },
         makeScreenCapture: @escaping (URL) -> any ScreenCapturing = {
             WindowScopedScreenCapture(captureDirectory: $0)
@@ -75,6 +77,7 @@ final class SessionComposition {
         self.readiness = readiness
         self.errorReporter = errorReporter
         self.config = config
+        self.loadSkills = loadSkills
         self.makeAttemptAuditing = makeAttemptAuditing
         self.makeScreenCapture = makeScreenCapture
         self.makeAudioSource = makeAudioSource
@@ -129,7 +132,7 @@ final class SessionComposition {
 
         let sessionDirectory = artifacts.currentSessionDir!
         let prepMaterialSources = inputs.prepSources
-        let bundledSkills = SkillCatalog.bundled()
+        let bundledSkills = loadSkills()
         let capabilities = CoachCapabilities.compose(
             disabledTools: brain.preferences.disabledTools,
             disabledSkills: brain.preferences.disabledSkills,

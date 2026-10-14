@@ -40,12 +40,58 @@ public struct RecordedExchange: Equatable, Sendable {
     }
 
     public struct Usage: Equatable, Sendable {
+        public enum InputAccounting: Sendable {
+            case includesCaches
+            case excludesCaches
+            case includesCacheRead
+        }
+
+        /// The provider's native input counter; its accounting varies by API.
         public let input: Int?
         public let cacheRead: Int?
         public let cacheWrite: Int?
         /// Includes reasoning tokens for every provider, so the column compares.
         public let output: Int?
+        public let totalInput: Int?
+        public let uncachedInput: Int?
         public let rendered: String
+
+        public init(input: Int?, cacheRead: Int?, cacheWrite: Int?, output: Int?,
+                    rendered: String, inputAccounting: InputAccounting) {
+            self.input = input
+            self.cacheRead = cacheRead
+            self.cacheWrite = cacheWrite
+            self.output = output
+            self.rendered = rendered
+            switch inputAccounting {
+            case .includesCaches:
+                totalInput = input
+                uncachedInput = Self.subtracting(input, Self.adding(cacheRead, cacheWrite))
+            case .excludesCaches:
+                uncachedInput = input
+                totalInput = Self.adding(input, Self.adding(cacheRead, cacheWrite))
+            case .includesCacheRead:
+                totalInput = input
+                uncachedInput = Self.subtracting(input, cacheRead)
+            }
+        }
+
+        private static func adding(_ lhs: Int?, _ rhs: Int?) -> Int? {
+            guard let lhs, let rhs, lhs >= 0, rhs >= 0 else { return nil }
+            let (sum, overflow) = lhs.addingReportingOverflow(rhs)
+            return overflow ? nil : sum
+        }
+
+        private static func subtracting(_ lhs: Int?, _ rhs: Int?) -> Int? {
+            guard let lhs, let rhs, lhs >= rhs, rhs >= 0 else { return nil }
+            return lhs - rhs
+        }
+
+        var debugSummary: String {
+            func value(_ count: Int?) -> String { count.map(String.init) ?? "unknown" }
+            return "input \(value(totalInput)), cached \(value(cacheRead)), "
+                + "write \(value(cacheWrite)), uncached \(value(uncachedInput)), output \(value(output))"
+        }
     }
 
     public var model: String?

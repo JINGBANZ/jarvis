@@ -38,8 +38,13 @@ extension InteractionsWireFormat {
                     cacheRead: RecordedExchange.int(fields?["total_cached_tokens"]),
                     cacheWrite: nil,
                     // Interactions counts thought tokens apart from output.
-                    output: visible.map { $0 + (thought ?? 0) },
-                    rendered: RecordedExchange.canonical(usage))
+                    output: visible.flatMap { visible in
+                        thought.flatMap { thought in
+                            let (sum, overflow) = visible.addingReportingOverflow(thought)
+                            return overflow ? nil : sum
+                        }
+                    },
+                    rendered: RecordedExchange.canonical(usage), inputAccounting: .includesCacheRead)
             }
         }
         return exchange

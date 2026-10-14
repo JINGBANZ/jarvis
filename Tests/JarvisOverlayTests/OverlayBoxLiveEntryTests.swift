@@ -128,18 +128,25 @@ import JarvisCore
     }
 
     @MainActor @Test
-    func aDetailTheBoxCannotAcceptAtDeliveryIsDroppedWhole() throws {
+    func collapsingKeepsStreamingAndFinalDetailsForExpansion() throws {
         let panel = liveBox()
         panel.showReplyProgress(progress(hint: "Move the left edge.", detail: "Use a window.\n\n```python\nleft = 0\n"))
         #expect(panel.detailCount == 1)
         panel.clickCollapseButton()
-        let delivered = try #require(ReplyDetail(markdown: "Use a window.\n\n```python\nleft = 0\n```"))
-        #expect(panel.deliver("Move the left edge.", detail: delivered) == nil)
-        #expect(panel.detailCount == 0, "a detail the collapsed box never showed leaves the history too")
+        let collapsedSize = panel.currentContentSize
+        panel.showReplyProgress(progress(hint: "Move the left edge.", detail: "Use a window.\n\n```python\nleft = 0\nright = 0\n"))
+        #expect(panel.currentDetail?.code?.code == "left = 0\nright = 0")
+        let delivered = try #require(ReplyDetail(markdown: "Use a window.\n\n```python\nleft = 0\nright = 0\n```\n\nThen scan."))
+        #expect(panel.deliver("Move the left edge.", detail: delivered) == delivered)
+        #expect(panel.detailCount == 1)
+        #expect(panel.isCollapsed)
+        #expect(!panel.isLogVisible)
+        #expect(panel.currentContentSize == collapsedSize)
         panel.clickCollapseButton()
-        #expect(panel.currentDetail == nil)
-        #expect(!panel.currentText.contains("detail below"))
+        #expect(panel.currentDetail == delivered)
+        #expect(panel.currentText.contains("detail below"))
         #expect(panel.entryCount == 1)
+        #expect(!panel.hasLiveEntry)
     }
 
     @MainActor @Test

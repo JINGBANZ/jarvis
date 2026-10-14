@@ -1,10 +1,10 @@
 # Scenario A: preparation grounding
 
-Review the search results in `brain-traffic.jsonl` alongside A4 and A9's replies recorded in
+Review the search results in `brain-traffic.jsonl` alongside A5 and A9's replies recorded in
 `results.txt`. C31/C32 check retrieval order and skipping; they do not prove semantic grounding.
 Judge meaning rather than exact phrasing.
 
-- **A4, search design:** The reply should connect the query path (Search API, cache, search index)
+- **A5, search design:** The reply should connect the query path (Search API, cache, search index)
   to authoritative catalog storage and the background indexing path. It should adapt the retrieved
   preparation to the stated latency/freshness requirements. A diagram with only a database and
   cache misses the prepared mechanism. Requirements are targets, not measured performance claims.

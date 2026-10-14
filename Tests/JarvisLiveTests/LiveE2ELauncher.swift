@@ -9,6 +9,7 @@ import Testing
 struct LiveE2ELauncher {
     let scenarioID: String
     let scenarioData: Data
+    let scenario: LiveE2EScenario
     let runDirectory: URL
     let app: URL
     let keepGoing: Bool
@@ -53,9 +54,11 @@ struct LiveE2ELauncher {
         let scenario: LiveE2EScenario
         let scenarioData: Data
         do {
-            let data = try Data(contentsOf: scenariosDirectory.appendingPathComponent("\(file ?? scenarioID).json"))
+            let source = try Data(contentsOf:
+                scenariosDirectory.appendingPathComponent("\(file ?? scenarioID).json"))
+            let transcriptionData: Data
             if let target = transcriptionTarget {
-                guard var json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                guard var json = try JSONSerialization.jsonObject(with: source) as? [String: Any],
                       var transcription = json["transcription"] as? [String: Any] else {
                     throw LiveE2EScenario.Failure.invalid("missing transcription settings")
                 }
@@ -64,9 +67,18 @@ struct LiveE2ELauncher {
                 transcription["locale"] = target.localeIdentifier
                 json["transcription"] = transcription
                 json["id"] = scenarioID
-                scenarioData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+                transcriptionData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
             } else {
-                scenarioData = data
+                transcriptionData = source
+            }
+            let selection = environment["JARVIS_LIVE_E2E_PROVIDER"] ?? BrainProvider.codexSubscription.rawValue
+            if selection == "scenario" {
+                scenarioData = transcriptionData
+            } else if let provider = BrainProvider(rawValue: selection) {
+                scenarioData = try LiveE2EScenario.selectingProvider(
+                    provider, in: transcriptionData, fixturesDirectory: fixturesDirectory)
+            } else {
+                throw LiveE2EScenario.Failure.invalid("unknown provider selection \"\(selection)\"")
             }
             scenario = try LiveE2EScenario.decode(scenarioData, fixturesDirectory: fixturesDirectory)
         } catch {
@@ -78,7 +90,7 @@ struct LiveE2ELauncher {
             return nil
         }
         return LiveE2ELauncher(
-            scenarioID: scenarioID, scenarioData: scenarioData,
+            scenarioID: scenarioID, scenarioData: scenarioData, scenario: scenario,
             runDirectory: runDirectory, app: URL(fileURLWithPath: app, isDirectory: true),
             keepGoing: keepGoing)
     }
@@ -110,7 +122,6 @@ struct LiveE2ELauncher {
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        let scenario = try LiveE2EScenario.decode(scenarioData, fixturesDirectory: Self.fixturesDirectory)
         let scenarioCopy = directory.appendingPathComponent("scenario.json")
         try scenarioData.write(to: scenarioCopy)
 
@@ -176,16 +187,9 @@ struct LiveE2ELauncher {
             leftoverHelperIDs: leftovers.sorted())
     }
 
-    func makeInvalidKeyDirectory(for provider: TranscriptionProvider = .openAI) throws -> URL {
+    func makeInvalidKeyDirectory() throws -> URL {
         let secrets = runDirectory.appendingPathComponent("\(scenarioID)-secrets", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: secrets, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        guard let credential = provider.ownCredential,
-              FileSecretStore(directoryURL: secrets)
-            .setApiKey("jarvis-live-e2e-invalid-key", for: credential) else {
-            throw CocoaError(.fileWriteUnknown)
-        }
-        return secrets
+        return try scenario.makeInvalidKeyDirectory(at: secrets)
     }
 
     // MARK: - Helpers

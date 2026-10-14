@@ -464,9 +464,9 @@ A reply is one compact `hint` string plus one optional Markdown `detail`. The hi
 Activity persists the delivered hint and detail. Its decoder normalizes older caption arrays when
 reading saved sessions, so session history remains readable without rewriting files; see
 [`ActivityResponse`](../Sources/JarvisCore/Diagnostics/ActivityResponse.swift).
-Every session declares `detail`, because every session has the Overlay Box to show it. A detail that
-arrives while the box is collapsed is not shown, and the replay records none, so the model never reads
-back a detail the user did not see. `detail` is nullable rather than absent, which is what makes a
+Every session declares `detail`, because every session has the Overlay Box to show it. Collapse hides
+both sections while incoming hints and details remain available after expansion. Activity and model
+history retain that accepted content. `detail` is nullable rather than absent, which is what makes a
 field optional under strict Structured Outputs.
 
 Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
@@ -490,7 +490,7 @@ renderer accepts, and the prose before, between, and after them. The segments ke
 model wrote them, so a sentence written after a block reads after it and a line that introduces a
 block sits directly above it. A candidate the box rejects on the way to the accepted one is removed
 from the prose, from the replayed arguments, and from Activity, and the tool result names it, so the
-model reads back what the user actually saw rather than assuming its block landed; the search then
+model reads back what is available in the box rather than assuming its block landed; the search then
 goes on, so a valid block written after a broken one still reaches the box. Everything else stays in
 the prose and renders inline where it was written, including a fence written after the shown one of
 its kind.
@@ -586,10 +586,10 @@ remaining overflow scrolls vertically. Smaller graphs and graphs that already fi
 shrinking to compensate for the graph. See `OverlayBoxPanel`, `DetailDocumentView`,
 `DiagramHintLayout`, `DiagramHintEdgeRoute`, and `DiagramHintImage` for sizing.
 
-Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
-reports back what reached the screen. A detail the box could not accept, because it is hidden or
-collapsed or has nothing left to draw, is dropped whole from Activity and from committed history, so the
-model's memory and the user's screen agree. Invalid or unsupported block syntax degrades to the rest
+Delivery is one main-actor operation: the runner asks the overlay to retain the reply and the overlay
+reports back what is available to the user. An inactive session or a detail with nothing left to draw
+is rejected, and that detail is omitted from Activity and committed history. Collapse changes
+visibility without changing acceptance or expanding the panel. Invalid or unsupported block syntax degrades to the rest
 of the reply, with diagnostic detail only in `jlog`. Rendered images are never archived; the detail's
 Markdown, diagram source included, is persisted with the tip in the owner-only session directory.
 
@@ -674,7 +674,7 @@ session and consumes the matched click through release. See
 
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
-| **SessionComposition** | Own one session from an accepted Start to coaching ready, capture-heartbeat handling, and Stop, over an `AudioSource` (`Sources/JarvisApp/Capture/AudioSource.swift`) the caller supplies. Production passes `AggregateEchoCapture` and keeps the default screen capture, `WindowScopedScreenCapture`; the [live e2e mode](./live-e2e-tests.md) passes `FixtureAudioSource` and `FixtureScreenCapture`. One composition is what lets the live e2e run exercise the production Start path with only the audio and the screen substituted, instead of a second copy of the wiring that could drift from it. `AppDelegate` keeps Start validation and preflight, readiness rendering, the global shortcuts, the menu, Settings, and Activity; `JarvisReadiness.activeSession` is the one readiness token both check callbacks against. | Composition over the components below. |
+| **SessionComposition** | Own one session from an accepted Start to coaching ready, capture-heartbeat handling, and Stop, over an `AudioSource` (`Sources/JarvisApp/Capture/AudioSource.swift`) the caller supplies. Production passes `AggregateEchoCapture` and keeps the default screen capture, `WindowScopedScreenCapture`; the [live e2e mode](./live-e2e-tests.md) passes `FixtureAudioSource` and `FixtureScreenCapture`. One composition lets the live e2e run exercise the production Start path with supplied audio and screen ports. The focused cache scenario also supplies configuration, a synthetic skill catalog, and a bounded provider sender through defaulted constructor ports; the normal app uses their production defaults. `AppDelegate` keeps Start validation and preflight, readiness rendering, the global shortcuts, the menu, Settings, and Activity; `JarvisReadiness.activeSession` is the one readiness token both check callbacks against. | Composition over the components below. |
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. When a client-commit model is selected, separate Silero VAD instances score these post-AEC streams (resampled to 16 kHz) on the delivery queue rather than the IOProc, and emit content-free turn edges. Both sides then downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3** + **Silero VAD** via Core ML. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `ProviderFailure` feeds attempt outcomes into the finite provider route; cycle exhaustion uses the session recovery policy. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
@@ -1031,14 +1031,12 @@ rather than a per-turn screenshot.
   [Gemini API target](#gemini-api-target).
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
-  itself and rebuilds every request as `[system] + memory + new delta`, followed by one "Session
-  state" line naming the skills and tools already loaded and any tool still waiting for its first
-  load (`CoachCapabilities.sessionState`). The line is fixed for the attempt and never enters memory,
-  so it costs its own few dozen tokens per request and nothing on later ones. It exists because a
-  load result deep in replayed history is easy to miss: without it, lighter models (GPT-6 Luna,
-  Claude Sonnet 5) reload what is already loaded after a brain switch, or call `call_tool` before any
-  load. Stating the state beat enforcing it through the tool choice, which would add refusal paths
-  that differ by brain. Owning the memory is what
+  itself. `CoachContext` composes immutable instructions and tools, the prep-document catalog,
+  committed memory, and the current attempt's delta in that order. A load's original call and result
+  are the model-facing evidence that it is loaded; the runner's internal loaded set commits with
+  that evidence and answers duplicate loads without repeating the body. A reminder excluded from
+  committed memory would move through the reusable prefix as new attempts append history, causing
+  repeated cache writes. Owning the memory is what
   keeps it small and cheap: it grows **append-only** (a byte-identical prefix, so OpenAI's prompt
   cache can reuse stable prefixes); a `stay_silent` call leaves no trace, even one a turn was refused
   or went past, so its refusal never tells a later turn that silence is off-limits, while useful
@@ -1067,8 +1065,10 @@ rather than a per-turn screenshot.
   `JarvisPrompts.HistorySummary`, using the history estimator to bound non-ASCII scripts and JSON
   overhead. Word count adds no separate rejection. The provider's generation allowance is separate
   from the accepted-summary budget, leaving room for completion and reasoning. The runner replaces
-  history only with a complete, structurally valid, bounded briefing; provider-marked incomplete
-  output, malformed output, or missing fields leaves the full history intact through the existing fail-soft path. This
+  history only with a complete, structurally valid, bounded briefing for the current revision.
+  Provider-marked incomplete output, malformed output, missing fields, or a stale result is rejected
+  before mutation; history, context revision, and rewrite reason stay unchanged through the existing
+  fail-soft path. This
   check establishes structure and size, not factual truth or semantic usefulness: a refusal in the
   expected JSON shape can still pass. Preserving evidence and distinguishing proposals from observed
   results remain summarizer responsibilities. Compaction uses one Core-owned workload
@@ -1137,7 +1137,7 @@ rather than a per-turn screenshot.
   `Contents/Resources` and `swift test` has neither.
 
   The composed set is frozen at Start (`SessionComposition`) and handed to the coach loop, whose
-  attempt runner builds every request's instructions with `JarvisPrompts.Coach.system(capabilities:)`,
+  context owner renders instructions once with `JarvisPrompts.Coach.system(capabilities:)`,
   which keeps file I/O off coaching turns. A skill's body reaches the model inside the turn, as a
   tool result, never by rewriting the system prompt, so every request in a session opens with the
   same instructions and a route switch changes none of them.
@@ -1196,7 +1196,7 @@ rather than a per-turn screenshot.
   transport error is safe to carry because it reaches a message only through
   `TransportFailureClassifier`'s fixed table, keyed on the error code and never on the error's own
   description, and a server close reason reaches Activity only through `ProviderMessageRedaction`
-  (see [One failure record](#one-failure-record-one-table-per-vendor)). Turn detection is **entirely
+  (see [Failure surfacing](#failure-surfacing--startup-loud-runtime-ghost)). Turn detection is **entirely
   server-owned**: Gemini finalizes each utterance itself and returns it as `inputTranscription`, so
   unlike the OpenAI models there is no client-side commit, no Silero endpoint scoring, and no
   ledger reconciling provisional against final items — one server final is one accepted line, mirrored
@@ -1234,6 +1234,52 @@ rather than a per-turn screenshot.
   hop at a 2:3 ratio), which was rejected for exactly that reason: it resamples twice for no benefit
   and keeps a "shared" constant that actually encodes one provider's requirement. Capturing at 16 kHz
   for every provider — the simplest option — is not available, since OpenAI Realtime requires 24 kHz.
+
+### Context composition
+
+Provider context layout is a cost-sensitive contract. `CoachContext` owns the fixed instructions,
+declared tools, and the projection of committed history into an attempt. Its immutable attempt
+snapshot prevents background compaction or a newly available prep index from changing a tool-loop
+continuation. The runner appends current evidence and tool results; only a completed attempt commits
+them. Internal loaded-capability bookkeeping commits with the original guidance, so removing a
+reminder never unloads a capability. Automatic callable-tool policy remains model-governed.
+
+| Context source | Lifetime and cache effect |
+|---|---|
+| Instructions, hot tool schemas, skill/deferred-tool descriptions | Fixed for the session, in deterministic order. Loaded bodies extend history without changing these declarations. |
+| Prep-document catalog | Metadata before history, frozen within the attempt. An index/catalog update declares a new context revision. |
+| Finalized speech, manual/silence instructions, retrieved prep evidence | Current attempt, then ordered durable history on successful completion. Failed or cancelled attempt effects do not commit. |
+| Skill/tool loads | Original call/result pairs remain verbatim in durable history and through compaction. Duplicate loads return a short result. |
+| Screen pixels and text | Current evidence within the attempt. Commit retires pixels and supersedes older text, declaring a screen-retirement boundary. |
+| Provider reasoning and raw call items | Verbatim within the attempt; normalized to provider-neutral calls at commit. A continuation is compared with its own attempt, while fresh attempts are compared with earlier initial requests. |
+| Final-cycle completion instruction and refused prose | Request-local or attempt-local; excluded from durable history. They append after the reusable opening rather than replacing earlier evidence. |
+| Compacted history | Only an accepted summary for the current revision, with retained load pairs, establishes a new revision. Rejected or stale summaries leave history, revision, and rewrite reason unchanged. Subsequent appends reuse the accepted prefix. |
+
+Every new context source declares its lifetime and every deliberate rewrite has an explicit reason.
+Provider/model and cache-affecting settings changes establish their own reuse boundaries. The
+actual wire encoders are part of this contract: an append-only `ChatMessage` list alone cannot
+prove provider-visible ordering, raw-item preservation, or correct cache-boundary placement.
+Multi-attempt wire regressions exercise all API families and contain the moving-footer negative
+control. The focused [live cache scenario](./live-e2e-tests.md#cache-regression-window) verifies
+provider-reported reuse beyond static instructions on the selected Luna Responses target.
+
+The audit worker records bounded SHA256 fingerprints, the first changed segment, context revision
+and rewrite reason, and optional read/write/uncached/output usage. It compares encoded inputs;
+terminal outcomes determine which comparisons represent completed history. Differences after a
+declared rewrite are evidence of a new boundary, not proof of a regression. Missing usage remains
+unknown, with provider-specific input accounting in `RecordedExchange.Usage`. Diagnostics do not
+enter Activity or affect scheduling. The client-wire scope cannot observe transformations a
+subscription helper applies after accepting the request.
+
+Exact prefixes make requests eligible for reuse, but lookup also depends on a previously written
+endpoint, cache lifetime, routing, model settings and minimum length. Current OpenAI cache controls
+and eligible message boundaries follow the [provider contract](https://developers.openai.com/api/docs/guides/prompt-caching);
+a stable cache key alone proves none of them. The native owner keeps the existing transaction and
+screen policies local. Pi and LangChain can encode this layout through a runtime bridge, but still
+require those policies and do not automatically preserve a caller's changing prefix. DeepSeek's
+[retained context projections](https://github.com/deepseek-ai/deepseek-harness/blob/d743267388641bc76f17c45ce8b4c231aed1d32c/packages/core/agent-loop/src/runtime-context.ts)
+and [live cache assertions](https://github.com/deepseek-ai/deepseek-harness/blob/d743267388641bc76f17c45ce8b4c231aed1d32c/apps/cli/tests/profiles/sdk/dynamic-tool-cache.e2e.ts)
+provide the reference patterns without replacing the coach runtime.
 
 ### Subscription targets through the bundled proxy
 

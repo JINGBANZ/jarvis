@@ -35,7 +35,7 @@ extension ResponsesWireFormat {
                     cacheRead: RecordedExchange.int(details?["cached_tokens"]),
                     cacheWrite: RecordedExchange.int(details?["cache_write_tokens"]),
                     output: RecordedExchange.int(fields?["output_tokens"]),
-                    rendered: RecordedExchange.canonical(usage))
+                    rendered: RecordedExchange.canonical(usage), inputAccounting: .includesCaches)
             }
         }
         return exchange

@@ -26,12 +26,13 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private let overlay: OverlayRendering
     private let clock: Clock
     private let sessionStart: TimeInterval
-    private let history = CoachHistory()
+    private let context: CoachContext
+    private var history: CoachHistory { context.history }
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let activity: (any ActivityEventRecording)?
     private let ledger: CoachTranscriptLedger
     /// Resolved once at Start, not per attempt, so declared schemas never drift from the prompt.
-    private let capabilities: CoachCapabilities
+    private var capabilities: CoachCapabilities { context.capabilities }
 
     private let runnerLock = NSLock()
     private var nextAttemptID = 0
@@ -55,7 +56,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         ledger: CoachTranscriptLedger,
         capabilities: CoachCapabilities
     ) {
-        self.capabilities = capabilities
+        self.context = CoachContext(capabilities: capabilities)
         self.config = config
         self.transcript = transcript
         self.screen = screen
@@ -236,11 +237,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
             ledger.commit(through: delta.upTo)
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
-        let systemPrompt = JarvisPrompts.Coach.system(capabilities: capabilities)
-        let prepCatalog = capabilities.tool(named: readPrepNoteTool.name) == nil ? nil
-            : JarvisPrompts.Coach.prepDocumentCatalog(attempt.prepMaterial?.catalog ?? [])
-        let historyBase: [ChatMessage] = [.system(systemPrompt)]
-            + (prepCatalog.map { [.user($0)] } ?? []) + history.snapshot()
+        let attemptContext = self.context.beginAttempt(prepCatalog: attempt.prepMaterial?.catalog ?? [])
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
@@ -255,7 +252,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 wake: work.wake,
                 reason: reason,
                 phase: requestPhase,
-                sequence: requestSequence)
+                sequence: requestSequence,
+                contextRevision: attemptContext.contextRevision,
+                contextRewriteReason: attemptContext.rewriteReason)
             conversation = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                 try await attempt.brain.makeConversation(progress: relay.sink)
             }
@@ -295,22 +294,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
             jlog("📎 preloaded the \(coding.name) skill for the Show code press")
             activity?.record(.capabilityLoaded(kind: .skill, name: coding.name))
         }
-        // Sent right after the opening messages, next to the decision, but kept out of
-        // `turnMessages` so history never replays it. It stays fixed for the attempt, so its
-        // continuations keep their cached prefix.
-        let sessionState = capabilities.sessionState(loaded: alreadyLoaded.union(loadedThisAttempt))
-        let sessionStateIndex = turnMessages.count
-        func request(finalResponse: Bool = false) -> [ChatMessage] {
-            var messages = turnMessages
-            if let sessionState { messages.insert(.user(sessionState), at: sessionStateIndex) }
-            if finalResponse {
-                messages.append(.user(JarvisPrompts.Coach.finalAnswerCycle(
-                    prepEnabled: capabilities.tool(named: readPrepNoteTool.name) != nil,
-                    allowsSilence: !reason.isManual)))
-            }
-            return historyBase + messages
-        }
-
         let result: AttemptResult = await { () async -> AttemptResult in
             var iterations = 0
             /// Whether the current request's reply reached the overlay. A request that showed
@@ -343,7 +326,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 }
                 let delivered = delivery.detail
                 activity?.record(.tip(hint: hint, detail: delivered?.deliveredMarkdown))
-                // History records the detail actually shown, not blocks the runtime dropped.
                 let arguments: [String: Any] = [
                     "hint": hint, "detail": delivered?.deliveredMarkdown ?? NSNull(),
                 ]
@@ -372,7 +354,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
             while iterations < maxToolIterations {
                 iterations += 1
                 let loaded = alreadyLoaded.union(loadedThisAttempt)
-                let tools = capabilities.tools
+                let tools = attemptContext.tools
                 // A press must end in a hint and already sent the screen, so it never gets
                 // stay_silent or capture_screen.
                 let toolChoice: ToolChoice
@@ -397,10 +379,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         wake: work.wake,
                         reason: reason,
                         phase: requestPhase,
-                        sequence: requestSequence)
+                        sequence: requestSequence,
+                        contextRevision: attemptContext.contextRevision,
+                        contextRewriteReason: attemptContext.rewriteReason)
                     response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
                         try await conversation.respond(
-                            messages: request(finalResponse: iterations == maxToolIterations),
+                            messages: attemptContext.messages(
+                                for: turnMessages, finalResponse: iterations == maxToolIterations,
+                                allowsSilence: !reason.isManual),
                             tools: tools,
                             toolChoice: toolChoice)
                     }

@@ -11,7 +11,7 @@ struct LiveE2EScenarioTests {
 
     @Test(
         "every shipped scenario decodes and validates",
-        arguments: ["A", "B", "C", "D", "H", "L", "P", "R", "F01-system", "F01-microphone", "F02"])
+        arguments: ["A", "B", "C", "D", "H", "L", "P", "R", "F01-system", "F01-microphone", "F02", "CACHE"])
     func shippedScenarioValidates(id: String) throws {
         let url = Self.liveTests.appendingPathComponent("Scenarios/\(id).json")
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
@@ -43,6 +43,71 @@ struct LiveE2EScenarioTests {
         }
     }
 
+    @Test("cache scenario inherits the shared Codex live-test default")
+    func cacheScenarioDefault() throws {
+        let scenario = try LiveE2EScenario.load(
+            from: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"),
+            fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true))
+        #expect(scenario.brain == .init(primary: .codexSubscription, fallbacks: []))
+    }
+
+    @Test("cache scenario accepts only the shared default model", arguments: [BrainProvider.codexSubscription, .openAI])
+    func cacheScenarioAcceptsProviderSelection(provider: BrainProvider) throws {
+        let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
+        let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        let selected = try LiveE2EScenario.selectingProvider(provider, in: fixture, fixturesDirectory: fixtures)
+        let scenario = try LiveE2EScenario.decode(selected, fixturesDirectory: fixtures)
+        #expect(scenario.brain.primary == provider)
+        #expect(scenario.brain.model == nil)
+        #expect(scenario.brain.fallbacks.isEmpty)
+        let target = LiveE2EScenario.target(for: provider)
+        var explicit = try #require(try JSONSerialization.jsonObject(with: selected) as? [String: Any])
+        explicit["brain"] = ["primary": provider.rawValue, "model": target.modelID, "fallbacks": []] as [String: Any]
+        let pinned = try LiveE2EScenario.decode(
+            JSONSerialization.data(withJSONObject: explicit), fixturesDirectory: fixtures)
+        #expect(pinned.brain == .init(primary: provider, fallbacks: [], model: target.modelID))
+    }
+
+    @Test("cache scenario rejects a different model, provider or fallback")
+    func cacheScenarioPinsItsTarget() throws {
+        let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
+        let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        for provider in [BrainProvider.codexSubscription, .openAI] {
+            let target = LiveE2EScenario.target(for: provider)
+            let alternate = try #require(BrainModelCatalog.models(for: provider).first { $0.id != target.modelID })
+            var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+            object["brain"] = ["primary": provider.rawValue, "model": alternate.id, "fallbacks": []] as [String: Any]
+            #expect(throws: LiveE2EScenario.Failure.self) {
+                try LiveE2EScenario.decode(JSONSerialization.data(withJSONObject: object), fixturesDirectory: fixtures)
+            }
+        }
+        for replacement in [
+            ["primary": "openai", "fallbacks": ["codex-subscription"]] as [String: Any],
+            ["primary": "claude-subscription", "fallbacks": []],
+            ["primary": "gemini", "fallbacks": []],
+        ] {
+            var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+            object["brain"] = replacement
+            let data = try JSONSerialization.data(withJSONObject: object)
+            #expect(throws: LiveE2EScenario.Failure.self) {
+                try LiveE2EScenario.decode(data, fixturesDirectory: fixtures)
+            }
+        }
+    }
+
+    @Test("cache scenario rejects provider switches")
+    func cacheScenarioRejectsProviderSwitches() throws {
+        let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
+        let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+        let steps = try #require(object["steps"] as? [[String: Any]])
+        object["steps"] = [["switchBrain": "openai"]] + steps
+        let data = try JSONSerialization.data(withJSONObject: object)
+        #expect(throws: LiveE2EScenario.Failure.self) {
+            try LiveE2EScenario.decode(data, fixturesDirectory: fixtures)
+        }
+    }
+
     @Test("scenario A ships the specified settings and steps")
     func scenarioAMatchesItsSpecification() throws {
         let scenario = try LiveE2EScenario.load(
@@ -60,11 +125,12 @@ struct LiveE2EScenarioTests {
             .press(.hint),
             them("Great, thanks for joining. We'll get started in just a minute."),
             them("Tell me about a time you disagreed with a teammate."),
-            .switchBrain(.openAI),
-            them("Let's move on to design: our product search is slow, and we are redesigning it. We agreed on twenty thousand searches per second, p99 under three hundred milliseconds, and results up to a minute stale, behind one search API. Now sketch the high-level architecture: which components would you put in, and what is the read path for one request?"),
             .switchBrain(.codexSubscription),
             them("Tell me about a time you pushed back on a decision from your manager."),
-            .say(.init(speaker: .me, text: "Jarvis, how can I solve this in one pass?"),
+            .switchBrain(.openAI),
+            them("Let's move on to the product-search design from your preparation notes: our product search is slow, and we are redesigning it. We agreed on twenty thousand searches per second, p99 under three hundred milliseconds, and results up to a minute stale, behind one search API. Now sketch the high-level architecture: which components would you put in, and what is the read path for one request?"),
+            .switchBrain(.codexSubscription),
+            .say(.init(speaker: .me, text: "Jarvis, let's return to the coding problem on my screen. Please look at it and explain how I can solve it in one pass."),
                  overlap: nil, whileAttemptRunning: false),
             .press(.hint),
             .press(.showCode),
@@ -148,9 +214,12 @@ struct LiveE2EScenarioTests {
             fixturesDirectory: fixtures)
 
         #expect(b.brain == .init(primary: .claudeSubscription, fallbacks: []))
-        #expect(b.capabilities == .init(
-            disabledTools: ["search_prep_notes"],
-            disabledSkills: ["behavioral", "system-design", "coding-with-ai"]))
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: Set(b.capabilities.disabledTools),
+            disabledSkills: Set(b.capabilities.disabledSkills),
+            prepSourcesConfigured: true, skills: SkillCatalog.bundled())
+        #expect(capabilities.skills.map(\.name) == ["coding"])
+        #expect(capabilities.deferredTools.isEmpty)
         #expect(b.steps.contains(.switchBrain(.gemini)))
     }
 

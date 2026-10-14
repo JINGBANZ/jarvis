@@ -40,11 +40,20 @@ human view. Sharing one stack grants no producer a path to author free-form huma
 presentation quotes the provider's identity and redacted message inside its fixed frame, the way a
 `heard` row quotes speech: the frame and the choice of clause stay Core's, and the quoted evidence is
 what makes an unclassified cause diagnosable from a screenshot (see
-[architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)).
+[architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost)).
 
 Provider traffic is kept at the wire level, the exact request and response bodies with images
 redacted, rather than as provider-neutral messages: cache-busting prefix changes and tool-schema
 bloat, the audit's main quarry, are visible only in the bytes actually sent.
+
+Coaching traffic can also carry optional context-revision attribution and a cache observation built
+on the worker. Bounded, content-free fingerprints describe the client-encoded prefix; provider
+usage counters describe measured reuse, and missing counters remain unknown. Revision and rewrite
+reason connect a changed prefix to its declared boundary; their interpretation is defined in
+[architecture.md → Context composition](./architecture.md#context-composition). The typed metadata
+lives in [`BrainCacheObservation`](../Sources/JarvisCore/Diagnostics/BrainCacheObservation.swift)
+and [`CoachingRequestContext`](../Sources/JarvisCore/Diagnostics/CoachingRequestAttribution.swift);
+recording it shares the same optional evidence contract as the raw traffic.
 
 ## Contract
 

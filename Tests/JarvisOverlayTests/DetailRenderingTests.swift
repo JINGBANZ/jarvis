@@ -231,7 +231,7 @@ import Testing
         }
     }
 
-    @MainActor @Test func hintsCarryAMarkerAndAHiddenBoxScrubsTheDetail() throws {
+    @MainActor @Test func hintsCarryAMarkerAndACollapsedBoxRetainsTheDetail() throws {
         let box = OverlayBoxPanel()
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
@@ -247,9 +247,42 @@ import Testing
         #expect(box.currentDetail == detail, "a hint without a detail leaves the box as it is")
 
         box.clickCollapseButton()
-        #expect(box.deliver("While collapsed.", detail: ReplyDetail(markdown: "Not shown.")) == nil)
+        let later = try #require(ReplyDetail(markdown: "Read after expanding."))
+        #expect(box.deliver("While collapsed.", detail: later) == later)
+        box.clickCollapseButton()
+        #expect(box.currentDetail == later)
+    }
+
+    @MainActor @Test(arguments: [
+        "Sort, then scan.",
+        "```python\nleft = 0\n```",
+        "```mermaid\ngraph LR\nA[Client] --> B[Service]\n```"
+    ])
+    func detailsArrivingWhileCollapsedAreAvailableAfterExpansion(markdown: String) throws {
+        let box = OverlayBoxPanel()
+        box.setSessionLive(true)
+        defer { box.setSessionLive(false) }
+        box.clickCollapseButton()
+        let collapsedSize = box.currentContentSize
+        let detail = try #require(ReplyDetail(markdown: markdown))
+        #expect(detail.hasContent)
+        #expect(box.acceptsDetail)
+        #expect(box.deliver("A new reply.", detail: detail) == detail)
+        #expect(box.detailCount == 1)
+        #expect(box.isCollapsed)
+        #expect(box.currentContentSize == collapsedSize)
         box.clickCollapseButton()
         #expect(box.currentDetail == detail)
+    }
+
+    @MainActor @Test func anInactiveSessionRejectsDetailEvenDuringAPreview() throws {
+        let box = OverlayBoxPanel()
+        box.showAppearancePreview(true)
+        defer { box.showAppearancePreview(false) }
+        let detail = try #require(ReplyDetail(markdown: "A late reply."))
+        #expect(!box.acceptsDetail)
+        #expect(box.deliver("Too late.", detail: detail) == nil)
+        #expect(box.detailCount == 0)
     }
 
     @MainActor @Test func aDetailWithNothingLeftToDrawDoesNotTakeTheBox() throws {
