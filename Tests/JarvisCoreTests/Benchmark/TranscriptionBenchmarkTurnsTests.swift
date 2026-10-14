@@ -8,15 +8,18 @@ struct TranscriptionBenchmarkTurnsTests {
     func turnsMatrixCoverage() {
         let arms = TranscriptionBenchmark.turnArms
 
-        #expect(arms.count == OpenAITranscriptionModel.allCases.count + 1)
+        #expect(arms.count == TranscriptionTarget.remoteTargets.count * 2 + 1)
         #expect(arms.allSatisfy { $0.orderedPhrases.count == 2 })
-        #expect(arms.allSatisfy { $0.orderedPhrases.allSatisfy { $0.language == .english } })
-        #expect(Set(arms.compactMap(\.model)) == Set(OpenAITranscriptionModel.allCases))
+        for target in TranscriptionTarget.remoteTargets {
+            let paths = arms.filter { $0.target == target }
+            #expect(paths.count == 2)
+            #expect(Set(paths.compactMap(\.languageProfile)) == [.english, .englishAndMandarinChinese])
+        }
         let apple = arms.filter { $0.provider == .appleSpeech }
         #expect(apple.count == 1)
-        #expect(apple.first?.localeIdentifier == "en_US")
+        #expect(apple.first?.target.localeIdentifier == "en_US")
         // The standard matrix stays one phrase per session, so the follow-up costs it nothing.
-        #expect(TranscriptionBenchmark.standardArms.count == 12)
+        #expect(TranscriptionBenchmark.standardArms.count == (TranscriptionTarget.remoteTargets.count + 1) * 3)
         #expect(TranscriptionBenchmark.standardArms.allSatisfy { $0.followUpPhrase == nil })
     }
 

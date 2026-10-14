@@ -36,6 +36,9 @@ final class SessionComposition {
     private let makeAudioSource: MakeAudioSource
 
     private var transcript = RollingTranscript()
+    #if JARVIS_LIVE_E2E
+    var liveE2ETranscriptBoundary: Int { transcript.count }
+    #endif
     private var transcriber: (any TranscriptionSession)?       // "me" (mic)
     private var themTranscriber: (any TranscriptionSession)?   // "them" (system audio)
     private var micConnectionState: TranscriptionConnectionState = .stopped

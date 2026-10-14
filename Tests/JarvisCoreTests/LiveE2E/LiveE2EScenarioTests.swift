@@ -11,7 +11,7 @@ struct LiveE2EScenarioTests {
 
     @Test(
         "every shipped scenario decodes and validates",
-        arguments: ["A", "B", "C", "D", "H", "P", "R", "F01-system", "F01-microphone", "F02", "CACHE"])
+        arguments: ["A", "B", "C", "D", "H", "L", "P", "R", "F01-system", "F01-microphone", "F02", "CACHE"])
     func shippedScenarioValidates(id: String) throws {
         let url = Self.liveTests.appendingPathComponent("Scenarios/\(id).json")
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
@@ -21,6 +21,26 @@ struct LiveE2EScenarioTests {
         let scenario = try LiveE2EScenario.load(from: url, fixturesDirectory: fixtures)
 
         #expect(scenario.id == id)
+    }
+
+    @Test func languageScenarioUsesTheSelectedProvidersCredential() throws {
+        let data = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/L.json"))
+        var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var transcription = try #require(json["transcription"] as? [String: Any])
+        transcription["provider"] = "gemini"
+        transcription["model"] = GeminiTranscriptionModel.geminiTranscribeLive.rawValue
+        json["transcription"] = transcription
+        let scenario = try LiveE2EScenario.decode(JSONSerialization.data(withJSONObject: json),
+            fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures"))
+        #expect(scenario.transcription.target == .gemini(.geminiTranscribeLive))
+        #expect(scenario.transcription.expectedLanguages == [.english, .mandarinChinese])
+        #expect(scenario.requiredCredentials == [.geminiAPIKey])
+        transcription["languages"] = ["english", "unknown"]
+        json["transcription"] = transcription
+        #expect(throws: LiveE2EScenario.Failure.self) {
+            try LiveE2EScenario.decode(JSONSerialization.data(withJSONObject: json),
+                fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures"))
+        }
     }
 
     @Test("cache scenario inherits the shared Codex live-test default")
@@ -98,7 +118,7 @@ struct LiveE2EScenarioTests {
         #expect(scenario.brain == .init(primary: .claudeSubscription, fallbacks: []))
         #expect(scenario.capabilities == .init(disabledTools: [], disabledSkills: []))
         #expect(scenario.prepNotes == "prep-notes.md")
-        #expect(scenario.transcription == .init(model: .gpt4oTranscribe, key: .standard))
+        #expect(scenario.transcription == .init(target: .openAI(.gpt4oTranscribe), expectedLanguages: [], key: .standard))
         #expect(scenario.voices == .init(them: "Samantha", me: "Daniel"))
         #expect(scenario.steps == [
             .screen(fixture: "coding-problem.jpg"),
@@ -237,7 +257,7 @@ struct LiveE2EScenarioTests {
         #expect(scenario.capabilities == .init(
             disabledTools: ["search_prep_notes"], disabledSkills: ["coding"]))
         #expect(scenario.prepNotes == "prep-notes.md")
-        #expect(scenario.transcription == .init(model: .gptTranscribe, key: .invalid))
+        #expect(scenario.transcription == .init(target: .openAI(.gptTranscribe), expectedLanguages: [], key: .invalid))
         #expect(scenario.steps == [
             .screen(fixture: "coding-problem.jpg"),
             .press(.explainMore),

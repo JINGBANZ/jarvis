@@ -109,8 +109,7 @@ same pages.
 **Slots.** Each part has a slot (`RobotSlotView`) with its icon, name, current value, and a short
 detail line. Brain shows the primary model and `VIA <PROVIDER>`, with three bars lit for the
 reasoning effort (none for None, three for High). Ear shows the transcription provider and short
-model name and the languages it expects; GPT-4o Transcribe with more than one language reads as
-hearing any language, because that model takes a single hint. Eye shows the capture scope and
+model name and the languages it expects, including both selections on GPT-4o Transcribe. Eye shows the capture scope and
 whether Chrome text is on, which needs both the switch and a live Accessibility grant.
 Mouth shows the Overlay Box and its text size. Slots are keyboard-focusable buttons (Space or Return opens) that
 VoiceOver reads as "<Part> settings" with the slot's value and detail. Hovering or focusing a slot
@@ -542,8 +541,8 @@ Transcribe**, and opt-in **GPT Live Transcribe** for session-by-session comparis
 languages** is a multi-select generated from the supported language values; English and Mandarin
 are currently available and can be selected independently. No selection means Automatic and
 sends no language hint. One selection guides recognition but does not translate. Multiple selections
-are sent to GPT Transcribe and GPT Live; GPT-4o remains automatic because it accepts at most one
-language hint, and the row says so whenever GPT-4o has multiple selections. The canonical list is one
+guide all selectable OpenAI models through their supported fields or recording context. The row
+states that selected languages guide recognition and that selecting none means automatic detection. The canonical list is one
 immutable Start-time expectation shared by `me` and `them`,
 so the transcription model—not a Jarvis per-turn classifier—handles a speaker switching languages
 inside one sentence. **Vocabulary** is a free-text, comma-separated glossary of literal terms
@@ -559,7 +558,7 @@ the one live/streaming model Jarvis supports (`GeminiTranscriptionModel`; Gemini
 place in a live coaching session). **Expected languages** and **Vocabulary** behave the same as their
 OpenAI counterparts — a multi-select language hint (empty means automatic) and a comma-separated
 glossary sent as `customVocabulary` — but always apply, since Gemini's one live model accepts both
-without the GPT-4o carve-out. **Mode** (`GeminiTranscriptionMode`) picks **Verbatim** (the default,
+through its own supported fields. **Mode** (`GeminiTranscriptionMode`) picks **Verbatim** (the default,
 preserves the raw utterance) or **Smart** (removes filler words and formats the output, so it reads
 better but is no longer exactly what was said). Gemini's turn detection, wire format, and the
 provider-derived wire sample rate are covered in

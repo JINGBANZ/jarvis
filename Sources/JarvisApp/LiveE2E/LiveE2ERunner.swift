@@ -35,8 +35,13 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     private enum AttemptEvent {
-        case started(id: Int, reason: TriggerReason)
+        case started(CoachingAttemptAuditEvent.Started)
         case finished(id: Int)
+    }
+
+    private struct SpokenStepMark {
+        let eventIndex: Int
+        let transcriptBoundary: Int
     }
 
     private struct SpokenClips {
@@ -70,8 +75,7 @@ final class LiveE2ERunner: BrainCompositionHost {
     private var expectsSessionEnd = false
     private var drain: Task<Void, Never>?
     private var attemptEvents: [AttemptEvent] = []
-    /// The `attemptEvents` index where a step's line began playing early, keyed by step.
-    private var earlyClipMarks: [Int: Int] = [:]
+    private var earlyClipMarks: [Int: SpokenStepMark] = [:]
     private var stepAttemptLines: [String] = []
     private var currentStep: Int?
     private var runDeadline = Date.distantFuture
@@ -161,18 +165,17 @@ final class LiveE2ERunner: BrainCompositionHost {
             case .press(let shortcut):
                 let mark = attemptEvents.count
                 composition.requestShortcut(shortcut)
-                try await awaitAttempt(step: index, since: mark, onStart: nil) {
-                    $0 == shortcut.triggerReason
-                }
+                try await awaitAttempt(step: index, since: mark, onStart: nil,
+                                       matching: .shortcut(shortcut))
             case .say(let line, let overlap, _):
                 guard fixtureSource != nil, let spoken = clips[index] else {
                     throw Failure.noFixtureAudio(index)
                 }
-                let mark: Int
+                let mark: SpokenStepMark
                 if let early = earlyClipMarks[index] {
                     mark = early
                 } else {
-                    mark = attemptEvents.count
+                    mark = spokenStepMark()
                     play(spoken, line: line, overlap: overlap)
                 }
                 // A next line marked `whileAttemptRunning` plays once this attempt starts.
@@ -182,13 +185,13 @@ final class LiveE2ERunner: BrainCompositionHost {
                    let nextClips = clips[next] {
                     onStart = { [weak self] in
                         guard let self else { return }
-                        self.earlyClipMarks[next] = self.attemptEvents.count
+                        self.earlyClipMarks[next] = self.spokenStepMark()
                         self.play(nextClips, line: nextLine, overlap: nextOverlap)
                     }
                 }
-                try await awaitAttempt(step: index, since: mark, onStart: onStart) {
-                    $0 == .turnEnd
-                }
+                try await awaitAttempt(step: index, since: mark.eventIndex, onStart: onStart,
+                                       matching: .speech(speaker: line.speaker,
+                                                         transcriptBoundary: mark.transcriptBoundary))
             case .switchBrain(let provider):
                 brain.preferences.route = BrainRoute(
                     primary: LiveE2EScenario.target(for: provider), fallbackTargets: [])
@@ -205,14 +208,15 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     private func startSession(_ scenario: LiveE2EScenario) async throws {
-        let key = secrets.apiKey(for: .openAIAPIKey) ?? ""
-        guard !key.isEmpty else { throw Failure.credentialUnavailable }
+        let credential = scenario.transcription.target.provider.ownCredential
+        let key = credential.flatMap { secrets.apiKey(for: $0) } ?? ""
+        guard credential == nil || !key.isEmpty else { throw Failure.credentialUnavailable }
         let route = brain.preferences.route
         // No system-audio probe: fixtures never open the tap, and the device scenario fails at
         // capture start when that grant is gone.
         let begun = readiness.begin(configuration: JarvisReadiness.Configuration(
             requiredPermissions: Set(JarvisReadiness.Permission.allCases).subtracting([.systemAudio]),
-            requiredCredentials: [.openAIAPIKey]))
+            requiredCredentials: Set([credential].compactMap { $0 })))
         let readinessSession = begun.session
         composition.applyReadinessEffects(begun.effects)
         composition.observeReadiness(
@@ -232,16 +236,23 @@ final class LiveE2ERunner: BrainCompositionHost {
 
         expectsSessionEnd = scenario.audio == .fixtureNoMicrophone
             || scenario.transcription.key == .invalid
+        let appleLocale: Locale?
+        if case .appleSpeech(let locale) = scenario.transcription.target {
+            if #available(macOS 26.0, *) {
+                appleLocale = try await AppleSpeechModelPreparation.prepare(localeIdentifier: locale)
+            } else {
+                throw Failure.notReadyToStart("Apple Speech requires macOS 26")
+            }
+        } else {
+            appleLocale = nil
+        }
         let inputs = SessionComposition.Inputs(
-            transcription: TranscriptionConfiguration(
-                provider: .openAI,
-                openAIModel: scenario.transcription.model,
-                openAIExpectedLanguages: [],
-                appleSpeechLocaleIdentifier: Defaults.Transcription.appleSpeechLocaleIdentifier),
+            transcription: scenario.transcription.target.configuration(
+                expectedLanguages: scenario.transcription.expectedLanguages),
             transcriptionKey: key,
             brainKeys: brain.savedKeys(for: route),
             brainRoute: route,
-            appleSpeechLocale: nil,
+            appleSpeechLocale: appleLocale,
             screen: SessionPlan.default.screen,
             prepSources: prepSources)
         guard composition.start(
@@ -339,9 +350,11 @@ final class LiveE2ERunner: BrainCompositionHost {
         for (index, step) in scenario.steps.enumerated() {
             guard case .say(let line, let overlap, _) = step else { continue }
             clips[index] = SpokenClips(
-                line: try speech.samples(for: line.text, voice: voice(for: line.speaker)),
+                line: try speech.samples(for: line.text, voice: voice(for: line.speaker),
+                    sampleRate: scenario.transcription.target.provider.audioFormat.sampleRate),
                 overlap: try overlap.map {
-                    try speech.samples(for: $0.text, voice: voice(for: $0.speaker))
+                    try speech.samples(for: $0.text, voice: voice(for: $0.speaker),
+                        sampleRate: scenario.transcription.target.provider.audioFormat.sampleRate)
                 })
         }
         return clips
@@ -359,6 +372,11 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     // MARK: - Waits
+
+    private func spokenStepMark() -> SpokenStepMark {
+        SpokenStepMark(eventIndex: attemptEvents.count,
+                       transcriptBoundary: composition.liveE2ETranscriptBoundary)
+    }
 
     private func awaitCompaction() async throws {
         var outcome: String?
@@ -381,7 +399,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         step: Int,
         since mark: Int,
         onStart: (() -> Void)?,
-        matching: (TriggerReason) -> Bool
+        matching: LiveE2EAttemptMatch
     ) async throws {
         let limit = Date().addingTimeInterval(Self.attemptTimeout)
         var matched: Int?
@@ -428,21 +446,21 @@ final class LiveE2ERunner: BrainCompositionHost {
     private func note(_ event: CoachingAttemptAuditEvent) {
         switch event {
         case .started(let started):
-            attemptEvents.append(.started(id: started.attemptID, reason: started.reason))
+            attemptEvents.append(.started(started))
         case .finished(let finished):
             attemptEvents.append(.finished(id: finished.attemptID))
         }
     }
 
-    private func firstStartedAttempt(since mark: Int, matching: (TriggerReason) -> Bool) -> Int? {
+    private func firstStartedAttempt(since mark: Int, matching: LiveE2EAttemptMatch) -> Int? {
         for event in attemptEvents.dropFirst(mark) {
-            if case .started(let id, let reason) = event, matching(reason) { return id }
+            if case .started(let started) = event, matching.matches(started) { return started.attemptID }
         }
         return nil
     }
 
     private var startedAttemptIDs: Set<Int> {
-        Set(attemptEvents.compactMap { if case .started(let id, _) = $0 { id } else { nil } })
+        Set(attemptEvents.compactMap { if case .started(let started) = $0 { started.attemptID } else { nil } })
     }
 
     private var finishedAttemptIDs: Set<Int> {

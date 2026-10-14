@@ -13,17 +13,13 @@ public enum RobotPartSummaries {
         let provider = configuration.provider.displayName
         switch configuration.provider {
         case .openAI:
-            // GPT-4o takes a single language hint, so with more it listens for any language.
-            let languages = configuration.openAIModel == .gpt4oTranscribe
-                && configuration.openAIExpectedLanguages.count > 1
-                ? [] : configuration.openAIExpectedLanguages
             return RobotPartSummary(
                 value: slotName(provider: provider, model: configuration.openAIModel.displayName),
-                detail: hears(languages))
+                detail: hears(configuration.languageExpectation.languages))
         case .gemini:
             return RobotPartSummary(
                 value: slotName(provider: provider, model: configuration.geminiModel.displayName),
-                detail: hears(configuration.geminiExpectedLanguages))
+                detail: hears(configuration.languageExpectation.languages))
         case .appleSpeech:
             let locale = configuration.appleSpeechLocaleIdentifier
                 .replacingOccurrences(of: "_", with: "-").uppercased()

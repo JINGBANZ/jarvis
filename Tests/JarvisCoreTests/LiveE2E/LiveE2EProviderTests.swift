@@ -43,6 +43,26 @@ import Testing
         #expect(selected.requiredCredentials == [.openAIAPIKey])
     }
 
+    @Test(arguments: TranscriptionTarget.remoteTargets, BrainProvider.allCases)
+    func coachingSelectionPreservesBilingualTranscription(
+        target: TranscriptionTarget, provider: BrainProvider
+    ) throws {
+        var json = try #require(JSONSerialization.jsonObject(with: data("L")) as? [String: Any])
+        var transcription = try #require(json["transcription"] as? [String: Any])
+        transcription["provider"] = target.provider.rawValue
+        transcription["model"] = target.modelID
+        json["transcription"] = transcription
+        let selected = try decode(LiveE2EScenario.selectingProvider(
+            provider, in: JSONSerialization.data(withJSONObject: json),
+            fixturesDirectory: Self.fixtures))
+
+        #expect(selected.brain == .init(primary: provider, fallbacks: []))
+        #expect(selected.transcription.target == target)
+        #expect(selected.transcription.expectedLanguages == [.english, .mandarinChinese])
+        let credentials = Set([provider.credential, target.provider.ownCredential].compactMap { $0 })
+        #expect(selected.requiredCredentials == credentials)
+    }
+
     @Test func overrideDoesNotHideAnInvalidSwitch() throws {
         var json = try #require(JSONSerialization.jsonObject(with: data("B")) as? [String: Any])
         json["steps"] = [["switchBrain": "unknown"], ["stop": true]] as [[String: Any]]

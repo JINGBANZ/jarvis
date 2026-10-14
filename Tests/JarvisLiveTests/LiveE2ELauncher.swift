@@ -32,7 +32,10 @@ struct LiveE2ELauncher {
     }
 
     /// Nil when the scenario must not launch; the issue or skipped line is already recorded.
-    static func begin(scenario scenarioID: String, file: String? = nil) async -> LiveE2ELauncher? {
+    static func begin(
+        scenario scenarioID: String, file: String? = nil,
+        transcriptionTarget: TranscriptionTarget? = nil
+    ) async -> LiveE2ELauncher? {
         let environment = ProcessInfo.processInfo.environment
         guard let run = environment["JARVIS_LIVE_E2E_RUN_DIR"],
               let app = environment["JARVIS_LIVE_E2E_APP"] else {
@@ -53,12 +56,27 @@ struct LiveE2ELauncher {
         do {
             let source = try Data(contentsOf:
                 scenariosDirectory.appendingPathComponent("\(file ?? scenarioID).json"))
+            let transcriptionData: Data
+            if let target = transcriptionTarget {
+                guard var json = try JSONSerialization.jsonObject(with: source) as? [String: Any],
+                      var transcription = json["transcription"] as? [String: Any] else {
+                    throw LiveE2EScenario.Failure.invalid("missing transcription settings")
+                }
+                transcription["provider"] = target.provider.rawValue
+                transcription["model"] = target.modelID
+                transcription["locale"] = target.localeIdentifier
+                json["transcription"] = transcription
+                json["id"] = scenarioID
+                transcriptionData = try JSONSerialization.data(withJSONObject: json, options: [.prettyPrinted, .sortedKeys])
+            } else {
+                transcriptionData = source
+            }
             let selection = environment["JARVIS_LIVE_E2E_PROVIDER"] ?? BrainProvider.codexSubscription.rawValue
             if selection == "scenario" {
-                scenarioData = source
+                scenarioData = transcriptionData
             } else if let provider = BrainProvider(rawValue: selection) {
                 scenarioData = try LiveE2EScenario.selectingProvider(
-                    provider, in: source, fixturesDirectory: fixturesDirectory)
+                    provider, in: transcriptionData, fixturesDirectory: fixturesDirectory)
             } else {
                 throw LiveE2EScenario.Failure.invalid("unknown provider selection \"\(selection)\"")
             }

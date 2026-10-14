@@ -9,6 +9,7 @@ public struct AudioTimeline: Sendable {
 
     public static let sampleRate = 24_000
     public static let chunkSampleCount = 480
+    public let samplesPerChunk: Int
 
     public struct Chunk: Sendable, Equatable {
         public let stream: Stream
@@ -35,7 +36,9 @@ public struct AudioTimeline: Sendable {
     private var elapsedTicks = 0
 
     /// Streams outside `liveStreams` never emit a chunk, like a dead device.
-    public init(liveStreams: Set<Stream>) {
+    public init(liveStreams: Set<Stream>, sampleRate: Int = Self.sampleRate) {
+        precondition(sampleRate > 0 && sampleRate % 50 == 0)
+        samplesPerChunk = sampleRate / 50
         streams = Dictionary(uniqueKeysWithValues: liveStreams.map { ($0, StreamState()) })
     }
 
@@ -47,7 +50,7 @@ public struct AudioTimeline: Sendable {
         precondition(afterChunks >= 0, "afterChunks must not be negative")
         guard !samples.isEmpty, var state = streams[stream] else { return false }
         let startTick = max(elapsedTicks + afterChunks, state.nextFreeTick)
-        let chunkCount = (samples.count + Self.chunkSampleCount - 1) / Self.chunkSampleCount
+        let chunkCount = (samples.count + samplesPerChunk - 1) / samplesPerChunk
         state.clips.append(ScheduledClip(startTick: startTick, samples: samples))
         state.nextFreeTick = startTick + chunkCount
         streams[stream] = state
@@ -58,12 +61,12 @@ public struct AudioTimeline: Sendable {
         var chunks: [Chunk] = []
         for stream in Stream.allCases {
             guard var state = streams[stream] else { continue }
-            var samples = [Int16](repeating: 0, count: Self.chunkSampleCount)
+            var samples = [Int16](repeating: 0, count: samplesPerChunk)
             var clipStarted = false
             var clipEnded = false
             if let clip = state.clips.first, clip.startTick <= elapsedTicks {
-                let offset = (elapsedTicks - clip.startTick) * Self.chunkSampleCount
-                let end = min(offset + Self.chunkSampleCount, clip.samples.count)
+                let offset = (elapsedTicks - clip.startTick) * samplesPerChunk
+                let end = min(offset + samplesPerChunk, clip.samples.count)
                 samples.replaceSubrange(0..<(end - offset), with: clip.samples[offset..<end])
                 clipStarted = offset == 0
                 clipEnded = end == clip.samples.count

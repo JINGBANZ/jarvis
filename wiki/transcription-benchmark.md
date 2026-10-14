@@ -82,12 +82,13 @@ composition used in production.
 | Standard matrix | `./scripts/transcription-benchmark.sh standard` | Compare every selectable transcription path over the fixed English, Mandarin, and bilingual fixtures. |
 | Standard matrix with more repetitions | `./scripts/transcription-benchmark.sh standard --repetitions N` | Gather a larger sample; `N` must preserve the source-owned minimum. |
 | Selected standard arms | `./scripts/transcription-benchmark.sh standard --filter TEXT` | Check one path quickly, such as one model's spoken-start offset; only arms whose id contains `TEXT` run. Combines with `--repetitions`. |
+| Language guidance | `./scripts/transcription-benchmark.sh languages [--filter TEXT]` | Compare automatic recognition and English/Mandarin guidance on identical speech, short acknowledgements, silence, and noise. |
 | Scoped reconnect | `./scripts/transcription-benchmark.sh reconnect` | Verify OpenAI reconnect, buffering, replay, final ordering, and provider identity. |
 | Two-turn session | `./scripts/transcription-benchmark.sh turns` | Verify that a session which already finalized one utterance still transcribes the next one. |
 
 Every mode is an explicit developer operation. They never run as part of `swift build`,
 `./scripts/run-tests.sh`, or the normal GitHub Actions gate. The live runner needs macOS TCC access;
-OpenAI arms make real provider requests, and Apple Speech may need to prepare its selected locale
+OpenAI and Gemini arms make real provider requests, and Apple Speech may need to prepare its selected locale
 model. The deterministic scorer and its edge cases still run automatically as unit tests in the
 normal gate.
 
@@ -107,8 +108,9 @@ desktop audio is outside the capture and the microphone is never opened.
 
 The matrix in
 [`TranscriptionBenchmark.standardArms`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift)
-covers every selectable OpenAI transcription model with the matching language profile, plus Apple
-Speech with one locale at a time. Standard mode requires every selected arm to finish every requested
+covers every remote target from `TranscriptionTarget.remoteTargets`, including OpenAI and Gemini,
+with the matching language profile, plus Apple Speech with one locale at a time. Capture converts
+into each target's declared wire sample rate rather than assuming one provider's rate. Standard mode requires every selected arm to finish every requested
 repetition with continuous capture. Transcript quality and lifecycle measurements remain visible in
 the summary rather than being hidden behind one universal accuracy threshold, which would make
 provider comparisons less informative.
@@ -118,11 +120,27 @@ filter in `summary.json`, so a partial matrix is never read as the whole one. A 
 no arm is rejected before any audio plays, and a run in which no selected arm could run fails
 acceptance, because either would otherwise pass with nothing measured.
 
-**Gemini is not in the matrix yet.** `Arm.model` is typed `OpenAITranscriptionModel?`, and
-`TranscriptionBenchmarkRunner`'s `requiredProviders` set names only `.openAI` (plus `.appleSpeech` on
-macOS 26+) — Gemini is explicitly out of scope rather than silently missing. Adding Gemini arms needs
-a provider-neutral model identifier on `Arm` before the matrix can compare it against the other two
-paths.
+## Language Guidance Comparison
+
+Language mode reuses the same generated fixture bytes across automatic and English/Mandarin
+selections on every remote target. The fixed inputs include English, Mandarin, a technical sentence
+that switches language, short acknowledgements in both languages, silence, and deterministic low-level
+noise. One fixture hash identifies the input across models and selections. Apple keeps its single-locale
+contract and remains in the standard and turns matrices; a bilingual language-list comparison would
+misrepresent that capability.
+
+Each repetition records its provider's setup confirmation, reported usage, normalized character error
+rate for speech, final latency, missing finals, and unexpected-script character count. The script
+count is a fixture-specific diagnostic for alphabetic characters outside Latin and Han; it never
+filters production speech or prevents a brain request. Non-speech controls retain any returned text
+and do not treat an empty transcript as missing speech. Reported usage is optional and preserves the
+provider's units; absent usage is not a zero-cost claim.
+
+OpenAI readiness verifies returned effective model and language/context settings. Gemini records
+setup acknowledgement because its response does not echo effective settings; Apple records local
+preparation. Recognition quality remains a separate measurement from configuration acceptance.
+Future remote targets enter these matrices through the shared target catalog and must declare their
+language capability and confirmation kind before the exhaustive switches compile.
 
 ## Two-Turn Session Regression
 
@@ -133,15 +151,15 @@ stops. Turns mode closes the gap by speaking twice on one connection.
 
 Each arm in
 [`TranscriptionBenchmark.turnArms`](../Sources/JarvisCore/Benchmark/TranscriptionBenchmark.swift)
-runs one session per selectable path, meaning every OpenAI transcription model plus Apple Speech in
-`en_US`, and plays two different English phrases separated by the same endpoint silence the standard
-matrix uses. The mode waits for each turn's finalized stream to settle before the next turn
+runs English and bilingual sessions on every remote target, plus an English session on Apple
+Speech in `en_US`. Each session plays two different phrases separated by the same endpoint silence
+the standard matrix uses. The mode waits for each turn's finalized stream to settle before the next turn
 speaks, so a final belongs to whichever turn was speaking when it arrived. Attribution is therefore
 by observation time rather than by matching text, which is what makes answering the second turn with
 the first turn's transcript a miss instead of a match.
 
-Both phrases are English so the Apple arm, which analyzes one locale per session, is tested on the
-same footing as the OpenAI arms; language coverage stays the standard matrix's job. An arm passes
+Apple's arm uses two English phrases because it analyzes one locale per session. Remote bilingual
+arms exercise a language switch after the first utterance has finalized. An arm passes
 when each turn's own finals match its phrase within the shared maximum character error rate, capture
 stayed continuous, and no reconnect intervened. This mode keeps an accuracy bound where the standard
 matrix deliberately has none, because a turn that returns a fragment of its phrase is the failure

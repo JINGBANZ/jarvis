@@ -13,11 +13,11 @@ extension TranscriptionBenchmarkRunner {
                 phase: "standard-arm",
                 detail: "\(armIndex + 1)/\(options.standardArms.count): \(arm.id)",
                 to: options.outputDirectory)
-            if arm.provider == .openAI, apiKey == nil {
+            if arm.provider.ownCredential != nil, apiKey(for: arm.provider) == nil {
                 summaries.append(.init(
                     arm: arm,
                     repetitions: [],
-                    unavailableReason: Failure.apiKeyUnavailable.description))
+                    unavailableReason: Failure.apiKeyUnavailable(arm.provider).description))
                 continue
             }
 
@@ -25,7 +25,7 @@ extension TranscriptionBenchmarkRunner {
             if arm.provider == .appleSpeech {
                 do {
                     appleLocale = try await prepareAppleLocale(
-                        arm.localeIdentifier ?? "")
+                        arm.target.localeIdentifier ?? "")
                 } catch {
                     try Task.checkCancellation()
                     guard !isAbortRequested else { throw Failure.benchmarkAborted }
@@ -59,7 +59,7 @@ extension TranscriptionBenchmarkRunner {
             summaries.append(.init(arm: arm, repetitions: repetitions))
         }
         return .init(
-            mode: TranscriptionBenchmarkOptions.Mode.standard.rawValue,
+            mode: options.mode.rawValue,
             repetitionsPerArm: options.repetitions,
             armFilter: options.armFilter,
             arms: summaries)
@@ -83,6 +83,8 @@ extension TranscriptionBenchmarkRunner {
         }
         session.connect()
         do {
+            let capture = try startCapture(for: arm.target)
+            defer { capture.stop() }
             _ = try await recorder.waitForReady(
                 timeout: arm.provider == .appleSpeech ? 60 : 20)
             try await Task.sleep(for: .milliseconds(150))
@@ -99,8 +101,8 @@ extension TranscriptionBenchmarkRunner {
                     FileManager.default.fileExists(atPath: abortMarker.path)
                 })
             try await recorder.waitForFinalStreamToSettle(
-                minimumCount: 1,
-                quietPeriod: 1,
+                minimumCount: arm.phrase.text.isEmpty ? 0 : 1,
+                quietPeriod: arm.phrase.text.isEmpty ? 5 : 1,
                 timeout: 20)
         } catch {
             failure = String(describing: error)

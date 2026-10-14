@@ -8,7 +8,9 @@ extension LiveE2EScenario {
 
     public var requiredCredentials: Set<Credential> {
         var credentials = Set(requiredBrainProviders.compactMap(\.credential))
-        if transcription.key == .standard { credentials.insert(.openAIAPIKey) }
+        if transcription.key == .standard, let credential = transcription.target.provider.ownCredential {
+            credentials.insert(credential)
+        }
         return credentials
     }
 }

@@ -26,14 +26,14 @@ import Testing
             == RobotPartSummary(value: "OpenAI · GPT", detail: "HEARS EN · 中文"))
     }
 
-    @Test func gpt4oWithTwoLanguagesHearsAnyLanguage() {
+    @Test func gpt4oWithTwoLanguagesShowsBothExpectations() {
         let twoLanguages = TranscriptionConfiguration(
             provider: .openAI,
             openAIModel: .gpt4oTranscribe,
             openAIExpectedLanguages: [.english, .mandarinChinese],
             appleSpeechLocaleIdentifier: "en_US")
         #expect(RobotPartSummaries.ear(twoLanguages)
-            == RobotPartSummary(value: "OpenAI · GPT-4o", detail: "HEARS ANY LANGUAGE"))
+            == RobotPartSummary(value: "OpenAI · GPT-4o", detail: "HEARS EN · 中文"))
         let oneLanguage = TranscriptionConfiguration(
             provider: .openAI,
             openAIModel: .gpt4oTranscribe,

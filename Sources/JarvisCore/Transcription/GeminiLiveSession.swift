@@ -25,7 +25,7 @@ public enum GeminiLiveSession {
         mode: GeminiTranscriptionMode = .verbatim
     ) -> [String: Any] {
         var transcription: [String: Any] = [
-            "languageCodes": TranscriptionLanguage.canonicalizing(languages).map(\.geminiHint),
+            "languageCodes": TranscriptionLanguageExpectation(languages: languages).languages.map(\.geminiHint),
             "mode": mode.wireValue,
         ]
         if !vocabulary.isEmpty {
@@ -59,7 +59,7 @@ public enum GeminiLiveSession {
     }
 
     public static func isSetupComplete(_ event: [String: Any]) -> Bool {
-        event["setupComplete"] != nil
+        event["setupComplete"] is [String: Any]
     }
 
     /// Only `inputTranscription` counts. `interimInputTranscription` is still being revised, and

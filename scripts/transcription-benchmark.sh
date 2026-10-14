@@ -7,14 +7,14 @@ cd "$(dirname "$0")/.."
 
 usage() {
   echo "usage:" >&2
-  echo "  $0 standard [--repetitions N] [--filter TEXT]" >&2
+  echo "  $0 standard|languages [--repetitions N] [--filter TEXT]" >&2
   echo "  $0 reconnect" >&2
   echo "  $0 turns" >&2
-  echo "--filter runs only the standard arms whose id contains TEXT, e.g. gpt-live-transcribe" >&2
+  echo "--filter runs only standard or languages arms whose id contains TEXT, e.g. gpt-live-transcribe" >&2
 }
 
 MODE="${1:-}"
-if [[ "$MODE" != "standard" && "$MODE" != "reconnect" && "$MODE" != "turns" ]]; then
+if [[ "$MODE" != "standard" && "$MODE" != "reconnect" && "$MODE" != "turns" && "$MODE" != "languages" ]]; then
   usage
   exit 2
 fi
@@ -46,8 +46,8 @@ if ! [[ "$REPETITIONS" =~ ^[0-9]+$ ]] || (( REPETITIONS < 3 )); then
   echo "--repetitions must be an integer of at least 3" >&2
   exit 2
 fi
-if [[ -n "$FILTER" && "$MODE" != "standard" ]]; then
-  echo "--filter applies only to standard mode" >&2
+if [[ -n "$FILTER" && "$MODE" != "standard" && "$MODE" != "languages" ]]; then
+  echo "--filter applies only to standard and languages modes" >&2
   exit 2
 fi
 
@@ -92,9 +92,9 @@ show_failure_if_present() {
 }
 
 case "$MODE" in
-  standard)
+  standard|languages)
     if [[ -n "$FILTER" ]]; then
-      echo "▶ running the standard arms matching \"$FILTER\" ($REPETITIONS repetitions per arm)"
+      echo "▶ running the $MODE arms matching \"$FILTER\" ($REPETITIONS repetitions per arm)"
     else
       echo "▶ running fixed system-audio matrix ($REPETITIONS repetitions per arm)"
     fi

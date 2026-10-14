@@ -357,7 +357,9 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
             localeIdentifier: locale.identifier,
             speaker: speaker.rawValue,
             generation: generation,
-            observedAt: clock.now()))
+            observedAt: clock.now(),
+            setupAcceptance: .init(target: .appleSpeech(localeIdentifier: locale.identifier),
+                expectation: .locale(locale.identifier))))
         emitState(.ready)
     }
 

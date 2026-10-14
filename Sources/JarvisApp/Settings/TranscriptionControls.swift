@@ -113,7 +113,7 @@ final class TranscriptionControls: NSObject {
         languagePicker.identifier = NSUserInterfaceItemIdentifier("transcription-languages")
         let languagesRow = SettingsRowView(
             title: "Expected languages",
-            detail: "Pick none and I listen for any language.",
+            detail: "Selected languages guide recognition. Pick none for automatic detection.",
             controlView: languagePicker,
             controlSize: NSSize(width: 340, height: 32))
         content.addSubview(languagesRow)
@@ -162,7 +162,7 @@ final class TranscriptionControls: NSObject {
             NSUserInterfaceItemIdentifier("transcription-gemini-languages")
         let geminiLanguagesRow = SettingsRowView(
             title: "Expected languages",
-            detail: "Pick none and I listen for any language.",
+            detail: "Selected languages guide recognition. Pick none for automatic detection.",
             controlView: geminiLanguagePicker,
             controlSize: NSSize(width: 340, height: 32))
         content.addSubview(geminiLanguagesRow)
@@ -244,11 +244,8 @@ final class TranscriptionControls: NSObject {
     }
 
     private func refreshLanguageDetail() {
-        let gpt4oIgnoresSelection = preferences.openAIModel == .gpt4oTranscribe
-            && preferences.openAIExpectedLanguages.count > 1
-        languagesRow?.setDetail(gpt4oIgnoresSelection
-            ? "GPT-4o takes one language hint, so with two I listen automatically."
-            : "Pick none and I listen for any language.")
+        languagesRow?.setDetail(
+            "Selected languages guide recognition. Pick none for automatic detection.")
     }
 
     private func refreshVocabularyDetail() {

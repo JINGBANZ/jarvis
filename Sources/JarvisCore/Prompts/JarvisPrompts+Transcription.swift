@@ -2,6 +2,13 @@ import Foundation
 
 extension JarvisPrompts {
     public enum Transcription {
+        public static func languageContext(_ languages: [TranscriptionLanguage]) -> String {
+            let names = TranscriptionLanguage.canonicalizing(languages)
+                .map(\.displayName).joined(separator: " and ")
+            return "The conversation uses \(names), including switching languages within a sentence. "
+                + "Names, numbers, and technical terminology may appear in either language."
+        }
+
         public static func context(for speaker: Speaker) -> String {
             switch speaker {
             case .me:

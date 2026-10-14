@@ -34,6 +34,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         }
     }
 
+    private let audioFormat: TranscriptionAudioFormat
     private let onChunk: @Sendable (Data, UInt64, Int, TimeInterval, [LocalSpeechEvent]) -> Void
     private let lock = NSLock()
 
@@ -50,10 +51,12 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         label: "jarvis.benchmark.delivery", qos: .userInitiated)
 
     init(
+        audioFormat: TranscriptionAudioFormat,
         onChunk: @escaping @Sendable (
             Data, UInt64, Int, TimeInterval, [LocalSpeechEvent]
         ) -> Void
     ) {
+        self.audioFormat = audioFormat
         self.onChunk = onChunk
     }
 
@@ -73,6 +76,8 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         lock.lock()
         teardownLocked()
         lock.unlock()
+        // Drain detector work before the relay installs a different provider's audio format.
+        deliveryQueue.sync {}
     }
 
     @available(macOS 14.2, *)
@@ -119,7 +124,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         }
         guard let downToWire = Resampler(
             fromHz: sampleRate,
-            toHz: Double(TranscriptionAudioFormat.pcm16Mono24k.sampleRate)),
+            toHz: Double(audioFormat.sampleRate)),
               let turnDetector = LocalTurnDetector(
                 inputSampleRate: sampleRate, trailingSilenceDuration: 1.0) else {
             throw Failure.conversionUnavailable
@@ -177,7 +182,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
         let sequence = sequence
         let sampleCount = wireSamples.count
         let commitAt = capturedAt + TimeInterval(sampleCount)
-            / TimeInterval(TranscriptionAudioFormat.pcm16Mono24k.sampleRate)
+            / TimeInterval(audioFormat.sampleRate)
         let data = wireSamples.withUnsafeBufferPointer { Data(buffer: $0) }
         let onChunk = self.onChunk
         deliveryQueue.async { [turnDetector] in

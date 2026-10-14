@@ -79,6 +79,9 @@ public extension TranscriptionBenchmark {
         public let evictedChunkCount: Int
         public let continuityPassed: Bool
         public let failure: String?
+        public let setupAcceptance: TranscriptionSetupAcceptance?
+        public let reportedUsage: [TranscriptionUsage]?
+        public let unexpectedScriptCharacterCount: Int?
     }
 
     struct ArmSummary: Codable, Equatable, Sendable {
@@ -146,7 +149,7 @@ public extension TranscriptionBenchmark {
     struct TurnsSummary: Codable, Equatable, Sendable {
         public let armID: String
         public let provider: TranscriptionProvider
-        public let model: OpenAITranscriptionModel?
+        public let model: String?
         public let localeIdentifier: String?
         public let turns: [TurnResult]
         public let duplicateCount: Int

@@ -4,7 +4,7 @@ import JarvisCore
 @MainActor
 final class TranscriptionBenchmarkRunner {
     enum Failure: Error, CustomStringConvertible {
-        case apiKeyUnavailable
+        case apiKeyUnavailable(TranscriptionProvider)
         case appleSpeechUnavailable(String)
         case missingFixture(String)
         case benchmarkAborted
@@ -13,8 +13,8 @@ final class TranscriptionBenchmarkRunner {
 
         var description: String {
             switch self {
-            case .apiKeyUnavailable:
-                "OpenAI API key unavailable in the owner-only key file or OPENAI_API_KEY"
+            case .apiKeyUnavailable(let provider):
+                "\(provider.displayName) API key unavailable in the owner-only key file or environment"
             case .appleSpeechUnavailable(let detail): "Apple Speech unavailable: \(detail)"
             case .missingFixture(let id): "Missing benchmark fixture \(id)"
             case .benchmarkAborted: "Transcription benchmark aborted"
@@ -30,7 +30,11 @@ final class TranscriptionBenchmarkRunner {
     let relay = TranscriptionBenchmarkSessionRelay()
     let player = SyntheticAudioPlayer()
     let networkDiagnostics = NetworkPathDiagnostics()
-    let apiKey = ChainedSecretStore([FileSecretStore(), EnvSecretStore()]).apiKey(for: .openAIAPIKey)
+    let secrets = ChainedSecretStore([FileSecretStore(), EnvSecretStore()])
+
+    func apiKey(for provider: TranscriptionProvider) -> String? {
+        provider.ownCredential.flatMap { secrets.apiKey(for: $0) }
+    }
     var preparedAppleLocales: [String: Locale] = [:]
     var appleLocaleFailures: [String: String] = [:]
 
@@ -98,24 +102,9 @@ final class TranscriptionBenchmarkRunner {
         }
         try player.prepare(try fixtures.fixture(for: first).fileURL)
 
-        let capture = SystemAudioBenchmarkCapture {
-            [relay] data, sequence, samples, timestamp, events in
-            relay.enqueue(
-                data,
-                sequence: sequence,
-                samples: samples,
-                capturedAt: timestamp,
-                speechEvents: events)
-        }
-        try capture.start()
-        defer {
-            capture.stop()
-            relay.install(nil)
-        }
-
         let summary: TranscriptionBenchmark.Summary
         switch options.mode {
-        case .standard:
+        case .standard, .languages:
             summary = try await runStandard(fixtures: fixtures)
         case .reconnect:
             summary = await runReconnect(fixtures: fixtures)
@@ -129,8 +118,18 @@ final class TranscriptionBenchmarkRunner {
         try validate(summary)
     }
 
+    func startCapture(for target: TranscriptionTarget) throws -> SystemAudioBenchmarkCapture {
+        let capture = SystemAudioBenchmarkCapture(audioFormat: target.provider.audioFormat) {
+            [relay] data, sequence, samples, timestamp, events in
+            relay.enqueue(data, sequence: sequence, samples: samples,
+                capturedAt: timestamp, speechEvents: events)
+        }
+        try capture.start()
+        return capture
+    }
+
     private var requiredProviders: Set<TranscriptionProvider> {
-        var providers: Set<TranscriptionProvider> = [.openAI]
+        var providers = Set(TranscriptionProvider.allCases.filter { $0.ownCredential != nil })
         if #available(macOS 26.0, *) {
             providers.insert(.appleSpeech)
         }
@@ -139,7 +138,7 @@ final class TranscriptionBenchmarkRunner {
 
     private func validate(_ summary: TranscriptionBenchmark.Summary) throws {
         switch options.mode {
-        case .standard:
+        case .standard, .languages:
             let incompleteArms = TranscriptionBenchmark.standardAcceptanceFailureArmIDs(
                 in: summary,
                 expectedRepetitions: options.repetitions,
@@ -212,11 +211,8 @@ final class TranscriptionBenchmarkRunner {
         recorder: TranscriptionBenchmarkEventRecorder,
         transportControl: TranscriptionBenchmarkTransportControl? = nil
     ) -> any TranscriptionSession {
-        let configuration = TranscriptionConfiguration(
-            provider: arm.provider,
-            openAIModel: arm.model ?? .gpt4oTranscribe,
-            openAIExpectedLanguages: arm.languageProfile?.expectedLanguages ?? [],
-            appleSpeechLocaleIdentifier: arm.localeIdentifier ?? "en_US")
+        let configuration = arm.target.configuration(
+            expectedLanguages: arm.languageProfile?.expectedLanguages ?? [])
         // Keep production ping/pong timing: faster probes can add a second fault during replay.
         let config = Config(
             silenceTimeoutSeconds: 120,
@@ -231,9 +227,7 @@ final class TranscriptionBenchmarkRunner {
         let sessionStart = clock.now()
         let session = TranscriptionSessionFactory.make(
             configuration: configuration,
-            // `apiKey` is OpenAI-scoped. A future Gemini arm must resolve its key via
-            // `arm.provider.ownCredential`.
-            apiKey: apiKey ?? "",
+            apiKey: apiKey(for: arm.provider) ?? "",
             appleSpeechLocale: appleLocale,
             speaker: .them,
             transcript: RollingTranscript(),

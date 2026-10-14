@@ -1,0 +1,18 @@
+{
+  "id": "L",
+  "audio": "fixture",
+  "brain": { "primary": "codex-subscription", "fallbacks": [] },
+  "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": [] },
+  "prepNotes": null,
+  "transcription": {
+    "provider": "openai", "model": "gpt-4o-transcribe", "key": "standard",
+    "languages": ["english", "mandarin-chinese"]
+  },
+  "voices": { "them": "Tingting", "me": "Tingting" },
+  "steps": [
+    { "say": { "speaker": "them", "text": "请解释 Swift actor isolation，and how the actor preserves ordered audio." } },
+    { "say": { "speaker": "me", "text": "我会先检查 buffered audio，then commit each chunk exactly once." } },
+    { "say": { "speaker": "them", "text": "网络恢复后，请继续说明 reconnect 的处理顺序。" } },
+    { "stop": true }
+  ]
+}
