@@ -35,8 +35,13 @@ final class LiveE2ERunner: BrainCompositionHost {
     }
 
     private enum AttemptEvent {
-        case started(id: Int, reason: TriggerReason)
+        case started(CoachingAttemptAuditEvent.Started)
         case finished(id: Int)
+    }
+
+    private struct SpokenStepMark {
+        let eventIndex: Int
+        let transcriptBoundary: Int
     }
 
     private struct SpokenClips {
@@ -70,8 +75,7 @@ final class LiveE2ERunner: BrainCompositionHost {
     private var expectsSessionEnd = false
     private var drain: Task<Void, Never>?
     private var attemptEvents: [AttemptEvent] = []
-    /// The `attemptEvents` index where a step's line began playing early, keyed by step.
-    private var earlyClipMarks: [Int: Int] = [:]
+    private var earlyClipMarks: [Int: SpokenStepMark] = [:]
     private var stepAttemptLines: [String] = []
     private var currentStep: Int?
     private var runDeadline = Date.distantFuture
@@ -161,18 +165,17 @@ final class LiveE2ERunner: BrainCompositionHost {
             case .press(let shortcut):
                 let mark = attemptEvents.count
                 composition.requestShortcut(shortcut)
-                try await awaitAttempt(step: index, since: mark, onStart: nil) {
-                    $0 == shortcut.triggerReason
-                }
+                try await awaitAttempt(step: index, since: mark, onStart: nil,
+                                       matching: .shortcut(shortcut))
             case .say(let line, let overlap, _):
                 guard fixtureSource != nil, let spoken = clips[index] else {
                     throw Failure.noFixtureAudio(index)
                 }
-                let mark: Int
+                let mark: SpokenStepMark
                 if let early = earlyClipMarks[index] {
                     mark = early
                 } else {
-                    mark = attemptEvents.count
+                    mark = spokenStepMark()
                     play(spoken, line: line, overlap: overlap)
                 }
                 // A next line marked `whileAttemptRunning` plays once this attempt starts.
@@ -182,13 +185,13 @@ final class LiveE2ERunner: BrainCompositionHost {
                    let nextClips = clips[next] {
                     onStart = { [weak self] in
                         guard let self else { return }
-                        self.earlyClipMarks[next] = self.attemptEvents.count
+                        self.earlyClipMarks[next] = self.spokenStepMark()
                         self.play(nextClips, line: nextLine, overlap: nextOverlap)
                     }
                 }
-                try await awaitAttempt(step: index, since: mark, onStart: onStart) {
-                    !$0.isManual
-                }
+                try await awaitAttempt(step: index, since: mark.eventIndex, onStart: onStart,
+                                       matching: .speech(speaker: line.speaker,
+                                                         transcriptBoundary: mark.transcriptBoundary))
             case .switchBrain(let provider):
                 brain.preferences.route = BrainRoute(
                     primary: LiveE2EScenario.target(for: provider), fallbackTargets: [])
@@ -370,6 +373,11 @@ final class LiveE2ERunner: BrainCompositionHost {
 
     // MARK: - Waits
 
+    private func spokenStepMark() -> SpokenStepMark {
+        SpokenStepMark(eventIndex: attemptEvents.count,
+                       transcriptBoundary: composition.liveE2ETranscriptBoundary)
+    }
+
     private func awaitCompaction() async throws {
         var outcome: String?
         try await wait(until: Date().addingTimeInterval(BrainWorkloadTimeout.historyCompaction + 5),
@@ -391,7 +399,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         step: Int,
         since mark: Int,
         onStart: (() -> Void)?,
-        matching: (TriggerReason) -> Bool
+        matching: LiveE2EAttemptMatch
     ) async throws {
         let limit = Date().addingTimeInterval(Self.attemptTimeout)
         var matched: Int?
@@ -438,21 +446,21 @@ final class LiveE2ERunner: BrainCompositionHost {
     private func note(_ event: CoachingAttemptAuditEvent) {
         switch event {
         case .started(let started):
-            attemptEvents.append(.started(id: started.attemptID, reason: started.reason))
+            attemptEvents.append(.started(started))
         case .finished(let finished):
             attemptEvents.append(.finished(id: finished.attemptID))
         }
     }
 
-    private func firstStartedAttempt(since mark: Int, matching: (TriggerReason) -> Bool) -> Int? {
+    private func firstStartedAttempt(since mark: Int, matching: LiveE2EAttemptMatch) -> Int? {
         for event in attemptEvents.dropFirst(mark) {
-            if case .started(let id, let reason) = event, matching(reason) { return id }
+            if case .started(let started) = event, matching.matches(started) { return started.attemptID }
         }
         return nil
     }
 
     private var startedAttemptIDs: Set<Int> {
-        Set(attemptEvents.compactMap { if case .started(let id, _) = $0 { id } else { nil } })
+        Set(attemptEvents.compactMap { if case .started(let started) = $0 { started.attemptID } else { nil } })
     }
 
     private var finishedAttemptIDs: Set<Int> {

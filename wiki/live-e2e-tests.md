@@ -214,11 +214,16 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   provider's PCM16 wire rate at
   run time and deletes the file right after decoding. `FixtureAudioSource` feeds both transcription
   streams as audio frames; nothing plays through the speakers.
-- **Waits on attempts, never timers.** A spoken step waits for the next automatic attempt to finish,
-  a press for its manual attempt. Pacing follows the app's own state, which is what lets the
+- **Waits on attempts, never timers.** A spoken step waits for an automatic attempt containing new
+  finalized speech from its speaker, using the transcript boundary captured before playback;
+  a press waits for its manual attempt. Early playback retains its original boundary.
+  Pacing follows the app's own state, which is what lets the
   chronology and in-flight cases land where they are meant to whatever the provider latency.
   A quiet check can already include finalized speech when its later turn-end event is batched into
-  that attempt; the runner accepts that automatic attempt too.
+  that attempt; the runner accepts that automatic attempt too. A quiet check with only earlier
+  speech or another speaker's speech cannot advance the step.
+  [`LiveE2EAttemptMatch`](../Sources/JarvisCore/LiveE2E/LiveE2EAttemptMatch.swift) owns this rule;
+  its regressions run in the offline Gate.
   H's `waitForCompaction` step waits on the first compaction outcome in the normal session log and
   fails if that first outcome rejects or fails, even if a later request could succeed. Its optional
   `historyCompactionTokenThreshold` affects only that debug scenario; production keeps `Config.default`.
@@ -232,7 +237,8 @@ and the Gate checks it with synthetic credentials for every selectable provider.
 
 - **Order and count.** Model phrasing and latency vary between runs, so ordinary assertions use
   ordering and counts, labeled with their case IDs. Scenario L also checks the fixed input's
-  Mandarin script and English technical terms in Activity and the transcript sent to coaching.
+  Mandarin script and English technical terms in Activity and the transcript sent to coaching,
+  and requires the provider's setup-confirmation marker separately for each speaker stream.
   CACHE additionally checks the synthetic reference's explicit phrase in delivered hints to prove
   retained guidance is used.
   H also checks the size budget and reduction and the stable queue identifier in replayed memory.

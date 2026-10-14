@@ -31,9 +31,10 @@ extension LiveE2ETests {
                 let marker = target.confirmation == .effectiveConfiguration
                     ? "effective transcription configuration verified"
                     : "transcription setup acknowledged; settings are not echoed"
-                results.check("L-setup", [
-                    (evidence.debugLines.filter { $0.contains(marker) }.count >= 2,
-                     "both streams recorded their provider's setup confirmation"),
+                results.check("L-setup", [Speaker.me, .them].map { speaker in
+                    (evidence.debugLines.contains { $0.contains("[\(speaker.rawValue)]: \(marker)") },
+                     "\(speaker.rawValue) recorded its provider's setup confirmation")
+                } + [
                     (!evidence.attempts.isEmpty, "the full session reached coaching"),
                 ])
                 Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
