@@ -1,9 +1,9 @@
 import Foundation
 
 public protocol OverlayRendering: AnyObject {
-    /// Sampled at delivery, since the user can collapse the box during a request.
+    /// Whether the overlay can retain detail for the current session, regardless of collapse.
     @MainActor var acceptsDetail: Bool { get }
-    /// The detail that reached the screen; nil if the box is hidden or nothing was left to draw.
+    /// The retained detail; nil if the session cannot accept it or nothing is left to draw.
     /// Finalizes a reply `showReplyProgress` opened instead of adding a second one.
     @MainActor func deliver(_ hint: String, detail: ReplyDetail?) -> ReplyDetail?
     /// The reply as far as it has streamed; nil withdraws a reply that will not be delivered.
@@ -16,9 +16,9 @@ extension OverlayRendering {
     @MainActor public var acceptsDetail: Bool { false }
 
     @MainActor public func deliver(_ hint: String, detail: ReplyDetail?) -> ReplyDetail? {
-        let shown = acceptsDetail ? detail : nil
-        render(hint, detail: shown)
-        return shown?.hasContent == true ? shown : nil
+        let retained = acceptsDetail ? detail : nil
+        render(hint, detail: retained)
+        return retained?.hasContent == true ? retained : nil
     }
 
     @MainActor public func showReplyProgress(_ progress: BrainReplyProgress?) {}

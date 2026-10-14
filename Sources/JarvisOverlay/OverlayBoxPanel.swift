@@ -326,8 +326,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
                               height: max(0, available - height))
     }
 
-    /// Returns the detail actually shown, nil when the box can't show one, so an unseen detail is
-    /// never recorded as delivered or replayed to the model.
+    /// Returns the retained detail, including while collapsed, for Activity and model history.
     public func deliver(_ hint: String, detail: ReplyDetail?) -> ReplyDetail? {
         let summary = hint.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !summary.isEmpty else {
@@ -335,16 +334,16 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             removeLiveReply()
             return nil
         }
-        let shown = acceptsDetail ? detail.flatMap { $0.hasContent ? $0 : nil } : nil
+        let retained = acceptsDetail ? detail.flatMap { $0.hasContent ? $0 : nil } : nil
         if let index = liveEntryIndex {
             // The live entry keeps its stamp: the moment its text first reached the box.
-            entries[index] = (stamp: entries[index].stamp, text: summary, hasDetail: shown != nil)
+            entries[index] = (stamp: entries[index].stamp, text: summary, hasDetail: retained != nil)
             liveEntryIndex = nil
-            show(detail: shown, for: entries[index].stamp)
+            show(detail: retained, for: entries[index].stamp)
         } else {
-            append(summary, detail: shown)
+            append(summary, detail: retained)
         }
-        return shown
+        return retained
     }
 
     /// The entry opens on the reply's first character, in its hint or, when the model writes the
@@ -481,7 +480,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     /// Not `panel.isVisible`: the Settings preview can show the box while no session is live.
-    public var acceptsDetail: Bool { isSessionLive && !isCollapsed }
+    public var acceptsDetail: Bool { isSessionLive }
 
     private func applyVisibility() {
         // The preview applies this on close; don't tear down its sample.

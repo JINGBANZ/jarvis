@@ -8,7 +8,8 @@ import Testing
 /// `swift test` never reaches a provider.
 struct LiveE2ELauncher {
     let scenarioID: String
-    let scenarioFile: String
+    let scenarioData: Data
+    let scenario: LiveE2EScenario
     let runDirectory: URL
     let app: URL
     let keepGoing: Bool
@@ -48,10 +49,20 @@ struct LiveE2ELauncher {
             return nil
         }
         let scenario: LiveE2EScenario
+        let scenarioData: Data
         do {
-            scenario = try LiveE2EScenario.load(
-                from: scenariosDirectory.appendingPathComponent("\(file ?? scenarioID).json"),
-                fixturesDirectory: fixturesDirectory)
+            let source = try Data(contentsOf:
+                scenariosDirectory.appendingPathComponent("\(file ?? scenarioID).json"))
+            let selection = environment["JARVIS_LIVE_E2E_PROVIDER"] ?? BrainProvider.codexSubscription.rawValue
+            if selection == "scenario" {
+                scenarioData = source
+            } else if let provider = BrainProvider(rawValue: selection) {
+                scenarioData = try LiveE2EScenario.selectingProvider(
+                    provider, in: source, fixturesDirectory: fixturesDirectory)
+            } else {
+                throw LiveE2EScenario.Failure.invalid("unknown provider selection \"\(selection)\"")
+            }
+            scenario = try LiveE2EScenario.decode(scenarioData, fixturesDirectory: fixturesDirectory)
         } catch {
             Issue.record(error)
             return nil
@@ -61,7 +72,7 @@ struct LiveE2ELauncher {
             return nil
         }
         return LiveE2ELauncher(
-            scenarioID: scenarioID, scenarioFile: file ?? scenarioID,
+            scenarioID: scenarioID, scenarioData: scenarioData, scenario: scenario,
             runDirectory: runDirectory, app: URL(fileURLWithPath: app, isDirectory: true),
             keepGoing: keepGoing)
     }
@@ -93,10 +104,8 @@ struct LiveE2ELauncher {
         let fileManager = FileManager.default
         try fileManager.createDirectory(
             at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        let source = Self.scenariosDirectory.appendingPathComponent("\(scenarioFile).json")
-        let scenario = try LiveE2EScenario.load(from: source, fixturesDirectory: Self.fixturesDirectory)
         let scenarioCopy = directory.appendingPathComponent("scenario.json")
-        try fileManager.copyItem(at: source, to: scenarioCopy)
+        try scenarioData.write(to: scenarioCopy)
 
         let processesBefore = Self.processIDs(matching: helperProcessPattern)
         var arguments = [
@@ -162,13 +171,7 @@ struct LiveE2ELauncher {
 
     func makeInvalidKeyDirectory() throws -> URL {
         let secrets = runDirectory.appendingPathComponent("\(scenarioID)-secrets", isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: secrets, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
-        guard FileSecretStore(directoryURL: secrets)
-            .setApiKey("sk-jarvis-live-e2e-invalid-key", for: .openAIAPIKey) else {
-            throw CocoaError(.fileWriteUnknown)
-        }
-        return secrets
+        return try scenario.makeInvalidKeyDirectory(at: secrets)
     }
 
     // MARK: - Helpers

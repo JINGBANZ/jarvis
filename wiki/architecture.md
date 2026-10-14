@@ -464,9 +464,9 @@ A reply is one compact `hint` string plus one optional Markdown `detail`. The hi
 Activity persists the delivered hint and detail. Its decoder normalizes older caption arrays when
 reading saved sessions, so session history remains readable without rewriting files; see
 [`ActivityResponse`](../Sources/JarvisCore/Diagnostics/ActivityResponse.swift).
-Every session declares `detail`, because every session has the Overlay Box to show it. A detail that
-arrives while the box is collapsed is not shown, and the replay records none, so the model never reads
-back a detail the user did not see. `detail` is nullable rather than absent, which is what makes a
+Every session declares `detail`, because every session has the Overlay Box to show it. Collapse hides
+both sections while incoming hints and details remain available after expansion. Activity and model
+history retain that accepted content. `detail` is nullable rather than absent, which is what makes a
 field optional under strict Structured Outputs.
 
 Nothing in the runtime decides what belongs in a detail. The speak guidance says when to write one at
@@ -490,7 +490,7 @@ renderer accepts, and the prose before, between, and after them. The segments ke
 model wrote them, so a sentence written after a block reads after it and a line that introduces a
 block sits directly above it. A candidate the box rejects on the way to the accepted one is removed
 from the prose, from the replayed arguments, and from Activity, and the tool result names it, so the
-model reads back what the user actually saw rather than assuming its block landed; the search then
+model reads back what is available in the box rather than assuming its block landed; the search then
 goes on, so a valid block written after a broken one still reaches the box. Everything else stays in
 the prose and renders inline where it was written, including a fence written after the shown one of
 its kind.
@@ -586,10 +586,10 @@ remaining overflow scrolls vertically. Smaller graphs and graphs that already fi
 shrinking to compensate for the graph. See `OverlayBoxPanel`, `DetailDocumentView`,
 `DiagramHintLayout`, `DiagramHintEdgeRoute`, and `DiagramHintImage` for sizing.
 
-Delivery is one main-actor operation: the runner asks the overlay to show the reply and the overlay
-reports back what reached the screen. A detail the box could not accept, because it is hidden or
-collapsed or has nothing left to draw, is dropped whole from Activity and from committed history, so the
-model's memory and the user's screen agree. Invalid or unsupported block syntax degrades to the rest
+Delivery is one main-actor operation: the runner asks the overlay to retain the reply and the overlay
+reports back what is available to the user. An inactive session or a detail with nothing left to draw
+is rejected, and that detail is omitted from Activity and committed history. Collapse changes
+visibility without changing acceptance or expanding the panel. Invalid or unsupported block syntax degrades to the rest
 of the reply, with diagnostic detail only in `jlog`. Rendered images are never archived; the detail's
 Markdown, diagram source included, is persisted with the tip in the owner-only session directory.
 

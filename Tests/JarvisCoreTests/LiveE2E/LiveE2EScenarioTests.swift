@@ -40,11 +40,12 @@ struct LiveE2EScenarioTests {
             .press(.hint),
             them("Great, thanks for joining. We'll get started in just a minute."),
             them("Tell me about a time you disagreed with a teammate."),
-            .switchBrain(.openAI),
-            them("Let's move on to design: our product search is slow, and we are redesigning it. We agreed on twenty thousand searches per second, p99 under three hundred milliseconds, and results up to a minute stale, behind one search API. Now sketch the high-level architecture: which components would you put in, and what is the read path for one request?"),
             .switchBrain(.codexSubscription),
             them("Tell me about a time you pushed back on a decision from your manager."),
-            .say(.init(speaker: .me, text: "Jarvis, how can I solve this in one pass?"),
+            .switchBrain(.openAI),
+            them("Let's move on to the product-search design from your preparation notes: our product search is slow, and we are redesigning it. We agreed on twenty thousand searches per second, p99 under three hundred milliseconds, and results up to a minute stale, behind one search API. Now sketch the high-level architecture: which components would you put in, and what is the read path for one request?"),
+            .switchBrain(.codexSubscription),
+            .say(.init(speaker: .me, text: "Jarvis, let's return to the coding problem on my screen. Please look at it and explain how I can solve it in one pass."),
                  overlap: nil, whileAttemptRunning: false),
             .press(.hint),
             .press(.showCode),
@@ -128,9 +129,12 @@ struct LiveE2EScenarioTests {
             fixturesDirectory: fixtures)
 
         #expect(b.brain == .init(primary: .claudeSubscription, fallbacks: []))
-        #expect(b.capabilities == .init(
-            disabledTools: ["search_prep_notes"],
-            disabledSkills: ["behavioral", "system-design", "coding-with-ai"]))
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: Set(b.capabilities.disabledTools),
+            disabledSkills: Set(b.capabilities.disabledSkills),
+            prepSourcesConfigured: true, skills: SkillCatalog.bundled())
+        #expect(capabilities.skills.map(\.name) == ["coding"])
+        #expect(capabilities.deferredTools.isEmpty)
         #expect(b.steps.contains(.switchBrain(.gemini)))
     }
 
