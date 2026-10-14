@@ -32,7 +32,6 @@
 
 ## What Jarvis Is, In One Sentence
 
-A personal, always-on macOS assistant that watches and listens during technical interviews and
-proactively coaches behavioral, system-design, and coding questions with short tips in an on-screen
-overlay — built as a thin harness over Apple's capture frameworks and the OpenAI APIs, reinventing
-nothing.
+A personal voice-only AI agent for macOS: talk naturally, get proactive help in a private on-screen
+overlay, and enter no typed prompts — currently focused on technical-conversation coaching, with
+every feature guided by the [voice-only interaction contract](./architecture.md#1-vision).

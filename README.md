@@ -1,11 +1,17 @@
 # Jarvis
 
-Jarvis is an experimental, open-source, voice-driven macOS coaching agent for technical
-conversations. It listens to both sides, checks the screen when useful, and offers concise guidance
-while you think.
+**Your voice-only AI agent for macOS.**
 
-Jarvis coaches proactively and stays quiet when it has nothing useful to add. Press **⌥⌘J** during a
-session for an immediate, screen-aware hint.
+Think out loud. Ask Jarvis a question. It listens to both sides of the conversation, checks your
+screen when useful, and offers help at the right moment. **No text input. No prompt box.**
+
+Jarvis is experimental and open source. Its current focus is coaching technical conversations:
+behavioral, system-design, and coding questions. Replies appear in a private on-screen overlay.
+Jarvis helps proactively and stays quiet when it has nothing useful to add. You can also press
+**⌥⌘J** during a session for an immediate, screen-aware hint.
+
+Every feature is built around spoken interaction: accurate listening, conversation context, and
+timely help. See the [voice-only product direction](./wiki/architecture.md#1-vision).
 
 ## Install Jarvis
 
@@ -20,13 +26,13 @@ Jarvis**. macOS will request the permissions Jarvis needs.
 
 ```mermaid
 flowchart TD
-    A["Conversation<br/>Microphone + system audio"] --> B["Follow the discussion"]
+    A["Conversation + spoken requests<br/>Microphone + system audio"] --> B["Follow the discussion"]
     B --> C{"Can Jarvis help?"}
     C -->|"Nothing useful"| D["Stay quiet"]
     C -->|"Enough context"| E["Show a short tip<br/>in the overlay"]
     C -->|"Needs visual context"| F["Check the screen"]
     F --> E
-    G["⌥⌘J<br/>Ask for a hint"] --> F
+    G["⌥⌘J<br/>Optional hint shortcut"] --> F
 ```
 
 ## Developer quick start
