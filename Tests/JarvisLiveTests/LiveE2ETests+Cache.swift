@@ -20,7 +20,8 @@ extension LiveE2ETests {
         guard let launcher = await LiveE2ELauncher.begin(scenario: LiveE2ECacheCheck.scenarioID) else { return }
         let launch = try await launcher.launch()
         let expectedProvider = launch.scenario.brain.primary
-        let expectedModel = launch.scenario.brain.model ?? LiveE2ECacheCheck.modelID
+        let expectedModel = LiveE2EScenario.target(
+            for: expectedProvider, modelID: launch.scenario.brain.model).modelID
         var results = LiveE2EResults(scenario: LiveE2ECacheCheck.scenarioID)
         guard let evidence = Self.requireEvidence(launch, &results) else {
             try launcher.finish(results)
@@ -36,7 +37,7 @@ extension LiveE2ETests {
             (attempts.allSatisfy { $0.outcome == "spoke" && $0.terminal == "speak" },
              "every selected attempt completed and committed a spoken answer"),
             (attempts.allSatisfy { $0.provider == expectedProvider.rawValue
-                && $0.model == expectedModel }, "the selected Luna target served every attempt"),
+                && $0.model == expectedModel }, "the selected target served every attempt"),
             (!evidence.attempts.contains { $0.wake == "pending_work" }, "no failed work was retried"),
             (initial.count == 8 && Set(initial.compactMap(\.attemptID)) == Set(attempts.map(\.id)),
              "exactly one initial provider request per selected attempt, with no extra initial requests"),
@@ -156,7 +157,7 @@ extension LiveE2ETests {
             if record.provider == BrainProvider.codexSubscription.rawValue {
                 cost = "not applicable (subscription)"
             } else if record.provider == BrainProvider.openAI.rawValue,
-               record.exchange.model == LiveE2ECacheCheck.modelID,
+               record.exchange.model == "gpt-6-luna",
                let total = usage?.totalInput, (1...272_000).contains(total),
                let read = usage?.cacheRead, let write = usage?.cacheWrite,
                let uncached = usage?.uncachedInput, let output = usage?.output,

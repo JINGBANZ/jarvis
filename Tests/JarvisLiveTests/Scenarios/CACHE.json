@@ -1,7 +1,7 @@
 {
   "id": "CACHE",
   "audio": "fixture",
-  "brain": { "primary": "codex-subscription", "model": "gpt-6-luna", "fallbacks": [] },
+  "brain": { "primary": "codex-subscription", "fallbacks": [] },
   "capabilities": { "disabledTools": [], "disabledSkills": [] },
   "prepNotes": "cache-prep-notes.md",
   "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },

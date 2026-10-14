@@ -23,15 +23,15 @@ struct LiveE2EScenarioTests {
         #expect(scenario.id == id)
     }
 
-    @Test("cache scenario ships Codex subscription Luna without a fallback")
+    @Test("cache scenario inherits the shared Codex live-test default")
     func cacheScenarioDefault() throws {
         let scenario = try LiveE2EScenario.load(
             from: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"),
             fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true))
-        #expect(scenario.brain == .init(primary: .codexSubscription, fallbacks: [], model: "gpt-6-luna"))
+        #expect(scenario.brain == .init(primary: .codexSubscription, fallbacks: []))
     }
 
-    @Test("cache scenario accepts subscription and paid Luna overrides", arguments: [BrainProvider.codexSubscription, .openAI])
+    @Test("cache scenario accepts only the shared default model", arguments: [BrainProvider.codexSubscription, .openAI])
     func cacheScenarioAcceptsProviderSelection(provider: BrainProvider) throws {
         let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
@@ -40,21 +40,29 @@ struct LiveE2EScenarioTests {
         #expect(scenario.brain.primary == provider)
         #expect(scenario.brain.model == nil)
         #expect(scenario.brain.fallbacks.isEmpty)
+        let target = LiveE2EScenario.target(for: provider)
         var explicit = try #require(try JSONSerialization.jsonObject(with: selected) as? [String: Any])
-        explicit["brain"] = ["primary": provider.rawValue, "model": "gpt-6-luna", "fallbacks": []] as [String: Any]
+        explicit["brain"] = ["primary": provider.rawValue, "model": target.modelID, "fallbacks": []] as [String: Any]
         let pinned = try LiveE2EScenario.decode(
             JSONSerialization.data(withJSONObject: explicit), fixturesDirectory: fixtures)
-        #expect(pinned.brain == .init(primary: provider, fallbacks: [], model: "gpt-6-luna"))
+        #expect(pinned.brain == .init(primary: provider, fallbacks: [], model: target.modelID))
     }
 
     @Test("cache scenario rejects a different model, provider or fallback")
     func cacheScenarioPinsItsTarget() throws {
         let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        for provider in [BrainProvider.codexSubscription, .openAI] {
+            let target = LiveE2EScenario.target(for: provider)
+            let alternate = try #require(BrainModelCatalog.models(for: provider).first { $0.id != target.modelID })
+            var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+            object["brain"] = ["primary": provider.rawValue, "model": alternate.id, "fallbacks": []] as [String: Any]
+            #expect(throws: LiveE2EScenario.Failure.self) {
+                try LiveE2EScenario.decode(JSONSerialization.data(withJSONObject: object), fixturesDirectory: fixtures)
+            }
+        }
         for replacement in [
-            ["primary": "codex-subscription", "model": "gpt-6.1-sol", "fallbacks": []] as [String: Any],
-            ["primary": "openai", "model": "gpt-6.1-sol", "fallbacks": []],
-            ["primary": "openai", "model": "gpt-6-luna", "fallbacks": ["codex-subscription"]],
+            ["primary": "openai", "fallbacks": ["codex-subscription"]] as [String: Any],
             ["primary": "claude-subscription", "fallbacks": []],
             ["primary": "gemini", "fallbacks": []],
         ] {

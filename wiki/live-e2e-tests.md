@@ -118,9 +118,10 @@ filtered to the chosen scenarios. `F01` selects both F01 scenario files. Each te
 with its scenario, waits for the app to exit, and asserts on the session folder.
 `Tests/JarvisLiveTests/LiveE2ELauncher.swift` holds the preflight and the launch.
 `CACHE` is opt-in and excluded from `all`; run it after changing context composition, history replay,
-provider encoding, or cache accounting. It uses Codex with `gpt-6-luna` by default; an explicit
-`--provider openai` selects the OpenAI API with the same model. CACHE uses one target with no fallback;
-other provider selections are rejected before launch.
+provider encoding, or cache accounting. It uses Codex by default; an explicit `--provider openai`
+selects the OpenAI API. Both use the shared live-test default described in
+[How a scenario runs](#how-a-scenario-runs). CACHE uses one target with no fallback; other provider
+selections are rejected before launch.
 
 - `--provider` selects `codex-subscription` (the default), `claude-subscription`, `openai`, or
   `gemini` for all coaching. The launcher removes scenario fallbacks and brain-switch steps, then
@@ -187,7 +188,7 @@ an ambiguous "this" after a design discussion.
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
 | H | Codex | A queue decision, an inclusive boundary rule, and unrun tests planted before resolved discussions. A lower debug threshold triggers compaction; the scenario requires the first summary to be accepted before asking for recall. C35/C36 check replacement, size reduction, replay, and delivery; `Scenarios/H-review.md` covers factual quality. |
 | P | Codex | An explicit full-document request over the existing prep fixture; verifies direct catalog read → reply without search and complete extracted text in the brain request. Design follow-ups exercise source attribution, cache invalidation, and a conflicting draft reported in speech. |
-| CACHE | Fixed GPT-6 Luna: Codex by default or explicit `--provider openai` | Warm-up and measured spoken attempts over a long synthetic retained skill and fictional Harbor Ledger preparation notes. Verifies real loading continuations, committed hints, stable encoded prefixes, and history-cache reuse. |
+| CACHE | Shared live-test default: Codex by default or explicit `--provider openai` | Warm-up and measured spoken attempts over a long synthetic retained skill and fictional Harbor Ledger preparation notes. Verifies real loading continuations, committed hints, stable encoded prefixes, and history-cache reuse. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
@@ -200,8 +201,10 @@ and the Gate checks it with synthetic credentials for every selectable provider.
 
 - **Isolated preferences.** Brain route and capability switches go to the private defaults suite
   `com.jarvis.coach.dev.live-e2e`, cleared per scenario, so a run never reads or changes the
-  developer's own settings. Models are selected by `LiveE2ERunner.target(for:)`; the run checks
-  the harness with a lighter model where available. Transcription is pinned to `gpt-4o-transcribe`.
+  developer's own settings. [`LiveE2EScenario.target(for:modelID:)`](../Sources/JarvisCore/LiveE2E/LiveE2EScenario+Target.swift)
+  owns the default model for each coaching provider, shared by scenario preferences, brain switches,
+  and CACHE validation. Ordinary scenarios can select explicit model IDs; CACHE uses that provider's
+  shared default. Transcription is pinned to `gpt-4o-transcribe`.
 - **Synthesized speech.** `FixtureSpeech` renders each line with `/usr/bin/say` to 24 kHz PCM16 at
   run time and deletes the file right after decoding. `FixtureAudioSource` feeds both transcription
   streams as audio frames; nothing plays through the speakers.
@@ -248,23 +251,25 @@ and the Gate checks it with synthetic credentials for every selectable provider.
 
 ### Cache regression window
 
-`LiveE2ETests+Cache.swift` samples two warm-up attempts and six measured attempts, taking the first
-native provider request of each completed spoken attempt from the step map rather than request order.
+[`LiveE2ETests+Cache.swift`](../Tests/JarvisLiveTests/LiveE2ETests+Cache.swift) takes the first native
+provider request of each completed spoken attempt from the step map rather than request order.
+`LiveE2ECacheCheck.warmupAttempts` and `measuredAttempts` own the sampling counts.
 Failed attempts, pending-work retries, extra initial
 requests, missing usage, and truncated prefix evidence cannot pass. Skill, tool, and preparation
 search continuations must occur during warm-up, and the loaders must not run again. Each measured
 attempt commits one delivered hint that uses the retained reference's explicit term.
 
-`LiveE2ECacheCheck` owns the thresholds: at least five of six measured requests must report cache reads
-of at least the preceding initial request's input minus its provider's checkpoint allowance, and
-their token-weighted cache-read rate must reach 80%. The OpenAI API allowance is 256 tokens. Codex
-uses 1,151 tokens for the observed Luna behavior through the pinned CLIProxyAPI 8.0.20 helper:
-1,024-token checkpoint spacing plus up to 127 tokens of reporting rounding. A controlled pair of
-identical requests confirms the next checkpoint predicted for the tested request. This is a measured
-contract for that Codex route, not a universal checkpoint guarantee or a guarantee from the public
-Responses API documentation; repeat the controlled probe when changing the helper or model. A
-separate check requires reads beyond the first cold request's static
-input, so caching only instructions and tool schemas cannot pass. Results print the history-hit
+[`LiveE2ECacheCheck.evaluate`](../Sources/JarvisCore/LiveE2E/LiveE2ECacheCheck.swift) owns the required
+history-hit count, token-weighted cache-read floor, and beyond-static guard. A history hit compares
+cache reads with the preceding initial request's input, allowing only the provider's checkpoint
+tolerance from `prefixTokenAllowance(for:)`. The Codex allowance is calibrated against observed
+Luna behavior through the pinned CLIProxyAPI 8.0.20 helper: 1,024-token checkpoint spacing and
+128-token cache-read reporting increments. A controlled pair of identical requests confirms the
+next checkpoint predicted for the tested request. This observation applies to that tested route;
+it does not establish a universal checkpoint rule or a public Responses API guarantee. Repeat the
+controlled probe when changing the helper or model. The beyond-static guard uses the
+first initial request's static baseline, which can itself have cache reads, so caching only
+instructions and tool schemas cannot pass. Results print the history-hit
 count and weighted rate; ordinary scenario token lines remain diagnostic. Per-request usage labels
 warm-up and measured requests and keeps missing counters unknown; cost estimates require every
 counter needed for the calculation.
@@ -275,10 +280,13 @@ compaction intentionally reset a prefix, so they stay outside this measurement. 
 and replay behavior is covered by `CoachContextCacheTests` and the ordinary live scenarios. A
 declared reset starts a new window; its non-null reason alone does not imply another reset.
 
-`LiveE2ECacheBudget` bounds coaching requests, run duration, and request size before sending. The
-sender accepts only the scenario's fixed Luna target and client output cap and performs no transport
-retry. The 2,048-token cap is a client request bound: the Codex helper removes `max_output_tokens`, so
-it does not enforce that cap upstream. Request, time, and body limits still apply on that route.
+[`LiveE2ECacheBudget`](../Sources/JarvisCore/LiveE2E/LiveE2ECacheBudget.swift) owns the request, duration,
+and API reservation limits in its `maximumRequests`, `maximumDuration`, and
+`maximumReservedCoachCost` constants; `reserve(inputBytes:now:)` enforces the body-size bound.
+The sender accepts only the shared live-test target and `maximumOutputTokens` client output cap
+and performs no transport retry. That cap is a client request bound: the Codex helper removes
+`max_output_tokens`, so it does not enforce the cap upstream. Request, time, and body limits still
+apply on that route.
 Codex coaching uses the subscription; paid API cost reservations and estimates belong only to the
 explicit OpenAI route, use that model's accounting, and exclude transcription. The scenario model,
 budget, threshold checker, and their failure cases run in the offline Gate; the actual hit rate is

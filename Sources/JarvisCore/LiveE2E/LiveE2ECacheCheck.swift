@@ -3,7 +3,6 @@ import Foundation
 
 public enum LiveE2ECacheCheck {
     public static let scenarioID = "CACHE"
-    public static let modelID = "gpt-6-luna"
     public static let warmupAttempts = 2
     public static let measuredAttempts = 6
 

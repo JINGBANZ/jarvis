@@ -25,7 +25,7 @@ enum LiveE2ECacheTransport {
                 throw LiveE2ECacheBudget.Failure.exhausted("missing request body")
             }
             let exchange = RecordedExchange.read(request: object, response: nil)
-            guard exchange.model == LiveE2ECacheCheck.modelID,
+            guard exchange.model == LiveE2EScenario.target(for: provider).modelID,
                   request.url == endpoint,
                   object["max_output_tokens"] as? Int == LiveE2ECacheBudget.maximumOutputTokens,
                   object["service_tier"] == nil || object["service_tier"] as? String == "default" else {

@@ -131,11 +131,6 @@ final class LiveE2ERunner: BrainCompositionHost {
         let preferences = try makePreferences(for: scenario)
         var send: BrainAccessor.Sender?
         if scenario.id == LiveE2ECacheCheck.scenarioID {
-            guard [.codexSubscription, .openAI].contains(scenario.brain.primary),
-                  scenario.brain.fallbacks.isEmpty,
-                  (scenario.brain.model ?? LiveE2ECacheCheck.modelID) == LiveE2ECacheCheck.modelID else {
-                throw Failure.notReadyToStart("cache scenario requires Codex or OpenAI on its fixed Luna target")
-            }
             runDeadline = Date().addingTimeInterval(LiveE2ECacheBudget.maximumDuration)
             preferences.effort = .low
             send = LiveE2ECacheTransport.sender(
@@ -196,7 +191,7 @@ final class LiveE2ERunner: BrainCompositionHost {
                 }
             case .switchBrain(let provider):
                 brain.preferences.route = BrainRoute(
-                    primary: Self.target(for: provider), fallbackTargets: [])
+                    primary: LiveE2EScenario.target(for: provider), fallbackTargets: [])
                 await brain.applyBrainPreferencesToRunningSession(
                     update: .topologyEdit)
             case .waitForCompaction:
@@ -329,8 +324,8 @@ final class LiveE2ERunner: BrainCompositionHost {
         defaults.removePersistentDomain(forName: Self.defaultsSuite)
         let preferences = BrainPreferences(defaults: defaults)
         preferences.route = BrainRoute(
-            primary: Self.target(for: scenario.brain.primary, modelID: scenario.brain.model),
-            fallbackTargets: scenario.brain.fallbacks.map { Self.target(for: $0) })
+            primary: LiveE2EScenario.target(for: scenario.brain.primary, modelID: scenario.brain.model),
+            fallbackTargets: scenario.brain.fallbacks.map { LiveE2EScenario.target(for: $0) })
         preferences.disabledTools = Set(scenario.capabilities.disabledTools)
         preferences.disabledSkills = Set(scenario.capabilities.disabledSkills)
         return preferences
@@ -461,16 +456,6 @@ final class LiveE2ERunner: BrainCompositionHost {
             withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) else { return }
         try? TranscriptionBenchmarkFiles.write(
             data, named: "live-e2e-error.json", to: options.outputDirectory)
-    }
-
-    /// A lighter model per line: the run checks the harness, not the model's best answer.
-    private static func target(for provider: BrainProvider, modelID: String? = nil) -> BrainTarget {
-        let defaultModel = switch provider {
-        case .claudeSubscription: "claude-sonnet-5-5"
-        case .openAI, .codexSubscription: "gpt-6-luna"
-        case .gemini: BrainModelCatalog.defaultModel(for: .gemini).id
-        }
-        return BrainTarget(provider: provider, modelID: modelID ?? defaultModel)
     }
 
     private static func stream(for speaker: Speaker) -> AudioTimeline.Stream {

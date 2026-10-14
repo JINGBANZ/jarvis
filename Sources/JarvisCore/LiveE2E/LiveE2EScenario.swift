@@ -131,10 +131,10 @@ extension LiveE2EScenario {
         steps = try Self.steps(from: raw.steps, primary: primary, fixturesDirectory: fixturesDirectory)
         if id == LiveE2ECacheCheck.scenarioID {
             guard [.codexSubscription, .openAI].contains(primary), fallbacks.isEmpty,
-                  (raw.brain.model ?? LiveE2ECacheCheck.modelID) == LiveE2ECacheCheck.modelID,
+                  Self.target(for: primary, modelID: raw.brain.model) == Self.target(for: primary),
                   !steps.contains(where: { if case .switchBrain = $0 { true } else { false } }) else {
                 throw Failure.invalid(
-                    "CACHE requires Codex subscription or OpenAI on gpt-6-luna without fallbacks or provider switches")
+                    "CACHE requires Codex subscription or OpenAI on its default live-test model without fallbacks or provider switches")
             }
         }
 
