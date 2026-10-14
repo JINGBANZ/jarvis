@@ -16,6 +16,7 @@ public extension BrainTrafficAuditing {
         error: String? = nil,
         phases: [String: Int]? = nil,
         kind: BrainTrafficAuditEvent.Kind = .providerCall,
+        cacheObserver: (any BrainCacheObserving)? = nil,
         at date: Date = Date()
     ) {
         record(BrainTrafficAuditEvent(
@@ -29,6 +30,7 @@ public extension BrainTrafficAuditing {
             phases: phases,
             kind: kind,
             requestContext: tag == "coach" ? CoachingRequestAttribution.current : nil,
+            cacheObserver: cacheObserver,
             date: date))
     }
 }

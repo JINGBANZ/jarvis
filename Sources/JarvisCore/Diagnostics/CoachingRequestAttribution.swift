@@ -6,6 +6,8 @@ public struct CoachingRequestContext: Sendable {
     public let sourceTrigger: String
     public let phase: CoachingAttemptAuditEvent.RequestPhase
     public let sequence: Int
+    public var contextRevision: UInt? = nil
+    public var contextRewriteReason: CoachingContextRewriteReason? = nil
 
     var approximateRetainedBytes: Int {
         96 + trigger.utf8.count + sourceTrigger.utf8.count
@@ -20,7 +22,9 @@ enum CoachingRequestAttribution {
         wake: CoachingAttemptAuditEvent.Wake,
         reason: TriggerReason,
         phase: CoachingAttemptAuditEvent.RequestPhase,
-        sequence: Int
+        sequence: Int,
+        contextRevision: UInt? = nil,
+        contextRewriteReason: CoachingContextRewriteReason? = nil
     ) -> CoachingRequestContext {
         let source = triggerName(reason)
         return CoachingRequestContext(
@@ -28,7 +32,9 @@ enum CoachingRequestAttribution {
             trigger: wake == .pendingWork ? CoachingAttemptAuditEvent.Wake.pendingWork.rawValue : source,
             sourceTrigger: source,
             phase: phase,
-            sequence: sequence)
+            sequence: sequence,
+            contextRevision: contextRevision,
+            contextRewriteReason: contextRewriteReason)
     }
 
     static func triggerName(_ reason: TriggerReason) -> String {

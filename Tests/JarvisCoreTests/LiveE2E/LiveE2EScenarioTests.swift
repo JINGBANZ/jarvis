@@ -11,7 +11,7 @@ struct LiveE2EScenarioTests {
 
     @Test(
         "every shipped scenario decodes and validates",
-        arguments: ["A", "B", "C", "D", "H", "P", "R", "F01-system", "F01-microphone", "F02"])
+        arguments: ["A", "B", "C", "D", "H", "P", "R", "F01-system", "F01-microphone", "F02", "CACHE"])
     func shippedScenarioValidates(id: String) throws {
         let url = Self.liveTests.appendingPathComponent("Scenarios/\(id).json")
         let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
@@ -21,6 +21,71 @@ struct LiveE2EScenarioTests {
         let scenario = try LiveE2EScenario.load(from: url, fixturesDirectory: fixtures)
 
         #expect(scenario.id == id)
+    }
+
+    @Test("cache scenario inherits the shared Codex live-test default")
+    func cacheScenarioDefault() throws {
+        let scenario = try LiveE2EScenario.load(
+            from: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"),
+            fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true))
+        #expect(scenario.brain == .init(primary: .codexSubscription, fallbacks: []))
+    }
+
+    @Test("cache scenario accepts only the shared default model", arguments: [BrainProvider.codexSubscription, .openAI])
+    func cacheScenarioAcceptsProviderSelection(provider: BrainProvider) throws {
+        let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
+        let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        let selected = try LiveE2EScenario.selectingProvider(provider, in: fixture, fixturesDirectory: fixtures)
+        let scenario = try LiveE2EScenario.decode(selected, fixturesDirectory: fixtures)
+        #expect(scenario.brain.primary == provider)
+        #expect(scenario.brain.model == nil)
+        #expect(scenario.brain.fallbacks.isEmpty)
+        let target = LiveE2EScenario.target(for: provider)
+        var explicit = try #require(try JSONSerialization.jsonObject(with: selected) as? [String: Any])
+        explicit["brain"] = ["primary": provider.rawValue, "model": target.modelID, "fallbacks": []] as [String: Any]
+        let pinned = try LiveE2EScenario.decode(
+            JSONSerialization.data(withJSONObject: explicit), fixturesDirectory: fixtures)
+        #expect(pinned.brain == .init(primary: provider, fallbacks: [], model: target.modelID))
+    }
+
+    @Test("cache scenario rejects a different model, provider or fallback")
+    func cacheScenarioPinsItsTarget() throws {
+        let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
+        let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        for provider in [BrainProvider.codexSubscription, .openAI] {
+            let target = LiveE2EScenario.target(for: provider)
+            let alternate = try #require(BrainModelCatalog.models(for: provider).first { $0.id != target.modelID })
+            var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+            object["brain"] = ["primary": provider.rawValue, "model": alternate.id, "fallbacks": []] as [String: Any]
+            #expect(throws: LiveE2EScenario.Failure.self) {
+                try LiveE2EScenario.decode(JSONSerialization.data(withJSONObject: object), fixturesDirectory: fixtures)
+            }
+        }
+        for replacement in [
+            ["primary": "openai", "fallbacks": ["codex-subscription"]] as [String: Any],
+            ["primary": "claude-subscription", "fallbacks": []],
+            ["primary": "gemini", "fallbacks": []],
+        ] {
+            var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+            object["brain"] = replacement
+            let data = try JSONSerialization.data(withJSONObject: object)
+            #expect(throws: LiveE2EScenario.Failure.self) {
+                try LiveE2EScenario.decode(data, fixturesDirectory: fixtures)
+            }
+        }
+    }
+
+    @Test("cache scenario rejects provider switches")
+    func cacheScenarioRejectsProviderSwitches() throws {
+        let fixture = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/CACHE.json"))
+        let fixtures = Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true)
+        var object = try #require(try JSONSerialization.jsonObject(with: fixture) as? [String: Any])
+        let steps = try #require(object["steps"] as? [[String: Any]])
+        object["steps"] = [["switchBrain": "openai"]] + steps
+        let data = try JSONSerialization.data(withJSONObject: object)
+        #expect(throws: LiveE2EScenario.Failure.self) {
+            try LiveE2EScenario.decode(data, fixturesDirectory: fixtures)
+        }
     }
 
     @Test("scenario A ships the specified settings and steps")

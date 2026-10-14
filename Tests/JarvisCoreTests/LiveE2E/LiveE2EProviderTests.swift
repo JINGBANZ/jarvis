@@ -53,6 +53,21 @@ import Testing
         }
     }
 
+    @Test("ordinary scenarios retain explicit models until a provider override")
+    func explicitModelSelection() throws {
+        var json = try #require(JSONSerialization.jsonObject(with: data("C")) as? [String: Any])
+        let provider = BrainProvider.codexSubscription
+        let defaultTarget = LiveE2EScenario.target(for: provider)
+        let alternate = try #require(BrainModelCatalog.models(for: provider).first { $0.id != defaultTarget.modelID })
+        json["brain"] = ["primary": provider.rawValue, "model": alternate.id, "fallbacks": []] as [String: Any]
+        let source = try JSONSerialization.data(withJSONObject: json)
+        let scenario = try decode(source)
+        #expect(LiveE2EScenario.target(for: scenario.brain.primary, modelID: scenario.brain.model)
+            == BrainTarget(provider: provider, modelID: alternate.id))
+        let selected = try decode(LiveE2EScenario.selectingProvider(provider, in: source, fixturesDirectory: Self.fixtures))
+        #expect(LiveE2EScenario.target(for: selected.brain.primary, modelID: selected.brain.model) == defaultTarget)
+    }
+
     @Test func scenarioModeKeepsSwitchProvidersAtTheirSteps() throws {
         let scenario = try decode(data("A"))
         #expect(scenario.requiredBrainProviders == [.claudeSubscription, .openAI, .codexSubscription])

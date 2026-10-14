@@ -6,7 +6,7 @@ umask 077
 cd "$(dirname "$0")/.."
 
 usage() {
-  echo "usage: $0 [A|B|C|D|H|P|R|F01|F02|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going]" >&2
+  echo "usage: $0 [A|B|C|D|H|P|R|F01|F02|CACHE|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going]" >&2
 }
 
 SCENARIO="all"
@@ -17,7 +17,7 @@ EVALUATION_AGENT="${EVAL_AGENT:-codex}"
 RUN_ARGUMENTS=("$@")
 while (( $# > 0 )); do
   case "$1" in
-    A|B|C|D|H|P|R|F01|F02|all) SCENARIO="$1" ;;
+    A|B|C|D|H|P|R|F01|F02|CACHE|all) SCENARIO="$1" ;;
     --provider)
       if (( $# < 2 )); then usage; exit 2; fi
       PROVIDER="$2"
@@ -80,8 +80,12 @@ find "$BASE" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort -r | tail -n +11 \
       rm -rf "$old_run"
     done
 
+SKIP_CACHE=()
 case "$SCENARIO" in
-  all) FILTER='JarvisLiveTests\.LiveE2ETests/' ;;
+  all)
+    FILTER='JarvisLiveTests\.LiveE2ETests/'
+    SKIP_CACHE=(--skip 'JarvisLiveTests\.LiveE2ETests/scenarioCACHE')
+    ;;
   *) FILTER="JarvisLiveTests\\.LiveE2ETests/scenario$SCENARIO" ;;
 esac
 
@@ -116,7 +120,7 @@ trap abort_run INT TERM
 source scripts/lib/swift-test-flags.sh
 echo "▶ running live e2e scenarios ($SCENARIO, provider $PROVIDER) into $RUN_DIR"
 set +e
-swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} --filter "$FILTER" 2>&1 \
+swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} ${SKIP_CACHE[@]+"${SKIP_CACHE[@]}"} --filter "$FILTER" 2>&1 \
   | tee "$RUN_DIR/swift-test.log"
 test_status=${PIPESTATUS[0]}
 set -e

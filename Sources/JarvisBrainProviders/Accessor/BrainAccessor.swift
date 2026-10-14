@@ -18,6 +18,7 @@ public struct BrainAccessor: BrainClient, Sendable {
     private let send: Sender?
     private let traffic: (any BrainTrafficAuditing)?
     private let trafficTag: String
+    private let cacheObserver: (any BrainCacheObserving)?
 
     public init(provider: BrainProvider = .openAI,
                 apiKey: String,
@@ -60,6 +61,7 @@ public struct BrainAccessor: BrainClient, Sendable {
         self.timeout = timeout
         self.traffic = traffic
         self.trafficTag = trafficTag
+        self.cacheObserver = traffic != nil && trafficTag == "coach" ? ProviderCacheObserver() : nil
         self.send = send
     }
 
@@ -115,7 +117,8 @@ public struct BrainAccessor: BrainClient, Sendable {
         } catch {
             traffic?.record(tag: trafficTag, provider: provider, request: body, response: nil, status: nil,
                             latencyMs: Self.elapsedMs(since: started),
-                            error: BrainRequestDelegate.errorSummary(error), phases: delegate.phases)
+                            error: BrainRequestDelegate.errorSummary(error), phases: delegate.phases,
+                            cacheObserver: cacheObserver)
             throw error
         }
         let data: Data
@@ -124,14 +127,14 @@ public struct BrainAccessor: BrainClient, Sendable {
             data = received
             traffic?.record(tag: trafficTag, provider: provider, request: body, response: data,
                             status: reply.status, latencyMs: Self.elapsedMs(since: started),
-                            phases: delegate.phases)
+                            phases: delegate.phases, cacheObserver: cacheObserver)
         case .failed(let failure):
             traffic?.record(tag: trafficTag, provider: provider, request: body,
                             response: failure.errorBody, status: reply.status,
                             latencyMs: Self.elapsedMs(since: started),
                             error: failure.errorBody == nil
                                 ? "stream ended before its terminal event" : "stream ended with an error event",
-                            phases: delegate.phases)
+                            phases: delegate.phases, cacheObserver: cacheObserver)
             throw self.failure(failure, status: reply.status)
         }
         guard (200..<300).contains(reply.status) else {

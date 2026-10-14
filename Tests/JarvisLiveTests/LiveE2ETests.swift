@@ -4,7 +4,6 @@ import JarvisCore
 import JarvisEvaluation
 import Testing
 
-/// Assert orders and counts, never wording or durations: model phrasing and provider latency vary.
 /// Design: wiki/live-e2e-tests.md
 @Suite(.serialized)
 struct LiveE2ETests {

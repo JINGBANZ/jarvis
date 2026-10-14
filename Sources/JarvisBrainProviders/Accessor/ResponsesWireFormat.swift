@@ -126,7 +126,10 @@ struct ResponsesWireFormat: BrainWireFormat {
         }
         struct IncompleteDetails: Decodable { let reason: String? }
         struct Usage: Decodable {
-            struct InputDetails: Decodable { let cached_tokens: Int? }
+            struct InputDetails: Decodable {
+                let cached_tokens: Int?
+                let cache_write_tokens: Int?
+            }
             struct OutputDetails: Decodable { let reasoning_tokens: Int? }
             let input_tokens: Int?
             let input_tokens_details: InputDetails?
@@ -141,14 +144,14 @@ struct ResponsesWireFormat: BrainWireFormat {
 
     func decode(_ data: Data) throws -> BrainResponse {
         let decoded = try JSONDecoder().decode(Response.self, from: data)
-        // Logged to tune the per-effort budgets from real use. History is append-only to keep
-        // `cached` high, so a run of zeros needs investigating.
         if let usage = decoded.usage {
-            let input = usage.input_tokens ?? 0
-            let cached = usage.input_tokens_details?.cached_tokens ?? 0
-            let reasoning = usage.output_tokens_details?.reasoning_tokens ?? 0
+            let counts = RecordedExchange.Usage(
+                input: usage.input_tokens, cacheRead: usage.input_tokens_details?.cached_tokens,
+                cacheWrite: usage.input_tokens_details?.cache_write_tokens, output: usage.output_tokens,
+                rendered: "", inputAccounting: .includesCaches)
+            let reasoning = usage.output_tokens_details?.reasoning_tokens.map(String.init) ?? "unknown"
             let truncated = decoded.status == "incomplete" ? " [incomplete]" : ""
-            jlog("Jarvis coach: tokens — input \(input) (\(cached) cached), reasoning \(reasoning), output \(usage.output_tokens ?? 0), cap \(maxOutputTokens)\(truncated)")
+            jlog("Jarvis coach: tokens — \(counts.debugSummary), reasoning \(reasoning), cap \(maxOutputTokens)\(truncated)")
         }
         // A safety stop ended the reply on purpose, like Claude's `refusal` stop, so it takes the
         // same path and a hint it cut off is never kept.

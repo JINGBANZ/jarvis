@@ -546,13 +546,20 @@ final class SessionAuditWorker: @unchecked Sendable {
         line["error"] = event.error
         if let phases = event.phases, !phases.isEmpty { line["phases"] = phases }
         if let context = event.requestContext {
-            line["coach_attempt"] = [
+            var attribution: [String: Any] = [
                 "id": context.attemptID,
                 "trigger": context.trigger,
                 "source_trigger": context.sourceTrigger,
                 "phase": context.phase.rawValue,
                 "sequence": context.sequence,
             ]
+            attribution["context_revision"] = context.contextRevision
+            attribution["context_rewrite_reason"] = context.contextRewriteReason?.rawValue
+            line["coach_attempt"] = attribution
+        }
+        if let observation = event.cacheObserver?.observe(
+            request: event.request, response: event.response, context: event.requestContext) {
+            line["cache"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(observation))
         }
         line["request"] = Self.redactingImages(Self.jsonValue(event.request))
         if let response = event.response { line["response"] = Self.redactingImages(Self.jsonValue(response)) }

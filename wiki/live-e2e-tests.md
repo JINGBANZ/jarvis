@@ -37,6 +37,13 @@ production records straight into the session evidence, and the runner wraps it t
 start and finish. The Foundation-only scenario model, launch options, and audio timeline live in
 `Sources/JarvisCore/LiveE2E/`.
 
+The opt-in cache scenario also supplies a synthetic skill catalog, a compaction threshold that keeps
+its measured window intact, and a budgeted provider sender through defaulted composition ports.
+Scenario H supplies its optional compaction threshold through the same configuration port.
+Other scenarios retain the production catalog, configuration, and sender. The budgeted sender
+forwards the native encoded request, refuses redirects, and cancels its byte producer when the
+consumer ends.
+
 The run is not:
 
 - **Part of the Gate or CI.** It reaches real providers and needs TCC grants and signed-in
@@ -49,7 +56,7 @@ The run is not:
   asserted, because provider latency varies between runs. Scenarios A and B also print a `tokens`
   line per provider with its coach calls and their input, cache-read, cache-write, and output
   totals, so a prompt change shows its token cost from one run to the next. They are never
-  asserted, and never summed across providers because OpenAI's input count includes cached input
+  asserted in these ordinary scenarios, and never summed across providers because OpenAI's input count includes cached input
   and Anthropic's excludes cache reads and writes. Totals cover the calls that reported usage, and the line counts the calls that did
   not, such as a timed-out request, rather than reading them as zero.
 - **A transcription comparison.** It uses one transcription model as configured. The benchmark owns
@@ -102,7 +109,7 @@ During a run:
 ## Running it
 
 ```sh
-./scripts/run-live-tests.sh [A|B|C|D|H|P|R|F01|F02|all] [--provider <selection>] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh [A|B|C|D|H|P|R|F01|F02|CACHE|all] [--provider <selection>] [--evaluate] [--keep-going]
 ```
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
@@ -110,6 +117,11 @@ with `./scripts/build-app.sh debug`, creates the run directory, and runs the `Ja
 filtered to the chosen scenarios. `F01` selects both F01 scenario files. Each test launches the app
 with its scenario, waits for the app to exit, and asserts on the session folder.
 `Tests/JarvisLiveTests/LiveE2ELauncher.swift` holds the preflight and the launch.
+`CACHE` is opt-in and excluded from `all`; run it after changing context composition, history replay,
+provider encoding, or cache accounting. It uses Codex by default; an explicit `--provider openai`
+selects the OpenAI API. Both use the shared live-test default described in
+[How a scenario runs](#how-a-scenario-runs). CACHE uses one target with no fallback; other provider
+selections are rejected before launch.
 
 - `--provider` selects `codex-subscription` (the default), `claude-subscription`, `openai`, or
   `gemini` for all coaching. The launcher removes scenario fallbacks and brain-switch steps, then
@@ -176,6 +188,7 @@ an ambiguous "this" after a design discussion.
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
 | H | Codex | A queue decision, an inclusive boundary rule, and unrun tests planted before resolved discussions. A lower debug threshold triggers compaction; the scenario requires the first summary to be accepted before asking for recall. C35/C36 check replacement, size reduction, replay, and delivery; `Scenarios/H-review.md` covers factual quality. |
 | P | Codex | An explicit full-document request over the existing prep fixture; verifies direct catalog read → reply without search and complete extracted text in the brain request. Design follow-ups exercise source attribution, cache invalidation, and a conflicting draft reported in speech. |
+| CACHE | Shared live-test default: Codex by default or explicit `--provider openai` | Warm-up and measured spoken attempts over a long synthetic retained skill and fictional Harbor Ledger preparation notes. Verifies real loading continuations, committed hints, stable encoded prefixes, and history-cache reuse. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
 | F02 | Claude Code | Transcription with a run-local invalid OpenAI key. |
@@ -188,8 +201,10 @@ and the Gate checks it with synthetic credentials for every selectable provider.
 
 - **Isolated preferences.** Brain route and capability switches go to the private defaults suite
   `com.jarvis.coach.dev.live-e2e`, cleared per scenario, so a run never reads or changes the
-  developer's own settings. Models are selected by `LiveE2ERunner.target(for:)`; the run checks
-  the harness with a lighter model where available. Transcription is pinned to `gpt-4o-transcribe`.
+  developer's own settings. [`LiveE2EScenario.target(for:modelID:)`](../Sources/JarvisCore/LiveE2E/LiveE2EScenario+Target.swift)
+  owns the default model for each coaching provider, shared by scenario preferences, brain switches,
+  and CACHE validation. Ordinary scenarios can select explicit model IDs; CACHE uses that provider's
+  shared default. Transcription is pinned to `gpt-4o-transcribe`.
 - **Synthesized speech.** `FixtureSpeech` renders each line with `/usr/bin/say` to 24 kHz PCM16 at
   run time and deletes the file right after decoding. `FixtureAudioSource` feeds both transcription
   streams as audio frames; nothing plays through the speakers.
@@ -207,8 +222,9 @@ and the Gate checks it with synthetic credentials for every selectable provider.
 
 ## Evidence rules
 
-- **Order and count, never wording or duration.** Model phrasing and latency vary between runs, so
-  every assertion is an ordering or a count, labeled with its case ID so a failure names the case.
+- **Order and count.** Model phrasing and latency vary between runs, so ordinary assertions use
+  ordering and counts, labeled with their case IDs. CACHE additionally checks the synthetic
+  reference's explicit phrase in delivered hints to prove retained guidance is used.
   H also checks the size budget and reduction and the stable queue identifier in replayed memory.
   Factual meaning and verification attribution require the separate content review below.
 - **Stored order is not spoken order.** Activity rows and attempt transcripts keep insertion order,
@@ -232,6 +248,49 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   about the model's response, and a retried timeout is the design working. Only timeouts count:
   any other failure, or a chain that times out until the target's failure budget is spent, still
   fails the step's cases. `LiveSessionEvidence.retryChain` implements the rule.
+
+### Cache regression window
+
+[`LiveE2ETests+Cache.swift`](../Tests/JarvisLiveTests/LiveE2ETests+Cache.swift) takes the first native
+provider request of each completed spoken attempt from the step map rather than request order.
+`LiveE2ECacheCheck.warmupAttempts` and `measuredAttempts` own the sampling counts.
+Failed attempts, pending-work retries, extra initial
+requests, missing usage, and truncated prefix evidence cannot pass. Skill, tool, and preparation
+search continuations must occur during warm-up, and the loaders must not run again. Each measured
+attempt commits one delivered hint that uses the retained reference's explicit term.
+
+[`LiveE2ECacheCheck.evaluate`](../Sources/JarvisCore/LiveE2E/LiveE2ECacheCheck.swift) owns the required
+history-hit count, token-weighted cache-read floor, and beyond-static guard. A history hit compares
+cache reads with the preceding initial request's input, allowing only the provider's checkpoint
+tolerance from `prefixTokenAllowance(for:)`. The Codex allowance is calibrated against observed
+Luna behavior through the pinned CLIProxyAPI 8.0.20 helper: 1,024-token checkpoint spacing and
+128-token cache-read reporting increments. A controlled pair of identical requests confirms the
+next checkpoint predicted for the tested request. This observation applies to that tested route;
+it does not establish a universal checkpoint rule or a public Responses API guarantee. Repeat the
+controlled probe when changing the helper or model. The beyond-static guard uses the
+first initial request's static baseline, which can itself have cache reads, so caching only
+instructions and tool schemas cannot pass. Results print the history-hit
+count and weighted rate; ordinary scenario token lines remain diagnostic. Per-request usage labels
+warm-up and measured requests and keeps missing counters unknown; cost estimates require every
+counter needed for the calculation.
+
+The checker compares the full ordered provider input as well as instructions, tools, settings, and
+context revision. This is a steady-history window: manual screenshots, target changes, and
+compaction intentionally reset a prefix, so they stay outside this measurement. Their boundary
+and replay behavior is covered by `CoachContextCacheTests` and the ordinary live scenarios. A
+declared reset starts a new window; its non-null reason alone does not imply another reset.
+
+[`LiveE2ECacheBudget`](../Sources/JarvisCore/LiveE2E/LiveE2ECacheBudget.swift) owns the request, duration,
+and API reservation limits in its `maximumRequests`, `maximumDuration`, and
+`maximumReservedCoachCost` constants; `reserve(inputBytes:now:)` enforces the body-size bound.
+The sender accepts only the shared live-test target and `maximumOutputTokens` client output cap
+and performs no transport retry. That cap is a client request bound: the Codex helper removes
+`max_output_tokens`, so it does not enforce the cap upstream. Request, time, and body limits still
+apply on that route.
+Codex coaching uses the subscription; paid API cost reservations and estimates belong only to the
+explicit OpenAI route, use that model's accounting, and exclude transcription. The scenario model,
+budget, threshold checker, and their failure cases run in the offline Gate; the actual hit rate is
+verified only by the signed-app run on the selected provider.
 
 C26 checks the delivered Activity response, after overlay acceptance, for both a nonempty hint
 and a code block accepted by `ReplyDetail`. The candidate already understands a viable approach
@@ -264,6 +323,8 @@ the load to the model. Failing a note would fail a correct app on a model's judg
 An asserted case that fails because of a model choice gets one rerun of its scenario alone; a second
 failure is real. No assertion is loosened to make a run pass. A provider stall is neither a model
 choice nor a failure: it is judged through its retry, as the evidence rules above describe.
+For CACHE, a stall or incomplete attempt fails that run: its cache threshold applies only to fresh,
+successful attempts. Any rerun is a separate reported result.
 
 ## Three accepted constraints
 

@@ -41,7 +41,7 @@ extension MessagesWireFormat {
                     cacheRead: RecordedExchange.int(fields?["cache_read_input_tokens"]),
                     cacheWrite: RecordedExchange.int(fields?["cache_creation_input_tokens"]),
                     output: RecordedExchange.int(fields?["output_tokens"]),
-                    rendered: RecordedExchange.canonical(usage))
+                    rendered: RecordedExchange.canonical(usage), inputAccounting: .excludesCaches)
             }
         }
         return exchange
