@@ -1,6 +1,5 @@
-# Hosted CI has no developer desktop. Local runs re-enter under a temporary
-# display owner, including the live runner's later caffeinate re-exec.
-if [[ "${GITHUB_ACTIONS:-}" != true && -z "${JARVIS_TEST_DISPLAY_ID:-}" ]]; then
+# Compile on CI too; only local runs create a display and re-enter under its owner.
+if [[ -z "${JARVIS_TEST_DISPLAY_ID:-}" ]]; then
   display_source="$PWD/scripts/test-display"
   display_build="$PWD/.build/test-display"
   mkdir -p "$display_build"
@@ -10,10 +9,13 @@ if [[ "${GITHUB_ACTIONS:-}" != true && -z "${JARVIS_TEST_DISPLAY_ID:-}" ]]; then
   )"
   display_runner="$display_build/test-display-$display_fingerprint"
   if [[ ! -x "$display_runner" ]]; then
+    echo "▶ compiling the test display helper"
     swiftc -swift-version 6 -parse-as-library \
       -import-objc-header "$display_source/DeskPad/CGVirtualDisplayPrivate.h" \
       "$display_source"/*.swift -o "$display_runner.$$"
     mv "$display_runner.$$" "$display_runner"
   fi
-  exec "$display_runner" -- /bin/bash "$PWD/scripts/$(basename "$0")" "$@"
+  if [[ "${GITHUB_ACTIONS:-}" != true ]]; then
+    exec "$display_runner" -- /bin/bash "$PWD/scripts/$(basename "$0")" "$@"
+  fi
 fi

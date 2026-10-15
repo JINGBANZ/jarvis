@@ -65,8 +65,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }()
 
     /// Takes the restored size up front: `setContentSize` pins the top-left, so resizing after
-    /// `center()` would leave the box off-centre. Never query `NSScreen` here: it blocks AppKit
-    /// on a host with no GUI session and hangs every main-actor test.
+    /// `center()` would leave the box off-centre. Keep explicit `NSScreen` queries in the isolated
+    /// desktop-test path: they can hang main-actor tests on a host without a GUI session.
     public init(contentSize: NSSize = NSSize(
         width: Defaults.Overlay.Box.width,
         height: Defaults.Overlay.Box.height)

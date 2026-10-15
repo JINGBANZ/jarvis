@@ -99,25 +99,7 @@ if [[ "$KEEP_GOING" == 1 ]]; then
   export JARVIS_LIVE_E2E_KEEP_GOING=1
 fi
 
-abort_run() {
-  trap - INT TERM
-  # The running scenario's app polls for this marker and stops its session so the evidence seals.
-  for scenario_dir in "$RUN_DIR"/*/; do
-    if [[ -f "$scenario_dir/scenario.json" && ! -f "$scenario_dir/live-e2e-finished" ]]; then
-      touch "$scenario_dir/abort"
-    fi
-  done
-  # LaunchServices started the app outside this process group, so the signal never reached it.
-  # Give it the launcher's 10s to seal its session, then kill it so capture cannot outlive the run.
-  for _ in {1..50}; do
-    /usr/bin/pgrep -f "$APP_PROCESS_PATTERN" >/dev/null || break
-    sleep 0.2
-  done
-  /usr/bin/pkill -f "$APP_PROCESS_PATTERN" || true
-  echo "Live e2e run aborted; partial results are in $RUN_DIR." >&2
-  exit 130
-}
-trap abort_run INT TERM
+source scripts/lib/live-test-cancellation.sh
 
 source scripts/lib/swift-test-flags.sh
 echo "▶ running live e2e scenarios ($SCENARIO, provider $PROVIDER) into $RUN_DIR"

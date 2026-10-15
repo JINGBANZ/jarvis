@@ -245,13 +245,17 @@ providers, retaining their existing credential and capture-permission prerequisi
 the existing Swift toolchain. Its display creation reuses MIT-licensed code from
 [DeskPad](../scripts/test-display/DeskPad/README.md), pinned in the repository, so startup needs no
 download. The helper owns the display until the command and its cancellation cleanup finish, then
-removes it. The live launcher passes the display identity explicitly through LaunchServices and
+removes it. Hangup, interrupt, and termination signals all invoke the live runner's cancellation
+handler, which lets the separately launched app finish cleanup before the display is removed.
+The Gate exercises that handler with a detached stand-in app without launching Jarvis or providers.
+The live launcher passes the display identity explicitly through LaunchServices and
 opens the app in the background. Overlay placement is checked before presentation and after resizing.
 
 Virtual displays use private macOS interfaces, confined to the test helper. If creation or placement
 fails, local tests stop with an error instead of falling back to the developer's screen. The helper
 requires an accessible, logged-in macOS desktop; a shell sandbox without WindowServer access cannot
-run it. GitHub Actions keeps its existing test environment without creating an extra display.
+run it. GitHub Actions compiles the helper on each matrix toolchain, then keeps its existing test
+environment without launching the helper or creating an extra display.
 
 ## The live activity viewer
 
