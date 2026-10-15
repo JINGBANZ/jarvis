@@ -13,21 +13,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
-    runs-on: macos-15
+  gate:
+    name: Gate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26]
+    runs-on: ${{ matrix.os }}
     # Backstop: a hung run at the 6-hour default would burn about twice the monthly free tier.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Show toolchain
-        run: swift --version
+        run: |
+          sw_vers
+          xcode-select -p
+          swift --version
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$(xcode-select -p)/../Info.plist"
 
       - name: Compile all targets
         run: swift build
 
       - name: Run tests and static guards
         run: ./scripts/run-tests.sh
+
+      - name: Upload test failure evidence
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: test-failure-${{ matrix.os }}
+          path: |
+            .build/run-tests.log
+            .build/test-diagnostics/
+          include-hidden-files: true
+          retention-days: 7
+
+  # Keep the existing required check name while requiring every matrix job to pass.
+  test:
+    needs: gate
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Require both macOS Gates
+        env:
+          GATE_RESULT: ${{ needs.gate.result }}
+        run: test "$GATE_RESULT" = success
 
   proxy-privacy:
     runs-on: macos-26
