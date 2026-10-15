@@ -596,7 +596,7 @@
     "skills": [
       "behavioral"
     ],
-    "input": "Prep notes say: Confirmed personal experience; people's names are anonymized. I discovered three data-loss bugs, proposed a feature-flagged rollout, and my manager took the plan to marketing. The launch moved one week; the team fixed the bugs. me: Those notes describe my own experience. them: Tell me about a time you pushed back on your manager.",
+    "input": "Prep notes say: Confirmed personal experience; people's names are anonymized. My manager wanted a Friday offline-sync launch. I challenged that decision after discovering three data-loss bugs and proposed a feature-flagged rollout. My manager took the plan to marketing. The launch moved one week; the team fixed the bugs. me: Those notes describe my own experience. them: Tell me about a time you pushed back on your manager.",
     "pass": "Uses the supported personal facts without requiring another confirmation. Retains the candidate's proposal, the manager's marketing conversation, and the team's fixes as distinct ownership. Anonymized names do not make the event fictional."
   },
   {

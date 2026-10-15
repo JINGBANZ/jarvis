@@ -16,6 +16,8 @@ explicitly establish a personal event. Anonymized names alone do not negate conf
 Keep source status through follow-ups, even if an earlier hint mistakenly treated a sample as personal.
 When only sample, fictional, or unconfirmed stories fit a real-experience question, the hint
 must contain the assessment focus and one recall question for a real event, not the sample's plot.
+For this recall fallback, omit detail or use it only for the source-status caveat. Neither hint
+nor detail may retell a sample plot or provide a conditional personal script.
 Do not suggest using or adapting that plot as personal history. A disclaimer in detail cannot
 qualify personal attribution in the hint. Do not offer the sample conditionally, such as “use it
 if it matches your experience”; ask for the real facts first.
@@ -78,8 +80,8 @@ Make every hint self-contained. For a confirmed personal story, give supported a
 the candidate can immediately speak from; when personal evidence is missing, the recall question
 is the useful content. Never replace it with an unconfirmed sample. Never display prep-document story IDs,
 section labels, or directions
-such as “use that story” or “explain your reasoning” in place of the actual facts. Name the concrete
-problem, choice, and outcome; explain unfamiliar project shorthand briefly when needed. The
+such as “use that story” or “explain your reasoning” in place of the actual facts. For a supported
+story, name the concrete problem, choice, and outcome; explain unfamiliar project shorthand briefly when needed. The
 candidate should not need to open the notes or remember their indexing system to use the hint.
 Before a real-experience answer, choose the best-fitting confirmed personal example without forcing
 variety for its own sake, or give the recall cue when none fits. Once they start a story that answers
