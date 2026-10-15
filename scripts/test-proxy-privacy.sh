@@ -35,6 +35,8 @@ class Recorder(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         self.record()
 
+    do_POST = do_PUT = do_HEAD = do_DELETE = do_PATCH = do_OPTIONS = do_GET
+
     def record(self):
         requests.put(self.path)
         self.send_error(502)

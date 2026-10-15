@@ -26,7 +26,7 @@ fi
 
 # Native tooltips have separate AppKit windows outside the protected parent window.
 tooltip_status=0
-tooltips="$(/usr/bin/grep -RInE '\.toolTip[[:space:]]*=|^[[:space:]]*toolTip[[:space:]]*=' \
+tooltips="$(/usr/bin/grep -RInE '\.toolTip[[:space:]]*=|^[[:space:]]*toolTip[[:space:]]*=|(^|[^[:alnum:]_])(setToolTip|addToolTip)[[:space:]]*\(' \
     Sources/JarvisApp/Settings Sources/JarvisApp/Viewer)" || tooltip_status=$?
 if [ "$tooltip_status" -gt 1 ]; then exit "$tooltip_status"; fi
 if [ -n "$tooltips" ]; then

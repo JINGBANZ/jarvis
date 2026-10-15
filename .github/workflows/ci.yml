@@ -49,17 +49,20 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  # Keep the existing required check name while requiring every matrix job to pass.
+  # Keep the existing required check name while requiring all validation jobs to pass.
   test:
-    needs: gate
+    needs: [gate, proxy-privacy]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - name: Require both macOS Gates
+      - name: Require macOS Gates and helper privacy
         env:
           GATE_RESULT: ${{ needs.gate.result }}
-        run: test "$GATE_RESULT" = success
+          PROXY_PRIVACY_RESULT: ${{ needs.proxy-privacy.result }}
+        run: |
+          test "$GATE_RESULT" = success
+          test "$PROXY_PRIVACY_RESULT" = success
 
   proxy-privacy:
     runs-on: macos-26

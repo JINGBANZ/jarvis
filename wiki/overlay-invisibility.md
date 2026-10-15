@@ -25,7 +25,8 @@ retain closed windows. It covers:
 
 Settings and Activity use inline text and accessibility help instead of native hover tooltips.
 AppKit creates tooltip windows separately from their parent; excluding the parent does not protect
-those windows. The static presentation guard rejects new native tooltip assignments in those areas.
+those windows. The static presentation guard rejects native tooltip assignments and registration
+calls in those areas.
 The overlay follows the same rule with help drawn inside its own panel.
 
 Native menus, system-owned dialogs, macOS privacy UI, and pages opened in a browser have independent

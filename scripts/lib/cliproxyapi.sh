@@ -27,7 +27,7 @@ build_cliproxyapi() {
   recipe="$(cat scripts/lib/cliproxyapi.sh scripts/cliproxyapi/local-only.patch | shasum -a 256 | awk '{print $1}')"
   local built="$cache/$CLIPROXYAPI_VERSION/$recipe"
   CLIPROXYAPI_BUILT_DIRECTORY="$built"
-  if [[ -f "$built/binary.sha256" && -x "$built/cliproxyapi" ]] \
+  if [[ -f "$built/binary.sha256" && -x "$built/cliproxyapi" && -f "$built/LICENSE" ]] \
       && (cd "$built" && shasum -a 256 -c binary.sha256 >/dev/null 2>&1); then
     return
   fi

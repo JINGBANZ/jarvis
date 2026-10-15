@@ -89,12 +89,12 @@ final class BrainSection: NSObject, SettingsSection {
             target: self,
             action: #selector(effortChanged))
         effortControl.setAccessibilityLabel("Reasoning effort")
+        effortControl.setAccessibilityHelp("More effort produces slower hints.")
         effortControl.controlSize = .small
         effortControl.segmentDistribution = .fillEqually
-        for (index, effort) in ReasoningEffort.allCases.enumerated() {
+        for index in ReasoningEffort.allCases.indices {
             effortControl.setImage(Self.effortGlyph(level: index), forSegment: index)
             effortControl.setImageScaling(.scaleProportionallyDown, forSegment: index)
-            effortControl.setToolTip(effort.displayName, forSegment: index)
         }
         if let index = ReasoningEffort.allCases.firstIndex(of: preferences.effort) {
             effortControl.selectedSegment = index

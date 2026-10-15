@@ -18,12 +18,11 @@ whose macOS workflow builds, launches, stops, and reads logs, so an agent may dr
 the scripts use `open`. The live e2e tests assume the three TCC grants, an OpenAI key and a Gemini
 key saved in the secrets file, and Codex and Claude Code signed in from Settings → Connections.
 
-The Gate runs across the macOS matrix in [`ci.yml`](../.github/workflows/ci.yml) so changes are checked
-against different AppKit and Swift versions. A failing runner preserves its diagnostic evidence while
-the other runners finish. The arrow-style test in
-[`DiagramHintRenderingTests.swift`](../Tests/JarvisOverlayTests/DiagramHintRenderingTests.swift)
-normalizes the rendered image before sampling, because AppKit's offscreen image inherits the display's
-color profile. Its failure evidence distinguishes missing strokes from color-profile differences.
+Pull-request CI covers multiple macOS environments because AppKit and toolchain behavior can differ
+across them; see [`ci.yml`](../.github/workflows/ci.yml) for the matrix, required-check wiring, and
+failure artifacts. Pixel assertions also need a consistent color space and scale because AppKit's
+offscreen images inherit the display's color profile. The normalization and diagnostic evidence live
+in [`coloredDashedArrowsRenderTheirStyle`](../Tests/JarvisOverlayTests/DiagramHintRenderingTests.swift).
 
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested
