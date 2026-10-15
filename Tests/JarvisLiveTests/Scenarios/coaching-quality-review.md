@@ -36,16 +36,6 @@ These cases evaluate instruction behavior, not transcription, tool parsing, rend
 selection, or speech/shortcut coordination. They do not replace the signed-app scenario D and
 real-browser checks documented in `wiki/live-e2e-tests.md`. Report those checks separately.
 
-## Behavioral source status
-
-The `behavioral-*` cases distinguish sample stories, explicit fictional practice, follow-ups,
-confirmed personal notes with anonymized names, and mixed sources. For
-`behavioral-excerpt-needs-source-status`, offer the production prep loader and reader. Return
-document-wide caveats only after a read from offset zero; do not put the pass criterion in context.
-An isolated first-person section does not establish whether the event is personal. Check the actual
-read action as well as the eventual hint. Scenario A supplies the full app check: verify that a
-search or reader result carries the sample disclaimer before judging attribution in A3/A4.
-
 ## Customer-scenario workflow coaching
 
 The `customer-*` cases cover enterprise workflow automation (FDE/RRK-style customer role-play),

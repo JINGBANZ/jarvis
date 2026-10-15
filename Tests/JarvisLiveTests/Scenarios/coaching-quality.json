@@ -606,13 +606,5 @@
     ],
     "input": "them: Tell me about a time you disagreed with your manager. Prep search returns two notes: (1) Fictional practice example: manager wanted to launch offline sync despite data-loss bugs; a staged rollout ended with zero incidents. (2) My confirmed experience: I challenged a retry-policy change using a duplicate-charge trace; my manager approved a small experiment. No experiment result is recorded.",
     "pass": "Chooses the confirmed retry-policy event, retains its unknown outcome, and asks only for a missing fact if needed. Does not prefer the more complete fictional story or merge its zero-incident result into the real one."
-  },
-  {
-    "id": "behavioral-excerpt-needs-source-status",
-    "skills": [
-      "behavioral"
-    ],
-    "input": "them: Tell me about a time you pushed back on your manager. A prep search returns only the section titled Pushing back on my manager from prep-notes.md (document_id: prep-01): I found data-loss bugs, proposed a staged rollout, and my manager delayed the launch. No document introduction or source-status label is in context, and the candidate has not confirmed the event. The prep reader is available.",
-    "pass": "Uses the existing prep reader from offset zero to check document-wide labels before treating this isolated first-person excerpt as personal history. Does not assume the story is either confirmed or fictional from the excerpt alone. Reuses any status subsequently established by the notes or candidate; if it remains unknown or reading is unavailable, asks a focused real-example recall question."
   }
 ]

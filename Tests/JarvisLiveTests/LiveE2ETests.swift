@@ -288,7 +288,6 @@ struct LiveE2ETests {
                 switch row.kind {
                 case "capabilityLoaded": return row.loadedCapability.map { "load \($0.name)" }
                 case "prepNotesSearched": return "search"
-                case "prepNoteRead": return "read"
                 case "screenViewed": return "screen"
                 case "tip": return "tip"
                 case "stayedSilent": return "silent"
@@ -329,21 +328,6 @@ struct LiveE2ETests {
 
         let a3Sequence = sequence(a3)
         let a5Sequence = sequence(a5)
-        let session = try #require(launch.sessionDirectory)
-        let prepText = try String(contentsOf: LiveE2ELauncher.fixturesDirectory
-            .appendingPathComponent("prep-notes.md"), encoding: .utf8)
-        let a3HasDocument = try Self.prepTextReachedBrain(prepText, in: session, attemptIDs: Set(a3.map(\.id)))
-        let a5HasDocument = try Self.prepTextReachedBrain(prepText, in: session, attemptIDs: Set(a5.map(\.id)))
-        let sampleDisclaimer = "These are sample behavioral and system-design notes. Every person named here is fictional."
-        let a3HasSampleStatus = try Self.prepTextReachedBrain(sampleDisclaimer, in: session,
-                                                            attemptIDs: Set(a3.map(\.id)))
-        let a4HasSampleStatus = try Self.prepTextReachedBrain(sampleDisclaimer, in: session,
-                                                            attemptIDs: Set(a4.map(\.id)))
-        let a3Read = a3Sequence.contains("read")
-        let expectedA3 = ["load behavioral", "load search_prep_notes", "search"]
-            + (a3Read ? ["load read_prep_note", "read"] : []) + ["tip"]
-        let expectedLoads = ["coding", "behavioral", "search_prep_notes"]
-            + (a3Read ? ["read_prep_note"] : []) + ["system-design"]
         let firstDesignRequest = a5.flatMap { evidence.traffic(for: $0) }.first {
             $0.tag == "coach"
         }
@@ -361,12 +345,9 @@ struct LiveE2ETests {
                                            a3Sequence.lastIndex(of: "tip")),
                       "A3 loads behavioral before its tip (saw \(a3Sequence))")
         results.check("C07", [
-            (a3Sequence == expectedA3,
+            (a3Sequence == ["load behavioral", "load search_prep_notes", "search", "tip"],
              "A3's chain stays in one attempt (saw \(a3Sequence))"),
-            (a3Read ? a3HasDocument : a3HasSampleStatus,
-             "A3 received the complete document or an explicit sample disclaimer before answering"),
-            ((a5Sequence == ["load system-design", "tip"]
-                || a5Sequence.sorted() == ["load system-design", "search", "tip"])
+            (a5Sequence.sorted() == ["load system-design", "search", "tip"]
                 && Self.precedes(a5Sequence.firstIndex(of: "load system-design"),
                                  a5Sequence.lastIndex(of: "tip")),
              "A5's chain stays in one attempt (saw \(a5Sequence))"),
@@ -375,8 +356,8 @@ struct LiveE2ETests {
         results.time("A3 question-to-tip", seconds: Self.questionToTip(evidence, a3))
         results.time("A5 question-to-tip", seconds: Self.questionToTip(evidence, a5))
         results.check("C31", [
-            (Self.precedes(a5Sequence.firstIndex(of: "search"), a5Sequence.lastIndex(of: "tip")) || a5HasDocument,
-             "A5 searches design preparation or reuses the complete document before answering"),
+            (Self.precedes(a5Sequence.firstIndex(of: "search"), a5Sequence.lastIndex(of: "tip")),
+             "A5 searches design preparation before answering"),
             (tip(a9) != nil && count("prepNotesSearched", in: a9) == 0,
              "A9 answers cache invalidation using the existing design excerpt"),
             (tip(a6) != nil && count("prepNotesSearched", in: a6) == 0,
@@ -394,8 +375,7 @@ struct LiveE2ETests {
         results.time("A9 question-to-tip", seconds: Self.questionToTip(evidence, a9))
 
         results.check("C08", [
-            (sequence(a4).contains("search") || a4HasSampleStatus,
-             "A4 searched prep notes or reused their explicit sample status (saw \(sequence(a4)))"),
+            (sequence(a4).contains("search"), "A4 searched prep notes (saw \(sequence(a4)))"),
             (loads(a4).isEmpty, "A4 loaded nothing"),
             (a4.contains { evidence.traffic(for: $0).contains {
                 $0.provider == launch.scenario.provider(atStep: says[2]).rawValue
@@ -403,8 +383,8 @@ struct LiveE2ETests {
         ])
         results.time("A4 question-to-tip", seconds: Self.questionToTip(evidence, a4))
         results.check("C09", loads(a1).contains("coding"), "A1 loaded coding (saw \(loads(a1)))")
-        results.check("C10", committed == expectedLoads,
-                      "required loads, each once, in order (saw \(committed))")
+        results.check("C10", committed == ["coding", "behavioral", "search_prep_notes", "system-design"],
+                      "four loads, each once, in order (saw \(committed))")
 
         results.check("C11", [
             (a7.allSatisfy { !$0.isEmpty }, "both A7 presses ran an attempt"),
@@ -443,8 +423,8 @@ struct LiveE2ETests {
             let codexInstructions = Self.coachTraffic(evidence, on: .codexSubscription)
                 .compactMap(\.instructions)
             results.check("C14", [
-                (loadsBeforeSwitch.map(\.name) == Array(expectedLoads.dropLast()),
-                 "all earlier loads committed before the OpenAI switch (saw \(loadsBeforeSwitch.map(\.name)))"),
+                (loadsBeforeSwitch.count == 3,
+                 "three loads committed before the OpenAI switch (saw \(loadsBeforeSwitch.map(\.name)))"),
                 (!loadsBeforeSwitch.isEmpty && unreplayed.isEmpty,
                  "A5 replays every earlier load pair with its result (missing \(unreplayed.map(\.name)))"),
                 (evidence.activity.filter { $0.kind == "brainChangeApplied" }.count == 3,

@@ -19,9 +19,6 @@ public let readPrepNoteTool = ToolDef(
         until the end, within the current tool budget. If you cannot finish, say which portion you read;
         never claim a complete review from a partial read. Reaching the end alone is not full coverage:
         text from offset zero through the end must be available. Reuse text already in context.
-        A full-document summary must cover each section, including the final one. Do not volunteer
-        a section count. If the user asks for one, count the actual section headings rather than
-        grouped summary topics.
         A missing document or invalid offset is not a reason to retry or ask for another upload.
         """,
     deferLoading: true

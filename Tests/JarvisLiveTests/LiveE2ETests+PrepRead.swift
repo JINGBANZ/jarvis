@@ -37,16 +37,11 @@ extension LiveE2ETests {
         try launcher.finish(results)
     }
 
-    static func prepTextReachedBrain(_ text: String, in session: URL,
-                                         attemptIDs: Set<Int>? = nil) throws -> Bool {
+    private static func prepTextReachedBrain(_ text: String, in session: URL) throws -> Bool {
         let traffic = try String(contentsOf: session.appendingPathComponent("brain-traffic.jsonl"), encoding: .utf8)
         return traffic.split(separator: "\n").contains { line in
             guard let record = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
                   let request = record["request"] as? [String: Any] else { return false }
-            if let attemptIDs {
-                guard let context = record["coach_attempt"] as? [String: Any],
-                      let id = context["id"] as? Int, attemptIDs.contains(id) else { return false }
-            }
             return RecordedExchange.read(request: request, response: record["response"]).input.contains {
                 guard case .result(_, let output) = $0 else { return false }
                 return output?.contains(text) == true

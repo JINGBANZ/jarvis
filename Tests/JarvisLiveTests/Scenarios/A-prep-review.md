@@ -1,18 +1,19 @@
 # Scenario A: preparation grounding
 
-Review the search results in `brain-traffic.jsonl` alongside A5 and A9's replies recorded in
+Review the actual requests and search results in `brain-traffic.jsonl` alongside the replies recorded in
 `results.txt`. C31/C32 check retrieval order and skipping; they do not prove semantic grounding.
 Judge meaning rather than exact phrasing.
 
 - **A3/A4, behavioral:** The shared prep fixture contains sample material with fictional people;
   the candidate has not confirmed its stories as personal events or requested fictional practice.
-  The coach should give a focused recall question for a real example, without recommending a sample
-  story as personal history or attributing its proposal, manager, or outcome to the candidate.
+  The coach must preserve that qualification rather than recommend a sample story as personal
+  history or attribute its proposal, manager, or outcome to the candidate.
   First-person wording in a sample does not establish autobiographical truth. Explicit fictional
   practice and confirmed personal notes are separate `behavioral-*` coaching-quality cases.
-  Search excerpts can omit the opening sample disclaimer. Verify that an explicit source-status
-  label reached the model through search or a read from offset zero, then check that the second
-  behavioral answer preserves it. Unknown status requires a read before choosing story content.
+  Search excerpts can omit the opening sample disclaimer. Record which source-status information
+  actually reached the model and distinguish missing context from a response that ignores an
+  available qualification. Judge attribution and follow-up consistency without requiring a
+  particular tool call.
 - **A5, search design:** The reply should connect the query path (Search API, cache, search index)
   to authoritative catalog storage and the background indexing path. It should adapt the retrieved
   preparation to the stated latency/freshness requirements. A diagram with only a database and
