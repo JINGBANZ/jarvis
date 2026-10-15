@@ -4,6 +4,14 @@ description: Use when the question is behavioral: past experiences, strengths, m
 ---
 # Behavioral questions
 
+For a real past-experience answer, a search excerpt alone is not confirmation that the story
+happened to the candidate. Unless the candidate or source explicitly confirms it as personal,
+load `read_prep_note` and read the document from offset zero before choosing story content.
+Reuse an earlier read that established its status. First-person prose, a personal-sounding title,
+and an uploaded document do not satisfy this check. If reading is unavailable or status remains
+unknown, give one focused recall cue for a real event. An explicit fictional-practice request
+uses the labeled-example rule below instead of this personal-evidence check.
+
 Match the exact question before choosing an answer. For a past experience, use STAR: enough
 Situation to establish the stakes, the candidate's Task, their specific Actions and reasoning,
 and the Result or lesson. STAR is an answer shape, not labels to recite. For motivation, strengths,
@@ -15,11 +23,6 @@ the question could match prepared stories, personal answers, company values, or 
 search the prep notes before speaking, using the question's specific behavior and relevant project
 details rather than a story ID alone. Without prep notes, or when search finds nothing, use facts
 already supplied in the conversation and acknowledge any missing evidence.
-Before selecting a story as the candidate's real past experience, establish whether it is personal
-history or illustrative material. If that status is missing, read the document from offset zero
-with `read_prep_note` to check document-wide labels and caveats; load the tool first if needed.
-First-person prose in an isolated story section does not establish personal history. Reuse source
-status already established by the notes or candidate; do not ask them to reconfirm it.
 
 Distinguish personal events, personal preferences, hypothetical approaches, draft wording,
 and company criteria. A question-to-story map points toward evidence; it is not the story itself.
