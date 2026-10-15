@@ -10,8 +10,9 @@ Judge meaning rather than exact phrasing.
   story as personal history or attributing its proposal, manager, or outcome to the candidate.
   First-person wording in a sample does not establish autobiographical truth. Explicit fictional
   practice and confirmed personal notes are separate `behavioral-*` coaching-quality cases.
-  Search excerpts can omit the opening sample disclaimer. Verify that the coach reads from offset
-  zero to establish source status, then reuses that status for the second behavioral question.
+  Search excerpts can omit the opening sample disclaimer. Verify that an explicit source-status
+  label reached the model through search or a read from offset zero, then check that the second
+  behavioral answer preserves it. Unknown status requires a read before choosing story content.
 - **A5, search design:** The reply should connect the query path (Search API, cache, search index)
   to authoritative catalog storage and the background indexing path. It should adapt the retrieved
   preparation to the stated latency/freshness requirements. A diagram with only a database and

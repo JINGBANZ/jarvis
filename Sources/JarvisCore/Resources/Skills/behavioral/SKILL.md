@@ -5,10 +5,11 @@ description: Use when the question is behavioral: past experiences, strengths, m
 # Behavioral questions
 
 For a real past-experience answer, a search excerpt alone is not confirmation that the story
-happened to the candidate. Unless the candidate or source explicitly confirms it as personal,
-load `read_prep_note` and read the document from offset zero before choosing story content.
-Reuse an earlier read that established its status. First-person prose, a personal-sounding title,
-and an uploaded document do not satisfy this check. If reading is unavailable or status remains
+happened to the candidate. If its status is unknown, load `read_prep_note` and read the document
+from offset zero before choosing story content. Reuse an earlier source-status check; an explicit
+sample or fictional label in an excerpt already rules out personal attribution.
+First-person prose, a personal-sounding title, and an uploaded document do not satisfy this check.
+If reading is unavailable or status remains
 unknown, give one focused recall cue for a real event.
 Apply a document-wide sample or illustrative label to its stories unless the notes or candidate
 explicitly establish a personal event. Anonymized names alone do not negate confirmed personal facts.
@@ -22,8 +23,8 @@ An explicit fictional-practice request uses the labeled-example rule below inste
 personal-evidence check.
 
 Match the exact question before choosing an answer. For a supported personal experience or
-requested fictional practice, use STAR: enough
-Situation to establish the stakes, the candidate's Task, their specific Actions and reasoning,
+requested fictional practice, use STAR: enough Situation to establish the stakes, the candidate's
+Task, their specific Actions and reasoning,
 and the Result or lesson. STAR is an answer shape, not labels to recite. For motivation, strengths,
 values, or career goals, give a direct position with relevant personal evidence. For a hypothetical
 or process question, give an approach and its tradeoffs without claiming it happened.
@@ -55,8 +56,8 @@ Being stuck or asking for help is not a request for fiction. Only when the candi
 asks for a fictional practice example, label its first line “Illustrative example” and keep that
 example separate from their history in later hints. For that explicit practice request, provide a
 useful fictional answer without demanding a real event; any invented details stay within the labeled
-example. If they supply partial personal facts, frame those facts
-without filling gaps. A draft approach can help answer a hypothetical; it cannot answer “tell me
+example. If they supply partial personal facts, frame those facts without filling gaps.
+A draft approach can help answer a hypothetical; it cannot answer “tell me
 about a time” as an event the candidate experienced.
 
 For a new interviewer question, pair the answer prompt with what the question is assessing.
@@ -81,8 +82,9 @@ such as “use that story” or “explain your reasoning” in place of the act
 problem, choice, and outcome; explain unfamiliar project shorthand briefly when needed. The
 candidate should not need to open the notes or remember their indexing system to use the hint.
 Before a real-experience answer, choose the best-fitting confirmed personal example without forcing
-variety for its own sake, or give the recall cue when none fits. Once they start a story that answers the question, help develop it rather
-than switching to a stronger prepared example. Suggest a different story only when the current one
+variety for its own sake, or give the recall cue when none fits. Once they start a story that answers
+the question, help develop it rather than switching to a stronger prepared example.
+Suggest a different story only when the current one
 cannot answer the question or the candidate asks for an alternative.
 
 As the candidate answers, coach only a material gap: missing ownership, vague action, absent

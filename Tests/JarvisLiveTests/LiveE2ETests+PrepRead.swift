@@ -22,7 +22,7 @@ extension LiveE2ETests {
         let original = try String(contentsOf: LiveE2ELauncher.fixturesDirectory
             .appendingPathComponent("prep-notes.md"), encoding: .utf8)
         let session = try #require(launch.sessionDirectory)
-        let completeTextReachedBrain = try Self.prepDocumentReachedBrain(original, in: session)
+        let completeTextReachedBrain = try Self.prepTextReachedBrain(original, in: session)
         results.check("C34", completeTextReachedBrain, "the complete extracted fixture reached the brain")
         let says = launch.stepIndices(Self.isSay)
         results.check("C34", says.count == 3, "all three document and design questions ran")
@@ -37,7 +37,7 @@ extension LiveE2ETests {
         try launcher.finish(results)
     }
 
-    static func prepDocumentReachedBrain(_ text: String, in session: URL,
+    static func prepTextReachedBrain(_ text: String, in session: URL,
                                          attemptIDs: Set<Int>? = nil) throws -> Bool {
         let traffic = try String(contentsOf: session.appendingPathComponent("brain-traffic.jsonl"), encoding: .utf8)
         return traffic.split(separator: "\n").contains { line in

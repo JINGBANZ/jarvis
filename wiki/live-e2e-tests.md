@@ -176,9 +176,10 @@ screenshot `coding-problem.jpg`, the runtime-rendered `weighted-route.txt`, and 
 `prep-notes.md`, including a short search-design section with cache invalidation. Each story is
 one section with no sub-headings, so a matching search returns the whole story. Search excerpts
 can omit the document-wide sample disclaimer. The behavioral source-status check reads from offset
-zero before attributing a story; the complete fixture fits in one page. Later prepared questions
-can reuse that document without another lookup. C07 proves the read reached the model, and C08/C31
-accept reuse only with complete-document evidence in the relevant request chain.
+zero when status is unknown; the complete fixture fits in one page. An excerpt with an explicit
+sample label already rules out personal attribution. C07 proves the relevant source text reached
+the model. C08 accepts reuse of known sample status, and C31 accepts design reuse only with
+complete-document evidence in the relevant request chain.
 `LiveE2EScenarioTests` pins the search layout and step order in the Gate.
 The design question refers explicitly to preparation notes. The later coding question explicitly
 returns to the screen and asks for inspection, so its capture check does not depend on interpreting
@@ -380,9 +381,9 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C05 | Prep search loads on demand, never runs before its load, and stays callable on every brain | A: the first behavioral question and the design question |
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
 | C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the design question |
-| C08 | A second prepared question searches or reuses the full document without loading | A: the second behavioral question |
+| C08 | A second prepared question searches or reuses known sample status without loading | A: the second behavioral question |
 | C09 | The coding skill loads on the coding screen | A: the first press; B: the Show code press, through the preload |
-| C10 | The whole session shows five load rows, each once | A, after Stop |
+| C10 | Required skills and prep tools load once, including the reader when source status needs checking | A, after Stop |
 | C11 | A press after the load is one round trip | A: the two later presses |
 | C12 | A diagram arrives at the architecture stage | A: the design question and its follow-up |
 | C13 | No diagram outside that stage | A: the coding and behavioral turns |
