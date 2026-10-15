@@ -57,28 +57,48 @@ import Testing
     }
 
     @MainActor @Test func coloredDashedArrowsRenderTheirStyle() throws {
-        func coloredPixels(_ arrow: String) throws -> Int {
+        func coloredPixels(_ arrow: String) throws -> (count: Int, bitmap: NSBitmapImageRep, sourceProfile: String) {
             let graph = try #require(DiagramHint(mermaid:
                 "flowchart TD\nA[API] \(arrow) B[Queue]\nlinkStyle 0 stroke:#EAB308,stroke-width:3px"))
             let image = DiagramHintImage.render(graph, fitting: CGSize(width: 200, height: 1))
-            let data = try #require(image.tiffRepresentation)
-            let bitmap = try #require(NSBitmapImageRep(data: data))
+            let original = try #require(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+            // lockFocus inherits the display profile; convert the bitmap before sampling its RGB values.
+            let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+            let context = try #require(CGContext(
+                data: nil, width: Int(image.size.width), height: Int(image.size.height),
+                bitsPerComponent: 8, bytesPerRow: 0, space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.draw(original, in: CGRect(origin: .zero, size: image.size))
+            let bitmap = NSBitmapImageRep(cgImage: try #require(context.makeImage()))
             var count = 0
             for y in 0..<bitmap.pixelsHigh {
                 for x in 0..<bitmap.pixelsWide {
-                    let color = try #require(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB))
+                    let color = try #require(bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB))
                     if color.redComponent > 0.7 && color.greenComponent > 0.4 && color.blueComponent < 0.2 {
                         count += 1
                     }
                 }
             }
-            return count
+            return (count, bitmap, String(describing: original.colorSpace))
         }
         let solid = try coloredPixels("-->")
         let dashed = try coloredPixels("-.->")
-        #expect(solid > 100)
-        #expect(dashed > 40)
-        #expect(dashed < solid, "dashed strokes leave visible gaps while preserving colored arrowheads")
+        #expect(solid.count > 100)
+        #expect(dashed.count > 40)
+        #expect(dashed.count < solid.count, "dashed strokes leave visible gaps while preserving colored arrowheads")
+        if solid.count <= 100 || dashed.count <= 40 || dashed.count >= solid.count {
+            let directory = URL(fileURLWithPath: ".build/test-diagnostics/diagram-arrow-style", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            var report = "OS: \(ProcessInfo.processInfo.operatingSystemVersionString)\n"
+            for (name, result) in [("solid", solid), ("dashed", dashed)] {
+                let png = try #require(result.bitmap.representation(using: .png, properties: [:]))
+                try png.write(to: directory.appendingPathComponent("\(name).png"))
+                report += "\(name): \(result.count) yellow pixels; \(result.bitmap.pixelsWide)x\(result.bitmap.pixelsHigh)\n"
+                report += "Source profile: \(result.sourceProfile)\nSample profile: \(result.bitmap.colorSpace)\n"
+            }
+            try report.write(to: directory.appendingPathComponent("pixels.txt"), atomically: true, encoding: .utf8)
+            print(report)
+        }
     }
 
     @MainActor @Test func asyncDiagramDeliveryDrawsInsideThePrivatePanel() async throws {
