@@ -57,7 +57,8 @@ The checks establish different facts; a passing flag test is not a passing captu
    reassertion paths. macOS may normalize the public sharing property, so the invocation counters
    prove those paths run, not that another process cannot capture the window.
 2. **Synthetic screenshot check.** `OverlayInvisibilityTests` creates protected and ordinary colored
-   panels and takes one `SCScreenshotManager` image. It does not exercise the signed app, streaming,
+   panels on the [automatic test display](./build-and-run.md#automatic-test-display) and takes one
+   `SCScreenshotManager` image of that display. It does not exercise the signed app, streaming,
    Settings, or a meeting application. Run from a terminal with Screen Recording permission:
 
    ```sh

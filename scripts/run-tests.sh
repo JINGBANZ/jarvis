@@ -2,11 +2,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+source scripts/lib/test-display.sh
+
 ./scripts/check-ghost-mode.sh
 ./scripts/check-coaching-kernel.sh
 ./scripts/check-audio-capture-config.sh
 ./scripts/check-app-identities.sh
 ./scripts/check-release-config.sh
+python3 scripts/test-live-cancellation.py
 
 source scripts/lib/swift-test-flags.sh
 mkdir -p .build

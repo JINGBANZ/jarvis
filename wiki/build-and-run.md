@@ -247,6 +247,30 @@ omits the item rather than offering an action that a self-signed build could nev
   monochrome tile while stopped and a lit Listening Lens in every other state: amber while starting or
   reconnecting, violet once ready, red when a Start is blocked by a requirement needing attention.
 
+### Automatic test display
+
+Both test commands create a temporary virtual display on local Macs and place the test Overlay Box
+there before showing it. Developers use the same commands, with no display app, installation,
+configuration, or additional permission grant. Ordinary tests exercise deterministic logic and
+rendering without provider credentials; live e2e tests launch the signed app and exercise real
+providers, retaining their existing credential and capture-permission prerequisites.
+
+[`scripts/lib/test-display.sh`](../scripts/lib/test-display.sh) compiles and caches a small helper with
+the existing Swift toolchain. Its display creation reuses MIT-licensed code from
+[DeskPad](../scripts/test-display/DeskPad/README.md), pinned in the repository, so startup needs no
+download. The helper owns the display until the command and its cancellation cleanup finish, then
+removes it. Hangup, interrupt, and termination signals all invoke the live runner's cancellation
+handler, which lets the separately launched app finish cleanup before the display is removed.
+The Gate exercises that handler with a detached stand-in app without launching Jarvis or providers.
+The live launcher passes the display identity explicitly through LaunchServices and
+opens the app in the background. Overlay placement is checked before presentation and after resizing.
+
+Virtual displays use private macOS interfaces, confined to the test helper. If creation or placement
+fails, local tests stop with an error instead of falling back to the developer's screen. The helper
+requires an accessible, logged-in macOS desktop; a shell sandbox without WindowServer access cannot
+run it. GitHub Actions compiles the helper on each matrix toolchain, then keeps its existing test
+environment without launching the helper or creating an extra display.
+
 ## The live activity viewer
 
 Settings → **Activity** opens an **in-app `WKWebView`** into which `ActivityLog` pushes the typed,
