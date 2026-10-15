@@ -101,8 +101,9 @@ Set up once per machine:
 
 During a run:
 
-- **The Mac stays usable.** Nothing reads the screen and no window opens, so the developer keeps
-  working. The Overlay Box does appear over that work while a scenario coaches.
+- **The Mac stays usable.** Scenarios use fixture screenshots. The Overlay Box renders on the
+  [automatic test display](./build-and-run.md#automatic-test-display), keeping it off the developer's
+  working screens without additional setup.
 - **Scenario R hears the room.** It records the real microphone and system audio for the few seconds
   from Start to coaching ready, so keep calls and media off while it runs.
 - **No other Jarvis Dev.app runs.** Two instances would contend for the capture device and the session

@@ -127,13 +127,16 @@ struct LiveE2ELauncher {
 
         let processesBefore = Self.processIDs(matching: helperProcessPattern)
         var arguments = [
-            "-W", "-n", app.path, "--args",
+            "-g", "-W", "-n", app.path, "--args",
             "--live-e2e",
             "--live-e2e-scenario", scenarioCopy.path,
             "--live-e2e-output-dir", directory.path,
             "--live-e2e-repo-dir", Self.repository.path,
             "--live-e2e-fixtures-dir", Self.fixturesDirectory.path,
         ]
+        if let displayID = ProcessInfo.processInfo.environment["JARVIS_TEST_DISPLAY_ID"] {
+            arguments.insert(contentsOf: ["--env", "JARVIS_TEST_DISPLAY_ID=\(displayID)"], at: 0)
+        }
         if let secretsDirectory { arguments += ["--live-e2e-secrets-dir", secretsDirectory.path] }
         let opener = Process()
         opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")

@@ -30,6 +30,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/`: the transcription benchmark matrix, scoring, and signed-app runner ([transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/LiveE2E/` + `Sources/JarvisApp/LiveE2E/`: the debug-only live e2e scenario model and signed-app mode ([live-e2e-tests.md](./live-e2e-tests.md)).
 - `Tests/JarvisLiveTests/` + `scripts/run-live-tests.sh`: the live e2e checker, scenarios, fixtures, and command; the Gate compiles the target but never runs it.
+- `scripts/run-tests.sh` + `scripts/test-display/`: the ordinary test command and the [automatic display](./build-and-run.md#automatic-test-display) shared by both local test commands.
 - `Sources/JarvisCore/Brain/`: the provider-neutral brain domain: client and attempt-scoped conversation contracts, route targets, and the model catalog.
 - `Sources/JarvisCore/Providers/`: provider failure classification, redaction, and credential checks shared by brain, transcription, and Settings.
 - `Sources/JarvisBrainProviders/`: the concrete brain adapters: the Responses client, the bundled subscription helper's supervisor and sign-in, and the CLI detector and runner the session evaluator uses ([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)).
