@@ -1,5 +1,6 @@
 import Testing
 import AppKit
+@testable import JarvisOverlay
 // @preconcurrency: CI's Xcode toolchain rejects ScreenCaptureKit's non-Sendable async results
 // crossing back to the @MainActor helpers.
 @preconcurrency import ScreenCaptureKit
@@ -22,7 +23,9 @@ private func checkScreenCaptureKitExclusion() async {
         Issue.record("JARVIS_RUN_CAPTURE_TESTS=1 is set but this process lacks Screen Recording permission — grant it to the terminal and re-run.")
         return
     }
-    guard let screen = NSScreen.main else { Issue.record("no main screen"); return }
+    guard let screen = OverlayTestDisplay.requestedScreen ?? NSScreen.main else {
+        Issue.record("no capture screen"); return
+    }
 
     // Rare, well-separated colors so ordinary UI pixels can't match.
     let protectedColor: (r: UInt8, g: UInt8, b: UInt8) = (123, 47, 201)
@@ -33,14 +36,22 @@ private func checkScreenCaptureKitExclusion() async {
                                         rect: NSRect(x: f.minX + 140, y: f.minY + 380, width: 900, height: 240))
     let controlPanel = makeSolidPanel(color: controlColor, protected: false,
                                       rect: NSRect(x: f.minX + 140, y: f.minY + 90, width: 900, height: 240))
-    defer { protectedPanel.orderOut(nil); controlPanel.orderOut(nil) }
+    let placements = [OverlayTestDisplay(window: protectedPanel), OverlayTestDisplay(window: controlPanel)]
+    defer {
+        withExtendedLifetime(placements) {
+            protectedPanel.orderOut(nil)
+            controlPanel.orderOut(nil)
+        }
+    }
+    protectedPanel.orderFrontRegardless()
+    controlPanel.orderFrontRegardless()
 
     try? await Task.sleep(nanoseconds: 700_000_000)   // let the windows render before capturing
 
     let screenNumber = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
     do {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        guard let display = content.displays.first(where: { $0.displayID == screenNumber }) ?? content.displays.first else {
+        guard let display = content.displays.first(where: { $0.displayID == screenNumber }) else {
             Issue.record("no SCDisplay"); return
         }
         let filter = SCContentFilter(display: display, excludingWindows: [])
@@ -79,7 +90,6 @@ private func makeSolidPanel(color: (r: UInt8, g: UInt8, b: UInt8), protected: Bo
     panel.ignoresMouseEvents = true
     panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
     if protected { panel.sharingType = .none }
-    panel.orderFrontRegardless()
     return panel
 }
 

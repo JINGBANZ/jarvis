@@ -4,6 +4,7 @@ import JarvisCore
 @MainActor
 public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplying {
     private let panel: NSPanel
+    private let testDisplay: OverlayTestDisplay?
     private let box: ResizeReportingView
     private let textView: NSTextView
     private let historyBackground = NSView(frame: .zero)
@@ -64,8 +65,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }()
 
     /// Takes the restored size up front: `setContentSize` pins the top-left, so resizing after
-    /// `center()` would leave the box off-centre. Never query `NSScreen` here: it blocks AppKit
-    /// on a host with no GUI session and hangs every main-actor test.
+    /// `center()` would leave the box off-centre. Keep explicit `NSScreen` queries in the isolated
+    /// desktop-test path: they can hang main-actor tests on a host without a GUI session.
     public init(contentSize: NSSize = NSSize(
         width: Defaults.Overlay.Box.width,
         height: Defaults.Overlay.Box.height)
@@ -74,6 +75,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: [.nonactivatingPanel, .borderless, .resizable],
             backing: .buffered, defer: false)
+        testDisplay = OverlayTestDisplay(window: panel)
         // The drag floor is the persisted floor, so a dragged size always survives a round trip.
         panel.minSize = NSSize(
             width: Defaults.Overlay.Box.widthRange.lowerBound,
@@ -174,7 +176,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         // The affordance drives edge drags itself, so AppKit's live-resize hook never fires for them.
         affordance.onResizeFinished = { [weak self] in self?.reportContentSize() }
         layoutContent()
-        panel.center()
+        if testDisplay == nil { panel.center() }
         panel.excludeFromScreenCapture()
     }
 
@@ -483,6 +485,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         guard isSessionLive else { return panel.orderOut(nil) }
         // An activation-policy flip can drop `sharingType`, so re-assert on every show.
         reassertCaptureExclusion()
+        testDisplay?.position()
         panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
     }
 
@@ -544,6 +547,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             setCollapsed(false)
             reassertCaptureExclusion()
             renderDisplay()
+            testDisplay?.position()
             panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
         } else {
             renderDisplay()

@@ -100,7 +100,8 @@ small `JarvisOverlay` library target (not the executable) so the tests below can
    writing another value. These catch the realistic regression: the flag or the re-assert being
    deleted.
 2. **On-screen capture test (opt-in, local):** `OverlayInvisibilityTests` paints a `.none` panel + a
-   control, captures the display with ScreenCaptureKit (the Zoom/Meet/Teams path), and asserts the
+   control on the [automatic test display](./build-and-run.md#automatic-test-display), captures that
+   display with ScreenCaptureKit (the Zoom/Meet/Teams path), and asserts the
    protected panel is absent while the control is present. CI can't grant Screen Recording, so it skips unless opted in:
 
    ```sh
