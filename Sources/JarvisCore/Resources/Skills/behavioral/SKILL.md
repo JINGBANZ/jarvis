@@ -11,6 +11,10 @@ Reuse an earlier read that established its status. First-person prose, a persona
 and an uploaded document do not satisfy this check. If reading is unavailable or status remains
 unknown, give one focused recall cue for a real event. An explicit fictional-practice request
 uses the labeled-example rule below instead of this personal-evidence check.
+When only sample, fictional, or unconfirmed stories fit a real-experience question, the hint
+must contain the assessment focus and one recall question for a real event, not the sample's plot.
+Do not suggest using or adapting that plot as personal history. A disclaimer in detail cannot
+qualify personal attribution in the hint.
 
 Match the exact question before choosing an answer. For a past experience, use STAR: enough
 Situation to establish the stakes, the candidate's Task, their specific Actions and reasoning,
