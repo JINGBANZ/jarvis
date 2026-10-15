@@ -11,11 +11,20 @@ The Command Line Tools SDK (`/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 ScreenCaptureKit, AVFoundation, AppKit, SwiftUI, Vision, CoreAudio, and Security — everything Jarvis
 needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`.
 
-The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Line Tools, which is
-what CI runs; no Xcode project exists. Developer desktops also have full Xcode and the Xcode MCP,
+The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Line Tools;
+no Xcode project exists. CI uses the hosted runners' selected Xcode toolchains. Developer desktops
+also have full Xcode and the Xcode MCP,
 whose macOS workflow builds, launches, stops, and reads logs, so an agent may drive the app that way;
 the scripts use `open`. The live e2e tests assume the three TCC grants, an OpenAI key and a Gemini
 key saved in the secrets file, and Codex and Claude Code signed in from Settings → Connections.
+
+Pull-request CI runs the full Gate on both macOS 15 and macOS 26, with the matrix defined in
+[`ci.yml`](../.github/workflows/ci.yml). The required `test` check succeeds only when both jobs pass;
+one failure does not cancel the other runner's diagnostics. Each job logs its OS, Xcode, and Swift
+versions. Failed jobs upload the test log and any synthetic rendering diagnostics for seven days.
+The arrow-style pixel test converts the rendered image into sRGB at one pixel per point before
+sampling, because AppKit's offscreen image inherits the display's color profile. Its failure evidence
+contains the solid/dashed PNGs, pixel counts, and source/sample profiles under `.build/test-diagnostics/`.
 
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested
