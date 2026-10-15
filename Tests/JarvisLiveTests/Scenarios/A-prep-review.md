@@ -4,6 +4,12 @@ Review the search results in `brain-traffic.jsonl` alongside A5 and A9's replies
 `results.txt`. C31/C32 check retrieval order and skipping; they do not prove semantic grounding.
 Judge meaning rather than exact phrasing.
 
+- **A3/A4, behavioral:** The shared prep fixture contains sample material with fictional people;
+  the candidate has not confirmed its stories as personal events or requested fictional practice.
+  The coach should give a focused recall question for a real example, without recommending a sample
+  story as personal history or attributing its proposal, manager, or outcome to the candidate.
+  First-person wording in a sample does not establish autobiographical truth. Explicit fictional
+  practice and confirmed personal notes are separate `behavioral-*` coaching-quality cases.
 - **A5, search design:** The reply should connect the query path (Search API, cache, search index)
   to authoritative catalog storage and the background indexing path. It should adapt the retrieved
   preparation to the stated latency/freshness requirements. A diagram with only a database and

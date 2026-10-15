@@ -23,6 +23,18 @@ struct LiveE2EScenarioTests {
         #expect(scenario.id == id)
     }
 
+    @Test("screen fixtures accept source text for runtime rendering")
+    func textScreenFixture() throws {
+        let fixtures = try makeFixtures()
+        defer { try? FileManager.default.removeItem(at: fixtures) }
+        try Data("Weighted route\nUnapplied proposal; no tests run.".utf8)
+            .write(to: fixtures.appendingPathComponent("route.txt"))
+        let decoded = try LiveE2EScenario.decode(
+            Data(Self.scenario(steps: #"[{ "screen": "route.txt" }, \#(Self.stop)]"#).utf8),
+            fixturesDirectory: fixtures)
+        #expect(decoded.steps.first == .screen(fixture: "route.txt"))
+    }
+
     @Test func languageScenarioUsesTheSelectedProvidersCredential() throws {
         let data = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/L.json"))
         var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
