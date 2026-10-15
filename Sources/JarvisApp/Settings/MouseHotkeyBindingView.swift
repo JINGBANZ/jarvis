@@ -75,7 +75,7 @@ final class MouseHotkeyBindingView: NSObject {
     private func render() {
         clearButton?.isEnabled = preferences.mouseCombination != nil && !isRecording
         label?.stringValue = preferences.mouseCombination.map(HotkeyKeyNames.displayString(for:)) ?? "Not set"
-        label?.toolTip = label?.stringValue
+        label?.setAccessibilityHelp(label?.stringValue)
         if isRecording {
             row?.setDetail("Click here; left/right needs ⌘ or ⌥. Esc cancels.", color: SettingsTheme.teal)
         } else if let failure {

@@ -91,7 +91,7 @@ final class RobotSlotView: NSView {
             .kern: 1.5, .font: NSFont.systemFont(ofSize: 9.5), .foregroundColor: color,
             .paragraphStyle: truncating,
         ])
-        toolTip = "\(state.value)\n\(state.detail)"
+        setAccessibilityHelp("\(state.value)\n\(state.detail)")
         setAccessibilityValue("\(state.value), \(state.detail.lowercased())")
         needsDisplay = true
     }

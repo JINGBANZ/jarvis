@@ -58,14 +58,26 @@ identity remains the source in `Resources/Info.plist`; the development script ed
 copy, rewriting its name and bundle id, dropping its update feed, and stamping it as a development
 build so the menu's footer caption reads a red `Dev` rather than the release version the plist carries.
 
-Both `build-app.sh` and `package-app.sh` copy the subscription helper,
-[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), to `Contents/MacOS/cliproxyapi` with
-its MIT license under `Contents/Resources/Licenses/`, from the one pinned release in
-[`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh), so the development and the release
-app run the same helper. The first build downloads the archive into `.build/cliproxyapi/`; every
-build checks its SHA-256 against the pin, so a corrupted or substituted cache fails the build instead
-of shipping, and the binary is never committed. Bumping the helper is that pin plus a Jarvis release
-([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)).
+Both `build-app.sh` and `package-app.sh` build the subscription helper,
+[CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), from the same pinned upstream source and
+[`local-only.patch`](../scripts/cliproxyapi/local-only.patch). The patch omits unused public-IP/SSH
+instructions and the Antigravity and Grok version updaters; configuration switches do not disable
+those upstream paths. The version, source checksum, and Go toolchain checksum live in
+[`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh). The script downloads the pinned Go
+compiler automatically, so a global Go installation is unnecessary. First-time app builds need
+network access for the source, toolchain, and checksum-verified Go modules. The offline Swift Gate
+does not build the helper.
+
+Build inputs and outputs live under `.build/cliproxyapi/`; the source and toolchain archives are
+checksum-verified before use, and cached binaries are keyed by the build recipe and patch and checked
+against their recorded digest. A checksum mismatch, rejected patch, or compiler failure stops the
+build. There is no upstream-binary fallback. Both bundle scripts install the result at
+`Contents/MacOS/cliproxyapi` and the upstream MIT license under `Contents/Resources/Licenses/`.
+Bumping the helper requires reviewing the patch and passing `./scripts/test-proxy-privacy.sh`, which
+runs the real binary with empty credentials behind a recording loopback HTTP proxy. It checks
+startup and Codex/Claude no-browser OAuth initiation, without opening a browser or authenticating.
+CI and the release workflow run this check. Provider inference and token refresh still need the
+appropriate [live e2e validation](./live-e2e-tests.md).
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature
@@ -211,6 +223,8 @@ omits the item rather than offering an action that a self-signed build could nev
 | `./scripts/run-tests.sh` | Build + run the unit/offline-pipeline tests (no key, no permissions). |
 | `./scripts/build-app.sh [release\|debug]` | Build, bundle, sign `Jarvis Dev.app` (default `release`). Creates the `Jarvis Dev` signing identity on first run. |
 | `./scripts/build-app.sh --run` | Same development build, then launch it. Per-session logs land in the workspace `.jarvis/` (see below). |
+| `./scripts/run-capture-privacy-tests.sh [hold-seconds]` | Check real signed-app windows in a continuous stream; see [capture validation](./overlay-invisibility.md#validation-layers). |
+| `./scripts/test-proxy-privacy.sh` | Build the bundled helper and check unrelated startup/sign-in HTTP requests with empty accounts. |
 | `./scripts/run-live-tests.sh [scenario] [--evaluate] [--keep-going]` | Build the debug app and run the live e2e scenarios against real providers ([live-e2e-tests.md](./live-e2e-tests.md)). |
 
 - **Always launch with `open "./Jarvis Dev.app"`**, never the bare binary — running it from a shell makes

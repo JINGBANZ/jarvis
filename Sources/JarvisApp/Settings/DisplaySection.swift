@@ -162,9 +162,9 @@ final class DisplaySection: NSObject, SettingsSection {
         // present macOS privacy UI.
         browserTextSwitch.isEnabled = isSessionStopped() || preferences.browserTextEnabled
         // The reconcile above switches page text off without a live grant, so On implies one.
-        browserTextSwitch.toolTip = preferences.browserTextEnabled
+        browserTextSwitch.setAccessibilityHelp(preferences.browserTextEnabled
             ? "On for the Chrome tab in front"
-            : "Off. I read the window's text from the screenshot."
+            : "Off. I read the window's text from the screenshot.")
     }
 
     @objc private func browserTextChanged(_ sender: NSSwitch) {

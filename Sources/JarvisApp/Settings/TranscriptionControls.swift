@@ -64,9 +64,6 @@ final class TranscriptionControls: NSObject {
             provider.lastItem?.representedObject = choice.rawValue
             if choice == .appleSpeech {
                 provider.lastItem?.isEnabled = Self.appleSpeechIsAvailable
-                provider.lastItem?.toolTip = Self.appleSpeechIsAvailable
-                    ? "Transcribes on this Mac in one language you pick."
-                    : "Needs macOS 26 with Apple Speech."
             }
         }
         if let selected = provider.itemArray.firstIndex(where: {
@@ -404,7 +401,6 @@ final class TranscriptionControls: NSObject {
         for locale in sortedLocales {
             localePopup.addItem(withTitle: Self.localeTitle(locale))
             localePopup.lastItem?.representedObject = locale.identifier
-            localePopup.lastItem?.toolTip = locale.identifier
         }
         localePopup.isEnabled = !sortedLocales.isEmpty
 

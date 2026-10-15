@@ -58,7 +58,7 @@ final class SettingsRowView: NSView {
 
     func setDetail(_ detail: String?, color: NSColor? = nil) {
         detailLabel.stringValue = detail ?? ""
-        detailLabel.toolTip = detail
+        detailLabel.setAccessibilityHelp(detail)
         detailLabel.textColor = color ?? SettingsTheme.mutedText
         if wrapsDetail {
             let paragraph = NSMutableParagraphStyle()

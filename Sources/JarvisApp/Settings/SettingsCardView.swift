@@ -45,7 +45,7 @@ final class SettingsCardView: NSBox {
         ])
         headingLabel.isHidden = false
         detailLabel.stringValue = detail ?? ""
-        detailLabel.toolTip = detail
+        detailLabel.setAccessibilityHelp(detail)
         detailLabel.isHidden = detail == nil
         headerSeparator.isHidden = false
         needsLayout = true

@@ -6,7 +6,7 @@ import Darwin
 #endif
 
 /// `-no-browser` keeps the one browser open in Jarvis code, behind the user's Sign in click.
-/// That mode also queries public IP services for SSH tunnel hints, which Jarvis ignores.
+/// The bundled helper omits remote SSH hints and their unrelated public-IP requests.
 public struct LocalProxySignIn: Sendable {
     public enum Event: Sendable, Equatable {
         /// The caller opens the OAuth page.

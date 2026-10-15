@@ -1,4 +1,5 @@
 import AppKit
+import JarvisOverlay
 
 // Design: wiki/settings-window.md
 /// Promotes the accessory app to `.regular` while open, because text fields in an accessory app
@@ -41,6 +42,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
     func show() {
         NSApp.setActivationPolicy(.regular) // ghost-mode-allowed: explicit Settings action
         if window == nil { build() }
+        NSWindow.reassertCaptureExclusion()
         hub.beginObservingSettings()
         let isOpening = !isShowingCurrent
         if isOpening { present(current) }
@@ -110,6 +112,7 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         win.titleVisibility = .hidden
         win.titlebarAppearsTransparent = true
         win.isReleasedWhenClosed = false
+        win.excludeFromScreenCapture()
         // Pages lay out below the bar, so the area below it keeps the old default and minimum.
         let barHeight = win.frame.height - win.contentLayoutRect.height
         win.setFrame(NSRect(origin: win.frame.origin, size: NSSize(
@@ -217,5 +220,6 @@ final class SettingsWindow: NSObject, NSWindowDelegate {
         pages.removeAll()
         current = .home
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: close explicit Settings action
+        NSWindow.reassertCaptureExclusion()
     }
 }

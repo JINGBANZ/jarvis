@@ -1,166 +1,137 @@
-# Overlay Invisibility — Hiding the Coaching Overlay from Screen Capture
+# Overlay Invisibility — Capture Protection and Its Limits
 
-> How Jarvis keeps its on-screen coaching overlay out of screen recordings and screen shares (so an
-> interviewer's Zoom/Meet/Teams never sees it) **and** out of Jarvis's own screen captures (so the
-> brain never reads back its own output). The mechanism, how the alternatives do it, the empirical
-> verification, and the limits.
+Jarvis requests capture exclusion for its Overlay Box and explicitly opened Settings surfaces. This
+is a best-effort macOS window hint. It is not a guarantee that a recorder, meeting app, or proctoring
+agent cannot see Jarvis. Capture behavior must be measured on the actual OS and capture path.
 
-## The Requirement
+## Mechanism and ownership
 
-Jarvis draws its coaching tips in a floating overlay, the Overlay Box
-([`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift)), which holds the full history of
-every tip in the session. That box must be invisible to two distinct audiences:
+[`NSWindow.excludeFromScreenCapture()`](../Sources/JarvisOverlay/NSWindow+CaptureExclusion.swift)
+sets `sharingType = .none` and weakly registers the window for reassertion. The registry does not
+retain closed windows. It covers:
 
-1. **Other apps capturing the screen** — the interviewer's Zoom/Meet/Teams share, a QuickTime/OBS
-   recording, the macOS screenshot tool.
-2. **Jarvis's own `capture_screen`** — otherwise the brain would read its own coaching text back in
-   the next screenshot (a feedback loop). See [`ScreenCaptureCLI.swift`](../Sources/JarvisScreenCapture/ScreenCaptureCLI.swift).
+- The [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift), including its history,
+  streamed replies, details, and appearance preview. The box reasserts exclusion when it becomes
+  visible and when visible content renders.
+- [`SettingsWindow`](../Sources/JarvisApp/Settings/SettingsWindow.swift), which contains Activity,
+  credentials, provider state, and configuration. Opening and closing Settings reasserts the
+  registered windows after its activation-policy change, including an idle overlay with no new text.
+- Activity's export-session picker, alerts, and file panels, and the Tools source picker. The code
+  requests exclusion on the `NSOpenPanel` as well; remote system-owned file-picker content still
+  requires separate capture validation.
+- The expected-language popover. Its
+  [`CaptureExcludedView`](../Sources/JarvisOverlay/CaptureExcludedView.swift) registers the hosting
+  window when AppKit attaches the content view.
 
-Both are solved by the *same* single flag.
+Settings and Activity use inline text and accessibility help instead of native hover tooltips.
+AppKit creates tooltip windows separately from their parent; excluding the parent does not protect
+those windows. The static presentation guard rejects new native tooltip assignments in those areas.
+The overlay follows the same rule with help drawn inside its own panel.
 
-## The Mechanism — there is exactly one
+Native menus, system-owned dialogs, macOS privacy UI, and pages opened in a browser have independent
+presentation paths. A protected Settings window does not establish protection for those surfaces.
+The runtime still permits Settings and its dialogs only after an explicit user action; capture
+exclusion does not authorize autonomous UI. See [AGENTS.md](../AGENTS.md#runtime-safety-boundaries).
 
-macOS exposes one window-level content-protection flag:
+## Why there is no protection timer
 
-```swift
-panel.sharingType = .none   // NSWindow.SharingType.none / NSWindowSharingNone
-```
+An activation-policy change can invalidate window sharing state on some configurations. Jarvis
+reasserts exclusion at the relevant events: construction, showing, rendering, appearance preview,
+and Settings' policy transitions. A periodic assignment could repair state that the OS dropped
+between those events, but would still leave an interval before repair. Add such a timer only after
+reproducing that failure and measuring whether it helps. Repeatedly setting `.none` cannot make a
+capture API honor a flag that it ignores.
 
-It marks the window's contents as unreadable by other processes' capture paths. **There is no other
-public API for this.** Apple DTS, verbatim: *"At this time there are no public APIs for preventing
-screen capture."* Every comparable tool funnels down to this same flag:
+Apple documents `.none` as a legacy constant and says there is no public API that prevents screen
+capture. Electron also warns that ScreenCaptureKit-based applications can capture protected windows.
+Other products using the same AppKit mechanism do not establish parity across their auxiliary
+windows, OS versions, or capture implementations. Closed-source behavior cannot be inferred from
+marketing or a framework choice.
 
-| Tool | Framework | Capture-hiding call | Resolves to |
-|---|---|---|---|
-| **Jarvis** | native Swift | `panel.sharingType = .none` | — |
-| Interview Coder (AGPL), Glass, cheating-daddy | Electron | `win.setContentProtection(true)` | `NSWindow.sharingType = .none` |
-| Pluely | Tauri | `"contentProtected": true` | `.none` |
-| Natively | Electron + Rust FFI | `setContentProtection(true)` **and** `msg_send![window, setSharingType: 0]` | `.none` |
-| Cluely / LockedIn / Final Round | closed | content-protection flag (marketing aside) | `.none` |
+## Validation layers
 
-Electron's `setContentProtection(true)` is literally `[window setSharingType:NSWindowSharingNone]`
-in `native_window_mac.mm`; Tauri's `contentProtected` is the same on macOS. The "low-level GPU/Metal
-hooks" some products market are dressing on this one flag. **Jarvis is at full parity, using the
-native API directly.**
+The checks establish different facts; a passing flag test is not a passing capture test.
 
-> Deprecation note: the `sharingType` property and the `.none` / `.readOnly` cases are **not**
-> deprecated. Only the unrelated `.readWrite` case was deprecated in macOS 15.0. Anyone who says
-> "`sharingType` is deprecated" has conflated it with that one case.
-
-## Empirical Verification (macOS 26.5 Tahoe, 2026-06-16)
-
-The online consensus — and Natively's own source comment — warned that **ScreenCaptureKit ignores
-`.none` on macOS 15+** (it captures the whole composited framebuffer). We tested it directly on this
-machine with a red `sharingType = .none` panel plus a blue control panel (no flag), captured four
-ways:
-
-| Capture path | API | Red `.none` panel | Blue control |
-|---|---|---|---|
-| Jarvis's own brain | `screencapture` CLI | **hidden** | visible |
-| Interviewer (one-shot) | `SCScreenshotManager.captureImage` | **hidden** | visible |
-| **Interviewer (live share)** | **`SCStream`** (what Zoom/Meet/Teams use) | **hidden** | visible |
-| After `setKey()` activation-policy flip | `SCScreenshotManager` | **still hidden** | visible |
-
-**Result:** on macOS 26.5, `.none` hides the overlay from *every* path tested — including the live
-`SCStream` path real screen-shares use — and it survives an `NSApp` activation-policy flip. The
-macOS-15 regression does **not** reproduce on Tahoe; Apple appears to have changed behavior again, or
-it was specific to certain 15.x builds. Behavior here has been version-volatile, so this is
-"verified-now," not "guaranteed-forever" — **re-test on major macOS updates** (the throwaway harness
-used was a handful of standalone Swift programs driving `NSPanel` + ScreenCaptureKit).
-
-## What Jarvis Does
-
-- [`OverlayBoxPanel`](../Sources/JarvisOverlay/OverlayBoxPanel.swift) sets `panel.sharingType = .none`
-  at construction through the `NSPanel.excludeFromScreenCapture()` helper
-  ([`NSPanel+CaptureExclusion.swift`](../Sources/JarvisOverlay/NSPanel+CaptureExclusion.swift)).
-- It **re-asserts** `.none` on every render that reaches the screen (`append` while visible) and
-  whenever it becomes visible (`applyVisibility()`, i.e. every Start). This is defense-in-depth, taken
-  from Natively's documented lesson: flipping `NSApp` activation policy, which Jarvis does when opening
-  the [Settings window](./settings-window.md) (`SettingsWindow.show()`), can, on some OS
-  versions/configs, make WindowServer drop the flag. It does **not** reproduce on macOS 26.5, but the
-  failure would be silent and high-impact (the box would become visible to an interviewer with no
-  signal), so re-asserting on every show is cheap insurance.
-- `showAppearancePreview(_:)` (the live sample shown while the Settings Mouth page is open) routes its
-  re-assert through the same counted `reassertCaptureExclusion()` helper, so the preview stays
-  excluded from screen capture. The plain appearance setters only change font and alpha and don't
-  touch `sharingType`.
-
-That is the entire implementation: no package, no entitlement, no private API. The panel lives in the
-small `JarvisOverlay` library target (not the executable) so the tests below can import it.
-
-## Regression tests
-
-`Tests/JarvisOverlayTests/` guards this in two layers:
-
-1. **Property tests (always run, incl. CI):** `OverlayBoxPanelTests` asserts the box sets
-   `sharingType = .none` at construction (`excludedFromScreenCaptureAtInit`) and that showing it and
-   rendering to it re-assert the flag (`sessionStartShowsTheBoxAndReassertsCaptureExclusion`,
-   `reassertsCaptureExclusionOnRenderWhileVisible`). A counter proves the re-assert code runs, which
-   is needed because macOS 26 normalizes `sharingType`, so a dropped flag can't be simulated by
-   writing another value. These catch the realistic regression: the flag or the re-assert being
-   deleted.
-2. **On-screen capture test (opt-in, local):** `OverlayInvisibilityTests` paints a `.none` panel + a
-   control, captures the display with ScreenCaptureKit (the Zoom/Meet/Teams path), and asserts the
-   protected panel is absent while the control is present. CI can't grant Screen Recording, so it skips unless opted in:
+1. **Offline Gate.** `OverlayBoxPanelTests` verifies construction and the box's show/render/preview
+   reassertion paths. macOS may normalize the public sharing property, so the invocation counters
+   prove those paths run, not that another process cannot capture the window.
+2. **Synthetic screenshot check.** `OverlayInvisibilityTests` creates protected and ordinary colored
+   panels and takes one `SCScreenshotManager` image. It does not exercise the signed app, streaming,
+   Settings, or a meeting application. Run from a terminal with Screen Recording permission:
 
    ```sh
    JARVIS_RUN_CAPTURE_TESTS=1 ./scripts/run-tests.sh --filter OverlayInvisibilityTests
    ```
 
-   Run it from a terminal that has Screen Recording permission. This is the automated form of the
-   manual verification recorded above — run it after major macOS updates to catch OS-level drift.
+3. **Signed-app continuous stream check.**
+   [`run-capture-privacy-tests.sh`](../scripts/run-capture-privacy-tests.sh) builds and launches the
+   signed debug app using `open`. The debug-only
+   [`CapturePrivacyAppDelegate`](../Sources/JarvisApp/LiveE2E/CapturePrivacyAppDelegate.swift) drives
+   the real Overlay Box and Settings/Activity while
+   [`CapturePrivacyStream`](../Sources/JarvisApp/LiveE2E/CapturePrivacyStream.swift) records a display
+   through `SCStream`, without excluding any app or window in the recorder's filter.
 
-### Why the capture test isn't in hosted CI
+   ```sh
+   ./scripts/run-capture-privacy-tests.sh
+   ```
 
-A deliberate, researched choice that matches what every comparable project does:
+   The app needs its own Screen Recording grant. Missing permission fails the check without opening
+   privacy UI. A three-color stripe marker is attached inside the real windows. It changes only
+   synthetic test content, leaving their capture policy intact. An ordinary panel with the same
+   marker must be captured as a positive control before and after the protected phases; the baseline
+   must contain no marker. The remaining phases require no detected marker: session start, streaming and detail, resize, Settings opening
+   while the overlay is idle, Activity navigation, Settings closing, session stop, and restart.
 
-- **No public API grants Screen Recording non-interactively.** Apple provides no entitlement or
-  test-only bypass for `kTCCServiceScreenCapture`; `CGRequestScreenCaptureAccess()` shows a prompt and
-  a grant needs a relaunch. A PPPC/MDM profile can only *deny* Screen Recording, never silently allow
-  it (Apple Platform Deployment).
-- **Hosted GitHub runners can't do it reliably.** `kTCCServiceScreenCapture` lives in the
-  SIP-protected system `TCC.db`; editing it works only because the macos-13/14 runner images happen to
-  ship with SIP disabled — undocumented and removable. Even when granted, hosted runners return
-  blank/incomplete capture frames (`actions/runner-images#8951`, open), so the test would be flaky or
-  falsely fail. (The runners *do* have a window server, which is why the property tests above run fine
-  in CI.)
-- **Everyone asserts the flag, not the pixels, in CI.** Electron added a private `isContentProtected()`
-  getter specifically to unit-test that the flag is set without capturing — exactly what our
-  `excludedFromScreenCaptureAtInit` test does. OBS and alt-tab-macos never pixel-test capture in CI.
+   Results retain the OS build, bundle identity, source revision/dirty state, signature information,
+   per-phase frame counts, and marker detections under the checkout's owner-only
+   `.jarvis/capture-privacy/` directory. Captured frames stay in memory and are never written. The
+   recorder requests sRGB output and samples a pixel grid at a requested ten frames per second with
+   color tolerance. Any detected marker fails a protected phase; a missing positive control invalidates the run. This
+   checks window-level exclusion, not every child rendering surface, arbitrary pixel, or a flash
+   between sampled frames. A passing result does not certify native menus or system-owned pickers.
 
-So: **flag/property tests gate CI; the pixel-level capture test is opt-in and runs locally** (or on a
-self-hosted Mac with auto-login + a one-time manual grant, if continuous pixel verification is ever
-needed). A capture-test *failure* on a future macOS is a **true signal worth investigating** — it
-means the OS stopped honoring `.none` (as reported on some macOS 15 builds), i.e. the overlay would be
-exposed — not a flaky test.
+4. **Actual receiving-app checks.** Zoom, Google Meet, Microsoft Teams, OBS/QuickTime, macOS
+   screenshots, and Jarvis's own `screencapture` CLI path need their own evidence. An `SCStream`
+   result is not a substitute for a meeting application's actual capture implementation.
 
-> Toolchain note: the tests use swift-testing but the async ones are nonisolated `@Test`s that `await`
-> a `@MainActor` helper. A direct `@MainActor async @Test` miscompiles on the Command-Line-Tools
-> swift-testing ("must be a compile-time constant to use @section"), and XCTest isn't available CLT-only.
+Hosted CI runs the property/static checks. It does not silently grant TCC or claim pixel validation.
+Run capture checks locally on supported OS versions, after OS upgrades, and for release candidates.
 
-## Limits — what `.none` does NOT protect against
+## Receiving-app evidence
 
-`sharingType = .none` is a best-effort window-server hint, not a security boundary. It does nothing
-against:
+For each supported OS and meeting-app release, record these conditions in the release or PR evidence:
 
-- **A phone/camera pointed at the screen**, or **HDMI capture cards / external recorders** — they
-  capture downstream of compositing.
-- **OS-version drift** — it worked on ≤14, was reported to leak on 15.4, and works on 26.5. Re-test
-  on macOS upgrades.
-- **Process-level detection** — proctoring agents (Proctorio, Talview) detect the *running
-  app/process*, not pixels. This is a separate, stronger vector; the flag offers zero defense. Other
-  tools respond with process-name disguise — out of scope for Jarvis (a personal tool, not an
-  anti-proctoring product).
-- Note: macOS shows a screen-capture indicator to *whoever is capturing*. It does not expose Jarvis's
-  overlay to the interviewer, but a user recording their **own** screen is flagged to themselves.
+| Condition | Required evidence |
+|---|---|
+| Platform | Exact macOS version/build, machine/display setup, Jarvis build/signature |
+| Recorder | App/browser version, screen-share mode (display, window, or tab), recording settings |
+| Viewpoint | What the remote participant or final recording receives, not just the sender's preview |
+| Scenarios | Streaming text, detail expansion, resize, idle overlay across Settings open/close, stop/start |
+| Auxiliary UI | Activity, hover, menus, language popover, export/source picker, and alerts |
+| Outcome | Pass/fail or unverified for each scenario; never infer untested combinations |
+
+The signed test can hold each phase for up to thirty seconds (`./scripts/run-capture-privacy-tests.sh
+30`) to help inspect a real receiving view. System-owned pickers and other auxiliary actions still
+need explicit manual exercise. The generated report labels meeting applications unverified; a manual
+check belongs alongside that report and does not rewrite its automated result.
+
+## Detection boundaries
+
+Window capture exclusion does not hide the process, executable, installation path, bundle identity,
+code signature, network connections, permission indicators, or files. It cannot protect against an
+external camera or capture hardware. Jarvis's current product scope excludes process-name disguise;
+that is a separate decision from protecting window contents. A neutral process name would change
+casual listings but would not establish invisibility to software inspecting executable identity.
+
+Jarvis's own screenshot path also needs protection against reading its overlay back as new context.
+Its current `screencapture` adapter relies on the same best-effort behavior. If that path changes to
+ScreenCaptureKit, recorder-owned content filters provide explicit exclusions for that recorder;
+they cannot control someone else's recorder.
 
 ## References
 
-- Apple DTS, "no public APIs for preventing screen capture": developer.apple.com/forums/thread/792152
-- Electron `native_window_mac.mm` — `setContentProtection` → `NSWindowSharingNone`
-- Natively `native-module/src/stealth_window.rs` — direct FFI, the SCK-limitation comment, and the
-  activation-policy re-assert loop that motivated the box's re-assert on every show
-- `SCContentFilter(display:excludingApplications:exceptingWindows:)` — the robust way to exclude
-  windows from *your own* `SCStream`, **if** Jarvis ever moves its brain capture off the
-  `screencapture` CLI onto ScreenCaptureKit
-- [landscape-survey.md](./landscape-survey.md) — the tools surveyed and why we built our own
+- [Apple: NSWindow.SharingType.none](https://developer.apple.com/documentation/appkit/nswindow/sharingtype-swift.enum/none)
+- [Apple DTS: preventing screen capture](https://developer.apple.com/forums/thread/792152)
+- [Electron: setContentProtection limitations](https://www.electronjs.org/docs/latest/api/browser-window#winsetcontentprotectionenable)
+- [Apple: capturing screen content with ScreenCaptureKit](https://developer.apple.com/documentation/screencapturekit/capturing-screen-content-in-macos)
+- [Sandbox and data egress](./sandbox.md)

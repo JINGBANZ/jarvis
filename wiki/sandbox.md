@@ -134,14 +134,12 @@ Narrow and explicit. Data leaves the machine only via:
   `chatgpt.com` and `api.anthropic.com` for coaching, and `auth.openai.com`, `claude.ai`, or
   `console.anthropic.com`, the three authorize hosts Jarvis will open a login page on, during sign-in
   and the helper's OAuth refresh operations. Jarvis opens an authorize page only on an
-  explicit Sign in click in Connections. That sign-in also asks public IP lookup
-  services (`api.ipify.org`, falling back to `ifconfig.me`, `icanhazip.com`, and `ipinfo.io`) for the
-  Mac's address, because the helper's login prints SSH tunnel hints; Jarvis ignores them. One
-  connection is the helper's own: it fetches its upstream project's Antigravity version manifest from
-  `antigravity-hub-auto-updater-*.us-central1.run.app` a second after it loads credentials, and again
-  every three hours for as long as it runs, which is until Quit. The request carries no credential and
-  happens with no account configured at all, and the configuration's own update switches
-  (`disable-control-panel`, `disable-auto-update-panel`) do not govern it. The configuration
+  explicit Sign in click in Connections. The helper is built from pinned source with a narrow
+  privacy patch that omits SSH/public-IP discovery and the Antigravity and Grok version updaters;
+  Jarvis has no use for those requests. The empty-account startup and OAuth-initiation egress check
+  runs in CI; it is not a firewall or proof about every credential-refresh/inference path.
+  See [build-and-run.md](./build-and-run.md#packaging--signing--why-permission-grants-persist) for
+  build provenance and verification. The configuration
   keeps the embedded model catalog instead of fetching one, enables the management API only on
   loopback behind a separate per-launch key for passive
   credential health and targeted expired-token refresh, turns off its downloadable panel, and
@@ -208,8 +206,8 @@ and provider-retention paths described here.
 > dashboard logs while the harness is being tuned. This **does** retain the transcript and the
 > screenshots sent to the model server-side at OpenAI (≈30-day TTL), so the no-local-retention
 > guarantee above does **not** extend to OpenAI's servers. This remains a deliberate
-> *debuggability-over-retention* choice. A future `store:false` change must also preserve stateless
-> tool-loop reasoning continuity; it is not part of the public-launch hardening. Requests to the Codex
+> *debuggability-over-retention* choice. The separate [Advanced Settings storage control](https://github.com/JINGBANZ/jarvis/issues/456)
+> must preserve stateless tool-loop reasoning continuity; it is not implemented here. Requests to the Codex
 > subscription pass through the bundled helper, which forces `store:false`, so this retention applies
 > to the OpenAI API target only. Gemini requests send `store:false`.
 

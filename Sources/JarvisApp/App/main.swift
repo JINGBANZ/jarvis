@@ -22,9 +22,24 @@ private func liveE2EDelegate() -> (any NSApplicationDelegate)? {
     #endif
 }
 
+@MainActor
+private func capturePrivacyDelegate() -> (any NSApplicationDelegate)? {
+    #if JARVIS_LIVE_E2E
+    guard CommandLine.arguments.contains("--capture-privacy") else { return nil }
+    do { return try CapturePrivacyAppDelegate() } catch {
+        fputs("Jarvis capture privacy: \(error)\n", stderr)
+        exit(2)
+    }
+    #else
+    return nil
+    #endif
+}
+
 let app = NSApplication.shared
 let delegate: any NSApplicationDelegate
-if let liveE2E = liveE2EDelegate() {
+if let capturePrivacy = capturePrivacyDelegate() {
+    delegate = capturePrivacy
+} else if let liveE2E = liveE2EDelegate() {
     delegate = liveE2E
 } else if TranscriptionBenchmarkOptions.isRequested {
     do {

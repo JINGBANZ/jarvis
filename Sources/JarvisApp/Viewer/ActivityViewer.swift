@@ -3,6 +3,7 @@ import WebKit
 import JarvisCore
 import JarvisEvaluation
 import JarvisBrainProviders
+import JarvisOverlay
 
 @MainActor
 final class ActivityViewer: NSObject, WKNavigationDelegate {
@@ -67,7 +68,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         pop.translatesAutoresizingMaskIntoConstraints = false
         pop.target = self
         pop.action = #selector(sessionChanged)
-        pop.toolTip = "Switch between this and previous sessions"
+        pop.setAccessibilityHelp("Switch between this and previous sessions")
         pop.setAccessibilityLabel("Session")
         pop.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         header.addSubview(pop)
@@ -76,7 +77,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let copyID = NSButton(title: "Copy ID", target: self, action: #selector(copySessionIDTapped))
         copyID.translatesAutoresizingMaskIntoConstraints = false
         copyID.bezelStyle = .rounded
-        copyID.toolTip = "Copy the exact session ID"
+        copyID.setAccessibilityHelp("Copy the exact session ID")
         header.addSubview(copyID)
         self.copySessionIDButton = copyID
 
@@ -89,14 +90,14 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         let clear = NSButton(title: "Clear history", target: self, action: #selector(clearHistoryTapped))
         clear.translatesAutoresizingMaskIntoConstraints = false
         clear.bezelStyle = .rounded
-        clear.toolTip = "Delete all previous sessions (keeps the current one)"
+        clear.setAccessibilityHelp("Delete all previous sessions (keeps the current one)")
         header.addSubview(clear)
         self.clearHistoryButton = clear
 
         let export = NSButton(title: "Export…", target: self, action: #selector(exportTapped))
         export.translatesAutoresizingMaskIntoConstraints = false
         export.bezelStyle = .rounded
-        export.toolTip = "Export one or more sessions' history to a file"
+        export.setAccessibilityHelp("Export one or more sessions' history to a file")
         header.addSubview(export)
         self.exportButton = export
 
@@ -227,15 +228,15 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         guard let button = evaluateButton else { return }
         if isEvaluating {
             button.title = isFetchingSource ? "Fetching source…" : "Evaluating…"
-            button.toolTip = isFetchingSource
+            button.setAccessibilityHelp(isFetchingSource
                 ? "Preparing the Jarvis source for this session's release"
-                : "The agentic evaluator is inspecting this session"
+                : "The agentic evaluator is inspecting this session")
             button.isEnabled = false
             return
         }
         guard let idx = picker?.indexOfSelectedItem, sessions.indices.contains(idx) else {
             button.title = "Evaluate"
-            button.toolTip = "No session selected"
+            button.setAccessibilityHelp("No session selected")
             button.isEnabled = false
             return
         }
@@ -243,24 +244,24 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         if coachingRunning {
             button.title = AgenticEvaluation.savedReport(in: session.url) == nil
                 ? "Evaluate" : "Open report"
-            button.toolTip = "Stop Jarvis before evaluating or opening a report"
+            button.setAccessibilityHelp("Stop Jarvis before evaluating or opening a report")
             button.isEnabled = false
             return
         }
         guard isSessionAuditClosed?(session.url) != false else {
             button.title = AgenticEvaluation.savedReport(in: session.url) == nil
                 ? "Evaluate" : "Open report"
-            button.toolTip = "This session's audit is still closing"
+            button.setAccessibilityHelp("This session's audit is still closing")
             button.isEnabled = false
             return
         }
         if AgenticEvaluation.savedReport(in: session.url) != nil {
             button.title = "Open report"
-            button.toolTip = "Open this session's evaluation report in your browser"
+            button.setAccessibilityHelp("Open this session's evaluation report in your browser")
             button.isEnabled = true
         } else {
             button.title = "Evaluate"
-            button.toolTip = "Choose an agent CLI to audit this session and the Jarvis source checkout"
+            button.setAccessibilityHelp("Choose an agent CLI to audit this session and the Jarvis source checkout")
             button.isEnabled = !isFindingAgents
         }
     }
@@ -471,6 +472,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             return
         }
         let alert = NSAlert() // ghost-mode-allowed: guarded explicit Activity action
+        alert.window.excludeFromScreenCapture()
         alert.messageText = title
         alert.informativeText = message
         alert.runModal() // ghost-mode-allowed: guarded explicit Activity action
@@ -494,6 +496,7 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
             return
         }
         let alert = NSAlert() // ghost-mode-allowed: guarded explicit Activity action
+        alert.window.excludeFromScreenCapture()
         alert.messageText = "Clear session history?"
         alert.informativeText = "This permanently deletes all previous sessions (logs and "
             + "screenshots). The current session and any session still owned by audit work are kept."

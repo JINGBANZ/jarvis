@@ -256,8 +256,10 @@ SOFTWARE.
 - License: **MIT**
 - Copyright (c) 2025-2005.9 Luis Pater; Copyright (c) 2025.9-present Router-For.ME
 
-The app bundle carries the upstream release binary unmodified at `Contents/MacOS/cliproxyapi`, with
-its license beside it at `Contents/Resources/Licenses/CLIProxyAPI-LICENSE.txt`.
+The app bundle carries a binary built from the pinned upstream source with Jarvis's
+`scripts/cliproxyapi/local-only.patch` at `Contents/MacOS/cliproxyapi`, with its upstream license
+beside it at `Contents/Resources/Licenses/CLIProxyAPI-LICENSE.txt`. The patch omits remote SSH/IP
+discovery and the Antigravity and Grok version updaters, which Jarvis does not use.
 
 ```
 MIT License
