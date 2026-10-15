@@ -44,7 +44,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         ("10:30:00", "Ask about the time complexity of that loop.", false),
         ("10:30:08", "Check the empty list before reading its first item.", true),
     ]
-    private var latestEntryStart = 0
     private var entries: [(stamp: String, text: String, hasDetail: Bool)] = []
     /// The entry a streaming reply is writing into, until `deliver` finalizes it or nil removes it.
     private var liveEntryIndex: Int?
@@ -382,7 +381,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         }
         if panel.isVisible { reassertCaptureExclusion() }
         renderDisplay()
-        textView.scrollToEndOfDocument(nil)
+        scrollToLatestHint()
     }
 
     /// A reply that will not be delivered leaves both sections.
@@ -422,18 +421,15 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         // An activation-policy flip can drop `sharingType` while the box is visible, so re-assert.
         if panel.isVisible { reassertCaptureExclusion() }
         renderDisplay()
-        if detail != nil {
-            // Scroll to the newest hint's start, not the end, so its detail marker stays in view.
-            if let layout = textView.layoutManager, let container = textView.textContainer {
-                layout.ensureLayout(for: container)
-                let glyphs = layout.glyphRange(
-                    forCharacterRange: NSRange(location: latestEntryStart, length: 1), actualCharacterRange: nil)
-                let rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
-                textView.scroll(NSPoint(x: 0, y: rect.minY + textView.textContainerInset.height))
-            }
-        } else {
-            textView.scrollToEndOfDocument(nil)
+        scrollToLatestHint()
+    }
+
+    private func scrollToLatestHint() {
+        // TextKit lays out long histories lazily; scrolling before layout uses a stale document height.
+        if let container = textView.textContainer {
+            textView.layoutManager?.ensureLayout(for: container)
         }
+        textView.scrollToEndOfDocument(nil)
     }
 
     private func renderDisplay() {
@@ -453,7 +449,6 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         ]
         for (i, entry) in items.enumerated() {
             if i > 0 { result.append(NSAttributedString(string: "\n\n")) }
-            latestEntryStart = result.length
             result.append(NSAttributedString(string: "\(entry.stamp)  ", attributes: stampAttrs))
             result.append(NSAttributedString(string: entry.text, attributes: hintAttrs))
             if entry.hasDetail {
@@ -552,7 +547,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
         } else {
             renderDisplay()
-            textView.scrollToEndOfDocument(nil)
+            scrollToLatestHint()
             setCollapsed(wasCollapsedBeforePreview)
             applyVisibility()
         }
