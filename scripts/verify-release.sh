@@ -120,6 +120,17 @@ if [[ ! -f "$EXTRACTED_HELPER" || -L "$EXTRACTED_HELPER" || ! -x "$EXTRACTED_HEL
   exit 1
 fi
 
+EXTRACTED_REFERENCES="$EXTRACTED_APP/Contents/Resources/ReferenceHelper"
+if [[ ! -f "$EXTRACTED_REFERENCES/helper.py" \
+      || ! -x "$EXTRACTED_REFERENCES/python/bin/python3" \
+      || "$(lipo -archs "$EXTRACTED_REFERENCES/python/bin/python3")" != arm64 \
+      || ! -f "$EXTRACTED_REFERENCES/Notices/python/PYTHON.json" \
+      || ! -f "$EXTRACTED_REFERENCES/python/lib/python3.13/site-packages/lancedb-0.40.0.dist-info/licenses/LICENSE" \
+      || -e "$EXTRACTED_REFERENCES/fake_helper.py" ]]; then
+  echo "error: disk-image app is missing the References runtime/notices or contains test code" >&2
+  exit 1
+fi
+
 # --deep is fine for verifying (only signing avoids it): every nested signature must hold.
 codesign --verify --strict --deep --verbose=2 "$EXTRACTED_APP"
 # syspolicy_check runs the modern distribution checks; spctl stays as the direct Gatekeeper assertion.

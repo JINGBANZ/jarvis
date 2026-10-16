@@ -10,6 +10,7 @@ source scripts/lib/test-display.sh
 ./scripts/check-app-identities.sh
 ./scripts/check-release-config.sh
 python3 scripts/test-live-cancellation.py
+./scripts/test-reference-helper.sh
 
 source scripts/lib/swift-test-flags.sh
 mkdir -p .build

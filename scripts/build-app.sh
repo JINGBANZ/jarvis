@@ -76,6 +76,11 @@ rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices"
        "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
 source scripts/lib/cliproxyapi.sh
 bundle_cliproxyapi "$APP"
+source scripts/lib/reference-helper.sh
+bundle_reference_helper "$APP"
+if [[ "$CONFIG" == debug ]]; then
+  cp scripts/reference-helper/fake_helper.py "$APP/Contents/Resources/ReferenceHelper/"
+fi
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 # A distinct name and bundle id keep the dev build from sharing TCC grants or Launch Services
@@ -89,6 +94,7 @@ cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
 /usr/bin/plutil -replace JarvisDevelopmentBuild -bool YES "$APP/Contents/Info.plist"
 
 echo "▶ signing with '$IDENTITY'"
+sign_reference_helper "$APP" "$IDENTITY"
 codesign --force --deep --sign "$IDENTITY" "$APP"
 codesign --verify --verbose "$APP"
 echo "✅ built $APP"
