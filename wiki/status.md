@@ -56,6 +56,8 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/EvalPrep/main.swift` + `scripts/eval-session.sh`: the terminal entry point for the same evaluator.
 - `Sources/CJarvisAEC/lib/libjarvis-aec.a`: the prebuilt WebRTC AEC3 archive, rebuilt by `scripts/build-aec.sh`.
 - `Sources/JarvisApp/Resources/SileroVAD.mlmodelc`: the Silero VAD model, rebuilt by `scripts/build-vad.sh`.
+- `scripts/run-capture-privacy-tests.sh`: the signed-app capture check ([overlay-invisibility.md](./overlay-invisibility.md)).
+- `scripts/test-proxy-privacy.sh`: the bundled-helper egress check ([build-and-run.md](./build-and-run.md)).
 - `scripts/build-app.sh` + `scripts/lib/cliproxyapi.sh`: the local `Jarvis Dev.app` build and the pinned subscription helper both app builds bundle ([build-and-run.md](./build-and-run.md)).
 - `.github/workflows/` + `scripts/package-app.sh`: CI, agent automation, and the signed, notarized release pipeline ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci), [sandbox.md → Repository automation](./sandbox.md#repository-automation)).
 - `AGENTS.md` + `.github/workflows/sync-shared-rules.yml`: agent guidance whose shared-rules block syncs weekly from `JINGBANZ/rules`.

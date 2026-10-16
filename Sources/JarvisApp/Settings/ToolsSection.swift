@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisOverlay
 import UniformTypeIdentifiers
 
 // Design: wiki/settings-window.md#tools
@@ -216,6 +217,7 @@ final class ToolsSection: NSObject, SettingsSection {
 
     @objc private func addSource() {
         let panel = NSOpenPanel()
+        panel.excludeFromScreenCapture()
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowedContentTypes = Self.allowedContentTypes

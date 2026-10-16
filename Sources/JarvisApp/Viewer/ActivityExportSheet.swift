@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisOverlay
 
 @MainActor
 enum ActivityExportSheet {
@@ -19,6 +20,7 @@ enum ActivityExportSheet {
         let jarvisResponsesOnly = picker.jarvisResponsesOnly
 
         let panel = NSOpenPanel() // ghost-mode-allowed: explicit user action in Settings
+        panel.excludeFromScreenCapture()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
@@ -66,6 +68,7 @@ enum ActivityExportSheet {
 
     private static func inform(_ title: String, _ message: String) {
         let alert = NSAlert() // ghost-mode-allowed: explicit user action in Settings
+        alert.window.excludeFromScreenCapture()
         alert.messageText = title
         alert.informativeText = message
         alert.runModal() // ghost-mode-allowed: explicit user action in Settings
@@ -104,6 +107,7 @@ private final class SessionPickerWindow: NSObject, NSTableViewDataSource, NSTabl
             backing: .buffered, defer: false)
         window.title = "Export Activity History"
         window.isReleasedWhenClosed = false
+        window.excludeFromScreenCapture()
         super.init()
         window.delegate = self
         let content = makeContentView()

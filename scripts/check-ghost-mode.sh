@@ -24,4 +24,15 @@ if [ -n "$violations" ]; then
     exit 1
 fi
 
+# Native tooltips have separate AppKit windows outside the protected parent window.
+tooltip_status=0
+tooltips="$(/usr/bin/grep -RInE '\.toolTip[[:space:]]*=|^[[:space:]]*toolTip[[:space:]]*=|(^|[^[:alnum:]_])(setToolTip|addToolTip)[[:space:]]*\(' \
+    Sources/JarvisApp/Settings Sources/JarvisApp/Viewer)" || tooltip_status=$?
+if [ "$tooltip_status" -gt 1 ]; then exit "$tooltip_status"; fi
+if [ -n "$tooltips" ]; then
+    echo "Settings/Activity help must stay inline or use accessibility help, outside native tooltip windows:" >&2
+    echo "$tooltips" >&2
+    exit 1
+fi
+
 echo "Ghost-mode presentation API guard passed."

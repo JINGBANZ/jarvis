@@ -818,9 +818,9 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisCore/Config/OverlayAppearance.swift` | UserDefaults persistence; `OverlayBoxApplying` protocol |
 | `Sources/JarvisCore/Config/TranscriptionPreferences.swift` | Persisted transcription selection + validation |
 | `Sources/JarvisOverlay/OverlayBoxPanel.swift` | The Overlay Box; `OverlayBoxApplying` conformance |
-| `Sources/JarvisOverlay/NSPanel+CaptureExclusion.swift` | The `sharingType = .none` helper the box re-asserts |
+| `Sources/JarvisOverlay/NSWindow+CaptureExclusion.swift` | The shared window capture-exclusion helper |
 
 ## Related Pages
 
-- [overlay-invisibility.md](./overlay-invisibility.md) — capture exclusion re-assert during preview
+- [overlay-invisibility.md](./overlay-invisibility.md) — Settings, auxiliary windows, overlay protection, and capture limits
 - [build-and-run.md](./build-and-run.md) — the embedded activity log

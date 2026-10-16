@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisOverlay
 
 @MainActor
 final class ExpectedLanguagePicker: NSView {
@@ -73,7 +74,7 @@ final class ExpectedLanguagePicker: NSView {
         let rowHeight: CGFloat = 28
         let height = 48 + CGFloat(TranscriptionLanguage.allCases.count) * rowHeight
         let controller = NSViewController()
-        controller.view = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: height))
+        controller.view = CaptureExcludedView(frame: NSRect(x: 0, y: 0, width: 300, height: height))
 
         let heading = NSTextField(labelWithString: "Expected languages")
         heading.font = .boldSystemFont(ofSize: NSFont.systemFontSize)

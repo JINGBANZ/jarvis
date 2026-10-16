@@ -1299,7 +1299,7 @@ The **Codex** and **Claude Code** targets (`BrainProvider.codexSubscription`,
 `.claudeSubscription`, selected in [Settings → Brain](./settings-window.md#brain)) let the user's
 ChatGPT or Claude plan pay for coaching instead of a metered API key. Both are served by
 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI) (MIT, Go), shipped inside the app at
-`Contents/MacOS/cliproxyapi` from the pinned, checksum-verified release in
+`Contents/MacOS/cliproxyapi` from the pinned, checksum-verified source and privacy patch built by
 [`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh). The helper holds the OAuth sign-ins
 and serves them on 127.0.0.1: Codex on its OpenAI Responses route (`/v1/responses`) and Claude Code
 on Anthropic's own Messages route (`/v1/messages`), so both subscriptions go through the one
