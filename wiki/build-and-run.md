@@ -88,36 +88,39 @@ appropriate [live e2e validation](./live-e2e-tests.md).
 
 ### References helper packaging and integration checks
 
-Both bundle scripts include the pinned redistributable Python runtime and locked LanceDB wheels from
-[`scripts/lib/reference-helper.sh`](../scripts/lib/reference-helper.sh). Runtime archives and wheels
-are verified against committed SHA-256 digests; reusable build-cache files have a checked manifest.
-The matching Python distribution metadata/native notices and wheel license files accompany the bundle.
-Every Python executable, native extension and bundled native library is signed before the outer app.
-The application needs no user-installed Python or dependency downloads at launch. First-time Gate and
-app builds download these build inputs; subsequent checks can use the verified local cache offline.
+Both bundle scripts copy the SwiftPM `JarvisReferenceHelper` executable through
+[`scripts/lib/reference-helper.sh`](../scripts/lib/reference-helper.sh) and sign it before the outer
+app. The helper links macOS's system SQLite with FTS5, adding no downloaded runtime, model,
+dictionary, or package-install step. Its dedicated target is the process boundary for document I/O
+and indexing; the shared framing and reply types remain Foundation-only in `JarvisCore`.
+The helper bundle directory contains only that executable, and release verification rejects builds
+containing the debug fault mode.
 
 The References integration is exercised only by the explicit development harness,
 `./scripts/run-reference-tests.sh`, while normal coaching continues to use the existing prep-material
 implementation. The harness launches the signed app through Launch Services on the shared temporary
-test display. It drives the same app-owned supervisor and framed stdio protocol with synthetic TXT
-files and real LanceDB queries, then injects process faults through a helper shipped only in debug
-bundles. Results are owner-only files under the checkout's `.jarvis/reference-harness/` directory.
+test display. It drives the app-owned supervisor and framed stdio protocol with synthetic TXT files
+and real SQLite FTS queries, then injects process faults through a mode compiled only in debug builds.
+Results are owner-only files under the checkout's `.jarvis/reference-harness/` directory.
 It does not contact providers or require capture grants. Pure framing/reply/request-state tests and
-initial Python helper contracts also run under `./scripts/run-tests.sh`.
+native helper process contracts also run under `./scripts/run-tests.sh`. The helper contracts use
+host Python only as a wire-test driver; Python is absent from the installed helper and app bundle.
 
-The supervisor allows a bounded 30-second import/hello warmup, then uses separate 2-second request
-deadlines because native imports may take longer than normal operations. This warmup does not
-extend the planned 2-second session metadata admission budget. The supervisor coalesces
-startup, fails pending calls on helper exit, and supports explicit restart
-without replaying requests. Automatic recovery and session/pin reconciliation belong to the reliable
-document-access phase.
+The supervisor coalesces startup, uses a separate bounded hello deadline and per-request deadlines,
+fails pending calls on helper exit, and supports explicit restart without replaying requests.
+Its child receives an explicit environment allowlist without provider credentials or host import
+paths. This is environment hygiene, not OS-enforced filesystem or network confinement.
+Automatic recovery and session/pin reconciliation belong to the reliable document-access phase.
 
-The helper owns private store initialization and a bounded TXT read/basic search path. Metadata
-admission, immutable revisions/session pins, full-document ranked search, production context/tools,
-and Settings integration belong to the subsequent References phases. The current basic search
-rebuilds the fixture table from the first bounded read page; it proves the dependency and transport,
-without claiming final retrieval semantics. Subprocesses and owner-only files provide process
-separation and privacy controls, not OS-enforced filesystem or network confinement.
+The helper owns a locked private SQLite store and a bounded TXT/Markdown read/basic search path.
+Search refreshes the fixture table from each authorized source's first bounded read page in one
+transaction, then ranks the persisted FTS5 rows. Offline contracts query that index from a fresh
+SQLite connection and exercise helper reopen and source refresh. This proves native packaging,
+persisted indexing, and transport; it does not establish final retrieval semantics or full-corpus
+performance. The stock `unicode61` tokenizer is checked with a basic ASCII fixture. Phase 3 owns
+multilingual and identifier tokenization with original-text offsets, excerpt correctness, and index
+version/rebuild policy. Metadata admission, immutable revisions/session pins, full-document ranked
+search, production context/tools, and Settings integration belong to the subsequent References phases.
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature
@@ -163,7 +166,7 @@ Gatekeeper blocks the app. Distributable builds go through `scripts/package-app.
 signs the bundle once with a **Developer ID Application** certificate — hardened runtime + secure
 timestamp (both notarization requirements) — with the `audio-input` entitlement that hardened runtime
 requires for microphone capture. Nested code is sealed inner to outer, Sparkle's pieces and then the
-subscription helper and References runtime under the same hardened runtime and timestamp before the app, because
+subscription helper and native References helper under the same hardened runtime and timestamp before the app, because
 notarization rejects any executable in the bundle that lacks them. It submits a temporary zip of that app to Apple's notary service,
 staples and validates the app's ticket, then uses the hash-pinned release-only `dmgbuild` tool to
 place the stapled app beside an `Applications` shortcut in `Jarvis.dmg`. The mounted Finder window is
@@ -182,7 +185,7 @@ ticket, mounts it read-only, and requires exactly the two visible install target
 Finder metadata and arrow background. `scripts/verify-dmg-layout.py` reads the final `.DS_Store` and
 checks the icon view, window size, chrome, icon size and positions, background link and digest, and
 Applications target position. Release verification also checks the Applications target, mounted app
-version, arm64 architecture, the arm64 subscription helper and its license, References runtime/notices without the debug fault helper, linked macOS 26-or-newer
+version, arm64 architecture, the arm64 subscription helper and its license, native References helper with debug fault mode excluded, linked macOS 26-or-newer
 SDK, notices, strict code signature, and
 Gatekeeper policy result before detaching the image. The same SDK guard runs immediately after the
 release build, before signing or notarization; the pre-container app is not accepted as a proxy for

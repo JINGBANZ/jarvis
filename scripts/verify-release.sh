@@ -121,13 +121,20 @@ if [[ ! -f "$EXTRACTED_HELPER" || -L "$EXTRACTED_HELPER" || ! -x "$EXTRACTED_HEL
 fi
 
 EXTRACTED_REFERENCES="$EXTRACTED_APP/Contents/Resources/ReferenceHelper"
-if [[ ! -f "$EXTRACTED_REFERENCES/helper.py" \
-      || ! -x "$EXTRACTED_REFERENCES/python/bin/python3" \
-      || "$(lipo -archs "$EXTRACTED_REFERENCES/python/bin/python3")" != arm64 \
-      || ! -f "$EXTRACTED_REFERENCES/Notices/python/PYTHON.json" \
-      || ! -f "$EXTRACTED_REFERENCES/python/lib/python3.13/site-packages/lancedb-0.40.0.dist-info/licenses/LICENSE" \
-      || -e "$EXTRACTED_REFERENCES/fake_helper.py" ]]; then
-  echo "error: disk-image app is missing the References runtime/notices or contains test code" >&2
+if [[ -L "$EXTRACTED_REFERENCES" || -L "$EXTRACTED_REFERENCES/JarvisReferenceHelper" \
+      || ! -f "$EXTRACTED_REFERENCES/JarvisReferenceHelper" || ! -x "$EXTRACTED_REFERENCES/JarvisReferenceHelper" \
+      || "$(lipo -archs "$EXTRACTED_REFERENCES/JarvisReferenceHelper")" != arm64 \
+      || "$(find "$EXTRACTED_REFERENCES" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" != 1 ]]; then
+  echo "error: disk-image app must contain only the native arm64 References helper" >&2
+  exit 1
+fi
+if "$EXTRACTED_REFERENCES/JarvisReferenceHelper" /dev/null --test-fault >/dev/null 2>&1; then
+  reference_status=0
+else
+  reference_status=$?
+fi
+if [[ "$reference_status" != 64 ]]; then
+  echo "error: release References helper contains the debug fault mode" >&2
   exit 1
 fi
 

@@ -21,12 +21,9 @@ chmod 700 "$PWD/.jarvis" "$BASE"
 RUN_DIR="$BASE/$(date '+%Y-%m-%d_%H-%M-%S')-$$"
 mkdir -m 700 "$RUN_DIR"
 POLLUTION="$RUN_DIR/pollution"
-mkdir -p "$POLLUTION/.local/lib/python3.13/site-packages" "$POLLUTION/cwd"
-for directory in "$POLLUTION" "$POLLUTION/.local/lib/python3.13/site-packages" "$POLLUTION/cwd"; do
-  printf 'raise RuntimeError("hostile user import executed")\n' > "$directory/sitecustomize.py"
-  printf 'raise RuntimeError("hostile user import executed")\n' > "$directory/lancedb.py"
-  printf 'import sitecustomize\n' > "$directory/hostile.pth"
-done
+mkdir -p "$POLLUTION/cwd"
+printf '#!/bin/sh\n: > "%s"\nexit 99\n' "$RUN_DIR/hostile-helper-executed" > "$POLLUTION/cwd/JarvisReferenceHelper"
+chmod 700 "$POLLUTION/cwd/JarvisReferenceHelper"
 codesign --verify --deep --strict 'Jarvis Dev.app'
 cleanup() {
   python3 - "$RUN_DIR" "$PWD/Jarvis Dev.app" "$EXPECTED_CASES" <<'PY_CLEANUP'
@@ -36,7 +33,7 @@ root, app = map(Path, sys.argv[1:3])
 app_command = str(app / 'Contents/MacOS/JarvisApp') + ' --reference-harness --reference-harness-output ' + str(root)
 if sys.argv[3] == '1': app_command += ' --reference-harness-quit-only'
 helper = app / 'Contents/Resources/ReferenceHelper'
-prefixes = [str(helper / 'python/bin/python3') + ' -I -B ' + str(helper / script) + ' ' + str(root) + '/' for script in ('helper.py', 'fake_helper.py')]
+prefixes = [str(helper / 'JarvisReferenceHelper') + ' ' + str(root) + '/']
 def owned():
     rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,command='], text=True)
     result = []
@@ -57,7 +54,8 @@ PY_CLEANUP
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
-open -n -g --env "HOME=$POLLUTION" --env "PYTHONPATH=$POLLUTION/cwd" \
+open -n -g --env "HOME=$POLLUTION" --env "PATH=$POLLUTION/cwd" --env "PYTHONPATH=$POLLUTION/cwd" \
+  --env "HTTPS_PROXY=http://127.0.0.1:1" \
   --env "OPENAI_API_KEY=synthetic-secret-canary" --env "GEMINI_API_KEY=synthetic-secret-canary" \
   --stdout "$RUN_DIR/stdout.log" --stderr "$RUN_DIR/stderr.log" \
   "$PWD/Jarvis Dev.app" --args --reference-harness --reference-harness-output "$RUN_DIR" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}

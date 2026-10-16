@@ -6,7 +6,9 @@ final class ReferenceHelperSupervisor {
     enum Failure: Error { case unavailable, timeout, protocolFailure }
     private let bundle: URL
     private let home: URL
-    private let scriptName: String
+    #if JARVIS_LIVE_E2E
+    private var testFault = false
+    #endif
     private let startupTimeout: Duration
     private var process: Process?
     private(set) var handshake: Data?
@@ -21,12 +23,18 @@ final class ReferenceHelperSupervisor {
     private var generation = UUID()
     private let writes = DispatchQueue(label: "jarvis.references.write")
 
-    init(bundle: URL, home: URL, scriptName: String = "helper.py", startupTimeout: Duration = .seconds(30)) {
+    init(bundle: URL, home: URL, startupTimeout: Duration = .seconds(30)) {
         self.bundle = bundle
         self.home = home
-        self.scriptName = scriptName
         self.startupTimeout = startupTimeout
     }
+
+    #if JARVIS_LIVE_E2E
+    convenience init(bundle: URL, home: URL, testFault: Bool, startupTimeout: Duration) {
+        self.init(bundle: bundle, home: home, startupTimeout: startupTimeout)
+        self.testFault = testFault
+    }
+    #endif
 
     func start() async throws {
         if let stopping { await stopping.value }
@@ -43,8 +51,11 @@ final class ReferenceHelperSupervisor {
                                                attributes: [.posixPermissions: 0o700])
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: home.path)
         let child = Process()
-        child.executableURL = bundle.appendingPathComponent("python/bin/python3")
-        child.arguments = ["-I", "-B", bundle.appendingPathComponent(scriptName).path, home.path]
+        child.executableURL = bundle.appendingPathComponent("JarvisReferenceHelper")
+        child.arguments = [home.path]
+        #if JARVIS_LIVE_E2E
+        if testFault { child.arguments?.append("--test-fault") }
+        #endif
         child.environment = ["HOME": home.path, "TMPDIR": home.appendingPathComponent("staging").path,
                              "LANG": "en_US.UTF-8", "PATH": "/usr/bin:/bin"]
         child.currentDirectoryURL = home

@@ -53,6 +53,12 @@ let package = Package(
             ]
         ),
         .executableTarget(
+            name: "JarvisReferenceHelper",
+            dependencies: ["JarvisCore"],
+            swiftSettings: liveE2ESettings,
+            linkerSettings: [.linkedLibrary("sqlite3")]
+        ),
+        .executableTarget(
             name: "EvalPrep",
             dependencies: ["JarvisEvaluation", "JarvisCore", "JarvisBrainProviders"]
         ),

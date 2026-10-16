@@ -56,6 +56,8 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         return .terminateCancel
     }
 
+    private struct HelperIdentity: Decodable { let pid: Int32 }
+
     private func json(_ value: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: value) }
     private func require(_ condition: Bool, _ name: String) throws {
         guard condition else { throw NSError(domain: "ReferenceHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: name]) }
@@ -73,16 +75,7 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try "Uniquequasar synthetic reference. 😀é\n".write(to: fixture.appendingPathComponent("sample.txt"), atomically: true, encoding: .utf8)
         let store = output.appendingPathComponent("store")
-        let userSite = store.appendingPathComponent(".local/lib/python3.13/site-packages")
-        try FileManager.default.createDirectory(at: userSite, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        let sentinel = output.appendingPathComponent("hostile-import-executed")
-        let hostile = "open(\"\(sentinel.path)\", \"w\").write(\"executed\")\nraise RuntimeError(\"hostile import\")\n"
-        for directory in [store, userSite] {
-            for module in ["sitecustomize.py", "lancedb.py", "pyarrow.py"] {
-                try hostile.write(to: directory.appendingPathComponent(module), atomically: true, encoding: .utf8)
-            }
-            try "import sitecustomize\n".write(to: directory.appendingPathComponent("hostile.pth"), atomically: true, encoding: .utf8)
-        }
+        let sentinel = output.appendingPathComponent("hostile-helper-executed")
         let real = ReferenceHelperSupervisor(bundle: bundle, home: store)
         supervisor = real
         let clock = ContinuousClock()
@@ -108,20 +101,39 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         let searchStart = clock.now
         let search = try await real.request("search", session: session, payload: json(["query": "uniquequasar"]))
         let firstSearch = searchStart.duration(to: clock.now)
-        try require(String(decoding: search, as: UTF8.self).contains(document.uuidString.lowercased()), "real LanceDB hit")
+        try require(String(decoding: search, as: UTF8.self).contains(document.uuidString.lowercased()), "real SQLite FTS5 hit")
         let hello = try await real.request("hello")
-        let values = try JSONSerialization.jsonObject(with: hello) as! [String: Any]
-        let pid = values["pid"] as! Int32
+        guard let values = try JSONSerialization.jsonObject(with: hello) as? [String: Any],
+              let identity = try? JSONDecoder().decode(HelperIdentity.self, from: hello), identity.pid > 0 else {
+            throw NSError(domain: "ReferenceHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid helper PID"])
+        }
+        let pid = identity.pid
+        try require(values["engine"] as? String == "sqlite-fts5" && values["secret_present"] as? Bool == false,
+                    "native SQLite helper and credential environment removed")
         let warmSearchStart = clock.now
         _ = try await real.request("search", session: session, payload: json(["query": "uniquequasar"]))
         let warmSearch = warmSearchStart.duration(to: clock.now)
         results.append(["case": "real-read-search", "startup": String(describing: startup), "idle_rss_kib": Int(rss)!,
                         "first_search": String(describing: firstSearch), "warm_search": String(describing: warmSearch), "pid": pid])
-        try require(!FileManager.default.fileExists(atPath: sentinel.path), "bundle-only imports")
+        try require(!FileManager.default.fileExists(atPath: sentinel.path), "bundle-only executable")
         await real.stop()
         try require(kill(pid, 0) != 0 && errno == ESRCH, "real helper reaped")
+        let persisted = Process()
+        persisted.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        persisted.arguments = [store.appendingPathComponent("control.sqlite").path,
+                               "SELECT document_id FROM chunks WHERE chunks MATCH 'uniquequasar';"]
+        let persistedOutput = Pipe()
+        persisted.standardOutput = persistedOutput
+        persisted.standardError = FileHandle.nullDevice
+        try persisted.run()
+        let persistedIDs = String(decoding: persistedOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        persisted.waitUntilExit()
+        try require(persisted.terminationStatus == 0 && persistedIDs.trimmingCharacters(in: .whitespacesAndNewlines) == document.uuidString.lowercased(),
+                    "persisted FTS index queried without source refresh")
         try await real.start()
-        _ = try await real.request("hello")
+        _ = try await real.request("configure", session: session, payload: json(["root": fixture.path, "documents": [["document_id": document.uuidString, "name": "sample.txt"]]]))
+        let reopened = try await real.request("search", session: session, payload: json(["query": "uniquequasar"]))
+        try require(String(decoding: reopened, as: UTF8.self).contains(document.uuidString.lowercased()), "SQLite FTS search after reopen")
         await real.stop()
         results.append(["case": "same-supervisor-restart"])
         supervisor = nil
@@ -130,7 +142,7 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
             let home = output.appendingPathComponent(fault)
             try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try fault.write(to: home.appendingPathComponent("fault"), atomically: true, encoding: .utf8)
-            let fake = ReferenceHelperSupervisor(bundle: bundle, home: home, scriptName: "fake_helper.py", startupTimeout: .milliseconds(300))
+            let fake = ReferenceHelperSupervisor(bundle: bundle, home: home, testFault: true, startupTimeout: .milliseconds(300))
             supervisor = fake
             let begin = clock.now
             if fault.hasPrefix("startup-") {
@@ -139,7 +151,10 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
                 catch {}
             } else {
                 try await fake.start()
-                let handshake = try JSONSerialization.jsonObject(with: fake.handshake!) as! [String: Any]
+                guard let data = fake.handshake,
+                      let handshake = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                    throw NSError(domain: "ReferenceHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid fake handshake"])
+                }
                 try require(handshake["secret_present"] as? Bool == false, "credential environment removed")
                 if fault == "out-of-order" {
                     async let a = fake.request("one")
@@ -183,7 +198,7 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         let raceHome = output.appendingPathComponent("stop-during-start")
         try FileManager.default.createDirectory(at: raceHome, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try "startup-hang".write(to: raceHome.appendingPathComponent("fault"), atomically: true, encoding: .utf8)
-        let racing = ReferenceHelperSupervisor(bundle: bundle, home: raceHome, scriptName: "fake_helper.py", startupTimeout: .milliseconds(300))
+        let racing = ReferenceHelperSupervisor(bundle: bundle, home: raceHome, testFault: true, startupTimeout: .milliseconds(300))
         supervisor = racing
         let starting = Task { try await racing.start() }
         try await Task.sleep(for: .milliseconds(50))

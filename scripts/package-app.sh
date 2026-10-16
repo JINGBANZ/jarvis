@@ -88,7 +88,7 @@ rm -rf "$SPARKLE/Versions/Current/XPCServices" "$SPARKLE/XPCServices"
 source scripts/lib/cliproxyapi.sh
 bundle_cliproxyapi "$APP"
 source scripts/lib/reference-helper.sh
-bundle_reference_helper "$APP"
+bundle_reference_helper "$APP" release
 
 echo "▶ signing (hardened runtime + timestamp)"
 # Sign inner code before outer. Not --deep: Apple calls it unsuitable for distribution because it
