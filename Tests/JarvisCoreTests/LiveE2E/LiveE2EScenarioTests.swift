@@ -204,6 +204,22 @@ struct LiveE2EScenarioTests {
         }
     }
 
+    @Test("behavioral search results retain the fixture's fictional status")
+    func behavioralSearchRetainsFictionalStatus() throws {
+        let notes = try String(
+            contentsOf: Self.liveTests.appendingPathComponent("Fixtures/prep-notes.md"), encoding: .utf8)
+        let index = PrepMaterialIndex(chunks: PrepMaterialChunker.chunk(
+            text: notes, sourceDisplayName: "prep-notes.md"))
+        for (query, section) in [
+            ("disagreed with a teammate conflict story", "Disagreement with a teammate"),
+            ("pushed back on manager decision story", "Pushing back on my manager"),
+        ] {
+            let story = try #require(index.search(query: query).first { $0.text.contains(section) })
+            #expect(story.text.localizedCaseInsensitiveContains("fictional practice"))
+            #expect(story.text.contains("not the candidate's personal history"))
+        }
+    }
+
     @Test("scenario A's technical preparation includes its cache follow-up")
     func searchDesignPreparationIncludesInvalidation() throws {
         let notes = try String(

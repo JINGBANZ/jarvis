@@ -319,6 +319,8 @@ struct LiveE2ETests {
         results.note("C02", a2Summary)
         results.note("G05", a2Summary)
         results.note("C03", "A3 loaded \(loads(a3))")
+        results.note("C03", "A3 content review: \(tip(a3)?.message ?? "no tip")")
+        results.note("C08", "A4 content review: \(tip(a4)?.message ?? "no tip")")
 
         let committed = evidence.committedLoads.map(\.name)
         results.check("C04", [

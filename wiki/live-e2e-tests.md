@@ -173,8 +173,9 @@ run on Codex by default or on the selected single provider. With `--provider sce
 happen inside a scenario, applied the way a Settings edit applies them. Steps live in
 `Tests/JarvisLiveTests/Scenarios/`; fixtures in `Tests/JarvisLiveTests/Fixtures/` are the coding
 screenshot `coding-problem.jpg`, the runtime-rendered `weighted-route.txt`, and fictional
-`prep-notes.md`, including a short search-design
-section with cache invalidation. Each story is one section with no sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
+`prep-notes.md`, including a short search-design section with cache invalidation. Each story carries
+its fictional-practice label in the same section, so retrieval exposes the source status used by the
+content review. Each story is one section with no sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
 again. The manager story stays out of everything a teammate query returns, so the first behavioral
 search never already answers the second. Both behavioral questions precede the design search,
 which can also return a behavioral story on shared vocabulary, so C08 tests a new lookup rather
