@@ -3,7 +3,7 @@ import JarvisCore
 
 @MainActor
 final class ReferenceHelperSupervisor {
-    enum Failure: Error { case unavailable, timeout, protocolFailure }
+    enum Failure: Error, Equatable { case unavailable, timeout, protocolFailure }
     private let bundle: URL
     private let home: URL
     #if JARVIS_LIVE_E2E
@@ -13,6 +13,8 @@ final class ReferenceHelperSupervisor {
     private var process: Process?
     private(set) var handshake: Data?
     var processIdentifier: Int32? { process?.processIdentifier }
+    var isRunning: Bool { process?.isRunning == true }
+    var connectionID: UUID { generation }
     private var input: FileHandle?
     private var decoder = ReferenceFrame()
     private var ledger = ReferenceRequestState()

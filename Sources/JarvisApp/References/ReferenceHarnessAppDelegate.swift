@@ -4,11 +4,11 @@ import JarvisCore
 
 @MainActor
 final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
-    private let output: URL
-    private let bundle: URL
+    let output: URL
+    let bundle: URL
     private var task: Task<Void, Never>?
-    private var supervisor: ReferenceHelperSupervisor?
-    private var results: [[String: Any]] = []
+    var supervisor: ReferenceHelperSupervisor?
+    var results: [[String: Any]] = []
     private var terminating = false
 
     init(arguments: [String] = CommandLine.arguments) throws {
@@ -58,8 +58,8 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
 
     private struct HelperIdentity: Decodable { let pid: Int32 }
 
-    private func json(_ value: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: value) }
-    private func require(_ condition: Bool, _ name: String) throws {
+    func json(_ value: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: value) }
+    func require(_ condition: Bool, _ name: String) throws {
         guard condition else { throw NSError(domain: "ReferenceHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: name]) }
     }
 
@@ -94,48 +94,9 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         let rss = String(decoding: metricOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         metrics.waitUntilExit()
         try require(metrics.terminationStatus == 0 && Int(rss) != nil, "idle RSS measurement")
-        let session = UUID(), document = UUID()
-        _ = try await real.request("configure", session: session, payload: json(["root": fixture.path, "documents": [["document_id": document.uuidString, "name": "sample.txt"]]]))
-        let read = try await real.request("read", session: session, payload: json(["document_id": document.uuidString, "offset": 0]))
-        try require(String(decoding: read, as: UTF8.self).contains("Uniquequasar"), "bounded TXT read")
-        let searchStart = clock.now
-        let search = try await real.request("search", session: session, payload: json(["query": "uniquequasar"]))
-        let firstSearch = searchStart.duration(to: clock.now)
-        try require(String(decoding: search, as: UTF8.self).contains(document.uuidString.lowercased()), "real SQLite FTS5 hit")
-        let hello = try await real.request("hello")
-        guard let values = try JSONSerialization.jsonObject(with: hello) as? [String: Any],
-              let identity = try? JSONDecoder().decode(HelperIdentity.self, from: hello), identity.pid > 0 else {
-            throw NSError(domain: "ReferenceHarness", code: 1, userInfo: [NSLocalizedDescriptionKey: "invalid helper PID"])
-        }
-        let pid = identity.pid
-        try require(values["engine"] as? String == "sqlite-fts5" && values["secret_present"] as? Bool == false,
-                    "native SQLite helper and credential environment removed")
-        let warmSearchStart = clock.now
-        _ = try await real.request("search", session: session, payload: json(["query": "uniquequasar"]))
-        let warmSearch = warmSearchStart.duration(to: clock.now)
-        results.append(["case": "real-read-search", "startup": String(describing: startup), "idle_rss_kib": Int(rss)!,
-                        "first_search": String(describing: firstSearch), "warm_search": String(describing: warmSearch), "pid": pid])
+        try await runAccessChecks(real: real, fixture: fixture, store: store,
+                                  startup: startup, idleRSS: Int(rss)!)
         try require(!FileManager.default.fileExists(atPath: sentinel.path), "bundle-only executable")
-        await real.stop()
-        try require(kill(pid, 0) != 0 && errno == ESRCH, "real helper reaped")
-        let persisted = Process()
-        persisted.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        persisted.arguments = [store.appendingPathComponent("control.sqlite").path,
-                               "SELECT document_id FROM chunks WHERE chunks MATCH 'uniquequasar';"]
-        let persistedOutput = Pipe()
-        persisted.standardOutput = persistedOutput
-        persisted.standardError = FileHandle.nullDevice
-        try persisted.run()
-        let persistedIDs = String(decoding: persistedOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        persisted.waitUntilExit()
-        try require(persisted.terminationStatus == 0 && persistedIDs.trimmingCharacters(in: .whitespacesAndNewlines) == document.uuidString.lowercased(),
-                    "persisted FTS index queried without source refresh")
-        try await real.start()
-        _ = try await real.request("configure", session: session, payload: json(["root": fixture.path, "documents": [["document_id": document.uuidString, "name": "sample.txt"]]]))
-        let reopened = try await real.request("search", session: session, payload: json(["query": "uniquequasar"]))
-        try require(String(decoding: reopened, as: UTF8.self).contains(document.uuidString.lowercased()), "SQLite FTS search after reopen")
-        await real.stop()
-        results.append(["case": "same-supervisor-restart"])
         supervisor = nil
 
         for fault in ["startup-hang", "startup-malformed", "startup-partial", "startup-exit", "exit", "duplicate", "out-of-order", "cancel", "blocked-stdin", "blocked-output"] {

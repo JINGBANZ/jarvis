@@ -1,202 +1,185 @@
 import Foundation
+import CryptoKit
+import JarvisCore
 import SQLite3
 
 actor ReferenceDocumentStore {
-    private enum Failure: Error { case unavailable }
-    private struct Source { let url: URL; let root: URL }
-    private struct Payload: Decodable {
-        struct Document: Decodable { let document_id: UUID; let name: String }
-        let root: String?
-        let documents: [Document]?
+    struct Payload: Decodable {
+        let app_instance_id: UUID?
+        let generation: Int?
+        let enabled: Bool?
+        let sources: [ReferenceDiscovery.Source]?
+        let start_id: UUID?
         let document_id: UUID?
+        let document_ids: [UUID]?
         let offset: Int?
+        let cursor: Int?
         let query: String?
+        let revision_id: String?
+        let owned_session_ids: [UUID]?
     }
-    private var database: OpaquePointer?
+    struct Preparation {
+        let token: UUID
+        let task: Task<Void, Never>
+        var background: Bool
+        var waiters: [UUID: CheckedContinuation<String, Error>]
+        let sourceState: String
+    }
+    let db: ReferenceDatabase
+    let home: URL
+    let databasePath: String
+    let staging: URL
+    let converters: ReferenceConversionPool
     private let lock: Int32
-    private var sources: [UUID: Source] = [:]
-    private var session: UUID?
-    private static let maximumSource = 1_048_576
-    private static let maximumPage = 16_000
+    var instance: UUID?
+    var configurationTask: Task<Void, Never>?
+    var configurationToken = UUID()
+    var backgroundTask: Task<Void, Never>?
+    var jobs: [String: Preparation] = [:]
+    var reservations: Set<UUID> = []
+    var closed = false
+    var waiterSessions: [UUID: String] = [:]
+    var waiterTimers: [UUID: Task<Void, Never>] = [:]
+    var revisionCaptures: [String: (CapturedReference, URL, URL)] = [:]
+    var peakDiskBytes: Int64 = 0
+    var pageReaders = 0
+    static let reservationBytes: Int64 = 450 * 1024 * 1024
+    static let cacheTarget: Int64 = 1024 * 1024 * 1024
 
     init(home: URL) throws {
         let files = FileManager.default
-        guard home.resolvingSymlinksInPath().pathComponents == home.standardizedFileURL.pathComponents else { throw Failure.unavailable }
+        var homeInfo = stat()
+        if lstat(home.path, &homeInfo) == 0, homeInfo.st_mode & S_IFMT != S_IFDIR { throw ReferenceStoreError.unavailable }
+        let home = home.resolvingSymlinksInPath().standardizedFileURL
         try files.createDirectory(at: home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: home.path)
-        lock = open(home.appendingPathComponent("owner.lock").path, O_RDWR | O_CREAT | O_NOFOLLOW, 0o600)
-        guard lock >= 0 else { throw Failure.unavailable }
-        guard fchmod(lock, 0o600) == 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else {
-            Darwin.close(lock)
-            throw Failure.unavailable
+        lock = open(home.appendingPathComponent("owner.lock").path, O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0o600)
+        guard lock >= 0 else { throw ReferenceStoreError.unavailable }
+        var info = stat()
+        guard fstat(lock, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              fchmod(lock, 0o600) == 0, flock(lock, LOCK_EX | LOCK_NB) == 0 else {
+            Darwin.close(lock); throw ReferenceStoreError.unavailable
         }
         do {
-            let staging = home.appendingPathComponent("staging")
-            guard staging.resolvingSymlinksInPath().pathComponents == staging.standardizedFileURL.pathComponents else { throw Failure.unavailable }
+            self.home = home
+            staging = home.appendingPathComponent("staging", isDirectory: true)
+            var stagingInfo = stat()
+            if lstat(staging.path, &stagingInfo) == 0, stagingInfo.st_mode & S_IFMT != S_IFDIR { throw ReferenceStoreError.unavailable }
             try files.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try files.setAttributes([.posixPermissions: 0o700], ofItemAtPath: staging.path)
-            let path = home.appendingPathComponent("control.sqlite").path
-            let file = open(path, O_RDWR | O_CREAT | O_NOFOLLOW | O_NONBLOCK, 0o600)
-            guard file >= 0 else { throw Failure.unavailable }
-            var info = stat()
-            let valid = fstat(file, &info) == 0 && info.st_mode & S_IFMT == S_IFREG && fchmod(file, 0o600) == 0
-            Darwin.close(file)
-            guard valid else { throw Failure.unavailable }
-            var opened: OpaquePointer?
-            let code = sqlite3_open_v2(path, &opened, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil)
-            guard code == SQLITE_OK else {
-                sqlite3_close(opened)
-                throw Failure.unavailable
+            for item in try files.contentsOfDirectory(at: staging, includingPropertiesForKeys: nil) { try files.removeItem(at: item) }
+            databasePath = home.appendingPathComponent("documents.sqlite").path
+            for suffix in ["", "-wal", "-shm"] {
+                let path = databasePath + suffix
+                var attributes = stat()
+                if lstat(path, &attributes) == 0, attributes.st_mode & S_IFMT != S_IFREG { throw ReferenceStoreError.unavailable }
             }
-            database = opened
-            // DELETE journals stay in the private store; temp work stays in memory.
-            let sql = """
-                PRAGMA journal_mode=DELETE;
+            let file = open(databasePath, O_RDWR | O_CREAT | O_NOFOLLOW, 0o600)
+            guard file >= 0 else { throw ReferenceStoreError.unavailable }
+            guard fchmod(file, 0o600) == 0 else { Darwin.close(file); throw ReferenceStoreError.unavailable }
+            Darwin.close(file)
+            db = try ReferenceDatabase(path: databasePath)
+            try db.script("""
+                PRAGMA journal_mode=WAL;
                 PRAGMA synchronous=FULL;
                 PRAGMA temp_store=MEMORY;
-                CREATE TABLE IF NOT EXISTS store_version(version INTEGER NOT NULL);
-                INSERT INTO store_version SELECT 1 WHERE NOT EXISTS(SELECT 1 FROM store_version);
-                CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(document_id UNINDEXED, text, tokenize='unicode61 remove_diacritics 0');
-                """
-            guard sqlite3_exec(opened, sql, nil, nil, nil) == SQLITE_OK else {
-                sqlite3_close(opened)
-                database = nil
-                throw Failure.unavailable
-            }
-        } catch {
-            Darwin.close(lock)
-            throw error
-        }
+                PRAGMA auto_vacuum=INCREMENTAL;
+                PRAGMA wal_autocheckpoint=256;
+                CREATE TABLE IF NOT EXISTS owner(id INTEGER PRIMARY KEY CHECK(id=1),app TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS configuration(id INTEGER PRIMARY KEY CHECK(id=1),app TEXT,generation INTEGER,enabled INTEGER,state TEXT,error TEXT,total_count INTEGER,sources TEXT);
+                CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY,path TEXT NOT NULL,identity TEXT NOT NULL,present INTEGER NOT NULL,current_revision TEXT);
+                CREATE INDEX IF NOT EXISTS documents_path ON documents(path);
+                CREATE INDEX IF NOT EXISTS documents_identity ON documents(identity);
+                CREATE TABLE IF NOT EXISTS metadata(generation INTEGER,document_id TEXT,name TEXT,format TEXT,path TEXT,root TEXT,identity TEXT,PRIMARY KEY(generation,document_id));
+                CREATE TABLE IF NOT EXISTS source_members(generation INTEGER,source_id TEXT,document_id TEXT,PRIMARY KEY(generation,source_id,document_id));
+                CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,document_id TEXT NOT NULL,source_hash TEXT NOT NULL,processor TEXT NOT NULL,scalar_count INTEGER NOT NULL,text_hash TEXT NOT NULL,ready INTEGER NOT NULL,search_ready INTEGER NOT NULL DEFAULT 0,last_used INTEGER NOT NULL);
+                CREATE TABLE IF NOT EXISTS content_parts(revision_id TEXT NOT NULL,part INTEGER NOT NULL,bytes BLOB NOT NULL,PRIMARY KEY(revision_id,part));
+                CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,app TEXT NOT NULL,start_id TEXT NOT NULL,generation INTEGER,state TEXT NOT NULL,catalog TEXT);
+                CREATE TABLE IF NOT EXISTS session_documents(session_id TEXT,document_id TEXT,name TEXT,format TEXT,path TEXT,root TEXT,identity TEXT,pin TEXT,PRIMARY KEY(session_id,document_id));
+                CREATE INDEX IF NOT EXISTS session_pins ON session_documents(pin);
+                CREATE TABLE IF NOT EXISTS abandoned(app TEXT,start_id TEXT,PRIMARY KEY(app,start_id));
+                CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(revision_id UNINDEXED,text,tokenize='unicode61 remove_diacritics 0');
+                DELETE FROM revisions WHERE ready=0;
+                DELETE FROM content_parts WHERE revision_id NOT IN (SELECT id FROM revisions);
+                UPDATE configuration SET state='failed',error='preparing' WHERE state='preparing';
+                """)
+            converters = ReferenceConversionPool(staging: staging)
+        } catch { Darwin.close(lock); throw error }
     }
 
-    func close() {
-        guard let database else { return }
-        sqlite3_close(database)
-        self.database = nil
+    func close() async {
+        guard !closed else { return }
+        closed = true
+        configurationTask?.cancel(); backgroundTask?.cancel()
+        let running = Array(jobs.values)
+        for job in running {
+            job.task.cancel()
+            for waiter in job.waiters.values { waiter.resume(throwing: CancellationError()) }
+        }
+        jobs.removeAll()
+        for timer in waiterTimers.values { timer.cancel() }
+        waiterTimers.removeAll(); waiterSessions.removeAll()
+        await converters.close()
+        for job in running { await job.task.value }
+        try? db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         Darwin.close(lock)
     }
 
-    func execute(_ request: ReferenceHelperRequest) throws -> Data {
-        try Task.checkCancellation()
-        let payload = try JSONDecoder().decode(Payload.self, from: request.payload)
-        if request.operation == "configure" {
-            guard let path = payload.root, let documents = payload.documents, documents.count <= 100,
-                  let session = request.session else { throw Failure.unavailable }
-            let root = URL(fileURLWithPath: path, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-            var directory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: root.path, isDirectory: &directory), directory.boolValue else {
-                throw Failure.unavailable
-            }
-            var configured: [UUID: Source] = [:]
-            for document in documents {
-                let url = root.appendingPathComponent(document.name)
-                let resolved = url.resolvingSymlinksInPath().standardizedFileURL
-                guard within(resolved, root), ["txt", "md"].contains(resolved.pathExtension.lowercased()),
-                      FileManager.default.fileExists(atPath: resolved.path) else { throw Failure.unavailable }
-                configured[document.document_id] = Source(url: url, root: root)
-            }
-            sources = configured
-            self.session = session
-            return try json(["documents": sources.count])
-        }
-        guard session != nil, session == request.session else { throw Failure.unavailable }
-        switch request.operation {
-        case "release":
-            sources.removeAll(); session = nil
-            return Data("{}".utf8)
-        case "read":
-            guard let id = payload.document_id else { throw Failure.unavailable }
-            let scalars = try read(id).unicodeScalars
-            let offset = payload.offset ?? 0
-            guard offset >= 0, offset <= scalars.count else { throw Failure.unavailable }
-            let text = String(String.UnicodeScalarView(scalars.dropFirst(offset).prefix(Self.maximumPage)))
-            return try json(["text": text, "next_offset": min(scalars.count, offset + Self.maximumPage), "total_scalars": scalars.count])
-        case "search":
-            guard let query = payload.query, !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  query.unicodeScalars.count <= 512 else { throw Failure.unavailable }
-            return try search(query)
-        default: throw Failure.unavailable
-        }
-    }
-
-    private func within(_ url: URL, _ root: URL) -> Bool {
-        url.pathComponents.starts(with: root.pathComponents) && url.pathComponents.count > root.pathComponents.count
-    }
-
-    private func read(_ id: UUID) throws -> String {
-        guard let source = sources[id] else { throw Failure.unavailable }
-        let resolved = source.url.resolvingSymlinksInPath().standardizedFileURL
-        guard within(resolved, source.root) else { throw Failure.unavailable }
-        let descriptor = open(resolved.path, O_RDONLY | O_NONBLOCK | O_NOFOLLOW)
-        guard descriptor >= 0 else { throw Failure.unavailable }
-        let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
-        defer { try? handle.close() }
-        var before = stat(), after = stat()
-        guard fstat(descriptor, &before) == 0, before.st_mode & S_IFMT == S_IFREG else { throw Failure.unavailable }
-        var raw = Data()
-        while raw.count <= Self.maximumSource {
-            try Task.checkCancellation()
-            let piece = try handle.read(upToCount: min(65_536, Self.maximumSource + 1 - raw.count)) ?? Data()
-            if piece.isEmpty { break }
-            raw.append(piece)
-        }
-        guard raw.count <= Self.maximumSource, fstat(descriptor, &after) == 0,
-              before.st_ino == after.st_ino, before.st_size == after.st_size,
-              before.st_mtimespec.tv_sec == after.st_mtimespec.tv_sec,
-              before.st_mtimespec.tv_nsec == after.st_mtimespec.tv_nsec,
-              let text = String(data: raw, encoding: .utf8) else { throw Failure.unavailable }
-        return text
-    }
-
-    private func search(_ query: String) throws -> Data {
-        try sql("BEGIN")
+    func execute(_ request: ReferenceHelperRequest) async throws -> Data {
         do {
-            try sql("DELETE FROM chunks")
-            for (id, _) in sources.sorted(by: { $0.key.uuidString < $1.key.uuidString }) {
-                try Task.checkCancellation()
-                let text = String(String.UnicodeScalarView(try read(id).unicodeScalars.prefix(Self.maximumPage)))
-                let insert = try prepare("INSERT INTO chunks(document_id,text) VALUES(?,?)")
-                defer { sqlite3_finalize(insert) }
-                try bind(id.uuidString.lowercased(), to: insert, at: 1)
-                try bind(text, to: insert, at: 2)
-                guard sqlite3_step(insert) == SQLITE_DONE else { throw Failure.unavailable }
-            }
-            try sql("COMMIT")
-        } catch {
-            try sql("ROLLBACK")
-            throw error
-        }
-        // Quote the literal input; phase 1 does not expose the FTS query language.
-        let literal = "\"" + query.replacingOccurrences(of: "\"", with: "\"\"") + "\""
-        let statement = try prepare("SELECT document_id,text FROM chunks WHERE chunks MATCH ? ORDER BY rank LIMIT 3")
-        defer { sqlite3_finalize(statement) }
-        try bind(literal, to: statement, at: 1)
-        var hits: [[String: String]] = []
-        while true {
             try Task.checkCancellation()
-            let code = sqlite3_step(statement)
-            if code == SQLITE_DONE { break }
-            guard code == SQLITE_ROW, let id = sqlite3_column_text(statement, 0), let text = sqlite3_column_text(statement, 1) else {
-                throw Failure.unavailable
+            guard !closed else { throw ReferenceStoreError.unavailable }
+            let payload = try JSONDecoder().decode(Payload.self, from: request.payload)
+            guard let app = payload.app_instance_id else { throw ReferenceStoreError.unknown_session }
+            try bindInstance(app)
+            switch request.operation {
+            case "configure": return try configure(payload)
+            case "metadata": return try metadataStatus(payload.generation)
+            case "admit": return try admit(request, payload)
+            case "list": return try list(request, payload)
+            case "read": return try await read(request, payload)
+            case "search": return try await search(request, payload)
+            case "release": return try release(request, payload)
+            case "abandon": return try abandon(payload)
+            case "reconcile": return try reconcile(payload)
+            case "diagnostics": return try json(["status": "ok", "disk_bytes": diskBytes(), "reserved_bytes": Int64(reservations.count) * Self.reservationBytes, "peak_disk_bytes": peakDiskBytes])
+            default: throw ReferenceStoreError.unavailable
             }
-            let bytes = UnsafeBufferPointer(start: text, count: Int(sqlite3_column_bytes(statement, 1)))
-            let excerpt = String(String.UnicodeScalarView(String(decoding: bytes, as: UTF8.self).unicodeScalars.prefix(2000)))
-            hits.append(["document_id": String(cString: id), "text": excerpt])
-        }
-        return try json(["hits": hits])
+        } catch is CancellationError { throw CancellationError() }
+        catch let error as ReferenceStoreError { return try json(["status": error.rawValue]) }
+        catch let error as ReferenceConversionError { return try json(["status": error.rawValue]) }
+        catch { return try json(["status": "unavailable"]) }
     }
 
-    private func json(_ object: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: object) }
-    private func sql(_ text: String) throws {
-        guard sqlite3_exec(database, text, nil, nil, nil) == SQLITE_OK else { throw Failure.unavailable }
+    func bindInstance(_ app: UUID) throws {
+        if let instance { guard instance == app else { throw ReferenceStoreError.unknown_session }; return }
+        let identifier = app.uuidString.lowercased()
+        try db.transaction {
+            try db.execute("UPDATE sessions SET state='ended' WHERE app<>?", [identifier])
+            try db.execute("DELETE FROM session_documents WHERE session_id IN (SELECT id FROM sessions WHERE state='ended')")
+            if try db.scalar("SELECT app FROM owner WHERE id=1") != identifier {
+                try db.execute("DELETE FROM metadata"); try db.execute("DELETE FROM source_members"); try db.execute("DELETE FROM configuration")
+            }
+            try db.execute("INSERT INTO owner VALUES(1,?) ON CONFLICT(id) DO UPDATE SET app=excluded.app", [identifier])
+        }
+        instance = app
+        try cleanup()
     }
-    private func prepare(_ text: String) throws -> OpaquePointer {
-        var statement: OpaquePointer?
-        guard sqlite3_prepare_v2(database, text, -1, &statement, nil) == SQLITE_OK, let statement else { throw Failure.unavailable }
-        return statement
+
+    func requireSession(_ request: ReferenceHelperRequest, _ payload: Payload) throws -> String {
+        guard let session = request.session?.uuidString.lowercased(), let app = payload.app_instance_id?.uuidString.lowercased(),
+              try db.scalar("SELECT state FROM sessions WHERE id=? AND app=?", [session, app]) == "active" else {
+            throw ReferenceStoreError.unknown_session
+        }
+        return session
     }
-    private func bind(_ value: String, to statement: OpaquePointer, at index: Int32) throws {
-        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
-        guard sqlite3_bind_text(statement, index, value, Int32(value.utf8.count), transient) == SQLITE_OK else { throw Failure.unavailable }
+    #if JARVIS_LIVE_E2E
+    func admitReplyDelay() -> Int {
+        guard let value = try? String(contentsOf: home.appendingPathComponent("admit-reply-delay-ms"), encoding: .utf8),
+              let delay = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)), (0...5000).contains(delay) else { return 0 }
+        return delay
     }
+    #endif
+    func json(_ object: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]) }
+    func hash(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
 }

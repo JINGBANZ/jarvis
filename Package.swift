@@ -18,6 +18,7 @@ let package = Package(
     platforms: [.macOS("14.2")],
     dependencies: [
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.9.6"),
+        .package(url: "https://github.com/weichsel/ZIPFoundation.git", exact: "0.9.20"),
     ],
     targets: [
         // `.copy`, not `.process`: SkillCatalog enumerates the `<name>/SKILL.md` folders.
@@ -54,7 +55,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "JarvisReferenceHelper",
-            dependencies: ["JarvisCore"],
+            dependencies: ["JarvisCore", .product(name: "ZIPFoundation", package: "ZIPFoundation")],
             swiftSettings: liveE2ESettings,
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),

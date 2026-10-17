@@ -90,37 +90,70 @@ appropriate [live e2e validation](./live-e2e-tests.md).
 
 Both bundle scripts copy the SwiftPM `JarvisReferenceHelper` executable through
 [`scripts/lib/reference-helper.sh`](../scripts/lib/reference-helper.sh) and sign it before the outer
-app. The helper links macOS's system SQLite with FTS5, adding no downloaded runtime, model,
-dictionary, or package-install step. Its dedicated target is the process boundary for document I/O
-and indexing; the shared framing and reply types remain Foundation-only in `JarvisCore`.
-The helper bundle directory contains only that executable, and release verification rejects builds
-containing the debug fault mode.
+app. It links system SQLite FTS5 and PDFKit; DOCX uses the exact pinned ZIPFoundation dependency
+with Foundation XML parsing. ZIPFoundation's privacy resource is copied beside the app's other
+resources, and its license is in `THIRD_PARTY_NOTICES.md`. No interpreter, model, dictionary,
+package installation, or runtime download is needed on the user's machine. The dedicated target is
+the process boundary; shared domain values and admission policy remain Foundation-only in Core.
 
-The References integration is exercised only by the explicit development harness,
-`./scripts/run-reference-tests.sh`, while normal coaching continues to use the existing prep-material
-implementation. The harness launches the signed app through Launch Services on the shared temporary
-test display. It drives the app-owned supervisor and framed stdio protocol with synthetic TXT files
-and real SQLite FTS queries, then injects process faults through a mode compiled only in debug builds.
-Results are owner-only files under the checkout's `.jarvis/reference-harness/` directory.
-It does not contact providers or require capture grants. Pure framing/reply/request-state tests and
-native helper process contracts also run under `./scripts/run-tests.sh`. The helper contracts use
-host Python only as a wire-test driver; Python is absent from the installed helper and app bundle.
+The explicit development harness, `./scripts/run-reference-tests.sh`, exercises this integration;
+normal coaching uses the existing prep-material implementation. It launches the signed app through
+Launch Services on the shared temporary test display and calls the same `ReferenceLibrary` and
+helper-backed `DocumentSession` adapter intended for production composition. Synthetic TXT, Markdown,
+PDF, and DOCX fixtures cover document access and admission; debug-only process faults cover transport
+and teardown. Results are owner-only files in the checkout's `.jarvis/reference-harness/` directory.
+It contacts no provider and needs no capture grants. The ordinary `./scripts/run-tests.sh` also runs
+Core contracts and native helper process/resource checks; host Python drives those checks and is
+absent from the installed app.
 
-The supervisor coalesces startup, uses a separate bounded hello deadline and per-request deadlines,
-fails pending calls on helper exit, and supports explicit restart without replaying requests.
-Its child receives an explicit environment allowlist without provider credentials or host import
-paths. This is environment hygiene, not OS-enforced filesystem or network confinement.
-Automatic recovery and session/pin reconciliation belong to the reliable document-access phase.
+`ReferenceLibrary` owns configuration generations and each pending or accepted session. It uses one
+absolute metadata-admission deadline, follows the latest generation without extending that deadline,
+and returns one admitted catalog/access handle or a typed omission reason. Disabled and empty
+configurations are silent. A failed or timed-out admission omits References for that session.
+Cancellation propagates and releases pending ownership. The caller explicitly accepts ownership
+only after its larger Start succeeds; abandoned admissions and uncertain release acknowledgments are
+reconciled against the library's owned session set after helper reconnection. Active handles retain
+access when future configuration is disabled or roots are removed.
 
-The helper owns a locked private SQLite store and a bounded TXT/Markdown read/basic search path.
-Search refreshes the fixture table from each authorized source's first bounded read page in one
-transaction, then ranks the persisted FTS5 rows. Offline contracts query that index from a fresh
-SQLite connection and exercise helper reopen and source refresh. This proves native packaging,
-persisted indexing, and transport; it does not establish final retrieval semantics or full-corpus
-performance. The stock `unicode61` tokenizer is checked with a basic ASCII fixture. Phase 3 owns
-multilingual and identifier tokenization with original-text offsets, excerpt correctness, and index
-version/rebuild policy. Metadata admission, immutable revisions/session pins, full-document ranked
-search, production context/tools, and Settings integration belong to the subsequent References phases.
+The supervisor coalesces startup and bounds hello, requests, cancellation, and shutdown. The library
+permits bounded helper recovery without replaying uncertain content calls; committed pins survive a
+helper restart for the same app instance. A fresh instance closes orphaned sessions after obtaining
+exclusive store ownership. The helper and reader workers receive a minimal environment without
+provider credentials, proxy variables, or loader overrides. This is process and environment hygiene;
+it is not OS-enforced filesystem or network confinement.
+
+The private SQLite store separates persistent document identity, complete metadata generations,
+immutable extracted revisions, and session membership/pins. Metadata discovery does not parse text.
+Catalog serialization is bounded while paginated listing retains every admitted member. Text is
+published in bounded transactions independently of search readiness. Source capture hashes the exact
+authorized snapshot passed to a reader, checks source changes, and reuses a validated revision when
+its hash and processor version match. A successful first content read commits a durable pin; later
+pages use that text after an edit, deletion, or helper restart. Unpinned access revalidates the source
+and cannot fall back to stale cached contents. Unicode-scalar pages are defined by the new read
+contract, independently of the existing prep tool's Character offsets.
+
+Reliable renames preserve the opaque document ID. An observed deletion and later re-addition creates
+a new ID. Without filesystem event history, a replacement at the same path between scans is treated
+as an update, whether caused by an editor's atomic save or an unobserved delete/recreate. Pinned
+sessions keep their original text; unpinned sessions use current content. Ambiguous cross-path
+identity matches never merge documents.
+
+TXT and Markdown decode directly on a bounded background lane. PDFKit and DOCX conversion run in
+killable workers with bounded concurrency, source/expanded-output sizes, wall time, and sampled RSS;
+the limits and processor version live in `ReferenceConversionPool`, `ReferenceSourceCapture`, and
+`ReferenceTextOutput`. DOCX preserves text traversal through paragraphs and interleaved tables; it
+does not reproduce Word layout. Image-only PDFs need OCR, which this reader does not implement.
+RSS sampling can overshoot its threshold and is not a hard OS memory limit. Workers exit when their
+owning helper disappears. Private staging is reclaimed after use or exclusive-owner restart.
+Disk accounting includes SQLite/WAL and staging; cleanup preserves active pins and reports capacity
+failure rather than deleting them. Logical deletion and checkpointing do not promise secure erasure.
+
+The basic FTS packaging check searches bounded first pages of already-pinned revisions and explicitly
+reports incomplete coverage. It shares the authoritative SQLite records and never reopens a source
+to replace a pin. Complete corpus indexing, multilingual/exact-identifier matching, useful excerpts,
+and search-first pin publication belong to the ranked-retrieval phase. Production context, tools,
+Settings, and Activity installation remain separate integration work; the development harness is not
+proof of that production behavior.
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature

@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/test-display.sh
-EXPECTED_CASES=14
+EXPECTED_CASES=25
 EXTRA_ARGS=()
 if [[ "${1:-}" == --quit-only ]]; then
   EXPECTED_CASES=1
@@ -24,6 +24,7 @@ POLLUTION="$RUN_DIR/pollution"
 mkdir -p "$POLLUTION/cwd"
 printf '#!/bin/sh\n: > "%s"\nexit 99\n' "$RUN_DIR/hostile-helper-executed" > "$POLLUTION/cwd/JarvisReferenceHelper"
 chmod 700 "$POLLUTION/cwd/JarvisReferenceHelper"
+python3 scripts/reference-helper/generate-fixtures.py "$RUN_DIR/formats"
 codesign --verify --deep --strict 'Jarvis Dev.app'
 cleanup() {
   python3 - "$RUN_DIR" "$PWD/Jarvis Dev.app" "$EXPECTED_CASES" <<'PY_CLEANUP'
