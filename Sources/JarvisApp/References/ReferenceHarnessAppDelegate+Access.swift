@@ -5,6 +5,8 @@ import JarvisCore
 extension ReferenceHarnessAppDelegate {
     func runAccessChecks(real: ReferenceHelperSupervisor, fixture: URL, store: URL,
                          startup: Duration, idleRSS: Int) async throws {
+        let gate = store.appendingPathComponent("index-before-publish")
+        try "hold".write(to: gate, atomically: true, encoding: .utf8)
         let library = ReferenceLibrary(supervisor: real)
         let source = ReferenceSource(id: UUID(), url: fixture)
         try await library.configure(enabled: true, sources: [source])
@@ -15,7 +17,17 @@ extension ReferenceHarnessAppDelegate {
         let read = try await admitted.session.read(documentID: document, offset: 0, revisionID: nil)
         try require(read.text.contains("Uniquequasar") && !read.searchReady, "read before own index readiness")
         let originalContext = admitted.context.serialized
-        let search = try await admitted.session.search(query: "uniquequasar", documentIDs: nil)
+        let partial = try await admitted.session.search(query: "uniquequasar", documentIDs: nil)
+        try require(!partial.complete && partial.hits.isEmpty && partial.coverage.searchedDocuments == 0, "staged index is ineligible while text remains readable")
+        try FileManager.default.removeItem(at: gate)
+        var search = try await admitted.session.search(query: "uniquequasar", documentIDs: nil)
+        let indexDeadline = ContinuousClock.now + .seconds(5)
+        while !search.complete, ContinuousClock.now < indexDeadline {
+            try await Task.sleep(for: .milliseconds(20))
+            search = try await admitted.session.search(query: "uniquequasar", documentIDs: nil)
+        }
+        try require(search.complete && search.coverage.searchedDocuments == 1, "complete typed search coverage")
+        results.append(["case": "read-independent-of-index"])
         try require(search.hits.contains(where: { $0.documentID == document }), "native FTS over authoritative revision")
         results.append(["case": "real-read-search", "startup": String(describing: startup), "idle_rss_kib": idleRSS])
 
@@ -23,7 +35,7 @@ extension ReferenceHarnessAppDelegate {
         try "2200".write(to: searchDelay, atomically: true, encoding: .utf8)
         let searchStarted = ContinuousClock.now
         let delayed = try await admitted.session.search(query: "uniquequasar", documentIDs: nil)
-        try require(!delayed.complete && delayed.hits.contains(where: { $0.documentID == document }), "partial search reply has transport headroom")
+        try require(delayed.complete && delayed.hits.contains(where: { $0.documentID == document }), "complete search reply has transport headroom")
         try require(searchStarted.duration(to: .now) >= .seconds(2.1) && searchStarted.duration(to: .now) < .seconds(3.5), "bounded search response")
         try FileManager.default.removeItem(at: searchDelay)
         results.append(["case": "search-response-headroom", "elapsed": String(describing: searchStarted.duration(to: .now))])
@@ -117,10 +129,11 @@ extension ReferenceHarnessAppDelegate {
         library.release(sessionID: recovered.sessionID)
         library.release(sessionID: beforeDisable.sessionID)
         library.release(sessionID: admitted.sessionID)
+        try await runRetrievalChecks(library: library, store: store)
         await real.stop()
     }
 
-    private func admission(_ library: ReferenceLibrary) async throws -> ReferenceAdmissionResult.Admitted {
+    func admission(_ library: ReferenceLibrary) async throws -> ReferenceAdmissionResult.Admitted {
         let start = UUID()
         guard case .admitted = try await library.admit(startID: start) else { throw ReferenceProtocolError.malformed }
         return try library.accept(startID: start)
@@ -131,7 +144,7 @@ extension ReferenceHarnessAppDelegate {
         try require((reason == .disabled || reason == .empty) == (reason.warning == nil), "omission warning policy")
     }
 
-    private func requireEntry(_ list: ReferenceListResult, name: String) throws -> UUID {
+    func requireEntry(_ list: ReferenceListResult, name: String) throws -> UUID {
         guard let entry = list.entries.first(where: { $0.name == name }) else { throw ReferenceProtocolError.malformed }
         return entry.documentID
     }

@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/test-display.sh
-EXPECTED_CASES=26
+EXPECTED_CASES=34
 EXTRA_ARGS=()
 if [[ "${1:-}" == --quit-only ]]; then
   EXPECTED_CASES=1
@@ -60,7 +60,7 @@ open -n -g --env "HOME=$POLLUTION" --env "PATH=$POLLUTION/cwd" --env "PYTHONPATH
   --env "OPENAI_API_KEY=synthetic-secret-canary" --env "GEMINI_API_KEY=synthetic-secret-canary" \
   --stdout "$RUN_DIR/stdout.log" --stderr "$RUN_DIR/stderr.log" \
   "$PWD/Jarvis Dev.app" --args --reference-harness --reference-harness-output "$RUN_DIR" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
-deadline=$((SECONDS + 100))
+deadline=$((SECONDS + 360))
 while [[ ! -f "$RUN_DIR/results.json" ]]; do
   if (( SECONDS >= deadline )); then
     echo "Reference harness timed out: $RUN_DIR" >&2

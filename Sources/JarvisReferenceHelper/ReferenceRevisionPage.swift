@@ -6,6 +6,29 @@ struct ReferenceRevisionPage: Sendable {
     let text: String
     let totalScalars: Int
 
+    static func fullText(databasePath: String, revision: String) throws -> String {
+        let database = try ReferenceDatabase(path: databasePath, readOnly: true)
+        try database.execute("BEGIN")
+        defer { try? database.execute("ROLLBACK") }
+        guard let expected = try database.scalar("SELECT text_hash FROM revisions WHERE id=? AND ready=1", [revision]) else { throw ReferenceStoreError.unavailable }
+        let query = try database.statement("SELECT bytes FROM content_parts WHERE revision_id=? ORDER BY part", [revision])
+        defer { sqlite3_finalize(query) }
+        var result = Data()
+        var digest = SHA256()
+        while true {
+            try Task.checkCancellation()
+            let code = sqlite3_step(query)
+            if code == SQLITE_DONE { break }
+            guard code == SQLITE_ROW, let pointer = sqlite3_column_blob(query, 0) else { throw ReferenceStoreError.unavailable }
+            let bytes = Data(bytes: pointer, count: Int(sqlite3_column_bytes(query, 0)))
+            guard result.count + bytes.count <= ReferenceTextOutput.maximumBytes else { throw ReferenceStoreError.limit_exceeded }
+            digest.update(data: bytes); result.append(bytes)
+        }
+        guard digest.finalize().map({ String(format: "%02x", $0) }).joined() == expected,
+              let text = String(data: result, encoding: .utf8) else { throw ReferenceStoreError.unavailable }
+        return text
+    }
+
     static func load(databasePath: String, revision: String, offset: Int) throws -> Self {
         let database = try ReferenceDatabase(path: databasePath, readOnly: true)
         try database.execute("BEGIN")

@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 import SQLite3
 
 final class ReferenceDatabase {
@@ -13,6 +14,12 @@ final class ReferenceDatabase {
             throw error
         }
         sqlite3_busy_timeout(handle, 250)
+        guard sqlite3_create_function_v2(handle, "reference_casefold", 1, SQLITE_UTF8 | SQLITE_DETERMINISTIC, nil, { context, _, values in
+            guard let value = values?[0], let bytes = sqlite3_value_text(value) else { sqlite3_result_null(context); return }
+            let text = String(decoding: UnsafeBufferPointer(start: bytes, count: Int(sqlite3_value_bytes(value))), as: UTF8.self)
+            let folded = ReferenceSearchTokenizer.folded(text)
+            sqlite3_result_text(context, folded, Int32(folded.utf8.count), unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+        }, nil, nil, nil) == SQLITE_OK else { throw failure() }
     }
     deinit { sqlite3_close(handle) }
 

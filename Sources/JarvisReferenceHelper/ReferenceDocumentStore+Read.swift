@@ -49,6 +49,6 @@ extension ReferenceDocumentStore {
         }
         return try json(["status": "ok", "document_id": document, "revision_id": revision, "name": name,
                          "text": page.text, "offset": offset, "next_offset": offset + page.text.unicodeScalars.count,
-                         "total_scalars": page.totalScalars, "search_ready": false])
+                         "total_scalars": page.totalScalars, "search_ready": try db.scalar("SELECT search_ready FROM revisions WHERE id=?", [revision]) == "1"])
     }
 }

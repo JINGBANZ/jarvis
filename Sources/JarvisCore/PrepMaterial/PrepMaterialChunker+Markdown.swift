@@ -41,11 +41,14 @@ extension PrepMaterialChunker {
     }
 
     static func isMarkdownHeading(_ paragraph: String) -> Bool {
-        guard let first = paragraph.components(separatedBy: "\n").first,
-              let line = markdownLine(first) else { return false }
-        let hashes = line.prefix(while: { $0 == "#" })
-        let rest = line.dropFirst(hashes.count)
-        return (1...6).contains(hashes.count) && (rest.isEmpty || rest.first?.isWhitespace == true)
+        isMarkdownHeading(paragraph[..<(paragraph.firstIndex(of: "\n") ?? paragraph.endIndex)])
+    }
+
+    static func isMarkdownHeading(_ source: Substring) -> Bool {
+        guard let line = markdownLine(source)?.unicodeScalars else { return false }
+        let hashes = line.prefix(while: { $0 == "#" }).count
+        return (1...6).contains(hashes)
+            && (line.dropFirst(hashes).first.map { CharacterSet.whitespacesAndNewlines.contains($0) } ?? true)
     }
 
     /// Nil unless an oversized table with leading and trailing pipes and a delimiter row; short
@@ -95,19 +98,25 @@ extension PrepMaterialChunker {
     }
 
     /// Four leading spaces or a tab mark indented code, so Markdown heuristics must not strip them.
-    private static func markdownLine(_ line: String) -> Substring? {
-        let spaces = line.prefix(while: { $0 == " " })
-        guard spaces.count <= 3 else { return nil }
-        let content = line.dropFirst(spaces.count)
-        guard content.first != "\t" else { return nil }
+    private static func markdownLine(_ line: String) -> Substring? { markdownLine(line[...]) }
+
+    private static func markdownLine(_ line: Substring) -> Substring? {
+        let spaces = line.unicodeScalars.prefix(4).prefix(while: { $0 == " " }).count
+        guard spaces <= 3 else { return nil }
+        let content = line[line.unicodeScalars.index(line.startIndex, offsetBy: spaces)...]
+        guard content.unicodeScalars.first != "\t" else { return nil }
         return content
     }
 
-    private static func fenceDelimiter(_ line: String) -> (marker: Character, count: Int, suffix: Substring)? {
-        guard let content = markdownLine(line), let marker = content.first,
+    static func fenceDelimiter(_ line: String) -> (marker: Character, count: Int, suffix: Substring)? {
+        fenceDelimiter(line[...])
+    }
+
+    static func fenceDelimiter(_ line: Substring) -> (marker: Character, count: Int, suffix: Substring)? {
+        guard let content = markdownLine(line), let marker = content.unicodeScalars.first,
               marker == "`" || marker == "~" else { return nil }
-        let count = content.prefix(while: { $0 == marker }).count
+        let count = content.unicodeScalars.prefix(while: { $0 == marker }).count
         guard count >= 3 else { return nil }
-        return (marker, count, content.dropFirst(count))
+        return (Character(String(marker)), count, content[content.unicodeScalars.index(content.startIndex, offsetBy: count)...])
     }
 }
