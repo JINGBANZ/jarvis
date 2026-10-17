@@ -37,6 +37,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisCore/Coach/`: the coaching loop, where `CoachDriver` schedules attempts and `CoachAttemptRunner` runs one, with route state, session memory, capabilities, and one file per coach tool ([architecture.md → Core Loop](./architecture.md#2-core-loop)).
 - `Sources/JarvisCore/Triggers/`: turn and silence triggers and silence backoff.
 - `Sources/JarvisCore/PrepMaterial/` + `Sources/JarvisApp/PrepMaterial/`: prep-material chunking, indexing, and search behind `search_prep_notes` ([architecture.md → Capabilities](./architecture.md#capabilities)).
+- `Sources/JarvisCore/References/` + `Sources/JarvisApp/References/` + `Sources/JarvisReferenceHelper/` + `scripts/reference-helper/`: packaged native SQLite References helper, protocol, and signed synthetic integration harness; production coaching remains on prep-material access ([build-and-run.md](./build-and-run.md#references-helper-packaging-and-integration-checks)).
 - `Sources/JarvisCore/Screen/`: the model-facing screen port, front-window selection, and OCR layout.
 - `Sources/JarvisScreenCapture/`: the OS-bound screen-capture adapter, combining the `screencapture` helper, browser Accessibility text, and OCR ([settings-window.md → Capture Scope](./settings-window.md#capture-scope)).
 - `Sources/JarvisCore/Overlay/`: the overlay output port, with its text model, code snippets, and diagram hints ([architecture.md → The detail box](./architecture.md#the-detail-box)).

@@ -86,6 +86,42 @@ startup and Codex/Claude no-browser OAuth initiation, without opening a browser 
 CI and the release workflow run this check. Provider inference and token refresh still need the
 appropriate [live e2e validation](./live-e2e-tests.md).
 
+### References helper packaging and integration checks
+
+Both bundle scripts copy the SwiftPM `JarvisReferenceHelper` executable through
+[`scripts/lib/reference-helper.sh`](../scripts/lib/reference-helper.sh) and sign it before the outer
+app. The helper links macOS's system SQLite with FTS5, adding no downloaded runtime, model,
+dictionary, or package-install step. Its dedicated target is the process boundary for document I/O
+and indexing; the shared framing and reply types remain Foundation-only in `JarvisCore`.
+The helper bundle directory contains only that executable, and release verification rejects builds
+containing the debug fault mode.
+
+The References integration is exercised only by the explicit development harness,
+`./scripts/run-reference-tests.sh`, while normal coaching continues to use the existing prep-material
+implementation. The harness launches the signed app through Launch Services on the shared temporary
+test display. It drives the app-owned supervisor and framed stdio protocol with synthetic TXT files
+and real SQLite FTS queries, then injects process faults through a mode compiled only in debug builds.
+Results are owner-only files under the checkout's `.jarvis/reference-harness/` directory.
+It does not contact providers or require capture grants. Pure framing/reply/request-state tests and
+native helper process contracts also run under `./scripts/run-tests.sh`. The helper contracts use
+host Python only as a wire-test driver; Python is absent from the installed helper and app bundle.
+
+The supervisor coalesces startup, uses a separate bounded hello deadline and per-request deadlines,
+fails pending calls on helper exit, and supports explicit restart without replaying requests.
+Its child receives an explicit environment allowlist without provider credentials or host import
+paths. This is environment hygiene, not OS-enforced filesystem or network confinement.
+Automatic recovery and session/pin reconciliation belong to the reliable document-access phase.
+
+The helper owns a locked private SQLite store and a bounded TXT/Markdown read/basic search path.
+Search refreshes the fixture table from each authorized source's first bounded read page in one
+transaction, then ranks the persisted FTS5 rows. Offline contracts query that index from a fresh
+SQLite connection and exercise helper reopen and source refresh. This proves native packaging,
+persisted indexing, and transport; it does not establish final retrieval semantics or full-corpus
+performance. The stock `unicode61` tokenizer is checked with a basic ASCII fixture. Phase 3 owns
+multilingual and identifier tokenization with original-text offsets, excerpt correctness, and index
+version/rebuild policy. Metadata admission, immutable revisions/session pins, full-document ranked
+search, production context/tools, and Settings integration belong to the subsequent References phases.
+
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature
 changes every build, so macOS
@@ -130,7 +166,7 @@ Gatekeeper blocks the app. Distributable builds go through `scripts/package-app.
 signs the bundle once with a **Developer ID Application** certificate — hardened runtime + secure
 timestamp (both notarization requirements) — with the `audio-input` entitlement that hardened runtime
 requires for microphone capture. Nested code is sealed inner to outer, Sparkle's pieces and then the
-subscription helper under the same hardened runtime and timestamp before the app, because
+subscription helper and native References helper under the same hardened runtime and timestamp before the app, because
 notarization rejects any executable in the bundle that lacks them. It submits a temporary zip of that app to Apple's notary service,
 staples and validates the app's ticket, then uses the hash-pinned release-only `dmgbuild` tool to
 place the stapled app beside an `Applications` shortcut in `Jarvis.dmg`. The mounted Finder window is
@@ -149,7 +185,7 @@ ticket, mounts it read-only, and requires exactly the two visible install target
 Finder metadata and arrow background. `scripts/verify-dmg-layout.py` reads the final `.DS_Store` and
 checks the icon view, window size, chrome, icon size and positions, background link and digest, and
 Applications target position. Release verification also checks the Applications target, mounted app
-version, arm64 architecture, the arm64 subscription helper and its license, linked macOS 26-or-newer
+version, arm64 architecture, the arm64 subscription helper and its license, native References helper with debug fault mode excluded, linked macOS 26-or-newer
 SDK, notices, strict code signature, and
 Gatekeeper policy result before detaching the image. The same SDK guard runs immediately after the
 release build, before signing or notarization; the pre-container app is not accepted as a proxy for
@@ -200,7 +236,7 @@ XCFramework, so no `.xcodeproj` is needed to consume it. SwiftPM leaves `Sparkle
 executable and both bundle scripts embed it at `Contents/Frameworks`, which is what the `JarvisApp`
 target's rpath names. Sparkle's XPC services exist only to install updates from inside an App Sandbox;
 Jarvis is not sandboxed (see [sandbox.md](./sandbox.md)), so they are deleted at embed time rather
-than notarized as unreachable code. The framework brings the bundle's only nested code, so
+than notarized as unreachable code. The framework and bundled helpers contain nested code, so
 `package-app.sh` seals it inside-out — the update helpers, the framework, then the app — and release
 verification requires every nested signature to hold in the mounted artifact.
 

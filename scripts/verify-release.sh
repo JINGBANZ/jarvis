@@ -120,6 +120,24 @@ if [[ ! -f "$EXTRACTED_HELPER" || -L "$EXTRACTED_HELPER" || ! -x "$EXTRACTED_HEL
   exit 1
 fi
 
+EXTRACTED_REFERENCES="$EXTRACTED_APP/Contents/Resources/ReferenceHelper"
+if [[ -L "$EXTRACTED_REFERENCES" || -L "$EXTRACTED_REFERENCES/JarvisReferenceHelper" \
+      || ! -f "$EXTRACTED_REFERENCES/JarvisReferenceHelper" || ! -x "$EXTRACTED_REFERENCES/JarvisReferenceHelper" \
+      || "$(lipo -archs "$EXTRACTED_REFERENCES/JarvisReferenceHelper")" != arm64 \
+      || "$(find "$EXTRACTED_REFERENCES" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" != 1 ]]; then
+  echo "error: disk-image app must contain only the native arm64 References helper" >&2
+  exit 1
+fi
+if "$EXTRACTED_REFERENCES/JarvisReferenceHelper" /dev/null --test-fault >/dev/null 2>&1; then
+  reference_status=0
+else
+  reference_status=$?
+fi
+if [[ "$reference_status" != 64 ]]; then
+  echo "error: release References helper contains the debug fault mode" >&2
+  exit 1
+fi
+
 # --deep is fine for verifying (only signing avoids it): every nested signature must hold.
 codesign --verify --strict --deep --verbose=2 "$EXTRACTED_APP"
 # syspolicy_check runs the modern distribution checks; spctl stays as the direct Gatekeeper assertion.

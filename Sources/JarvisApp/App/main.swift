@@ -35,9 +35,24 @@ private func capturePrivacyDelegate() -> (any NSApplicationDelegate)? {
     #endif
 }
 
+@MainActor
+private func referenceHarnessDelegate() -> (any NSApplicationDelegate)? {
+    #if JARVIS_LIVE_E2E
+    guard CommandLine.arguments.contains("--reference-harness") else { return nil }
+    do { return try ReferenceHarnessAppDelegate() } catch {
+        fputs("Reference harness: invalid development invocation\n", stderr)
+        exit(2)
+    }
+    #else
+    return nil
+    #endif
+}
+
 let app = NSApplication.shared
 let delegate: any NSApplicationDelegate
-if let capturePrivacy = capturePrivacyDelegate() {
+if let references = referenceHarnessDelegate() {
+    delegate = references
+} else if let capturePrivacy = capturePrivacyDelegate() {
     delegate = capturePrivacy
 } else if let liveE2E = liveE2EDelegate() {
     delegate = liveE2E

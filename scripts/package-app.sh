@@ -87,6 +87,8 @@ ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisCore.bundle" \
 rm -rf "$SPARKLE/Versions/Current/XPCServices" "$SPARKLE/XPCServices"
 source scripts/lib/cliproxyapi.sh
 bundle_cliproxyapi "$APP"
+source scripts/lib/reference-helper.sh
+bundle_reference_helper "$APP" release
 
 echo "▶ signing (hardened runtime + timestamp)"
 # Sign inner code before outer. Not --deep: Apple calls it unsuitable for distribution because it
@@ -96,6 +98,7 @@ for nested in Versions/Current/Autoupdate Versions/Current/Updater.app; do
 done
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE"
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/cliproxyapi"
+sign_reference_helper "$APP" "$IDENTITY" --options runtime --timestamp
 codesign --force --options runtime --timestamp \
   --entitlements Resources/Jarvis.entitlements \
   --sign "$IDENTITY" "$APP"
