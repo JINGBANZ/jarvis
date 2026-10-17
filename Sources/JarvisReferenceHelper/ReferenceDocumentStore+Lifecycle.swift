@@ -56,16 +56,20 @@ extension ReferenceDocumentStore {
         return bytes
     }
     func cleanup(pressure: Bool = false) throws {
-        try db.execute("UPDATE documents SET current_revision=NULL WHERE present=0 AND id NOT IN (SELECT document_id FROM session_documents)")
-        try db.execute("DELETE FROM revisions WHERE ready=1 AND id NOT IN (SELECT pin FROM session_documents WHERE pin IS NOT NULL) AND id NOT IN (SELECT current_revision FROM documents WHERE current_revision IS NOT NULL)")
-        if pressure {
-            try db.transaction {
+        try db.transaction {
+            try db.execute("UPDATE documents SET current_revision=NULL WHERE present=0 AND id NOT IN (SELECT document_id FROM session_documents)")
+            try db.execute("DELETE FROM revisions WHERE ready=1 AND id NOT IN (SELECT pin FROM session_documents WHERE pin IS NOT NULL) AND id NOT IN (SELECT current_revision FROM documents WHERE current_revision IS NOT NULL)")
+            if pressure {
                 try db.execute("UPDATE documents SET current_revision=NULL WHERE current_revision NOT IN (SELECT pin FROM session_documents WHERE pin IS NOT NULL)")
                 try db.execute("DELETE FROM revisions WHERE ready=1 AND id NOT IN (SELECT pin FROM session_documents WHERE pin IS NOT NULL)")
             }
+            try db.execute("DELETE FROM content_parts WHERE revision_id NOT IN (SELECT id FROM revisions)")
+            try db.execute("DELETE FROM chunks WHERE revision_id NOT IN (SELECT id FROM revisions)")
+            try db.execute("DELETE FROM passages WHERE revision_id NOT IN (SELECT id FROM revisions) OR NOT EXISTS(SELECT 1 FROM search_state s WHERE s.revision_id=passages.revision_id AND s.generation=passages.generation)")
+            try db.execute("DELETE FROM chunks WHERE rowid NOT IN (SELECT id FROM passages)")
+            try db.execute("DELETE FROM search_state WHERE revision_id NOT IN (SELECT id FROM revisions)")
+            try db.execute("DELETE FROM revision_sources WHERE revision_id NOT IN (SELECT id FROM revisions)")
         }
-        try db.execute("DELETE FROM content_parts WHERE revision_id NOT IN (SELECT id FROM revisions)")
-        try db.execute("DELETE FROM chunks WHERE revision_id NOT IN (SELECT id FROM revisions)")
         let retained = Set(try db.rows("SELECT id FROM revisions").compactMap { $0[0] })
         revisionCaptures = revisionCaptures.filter { retained.contains($0.key) }
         try db.execute("PRAGMA wal_checkpoint(PASSIVE)")

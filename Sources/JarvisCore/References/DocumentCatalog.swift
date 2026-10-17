@@ -12,6 +12,13 @@ public struct DocumentCatalog: Codable, Equatable, Sendable {
             self.format = format
         }
 
+        public func encode(to encoder: any Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(documentID.uuidString.lowercased(), forKey: .documentID)
+            try container.encode(name, forKey: .name)
+            try container.encode(format, forKey: .format)
+        }
+
         enum CodingKeys: String, CodingKey {
             case documentID = "document_id", name, format
         }

@@ -103,7 +103,7 @@ extension PrepMaterialChunker {
         return content
     }
 
-    private static func fenceDelimiter(_ line: String) -> (marker: Character, count: Int, suffix: Substring)? {
+    static func fenceDelimiter(_ line: String) -> (marker: Character, count: Int, suffix: Substring)? {
         guard let content = markdownLine(line), let marker = content.first,
               marker == "`" || marker == "~" else { return nil }
         let count = content.prefix(while: { $0 == marker }).count

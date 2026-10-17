@@ -30,7 +30,8 @@ files available to the signed-in user.
 
 The native References helper is exercised through the explicit development harness described in
 [build-and-run.md](./build-and-run.md#references-helper-packaging-and-integration-checks). Its synthetic
-reference store contains metadata, extracted text, and durable session pins in owner-only SQLite and
+reference store contains metadata, extracted text, derived passage/search postings, and durable
+session pins in owner-only SQLite and
 private staging under that harness's workspace directory. It stores no captured audio, transcript,
 screenshot, or browser evidence and has no provider client. Normal coaching does not use this
 persistent reference store. Source containment, bounded parsing, and environment filtering are

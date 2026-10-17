@@ -102,10 +102,12 @@ extension ReferenceDocumentStore {
             try Task.checkCancellation()
             guard !closed, jobs[document]?.token == token else { throw CancellationError() }
             try db.transaction {
+                try db.execute("INSERT INTO revision_sources VALUES(?,?) ON CONFLICT(revision_id) DO UPDATE SET source_state=excluded.source_state", [identifier, captured.sourceState])
                 try db.execute("UPDATE revisions SET ready=1,last_used=strftime('%s','now') WHERE id=?", [identifier])
                 try db.execute("UPDATE documents SET current_revision=?,identity=? WHERE id=? AND path=? AND present=1", [identifier, captured.sourceIdentity, document, source.url.path])
             }
             revisionCaptures[identifier] = (captured, source.url, source.root)
+            try enqueueIndex(identifier)
             result = .success(identifier)
         } catch {
             if let revision {

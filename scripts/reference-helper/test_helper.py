@@ -141,7 +141,7 @@ class HelperContracts(unittest.TestCase):
         first = self.read(key)
         self.assertEqual(first["status"], "ok")
         self.assertEqual(len(first["text"]), 16000)
-        self.assertFalse(first["search_ready"])
+        self.assertIsInstance(first["search_ready"], bool)
         second = self.read(key, first["next_offset"])
         self.assertEqual(first["text"] + second["text"], text)
         self.assertEqual(second["total_scalars"], len(text))
@@ -356,14 +356,22 @@ class HelperContracts(unittest.TestCase):
     def test_concurrent_first_search_indexes_each_revision_once(self):
         key = self.prepare("Uniquequasar " + "x" * 2_000_000)
         self.assertEqual(self.read(key)["status"], "ok")
+        deadline = time.monotonic() + 15
+        while True:
+            result = self.result("search", {"query": "uniquequasar"})
+            if result["complete"]:
+                break
+            self.assertLess(time.monotonic(), deadline, result)
+            time.sleep(.02)
         first = self.send("search", {"query": "uniquequasar"})
         second = self.send("search", {"query": "uniquequasar"})
         replies = {reply["id"]: reply for reply in [self.receive(), self.receive()]}
         for request in [first, second]:
-            self.assertEqual(replies[request]["result"]["status"], "partial")
+            self.assertEqual(replies[request]["result"]["status"], "ok")
             self.assertEqual(len(replies[request]["result"]["hits"]), 1)
         with sqlite3.connect(self.root / "store/documents.sqlite") as database:
-            self.assertEqual(database.execute("SELECT count(*) FROM chunks").fetchone()[0], 1)
+            self.assertEqual(database.execute("SELECT count(*) FROM passages").fetchone()[0], database.execute("SELECT count(*) FROM chunks").fetchone()[0])
+            self.assertEqual(database.execute("SELECT count(*) FROM (SELECT revision_id,generation,ordinal,count(*) c FROM passages GROUP BY 1,2,3 HAVING c>1)").fetchone()[0], 0)
 
     def test_unreadable_unpinned_file_does_not_serve_cached_text(self):
         key = self.prepare("source permissions")
