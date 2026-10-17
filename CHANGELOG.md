@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.7](https://github.com/JINGBANZ/jarvis/compare/v0.5.6...v0.5.7) (2026-10-17)
+
+
+### Features
+
+* **references:** add metadata admission and pinned document reads ([#460](https://github.com/JINGBANZ/jarvis/issues/460)) ([91baae7](https://github.com/JINGBANZ/jarvis/commit/91baae7248a2e869533b9c535b1f63beb859ea2c))
+* **references:** add native sqlite helper and integration harness ([#459](https://github.com/JINGBANZ/jarvis/issues/459)) ([954000d](https://github.com/JINGBANZ/jarvis/commit/954000d8e814e65dc3b3feda58498b06e6028c4d))
+
+
+### Bug Fixes
+
+* **overlay:** scroll new hints after text layout ([#452](https://github.com/JINGBANZ/jarvis/issues/452)) ([79893dc](https://github.com/JINGBANZ/jarvis/commit/79893dcf7b966cb5fec00a0146bd19452c4ffab5))
+* **privacy:** protect settings and restrict helper egress ([#457](https://github.com/JINGBANZ/jarvis/issues/457)) ([56f50da](https://github.com/JINGBANZ/jarvis/commit/56f50da6a355360584192abdb5d5d31db8f85c3f))
+* **test:** isolate local overlays on an automatic virtual display ([#458](https://github.com/JINGBANZ/jarvis/issues/458)) ([dced4e1](https://github.com/JINGBANZ/jarvis/commit/dced4e10794b48f74b7242785752fe11dff6e123))
+* **tests:** normalize diagram pixels and gate both macos versions ([#454](https://github.com/JINGBANZ/jarvis/issues/454)) ([560ad81](https://github.com/JINGBANZ/jarvis/commit/560ad813f18f83eeb682ab1d0eb01ebbbd4619c2))
+
 ## [0.5.6](https://github.com/JINGBANZ/jarvis/compare/v0.5.5...v0.5.6) (2026-10-14)
 
 
