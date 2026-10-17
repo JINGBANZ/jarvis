@@ -28,6 +28,15 @@ and session files; provider choice and egress are explicit in Jarvis's code. Bec
 off, **“screen, not disk” is not a current OS guarantee**: another bug in this process could reach
 files available to the signed-in user.
 
+The native References helper is exercised through the explicit development harness described in
+[build-and-run.md](./build-and-run.md#references-helper-packaging-and-integration-checks). Its synthetic
+reference store contains metadata, extracted text, and durable session pins in owner-only SQLite and
+private staging under that harness's workspace directory. It stores no captured audio, transcript,
+screenshot, or browser evidence and has no provider client. Normal coaching does not use this
+persistent reference store. Source containment, bounded parsing, and environment filtering are
+application controls; reader subprocesses retain the signed-in user's OS authority. Cleanup does
+not promise secure erasure of SQLite free pages or filesystem blocks.
+
 ## Repository automation
 
 The source repository is public, so its automation treats public input as untrusted and gives it no

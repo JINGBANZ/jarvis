@@ -3,12 +3,16 @@
 bundle_reference_helper() {
   local app="$1" configuration="$2"
   local destination="$app/Contents/Resources/ReferenceHelper"
-  local binary
-  binary="$(swift build -c "$configuration" --show-bin-path)/JarvisReferenceHelper"
-  [[ -x "$binary" ]] || return 1
+  local binary artifacts privacy
+  artifacts="$(swift build -c "$configuration" --show-bin-path)"
+  binary="$artifacts/JarvisReferenceHelper"
+  privacy="$artifacts/ZIPFoundation_ZIPFoundation.bundle"
+  [[ -x "$binary" && -f "$privacy/PrivacyInfo.xcprivacy" ]] || return 1
   rm -rf "$destination"
   mkdir -p "$destination"
   cp "$binary" "$destination/JarvisReferenceHelper"
+  rm -rf "$app/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle"
+  cp -R "$privacy" "$app/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle"
   if [[ "$configuration" == release ]]; then
     /usr/bin/strip -S -x "$destination/JarvisReferenceHelper"
   fi

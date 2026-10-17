@@ -128,6 +128,12 @@ if [[ -L "$EXTRACTED_REFERENCES" || -L "$EXTRACTED_REFERENCES/JarvisReferenceHel
   echo "error: disk-image app must contain only the native arm64 References helper" >&2
   exit 1
 fi
+REFERENCE_PRIVACY="$EXTRACTED_APP/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle/PrivacyInfo.xcprivacy"
+if [[ ! -f "$REFERENCE_PRIVACY" || -L "$REFERENCE_PRIVACY" ]]; then
+  echo "error: disk-image app is missing the ZIPFoundation privacy manifest" >&2
+  exit 1
+fi
+plutil -lint "$REFERENCE_PRIVACY"
 if "$EXTRACTED_REFERENCES/JarvisReferenceHelper" /dev/null --test-fault >/dev/null 2>&1; then
   reference_status=0
 else
@@ -135,6 +141,16 @@ else
 fi
 if [[ "$reference_status" != 64 ]]; then
   echo "error: release References helper contains the debug fault mode" >&2
+  exit 1
+fi
+
+if "$EXTRACTED_REFERENCES/JarvisReferenceHelper" --test-conversion /dev/null __test_memory /dev/null >/dev/null 2>&1; then
+  reference_status=0
+else
+  reference_status=$?
+fi
+if [[ "$reference_status" != 64 ]]; then
+  echo "error: release References helper contains debug conversion controls" >&2
   exit 1
 fi
 
