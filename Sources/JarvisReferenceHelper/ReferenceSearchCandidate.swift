@@ -43,10 +43,11 @@ struct ReferenceSearchCandidate: Sendable {
               WHERE sd.session_id=? AND (? IS NULL OR sd.document_id IN (SELECT value FROM json_each(?)))
                 AND sd.document_id NOT IN (SELECT value FROM json_each(?))
             )
-            SELECT e.document_id,e.revision_id,e.generation,e.name,p.section,p.text,p.offset,e.scalar_count,
-                   -1 AS priority,0 AS score,p.ordinal
-            FROM eligible e JOIN passages p ON p.revision_id=e.revision_id AND p.generation=e.generation AND p.ordinal=0
-            WHERE reference_casefold(e.name)=reference_casefold(?) OR reference_casefold(e.name)=reference_casefold(?) || ' [' || substr(e.document_id,1,8) || ']'
+            SELECT e.document_id,e.revision_id,e.generation,e.name,p.section,coalesce(p.text,''),coalesce(p.offset,0),e.scalar_count,
+                   -1 AS priority,0 AS score,coalesce(p.ordinal,0) AS ordinal
+            FROM eligible e LEFT JOIN passages p ON p.revision_id=e.revision_id AND p.generation=e.generation AND p.ordinal=0
+            WHERE (p.id IS NOT NULL OR e.scalar_count=0)
+              AND (reference_casefold(e.name)=reference_casefold(?) OR reference_casefold(e.name)=reference_casefold(?) || ' [' || substr(e.document_id,1,8) || ']')
             UNION ALL
             SELECT e.document_id,e.revision_id,e.generation,e.name,p.section,p.text,p.offset,e.scalar_count,
                    0 AS priority,bm25(chunks) AS score,p.ordinal

@@ -163,6 +163,8 @@ Disk accounting includes SQLite/WAL and staging. `ReferenceStorageBudget` serial
 reservations with each bounded index write so indexing cannot spend reserved capacity. Cleanup
 preserves active pins and reports capacity failure rather than deleting them. Logical deletion and
 checkpointing do not promise secure erasure.
+Completed conversion removes its staging snapshot and releases its reservation before indexing;
+other active conversions keep their reservations.
 
 Ranked retrieval uses complete, versioned passages from the authoritative text. The range-producing
 `PrepMaterialChunker.passages` preserves original Unicode-scalar offsets, CRLF, Markdown sections,
@@ -174,6 +176,7 @@ terms use BM25 disjunction; explicit identifiers require their exact encoded ter
 `C++`, `C#`, `账单-42`, and `账单_42`. Indexing and queries normalize trailing sentence delimiters
 consistently; matching and excerpt anchoring share the selected terms. Exact frozen display names
 have a separate lookup path with the same canonical Unicode case folding.
+Exact-name evidence includes empty readable revisions and uses the same durable pin contract.
 This is lexical retrieval; semantically similar paraphrases without shared terms are not guaranteed.
 BM25 corpus statistics can change while pinned document text stays immutable.
 

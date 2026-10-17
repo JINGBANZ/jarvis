@@ -132,6 +132,51 @@ class SearchContracts(unittest.TestCase):
         for query in [".", "...", "/", "-", "_", "+", "#"]:
             self.assertEqual(self.search(query)["hits"], [], query)
 
+    def test_empty_exact_name_search_pins_and_reads_empty_revision(self):
+        key = self.prepare("", "Empty.md")
+        self.ready("absenttoken", count=1)
+        self.assertIsNone(self.pins()[key])
+        result = self.search("EMPTY.md")
+        self.assertTrue(result["complete"], result)
+        self.assertEqual(len(result["hits"]), 1, result)
+        hit = result["hits"][0]
+        self.assertEqual(hit["document_id"], key)
+        self.assertEqual((hit["text"], hit["offset"], hit["next_offset"], hit["total_scalars"]), ("", 0, 0, 0))
+        self.assertEqual(self.pins()[key], hit["revision_id"])
+        (self.sources / "Empty.md").unlink()
+        self.restart()
+        page = self.read(key, revision_id=hit["revision_id"])
+        self.assertEqual((page["status"], page["text"], page["total_scalars"]), ("ok", "", 0))
+        self.assertEqual(self.search("Empty.md")["hits"][0]["revision_id"], hit["revision_id"])
+
+    def test_completed_conversion_releases_own_reservation_before_index(self):
+        preparation_gate = self.gate("preparation-after-reserve")
+        completed_gate = self.gate("preparation-after-index-enqueue")
+        self.prepare("quasar index without its completed conversion reservation")
+        self.arrived("preparation-after-reserve")
+        self.assertEqual(self.result("diagnostics")["reserved_bytes"], 450 * 1024 * 1024)
+        target = 1024 * 1024 * 1024 - 450 * 1024 * 1024 + 1024 * 1024
+        padding = target - self.result("diagnostics")["disk_bytes"]
+        with (self.root / "store" / "retained-cache-padding").open("wb") as output:
+            block = bytes(1024 * 1024)
+            while padding:
+                size = min(padding, len(block)); output.write(block[:size]); padding -= size
+        preparation_gate.unlink()
+        self.arrived("preparation-after-index-enqueue")
+        deadline = time.monotonic() + 5
+        while True:
+            with sqlite3.connect(self.database) as db:
+                state = db.execute("SELECT state FROM search_state").fetchone()[0]
+            if state != "preparing": break
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        self.assertEqual(state, "ready")
+        self.assertEqual(self.result("diagnostics")["reserved_bytes"], 0)
+        result = self.search("quasar")
+        self.assertTrue(result["complete"], result)
+        self.assertEqual(len(result["hits"]), 1, result)
+        completed_gate.unlink()
+
     def test_exact_identifier_excerpt_does_not_anchor_on_loose_component(self):
         fixtures = {query: loose + " " + "unrelated " * 320 + query + " actual evidence"
                     for loose, query in [("C", "C++"), ("-42", "账单-42"), ("_42", "账单_42")]}

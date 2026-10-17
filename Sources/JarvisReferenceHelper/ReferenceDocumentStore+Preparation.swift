@@ -74,9 +74,11 @@ extension ReferenceDocumentStore {
     func performPreparation(document: String, source: SourceLocation, state: String, token: UUID) async {
         var snapshot: URL?
         var revision: String?
-        let result: Result<String, Error>
+        var result: Result<String, Error>
         do {
+            #if JARVIS_LIVE_E2E
             await ReferenceSearchIndex.barrier(home: home, name: "preparation-after-reserve")
+            #endif
             try Task.checkCancellation()
             let staging = self.staging
             let captureTask = Task.detached(priority: .utility) {
@@ -109,7 +111,6 @@ extension ReferenceDocumentStore {
                 try db.execute("UPDATE documents SET current_revision=?,identity=? WHERE id=? AND path=? AND present=1", [identifier, captured.sourceIdentity, document, source.url.path])
             }
             revisionCaptures[identifier] = (captured, source.url, source.root)
-            try enqueueIndex(identifier)
             result = .success(identifier)
         } catch {
             if let revision {
@@ -122,6 +123,16 @@ extension ReferenceDocumentStore {
         }
         if let snapshot { try? FileManager.default.removeItem(at: snapshot) }
         storageBudget.release(token)
+        if case .success(let identifier) = result {
+            do {
+                try enqueueIndex(identifier)
+                #if JARVIS_LIVE_E2E
+                if FileManager.default.fileExists(atPath: home.appendingPathComponent("preparation-after-index-enqueue").path) {
+                    await ReferenceSearchIndex.barrier(home: home, name: "preparation-after-index-enqueue")
+                }
+                #endif
+            } catch { result = .failure(error) }
+        }
         guard let job = jobs[document], job.token == token else { return }
         jobs.removeValue(forKey: document)
         for (waiter, continuation) in job.waiters {
