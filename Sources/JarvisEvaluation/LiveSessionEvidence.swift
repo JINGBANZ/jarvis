@@ -257,7 +257,11 @@ public struct LiveSessionEvidence: Sendable {
             let second = occurredAt.rounded(.down)
             guard let match = attempts.indices.dropFirst(cursor).first(where: { index in
                 guard let startedAt = attempts[index].startedAt else { return false }
-                return startedAt <= second && second <= (attempts[index].finishedAt ?? .infinity)
+                // Manual capture precedes the attempt audit, so it can fall in the previous second.
+                let isManualCapture = row.kind == ActivityEvent.Kind.screenViewed.rawValue
+                    && ["manual_hint", "manual_code", "manual_explanation"].contains(attempts[index].sourceTrigger)
+                let startsInTime = startedAt <= second || (isManualCapture && startedAt == second + 1)
+                return startsInTime && second <= (attempts[index].finishedAt ?? .infinity)
             }) else { return nil }
             if let kind = row.kind, terminalKinds.contains(kind) {
                 cursor = match + 1

@@ -30,7 +30,10 @@ above 3. Taking the maximum end produces `[1,10]`. Checking one case does not pr
 correctness; empty input, disjoint intervals, touching closed endpoints and chains remain
 useful follow-up tests, not mandatory words in every reply.
 
-This fixture uses the existing merge-interval JPEG and synthetic speech. It does not render
+This fixture uses the merge-interval JPEG for stages 1–3 and 5, and renders `weighted-route.txt`
+as a JPEG for stage 4. Confirm that the manual hint's screen evidence shows the unapplied Dijkstra
+proposal, not Merge Intervals. Both the spoken report and that screen say tests have not run.
+The fixture uses synthetic speech. It does not render
 an AI panel, execute generated Java, verify browser Accessibility, or test full-file scrolling.
 Those require separate real-browser evidence. Do not interpret a successful D run as that evidence.
 

@@ -161,7 +161,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             try checkAbort()
             switch steps[index] {
             case .screen(let fixture):
-                screen.show(try Data(contentsOf: options.fixturesDirectory.appendingPathComponent(fixture)))
+                try screen.show(options.fixturesDirectory.appendingPathComponent(fixture))
             case .press(let shortcut):
                 let mark = attemptEvents.count
                 composition.requestShortcut(shortcut)

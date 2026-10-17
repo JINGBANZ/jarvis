@@ -62,7 +62,9 @@ extension LiveE2ETests {
                       "review of a valid AI proposal delivered supporting detail without a confusion signal")
         results.note("C29", "Structural checks only. Semantic review NOT EVALUATED: apply "
             + "Tests/JarvisLiveTests/Scenarios/D-review.md to the recorded replies. "
-            + "AI proposal and test results are spoken reports; the JPEG is OCR-only and proves no Chrome AX coverage.")
+            + "The Merge Intervals proposal and test result are spoken reports; "
+            + "the weighted-route proposal is also visible through screenshot OCR. "
+            + "Neither fixture proves execution or Chrome AX coverage.")
         Self.checkNoScreenshotBytes(launch, &results)
         Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         try launcher.finish(results)

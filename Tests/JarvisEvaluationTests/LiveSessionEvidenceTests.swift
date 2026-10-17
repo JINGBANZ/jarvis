@@ -247,6 +247,36 @@ import Testing
         #expect(evidence.activity.map(\.index).filter { !attributed.contains($0) } == [0, 4, 6, 8, 9])
     }
 
+    @Test func manualCaptureBeforeTheAttemptStampStillBelongsToItsPress() throws {
+        let base = try Self.unix(10, 0, 0)
+        let evidence = try Self.evidence(
+            activity: [
+                Self.row("screenViewed", "earlier capture", at: base - 1.1),
+                Self.row("heard", "earlier speech", at: base - 0.001),
+                Self.row("screenViewed", "manual capture", at: base - 0.001),
+                Self.row("tip", "first reply", at: base + 4),
+                Self.row("screenViewed", "automatic capture outside attempt", at: base + 5.999),
+                Self.row("tip", "second reply", at: base + 8),
+                Self.row("screenViewed", "Show code capture", at: base + 9.999),
+                Self.row("tip", "code reply", at: base + 12),
+            ],
+            attempts: [
+                Self.started(1, at: "10:00:00", sourceTrigger: "manual_hint"),
+                Self.finished(1, at: "10:00:04"),
+                Self.started(2, at: "10:00:06"),
+                Self.finished(2, at: "10:00:08"),
+                Self.started(3, at: "10:00:10", sourceTrigger: "manual_code"),
+                Self.finished(3, at: "10:00:12"),
+            ])
+
+        let first = try #require(evidence.attempt(id: 1))
+        let second = try #require(evidence.attempt(id: 2))
+        let third = try #require(evidence.attempt(id: 3))
+        #expect(evidence.rows(in: first).map(\.index) == [2, 3])
+        #expect(evidence.rows(in: second).map(\.index) == [5])
+        #expect(evidence.rows(in: third).map(\.index) == [6, 7])
+    }
+
     @Test func aFailedCycleRowClosesItsAttemptAndAnUnfinishedAttemptStaysOpen() throws {
         let base = try Self.unix(11, 0, 0)
         let evidence = try Self.evidence(

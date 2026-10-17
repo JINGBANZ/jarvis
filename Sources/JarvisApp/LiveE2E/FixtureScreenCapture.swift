@@ -7,7 +7,11 @@ final class FixtureScreenCapture: ScreenCapturing {
     private let recognizer = ScreenTextRecognizer()
     private let current = OSAllocatedUnfairLock<Data?>(initialState: nil)
 
-    func show(_ jpeg: Data) {
+    @MainActor
+    func show(_ fixture: URL) throws {
+        let jpeg = fixture.pathExtension.lowercased() == "txt"
+            ? try Self.textJPEG(String(contentsOf: fixture, encoding: .utf8))
+            : try Data(contentsOf: fixture)
         current.withLock { $0 = jpeg }
     }
 

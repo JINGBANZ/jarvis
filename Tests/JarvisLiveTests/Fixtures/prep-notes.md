@@ -4,6 +4,8 @@ These are sample behavioral and system-design notes. Every person named here is 
 
 ## Pushing back on my manager
 
+Fictional practice example; this is not the candidate's personal history.
+
 My manager, Marcus Webb, wanted to ship the offline sync feature for a Friday launch. Marketing
 had already scheduled the announcement.
 
@@ -27,6 +29,8 @@ What I would do again:
 - Once a decision is made, I commit to it fully, even when I argued for something else.
 
 ## Disagreement with a teammate
+
+Fictional practice example; this is not the candidate's personal history.
 
 On the payments team, my teammate Priya and I disagreed about the billing retry job. It kept
 charging some customers twice after a timeout, and she wanted to rewrite it in Go because she

@@ -1,4 +1,5 @@
 import Foundation
+import JarvisBrainProviders
 import JarvisCore
 import Testing
 
@@ -21,16 +22,7 @@ extension LiveE2ETests {
         let original = try String(contentsOf: LiveE2ELauncher.fixturesDirectory
             .appendingPathComponent("prep-notes.md"), encoding: .utf8)
         let session = try #require(launch.sessionDirectory)
-        let traffic = try String(contentsOf: session.appendingPathComponent("brain-traffic.jsonl"), encoding: .utf8)
-        let completeTextReachedBrain = traffic.split(separator: "\n").contains { line in
-            guard let record = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
-                  let request = record["request"] as? [String: Any],
-                  let input = request["input"] as? [[String: Any]] else { return false }
-            return input.contains {
-                $0["type"] as? String == "function_call_output"
-                    && ($0["output"] as? String)?.contains(original) == true
-            }
-        }
+        let completeTextReachedBrain = try Self.prepTextReachedBrain(original, in: session)
         results.check("C34", completeTextReachedBrain, "the complete extracted fixture reached the brain")
         let says = launch.stepIndices(Self.isSay)
         results.check("C34", says.count == 3, "all three document and design questions ran")
@@ -43,5 +35,17 @@ extension LiveE2ETests {
         results.note("C34", "Semantic review NOT EVALUATED: apply Scenarios/P-review.md to the replies.")
         Self.checkCleanEnd(launch, evidence, endedByUser: true, &results)
         try launcher.finish(results)
+    }
+
+    private static func prepTextReachedBrain(_ text: String, in session: URL) throws -> Bool {
+        let traffic = try String(contentsOf: session.appendingPathComponent("brain-traffic.jsonl"), encoding: .utf8)
+        return traffic.split(separator: "\n").contains { line in
+            guard let record = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let request = record["request"] as? [String: Any] else { return false }
+            return RecordedExchange.read(request: request, response: record["response"]).input.contains {
+                guard case .result(_, let output) = $0 else { return false }
+                return output?.contains(text) == true
+            }
+        }
     }
 }

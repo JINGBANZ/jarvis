@@ -1,0 +1,23 @@
+Weighted route - AI-assisted coding review
+
+Task: Find a minimum-cost route from source to destination.
+Movement costs are nonnegative. The chosen algorithm is Dijkstra.
+
+Orbit - returned proposal, awaiting review
+This is pseudocode, not an applied edit. No tests have run.
+
+dist[source] = 0
+heap.push((0, source))
+while heap is not empty:
+    cost, node = heap.pop_min()
+    if cost > dist[node]:
+        continue
+    if node == destination:
+        return reconstruct_route(predecessor, destination)
+    for neighbor, weight in edges[node]:
+        candidate = cost + weight
+        if candidate < dist.get(neighbor, infinity):
+            dist[neighbor] = candidate
+            predecessor[neighbor] = node
+            heap.push((candidate, neighbor))
+return no_route
