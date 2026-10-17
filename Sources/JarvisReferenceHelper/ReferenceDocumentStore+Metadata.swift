@@ -5,6 +5,7 @@ extension ReferenceDocumentStore {
     func configure(_ payload: Payload) throws -> Data {
         guard let generation = payload.generation, generation >= 0, let enabled = payload.enabled,
               let sources = payload.sources, let app = instance else { throw ReferenceStoreError.unavailable }
+        guard sources.count <= ReferenceDiscovery.maximumSources else { throw ReferenceStoreError.resource_limit }
         let sorted = sources.sorted { $0.source_id.uuidString < $1.source_id.uuidString }
         guard Set(sources.map(\.source_id)).count == sources.count else { throw ReferenceStoreError.unavailable }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
@@ -69,7 +70,7 @@ extension ReferenceDocumentStore {
         var identities: [String: [[String?]]] = [:]
         for row in previous {
             if let path = row[1], paths[path] == nil { paths[path] = row }
-            if let identity = row[2] { identities[identity, default: []].append(row) }
+            if row[3] == "1", let identity = row[2] { identities[identity, default: []].append(row) }
         }
         let currentPaths = Set(discovered.map(\.path))
         var used = Set<String>()
@@ -83,7 +84,7 @@ extension ReferenceDocumentStore {
             try db.transaction {
                 for item in discovered[begin..<min(begin + 100, discovered.count)] {
                     var identifier: String?
-                    if let old = paths[item.path], old[3] == "1" || old[2] == item.identity { identifier = old[0] }
+                    if let old = paths[item.path], old[3] == "1" { identifier = old[0] }
                     if identifier == nil, let candidates = identities[item.identity], candidates.count == 1,
                        let oldPath = candidates[0][1], !currentPaths.contains(oldPath) { identifier = candidates[0][0] }
                     if identifier.map({ used.contains($0) }) == true { identifier = nil }

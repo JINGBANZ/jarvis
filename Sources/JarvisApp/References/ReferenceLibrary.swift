@@ -157,7 +157,8 @@ final class ReferenceLibrary {
             guard owned[sessionID] != nil else { throw ReferenceAccessFailure(reason: .released) }
             var payload = payload
             payload["app_instance_id"] = appInstanceID.uuidString
-            let data = try await supervisor.request(operation, session: sessionID, payload: encode(payload))
+            let timeout: Duration = operation == "search" ? .seconds(3) : .seconds(2)
+            let data = try await supervisor.request(operation, session: sessionID, payload: encode(payload), timeout: timeout)
             struct Status: Decodable { let status: String? }
             if let status = try JSONDecoder().decode(Status.self, from: data).status, status != "ok", status != "partial" {
                 guard let reason = ReferenceAccessFailure.Reason(rawValue: status) else { throw ReferenceProtocolError.malformed }

@@ -30,6 +30,9 @@ extension ReferenceDocumentStore {
                 expected = nil
             }
         }
+        if try db.scalar("SELECT id FROM documents WHERE path=? AND present=1 AND id<>? LIMIT 1", [url.path, document]) != nil {
+            throw ReferenceStoreError.source_changed
+        }
         return SourceLocation(url: url, root: boundary, identity: expected)
     }
 

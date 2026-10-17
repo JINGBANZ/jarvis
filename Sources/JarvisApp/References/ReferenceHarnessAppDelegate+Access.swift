@@ -19,6 +19,15 @@ extension ReferenceHarnessAppDelegate {
         try require(search.hits.contains(where: { $0.documentID == document }), "native FTS over authoritative revision")
         results.append(["case": "real-read-search", "startup": String(describing: startup), "idle_rss_kib": idleRSS])
 
+        let searchDelay = store.appendingPathComponent("search-reply-delay-ms")
+        try "2200".write(to: searchDelay, atomically: true, encoding: .utf8)
+        let searchStarted = ContinuousClock.now
+        let delayed = try await admitted.session.search(query: "uniquequasar", documentIDs: nil)
+        try require(!delayed.complete && delayed.hits.contains(where: { $0.documentID == document }), "partial search reply has transport headroom")
+        try require(searchStarted.duration(to: .now) >= .seconds(2.1) && searchStarted.duration(to: .now) < .seconds(3.5), "bounded search response")
+        try FileManager.default.removeItem(at: searchDelay)
+        results.append(["case": "search-response-headroom", "elapsed": String(describing: searchStarted.duration(to: .now))])
+
         try "Replacement content".write(to: fixture.appendingPathComponent("sample.txt"), atomically: true, encoding: .utf8)
         let unchanged = try await admitted.session.read(documentID: document, offset: 0, revisionID: read.revisionID)
         try require(unchanged.text == read.text, "first read pins original content")

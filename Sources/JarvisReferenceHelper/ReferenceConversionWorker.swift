@@ -4,7 +4,7 @@ import PDFKit
 enum ReferenceConversionWorker {
     static let processorVersion: String = {
         let os = ProcessInfo.processInfo.operatingSystemVersion
-        return "native-text-1/pdfkit-page-1/docx-xml-1/zipfoundation-0.9.20/macos-\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
+        return "native-text-1/pdfkit-page-1/docx-xml-2/zipfoundation-0.9.20/macos-\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
     }()
 
     static func run(arguments: [String]) -> Int32 {

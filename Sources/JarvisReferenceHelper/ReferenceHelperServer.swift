@@ -97,12 +97,10 @@ actor ReferenceHelperServer {
                         result = Data("{}".utf8)
                         status = "unavailable"
                     }
-                        #if JARVIS_LIVE_E2E
-                        if request.operation == "admit" {
-                            let delay = await store.admitReplyDelay()
-                            if delay > 0 { try? await Task.sleep(for: .milliseconds(delay)) }
-                        }
-                        #endif
+                    #if JARVIS_LIVE_E2E
+                    let delay = await store.replyDelay(for: request.operation)
+                    if delay > 0 { try? await Task.sleep(for: .milliseconds(delay)) }
+                    #endif
                     guard !Task.isCancelled else { return }
                     tasks.removeValue(forKey: request.id)
                     do { try Self.send(id: request.id, status: status, result: result) }

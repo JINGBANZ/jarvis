@@ -106,6 +106,15 @@ It contacts no provider and needs no capture grants. The ordinary `./scripts/run
 Core contracts and native helper process/resource checks; host Python drives those checks and is
 absent from the installed app.
 
+The helper accepts the extensions declared in `ReferenceSourceCapture.supportedFormats`. Unsupported
+files inside a directory, escaping or broken links, and non-regular entries are excluded from its
+catalog. A directly selected unsupported file fails that metadata generation with
+`unsupported_format`; a missing or inaccessible selected root or enumeration failure also fails the
+generation. Discovery limits in `ReferenceDiscovery` bound both the number of selected sources and
+the total entries visited across overlapping roots, including unsupported entries; exceeding them
+reports a resource failure instead of silently truncating membership. Production Settings feedback
+for unsupported selections is part of the pending integration.
+
 `ReferenceLibrary` owns configuration generations and each pending or accepted session. It uses one
 absolute metadata-admission deadline, follows the latest generation without extending that deadline,
 and returns one admitted catalog/access handle or a typed omission reason. Disabled and empty
@@ -115,7 +124,8 @@ only after its larger Start succeeds; abandoned admissions and uncertain release
 reconciled against the library's owned session set after helper reconnection. Active handles retain
 access when future configuration is disabled or roots are removed.
 
-The supervisor coalesces startup and bounds hello, requests, cancellation, and shutdown. The library
+The supervisor coalesces startup and bounds hello, requests, cancellation, and shutdown. Search
+transport allows headroom after the helper's indexing budget so partial results can return. The library
 permits bounded helper recovery without replaying uncertain content calls; committed pins survive a
 helper restart for the same app instance. A fresh instance closes orphaned sessions after obtaining
 exclusive store ownership. The helper and reader workers receive a minimal environment without
@@ -127,7 +137,8 @@ immutable extracted revisions, and session membership/pins. Metadata discovery d
 Catalog serialization is bounded while paginated listing retains every admitted member. Text is
 published in bounded transactions independently of search readiness. Source capture hashes the exact
 authorized snapshot passed to a reader, checks source changes, and reuses a validated revision when
-its hash and processor version match. A successful first content read commits a durable pin; later
+its hash and processor version match. A successful first read, including an empty document or valid
+end-of-document page, commits a durable pin; invalid reads do not. Later
 pages use that text after an edit, deletion, or helper restart. Unpinned access revalidates the source
 and cannot fall back to stale cached contents. Unicode-scalar pages are defined by the new read
 contract, independently of the existing prep tool's Character offsets.

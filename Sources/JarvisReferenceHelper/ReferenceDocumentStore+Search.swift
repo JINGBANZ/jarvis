@@ -30,7 +30,7 @@ extension ReferenceDocumentStore {
                 guard diskBytes() + Int64(page.text.utf8.count) * 8 + 65_536 < Self.cacheTarget else { break }
                 _ = try requireSession(request, payload)
                 try db.transaction {
-                    try db.execute("INSERT INTO chunks(revision_id,text) VALUES(?,?)", [revision, page.text])
+                    try db.execute("INSERT INTO chunks(revision_id,text) SELECT ?,? WHERE NOT EXISTS(SELECT 1 FROM chunks WHERE revision_id=?)", [revision, page.text, revision])
                 }
             }
             indexed += 1

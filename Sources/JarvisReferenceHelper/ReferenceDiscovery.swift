@@ -1,6 +1,8 @@
 import Foundation
 
 struct ReferenceDiscovery: Sendable {
+    static let maximumSources = 128
+    static let maximumEntries = 100_000
     struct Source: Codable, Sendable, Equatable { let source_id: UUID; let path: String }
     struct Document: Sendable {
         let path: String
@@ -20,6 +22,7 @@ struct ReferenceDiscovery: Sendable {
     static func scan(_ sources: [Source]) throws -> [Document] {
         let files = FileManager.default
         var found: [String: Document] = [:]
+        var visited = 0
         for source in sources {
             try Task.checkCancellation()
             let root = URL(fileURLWithPath: source.path).resolvingSymlinksInPath().standardizedFileURL
@@ -32,16 +35,20 @@ struct ReferenceDiscovery: Sendable {
                     errorHandler: { _, _ in enumerationFailed = true; return false }) else { throw ReferenceStoreError.unavailable }
                 for case let url as URL in enumerator {
                     try Task.checkCancellation()
+                    visited += 1
+                    guard visited <= maximumEntries else { throw ReferenceStoreError.resource_limit }
                     let resolved = url.resolvingSymlinksInPath().standardizedFileURL
-                    guard contains(resolved, root: root) else { throw ReferenceStoreError.invalid_source }
-                    if ["txt", "md", "pdf", "docx"].contains(resolved.pathExtension.lowercased()) {
-                        guard candidates.count < 100_000 else { throw ReferenceStoreError.resource_limit }
-                        if (try resolved.resourceValues(forKeys: [.isDirectoryKey])).isDirectory != true { candidates.append(resolved) }
+                    guard contains(resolved, root: root) else { continue }
+                    if ReferenceSourceCapture.supportedFormats.contains(resolved.pathExtension.lowercased()) {
+                        var info = stat()
+                        if lstat(resolved.path, &info) == 0, info.st_mode & S_IFMT == S_IFREG { candidates.append(resolved) }
                     }
                 }
                 guard !enumerationFailed else { throw ReferenceStoreError.unavailable }
             } else {
-                guard ["txt", "md", "pdf", "docx"].contains(root.pathExtension.lowercased()) else { throw ReferenceStoreError.unsupported_format }
+                guard ReferenceSourceCapture.supportedFormats.contains(root.pathExtension.lowercased()) else { throw ReferenceStoreError.unsupported_format }
+                visited += 1
+                guard visited <= maximumEntries else { throw ReferenceStoreError.resource_limit }
                 candidates = [root]
             }
             for url in candidates {
@@ -63,7 +70,6 @@ struct ReferenceDiscovery: Sendable {
                     found[key] = Document(path: key, root: root.path, identity: try identity(url),
                                           format: url.pathExtension.lowercased(), name: name, sourceIDs: [source.source_id])
                 }
-                guard found.count <= 100_000 else { throw ReferenceStoreError.resource_limit }
             }
         }
         return found.values.sorted { $0.path < $1.path }

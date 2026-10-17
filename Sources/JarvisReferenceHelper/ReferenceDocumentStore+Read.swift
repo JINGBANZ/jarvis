@@ -32,7 +32,7 @@ extension ReferenceDocumentStore {
             if let requested = payload.revision_id, requested != revision { throw ReferenceStoreError.revision_mismatch }
             page = try await pageForPinnedRevision(id: revision, offset: offset)
             _ = try requireSession(request, payload)
-        } else if current[0] == nil, !page.text.isEmpty {
+        } else if current[0] == nil {
             guard let (capture, url, root) = revisionCaptures[revision] else { throw ReferenceStoreError.unavailable }
             let validation = Task.detached(priority: .userInitiated) {
                 try ReferenceSourceCapture.validate(capture: capture, originalURL: url, root: root)

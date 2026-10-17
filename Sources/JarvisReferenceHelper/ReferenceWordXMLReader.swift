@@ -5,6 +5,7 @@ final class ReferenceWordXMLReader: NSObject, XMLParserDelegate {
     private var depth = 0
     private var bodyDepth: Int?
     private var textDepth: Int?
+    private var runDepth: Int?
     private var bodySeen = false
     private var pendingSeparator = ""
     private var hasText = false
@@ -34,8 +35,9 @@ final class ReferenceWordXMLReader: NSObject, XMLParserDelegate {
             bodySeen = true; bodyDepth = depth
         }
         guard bodyDepth != nil else { return }
+        if name == "r" { runDepth = depth }
         if name == "t" { textDepth = depth }
-        if name == "tab" { emit("\t", parser) }
+        if name == "tab", runDepth != nil { emit("\t", parser) }
         if name == "br" || name == "cr" { emit("\n", parser) }
     }
 
@@ -47,6 +49,7 @@ final class ReferenceWordXMLReader: NSObject, XMLParserDelegate {
         defer { depth -= 1 }
         guard Self.namespaces.contains(namespaceURI ?? ""), bodyDepth != nil else { return }
         if name == "t", textDepth == depth { textDepth = nil }
+        if name == "r", runDepth == depth { runDepth = nil }
         if name == "p" || name == "tr" { pendingSeparator = "\n" }
         if name == "tc" { pendingSeparator = "\t" }
         if name == "body", bodyDepth == depth { bodyDepth = nil }

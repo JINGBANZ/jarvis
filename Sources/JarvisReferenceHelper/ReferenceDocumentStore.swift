@@ -174,8 +174,9 @@ actor ReferenceDocumentStore {
         return session
     }
     #if JARVIS_LIVE_E2E
-    func admitReplyDelay() -> Int {
-        guard let value = try? String(contentsOf: home.appendingPathComponent("admit-reply-delay-ms"), encoding: .utf8),
+    func replyDelay(for operation: String) -> Int {
+        guard operation == "admit" || operation == "search",
+              let value = try? String(contentsOf: home.appendingPathComponent("\(operation)-reply-delay-ms"), encoding: .utf8),
               let delay = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)), (0...5000).contains(delay) else { return 0 }
         return delay
     }

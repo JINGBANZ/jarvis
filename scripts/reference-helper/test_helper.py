@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import select
 import shutil
+import socket
 import runpy
 import sqlite3
 import struct
@@ -102,11 +103,11 @@ class HelperContracts(unittest.TestCase):
         self.assertEqual(reply["status"], "ok", reply)
         return reply["result"]
 
-    def configure(self, enabled=True, sources=None):
+    def configure(self, enabled=True, sources=None, readiness_timeout=5):
         self.generation += 1
         result = self.result("configure", {"generation": self.generation, "enabled": enabled,
                              "sources": sources if sources is not None else [{"source_id": self.source, "path": str(self.sources)}]})
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + readiness_timeout
         while result.get("state") == "preparing" and time.monotonic() < deadline:
             time.sleep(.01)
             result = self.result("metadata", {"generation": self.generation})
@@ -223,6 +224,27 @@ class HelperContracts(unittest.TestCase):
         for offset in [-1, True, 1.5]:
             self.assertNotEqual(self.read(key, offset)["status"], "ok")
 
+    def test_successful_empty_reads_pin_across_edits_and_restart(self):
+        for name, original in [("empty.txt", ""), ("eof.md", "nonempty source")]:
+            with self.subTest(name=name):
+                fixture = self.sources / name
+                fixture.write_text(original)
+                self.configure()
+                session = identifier()
+                catalog = self.admit(session=session, start=identifier())
+                key = next(entry["document_id"] for entry in catalog["entries"] if entry["name"] == name)
+                first = self.read(key, len(original), session=session)
+                self.assertEqual(first["status"], "ok", first)
+                self.assertEqual(first["text"], "")
+                fixture.write_text("replacement content")
+                self.assertEqual(self.read(key, session=session)["text"], original)
+                fixture.unlink()
+                self.restart()
+                self.result("reconcile", {"owned_session_ids": [session]})
+                again = self.read(key, session=session)
+                self.assertEqual(again["revision_id"], first["revision_id"])
+                self.assertEqual(again["text"], original)
+
     def test_unpinned_missing_or_unreadable_source_has_no_stale_fallback(self):
         key = self.prepare("original")
         other = identifier()
@@ -280,6 +302,68 @@ class HelperContracts(unittest.TestCase):
         catalog = self.admit()
         self.assertEqual(catalog["total_count"], 1)
         self.assertEqual(self.read(catalog["entries"][0]["document_id"])["text"], "inside directory")
+
+    def test_observed_absence_does_not_revive_same_inode_at_old_or_new_path(self):
+        for returned_name in ["fixture.txt", "returned.txt"]:
+            with self.subTest(name=returned_name):
+                key = self.prepare("before absence")
+                fixture = self.sources / "fixture.txt"
+                parked = self.root / "parked.txt"
+                fixture.rename(parked)
+                self.assertEqual(self.configure()["total_count"], 0)
+                parked.rename(self.sources / returned_name)
+                self.configure()
+                session = identifier()
+                entry = self.admit(session=session, start=identifier())["entries"][0]
+                self.assertNotEqual(entry["document_id"], key)
+                self.assertNotEqual(self.read(key)["status"], "ok")
+                self.assertEqual(self.read(entry["document_id"], session=session)["text"], "before absence")
+                (self.sources / returned_name).unlink()
+                self.configure()
+                self.session, self.start = identifier(), identifier()
+
+    def test_directory_skips_unsupported_and_ineligible_entries(self):
+        (self.sources / "good.txt").write_text("eligible text")
+        for name in ["sheet.xlsx", "photo.png", "data.csv", "config.json", "notes.markdown"]:
+            (self.sources / name).write_bytes(b"unsupported fixture")
+        (self.sources / "escape.txt").symlink_to(self.root / "outside.txt")
+        (self.root / "outside.txt").write_text("outside root")
+        (self.sources / "broken.md").symlink_to(self.root / "missing")
+        os.mkfifo(self.sources / "pipe.txt", 0o600)
+        with socket.socket(socket.AF_UNIX) as server:
+            server.bind(str(self.sources / "socket.txt"))
+            metadata = self.configure()
+            self.assertEqual(metadata["state"], "ready", metadata)
+            catalog = self.admit()
+            self.assertEqual([entry["name"] for entry in catalog["entries"]], ["good.txt"])
+        unsupported = self.sources / "sheet.xlsx"
+        failed = self.configure(sources=[{"source_id": identifier(), "path": str(unsupported)}])
+        self.assertEqual(failed["state"], "failed")
+        self.assertEqual(failed["error"], "unsupported_format")
+
+    def test_discovery_bounds_sources_and_total_traversal_work(self):
+        many = [{"source_id": identifier(), "path": str(self.sources)} for _ in range(129)]
+        reply = self.result("configure", {"generation": 1, "enabled": True, "sources": many})
+        self.assertEqual(reply["status"], "resource_limit")
+        # Repeated roots must share one work budget even when all entries are unsupported.
+        for index in range(1024): (self.sources / f"{index}.bin").touch()
+        overlapping = [{"source_id": identifier(), "path": str(self.sources)} for _ in range(98)]
+        failed = self.configure(sources=overlapping, readiness_timeout=30)
+        self.assertEqual(failed["state"], "failed", failed)
+        self.assertEqual(failed["error"], "resource_limit")
+        self.assertEqual(self.configure()["state"], "ready")
+
+    def test_concurrent_first_search_indexes_each_revision_once(self):
+        key = self.prepare("Uniquequasar " + "x" * 2_000_000)
+        self.assertEqual(self.read(key)["status"], "ok")
+        first = self.send("search", {"query": "uniquequasar"})
+        second = self.send("search", {"query": "uniquequasar"})
+        replies = {reply["id"]: reply for reply in [self.receive(), self.receive()]}
+        for request in [first, second]:
+            self.assertEqual(replies[request]["result"]["status"], "partial")
+            self.assertEqual(len(replies[request]["result"]["hits"]), 1)
+        with sqlite3.connect(self.root / "store/documents.sqlite") as database:
+            self.assertEqual(database.execute("SELECT count(*) FROM chunks").fetchone()[0], 1)
 
     def test_unreadable_unpinned_file_does_not_serve_cached_text(self):
         key = self.prepare("source permissions")
@@ -397,17 +481,27 @@ class HelperContracts(unittest.TestCase):
 
     def test_docx_xml_entities_and_expansion_are_bounded(self):
         fixture = self.sources / "unsafe.docx"
+        relationships = '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>'
         with zipfile.ZipFile(fixture, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("_rels/.rels", relationships)
             archive.writestr("word/document.xml", '<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>&xxe;</w:t></w:r></w:p></w:body></w:document>')
         self.configure()
         key = self.admit()["entries"][0]["document_id"]
-        self.assertNotEqual(self.read(key)["status"], "ok")
+        self.assertEqual(self.read(key)["status"], "invalid_document")
         # Very small compressed input must not permit unbounded expanded allocations.
         with zipfile.ZipFile(fixture, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("_rels/.rels", relationships)
             with archive.open("word/document.xml", "w") as output:
                 for _ in range(101): output.write(b"x" * 1_048_576)
-        self.assertNotEqual(self.read(key)["status"], "ok")
+        self.assertEqual(self.read(key)["status"], "limit_exceeded")
         self.assertEqual(self.result("hello")["engine"], "sqlite-fts5")
+
+    def test_docx_tab_stop_properties_do_not_emit_text(self):
+        body = '<w:p><w:pPr><w:tabs><w:tab w:val="left" w:pos="720"/><w:tab w:val="right" w:pos="1440"/></w:tabs></w:pPr><w:r><w:t>Before</w:t><w:tab/><w:t>After</w:t></w:r></w:p>'
+        docx(self.sources / "tabs.docx", body)
+        self.configure()
+        key = self.admit()["entries"][0]["document_id"]
+        self.assertEqual(self.read(key)["text"], "Before\tAfter\n")
 
     def test_source_boundaries_fifo_symlink_invalid_text_and_limits(self):
         key = self.prepare()
