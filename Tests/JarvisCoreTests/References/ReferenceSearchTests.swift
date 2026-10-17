@@ -30,6 +30,27 @@ struct ReferenceSearchTests {
         }
     }
 
+    @Test func sentencePunctuationAndIdentifierRangesStayConsistent() throws {
+        #expect(ReferenceSearchTokenizer.matchExpression("How does retry backoff work.") == ReferenceSearchTokenizer.matchExpression("How does retry backoff work"))
+        for (punctuated, word) in [("docs/", "docs"), ("long-", "long"), ("word_", "word")] {
+            #expect(ReferenceSearchTokenizer.matchExpression(punctuated) == ReferenceSearchTokenizer.matchExpression(word))
+        }
+        #expect(ReferenceSearchTokenizer.queryTerms(".NET .env") == [".net", ".env"])
+        #expect(ReferenceSearchTokenizer.queryTerms("../foo") == ["../foo"])
+        #expect(ReferenceSearchTokenizer.queryTerms("/foo") == ["/foo"])
+        #expect(ReferenceSearchTokenizer.queryTerms("账单-42") == ["账单-42"])
+        #expect(ReferenceSearchTokenizer.queryTerms("账单_42") == ["账单_42"])
+        for punctuation in [".", "...", "/", "-", "_", "+", "#"] {
+            #expect(ReferenceSearchTokenizer.matchExpression(punctuation) == nil)
+        }
+        let source = "retry... C++. 账单-42. 账单_42..."
+        let terms = ReferenceSearchTokenizer.terms(source)
+        for (value, range) in [("retry", 0..<5), ("c++", 9..<12), ("账单-42", 14..<19), ("账单_42", 21..<26)] {
+            #expect(terms.contains { $0.value == value && $0.offset == range.lowerBound && $0.endOffset == range.upperBound })
+        }
+        #expect(try #require(ReferenceSearchTokenizer.matchExpression("C++.")) == ReferenceSearchTokenizer.matchExpression("C++"))
+    }
+
     @Test func passageRangesPreserveCRLFCodeTablesAndUnicode() {
         let source = "# First\r\n\r\n😀e\u{301} content\r\n\r\n```swift\r\n# code\r\n\r\nlet answer = 42\r\n```\r\n\r\n# Second\r\n| key | value |\r\n| --- | --- |\r\n| x | y |\r\n"
         let passages = PrepMaterialChunker.passages(text: source, markdown: true, targetScalars: 80)
@@ -56,6 +77,15 @@ struct ReferenceSearchTests {
         #expect(passages.map { String(text[$0.range]) }.joined() == text)
         #expect(passages.filter { text[$0.range].contains("xxxx") }.allSatisfy { $0.section == "# Original" })
         #expect(passages.last?.section == "# Next")
+    }
+
+    @Test func longFenceSuffixAndHeadingClassificationRemainExact() {
+        let text = "# Original\n```swift\n```" + String(repeating: " ", count: 32_000) + "not a closing fence\n# Still code\n```\n# Final\nlast\n"
+        let passages = PrepMaterialChunker.passages(text: text, markdown: true)
+        #expect(passages.map { String(text[$0.range]) }.joined() == text)
+        #expect(passages.allSatisfy { text[$0.range].unicodeScalars.count <= 16_000 })
+        #expect(passages.filter { text[$0.range].contains("# Still code") }.allSatisfy { $0.section == "# Original" })
+        #expect(passages.last?.section == "# Final")
     }
 
     @Test func coverageAndTruncationRoundTripIndependently() throws {

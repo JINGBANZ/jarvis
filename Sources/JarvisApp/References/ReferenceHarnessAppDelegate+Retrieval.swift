@@ -10,12 +10,20 @@ extension ReferenceHarnessAppDelegate {
         let originalURL = folder.appendingPathComponent("Payment.md")
         try original.write(to: originalURL, atomically: true, encoding: .utf8)
         try "C# managed types 账单_42".write(to: folder.appendingPathComponent("managed.md"), atomically: true, encoding: .utf8)
+        let grapheme = "grapheme " + String(repeating: "x", count: 1_990) + "e\u{301} trailing text"
+        try grapheme.write(to: folder.appendingPathComponent("grapheme.txt"), atomically: true, encoding: .utf8)
         try await library.configure(enabled: true, sources: [ReferenceSource(id: UUID(), url: folder)])
         let access = try await admission(library)
         let list = try await access.session.list(query: nil, cursor: nil)
         let payment = try requireEntry(list, name: "Payment.md")
         let managed = try requireEntry(list, name: "managed.md")
-        try await waitForSearch(access.session, count: 2, timeout: .seconds(10))
+        try await waitForSearch(access.session, count: 3, timeout: .seconds(10))
+        let boundary = try await access.session.search(query: "grapheme", documentIDs: nil)
+        guard let scalarHit = boundary.hits.first else { throw ReferenceProtocolError.malformed }
+        let scalarPage = try await access.session.read(documentID: scalarHit.documentID, offset: scalarHit.offset, revisionID: scalarHit.revisionID)
+        try require(scalarHit.nextOffset == 2_000 && scalarHit.text.unicodeScalars.last == "e"
+                    && scalarPage.text.unicodeScalars.starts(with: scalarHit.text.unicodeScalars), "excerpt ending inside a decomposed grapheme")
+        results.append(["case": "search-scalar-grapheme-boundary"])
         let evidence = try await access.session.search(query: "ORCHID-439", documentIDs: nil)
         guard let hit = evidence.hits.first else { throw ReferenceProtocolError.malformed }
         let scalars = original.unicodeScalars
@@ -36,7 +44,7 @@ extension ReferenceHarnessAppDelegate {
         results.append(["case": "search-session-filter"])
         try "replacement".write(to: originalURL, atomically: true, encoding: .utf8)
         let pinned = try await access.session.read(documentID: payment, offset: hit.offset, revisionID: hit.revisionID)
-        try require(pinned.text.hasPrefix(hit.text), "first search pins text before later read")
+        try require(pinned.text.unicodeScalars.starts(with: hit.text.unicodeScalars), "first search pins text before later read")
         results.append(["case": "search-first-pin-read"])
         library.release(sessionID: access.sessionID)
 

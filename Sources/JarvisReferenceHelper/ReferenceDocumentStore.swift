@@ -38,7 +38,7 @@ actor ReferenceDocumentStore {
     var indexTask: Task<Void, Never>?
     var pendingIndexes: Set<String> = []
     var jobs: [String: Preparation] = [:]
-    var reservations: Set<UUID> = []
+    let storageBudget = ReferenceStorageBudget()
     var closed = false
     var waiterSessions: [UUID: String] = [:]
     var waiterTimers: [UUID: Task<Void, Never>] = [:]
@@ -148,7 +148,7 @@ actor ReferenceDocumentStore {
             case "release": return try release(request, payload)
             case "abandon": return try abandon(payload)
             case "reconcile": return try reconcile(payload)
-            case "diagnostics": return try json(["status": "ok", "disk_bytes": diskBytes(), "reserved_bytes": Int64(reservations.count) * Self.reservationBytes, "peak_disk_bytes": peakDiskBytes])
+            case "diagnostics": return try json(["status": "ok", "disk_bytes": diskBytes(), "reserved_bytes": storageBudget.reservedBytes, "peak_disk_bytes": peakDiskBytes])
             default: throw ReferenceStoreError.unavailable
             }
         } catch is CancellationError { throw CancellationError() }

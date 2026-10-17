@@ -25,22 +25,23 @@ extension PrepMaterialChunker {
         var lineStart = text.startIndex
         while lineStart < text.endIndex {
             let end = text.unicodeScalars[lineStart...].firstIndex(of: "\n").map { text.unicodeScalars.index(after: $0) } ?? text.endIndex
-            let line = String(text[lineStart..<end]).trimmingCharacters(in: .newlines)
+            let line = text[lineStart..<end]
             let heading = markdown && fence == nil && isMarkdownHeading(line)
+            let blank = line.unicodeScalars.allSatisfy { CharacterSet.whitespacesAndNewlines.contains($0) }
             if heading, hasContent { flush(lineStart) }
-            if heading { section = String(line.unicodeScalars.prefix(256)) }
+            if heading { section = String(String.UnicodeScalarView(line.unicodeScalars.prefix(256))).trimmingCharacters(in: .newlines) }
             let wasInFence = fence != nil
             if markdown, let open = fence {
                 if let close = fenceDelimiter(line), close.marker == open.marker, close.count >= open.count,
-                   close.suffix.trimmingCharacters(in: .whitespaces).isEmpty { fence = nil }
-            } else if markdown, let open = fenceDelimiter(line), open.marker != "`" || !open.suffix.contains("`") {
+                   close.suffix.unicodeScalars.allSatisfy({ CharacterSet.whitespacesAndNewlines.contains($0) }) { fence = nil }
+            } else if markdown, let open = fenceDelimiter(line), open.marker != "`" || !open.suffix.unicodeScalars.contains("`") {
                 if hasContent { flush(lineStart) }
                 fence = (open.marker, open.count)
             }
-            let lineCount = text[lineStart..<end].unicodeScalars.count
+            let lineCount = line.unicodeScalars.count
             if count + lineCount > targetScalars, hasContent, fence == nil, !wasInFence { flush(lineStart) }
             count += lineCount
-            hasContent = hasContent || !line.trimmingCharacters(in: .whitespaces).isEmpty && !heading
+            hasContent = hasContent || !blank && !heading
             // Even a hostile single line/fence has a bounded indexing allocation.
             while count > 16_000 {
                 let cut = text.unicodeScalars.index(start, offsetBy: 16_000)
@@ -50,7 +51,7 @@ extension PrepMaterialChunker {
                 hasContent = remaining > 0
             }
             if count >= targetScalars, fence == nil,
-               wasInFence || line.trimmingCharacters(in: .whitespaces).isEmpty || line.trimmingCharacters(in: .whitespaces).hasPrefix("|") {
+               wasInFence || blank || line.unicodeScalars.drop(while: { CharacterSet.whitespaces.contains($0) }).first == "|" {
                 flush(end)
             }
             lineStart = end

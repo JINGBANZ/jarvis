@@ -46,14 +46,14 @@ struct ReferenceSearchCandidate: Sendable {
             SELECT e.document_id,e.revision_id,e.generation,e.name,p.section,p.text,p.offset,e.scalar_count,
                    -1 AS priority,0 AS score,p.ordinal
             FROM eligible e JOIN passages p ON p.revision_id=e.revision_id AND p.generation=e.generation AND p.ordinal=0
-            WHERE lower(e.name)=lower(?) OR lower(e.name)=lower(?) || ' [' || substr(e.document_id,1,8) || ']'
+            WHERE reference_casefold(e.name)=reference_casefold(?) OR reference_casefold(e.name)=reference_casefold(?) || ' [' || substr(e.document_id,1,8) || ']'
             UNION ALL
             SELECT e.document_id,e.revision_id,e.generation,e.name,p.section,p.text,p.offset,e.scalar_count,
                    0 AS priority,bm25(chunks) AS score,p.ordinal
             FROM chunks JOIN passages p ON p.id=chunks.rowid
             JOIN eligible e ON e.revision_id=p.revision_id AND e.generation=p.generation
             WHERE chunks MATCH ?
-              AND NOT(lower(e.name)=lower(?) OR lower(e.name)=lower(?) || ' [' || substr(e.document_id,1,8) || ']')
+              AND NOT(reference_casefold(e.name)=reference_casefold(?) OR reference_casefold(e.name)=reference_casefold(?) || ' [' || substr(e.document_id,1,8) || ']')
             ORDER BY priority,score,document_id,ordinal LIMIT 4
             """, [ReferenceSearchIndex.version, session, subset, subset, excluded, query, query, expression, query, query]).map { row in
                 guard let document = row[0], let revision = row[1], let generation = row[2], let name = row[3],
@@ -65,7 +65,7 @@ struct ReferenceSearchCandidate: Sendable {
     }
 
     func excerpt(query: String) -> (text: String, offset: Int) {
-        let wanted = Set(ReferenceSearchTokenizer.terms(query).map(\.value))
+        let wanted = ReferenceSearchTokenizer.queryTerms(query)
         let match = ReferenceSearchTokenizer.terms(text).first { wanted.contains($0.value) }?.offset ?? 0
         let scalars = text.unicodeScalars
         let begin = max(0, match - 400)

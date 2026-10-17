@@ -4,7 +4,7 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/test-display.sh
-EXPECTED_CASES=33
+EXPECTED_CASES=34
 EXTRA_ARGS=()
 if [[ "${1:-}" == --quit-only ]]; then
   EXPECTED_CASES=1

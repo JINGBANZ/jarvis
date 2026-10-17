@@ -159,17 +159,21 @@ the limits and processor version live in `ReferenceConversionPool`, `ReferenceSo
 does not reproduce Word layout. Image-only PDFs need OCR, which this reader does not implement.
 RSS sampling can overshoot its threshold and is not a hard OS memory limit. Workers exit when their
 owning helper disappears. Private staging is reclaimed after use or exclusive-owner restart.
-Disk accounting includes SQLite/WAL and staging; cleanup preserves active pins and reports capacity
-failure rather than deleting them. Logical deletion and checkpointing do not promise secure erasure.
+Disk accounting includes SQLite/WAL and staging. `ReferenceStorageBudget` serializes conversion
+reservations with each bounded index write so indexing cannot spend reserved capacity. Cleanup
+preserves active pins and reports capacity failure rather than deleting them. Logical deletion and
+checkpointing do not promise secure erasure.
 
 Ranked retrieval uses complete, versioned passages from the authoritative text. The range-producing
 `PrepMaterialChunker.passages` preserves original Unicode-scalar offsets, CRLF, Markdown sections,
 code fences and table rows, with a hard passage allocation bound. `ReferenceSearchTokenizer` emits
-canonical lowercase word terms, CJK scalar/bigram terms, and punctuation-preserving identifiers.
+canonical Unicode case-folded word terms, CJK scalar/bigram terms, and punctuation-bearing identifiers.
 It encodes those terms for SQLite's ASCII tokenizer, so punctuation is never interpreted as FTS
 syntax and tokenization does not depend on the installed OS's language dictionaries. Ordinary topic
 terms use BM25 disjunction; explicit identifiers require their exact encoded terms, distinguishing
-`C++`, `C#`, `账单-42`, and `账单_42`. Exact frozen display names also have a separate lookup path.
+`C++`, `C#`, `账单-42`, and `账单_42`. Indexing and queries normalize trailing sentence delimiters
+consistently; matching and excerpt anchoring share the selected terms. Exact frozen display names
+have a separate lookup path with the same canonical Unicode case folding.
 This is lexical retrieval; semantically similar paraphrases without shared terms are not guaranteed.
 BM25 corpus statistics can change while pinned document text stays immutable.
 
@@ -196,8 +200,8 @@ app harness additionally prepares 10,000 actual small TXT files and measures com
 checks contact no provider. Production context, tools, Settings, Activity installation and provider
 cache validation remain separate integration work; the development harness does not prove that
 production behavior. Reconnection restores committed text and index generations. Never-converted
-files remain incomplete search coverage until existing read or configuration preparation runs;
-there is no new automatic conversion retry policy.
+files count as incomplete search coverage until a read or configuration preparation converts them.
+Search reports that incomplete coverage without retrying conversion.
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature

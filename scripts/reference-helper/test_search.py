@@ -8,6 +8,7 @@ import sqlite3
 import sys
 import time
 import unittest
+import unicodedata
 import uuid
 
 spec = importlib.util.spec_from_file_location("reference_contracts", Path(__file__).with_name("test_helper.py"))
@@ -120,6 +121,140 @@ class SearchContracts(unittest.TestCase):
         self.assertTrue(result["complete"])
         self.assertTrue(result["truncated"])
         self.assertEqual(len(result["hits"]), 3)
+
+    def test_sentence_punctuation_does_not_select_false_identifiers(self):
+        (self.sources / "Retry.md").write_text("Provider retry backoff guidance docs long word .NET .env")
+        (self.sources / "punctuation.txt").write_text(". / - _ + # ...")
+        self.configure(); self.admit(); self.ready("absenttoken", count=2)
+        for query in ["How does retry backoff work.", "How does retry backoff work...", "retry / backoff .", "docs/", "long-", "word_", ".NET", ".env"]:
+            result = self.search(query)
+            self.assertEqual([hit["name"] for hit in result["hits"]], ["Retry.md"], (query, result))
+        for query in [".", "...", "/", "-", "_", "+", "#"]:
+            self.assertEqual(self.search(query)["hits"], [], query)
+
+    def test_exact_identifier_excerpt_does_not_anchor_on_loose_component(self):
+        fixtures = {query: loose + " " + "unrelated " * 320 + query + " actual evidence"
+                    for loose, query in [("C", "C++"), ("-42", "账单-42"), ("_42", "账单_42")]}
+        for index, text in enumerate(fixtures.values()): (self.sources / f"{index}.txt").write_text(text)
+        self.configure(); self.admit(); self.ready("absenttoken", count=3)
+        for query, text in fixtures.items():
+            result = self.search(query)
+            self.assertEqual(len(result["hits"]), 1, result)
+            hit = result["hits"][0]
+            self.assertIn(query, hit["text"])
+            self.assertEqual(text[hit["offset"]:hit["next_offset"]], hit["text"])
+
+    def test_excerpt_ending_inside_grapheme_uses_scalar_prefix(self):
+        originals = {}
+        for index, boundary in enumerate(["e\u0301", "👩\u200d🚀", "🇺🇸"]):
+            query = f"grapheme{index}"
+            text = query + " " + "x" * (1999 - len(query) - 1) + boundary + " trailing text"
+            originals[query] = text
+            (self.sources / f"{index}.txt").write_text(text)
+        self.configure(); self.admit(); self.ready("absenttoken", count=3)
+        for query, text in originals.items():
+            result = self.search(query)
+            self.assertEqual(len(result["hits"]), 1, result)
+            hit = result["hits"][0]
+            self.assertEqual(hit["next_offset"], 2000)
+            self.assertEqual(hit["text"], text[:2000])
+            self.assertTrue(self.read(hit["document_id"], hit["offset"])["text"].startswith(hit["text"]))
+
+    def test_unicode_exact_names_and_duplicate_fts_suppression(self):
+        (self.sources / "Überblick.md").write_text("filename-only evidence")
+        (self.sources / "Straße.md").write_text("case folding evidence")
+        for folder in ["first", "second"]:
+            location = self.sources / folder
+            location.mkdir()
+            (location / "Übersicht.md").write_text("Übersicht.md repeated " * 300)
+        self.configure(); self.admit(); self.ready("absenttoken", count=4)
+        for query, expected in [("überblick.md", "Überblick.md"), ("u\u0308berblick.md", "Überblick.md"), ("STRASSE.md", "Straße.md")]:
+            self.assertEqual([unicodedata.normalize("NFC", hit["name"]) for hit in self.search(query)["hits"]], [expected])
+            self.assertEqual([unicodedata.normalize("NFC", entry["name"]) for entry in self.result("list", {"query": query})["entries"]], [expected])
+        result = self.search("übersicht.md")
+        self.assertEqual(len(result["hits"]), 2, result)
+        self.assertEqual(len({hit["document_id"] for hit in result["hits"]}), 2)
+        self.assertFalse(result["truncated"], result)
+
+    def test_removed_root_unpinned_markdown_keeps_frozen_format(self):
+        gate = self.gate("index-before-publish")
+        self.prepare("blocked first index")
+        self.arrived("index-before-publish")
+        text = "# Notes\n\n```swift\n# Not a section\nquasar code\n```\n\n| key | value |\n| --- | --- |\n| needle | table |\n\n# Final\nquasar final\n"
+        (self.sources / "Notes.md").write_text(text)
+        self.configure()
+        self.session = str(uuid.uuid4()); self.start = str(uuid.uuid4())
+        catalog = self.admit()
+        key = next(entry["document_id"] for entry in catalog["entries"] if entry["name"] == "Notes.md")
+        deadline = time.monotonic() + 5
+        while True:
+            with sqlite3.connect(self.database) as db:
+                revision = db.execute("SELECT current_revision FROM documents WHERE id=?", (key,)).fetchone()[0]
+            if revision: break
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        self.assertIsNone(self.pins()[key])
+        self.configure(sources=[])
+        gate.unlink()
+        self.ready("absenttoken", count=2)
+        with sqlite3.connect(self.database) as db:
+            passages = db.execute("SELECT section,text FROM passages WHERE revision_id=? ORDER BY ordinal", (revision,)).fetchall()
+        self.assertEqual([section for section, _ in passages], ["# Notes", "# Final"])
+        self.assertTrue(any("```swift\n# Not a section\nquasar code\n```" in passage for _, passage in passages))
+        self.assertIn("| needle | table |", passages[0][1])
+
+    def test_index_respects_reservations_acquired_after_index_start(self):
+        index_gate = self.gate("index-after-batch")
+        key = self.prepare("quasar " + "x " * 20_000)
+        self.arrived("index-after-batch")
+        deadline = time.monotonic() + 5
+        while self.result("diagnostics")["reserved_bytes"]:
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        with sqlite3.connect(self.database) as db:
+            before = db.execute("SELECT count(*) FROM passages").fetchone()[0]
+            db.execute("UPDATE session_documents SET pin=(SELECT current_revision FROM documents WHERE id=?) WHERE session_id=? AND document_id=?", (key, self.session, key))
+        old_session = self.session
+        # Real allocated padding leaves less than one index batch after two 450MiB conversion
+        # reservations. A sparse file would not exercise the allocated-size contract.
+        target = 1024 * 1024 * 1024 - 2 * 450 * 1024 * 1024 - 512 * 1024
+        padding = target - self.result("diagnostics")["disk_bytes"]
+        with (self.root / "store" / "allocated-padding").open("wb") as output:
+            block = bytes(1024 * 1024)
+            while padding:
+                size = min(padding, len(block)); output.write(block[:size]); padding -= size
+        preparation_gate = self.gate("preparation-after-reserve")
+        new_sources = self.root / "new-sources"; new_sources.mkdir()
+        for name in ["first.txt", "second.txt"]: (new_sources / name).write_text("new reference")
+        self.configure(sources=[{"source_id": str(uuid.uuid4()), "path": str(new_sources)}])
+        self.session = str(uuid.uuid4()); self.start = str(uuid.uuid4())
+        catalog = self.admit()
+        self.arrived("preparation-after-reserve")
+        requests = {self.send("read", {"document_id": entry["document_id"], "offset": 0}) for entry in catalog["entries"]}
+        for _ in requests:
+            reply = self.receive(timeout=4)
+            self.assertIn(reply["id"], requests)
+            self.assertEqual(reply["result"]["status"], "preparing", reply)
+        diagnostics = self.result("diagnostics")
+        self.assertEqual(diagnostics["reserved_bytes"], 900 * 1024 * 1024)
+        index_gate.unlink()
+        deadline = time.monotonic() + 5
+        while True:
+            with sqlite3.connect(self.database) as db:
+                state = db.execute("SELECT state FROM search_state WHERE revision_id=(SELECT current_revision FROM documents WHERE id=?)", (key,)).fetchone()[0]
+                after = db.execute("SELECT count(*) FROM passages").fetchone()[0]
+            if state != "preparing": break
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        self.assertEqual(state, "cache_full")
+        self.assertEqual(after, before)
+        diagnostics = self.result("diagnostics")
+        self.assertLessEqual(diagnostics["disk_bytes"] + diagnostics["reserved_bytes"], 1024 * 1024 * 1024)
+        # Content remains readable even though indexing cannot spend the reserved capacity.
+        page = self.read(key, session=old_session)
+        self.assertEqual(page["status"], "ok")
+        self.assertTrue(page["text"].startswith("quasar"))
+        preparation_gate.unlink()
 
     def test_duplicate_basenames_keep_distinct_frozen_ids(self):
         for folder in ["first", "second"]:

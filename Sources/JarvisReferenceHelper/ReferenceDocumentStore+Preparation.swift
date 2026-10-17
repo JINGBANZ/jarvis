@@ -76,6 +76,8 @@ extension ReferenceDocumentStore {
         var revision: String?
         let result: Result<String, Error>
         do {
+            await ReferenceSearchIndex.barrier(home: home, name: "preparation-after-reserve")
+            try Task.checkCancellation()
             let staging = self.staging
             let captureTask = Task.detached(priority: .utility) {
                 try ReferenceSourceCapture.capture(url: source.url, root: source.root, staging: staging, expectedIdentity: source.identity)
@@ -119,7 +121,7 @@ extension ReferenceDocumentStore {
             result = .failure(error)
         }
         if let snapshot { try? FileManager.default.removeItem(at: snapshot) }
-        reservations.remove(token)
+        storageBudget.release(token)
         guard let job = jobs[document], job.token == token else { return }
         jobs.removeValue(forKey: document)
         for (waiter, continuation) in job.waiters {

@@ -7,7 +7,11 @@ public enum ReferenceSearchTokenizer {
         public let endOffset: Int
     }
 
-    public static let version = "unicode-identifier-1"
+    public static let version = "unicode-identifier-2"
+
+    public static func folded(_ value: String) -> String {
+        value.folding(options: .caseInsensitive, locale: Locale(identifier: "en_US_POSIX")).precomposedStringWithCanonicalMapping
+    }
 
     public static func terms(_ text: String) -> [Term] {
         var result: [Term] = []
@@ -16,8 +20,12 @@ public enum ReferenceSearchTokenizer {
         var position = 0
         var previousCJK: (Unicode.Scalar, Int)?
         func emit(_ value: String, _ start: Int, _ end: Int) {
-            guard !value.isEmpty, value.utf8.count <= 2_048 else { return }
-            result.append(Term(value: value.precomposedStringWithCanonicalMapping.lowercased(), offset: start, endOffset: end))
+            let scalars = value.unicodeScalars
+            let trimmed = scalars.reversed().drop(while: { "._-/".unicodeScalars.contains($0) }).reversed()
+            guard trimmed.contains(where: { CharacterSet.alphanumerics.contains($0) }) else { return }
+            let text = String(String.UnicodeScalarView(trimmed))
+            guard text.utf8.count <= 2_048 else { return }
+            result.append(Term(value: folded(text), offset: start, endOffset: end - (scalars.count - trimmed.count)))
         }
         func flush() {
             guard !word.isEmpty else { return }
@@ -90,20 +98,31 @@ public enum ReferenceSearchTokenizer {
 
     public static func indexedText(_ text: String) -> String { terms(text).map { encoded($0.value) }.joined(separator: " ") }
 
-    public static func matchExpression(_ query: String) -> String? {
+    public static func queryTerms(_ query: String) -> Set<String> {
         let terms = terms(query)
-        let identifiers = Set(terms.filter { term in
-            term.value.unicodeScalars.contains(where: { "_+-#./".unicodeScalars.contains($0) })
-                && term.value.unicodeScalars.contains(where: { CharacterSet.alphanumerics.contains($0) })
+        let identifierTerms = terms.filter { isIdentifier($0.value) }
+        let identifiers = Set(identifierTerms.filter { term in
+            !identifierTerms.contains { other in
+                other.offset <= term.offset && other.endOffset >= term.endOffset
+                    && (other.offset < term.offset || other.endOffset > term.endOffset)
+            }
         }.map(\.value))
         // An explicit identifier must match exactly; its loose component terms cannot satisfy it.
         let cjkPairs = terms.filter { $0.value.unicodeScalars.count == 2 && $0.value.unicodeScalars.allSatisfy(isCJK) }
         let ordinary = terms.filter { term in
             cjkPairs.isEmpty || !(term.value.unicodeScalars.count == 1 && term.value.unicodeScalars.allSatisfy(isCJK))
         }
-        let selected = identifiers.isEmpty ? Set(ordinary.map(\.value)) : identifiers
+        return identifiers.isEmpty ? Set(ordinary.map(\.value)) : identifiers
+    }
+
+    public static func matchExpression(_ query: String) -> String? {
+        let selected = queryTerms(query)
         guard !selected.isEmpty else { return nil }
-        return selected.sorted().map { "\"" + encoded($0) + "\"" }.joined(separator: identifiers.isEmpty ? " OR " : " AND ")
+        return selected.sorted().map { "\"" + encoded($0) + "\"" }.joined(separator: selected.contains(where: isIdentifier) ? " AND " : " OR ")
+    }
+
+    private static func isIdentifier(_ value: String) -> Bool {
+        value.unicodeScalars.contains(where: { "_+-#./".unicodeScalars.contains($0) })
     }
 
     private static func isCJK(_ scalar: Unicode.Scalar) -> Bool {

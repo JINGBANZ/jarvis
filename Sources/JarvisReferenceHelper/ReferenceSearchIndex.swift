@@ -52,7 +52,7 @@ struct ReferenceSearchIndex {
         }
     }
 
-    static func write(databasePath: String, home: URL, revision: String, generation: String, markdown: Bool) async throws {
+    static func write(databasePath: String, home: URL, revision: String, generation: String, markdown: Bool, budget: ReferenceStorageBudget) async throws {
         let text = try ReferenceRevisionPage.fullText(databasePath: databasePath, revision: revision)
         let db = try ReferenceDatabase(path: databasePath)
         while let row = try db.rows("SELECT id FROM passages WHERE revision_id=? AND generation<>? LIMIT 64", [revision, generation]).first,
@@ -69,12 +69,13 @@ struct ReferenceSearchIndex {
             try Task.checkCancellation()
             let original = String(text[passage.range])
             let tokens = ReferenceSearchTokenizer.indexedText(original)
-            try ensureSpace(home: home, bytes: tokens.utf8.count + original.utf8.count)
-            try db.transaction {
-                try requireGeneration(db, revision: revision, generation: generation)
-                try db.execute("INSERT INTO passages(revision_id,generation,ordinal,offset,end_offset,section,text) VALUES(?,?,?,?,?,?,?)", [revision, generation, String(ordinal), String(passage.offset), String(passage.offset + original.unicodeScalars.count), passage.section, original])
-                let rowID = try db.scalar("SELECT last_insert_rowid()")
-                try db.execute("INSERT INTO chunks(rowid,revision_id,generation,text) VALUES(?,?,?,?)", [rowID, revision, generation, tokens])
+            try budget.write(home: home, bytes: tokens.utf8.count + original.utf8.count) {
+                try db.transaction {
+                    try requireGeneration(db, revision: revision, generation: generation)
+                    try db.execute("INSERT INTO passages(revision_id,generation,ordinal,offset,end_offset,section,text) VALUES(?,?,?,?,?,?,?)", [revision, generation, String(ordinal), String(passage.offset), String(passage.offset + original.unicodeScalars.count), passage.section, original])
+                    let rowID = try db.scalar("SELECT last_insert_rowid()")
+                    try db.execute("INSERT INTO chunks(rowid,revision_id,generation,text) VALUES(?,?,?,?)", [rowID, revision, generation, tokens])
+                }
             }
             await barrier(home: home, name: "index-after-batch")
         }
@@ -90,16 +91,6 @@ struct ReferenceSearchIndex {
 
     static func requireGeneration(_ db: ReferenceDatabase, revision: String, generation: String) throws {
         guard try db.scalar("SELECT 1 FROM search_state s JOIN revisions r ON r.id=s.revision_id AND r.ready=1 WHERE s.revision_id=? AND s.generation=? AND s.version=? AND s.state='preparing'", [revision, generation, version]) != nil else { throw ReferenceStoreError.superseded }
-    }
-
-    private static func ensureSpace(home: URL, bytes: Int) throws {
-        var total: Int64 = 0
-        if let entries = FileManager.default.enumerator(at: home, includingPropertiesForKeys: [.totalFileAllocatedSizeKey]) {
-            for case let url as URL in entries { total += Int64((try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0) }
-        }
-        guard total + Int64(bytes) * 8 + 1_048_576 < ReferenceDocumentStore.cacheTarget else { throw ReferenceStoreError.cache_full }
-        var volume = statfs()
-        guard statfs(home.path, &volume) == 0, UInt64(volume.f_bavail) * UInt64(volume.f_bsize) > UInt64(bytes) * 8 + 1_048_576 else { throw ReferenceStoreError.disk_full }
     }
 
     static func barrier(home: URL, name: String) async {

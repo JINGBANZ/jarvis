@@ -76,13 +76,6 @@ extension ReferenceDocumentStore {
         try db.execute("PRAGMA incremental_vacuum(256)")
     }
     func reserve(_ token: UUID) throws {
-        guard reservations.count < 2 else { throw ReferenceStoreError.preparing }
-        let required = Int64(reservations.count + 1) * Self.reservationBytes
-        if diskBytes() + required > Self.cacheTarget { try cleanup(pressure: true) }
-        guard diskBytes() + required <= Self.cacheTarget else { throw ReferenceStoreError.cache_full }
-        var volume = statfs()
-        guard statfs(home.path, &volume) == 0 else { throw ReferenceStoreError.disk_full }
-        guard UInt64(volume.f_bavail) * UInt64(volume.f_bsize) >= UInt64(required) else { throw ReferenceStoreError.disk_full }
-        reservations.insert(token)
+        try storageBudget.reserve(token, home: home, diskBytes: { diskBytes() }, cleanup: { try cleanup(pressure: true) })
     }
 }

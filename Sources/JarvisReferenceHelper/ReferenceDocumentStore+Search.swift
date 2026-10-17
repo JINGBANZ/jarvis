@@ -38,7 +38,7 @@ extension ReferenceDocumentStore {
                     try await validateSearchCandidate(candidate, session: session)
                     let excerpt = candidate.excerpt(query: query)
                     let page = try await pageForPinnedRevision(id: candidate.revision, offset: excerpt.offset)
-                    guard page.text.hasPrefix(excerpt.text), page.totalScalars == candidate.total else { throw ReferenceStoreError.unavailable }
+                    guard page.text.unicodeScalars.starts(with: excerpt.text.unicodeScalars), page.totalScalars == candidate.total else { throw ReferenceStoreError.unavailable }
                     guard let documentID = UUID(uuidString: candidate.document) else { throw ReferenceStoreError.unavailable }
                     finalized.append((candidate, ReferenceSearchHit(documentID: documentID, revisionID: candidate.revision,
                         name: candidate.name, section: candidate.section, text: excerpt.text, offset: excerpt.offset,

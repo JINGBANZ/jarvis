@@ -20,10 +20,10 @@ extension ReferenceDocumentStore {
                     try db.execute("UPDATE revisions SET search_ready=0 WHERE id=?", [revision])
                     try db.execute("INSERT INTO search_state(revision_id,generation,version,state) VALUES(?,?,?,'preparing') ON CONFLICT(revision_id) DO UPDATE SET generation=excluded.generation,version=excluded.version,state='preparing'", [revision, generation, ReferenceSearchIndex.version])
                 }
-                let markdown = try db.scalar("SELECT 1 FROM session_documents WHERE pin=? AND format='md' UNION ALL SELECT 1 FROM metadata m JOIN documents d ON d.id=m.document_id WHERE d.current_revision=? AND m.format='md' LIMIT 1", [revision, revision]) != nil
-                let path = databasePath, directory = home
+                let markdown = try db.scalar("SELECT 1 FROM revisions r JOIN session_documents sd ON sd.document_id=r.document_id WHERE r.id=? AND sd.format='md' UNION ALL SELECT 1 FROM revisions r JOIN metadata m ON m.document_id=r.document_id WHERE r.id=? AND m.format='md' LIMIT 1", [revision, revision]) != nil
+                let path = databasePath, directory = home, budget = storageBudget
                 let task = Task.detached(priority: .utility) {
-                    try await ReferenceSearchIndex.write(databasePath: path, home: directory, revision: revision, generation: generation, markdown: markdown)
+                    try await ReferenceSearchIndex.write(databasePath: path, home: directory, revision: revision, generation: generation, markdown: markdown, budget: budget)
                 }
                 indexTask = Task {
                     do { try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() } }
