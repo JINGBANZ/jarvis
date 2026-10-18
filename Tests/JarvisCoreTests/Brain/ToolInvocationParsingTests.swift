@@ -51,10 +51,10 @@ import Testing
         #expect(valid != nil)
         for arguments in [
             #"{"document_id":"","offset":0}"#,
-            #"{"document_id":"id","offset":-1}"#,
-            #"{"document_id":"id","offset":1.5}"#,
-            #"{"document_id":"id","offset":true}"#,
-            #"{"document_id":"id","offset":"zero"}"#,
+            #"{"document_id":"00000000-0000-0000-0000-000000000001","offset":-1}"#,
+            #"{"document_id":"00000000-0000-0000-0000-000000000001","offset":1.5}"#,
+            #"{"document_id":"00000000-0000-0000-0000-000000000001","offset":true}"#,
+            #"{"document_id":"00000000-0000-0000-0000-000000000001","offset":"zero"}"#,
         ] {
             #expect(ToolInvocation.parse(callId: "read", name: "read_reference",
                                         argumentsJSON: arguments) == nil)
