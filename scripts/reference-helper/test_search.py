@@ -105,6 +105,90 @@ class SearchContracts(unittest.TestCase):
         result = self.search("How does retry backoff work?")
         self.assertEqual(names[result["hits"][0]["document_id"]], "Payment.md")
 
+    def test_identifier_topics_influence_ranking_without_broadening_matches(self):
+        fixtures = {"noise.txt": "client-side " * 8 + "unrelated " * 20,
+                    "topic.txt": "client-side cancellation cancellation cancellation guidance " + "ordinary " * 20,
+                    "spaces.txt": "client side cancellation cancellation cancellation",
+                    "other.txt": "unrelated supporting corpus words"}
+        for name, text in fixtures.items(): (self.sources / name).write_text(text)
+        self.configure(); self.admit(); self.ready("absenttoken", count=len(fixtures))
+        result = self.search("client-side cancellation")
+        self.assertEqual(result["hits"][0]["name"], "topic.txt", result)
+        self.assertEqual({hit["name"] for hit in result["hits"]}, {"noise.txt", "topic.txt"})
+        for query in ["client_side cancellation", "client--side cancellation", "client/side cancellation"]:
+            self.assertEqual(self.search(query)["hits"], [], query)
+
+    def test_identifier_topics_preserve_every_required_identifier(self):
+        fixtures = {"both.txt": "cache-key parser.v2 cancellation",
+                    "underscore.txt": "cache-key parser_v2 cancellation " * 20,
+                    "spaces.txt": "cache key parser.v2 cancellation " * 20,
+                    "other.txt": "cache-key parser v2 cancellation " * 20}
+        for name, text in fixtures.items(): (self.sources / name).write_text(text)
+        self.configure(); self.admit(); self.ready("absenttoken", count=len(fixtures))
+        for query, expected in [("cache-key parser.v2 cancellation", "both.txt"),
+                                ("cache-key parser_v2 cancellation", "underscore.txt")]:
+            self.assertEqual([hit["name"] for hit in self.search(query)["hits"]], [expected], query)
+        self.assertEqual(self.search("cache-key parser-v2 cancellation")["hits"], [])
+
+    def test_disappearing_staging_entry_does_not_fail_index_write(self):
+        (self.root / "store" / "budget-test-disappearance").write_text("enabled")
+        disappearing = self.root / "store" / "budget-test-entry"
+        disappearing.write_text("temporary staging bytes")
+        key = self.prepare("quasar authoritative evidence")
+        self.assertTrue(self.ready("quasar", count=1)["hits"])
+        self.assertFalse(disappearing.exists())
+        self.assertIsNotNone(self.pins()[key])
+
+    def test_first_readiness_timeout_keeps_frozen_scope_and_generation(self):
+        for name in ["one.txt", "two.txt"]:
+            (self.sources / name).write_text("quasar " + name)
+        self.configure(); catalog = self.admit(); self.ready("absenttoken", count=2)
+        keys = [entry["document_id"] for entry in catalog["entries"]]
+        with sqlite3.connect(self.database) as db:
+            for index in range(1000):
+                document = str(uuid.uuid4())
+                path = f"/deadline-fixture/{index}.txt"
+                db.execute("INSERT INTO documents VALUES(?,?,?,1,NULL)", (document, path, "fixture"))
+                db.execute("INSERT INTO session_documents VALUES(?,?,?,?,?,?,?,NULL)", (self.session, document, str(index), "txt", path, "/deadline-fixture", "fixture"))
+        gate = self.gate("search-before-readiness-query")
+        for subset, count in [(None, 1002), ([keys[0]], 1), ([], 0), ([str(uuid.uuid4())], 0)]:
+            result = self.search("quasar", subset)
+            self.assertEqual(result["hits"], [], result)
+            self.assertEqual(result["coverage"]["eligible_documents"], count, result)
+            self.assertEqual(result["coverage"]["metadata_generation"], self.generation, result)
+            self.assertEqual(result["coverage"]["searched_documents"], 0, result)
+            if count:
+                self.assertFalse(result["complete"], result)
+                self.assertEqual(result["coverage"]["omissions"], {"deadline": count}, result)
+            self.assertTrue(all(pin is None for pin in self.pins().values()))
+        with sqlite3.connect(self.database) as db:
+            db.execute("DELETE FROM session_documents WHERE path LIKE '/deadline-fixture/%'")
+            db.execute("DELETE FROM documents WHERE path LIKE '/deadline-fixture/%'")
+        gate.unlink()
+        self.assertTrue(self.search("quasar")["complete"])
+
+    def test_page_deadline_is_partial_without_source_failure_or_first_pin(self):
+        key = self.prepare("quasar " + "x" * 600_000)
+        self.ready("absenttoken", count=1)
+        with sqlite3.connect(self.database) as db:
+            revision = db.execute("SELECT current_revision FROM documents WHERE id=?", (key,)).fetchone()[0]
+            part, original = db.execute("SELECT part,bytes FROM content_parts WHERE revision_id=? ORDER BY part DESC LIMIT 1", (revision,)).fetchone()
+            db.execute("UPDATE content_parts SET bytes=? WHERE revision_id=? AND part=?", (b"z" * len(original), revision, part))
+        gate = self.gate("search-page-part")
+        started = time.monotonic()
+        result = self.search("quasar")
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertEqual(result["hits"], [], result)
+        self.assertFalse(result["complete"], result)
+        self.assertEqual(result["coverage"]["omissions"], {"deadline": 1}, result)
+        self.assertIsNone(self.pins()[key])
+        with sqlite3.connect(self.database) as db:
+            db.execute("UPDATE content_parts SET bytes=? WHERE revision_id=? AND part=?", (original, revision, part))
+        # An ordinary read does not inherit the search budget or its test barrier.
+        self.assertEqual(self.read(key)["status"], "ok")
+        gate.unlink()
+        self.assertTrue(self.search("quasar")["complete"])
+
     def test_empty_foreign_subset_and_eligibility_before_top_k(self):
         for i in range(7):
             (self.sources / f"{i}.txt").write_text(("quasar " * (20-i)) + f"document {i}")
@@ -258,6 +342,14 @@ class SearchContracts(unittest.TestCase):
         self.configure()
         self.session = str(uuid.uuid4()); self.start = str(uuid.uuid4())
         self.assertEqual(self.admit()["entries"][0]["document_id"], key)
+        # The previous capture can remain search-ready while the renamed source prepares.
+        deadline = time.monotonic() + 5
+        while True:
+            with sqlite3.connect(self.database) as db:
+                current = db.execute("SELECT r.id,r.search_ready FROM documents d JOIN revisions r ON r.id=d.current_revision WHERE d.id=?", (key,)).fetchone()
+            if current and current[0] != old_hit["revision_id"] and current[1]: break
+            self.assertLess(time.monotonic(), deadline, current)
+            time.sleep(.01)
         self.ready("absenttoken", count=1)
         new_hit = self.search("quasar")["hits"][0]
         self.assertNotEqual(new_hit["revision_id"], old_hit["revision_id"])

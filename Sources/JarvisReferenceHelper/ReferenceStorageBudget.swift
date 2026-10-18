@@ -25,9 +25,24 @@ final class ReferenceStorageBudget: Sendable {
         try reservations.withLockUnchecked { active in
             var allocated: Int64 = 0
             if let files = FileManager.default.enumerator(at: home, includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey]) {
-                for case let url as URL in files {
-                    let values = try url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
-                    if values.isRegularFile == true { allocated += Int64(values.totalFileAllocatedSize ?? 0) }
+                for case var url as URL in files {
+                    #if JARVIS_LIVE_E2E
+                    if url.lastPathComponent == "budget-test-entry", FileManager.default.fileExists(atPath: home.appendingPathComponent("budget-test-disappearance").path) {
+                        try FileManager.default.removeItem(at: url)
+                        url.removeAllCachedResourceValues()
+                    }
+                    #endif
+                    do {
+                        let values = try url.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .isRegularFileKey])
+                        if values.isRegularFile == true { allocated += Int64(values.totalFileAllocatedSize ?? 0) }
+                    } catch {
+                        let failure = error as NSError
+                        // Preparation can remove its snapshot after enumeration, outside this lock.
+                        if failure.domain == NSCocoaErrorDomain,
+                           failure.code == NSFileNoSuchFileError || failure.code == NSFileReadNoSuchFileError { continue }
+                        if failure.domain == NSPOSIXErrorDomain, failure.code == Int(ENOENT) { continue }
+                        throw error
+                    }
                 }
             }
             let required = Int64(active.count) * ReferenceDocumentStore.reservationBytes + Int64(bytes) * 8 + 1_048_576

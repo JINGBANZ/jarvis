@@ -30,6 +30,19 @@ struct ReferenceSearchTests {
         }
     }
 
+    @Test func identifierTopicsRankWithoutChangingExcerptAnchors() throws {
+        #expect(ReferenceSearchTokenizer.queryTerms("client-side cancellation") == ["client-side"])
+        #expect(ReferenceSearchTokenizer.queryTerms("cache-key parser.v2 cancellation") == ["cache-key", "parser.v2"])
+        let mixed = try #require(ReferenceSearchTokenizer.matchExpression("client-side cancellation"))
+        #expect(mixed.contains("\"" + ReferenceSearchTokenizer.encoded("cancellation") + "\""))
+        #expect(!mixed.contains("\"" + ReferenceSearchTokenizer.encoded("client") + "\""))
+        #expect(!mixed.contains("\"" + ReferenceSearchTokenizer.encoded("side") + "\""))
+        let chinese = try #require(ReferenceSearchTokenizer.matchExpression("账单-42 失败退款"))
+        #expect(chinese.contains("\"" + ReferenceSearchTokenizer.encoded("失败") + "\""))
+        #expect(!chinese.contains("\"" + ReferenceSearchTokenizer.encoded("失") + "\""))
+        #expect(ReferenceSearchTokenizer.queryTerms("账单-42 失败退款") == ["账单-42"])
+    }
+
     @Test func sentencePunctuationAndIdentifierRangesStayConsistent() throws {
         #expect(ReferenceSearchTokenizer.matchExpression("How does retry backoff work.") == ReferenceSearchTokenizer.matchExpression("How does retry backoff work"))
         for (punctuated, word) in [("docs/", "docs"), ("long-", "long"), ("word_", "word")] {

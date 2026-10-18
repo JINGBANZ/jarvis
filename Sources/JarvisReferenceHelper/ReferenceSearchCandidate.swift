@@ -12,7 +12,7 @@ struct ReferenceSearchCandidate: Sendable {
     let total: Int
 
     static func query(databasePath: String, session: String, subset: String?, excluded: String,
-                      expression: String, query: String, deadline: ContinuousClock.Instant) throws -> ReferenceSearchBatch {
+                      expression: String, query: String, deadline: ContinuousClock.Instant) async throws -> ReferenceSearchBatch {
         let db = try ReferenceDatabase(path: databasePath, readOnly: true)
         // Progress cancellation bounds expensive postings/ranking as well as IPC wait time.
         let cancellation = ReferenceQueryBudget(deadline: deadline)
@@ -20,6 +20,10 @@ struct ReferenceSearchCandidate: Sendable {
         defer { cancellation.remove(from: db) }
         try db.execute("BEGIN")
         defer { try? db.execute("ROLLBACK") }
+        #if JARVIS_LIVE_E2E
+        await ReferenceSearchIndex.barrier(home: URL(fileURLWithPath: databasePath).deletingLastPathComponent(), name: "search-before-readiness-query", deadline: deadline)
+        #endif
+        try cancellation.check()
         let states = try db.rows("""
             SELECT sd.document_id,CASE WHEN r.id IS NULL THEN 'preparing'
               WHEN s.state='ready' AND s.version=? AND r.search_ready=1 THEN 'ready'

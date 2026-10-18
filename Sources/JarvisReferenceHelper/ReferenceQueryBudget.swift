@@ -2,8 +2,15 @@ import Foundation
 import SQLite3
 
 final class ReferenceQueryBudget {
+    enum Failure: Error { case deadline }
+
     let deadline: ContinuousClock.Instant
     init(deadline: ContinuousClock.Instant) { self.deadline = deadline }
+
+    func check() throws {
+        try Task.checkCancellation()
+        guard ContinuousClock.now < deadline else { throw Failure.deadline }
+    }
 
     func install(on database: ReferenceDatabase) {
         sqlite3_progress_handler(database.handle, 1_000, { context in

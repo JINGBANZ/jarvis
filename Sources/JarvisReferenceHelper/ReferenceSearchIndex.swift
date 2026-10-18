@@ -96,12 +96,13 @@ struct ReferenceSearchIndex {
         guard try db.scalar("SELECT 1 FROM search_state s JOIN revisions r ON r.id=s.revision_id AND r.ready=1 WHERE s.revision_id=? AND s.generation=? AND s.version=? AND s.state='preparing'", [revision, generation, version]) != nil else { throw ReferenceStoreError.superseded }
     }
 
-    static func barrier(home: URL, name: String) async {
+    static func barrier(home: URL, name: String, deadline: ContinuousClock.Instant? = nil) async {
         #if JARVIS_LIVE_E2E
         let gate = home.appendingPathComponent(name)
         guard FileManager.default.fileExists(atPath: gate.path) else { return }
         try? Data().write(to: home.appendingPathComponent(name + "-arrived"))
-        while FileManager.default.fileExists(atPath: gate.path), !Task.isCancelled {
+        while FileManager.default.fileExists(atPath: gate.path), !Task.isCancelled,
+              deadline.map({ ContinuousClock.now < $0 }) ?? true {
             do { try await Task.sleep(for: .milliseconds(10)) } catch { return }
         }
         #endif

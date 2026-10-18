@@ -175,8 +175,9 @@ canonical Unicode case-folded word terms, CJK scalar/bigram terms, and punctuati
 It encodes those terms for SQLite's ASCII tokenizer, so punctuation is never interpreted as FTS
 syntax and tokenization does not depend on the installed OS's language dictionaries. Ordinary topic
 terms use BM25 disjunction; explicit identifiers require their exact encoded terms, distinguishing
-`C++`, `C#`, `账单-42`, and `账单_42`. Indexing and queries normalize trailing sentence delimiters
-consistently; matching and excerpt anchoring share the selected terms. Exact frozen display names
+`C++`, `C#`, `账单-42`, and `账单_42`. Topic words outside identifier spans influence BM25 ranking
+without relaxing required identifiers; excerpts keep their identifier anchors. Indexing and queries
+normalize trailing sentence delimiters consistently. Exact frozen display names
 have a separate lookup path with the same canonical Unicode case folding.
 Exact-name evidence includes empty readable revisions and uses the same durable pin contract.
 This is lexical retrieval; semantically similar paraphrases without shared terms are not guaranteed.
@@ -184,7 +185,11 @@ BM25 corpus statistics can change while pinned document text stays immutable.
 
 `ReferenceSearchCandidate` joins frozen session membership and the selected pinned/current revision
 before ordering or limiting hits. Optional document filters use a bound JSON relation; an empty
-filter stays empty. Ranking and typed readiness coverage share one SQLite read snapshot. Results
+filter stays empty. Ranking and typed readiness coverage share one SQLite read snapshot. If the first
+query exhausts its budget, coverage retains the frozen filtered membership count and metadata
+generation, with deadline omissions instead of an empty scope. The same absolute search deadline
+bounds evidence-page scanning and hashing; expiry returns partial coverage without first-use pins.
+Ordinary reads keep their separate read contract. Results
 carry display names, sections, original offsets and bounded original text; readiness omissions are
 separate from top-three truncation. Only candidate sources are checked before first-use pinning,
 including a final check after all evidence pages load, without hashing the whole corpus on each query.

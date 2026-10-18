@@ -99,7 +99,10 @@ public enum ReferenceSearchTokenizer {
     public static func indexedText(_ text: String) -> String { terms(text).map { encoded($0.value) }.joined(separator: " ") }
 
     public static func queryTerms(_ query: String) -> Set<String> {
-        let terms = terms(query)
+        queryTerms(terms(query))
+    }
+
+    private static func queryTerms(_ terms: [Term]) -> Set<String> {
         let identifierTerms = terms.filter { isIdentifier($0.value) }
         let identifiers = Set(identifierTerms.filter { term in
             !identifierTerms.contains { other in
@@ -116,9 +119,20 @@ public enum ReferenceSearchTokenizer {
     }
 
     public static func matchExpression(_ query: String) -> String? {
-        let selected = queryTerms(query)
+        let terms = terms(query)
+        let selected = queryTerms(terms)
         guard !selected.isEmpty else { return nil }
-        return selected.sorted().map { "\"" + encoded($0) + "\"" }.joined(separator: selected.contains(where: isIdentifier) ? " AND " : " OR ")
+        let identifiers = selected.contains(where: isIdentifier)
+        let required = selected.sorted().map { "\"" + encoded($0) + "\"" }.joined(separator: identifiers ? " AND " : " OR ")
+        guard identifiers else { return required }
+        let ranges = terms.filter { selected.contains($0.value) }
+        let topics = queryTerms(terms.filter { term in
+            !ranges.contains { $0.offset <= term.offset && $0.endOffset >= term.endOffset }
+        })
+        guard !topics.isEmpty else { return required }
+        let ranked = selected.union(topics).sorted().map { "\"" + encoded($0) + "\"" }.joined(separator: " OR ")
+        // Required identifiers keep eligibility exact; the always-satisfied group adds topic scores.
+        return "(" + required + ") AND (" + ranked + ")"
     }
 
     private static func isIdentifier(_ value: String) -> Bool {

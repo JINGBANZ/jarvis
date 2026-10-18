@@ -10,15 +10,22 @@ extension ReferenceDocumentStore {
         guard (payload.document_ids?.count ?? 0) <= 2_000 else { throw ReferenceStoreError.limit_exceeded }
         let subset = try payload.document_ids.map { String(decoding: try JSONEncoder().encode($0.map { $0.uuidString.lowercased() }), as: UTF8.self) }
         let expression = ReferenceSearchTokenizer.matchExpression(query) ?? "\"t0\""
-        var lastBatch = ReferenceSearchBatch(candidates: [], states: [], metadataGeneration: 0)
+        guard let generation = try db.scalar("SELECT generation FROM sessions WHERE id=?", [session]).flatMap(Int.init),
+              let eligible = try db.scalar("SELECT count(*) FROM session_documents WHERE session_id=? AND (? IS NULL OR document_id IN (SELECT value FROM json_each(?)))", [session, subset, subset]).flatMap(Int.init) else { throw ReferenceStoreError.unavailable }
+        if eligible == 0 {
+            return try encodeSearchResult(ReferenceSearchResult(hits: [], complete: true, truncated: false,
+                coverage: ReferenceSearchCoverage(eligibleDocuments: 0, searchedDocuments: 0, omissions: [:],
+                    metadataGeneration: generation, indexVersion: ReferenceSearchIndex.version)))
+        }
+        var lastBatch: ReferenceSearchBatch?
         var excluded: [String: String] = [:]
-        while ContinuousClock.now < deadline {
+        searchLoop: while ContinuousClock.now < deadline {
             try Task.checkCancellation()
             _ = try requireSession(request, payload)
             let path = databasePath
             let exclusion = String(decoding: try JSONEncoder().encode(excluded.keys.sorted()), as: UTF8.self)
             let lookup = Task.detached(priority: .userInitiated) {
-                return try ReferenceSearchCandidate.query(databasePath: path, session: session, subset: subset,
+                return try await ReferenceSearchCandidate.query(databasePath: path, session: session, subset: subset,
                                                           excluded: exclusion, expression: expression, query: query, deadline: deadline)
             }
             let batch: ReferenceSearchBatch
@@ -37,15 +44,17 @@ extension ReferenceDocumentStore {
                 do {
                     try await validateSearchCandidate(candidate, session: session)
                     let excerpt = candidate.excerpt(query: query)
-                    let page = try await pageForPinnedRevision(id: candidate.revision, offset: excerpt.offset)
+                    let page = try await pageForPinnedRevision(id: candidate.revision, offset: excerpt.offset, deadline: deadline)
                     guard page.text.unicodeScalars.starts(with: excerpt.text.unicodeScalars), page.totalScalars == candidate.total else { throw ReferenceStoreError.unavailable }
                     guard let documentID = UUID(uuidString: candidate.document) else { throw ReferenceStoreError.unavailable }
                     finalized.append((candidate, ReferenceSearchHit(documentID: documentID, revisionID: candidate.revision,
                         name: candidate.name, section: candidate.section, text: excerpt.text, offset: excerpt.offset,
                         nextOffset: excerpt.offset + excerpt.text.unicodeScalars.count, totalScalars: candidate.total)))
                 } catch is CancellationError { throw CancellationError() }
+                catch ReferenceQueryBudget.Failure.deadline { break searchLoop }
                 catch ReferenceStoreError.superseded { retry = true }
                 catch {
+                    if ContinuousClock.now >= deadline { break searchLoop }
                     excluded[candidate.document] = (error as? ReferenceStoreError)?.rawValue ?? (error as? ReferenceConversionError)?.rawValue ?? "unavailable"
                     retry = true
                 }
@@ -88,7 +97,13 @@ extension ReferenceDocumentStore {
             }
             return try searchResult(session: session, batch: batch, hits: finalized.map(\.1), truncated: candidates.count > 3, excluded: excluded)
         }
-        return try searchResult(session: session, batch: lastBatch, hits: [], truncated: false, excluded: excluded, timedOut: true)
+        if let lastBatch {
+            return try searchResult(session: session, batch: lastBatch, hits: [], truncated: false, excluded: excluded, timedOut: true)
+        }
+        try requireActiveSession(session)
+        return try encodeSearchResult(ReferenceSearchResult(hits: [], complete: false, truncated: false,
+            coverage: ReferenceSearchCoverage(eligibleDocuments: eligible, searchedDocuments: 0, omissions: ["deadline": eligible],
+                metadataGeneration: generation, indexVersion: ReferenceSearchIndex.version)))
     }
 
     func validateSearchCandidate(_ candidate: ReferenceSearchCandidate, session: String) async throws {
@@ -137,6 +152,10 @@ extension ReferenceDocumentStore {
         let result = ReferenceSearchResult(hits: hits, complete: omissions.isEmpty, truncated: truncated,
             coverage: ReferenceSearchCoverage(eligibleDocuments: batch.states.count, searchedDocuments: searched,
                 omissions: omissions, metadataGeneration: batch.metadataGeneration, indexVersion: ReferenceSearchIndex.version))
+        return try encodeSearchResult(result)
+    }
+
+    func encodeSearchResult(_ result: ReferenceSearchResult) throws -> Data {
         let encoded = try JSONEncoder().encode(result)
         var object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
         object["status"] = result.complete ? "ok" : "partial"

@@ -1,13 +1,13 @@
 import Foundation
 
 extension ReferenceDocumentStore {
-    func pageForPinnedRevision(id: String, offset: Int) async throws -> ReferenceRevisionPage {
+    func pageForPinnedRevision(id: String, offset: Int, deadline: ContinuousClock.Instant? = nil) async throws -> ReferenceRevisionPage {
         guard pageReaders < 2 else { throw ReferenceStoreError.preparing }
         pageReaders += 1
         defer { pageReaders -= 1 }
         let path = databasePath
         let loader = Task.detached(priority: .userInitiated) {
-            try ReferenceRevisionPage.load(databasePath: path, revision: id, offset: offset)
+            try await ReferenceRevisionPage.load(databasePath: path, revision: id, offset: offset, deadline: deadline)
         }
         return try await withTaskCancellationHandler { try await loader.value } onCancel: { loader.cancel() }
     }
