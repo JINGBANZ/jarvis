@@ -4,13 +4,16 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/test-display.sh
-EXPECTED_CASES=34
+EXPECTED_CASES=41
 EXTRA_ARGS=()
 if [[ "${1:-}" == --quit-only ]]; then
   EXPECTED_CASES=1
   EXTRA_ARGS+=(--reference-harness-quit-only)
+elif [[ "${1:-}" =~ ^REF0[1-7]$ ]]; then
+  EXPECTED_CASES=2
+  EXTRA_ARGS+=(--reference-harness-case "$1")
 elif (( $# > 0 )); then
-  echo "usage: $0 [--quit-only]" >&2
+  echo "usage: $0 [REF01|REF02|REF03|REF04|REF05|REF06|REF07|--quit-only]" >&2
   exit 2
 fi
 ./scripts/build-app.sh debug
@@ -31,16 +34,22 @@ cleanup() {
 import os, signal, subprocess, sys, time
 from pathlib import Path
 root, app = map(Path, sys.argv[1:3])
-app_command = str(app / 'Contents/MacOS/JarvisApp') + ' --reference-harness --reference-harness-output ' + str(root)
-if sys.argv[3] == '1': app_command += ' --reference-harness-quit-only'
+def aliases(path):
+    value = str(path)
+    return {value, value.replace('/private/tmp/', '/tmp/', 1)} if value.startswith('/private/tmp/') else {value}
+app_commands = [executable + ' --reference-harness --reference-harness-output ' + directory
+                for executable in aliases(app / 'Contents/MacOS/JarvisApp') for directory in aliases(root)]
+if sys.argv[3] == '1': app_commands = [command + ' --reference-harness-quit-only' for command in app_commands]
 helper = app / 'Contents/Resources/ReferenceHelper'
-prefixes = [str(helper / 'JarvisReferenceHelper') + ' ' + str(root) + '/']
+prefixes = [executable + ' ' + directory + '/' for executable in aliases(helper / 'JarvisReferenceHelper')
+            for directory in aliases(root)]
 def owned():
     rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,command='], text=True)
     result = []
     for row in rows.splitlines():
         parts = row.strip().split(None, 1)
-        if len(parts) == 2 and (parts[1] == app_command or any(parts[1].startswith(p) for p in prefixes)):
+        if len(parts) == 2 and (any(parts[1] == command or parts[1].startswith(command + ' ') for command in app_commands)
+                or any(parts[1].startswith(p) for p in prefixes)):
             result.append(int(parts[0]))
     return result
 for pid in owned():
@@ -60,7 +69,7 @@ open -n -g --env "HOME=$POLLUTION" --env "PATH=$POLLUTION/cwd" --env "PYTHONPATH
   --env "OPENAI_API_KEY=synthetic-secret-canary" --env "GEMINI_API_KEY=synthetic-secret-canary" \
   --stdout "$RUN_DIR/stdout.log" --stderr "$RUN_DIR/stderr.log" \
   "$PWD/Jarvis Dev.app" --args --reference-harness --reference-harness-output "$RUN_DIR" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
-deadline=$((SECONDS + 360))
+deadline=$((SECONDS + 600))
 while [[ ! -f "$RUN_DIR/results.json" ]]; do
   if (( SECONDS >= deadline )); then
     echo "Reference harness timed out: $RUN_DIR" >&2

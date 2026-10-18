@@ -6,7 +6,7 @@ umask 077
 cd "$(dirname "$0")/.."
 
 usage() {
-  echo "usage: $0 [A|B|C|D|H|L|P|R|F01|F02|CACHE|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going]" >&2
+  echo "usage: $0 [A|B|C|D|H|L|P|R|F01|F02|CACHE|REF01|REF02|REF03|REF04|REF05|REF06|REF07|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going]" >&2
 }
 
 SCENARIO="all"
@@ -17,7 +17,7 @@ EVALUATION_AGENT="${EVAL_AGENT:-codex}"
 RUN_ARGUMENTS=("$@")
 while (( $# > 0 )); do
   case "$1" in
-    A|B|C|D|H|L|P|R|F01|F02|CACHE|all) SCENARIO="$1" ;;
+    A|B|C|D|H|L|P|R|F01|F02|CACHE|REF01|REF02|REF03|REF04|REF05|REF06|REF07|all) SCENARIO="$1" ;;
     --provider)
       if (( $# < 2 )); then usage; exit 2; fi
       PROVIDER="$2"
@@ -31,6 +31,10 @@ while (( $# > 0 )); do
   esac
   shift
 done
+if [[ "$SCENARIO" =~ ^REF0[1-7]$ ]]; then
+  echo "$SCENARIO uses the deterministic signed References harness (synthetic tool traffic; no provider or capture)."
+  exec ./scripts/run-reference-tests.sh "$SCENARIO"
+fi
 case "$PROVIDER" in
   codex-subscription|claude-subscription|openai|gemini|scenario) ;;
   *) echo "Unknown live e2e provider: $PROVIDER" >&2; usage; exit 2 ;;

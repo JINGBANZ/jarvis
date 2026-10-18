@@ -10,21 +10,21 @@ import JarvisBrainProviders
     }
 
     private var capabilities: CoachCapabilities {
-        .compose(disabledTools: [], prepSourcesConfigured: true, skills: [codingSkill])
+        .compose(disabledTools: [], referencesAdmitted: true, skills: [codingSkill])
     }
 
     @Test(arguments: [BrainProvider.openAI, .claudeSubscription, .gemini])
     func completedAttemptsPreserveTheirProviderVisibleInitialPrefixes(provider: BrainProvider) async throws {
         let script = try [
             call("load_skill", id: "a1_skill", arguments: ["name": "coding"], provider: provider),
-            call("load_tool", id: "a1_tool", arguments: ["name": "search_prep_notes"], provider: provider),
+            call("load_tool", id: "a1_tool", arguments: ["name": "search_references"], provider: provider),
             call("call_tool", id: "a1_search", arguments: [
-                "name": "search_prep_notes", "arguments": "{\"query\":\"ledger idempotency\"}"], provider: provider),
+                "name": "search_references", "arguments": "{\"query\":\"ledger idempotency\"}"], provider: provider),
             speak("a1_speak", provider: provider), speak("a2_speak", provider: provider),
             call("stay_silent", id: "a3_silent", arguments: [:], provider: provider),
             speak("a4_speak", provider: provider),
             call("load_skill", id: "a5_skill", arguments: ["name": "coding"], provider: provider),
-            call("load_tool", id: "a5_tool", arguments: ["name": "search_prep_notes"], provider: provider),
+            call("load_tool", id: "a5_tool", arguments: ["name": "search_references"], provider: provider),
             speak("a5_speak", provider: provider), speak("a6_speak", provider: provider),
             call("stay_silent", id: "a7_silent", arguments: [:], provider: provider),
             speak("a8_speak", provider: provider),
@@ -32,14 +32,15 @@ import JarvisBrainProviders
         let transport = ContextCacheTransport(script: script.map { .response($0) })
         let transcript = RollingTranscript()
         let overlay = FakeOverlay()
-        let search = FakePrepMaterialSearch(results: [
-            .init(sourceDisplayName: "synthetic-ledger.md",
+        let search = FakeDocumentSession(results: [
+            referenceHit(name: "synthetic-ledger.md",
                   text: "Commit the deduplicated effect and checkpoint atomically.")])
         let driver = CoachDriver(
             config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: [.init(target: target(provider), brain: accessor(transport, provider: provider))]),
             screen: UnavailableScreen(), overlay: overlay, clock: ManualClock(now: 100),
-            automaticAttemptDelay: { _ in }, capabilities: capabilities, prepMaterial: search)
+            automaticAttemptDelay: { _ in }, capabilities: capabilities, documents: search,
+            sessionContext: try SessionContext(documentCatalog: .bounded([.init(documentID: search.documentID, name: "synthetic-ledger.md", format: "md")])))
         let triggers: [TriggerReason] = [
             .turnEnd, .turnEnd, .silence(secondsQuiet: 3), .manualCode,
             .turnEnd, .turnEnd, .silence(secondsQuiet: 5), .manualHint,
@@ -85,10 +86,10 @@ import JarvisBrainProviders
         #expect(!skillOutput.contains("Ledger invariants"))
         let toolDuplicate = try #require(captured.first { $0.attempt == 5 && $0.sequence == 3 })
         #expect(try output("a5_tool", in: object(toolDuplicate.body), provider: provider)
-            == JarvisPrompts.Coach.loadToolAlreadyLoaded("search_prep_notes"))
+            == JarvisPrompts.Coach.loadToolAlreadyLoaded("search_references"))
         for request in initialRequests.dropFirst() {
             #expect(try output("a1_skill", in: request, provider: provider).contains(codingSkill.body))
-            #expect(try output("a1_tool", in: request, provider: provider).contains(searchPrepNotesTool.parametersJSON))
+            #expect(try output("a1_tool", in: request, provider: provider).contains(searchReferencesTool.parametersJSON))
         }
         let withMovingFooter = try initialRequests.map { try addingTransientFooter(to: $0, provider: provider) }
         #expect(try prefixResults(withMovingFooter, provider: provider) == Array(repeating: false, count: 7))
@@ -98,10 +99,10 @@ import JarvisBrainProviders
     func failedOrCancelledLoadsNeverBecomeCommittedState(provider: BrainProvider, cancel: Bool) async throws {
         let transport = ContextCacheTransport(script: [
             .response(try call("load_skill", id: "aborted_skill", arguments: ["name": "coding"], provider: provider)),
-            .response(try call("load_tool", id: "aborted_tool", arguments: ["name": "search_prep_notes"], provider: provider)),
+            .response(try call("load_tool", id: "aborted_tool", arguments: ["name": "search_references"], provider: provider)),
             cancel ? .cancel : .fail,
             .response(try call("load_skill", id: "retry_skill", arguments: ["name": "coding"], provider: provider)),
-            .response(try call("load_tool", id: "retry_tool", arguments: ["name": "search_prep_notes"], provider: provider)),
+            .response(try call("load_tool", id: "retry_tool", arguments: ["name": "search_references"], provider: provider)),
             .response(try speak("retry_speak", provider: provider)),
         ])
         let runner = makeRunner()
@@ -124,7 +125,7 @@ import JarvisBrainProviders
         let retrySkill = try #require(requests.first { $0.attempt == 2 && $0.sequence == 2 })
         #expect(try output("retry_skill", in: object(retrySkill.body), provider: provider).contains(codingSkill.body))
         let retryTool = try #require(requests.first { $0.attempt == 2 && $0.sequence == 3 })
-        #expect(try output("retry_tool", in: object(retryTool.body), provider: provider).contains(searchPrepNotesTool.parametersJSON))
+        #expect(try output("retry_tool", in: object(retryTool.body), provider: provider).contains(searchReferencesTool.parametersJSON))
     }
 
     @Test(arguments: [BrainProvider.openAI, .claudeSubscription, .gemini])
@@ -216,10 +217,10 @@ import JarvisBrainProviders
 
     private func run(_ runner: CoachAttemptRunner, brain: BrainClient, provider: BrainProvider) async -> CoachAttemptRunner.AttemptResult {
         var work = CoachAttemptRunner.PendingCoachingWork(reason: .turnEnd)
-        work.prepNotesObservation = .user("Pending ledger question.")
+        work.referencesObservation = .user("Pending ledger question.")
         return await runner.runAttempt(work, using: .init(
             plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
-            target: target(provider), brain: brain, summarizer: nil, onSelected: nil, prepMaterial: nil)).result
+            target: target(provider), brain: brain, summarizer: nil, onSelected: nil, documents: nil)).result
     }
 
     private func speak(_ id: String, provider: BrainProvider) throws -> Data {

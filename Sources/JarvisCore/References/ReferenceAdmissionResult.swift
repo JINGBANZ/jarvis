@@ -14,7 +14,14 @@ public enum ReferenceAdmissionResult: Sendable {
             self.context = context; self.accessPolicy = accessPolicy
         }
     }
-    public enum AccessPolicy: Sendable { case documents }
+    public struct AccessPolicy: Sendable {
+        public let disabledTools: Set<String>
+        public init(disabledTools: Set<String>) { self.disabledTools = disabledTools }
+        public static let documents = AccessPolicy(disabledTools: [])
+    }
+    public var startID: UUID {
+        switch self { case .admitted(let result): result.startID; case .omitted(let id, _): id }
+    }
     case admitted(Admitted)
     case omitted(startID: UUID, reason: ReferenceOmissionReason)
 }

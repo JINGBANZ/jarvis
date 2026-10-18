@@ -205,10 +205,10 @@ import Testing
     }
 
     @Test func parseMapsSearchPrepNotesAndTrimsQuery() {
-        guard case .searchPrepNotes(_, let query)? = ToolInvocation.parse(
-            callId: "c", name: "search_prep_notes", argumentsJSON: #"{"query":"  rate limiter  "}"#)
+        guard case .searchReferences(_, let query, _)? = ToolInvocation.parse(
+            callId: "c", name: "search_references", argumentsJSON: #"{"query":"  rate limiter  "}"#)
         else {
-            Issue.record("search_prep_notes"); return
+            Issue.record("search_references"); return
         }
         #expect(query == "rate limiter")
     }
@@ -216,17 +216,17 @@ import Testing
     @Test func parseSearchPrepNotesToleratesAnUnexpectedSiblingField() {
         // A request without `strict` has no Structured Outputs guarantee, so stray fields can
         // arrive.
-        guard case .searchPrepNotes(_, let query)? = ToolInvocation.parse(
-            callId: "c", name: "search_prep_notes",
+        guard case .searchReferences(_, let query, _)? = ToolInvocation.parse(
+            callId: "c", name: "search_references",
             argumentsJSON: #"{"query":"rate limiter","extra":{"nested":1}}"#) else {
-            Issue.record("search_prep_notes with sibling field"); return
+            Issue.record("search_references with sibling field"); return
         }
         #expect(query == "rate limiter")
     }
 
     @Test func parseRejectsMalformedSearchPrepNotes() {
         for args in [#"{}"#, #"{"query":""}"#, #"{"query":"   "}"#, #"{"q":"rate limiter"}"#, "junk"] {
-            #expect(ToolInvocation.parse(callId: "c", name: "search_prep_notes", argumentsJSON: args) == nil,
+            #expect(ToolInvocation.parse(callId: "c", name: "search_references", argumentsJSON: args) == nil,
                     "args=\(args)")
         }
     }

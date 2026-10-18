@@ -24,6 +24,7 @@ public enum ActivityEvent: Sendable {
         case prepNoteRead
         case capabilityLoaded
         case prepNotesUnavailable
+        case referencesOmitted, referencesListed, referencesSearched, referenceRead, referencesUnavailable
     }
 
     /// Persisted inside the event, so part of the on-disk vocabulary.
@@ -58,6 +59,12 @@ public enum ActivityEvent: Sendable {
     /// Not a zero-match search, which would claim the notes were read. States no timing; whether
     /// the index is still building belongs in `jlog`.
     case prepNotesUnavailable
+
+    case referencesUnavailable
+    case referencesOmitted(reason: ReferenceOmissionReason)
+    case referencesListed(count: Int)
+    case referencesSearched(query: String, matchCount: Int, complete: Bool)
+    case referenceRead(documentID: UUID)
 
     var response: ActivityResponse? {
         guard case .tip(let hint, let detail) = self else { return nil }
@@ -131,6 +138,16 @@ public enum ActivityEvent: Sendable {
                 "⚠️ \(failure.activitySentenceWithoutAdvice) — skipping it\(failure.activityAdvice)",
                 nil
             )
+        case .referencesUnavailable:
+            return (.referencesUnavailable, "📎 couldn't access References — coaching with available evidence", nil)
+        case .referencesOmitted(let reason):
+            return (.referencesOmitted, "⚠️ " + (reason.warning ?? "References are unavailable for this session."), nil)
+        case .referencesListed(let count):
+            return (.referencesListed, "📎 listed \(count) references", nil)
+        case .referencesSearched(let query, let count, let complete):
+            return (.referencesSearched, "📎 checked references for \"\(query)\" — \(count) matches" + (complete ? "" : "; partial coverage"), nil)
+        case .referenceRead:
+            return (.referenceRead, "📎 read a reference document", nil)
         case .prepNotesSearched(let query, let matchCount):
             let message = matchCount > 0
                 ? "📎 checked prep notes for \"\(query)\" — found \(matchCount) match"

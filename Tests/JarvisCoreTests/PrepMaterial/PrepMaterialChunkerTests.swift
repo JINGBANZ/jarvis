@@ -52,8 +52,7 @@ import Testing
         """
         let chunks = PrepMaterialChunker.chunk(
             text: text, sourceDisplayName: "notes.md", targetWordCount: 30)
-        let index = PrepMaterialIndex(chunks: chunks)
-        let result = try #require(index.search(query: "dependency mistake").first)
+        let result = try #require(chunks.first { $0.text.contains("### Dependency mistake") })
         #expect(result.text.contains("I shipped a smaller milestone"))
         #expect(result.text.contains("No missed commitment is established."))
         #expect(!result.text.contains("First story"))

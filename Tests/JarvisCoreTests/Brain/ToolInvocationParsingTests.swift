@@ -6,15 +6,15 @@ import Testing
     @Test func callToolResolvesToTheNamedToolFromArgumentsText() {
         let parsed = ToolInvocation.parse(
             callId: "c1", name: "call_tool",
-            argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"rate limiter\"}"}"#)
-        #expect(parsed == .searchPrepNotes(callId: "c1", query: "rate limiter"))
+            argumentsJSON: #"{"name":"search_references","arguments":"{\"query\":\"rate limiter\"}"}"#)
+        #expect(parsed == .searchReferences(callId: "c1", query: "rate limiter"))
     }
 
     @Test func callToolAlsoAcceptsAnArgumentsObject() {
         let parsed = ToolInvocation.parse(
             callId: "c1", name: "call_tool",
-            argumentsJSON: #"{"name":"search_prep_notes","arguments":{"query":"rate limiter"}}"#)
-        #expect(parsed == .searchPrepNotes(callId: "c1", query: "rate limiter"))
+            argumentsJSON: #"{"name":"search_references","arguments":{"query":"rate limiter"}}"#)
+        #expect(parsed == .searchReferences(callId: "c1", query: "rate limiter"))
     }
 
     @Test(arguments: ["speak", "capture_screen", "stay_silent", "load_tool", "load_skill", "call_tool"])
@@ -29,25 +29,25 @@ import Testing
         #expect(ToolInvocation.parse(callId: "c1", name: "call_tool",
                                      argumentsJSON: #"{"name":"nope","arguments":"{}"}"#) == nil)
         #expect(ToolInvocation.parse(callId: "c1", name: "call_tool",
-                                     argumentsJSON: #"{"name":"search_prep_notes"}"#) == nil)
+                                     argumentsJSON: #"{"name":"search_references"}"#) == nil)
         #expect(ToolInvocation.parse(callId: "c1", name: "call_tool",
-                                     argumentsJSON: #"{"name":"search_prep_notes","arguments":"not json"}"#) == nil)
+                                     argumentsJSON: #"{"name":"search_references","arguments":"not json"}"#) == nil)
     }
 
     @Test func theRoutedNameIsReadableWithoutTheRoutedArguments() {
         #expect(ToolInvocation.routedToolName(
-            argumentsJSON: #"{"name":"search_prep_notes","arguments":"{}"}"#) == "search_prep_notes")
+            argumentsJSON: #"{"name":"search_references","arguments":"{}"}"#) == "search_references")
         #expect(ToolInvocation.routedToolName(argumentsJSON: #"{"arguments":"{}"}"#) == nil)
     }
 
     @Test func parsingIsByNameAloneSoARoutedNameParsesLikeADirectOne() {
         let parsed = ToolInvocation.parse(
-            callId: "p1", name: "search_prep_notes", argumentsJSON: #"{"query":"q"}"#)
-        #expect(parsed == .searchPrepNotes(callId: "p1", query: "q"))
+            callId: "p1", name: "search_references", argumentsJSON: #"{"query":"q"}"#)
+        #expect(parsed == .searchReferences(callId: "p1", query: "q"))
     }
     @Test func readPrepNoteArgumentsAreValidatedThroughDispatcher() {
         let valid = ToolInvocation.parse(callId: "read", name: "call_tool",
-            argumentsJSON: #"{"name":"read_prep_note","arguments":{"document_id":"opaque-id","offset":0}}"#)
+            argumentsJSON: #"{"name":"read_reference","arguments":{"document_id":"00000000-0000-0000-0000-000000000001","offset":0}}"#)
         #expect(valid != nil)
         for arguments in [
             #"{"document_id":"","offset":0}"#,
@@ -56,7 +56,7 @@ import Testing
             #"{"document_id":"id","offset":true}"#,
             #"{"document_id":"id","offset":"zero"}"#,
         ] {
-            #expect(ToolInvocation.parse(callId: "read", name: "read_prep_note",
+            #expect(ToolInvocation.parse(callId: "read", name: "read_reference",
                                         argumentsJSON: arguments) == nil)
         }
     }

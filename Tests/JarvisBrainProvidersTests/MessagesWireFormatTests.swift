@@ -18,7 +18,7 @@ import JarvisCore
 
     @Test func metadataPrefixSurvivesChangingHistoryAndToolContinuations() throws {
         let catalog = #"Untrusted filenames: [{"documentID":"stable-id","sourceDisplayName":"notes.md"}]"#
-        let call = RawToolCall(id: "read", name: "read_prep_note", argumentsJSON: "{}")
+        let call = RawToolCall(id: "read", name: "read_reference", argumentsJSON: "{}")
         let tails: [[ChatMessage]] = [
             [.user("first request")],
             [.user("first request"), .assistantToolCalls([call]),
@@ -170,9 +170,9 @@ import JarvisCore
     }
 
     @Test func aCallToolBlockDecodesIntoTheRoutedInvocation() throws {
-        let reply = #"{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"call_tool","input":{"name":"search_prep_notes","arguments":"{\"query\":\"rate limiter\"}"}}]}"#
+        let reply = #"{"stop_reason":"tool_use","content":[{"type":"tool_use","id":"t1","name":"call_tool","input":{"name":"search_references","arguments":"{\"query\":\"rate limiter\"}"}}]}"#
         let response = try wire.decode(Data(reply.utf8))
-        #expect(response.toolCalls == [.searchPrepNotes(callId: "t1", query: "rate limiter")])
+        #expect(response.toolCalls == [.searchReferences(callId: "t1", query: "rate limiter")])
         #expect(response.rawToolCalls.map(\.name) == ["call_tool"])
     }
 

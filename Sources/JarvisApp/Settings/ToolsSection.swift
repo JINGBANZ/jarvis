@@ -19,6 +19,7 @@ final class ToolsSection: NSObject, SettingsSection {
         .plainText, .pdf, UTType(filenameExtension: "md"), UTType(filenameExtension: "docx"),
     ].compactMap { $0 }
 
+    private let onChanged: () -> Void
     private let brainPreferences: BrainPreferences
     private let prepPreferences: PrepMaterialPreferences
     private var stack: SettingsCardStack?
@@ -27,27 +28,29 @@ final class ToolsSection: NSObject, SettingsSection {
     /// Built once per page so the switch is never re-parented while it is being toggled.
     private var switchRow: SettingsRowView?
     private let addButton = NSButton(title: "＋ Add files or folders…", target: nil, action: nil)
+    private var selectionNotice: String?
     private var listViews: [NSView] = []
     private var rowsBySourceID: [UUID: SettingsRowView] = [:]
     /// Guards a background existence check against a stale result landing after a newer render.
     private var renderGeneration = 0
 
-    init(brainPreferences: BrainPreferences, prepPreferences: PrepMaterialPreferences) {
+    init(brainPreferences: BrainPreferences, prepPreferences: PrepMaterialPreferences, onChanged: @escaping () -> Void) {
+        self.onChanged = onChanged
         self.brainPreferences = brainPreferences
         self.prepPreferences = prepPreferences
         super.init()
         prepSwitch.target = self
         prepSwitch.action = #selector(prepSwitchChanged)
-        prepSwitch.setAccessibilityLabel("Search my prep notes")
-        prepSwitch.identifier = NSUserInterfaceItemIdentifier("tool-search-prep-notes")
+        prepSwitch.setAccessibilityLabel("Use my References")
+        prepSwitch.identifier = NSUserInterfaceItemIdentifier("tool-references")
         addButton.target = self
         addButton.action = #selector(addSource)
         addButton.bezelStyle = .rounded
-        addButton.setAccessibilityLabel("Add prep notes")
+        addButton.setAccessibilityLabel("Add References")
     }
 
     private var isPrepSearchOn: Bool {
-        !brainPreferences.disabledTools.contains(searchPrepNotesTool.name)
+        !brainPreferences.disabledTools.contains(searchReferencesTool.name)
     }
 
     private var cardHeight: CGFloat {
@@ -59,16 +62,16 @@ final class ToolsSection: NSObject, SettingsSection {
         } else {
             list = Self.messageRowHeight
         }
-        return SettingsStyle.cardHeaderHeight + Self.switchRowHeight + list
+        return SettingsStyle.cardHeaderHeight + Self.switchRowHeight + list + (selectionNotice == nil ? 0 : Self.messageRowHeight)
     }
 
     func makePage() -> SettingsPageView {
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
-        card.setHeader(title: "Prep notes search", detail: "Searched on this Mac")
+        card.setHeader(title: "References", detail: "TXT, Markdown, PDF and DOCX · prepared on this Mac")
         card.onLayout = { [weak self] in self?.layoutCard() }
         self.card = card
         let switchRow = SettingsRowView(
-            title: "Search my prep notes",
+            title: "Use my References",
             detail: "",
             controlView: prepSwitch,
             controlSize: NSSize(width: 44, height: 26),
@@ -78,8 +81,8 @@ final class ToolsSection: NSObject, SettingsSection {
         card.contentView?.addSubview(switchRow)
         self.switchRow = switchRow
 
-        let callout = SettingsCalloutView(text: "I read these files where they are and never change "
-            + "them. I send their filenames to my Brain provider, and send document text when I search or read a note. "
+        let callout = SettingsCalloutView(text: "I keep a private local copy of extracted reference text. Your original files stay unchanged. "
+            + "I send their filenames to my Brain provider, and send bounded text when I search or read a reference. "
             + "Removing a file here doesn't delete it.")
         let stack = SettingsCardStack()
         stack.install([(card, cardHeight), (callout, SettingsCalloutView.preferredHeight)])
@@ -117,16 +120,17 @@ final class ToolsSection: NSObject, SettingsSection {
         let sources = prepPreferences.sources
         prepSwitch.state = isOn ? .on : .off
         switchRow?.setDetail(isOn && sources.isEmpty
-            ? "Add notes below and I can search them."
-            : "When a topic you prepared comes up, I look it up in these notes.")
+            ? "Add References below so I can read or search them."
+            : "I can read or search these files when the conversation needs them.")
 
         if isOn {
             if sources.isEmpty {
-                listViews.append(messageLabel("No notes yet."))
+                listViews.append(messageLabel("No References yet."))
             }
             for source in sources {
                 let remove = ClosureButton(title: "×") { [weak self] in
                     self?.prepPreferences.remove(id: source.id)
+                    self?.onChanged()
                     self?.render()
                 }
                 remove.bezelStyle = .rounded
@@ -143,8 +147,9 @@ final class ToolsSection: NSObject, SettingsSection {
             }
             listViews.append(addButton)
         } else {
-            listViews.append(messageLabel("Switched off. Your list is kept, and I won't search it."))
+            listViews.append(messageLabel("Switched off. Your list is kept; applies at the next Start."))
         }
+        if let selectionNotice { listViews.append(messageLabel(selectionNotice)) }
         listViews.forEach { content.addSubview($0) }
         stack?.setHeight(cardHeight, for: card)
         card.frame.size.height = cardHeight
@@ -206,12 +211,13 @@ final class ToolsSection: NSObject, SettingsSection {
     @objc private func prepSwitchChanged(_ sender: NSSwitch) {
         var disabled = brainPreferences.disabledTools
         if sender.state == .on {
-            disabled.remove(searchPrepNotesTool.name)
+            disabled.remove(searchReferencesTool.name)
         } else {
-            disabled.insert(searchPrepNotesTool.name)
+            disabled.insert(searchReferencesTool.name)
         }
         brainPreferences.disabledTools = disabled
-        jlog("Jarvis: prep notes search \(sender.state == .on ? "on" : "off") for the next Start.")
+        onChanged()
+        jlog("Jarvis: References \(sender.state == .on ? "on" : "off") for the next Start.")
         render()
     }
 
@@ -223,16 +229,22 @@ final class ToolsSection: NSObject, SettingsSection {
         panel.allowedContentTypes = Self.allowedContentTypes
         panel.allowsMultipleSelection = true
         panel.prompt = "Add"
-        panel.message = "Choose notes I can reference while coaching. Files stay where they are."
+        panel.message = "Choose References I can read while coaching. Files stay where they are."
         guard panel.runModal() == .OK else { return } // ghost-mode-allowed: explicit user action in Settings
 
         var newSources: [PrepMaterialSource] = []
+        selectionNotice = nil
         for url in panel.urls {
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory) else { continue }
+            guard isDirectory.boolValue || ["txt", "md", "pdf", "docx"].contains(url.pathExtension.lowercased()) else {
+                selectionNotice = "Unsupported file skipped. Choose TXT, Markdown, PDF or DOCX."
+                continue
+            }
             newSources.append(PrepMaterialSource(path: url.path, isDirectory: isDirectory.boolValue))
         }
         prepPreferences.add(newSources)
+        onChanged()
         render()
     }
 }

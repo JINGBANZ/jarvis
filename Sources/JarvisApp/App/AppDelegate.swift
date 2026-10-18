@@ -33,14 +33,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var activityViewer: ActivityViewer!
     private let readiness = JarvisReadiness()
     private var pendingStartTask: Task<Void, Never>?
+    private var pendingReferenceAdmission: PendingReferenceAdmission?
     private var pendingStartRevision: UInt = 0
     private var hotkeys: HotkeyController?
     private var mouseHotkeys: MouseHotkeyController?
     private let artifacts = SessionArtifacts()
+    private let references = ReferenceRuntime()
+    private var terminatingReferences = false
+    private var referencesStopped = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
         MainMenu.install()
+        configureReferences()
 
         onboarding = OnboardingGate(
             preferences: onboardingPreferences,
@@ -106,6 +111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
         composition = SessionComposition(
             brain: brain,
+            referenceLibrary: references.library,
             artifacts: artifacts,
             overlayBox: overlayBox,
             readiness: readiness,
@@ -186,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 }),
             OverlaySection(appearance: appearance, box: overlayBox),
             connectionsSection,
-            ToolsSection(brainPreferences: brain.preferences, prepPreferences: prepMaterialPreferences),
+            ToolsSection(brainPreferences: brain.preferences, prepPreferences: prepMaterialPreferences, onChanged: { [weak self] in self?.configureReferences() }),
             SkillsSection(preferences: brain.preferences),
             hotkeySection,
             ActivitySection(viewer: activityViewer),
@@ -232,12 +238,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        // Quitting from onboarding: nothing exists to stop yet.
-        guard didStartApp else { return .terminateNow }
-        activityViewer?.cancelEvaluation()
-        stop(reason: .applicationQuit)
-        proxySupervisor?.terminateNow()
-        return .terminateNow
+        guard !referencesStopped else { return .terminateNow }
+        if didStartApp {
+            activityViewer?.cancelEvaluation()
+            stop(reason: .applicationQuit)
+            proxySupervisor?.terminateNow()
+        }
+        guard !terminatingReferences else { return .terminateCancel }
+        terminatingReferences = true
+        Task {
+            await references.stop()
+            referencesStopped = true
+            sender.terminate(nil) // ghost-mode-allowed: complete explicit Quit after owned helper cleanup
+        }
+        return .terminateCancel
+    }
+
+    private func configureReferences() {
+        references.configure(preferences: BrainPreferences(), sources: prepMaterialPreferences)
     }
 
     /// True once the Start is accepted, before preparation finishes. Stop, a newer Start, or a
@@ -261,6 +279,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             requiredPermissions: Set(JarvisReadiness.Permission.allCases).subtracting([.systemAudio]),
             requiredCredentials: requiredCredentials,
             requiresTranscriptionPreparation: preparesAppleSpeech)
+        pendingStartRevision &+= 1
+        pendingStartTask?.cancel()
+        pendingStartTask = nil
+        cancelPendingReferenceAdmission()
         let readinessStart = readiness.begin(configuration: readinessConfiguration)
         let readinessSession = readinessStart.session
         composition.applyReadinessEffects(readinessStart.effects)
@@ -311,12 +333,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             return false
         }
 
-        pendingStartRevision &+= 1
         let revision = pendingStartRevision
-        pendingStartTask?.cancel()
+        let referenceStartID = UUID()
+        let referenceDeadline = ContinuousClock.now + .seconds(2)
+        references.reconcile()
+        let referenceTask = PendingReferenceAdmission(library: references.library, deadline: referenceDeadline, startID: referenceStartID)
+        pendingReferenceAdmission = referenceTask
         pendingStartTask = nil
         pendingStartTask = Task { [weak self] in
             guard let self else { return }
+            defer {
+                referenceTask.cancel()
+                self.references.library.abandon(startID: referenceStartID)
+                if self.pendingReferenceAdmission?.startID == referenceStartID { self.pendingReferenceAdmission = nil }
+            }
 
             // Re-prove per session: a revoked grant's tap still delivers silent frames, and capture
             // health counts frames, not amplitude.
@@ -393,9 +423,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 self.cancelReadinessAttempt(readinessSession)
                 return
             }
+            let referenceAdmission: ReferenceAdmissionResult
+            do { referenceAdmission = try await referenceTask.result() } catch { return }
+            guard !Task.isCancelled, self.pendingStartRevision == revision,
+                  self.readiness.activeSession == readinessSession else { return }
+            guard self.brain.savedKeys(for: brainRoute) == brainKeys,
+                  transcriptionProvider.ownCredential.map({ (self.secrets.apiKey(for: $0) ?? "") == transcriptionKey }) ?? true,
+                  self.transcriptionPreferences.configuration == transcriptionConfiguration,
+                  self.brain.preferences.route == brainRoute else {
+                self.pendingStartTask = nil
+                self.cancelReadinessAttempt(readinessSession)
+                return
+            }
             self.pendingStartTask = nil
             if let proxy { self.brain.onProxyReadiness?(proxy) }
             _ = self.installPreparedStart(
+                references: referenceAdmission,
                 brainKeys: brainKeys,
                 transcriptionKey: transcriptionKey,
                 brainRoute: brainRoute,
@@ -451,6 +494,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
     /// Refuses a route with no usable target before stopping the running pipeline.
     private func installPreparedStart(
+        references: ReferenceAdmissionResult,
         brainKeys: [Credential: String],
         transcriptionKey: String,
         brainRoute: BrainRoute,
@@ -474,7 +518,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 for: readinessSession)
             return false
         }
-        stop(reason: .replacedByNewSession, preserving: readinessSession)
+        stop(reason: .replacedByNewSession, preserving: readinessSession, preservingReferenceStart: references.startID)
         showActiveBrainTarget(
             availability.failure(for: brainRoute.primary) == nil ? brainRoute.primary : nil)
         return composition.start(
@@ -485,7 +529,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 brainRoute: brainRoute,
                 appleSpeechLocale: appleSpeechLocale,
                 screen: screenPreferences.selection,
-                prepSources: prepMaterialPreferences.sources),
+                references: references),
             proxy: proxy,
             readinessSession: readinessSession,
             reportContext: reportContext)
@@ -494,9 +538,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     /// Safe to call when already stopped.
     private func stop(
         reason: SessionEndReason,
-        preserving readinessToPreserve: JarvisReadiness.Session? = nil
+        preserving readinessToPreserve: JarvisReadiness.Session? = nil,
+        preservingReferenceStart: UUID? = nil
     ) {
         pendingStartRevision &+= 1
+        if pendingReferenceAdmission?.startID != preservingReferenceStart { cancelPendingReferenceAdmission() }
         pendingStartTask?.cancel()
         pendingStartTask = nil
         // A blocker reported before any allocation stays visible until the next explicit Start, and
@@ -548,12 +594,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         activityViewer?.readinessDidChange(status)
     }
 
+    private func cancelPendingReferenceAdmission() {
+        guard let pending = pendingReferenceAdmission else { return }
+        pendingReferenceAdmission = nil
+        pending.cancel()
+    }
+
     private func cancelPendingStart(using provider: BrainProvider) {
         guard pendingStartTask != nil,
               brain.preferences.route.targets.contains(where: { $0.provider == provider }) else {
             return
         }
         pendingStartRevision &+= 1
+        cancelPendingReferenceAdmission()
         pendingStartTask?.cancel()
         pendingStartTask = nil
         if let session = readiness.activeSession {

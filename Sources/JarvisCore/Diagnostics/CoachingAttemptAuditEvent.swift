@@ -10,7 +10,10 @@ public enum CoachingAttemptAuditEvent: Sendable {
         case initial
         case captureScreenContinuation = "capture_screen_continuation"
         case searchPrepNotesContinuation = "search_prep_notes_continuation"
+        case searchReferencesContinuation = "search_references_continuation"
+        case listReferencesContinuation = "list_references_continuation"
         case readPrepNoteContinuation = "read_prep_note_continuation"
+        case readReferenceContinuation = "read_reference_continuation"
         case loadToolContinuation = "load_tool_continuation"
         case loadSkillContinuation = "load_skill_continuation"
     }

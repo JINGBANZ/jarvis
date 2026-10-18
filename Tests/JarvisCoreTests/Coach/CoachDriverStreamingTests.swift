@@ -120,7 +120,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
     }
 
     private var capabilities: CoachCapabilities {
-        CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: false)
+        CoachCapabilities.compose(disabledTools: [], referencesAdmitted: false)
     }
 
     private func makeDriver(brain: BrainClient, overlay: OverlayRendering, activity: (any ActivityEventRecording)? = nil)
@@ -147,7 +147,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return await runner.runAttempt(.init(reason: reason), using: .init(
             plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
-            target: target, brain: brain, summarizer: nil, onSelected: nil, prepMaterial: nil)).result
+            target: target, brain: brain, summarizer: nil, onSelected: nil, documents: nil)).result
     }
 
     /// Coalescing may drop intermediate snapshots, never reorder them.
@@ -417,7 +417,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
     @Test func aLoadSkillReplyShowsNothing() async {
         let overlay = ProgressRecordingOverlay()
         let skills = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false,
+            disabledTools: [], referencesAdmitted: false,
             skills: [Skill(name: "coding", description: "d", body: "b")])
         let transcript = RollingTranscript()
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)

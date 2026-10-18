@@ -66,15 +66,15 @@ extension LiveE2ETests {
              "the preparation tool loaded once during warm-up"),
             (warmupPhases.contains("load_skill_continuation")
                 && warmupPhases.contains("load_tool_continuation")
-                && warmupPhases.contains("search_prep_notes_continuation"),
+                && warmupPhases.contains("search_references_continuation"),
              "real skill, tool and prep-search continuations preceded the measured window"),
-            (evidence.activity.contains { $0.kind == "prepNotesSearched" }, "preparation retrieval ran"),
-            (!evidence.activity.contains { $0.kind == "prepNotesUnavailable" },
+            (evidence.activity.contains { $0.kind == "referencesSearched" }, "preparation retrieval ran"),
+            (!evidence.activity.contains { ["referencesOmitted", "referencesUnavailable"].contains($0.kind) },
              "the preparation index was ready when retrieval ran"),
             (!evidence.activity.contains { $0.kind == "screenViewed" }, "spoken questions needed no screen capture"),
             (evidence.activity.contains { $0.loadedCapability?.name == LiveE2ECacheFixture.skillName },
              "the synthetic skill loaded successfully"),
-            (evidence.activity.contains { $0.loadedCapability?.name == "search_prep_notes" },
+            (evidence.activity.contains { $0.loadedCapability?.name == "search_references" },
              "the preparation-search tool loaded successfully"),
             (traffic.contains { record in record.exchange.input.contains { item in
                 guard case .result(_, let output) = item else { return false }

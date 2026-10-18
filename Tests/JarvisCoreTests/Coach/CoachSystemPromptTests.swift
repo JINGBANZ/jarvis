@@ -5,10 +5,10 @@ import Testing
     private let withCatalog = CoachCapabilities(
         tools: coachTools,
         deferredTools: [ToolDef(
-            name: "search_prep_notes",
-            description: searchPrepNotesTool.description,
+            name: "search_references",
+            description: searchReferencesTool.description,
             parametersJSON: "{}",
-            guidance: searchPrepNotesTool.guidance,
+            guidance: searchReferencesTool.guidance,
             deferLoading: true)])
 
     @Test func bareBuilderIsTheBasePromptPlusCoreToolGuidance() {
@@ -20,7 +20,7 @@ import Testing
 
     @Test func theDetailSectionIsAlwaysPresent() {
         let with = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false))
+            disabledTools: [], referencesAdmitted: false))
         #expect(with.contains("# Detail"))
         #expect(with.contains("The hint is the coaching."))
         #expect(with.contains("# Tip style"))
@@ -28,7 +28,7 @@ import Testing
 
     @Test func theCoreCarriesNoCodeOrDiagramRules() {
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true, skills: skills))
+            disabledTools: [], referencesAdmitted: true, skills: skills))
         #expect(!prompt.contains("mermaid"))
         #expect(!prompt.contains("codeSnippet"))
         #expect(!prompt.contains("highlightedLines"))
@@ -54,13 +54,13 @@ import Testing
     @Test func aDeferredToolIsCatalogedButNotExplained() {
         let offered = JarvisPrompts.Coach.system(capabilities: withCatalog)
         #expect(offered.contains(
-            "- search_prep_notes: \(searchPrepNotesTool.description)"))
+            "- search_references: \(searchReferencesTool.description)"))
         #expect(!offered.contains("# Prep material"))
     }
 
     @Test func theCatalogsFollowTheToolGuidanceInOrder() throws {
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true, skills: skills))
+            disabledTools: [], referencesAdmitted: true, skills: skills))
         let loading = try #require(prompt.range(of: "# Loading"))
         let policy = try #require(prompt.range(of: "# Action policy"))
         let tipStyle = try #require(prompt.range(of: "# Tip style"))
@@ -80,7 +80,7 @@ import Testing
     @Test func aSkillIsCatalogedButNotExplained() {
         let prompt = JarvisPrompts.Coach.system(
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false, skills: skills))
+                disabledTools: [], referencesAdmitted: false, skills: skills))
 
         #expect(prompt.contains("# Skills you can load"))
         #expect(prompt.contains("- behavioral: Use when the question is behavioral."))
@@ -90,12 +90,12 @@ import Testing
 
     @Test func theLoadingSectionNamesOnlyTheLoadersPresent() {
         let both = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true, skills: skills))
+            disabledTools: [], referencesAdmitted: true, skills: skills))
         #expect(both.contains("a skill listed under \"Skills you can load\" with load_skill"))
         #expect(both.contains("a tool listed under \"Tools you can load\" with load_tool"))
 
         let skillsOnly = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false, skills: skills))
+            disabledTools: [], referencesAdmitted: false, skills: skills))
         #expect(skillsOnly.contains("# Loading"))
         #expect(skillsOnly.contains("with load_skill"))
         #expect(!skillsOnly.contains("load_tool"))
@@ -113,7 +113,7 @@ import Testing
 
     @Test func theLoadingSectionStillDefersToAForcedSpeak() {
         let prompt = JarvisPrompts.Coach.system(capabilities: CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true, skills: skills))
+            disabledTools: [], referencesAdmitted: true, skills: skills))
         #expect(prompt.contains(
             "Only when speak is the sole permitted tool, speak with what you have."))
     }
@@ -121,9 +121,9 @@ import Testing
     @Test func everythingSwitchedOffIsTheBarePrompt() {
         #expect(JarvisPrompts.Coach.system(
             capabilities: CoachCapabilities.compose(
-                disabledTools: ["search_prep_notes"],
+                disabledTools: ["search_references"],
                 disabledSkills: ["behavioral", "system-design"],
-                prepSourcesConfigured: true, skills: skills))
+                referencesAdmitted: true, skills: skills))
             == JarvisPrompts.Coach.system(capabilities: .default))
     }
 }

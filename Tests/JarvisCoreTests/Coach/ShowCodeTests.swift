@@ -118,7 +118,7 @@ import Testing
             plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen),
             activity: activity,
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false,
+                disabledTools: [], referencesAdmitted: false,
                 skills: skills ?? [coding]))
     }
 }

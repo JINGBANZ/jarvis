@@ -10,7 +10,7 @@ public final class CoachDriver: @unchecked Sendable {
     private let transcriptionSettlement = TranscriptionSettlementGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
     private let coachingAttempts: (any CoachingAttemptAuditing)?
-    private var _prepMaterial: (any PrepMaterialSearching)?
+    private let documents: (any DocumentSession)?
     private let ledger = CoachTranscriptLedger()
     private let transcript: RollingTranscript
     private var failedTranscriptBoundary: Int?
@@ -60,7 +60,7 @@ public final class CoachDriver: @unchecked Sendable {
         let brain: BrainClient
         let summarizer: BrainClient?
         let onSelected: (@MainActor @Sendable (BrainTarget) -> Void)?
-        let prepMaterial: (any PrepMaterialSearching)?
+        let documents: (any DocumentSession)?
     }
 
     // Selection-step and delivery types stay module-visible so tests can drive the commit (callback
@@ -117,13 +117,14 @@ public final class CoachDriver: @unchecked Sendable {
         recoveryDelay: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
         activity: (any ActivityEventRecording)? = nil,
         capabilities: CoachCapabilities = .default,
-        prepMaterial: (any PrepMaterialSearching)? = nil
+        documents: (any DocumentSession)? = nil,
+        sessionContext: SessionContext? = nil
     ) {
         self.recoveryDelay = recoveryDelay
         self.clock = clock
         self.plan = plan
         self.activity = activity
-        self._prepMaterial = prepMaterial
+        self.documents = documents
         self.transcript = transcript
         self.configuredRoute = route
         self.routeSession = BrainRouteSession(targetCount: route.targets.count)
@@ -139,7 +140,7 @@ public final class CoachDriver: @unchecked Sendable {
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
-            capabilities: capabilities)
+            capabilities: capabilities, sessionContext: sessionContext)
     }
 
     private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { _ in
@@ -150,13 +151,6 @@ public final class CoachDriver: @unchecked Sendable {
     public func updatePlan(_ plan: SessionPlan) {
         stateLock.lock()
         self.plan = SessionPlan(revision: plan.revision, screen: plan.screen)
-        stateLock.unlock()
-    }
-
-    /// Takes effect at the next attempt. Nothing waits for it; a search before then finds no notes.
-    public func installPrepMaterial(_ port: (any PrepMaterialSearching)?) {
-        stateLock.lock()
-        _prepMaterial = port
         stateLock.unlock()
     }
 
@@ -528,7 +522,7 @@ public final class CoachDriver: @unchecked Sendable {
                 brain: brain,
                 summarizer: configured.summarizer,
                 onSelected: configuredRoute.onSelected,
-                prepMaterial: _prepMaterial)
+                documents: documents)
             return step
         }
 

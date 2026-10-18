@@ -435,7 +435,7 @@ private func speakResponseBody(arguments: String) -> Data {
     }
 
     @Test func declaresBothLoadersAndNeverTheDeferredTool() async throws {
-        let capabilities = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
+        let capabilities = CoachCapabilities.compose(disabledTools: [], referencesAdmitted: true)
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                    send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
@@ -447,12 +447,12 @@ private func speakResponseBody(arguments: String) -> Data {
         let callTool = try #require((body["tools"] as? [[String: Any]])?.first { $0["name"] as? String == "call_tool" })
         #expect(callTool["strict"] as? Bool == true)
         let text = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""
-        #expect(text.contains("\"enum\":[\"search_prep_notes\",\"read_prep_note\"]"))
+        #expect(text.contains("\"enum\":[\"list_references\",\"search_references\",\"read_reference\"]"))
     }
 
     @Test func encodesTheSkillLoaderWithItsCatalogEnum() async throws {
         let capabilities = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false,
+            disabledTools: [], referencesAdmitted: false,
             skills: [Skill(name: "behavioral", description: "d", body: "b"),
                      Skill(name: "system-design", description: "d", body: "b")])
         let box = CapturedBody()
@@ -469,7 +469,7 @@ private func speakResponseBody(arguments: String) -> Data {
     }
 
     @Test func aConversationDeclaresTheSameToolsOnEveryRequest() async throws {
-        let capabilities = CoachCapabilities.compose(disabledTools: [], prepSourcesConfigured: true)
+        let capabilities = CoachCapabilities.compose(disabledTools: [], referencesAdmitted: true)
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
                                    send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
@@ -483,7 +483,7 @@ private func speakResponseBody(arguments: String) -> Data {
         await conversation.finish()
 
         #expect(first["tools"] as? NSArray == second["tools"] as? NSArray)
-        #expect(declaredNames(second)?.contains("search_prep_notes") == false)
+        #expect(declaredNames(second)?.contains("search_references") == false)
     }
 
     @Test func defaultToolChoiceIsAuto() async throws {
@@ -519,7 +519,7 @@ private func speakResponseBody(arguments: String) -> Data {
     /// unchanged.
     @Test func allowedToolChoiceEncodesAllowedToolsOverTheSameDeclaredArray() async throws {
         let tools = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false,
+            disabledTools: [], referencesAdmitted: false,
             skills: [Skill(name: "behavioral", description: "d", body: "b")]).tools
         let box = CapturedBody()
         let client = BrainAccessor(apiKey: "sk-x", model: "gpt-5.5",
@@ -562,7 +562,7 @@ private func speakResponseBody(arguments: String) -> Data {
 
     private var hotTools: [ToolDef] {
         CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true,
+            disabledTools: [], referencesAdmitted: true,
             skills: [Skill(name: "behavioral", description: "d", body: "b")]).tools
     }
 

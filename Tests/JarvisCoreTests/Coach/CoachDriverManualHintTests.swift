@@ -14,7 +14,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
 @Suite(.serialized) struct CoachDriverManualHintTests {
     private func makeDriver(brain: BrainClient, screen: ScreenCapturing, overlay: OverlayRendering,
                             clock: Clock, capabilities: CoachCapabilities = .default,
-                            prepMaterial: (any PrepMaterialSearching)? = nil,
+                            documents: (any DocumentSession)? = nil,
                             activity: (any ActivityEventRecording)? = nil)
         -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
@@ -30,7 +30,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
             automaticAttemptDelay: { _ in },
             activity: activity,
             capabilities: capabilities,
-            prepMaterial: prepMaterial
+            documents: documents
         )
         return (driver, transcript)
     }
@@ -177,7 +177,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         let overlay = FakeOverlay()
         let (driver, _) = makeDriver(
             brain: brain, screen: screen, overlay: overlay, clock: ManualClock(now: 100),
-            capabilities: .compose(disabledTools: [], prepSourcesConfigured: false, skills: skills),
+            capabilities: .compose(disabledTools: [], referencesAdmitted: false, skills: skills),
             activity: activity)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -194,7 +194,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         let brain = ScriptedBrain(script: [loadSkill("behavioral"), speak])
         let (driver, _) = makeDriver(
             brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(now: 100),
-            capabilities: .compose(disabledTools: [], prepSourcesConfigured: false,
+            capabilities: .compose(disabledTools: [], referencesAdmitted: false,
                                    skills: [skills[0]]))
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -207,7 +207,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         let brain = ScriptedBrain(script: repeatedLoads + [speak])
         let (driver, _) = makeDriver(
             brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(now: 100),
-            capabilities: .compose(disabledTools: [], prepSourcesConfigured: false, skills: skills))
+            capabilities: .compose(disabledTools: [], referencesAdmitted: false, skills: skills))
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
@@ -215,22 +215,22 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
     }
 
     @Test func aPressMaySearchPrepNotesBeforeSpeaking() async {
-        let search = FakePrepMaterialSearch(results: [PrepMaterialSearchResult(
-            sourceDisplayName: "behavioral.md", text: "the migration I led")])
+        let search = FakeDocumentSession(results: [referenceHit(
+            name: "behavioral.md", text: "the migration I led")])
         let activity = RecordingActivity()
         let brain = ScriptedBrain(script: [
-            .init(toolCalls: [.loadTool(callId: "l1", name: "search_prep_notes")],
+            .init(toolCalls: [.loadTool(callId: "l1", name: "search_references")],
                   rawToolCalls: [RawToolCall(id: "l1", name: "load_tool",
-                                             argumentsJSON: #"{"name":"search_prep_notes"}"#)]),
-            .init(toolCalls: [.searchPrepNotes(callId: "c1", query: "disagreement")],
+                                             argumentsJSON: #"{"name":"search_references"}"#)]),
+            .init(toolCalls: [.searchReferences(callId: "c1", query: "disagreement")],
                   rawToolCalls: [RawToolCall(id: "c1", name: "call_tool",
-                                             argumentsJSON: #"{"name":"search_prep_notes","arguments":"{\"query\":\"disagreement\"}"}"#)]),
+                                             argumentsJSON: #"{"name":"search_references","arguments":"{\"query\":\"disagreement\"}"}"#)]),
             speak,
         ])
         let (driver, _) = makeDriver(
             brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(now: 100),
-            capabilities: .compose(disabledTools: [], prepSourcesConfigured: true),
-            prepMaterial: search, activity: activity)
+            capabilities: .compose(disabledTools: [], referencesAdmitted: true),
+            documents: search, activity: activity)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
 
@@ -241,7 +241,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         ])
         #expect(search.queries == ["disagreement"])
         #expect(activity.kinds
-            == [.manualHint, .screenViewed, .capabilityLoaded, .prepNotesSearched, .tip])
+            == [.manualHint, .screenViewed, .capabilityLoaded, .referencesSearched, .tip])
     }
 
     @Test func aLoadMadeByAPressCommitsToTheSession() async throws {
@@ -250,7 +250,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         ])
         let (driver, transcript) = makeDriver(
             brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(now: 100),
-            capabilities: .compose(disabledTools: [], prepSourcesConfigured: false, skills: skills))
+            capabilities: .compose(disabledTools: [], referencesAdmitted: false, skills: skills))
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         transcript.append(.init(speaker: .them, text: "Tell me about a conflict you had.", at: 101))

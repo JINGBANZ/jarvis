@@ -2,7 +2,7 @@
   "id": "B",
   "audio": "fixture",
   "brain": { "primary": "claude-subscription", "fallbacks": [] },
-  "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": ["behavioral", "system-design", "coding-with-ai", "customer-scenario-design"] },
+  "capabilities": { "disabledTools": ["search_references"], "disabledSkills": ["behavioral", "system-design", "coding-with-ai", "customer-scenario-design"] },
   "prepNotes": "prep-notes.md",
   "transcription": { "model": "gpt-4o-transcribe", "key": "standard" },
   "voices": { "them": "Samantha", "me": "Daniel" },

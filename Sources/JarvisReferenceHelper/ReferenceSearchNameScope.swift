@@ -15,7 +15,7 @@ struct ReferenceSearchNameScope {
         let ordered = grouped.keys.sorted { $0.count == $1.count ? $0 < $1 : $0.count > $1.count }
         var matched = false
         var selected = Set<String>()
-        // Consume complete longer names before their suffixes, as PrepMaterialIndex does.
+        // A longer filename owns its span so a suffix cannot select a second document.
         for base in ordered {
             try budget.check()
             let pattern = #"(?<![\p{L}\p{N}\p{M}_./\\-])"# + NSRegularExpression.escapedPattern(for: base)

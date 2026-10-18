@@ -3,19 +3,19 @@ import Testing
 
 @Suite struct PrepMaterialChunkerCompatibilityTests {
     @Test(arguments: ["md", "txt", "pdf", "docx"])
-    func everySupportedFormatCanSupplyEveryInterviewTopic(_ fileExtension: String) throws {
-        // PDF and Word fixtures are already-extracted text; decoding happens before this index.
+    func everySupportedFormatPreservesEveryPreparedTopic(_ fileExtension: String) throws {
+        // PDF and Word fixtures are already-extracted text; decoding precedes chunking.
         let materials = [
-            ("behavioral", "mentoring", "Mentoring: I coached an apprentice into an engineering role."),
-            ("coding", "binary", "Binary search: halve the remaining sorted range each iteration."),
-            ("system-design", "replication", "Replication: asynchronous copies trade freshness for availability."),
+            ("behavioral", "Mentoring: I coached an apprentice into an engineering role."),
+            ("coding", "Binary search: halve the remaining sorted range each iteration."),
+            ("system-design", "Replication: asynchronous copies trade freshness for availability."),
         ]
-        let chunks = materials.flatMap { topic, _, text in
+        let chunks = materials.flatMap { topic, text in
             PrepMaterialChunker.chunk(text: text, sourceDisplayName: "\(topic).\(fileExtension)")
         }
-        let index = PrepMaterialIndex(chunks: chunks)
-        for (topic, query, text) in materials {
-            let result = try #require(index.search(query: query).first)
+        #expect(chunks.count == materials.count)
+        for (topic, text) in materials {
+            let result = try #require(chunks.first { $0.sourceDisplayName == "\(topic).\(fileExtension)" })
             #expect(result.sourceDisplayName == "\(topic).\(fileExtension)")
             #expect(result.text == text)
         }
@@ -63,7 +63,6 @@ import Testing
         let chunks = PrepMaterialChunker.chunk(
             text: evidence + "\n\n" + headings, sourceDisplayName: "notes.md")
         #expect(chunks.map(\.text) == [evidence])
-        #expect(PrepMaterialIndex(chunks: chunks).search(query: "Empty").isEmpty)
     }
 
     @Test func headingImmediatelyBeforeTableKeepsFirstRows() {
@@ -116,12 +115,12 @@ import Testing
         let chunks = PrepMaterialChunker.chunk(
             text: section + "\n\n## Delivery\n\nWe shipped a release.",
             sourceDisplayName: "notes.md", targetWordCount: targetWordCount)
-        let result = try #require(PrepMaterialIndex(chunks: chunks).search(query: "Mentoring").first)
+        let result = try #require(chunks.first)
         #expect(result.text == section)
         #expect(chunks.count == 2)
     }
 
-    @Test func headingBeforeOversizedTableStaysWithFirstRows() throws {
+    @Test func headingBeforeOversizedTableStaysWithFirstRows() {
         let heading = "# Storage\n\n## Latency"
         let header = "| Strategy | Benefit |\n|---|---|"
         let rows = ["| Cache | fast reads |", "| Replica | stale reads |"]
@@ -129,8 +128,6 @@ import Testing
             text: heading + "\n\n" + header + "\n" + rows.joined(separator: "\n"),
             sourceDisplayName: "design.md", targetWordCount: 12)
         #expect(chunks.map(\.text) == [heading + "\n\n" + header + "\n" + rows[0], header + "\n" + rows[1]])
-        let result = try #require(PrepMaterialIndex(chunks: chunks).search(query: "Latency").first)
-        #expect(result.text.contains(rows[0]))
     }
 
     @Test func splitComparisonTablesKeepHeadersWithEveryRow() {
@@ -161,16 +158,15 @@ import Testing
         **Caveat:** Not measured in production.
         """
         let chunks = PrepMaterialChunker.chunk(text: text, sourceDisplayName: "design.md")
-        let result = try #require(PrepMaterialIndex(chunks: chunks).search(query: "Cache").first)
+        #expect(chunks.count == 1)
+        let result = try #require(chunks.first)
         #expect(result.text == text)
     }
 
     @Test(arguments: ["notes.txt", "notes.md", "export.pdf", "export.docx"])
-    func unicodeListsAndExtractedParagraphsRemainSearchable(_ name: String) {
+    func unicodeListsAndExtractedParagraphsStayTogether(_ name: String) {
         let text = "项目：缓存设计。\r\n\r\n- Reduce latency\r\n- Preserve correctness\r\n\r\nRésultat : amélioration."
         let chunks = PrepMaterialChunker.chunk(text: text, sourceDisplayName: name)
         #expect(chunks.map(\.text) == ["项目：缓存设计。\n\n- Reduce latency\n- Preserve correctness\n\nRésultat : amélioration."])
-        let results = PrepMaterialIndex(chunks: chunks).search(query: "latency")
-        #expect(results.first?.text.contains("Preserve correctness") == true)
     }
 }

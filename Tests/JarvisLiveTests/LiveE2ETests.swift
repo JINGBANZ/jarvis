@@ -156,15 +156,15 @@ struct LiveE2ETests {
                 (!evidence.activity.contains {
                     ["behavioral", "system-design", "coding-with-ai"].contains($0.loadedCapability?.name ?? "")
                 }, "switched-off skills never load"),
-                (!evidence.activity.contains { $0.kind == "prepNotesSearched" }, "no prep search"),
+                (!evidence.activity.contains { $0.kind == "referencesSearched" }, "no prep search"),
                 (!b2.isEmpty, "B2 ran an attempt"),
             ])
             results.note("C16", "B2 ended \(b2.last?.terminal ?? "without an attempt"), "
                 + Self.describeDetail(evidence, b2))
             results.check("C18", [
                 (!initialTraffic.isEmpty, "initial provider's coach requests were recorded"),
-                (initialTraffic.allSatisfy { !($0.instructions ?? "").contains("search_prep_notes") },
-                 "instructions never name search_prep_notes"),
+                (initialTraffic.allSatisfy { !($0.instructions ?? "").contains("search_references") },
+                 "instructions never name search_references"),
                 (initialTraffic.allSatisfy { !($0.instructions ?? "").contains("Tools you can load") },
                  "instructions carry no tools catalog or load-tool clause"),
             ])
@@ -287,7 +287,7 @@ struct LiveE2ETests {
             rows(chain).compactMap { row -> String? in
                 switch row.kind {
                 case "capabilityLoaded": return row.loadedCapability.map { "load \($0.name)" }
-                case "prepNotesSearched": return "search"
+                case "referencesSearched": return "search"
                 case "screenViewed": return "screen"
                 case "tip": return "tip"
                 case "stayedSilent": return "silent"
@@ -332,12 +332,12 @@ struct LiveE2ETests {
             $0.tag == "coach"
         }
         results.check("C05", [
-            (Self.precedes(a3Sequence.firstIndex(of: "load search_prep_notes"),
+            (Self.precedes(a3Sequence.firstIndex(of: "load search_references"),
                            a3Sequence.firstIndex(of: "search")),
-             "A3 loads search_prep_notes before searching (saw \(a3Sequence))"),
+             "A3 loads search_references before searching (saw \(a3Sequence))"),
             (firstDesignRequest?.declaredToolNames.contains("call_tool") == true
-                && firstDesignRequest?.declaredToolNames.contains("search_prep_notes") == false,
-             "A5's first request declares call_tool and never search_prep_notes"),
+                && firstDesignRequest?.declaredToolNames.contains("search_references") == false,
+             "A5's first request declares call_tool and never search_references"),
             (evidence.debugLines(containing: "was called before it was loaded").isEmpty,
              "no deferred tool ran before its load"),
         ])
@@ -345,7 +345,7 @@ struct LiveE2ETests {
                                            a3Sequence.lastIndex(of: "tip")),
                       "A3 loads behavioral before its tip (saw \(a3Sequence))")
         results.check("C07", [
-            (a3Sequence == ["load behavioral", "load search_prep_notes", "search", "tip"],
+            (a3Sequence == ["load behavioral", "load search_references", "search", "tip"],
              "A3's chain stays in one attempt (saw \(a3Sequence))"),
             (a5Sequence.sorted() == ["load system-design", "search", "tip"]
                 && Self.precedes(a5Sequence.firstIndex(of: "load system-design"),
@@ -358,15 +358,15 @@ struct LiveE2ETests {
         results.check("C31", [
             (Self.precedes(a5Sequence.firstIndex(of: "search"), a5Sequence.lastIndex(of: "tip")),
              "A5 searches design preparation before answering"),
-            (tip(a9) != nil && count("prepNotesSearched", in: a9) == 0,
+            (tip(a9) != nil && count("referencesSearched", in: a9) == 0,
              "A9 answers cache invalidation using the existing design excerpt"),
-            (tip(a6) != nil && count("prepNotesSearched", in: a6) == 0,
+            (tip(a6) != nil && count("referencesSearched", in: a6) == 0,
              "A6 answers the one-pass coding question without searching preparation"),
         ])
         results.check("C32", [
-            (count("prepNotesSearched", in: a1) == 0,
+            (count("referencesSearched", in: a1) == 0,
              "A1's cold coding hint does not force an unrelated prep search"),
-            (count("prepNotesSearched", in: a2) == 0,
+            (count("referencesSearched", in: a2) == 0,
              "A2's small talk does not search prep notes"),
         ])
         results.note("C31", "A5 content review: \(tip(a5)?.message ?? "no tip")")
@@ -383,7 +383,7 @@ struct LiveE2ETests {
         ])
         results.time("A4 question-to-tip", seconds: Self.questionToTip(evidence, a4))
         results.check("C09", loads(a1).contains("coding"), "A1 loaded coding (saw \(loads(a1)))")
-        results.check("C10", committed == ["coding", "behavioral", "search_prep_notes", "system-design"],
+        results.check("C10", committed == ["coding", "behavioral", "search_references", "system-design"],
                       "four loads, each once, in order (saw \(committed))")
 
         results.check("C11", [

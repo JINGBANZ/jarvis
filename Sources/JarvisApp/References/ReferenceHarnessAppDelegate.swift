@@ -71,6 +71,16 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
             results.append(["case": "application-quit", "helper_pid": helper.processIdentifier!])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--reference-harness-case"),
+           CommandLine.arguments.indices.contains(index + 1) {
+            try await runPhaseFourChecks(selection: CommandLine.arguments[index + 1])
+            let helper = ReferenceHelperSupervisor(bundle: bundle, home: output.appendingPathComponent("quit-store"))
+            supervisor = helper
+            try await helper.start()
+            results.append(["case": "application-quit", "helper_pid": helper.processIdentifier!])
+            return
+        }
+        try await runPhaseFourChecks(selection: "all")
         let fixture = output.appendingPathComponent("fixtures")
         try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try "Uniquequasar synthetic reference. 😀é\n".write(to: fixture.appendingPathComponent("sample.txt"), atomically: true, encoding: .utf8)

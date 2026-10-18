@@ -28,10 +28,10 @@ import Foundation
         let p = BrainPreferences(defaults: d)
         #expect(p.disabledTools.isEmpty)
 
-        p.disabledTools = ["search_prep_notes"]
+        p.disabledTools = ["search_references"]
 
-        #expect(BrainPreferences(defaults: d).disabledTools == ["search_prep_notes"])
-        #expect(d.stringArray(forKey: Defaults.Brain.disabledToolsKey) == ["search_prep_notes"])
+        #expect(BrainPreferences(defaults: d).disabledTools == ["search_references"])
+        #expect(d.stringArray(forKey: Defaults.Brain.disabledToolsKey) == ["search_references"])
     }
 
     @Test func disabledSkillsRoundTripAndDefaultToNothingSwitchedOff() {
@@ -49,9 +49,9 @@ import Foundation
         let d = freshDefaults()
         let p = BrainPreferences(defaults: d)
 
-        p.disabledTools = CoachCapabilities.fixedToolNames.union(["search_prep_notes"])
+        p.disabledTools = CoachCapabilities.fixedToolNames.union(["search_references"])
 
-        #expect(p.disabledTools == ["search_prep_notes"])
+        #expect(p.disabledTools == ["search_references"])
     }
 
     @Test func roundTripsThroughDefaults() {
@@ -326,4 +326,27 @@ import Foundation
         #expect(p.fallbackTargets == [BrainTarget(provider: .openAI, modelID: "gpt-5.4-mini")])
         #expect((d.array(forKey: Defaults.Brain.fallbackTargetsKey) ?? []).count == 1)
     }
+    @Test(arguments: [false, true], [false, true])
+    func referenceMigrationPreservesMasterAndIndependentReadRestrictions(masterOff: Bool, readOff: Bool) {
+        let defaults = freshDefaults()
+        var legacy: Set<String> = ["unknown_future_tool"]
+        if masterOff { legacy.insert("search_prep_notes") }
+        if readOff { legacy.insert("read_prep_note") }
+        defaults.set(legacy.sorted(), forKey: Defaults.Brain.disabledToolsKey)
+        let migrated = BrainPreferences(defaults: defaults)
+        #expect(migrated.disabledTools.contains("search_references") == masterOff)
+        #expect(migrated.disabledTools.contains("read_reference") == readOff)
+        #expect(migrated.disabledTools.contains("unknown_future_tool"))
+        #expect(!migrated.disabledTools.contains("search_prep_notes"))
+        #expect(!migrated.disabledTools.contains("read_prep_note"))
+        let offered = CoachCapabilities.compose(disabledTools: migrated.disabledTools, referencesAdmitted: !masterOff)
+        #expect((offered.tool(named: "list_references") != nil) == !masterOff)
+        #expect((offered.tool(named: "read_reference") != nil) == (!masterOff && !readOff))
+        migrated.disabledTools = []
+        defaults.set(["search_prep_notes", "read_prep_note"], forKey: Defaults.Brain.disabledToolsKey)
+        let restarted = BrainPreferences(defaults: defaults)
+        #expect(restarted.disabledTools == ["search_prep_notes", "read_prep_note"])
+        #expect(CoachCapabilities.compose(disabledTools: restarted.disabledTools, referencesAdmitted: true).catalogNames.count == 3)
+    }
+
 }

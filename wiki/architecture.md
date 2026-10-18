@@ -139,8 +139,9 @@ moments the model judges worthwhile.
    (`CoachHistory`), the
    new transcript delta, the timing context (seconds silent, session elapsed), and the session's
    switched-on tool set. `capture_screen`, `speak`, and `stay_silent` are always there; `load_tool`,
-   `call_tool`, and catalog entries for `search_prep_notes` and `read_prep_note` join them when prep sources are configured
-   and the user has not switched that capability off (see [Capabilities](#capabilities)). The timing
+   `call_tool`, and catalog entries for `list_references`, `search_references`, and `read_reference`
+   join them when References are admitted at Start and permitted by the session's frozen access
+   policy (see [References](#references)). The timing
    is what lets the model tell "thinking" from "stuck."
 4. Before speaking, the model calls `capture_screen` when a specific, correct reply depends on
    visible context missing from the conversation — including unresolved references such as “this”
@@ -162,8 +163,8 @@ moments the model judges worthwhile.
    ("final empty. no. final.") that polluted the conversation and was imitated on later turns;
    requiring a tool call prevents the emission rather than filtering it afterwards.
 6. Activity records every brain action, through the session's one evidence handle: successful or
-   failed `capture_screen`, `speak`, `stay_silent`, each prep-notes search or document read, each capability load, and
-   the fixed notice that a tip went out without the user's prepared notes. Heard rows and
+   failed `capture_screen`, `speak`, `stay_silent`, each reference list, search or read, each capability
+   load, and typed reference admission or access notices. Heard rows and
    model-facing transcript deltas share `ConversationChronology`:
    occurrence time is authoritative, and insertion order breaks timestamp ties. A late-finalizing
    earlier utterance is therefore inserted before a faster later reply. When Activity reaches its
@@ -188,7 +189,7 @@ moments the model judges worthwhile.
 ### Capabilities
 
 What a session can do is one value, `CoachCapabilities`, composed at Start from the user's switches,
-the bundled skills, and whether prep-material sources are configured, then read by the coach loop,
+the bundled skills, and the References admission result, then read by the coach loop,
 which builds every request's prompt and tool list from it. One value fixed at Start is the whole
 point: a set that grew or changed shape mid-session would change what a brain was told it could call
 between two requests of the same conversation, and a route can move between brains over one shared
@@ -293,7 +294,7 @@ The body targets 15 KB so a loaded skill remains usable under time pressure. It 
 explanation and example scripts, omits the generative-content scenario, and keeps workflow mechanisms
 and their failure modes. Timings, sample sizes, routing shares, and rollout thresholds are illustrative;
 none establish company policy, universal statistical confidence, or a customer's measured baseline.
-Personal stories, previous practice designs, scores, and debriefs remain in optional prep notes.
+Personal stories, previous practice designs, scores, and debriefs remain in optional References.
 Missing notes leave generic coaching available without fabricated personal history; invalid skill
 files and disabled skills retain the catalog's existing degradation behavior.
 
@@ -310,92 +311,71 @@ a turn. An attempt that fails simply loads again, at the cost of one round trip,
 "already loaded" is true exactly when the loaded content is in history the model can still read. Compaction
 keeps those pairs verbatim under the summary for the same reason ([`CoachHistory`](../Sources/JarvisCore/Coach/CoachHistory.swift)).
 
-`search_prep_notes` and `read_prep_note` are deferred tools. They are in the catalog when prep-material *sources* are
-configured and the user has not switched it off. "Configured" is deliberately not "an index exists":
-building the index reads files and shells out to `textutil`, so it runs off the Start path and the
-search port arrives after the first
-attempts. A search that finds no index says so and coaching continues without the notes. That is the
-honest answer, and it costs nothing, where changing the offered set mid-session would cost the whole
-session. The same answer covers indexing that finished with nothing usable, because the builder
-installs no port in either case; which one it was stays in `jlog`, and Activity carries only the
-fixed notice that a tip went out without the user's own material. Switching the capability off also
-skips the index build, so the file reading and `textutil` work stop with it.
+### References
 
-Prep material is shared across interview types: `.md`, `.txt`, `.pdf`, and `.docx` sources can all
-supply behavioral, coding, or system-design preparation, including mixed-topic documents. No skill
-or topic filters sources by file format. Extraction depends on the file format; coaching depends
-on the question and retrieved evidence. The deferred tool description names behavioral stories,
-coding approaches, and system designs so technical preparation is discoverable before loading.
-Retrieval stays selective: questions unlike plausible preparation can skip it, and relevant excerpts
-already in context are reused. Once loaded, tool guidance treats excerpts as reference data, preserves
-assumptions and caveats, and supplements uncovered technical topics without fabricated attribution
-or personal history. A required reply alone does not bypass loading; only a tool choice permitting
-solely `speak` does.
+References are user-selected local documents relevant to the current conversation: TXT, Markdown,
+PDF, and DOCX. Prepared behavioral stories, coding notes, and system designs are examples. Settings
+owns the source list and the master switch; the native
+SQLite helper prepares reusable metadata, extracted text, and ranked search independently. The app
+warms the helper asynchronously at launch. Source edits and Settings changes prepare the next
+metadata generation, and each explicit Start reconciles changes missed by the filesystem watcher.
+The helper, readers, storage, and retrieval mechanics are described in
+[build-and-run.md](./build-and-run.md#references-helper-packaging-and-integration-checks).
 
-The catalogs stay in the cached prompt after a load, so every line in them holds for the whole
-session: each loader is used once per session, and the prep tool's line asks for a search only when
-no excerpt already in the conversation covers the question. A line saying to load before such
-questions would still read as an instruction after the load, and one saying to search before every
-such question competes with reusing an excerpt on a follow-up. Skills name the task ("search the
-prep notes", only if prep notes are available), never the deferred tool, and the search rules live
-only in the tool's own guidance: a skill naming the tool invites a call before its load, and a
-session with prep search off carries none of those rules. Every search result opens with a line
-marking the excerpts as reference data, never instructions, so a search that runs before its load
-still carries that boundary.
+An accepted Start begins one absolute two-second metadata-admission deadline alongside the other
+readiness work. Helper startup and newer preparation generations consume that same deadline; they
+do not reset it. Start waits for complete metadata, not all source hashes, conversion, or indexing.
+`ReferenceLibrary` returns one `ReferenceAdmissionResult` from which composition derives the access
+handle, context, and reference tools together. A metadata failure or timeout omits References for
+that entire session and adds one typed Activity warning after the new session's evidence sink
+exists. Disabled References and a valid empty selection omit them silently. A canceled or otherwise
+rejected Start releases its pending admission without writing a warning into an older session.
+The ordinary app and live e2e runner use this same admission path.
 
-Prep search uses local keyword ranking over paragraph chunks. Only `.md` sources receive Markdown
-handling; plain text and extracted PDF/Word text retain paragraph-based chunking without interpreting
-literal hash or pipe characters. Markdown section boundaries keep short stories with their accuracy
-notes. Consecutive headings stay with their first content block, including the first group of an
-oversized table; trailing headings without content are omitted from the search index because they
-supply no evidence. The source file is unchanged. Fenced code blocks stay intact, including blank
-lines; indented code is not interpreted as headings or tables. Recognized leading/trailing-pipe
-tables with an explicit delimiter row split between rows and repeat their column headers, including
-when a table immediately follows a heading without a blank line. Comparison rows remain
-interpretable and a question map does not become one oversized search result. Unsupported Markdown
-constructs retain paragraph behavior. Long prose paragraphs, fenced code, individual rows with their
-headers, and a heading plus its first content block can exceed the target; long sections can still span chunks
-(see [`PrepMaterialChunker`](../Sources/JarvisCore/PrepMaterial/PrepMaterialChunker.swift)).
+Successful admission freezes membership, display metadata, access policy, and the exact serialized
+`SessionContext(DocumentCatalog)` before the first inference. The bounded JSON catalog contains names,
+formats, opaque document IDs, and total/omitted counts; it contains no source text or filesystem
+paths. It is informational, untrusted user-role data after instructions and before summary/history,
+exactly once in every coaching request. It stays outside `CoachHistory`, so compaction cannot
+summarize it away or duplicate it. There is no discovery-finished message or startup-only inference.
+Later content or search readiness changes tool outcomes without rewriting this context or its tools.
+See [Context composition](#context-composition).
 
-A query naming a complete source filename scopes ranking to that document and scores the remaining
-topic terms. Filename boundaries exclude embedded names and extra filename suffixes, so mentioning
-OtherPayment.md does not select Payment.md; sentence punctuation is accepted. Longer configured
-names are consumed first so a shared suffix does not select another source. A title-heavy query
-can therefore reach the design sections instead of other files' introductions.
-Search hits carry opaque document identities. The index retains the original extracted text in
-memory alongside its chunks; full reads therefore preserve Markdown and document order, including
-text omitted or repeated by search chunking. Two files with the same display name have different
-identities. Repeated selections of the same file are deduplicated before extraction.
+`list_references`, `read_reference`, and `search_references` are deferred tools behind the async
+`DocumentSession` interface. Listing pages the complete admitted metadata snapshot, including entries
+omitted from the prompt catalog; listing alone does not pin content. A uniquely named catalog
+document can be read directly, saving a search round trip. Duplicate filenames remain distinct and
+require evidence or user clarification, never selection by list order. Reads accept opaque IDs,
+never paths, and return original extracted text in bounded Unicode-scalar pages with a revision ID
+and continuation offset. Subsequent pages carry that revision ID. A full-document answer requires
+coverage from offset zero through the end; a partial read must be disclosed. Unknown IDs, invalid
+offsets, preparation, and unavailable sources have explicit outcomes.
 
-Once the index is available, each request includes a compact JSON document catalog immediately after
-coaching instructions and before conversation history or live context: filenames and opaque IDs,
-without document text or filesystem paths. Its ordering, IDs, and serialization stay fixed across
-attempts and continuations using the same index. Each payload includes one copy; committed history
-never includes it. This placement preserves the stable prefix before changing conversation content. A uniquely named document can be read
-directly by its catalog ID, saving the search round trip; topical questions still use search.
-Duplicate filenames remain distinct entries and require relevant evidence or user clarification,
-never selection by list order. Filenames are escaped as JSON and explicitly marked as untrusted
-data. Disabling prep removes the catalog as well as both tools. The metadata reaches the selected
-brain provider; the Settings disclosure names that egress.
+Search returns bounded ranked passages plus coverage of the admitted scope. Incomplete preparation
+and a truncated hit list are separate facts; no matches cannot establish that nothing relevant
+exists. Retrieval stays selective: questions unrelated to available References can skip it, excerpts
+already in context are reused, and a new topic can warrant another query. A hit that merely names a
+story or section calls for a read instead of repeated title searches. Empty or unavailable results
+do not authorize repeated polling or delay generic coaching. Tool descriptions and loaded guidance
+own these rules; skills name the task rather than bypassing tool loading. The catalogs remain fixed
+after a load, so their descriptions hold throughout the conversation.
 
-Search guidance normally calls for one query per topic. A hit that only names a story or section
-calls for `read_prep_note` with the hit's
-identity; an explicit named-document request can instead use its catalog identity. This read never accepts a filesystem path or reads from disk during a coaching attempt.
-It returns a bounded page with its starting offset and an explicit continuation offset or end marker; the model can continue
-within the existing tool budget and must disclose partial coverage if it cannot finish. A short
-excerpt does not imply an unreadable file or a need to upload again. Reaching the end alone does not
-prove full coverage: the model must have the text from offset zero through the end. Design answers
-identify the document and available section, distinguish source claims from recommendations, and
-expose conflicts between versions instead of silently combining them. Unknown identities, invalid
-offsets, and an unavailable index return explicit results without retries. Successful pages remain
-in pending work across existing provider retries, deduplicated and separate from the latest search
-observation. They are bounded by the existing attempt and route budgets and released with pending
-work; a later page or search cannot discard earlier document text. Both tools share the
-prep switch and the untrusted-reference boundary, and retrieved text goes only to the selected
-brain and the existing session evidence. See
-[`PrepMaterialIndex`](../Sources/JarvisCore/PrepMaterial/PrepMaterialIndex.swift),
-[`SearchPrepNotes`](../Sources/JarvisCore/Coach/Tools/SearchPrepNotes.swift), and
-[`ReadPrepNote`](../Sources/JarvisCore/Coach/Tools/ReadPrepNote.swift).
+The first successful read or emitted search evidence durably pins that document's revision. Later
+pages and search evidence use the same text after edits, deletion, or helper restart. Unpinned
+access validates the source and cannot substitute stale cached text. Removing a root or switching
+References off in Settings affects future admission; the current session retains its catalog,
+tools, and admitted access, including first use of an unread member. Disabling future preparation
+does not cancel work an active session still needs. Stop cancels and drains the session's attempt
+and compaction work before releasing its access and pins; the helper stays warm for Settings and
+later sessions. Quit also shuts down the helper and parser children.
+
+Names and returned text remain untrusted reference data, never instructions. Coaching preserves
+assumptions and caveats, identifies the source and section when available, distinguishes source
+claims from recommendations, and exposes conflicting versions. Missing personal evidence cannot
+authorize fabricated attribution or history. Successful read pages remain deduplicated in pending
+work across the existing provider retry budget; a later search does not discard them. Tool awaits
+respect attempt cancellation and keep the existing response cap and one brain target per attempt.
+The privacy and persistent-cache boundary is in [sandbox.md](./sandbox.md#references-data).
 
 The behavioral skill evaluates all returned excerpts against the exact question and distinguishes
 personal events from drafts, hypothetical approaches, and criteria. For a new question, the opening
@@ -416,7 +396,7 @@ cap is defined by `CoachAttemptRunner.maxToolIterations` in
 [`CoachAttemptRunner.swift`](../Sources/JarvisCore/Coach/CoachAttemptRunner.swift). Every trigger
 reserves the final response for a terminal action, with a completion reminder excluded from committed
 history: manual requests force speak, while automatic turns permit speak or stay_silent. No further
-retrieval or capture runs on that response. Prep-enabled attempts also remind the model to disclose
+retrieval or capture runs on that response. Attempts offering document reads also remind the model to disclose
 incomplete document coverage and limit conclusions to available evidence. Automatic turns retain the
 choice to stay silent even after inspecting context. This completion guard spends the existing budget
 rather than adding calls or changing provider routing.
@@ -428,7 +408,7 @@ something to do. See
 [settings-window.md](./settings-window.md) for the user-facing card.
 
 A [coaching shortcut](#on-demand-coaching-shortcuts) press runs this same loop, so even the first press
-of a session can load the skill or tool its question needs and search prep notes, and its loads commit
+of a session can load the skill or tool its question needs and search References, and its loads commit
 when it speaks, like any attempt's. What a press may call is narrowed on each response instead,
 with the `tools` array unchanged: every callable tool except `stay_silent` and `capture_screen`,
 since its screen is already in the first request, and the response at the cap is forced to `speak`.
@@ -643,8 +623,8 @@ nothing about how to answer it: how is the speak guidance's job and the loaded s
 is not a third copy to keep in step. All three capture a fresh screen, then snapshot the latest
 finalized transcript for the first request, so speech finalized during capture reaches that request.
 The attempt audit and committed transcript boundary use that same snapshot; a deferred turn already
-covered by it does not produce another hint. All three always end in a tip: a press may load a skill or tool and search prep
-notes first, but never stays silent or captures again (see [Capabilities](#capabilities)). If capture
+covered by it does not produce another hint. All three always end in a tip: a press may load a skill or
+tool and search References first, but never stays silent or captures again (see [Capabilities](#capabilities)). If capture
 fails, the request identifies the missing screen and uses available context without inventing visible
 details. They share the ordinary single-flight coach loop and provider route. Natural wakes preserve
 pending manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass
@@ -1043,7 +1023,7 @@ rather than a per-turn screenshot.
   [Gemini API target](#gemini-api-target).
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
   prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
-  itself. `CoachContext` composes immutable instructions and tools, the prep-document catalog,
+  itself. `CoachContext` composes immutable instructions and tools, `SessionContext`,
   committed memory, and the current attempt's delta in that order. A load's original call and result
   are the model-facing evidence that it is loaded; the runner's internal loaded set commits with
   that evidence and answers duplicate loads without repeating the body. A reminder excluded from
@@ -1100,7 +1080,7 @@ rather than a per-turn screenshot.
   policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
   model loads when the question calls for it. Five skills ship: behavioral shapes candidate-owned
   experience answers with STAR, handles personal and hypothetical questions directly, preserves
-  prep-material caveats, and reserves labeled fictional examples for an explicit practice request.
+  reference caveats, and reserves labeled fictional examples for an explicit practice request.
   It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
   local implementation and defect diagnosis, workload-grounded performance reasoning, and
   discriminating tests with explicit expected results. Understanding questions precede implementation
@@ -1251,7 +1231,7 @@ rather than a per-turn screenshot.
 
 Provider context layout is a cost-sensitive contract. `CoachContext` owns the fixed instructions,
 declared tools, and the projection of committed history into an attempt. Its immutable attempt
-snapshot prevents background compaction or a newly available prep index from changing a tool-loop
+snapshot prevents background compaction or changing reference readiness from altering a tool-loop
 continuation. The runner appends current evidence and tool results; only a completed attempt commits
 them. Internal loaded-capability bookkeeping commits with the original guidance, so removing a
 reminder never unloads a capability. Automatic callable-tool policy remains model-governed.
@@ -1259,8 +1239,8 @@ reminder never unloads a capability. Automatic callable-tool policy remains mode
 | Context source | Lifetime and cache effect |
 |---|---|
 | Instructions, hot tool schemas, skill/deferred-tool descriptions | Fixed for the session, in deterministic order. Loaded bodies extend history without changing these declarations. |
-| Prep-document catalog | Metadata before history, frozen within the attempt. An index/catalog update declares a new context revision. |
-| Finalized speech, manual/silence instructions, retrieved prep evidence | Current attempt, then ordered durable history on successful completion. Failed or cancelled attempt effects do not commit. |
+| `SessionContext(DocumentCatalog)` | Exact serialized informational user data before summary/history, fixed at admission for the session. Included once; outside compaction. Content/index preparation never rewrites it. |
+| Finalized speech, manual/silence instructions, retrieved reference evidence | Current attempt, then ordered durable history on successful completion. Failed or cancelled attempt effects do not commit. |
 | Skill/tool loads | Original call/result pairs remain verbatim in durable history and through compaction. Duplicate loads return a short result. |
 | Screen pixels and text | Current evidence within the attempt. Commit retires pixels and supersedes older text, declaring a screen-retirement boundary. |
 | Provider reasoning and raw call items | Verbatim within the attempt; normalized to provider-neutral calls at commit. A continuation is compared with its own attempt, while fresh attempts are compared with earlier initial requests. |

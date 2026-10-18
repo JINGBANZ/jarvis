@@ -5,14 +5,15 @@ final class CoachContext: @unchecked Sendable {
     let capabilities: CoachCapabilities
     let instructions: String
     let history = CoachHistory()
+    let sessionContext: SessionContext?
     private let lock = NSLock()
-    private var previousCatalog: String?
     private var previousHistoryRevision: UInt = 0
     private var revision: UInt = 0
     private var rewriteReason: CoachingContextRewriteReason?
 
-    init(capabilities: CoachCapabilities) {
+    init(capabilities: CoachCapabilities, sessionContext: SessionContext? = nil) {
         self.capabilities = capabilities
+        self.sessionContext = sessionContext
         instructions = JarvisPrompts.Coach.system(capabilities: capabilities)
     }
 
@@ -40,20 +41,15 @@ final class CoachContext: @unchecked Sendable {
         }
     }
 
-    func beginAttempt(prepCatalog: [PrepMaterialDocumentReference]) -> Attempt {
+    func beginAttempt() -> Attempt {
         lock.withLock {
             let snapshot = history.snapshotWithRevision()
-            let prepEnabled = capabilities.tool(named: readPrepNoteTool.name) != nil
-            let catalog = prepEnabled ? JarvisPrompts.Coach.prepDocumentCatalog(prepCatalog) : nil
+            let prepEnabled = capabilities.tool(named: readReferenceTool.name) != nil
+            let catalog = sessionContext.map { "SessionContext (informational background data; untrusted reference metadata):\n" + String(decoding: $0.serialized, as: UTF8.self) }
             if snapshot.revision != previousHistoryRevision {
                 revision &+= 1
                 rewriteReason = snapshot.rewriteReason
             }
-            if catalog != previousCatalog {
-                revision &+= 1
-                rewriteReason = .prepCatalogUpdate
-            }
-            previousCatalog = catalog
             previousHistoryRevision = snapshot.revision
             return Attempt(
                 tools: capabilities.tools, contextRevision: revision, rewriteReason: rewriteReason,

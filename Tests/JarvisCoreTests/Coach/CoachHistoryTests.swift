@@ -200,11 +200,11 @@ import Testing
         #expect(calledBefore.isDisjoint(with: answeredAfter))
     }
 
-    @Test(arguments: [("load_tool", "Loaded search_prep_notes. Arguments JSON Schema: {}"),
+    @Test(arguments: [("load_tool", "Loaded search_references. Arguments JSON Schema: {}"),
                       ("load_skill", "Loaded skill: behavioral. Organize the answer as STAR.")])
     func loadPairsSurviveASummaryAndStayOutOfIt(loader: String, loaded: String) throws {
         let load = RawToolCall(id: "l1", name: loader,
-                               argumentsJSON: #"{"name":"search_prep_notes"}"#)
+                               argumentsJSON: #"{"name":"search_references"}"#)
         // Padded to one filler's length, so both cases land on the same greedy boundary.
         let result = loaded.padding(toLength: 401, withPad: " padding", startingAt: 0)
         let h = historyWithAPairAtTheGreedyBoundary(call: load, result: result)
@@ -232,8 +232,8 @@ import Testing
         let h = CoachHistory()
         h.commit([
             .assistantToolCalls([RawToolCall(id: "l1", name: "load_tool",
-                                             argumentsJSON: #"{"name":"search_prep_notes"}"#)]),
-            .init(role: .tool, text: "Loaded search_prep_notes.", toolCallId: "l1"),
+                                             argumentsJSON: #"{"name":"search_references"}"#)]),
+            .init(role: .tool, text: "Loaded search_references.", toolCallId: "l1"),
             .user(String(repeating: "x", count: 4000)),
         ])
 

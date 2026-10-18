@@ -65,6 +65,77 @@ class SearchContracts(unittest.TestCase):
         with sqlite3.connect(self.database) as db:
             return dict(db.execute("SELECT document_id,pin FROM session_documents WHERE session_id=?", (self.session,)))
 
+    def test_empty_library_and_blank_queries_have_truthful_outcomes(self):
+        metadata = self.configure()
+        self.assertEqual((metadata["state"], metadata["total_count"]), ("ready", 0))
+        empty = self.result("admit", {"generation": self.generation, "start_id": self.start})
+        self.assertEqual(empty["state"], "empty")
+        key = self.prepare("rate limiter evidence")
+        self.ready("absenttoken", count=1)
+        for query in ["", "   ", "\t\n"]:
+            self.assertEqual(self.result("search", {"query": query})["status"], "limit_exceeded")
+            self.assertIsNone(self.pins()[key])
+
+    def test_ordinary_topics_rank_relevant_passages_case_insensitively(self):
+        fixtures = {"strong.md": "rate limiter rate limiter token bucket rate limiter design",
+                    "weak.md": "a brief mention of rate limiter in passing, mostly about something else entirely",
+                    "url-shortener.md": "design a url shortener with base62 encoding"}
+        for name, text in fixtures.items(): (self.sources / name).write_text(text)
+        self.configure(); self.admit()
+        self.assertEqual(self.ready("binary search tree rotations", count=3)["hits"], [])
+        for query in ["rate limiter", "RATE LIMITER", "how would you design a rate limiter"]:
+            result = self.search(query)
+            self.assertEqual(result["hits"][0]["name"], "strong.md", (query, result))
+
+    def test_named_search_reads_original_markdown_and_all_unicode_pages(self):
+        text = "# Payment Design\r\n\r\nSession date\r\n\r\n## Architecture\r\n\r\nUse durable operations.\r\n\r\n"
+        text += "支付 👩🏽‍💻 e\u0301\r\n" * 6000 + "\r\n## Appendix\r\n"
+        key = self.prepare(text, "Payment.md")
+        self.ready("absenttoken", count=1)
+        hit = self.search("Payment.md")["hits"][0]
+        self.assertEqual(hit["document_id"], key)
+        offset, pages = 0, []
+        while offset < len(text):
+            page = self.read(key, offset, revision_id=hit["revision_id"])
+            self.assertEqual(page["status"], "ok", page)
+            self.assertGreater(len(page["text"]), 0)
+            self.assertLessEqual(len(page["text"]), 16_000)
+            self.assertEqual(page["next_offset"], offset + len(page["text"]))
+            self.assertEqual(page["total_scalars"], len(text))
+            self.assertEqual(page["revision_id"], hit["revision_id"])
+            pages.append(page["text"])
+            offset = page["next_offset"]
+        self.assertEqual("".join(pages), text)
+        for offset in [-1, 2**63 - 1]:
+            self.assertEqual(self.read(key, offset)["status"], "invalid_offset")
+        self.assertEqual(self.read(str(uuid.uuid4()))["status"], "unknown_document")
+        self.assertNotEqual(self.read("/etc/passwd")["status"], "ok")
+
+    def test_live_fixture_queries_keep_behavioral_stories_whole_and_distinct(self):
+        fixture = Path(__file__).resolve().parents[2] / "Tests/JarvisLiveTests/Fixtures/prep-notes.md"
+        key = self.prepare(fixture.read_text(), "prep-notes.md")
+        self.ready("absenttoken", count=1)
+        for query in ["time you disagreed with a teammate", "disagreed with a teammate",
+                      "disagreed with a teammate conflict story", "disagreed with a teammate conflict",
+                      "teammate disagreement", "conflict with a teammate"]:
+            hits = self.search(query)["hits"]
+            self.assertFalse(any("Product search architecture" in hit["text"] for hit in hits), query)
+            self.assertFalse(any("Marcus" in hit["text"] or "feature flag" in hit["text"] for hit in hits), query)
+            self.assertTrue(any("my teammate Priya" in hit["text"] and "0.01%" in hit["text"] for hit in hits), query)
+        for query in ["time you pushed back on a decision from your manager",
+                      "pushed back on manager decision story",
+                      "pushed back on manager decision evidence alternative outcome",
+                      "pushed back on manager decision launch data loss bugs staged rollout"]:
+            hits = self.search(query)["hits"]
+            self.assertFalse(any("Product search architecture" in hit["text"] for hit in hits), query)
+            self.assertTrue(hits and "Marcus Webb" in hits[0]["text"] and "zero data-loss" in hits[0]["text"], query)
+        for query in ["product search high level architecture read path", "slow search endpoint redesign"]:
+            hits = self.search(query)["hits"]
+            self.assertTrue(hits, query)
+            self.assertEqual(hits[0]["document_id"], key)
+            for detail in ["Product search architecture", "invalidation", "version"]:
+                self.assertIn(detail, hits[0]["text"], query)
+
     def test_full_tail_search_first_pin_and_original_offsets(self):
         text = "# Overview\r\n\r\n" + ("😀e\u0301 background words.\r\n\r\n" * 1800) + "# Payments\r\n\r\nuniquequasar 支付失败 账单-42 evidence.\r\n"
         key = self.prepare(text, "Payment.md")
@@ -125,16 +196,20 @@ class SearchContracts(unittest.TestCase):
 
     def test_complete_filename_spans_preserve_longest_names_and_unicode(self):
         fixtures = {"Payment System Design.md": "architecture retry guidance", "System Design.md": "architecture other guidance",
-                    "Straße.md": "canonical unicode retry guidance", "Überblick.md": "unicode composition retry guidance", "Other.md": "OtherPayment.md needle"}
+                    "Payment.md": "authorization settlement",
+                    "Straße.md": "canonical unicode retry guidance", "Überblick.md": "unicode composition retry guidance",
+                    "Other.md": "OtherPayment.md Payment.md.bak Payment.md-copy 支付Payment.md needle"}
         for name, text in fixtures.items(): (self.sources / name).write_text(text)
-        self.configure(); self.admit(); self.ready("absenttoken", count=5)
-        for query in ["Payment System Design.md architecture", 'Read "Payment System Design.md".', "Payment System Design.md. retry"]:
+        self.configure(); self.admit(); self.ready("absenttoken", count=len(fixtures))
+        for query in ["Payment System Design.md architecture", 'Read "Payment System Design.md".',
+                      "Read (Payment System Design.md)", "Payment System Design.md. retry"]:
             self.assertEqual({hit["name"] for hit in self.search(query)["hits"]}, {"Payment System Design.md"}, query)
         result = self.search("Compare Payment System Design.md with System Design.md architecture")
         self.assertEqual({hit["name"] for hit in result["hits"]}, {"Payment System Design.md", "System Design.md"})
         self.assertEqual({hit["name"] for hit in self.search("STRASSE.md retry")["hits"]}, {"Straße.md"})
         self.assertEqual({unicodedata.normalize("NFC", hit["name"]) for hit in self.search("u\u0308berblick.md retry")["hits"]}, {"Überblick.md"})
-        self.assertEqual([hit["name"] for hit in self.search("OtherPayment.md needle")["hits"]], ["Other.md"])
+        for fragment in ["OtherPayment.md", "Payment.md.bak", "Payment.md-copy", "支付Payment.md"]:
+            self.assertEqual([hit["name"] for hit in self.search(fragment + " needle")["hits"]], ["Other.md"], fragment)
         for query in ["Payment System Design.md.bak needle", "Payment System Design.md-copy needle"]:
             self.assertNotIn("Payment System Design.md", [hit["name"] for hit in self.search(query)["hits"]], query)
 
@@ -571,10 +646,11 @@ class SearchContracts(unittest.TestCase):
         preparation_gate.unlink()
 
     def test_duplicate_basenames_keep_distinct_frozen_ids(self):
-        for folder in ["first", "second"]:
+        texts = {"first": "authorization uniquealpha", "second": "settlement uniquebeta"}
+        for folder, text in texts.items():
             location = self.sources / folder
             location.mkdir()
-            (location / "Payment.md").write_text("separate evidence " + folder)
+            (location / "Payment.md").write_text(text)
         self.configure(); catalog = self.admit()
         self.ready("absenttoken", count=2)
         result = self.search("Payment.md")
@@ -582,6 +658,13 @@ class SearchContracts(unittest.TestCase):
         self.assertEqual({hit["document_id"] for hit in result["hits"]},
                          {entry["document_id"] for entry in catalog["entries"]})
         self.assertEqual(len({hit["name"] for hit in result["hits"]}), 2)
+        selected = []
+        for term, text in [("uniquealpha", texts["first"]), ("uniquebeta", texts["second"])]:
+            hits = self.search(term)["hits"]
+            self.assertEqual(len(hits), 1, hits)
+            selected.append(hits[0]["document_id"])
+            self.assertEqual(self.read(hits[0]["document_id"])["text"], text)
+        self.assertNotEqual(*selected)
 
     def test_admission_does_not_wait_for_blocked_index(self):
         gate = self.gate("index-before-publish")

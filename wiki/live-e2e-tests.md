@@ -6,13 +6,19 @@
 
 ## What the run is and is not
 
-`./scripts/run-live-tests.sh` launches `Jarvis Dev.app` once per scenario in an explicit live e2e
+For spoken scenarios, `./scripts/run-live-tests.sh` launches `Jarvis Dev.app` once per scenario in an explicit live e2e
 mode. Interviewer and candidate lines are synthesized at run time and fed as audio into the
 scenario-selected real transcription provider. The real coach uses only the Codex subscription by
 default, loads skills and tools on demand, views a fixture screenshot when it asks for the screen, delivers to the real Overlay Box,
 and writes a normal session directory. A provider option selects another coaching target or enables
 the scenario files' explicit switches between Claude Code, OpenAI, Codex, and Gemini. A test target
 then reads that directory and records one result per case ID.
+
+Explicit REF01–REF07 selectors delegate to the signed deterministic References harness described in
+[build-and-run.md](./build-and-run.md#references-helper-packaging-and-integration-checks). Those cases
+use scripted brain replies with the production tool handlers and packaged helper; they call no
+provider, capture no audio or screen, and need none of the provider/TCC prerequisites below. They
+are separate from the spoken scenarios and excluded from `all`.
 
 The mode is a sibling of the [transcription benchmark](./transcription-benchmark.md) and follows its
 conventions: `--live-e2e` in `Sources/JarvisApp/App/main.swift` selects `LiveE2EAppDelegate`
@@ -113,7 +119,13 @@ During a run:
 
 ```sh
 ./scripts/run-live-tests.sh [A|B|C|D|H|L|P|R|F01|F02|CACHE|all] [--provider <selection>] [--evaluate] [--keep-going]
+./scripts/run-live-tests.sh REF01
 ```
+
+The second form accepts any selector from REF01 through REF07 and delegates to
+`./scripts/run-reference-tests.sh` with that selector. Provider and evaluation options apply to
+spoken scenarios; use the [References harness](./build-and-run.md#references-helper-packaging-and-integration-checks)
+directly for its full suite or Quit-only check.
 
 The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
 with `./scripts/build-app.sh debug`, creates the run directory, and runs the `JarvisLiveTests` target
@@ -185,13 +197,13 @@ an ambiguous "this" after a design discussion.
 
 | Scenario | Brain with `--provider scenario` | What it drives |
 |---|---|---|
-| A | Claude Code, then Codex, then OpenAI, then Codex | Every capability on, prep notes from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
-| B | Claude Code, then Gemini API | Behavioral, system design, customer-scenario design, coding with AI, and prep search off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
+| A | Claude Code, then Codex, then OpenAI, then Codex | Every capability on, References from the fixture. Presses and spoken turns across coding, behavioral, and design questions. The OpenAI turn is the interviewer's spoken design question, which states the agreed requirements and asks for the high-level architecture, the stage where the system-design skill attaches a diagram, so the switch runs in both directions and the metered requests stay on one turn. |
+| B | Claude Code, then Gemini API | Behavioral, system design, customer-scenario design, coding with AI, and References off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
-| H | Codex | A queue decision, an inclusive boundary rule, and unrun tests planted before resolved discussions. A lower debug threshold triggers compaction; the scenario requires the first summary to be accepted before asking for recall. C35/C36 check replacement, size reduction, replay, and delivery; `Scenarios/H-review.md` covers factual quality. |
+| H | Codex | An admitted reference is read on the first spoken turn, alongside a queue decision, inclusive boundary rule, and unrun tests planted before resolved discussions. A lower debug threshold triggers real-provider compaction; the first summary must be accepted before recall. C35/C36 check replacement, size reduction, replay, and delivery. REF06-H checks exact session-context preservation and reports provider usage; `Scenarios/H-review.md` covers factual quality. |
 | L | Codex | The same bilingual technical conversation on every remote transcription target, with both speaker streams retaining Mandarin and English technical terms in coach input, provider-specific setup confirmation, and a clean end. |
-| P | Codex | An explicit full-document request over the existing prep fixture; verifies direct catalog read → reply without search and complete extracted text in the brain request. Design follow-ups exercise source attribution, cache invalidation, and a conflicting draft reported in speech. |
+| P | Codex | An explicit full-document request over the reference fixture admitted by the real helper; verifies direct `read_reference` from the frozen catalog → reply without search and complete extracted text in the brain request. Design follow-ups exercise source attribution, cache invalidation, and a conflicting draft reported in speech. |
 | CACHE | Shared live-test default: Codex by default or explicit `--provider openai` | Warm-up and measured spoken attempts over a long synthetic retained skill and fictional Harbor Ledger preparation notes. Verifies real loading continuations, committed hints, stable encoded prefixes, and history-cache reuse. |
 | R | Claude Code | The real capture device with no speech: Start, coaching ready, Stop. |
 | F01 | Claude Code | Two launches, `F01-system` and `F01-microphone`: a fixture source that delivers no system frames, then one that delivers no microphone frames. |
@@ -229,6 +241,12 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   fails if that first outcome rejects or fails, even if a later request could succeed. Its optional
   `historyCompactionTokenThreshold` affects only that debug scenario; production keeps `Config.default`.
   H prints coach and summarizer usage separately, plus the accepted before/after history estimates.
+  Its reference check requires the full requested fixture text to reach the provider before the
+  first summarizer request, and compares the frozen context, instructions, and tools on every coach
+  request. The authoritative context is excluded from summarizer input and remains once before
+  accepted condensed history. REF06-H usage lines retain cache-read, cache-write, uncached-input,
+  and output counts, with missing values unknown. Compaction starts a new cache epoch, so H does not
+  assert a cache-hit threshold across that rewrite; CACHE owns steady-history reuse.
 - **An injected screen.** A `screen` step hands a JPEG fixture to `FixtureScreenCapture`, and every
   later capture returns that image with its on-device OCR as current-viewport text evidence, the
   snapshot the window path produces for a non-browser window. Only coding needs one: an interviewer states behavioral and design questions aloud,
@@ -260,7 +278,7 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   attempt each step waited on, and the checker reads that map instead of counting.
 - **A provider stall is judged through its retry.** When a provider request times out, the app
   retries the same work on the same target as a `pending_work` attempt, carrying the screen and
-  prep-notes observations but not the loads. A step's cases read that whole chain and its last
+  reference observations but not the loads. A step's cases read that whole chain and its last
   attempt, the one that answered, and the stall shows as a slower time and a note. The run cares
   about the model's response, and a retried timeout is the design working. Only timeouts count:
   any other failure, or a chain that times out until the target's failure budget is spent, still
@@ -373,7 +391,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C02 | Small talk loads nothing | A: the interviewer's logistics line |
 | C03 | The first behavioral question picks the behavioral skill | A: the first behavioral question |
 | C04 | An already-loaded kind never reloads | A: every turn |
-| C05 | Prep search loads on demand, never runs before its load, and stays callable on every brain | A: the first behavioral question and the design question |
+| C05 | Reference search loads on demand, never runs before its load, and stays callable on every brain | A: the first behavioral question and the design question |
 | C06 | The behavioral skill loads before the first behavioral tip | A: the first behavioral question |
 | C07 | The longest realistic chains stay inside one attempt | A: the first behavioral question and the design question |
 | C08 | A second prepared question searches without loading | A: the second behavioral question |
@@ -386,7 +404,7 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C15 | Coaching continues after loads with stable instructions | A: the initial and later behavioral providers |
 | C16 | A switched-off skill is never loaded, and its question gets generic coaching | B: the behavioral question |
 | C17 | The remaining skill still loads when others are off | B: the Show code press |
-| C18 | Prep search off leaves no tool and no catalog line | B: initial provider instructions |
+| C18 | References off leaves no reference tool or session catalog | B: initial provider instructions and input |
 | C19 | Switched-off capabilities apply as configured | B: initial provider instructions list only coding |
 | C20 | A reply the runner answered instead of running is reported, never failed | A and B |
 | C21 | Loaded guidance survives compaction | Not scheduled; unit-tested |
@@ -405,10 +423,11 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C34 | A named-document request reads directly from the catalog before replying; design follow-ups deliver answers | P; semantics use Tests/JarvisLiveTests/Scenarios/P-review.md |
 | C35 | The first real summary is accepted within budget and reduces history size | H |
 | C36 | Subsequent coaching replays condensed memory with the queue decision and delivers a reply | H; semantics use Tests/JarvisLiveTests/Scenarios/H-review.md |
+| REF06-H | A real reference read precedes compaction; exact SessionContext remains once before history and outside summarizer input | H; predicates in `LiveE2ETests+HistoryCompaction.swift` |
 
 C31 checks Scenario A's selective technical retrieval: the existing design question searches before
 answering, its cache-invalidation follow-up reuses the excerpt, and the one-pass coding question
-answers without a prep search. The Gate checks that the technical section includes the follow-up
+answers without a reference search. The Gate checks that the technical section includes the follow-up
 and stays out of the teammate and manager searches. C32 covers the cold coding hint and small talk.
 A5/A9 replies are recorded for the manual content rubric in
 [`A-prep-review.md`](../Tests/JarvisLiveTests/Scenarios/A-prep-review.md); a search-count pass alone

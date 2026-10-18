@@ -7,6 +7,8 @@ import JarvisCore
 final class LiveE2EAppDelegate: NSObject, NSApplicationDelegate {
     private let runner: LiveE2ERunner
     private var runTask: Task<Void, Never>?
+    private var stopping = false
+    private var stopped = false
 
     init(options: LiveE2EOptions) {
         runner = LiveE2ERunner(options: options)
@@ -20,9 +22,21 @@ final class LiveE2EAppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !stopped else { return .terminateNow }
+        guard !stopping else { return .terminateCancel }
+        stopping = true
+        runTask?.cancel()
+        Task {
+            await runner.stopOwnedHelpers()
+            stopped = true
+            sender.terminate(nil) // ghost-mode-allowed: complete explicit live test termination after helper cleanup
+        }
+        return .terminateCancel
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         runTask?.cancel()
-        runner.terminateProxyHelper()
         // Remove speech even on abort. No marker follows terminate, so the log is the only report.
         do {
             try runner.removeGeneratedAudio()

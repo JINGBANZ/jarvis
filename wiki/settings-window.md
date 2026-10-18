@@ -204,7 +204,7 @@ pages it moves.
 | `DisplaySection` | **Eye**: "What I look at when I check your screen." | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — and the optional Chrome text switch, followed by a short fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot ([Capture Scope](#capture-scope)). |
 | `OverlaySection` | **Mouth**: "How my hints show up on your screen." | One **Overlay Box** card (the persistent response history) with an icon, description, text size and opacity rows, and the detail box's own rows. It has no On/Off switch: the box shows for every session. Its live sample appears only while the Mouth page is visible (`didBecomeActive`/`didResignActive`). The header's live chip says the sliders act on screen. Persists via `OverlayAppearance` ([Overlay Appearance](#overlay-appearance)). |
 | `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts saved managed API keys. |
-| `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | Prep notes search, with its switch and its list of local note files and folders ([Tools](#tools)). Applies on the next Start. |
+| `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | References, with its switch and its list of local files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
 | `HotkeySection` | **Shortcuts**: "Ask me for help, or step through my details." | One card with a row each for **Give me a hint**, **Explain more**, **Show code**, **Previous detail**, and **Next detail**: keyboard keycaps and **Record**, an optional mouse row with **Record**/**Clear**, and per-row failure feedback ([Shortcuts](#shortcuts)). |
 | `ActivitySection` | **Activity**: "What I heard and said, session by session." | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**, which opens a menu of the installed Claude Code / Codex CLIs; the chosen one runs the sole `AgenticEvaluator` over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
@@ -486,24 +486,31 @@ every key and default value it reads comes from
 
 ## Tools
 
-The Tools page lists the coaching tools the user can switch. Prep notes search is the only one: the
+The Tools page lists the coaching tools the user can switch. References is the only card: the
 always-on tools (screen capture, speak, stay silent) aren't listed, because Jarvis cannot start
 without screen capture and a turn cannot end without one of the other two. Its one card holds the
-**Search my prep notes** switch and, below it, the list of local note files and folders the search
+**Use my References** switch and, below it, the list of local files and folders the helper
 reads, with **Add files or folders…** and a remove button per source. The switch is always enabled.
-When it is on with no sources, its detail asks the user to add notes, because the runtime offers
-`search_prep_notes` and `read_prep_note` only when sources exist
-([architecture.md → Capabilities](./architecture.md#capabilities)). Switching it off disables search and document reads, hides the list
-and keeps it; switching it back on shows the same list.
+When it is on with no sources, its detail asks the user to add files. Switching it off hides the
+list and keeps it; switching it back on shows the same list. Source edits and the switch notify
+`ReferenceRuntime` immediately to prepare future admission. A session already using References
+retains its frozen access; the [References contract](./architecture.md#references) defines Start,
+omission, and current-session behavior.
 
-Jarvis stores only the chosen paths (`PrepMaterialPreferences`), never a copy of their contents, and
-reads them into the session index at Start, so source changes apply on the next Start and removing a
-source only forgets it. Search and document reads run on this Mac. A filename-and-ID catalog joins
-coaching requests once indexing finishes, and requested excerpts or pages join them when retrieved.
-The card header says where search runs; its callout discloses both filename and document-text egress
-to the brain provider. The file picker accepts the formats prep indexing can read. Whether each source still exists is
+`PrepMaterialPreferences` persists the selected paths and stable source identities. The source files
+stay where they are and remain authoritative. The helper keeps a private, reusable cache of extracted
+text and search data; removing a selection does not delete its file. The card header names supported
+formats and local preparation, and its callout discloses the local text cache, filename catalog, and bounded
+read/search text sent to the brain provider. Cache retention and egress are defined in
+[sandbox.md → References data](./sandbox.md#references-data).
+
+The picker accepts TXT, Markdown, PDF, DOCX, and folders; an unsupported direct file selection shows
+inline feedback and is not saved. Unsupported files inside selected folders are excluded. Whether each source still exists is
 checked off the main thread, because a stat can block on a network volume or a sleeping disk; a
 missing source shows its title and path in amber. The page re-checks every time it becomes visible.
+The [helper integration](./build-and-run.md#references-helper-packaging-and-integration-checks)
+owns preparation and filesystem-change handling. Settings renders source feedback; preparation
+progress stays out of the coaching conversation.
 
 ## Skills
 
@@ -524,6 +531,8 @@ these pages, and nothing else: a session resolves its capabilities once at Start
 instructions and tool set from that one value, so a mid-session change would contradict what the
 model was told earlier in the same conversation. Both header chips say edits apply on the next
 Start. See [architecture.md → Capabilities](./architecture.md#capabilities).
+`BrainPreferences` preserves saved reference master/read restrictions when loading preferences;
+source persistence keeps its existing identities.
 
 ## Ear
 
@@ -602,7 +611,7 @@ the key being wrong and rotating it fixes none of them, so each lands in the thi
 cause quoted. They are not worth telling apart here: a session that actually hits one of them names
 it in Activity. The verdict comes from the same
 `CredentialCheck` table a live session uses (see
-[architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)),
+[architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost)),
 so Settings and a session that dies on the same key cannot disagree. The check never gates the save:
 the key is written first, and a check that fails or times out lands in the inconclusive case with its
 cause rather than blocking anything. While the request is in flight the card reads **Checking the key
@@ -773,7 +782,9 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisCore/Config/RobotHubState.swift`, `RobotSlotState.swift`, `RobotHubMeter.swift`, `RobotPartHealth.swift`, `RobotPartSummary.swift`, `RobotPart.swift` | What the hub shows |
 | `Sources/JarvisApp/Settings/BrainSection.swift` | Brain page: provider route + reasoning effort |
 | `Sources/JarvisApp/Settings/TranscriptionSection.swift` | Ear page |
-| `Sources/JarvisApp/Settings/ToolsSection.swift` | Tools page: prep notes search and its sources |
+| `Sources/JarvisApp/Settings/ToolsSection.swift` | Tools page: References and its sources |
+| `Sources/JarvisApp/References/ReferenceRuntime.swift` | Preparation configuration shared by Settings and Start |
+| `Sources/JarvisApp/References/ReferenceSourceWatcher.swift` | Selected-source filesystem events |
 | `Sources/JarvisApp/Settings/SkillsSection.swift` | Skills page |
 | `Sources/JarvisApp/Settings/SkillCardView.swift` | One skill's card |
 | `Sources/JarvisApp/Settings/SkillCardGridView.swift` | Responsive skill card grid |
@@ -811,7 +822,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisEvaluation/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |
 | `Sources/JarvisCore/Config/Defaults.swift` | Every user setting's key, default, and valid range |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + route validation |
-| `Sources/JarvisCore/Config/PrepMaterialPreferences.swift` | The prep note sources Tools lists |
+| `Sources/JarvisCore/Config/PrepMaterialPreferences.swift` | The reference sources Tools lists |
 | `Sources/JarvisCore/Coach/CoachDriver.swift` | Between-attempt route application and attempt orchestration |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisScreenCapture/ScreenCaptureCLI.swift` | Executes the attempt's frozen `SessionPlan` capture selection and handles main-display fallback |

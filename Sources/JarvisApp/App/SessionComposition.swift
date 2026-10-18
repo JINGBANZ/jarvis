@@ -14,9 +14,8 @@ final class SessionComposition {
         let brainRoute: BrainRoute
         let appleSpeechLocale: Locale?
         let screen: ScreenCaptureSelection
-        /// Sources, not a finished index: the index lands later and must not change what the
-        /// session offers.
-        let prepSources: [PrepMaterialSource]
+        let references: ReferenceAdmissionResult
+
     }
 
     var onReadinessStatusChanged: ((JarvisReadiness.Status) -> Void)?
@@ -53,7 +52,8 @@ final class SessionComposition {
     private var audioSource: (any AudioSource)?
     private var turns: TurnTaskBox?
     private(set) var coachDriver: CoachDriver?
-    private var prepMaterialIndexTask: Task<Void, Never>?
+    private let referenceLibrary: ReferenceLibrary
+    private var referenceSessionID: UUID?
     private var requestManualHint: ((CoachingShortcut) -> Void)?
     /// Only cancelled coaching turns hold the ghost lifecycle open; an audit drain alone doesn't.
     private var pendingTurnDrainIDs: Set<UUID> = []
@@ -62,6 +62,7 @@ final class SessionComposition {
 
     init(
         brain: BrainComposition,
+        referenceLibrary: ReferenceLibrary,
         artifacts: SessionArtifacts,
         overlayBox: OverlayBoxPanel,
         readiness: JarvisReadiness,
@@ -75,6 +76,7 @@ final class SessionComposition {
         makeAudioSource: @escaping MakeAudioSource
     ) {
         self.brain = brain
+        self.referenceLibrary = referenceLibrary
         self.artifacts = artifacts
         self.overlayBox = overlayBox
         self.readiness = readiness
@@ -134,17 +136,16 @@ final class SessionComposition {
         }
 
         let sessionDirectory = artifacts.currentSessionDir!
-        let prepMaterialSources = inputs.prepSources
+        let admitted = inputs.references.admitted
         let bundledSkills = loadSkills()
-        let capabilities = CoachCapabilities.compose(
+        let capabilities = inputs.references.capabilities(
             disabledTools: brain.preferences.disabledTools,
             disabledSkills: brain.preferences.disabledSkills,
-            prepSourcesConfigured: !prepMaterialSources.isEmpty,
             skills: bundledSkills)
         // This log line is the only place switched-off capabilities appear. It lists only saved
         // names that match a real, switchable capability.
         let everything = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: !prepMaterialSources.isEmpty,
+            disabledTools: [], referencesAdmitted: admitted != nil,
             skills: bundledSkills)
         let honoredDisabled = brain.preferences.disabledTools
             .subtracting(CoachCapabilities.fixedToolNames)
@@ -181,17 +182,9 @@ final class SessionComposition {
             coachingAttempts: attemptAuditing,
             plan: freshSessionPlan(screen: inputs.screen),
             activity: artifacts.sessionAudit,
-            capabilities: capabilities)
-
-        // Off the Start path: it reads files and may spawn `textutil`, and a search before it lands
-        // just finds no index. `stop()` cancels it so it can't outlive the session.
-        if capabilities.tool(named: searchPrepNotesTool.name) != nil {
-            prepMaterialIndexTask = Task.detached(priority: .utility) { [weak driver] in
-                let index = await PrepMaterialIndexBuilder.build(from: prepMaterialSources)
-                guard !Task.isCancelled else { return }
-                driver?.installPrepMaterial(index)
-            }
-        }
+            capabilities: capabilities,
+            documents: admitted?.session,
+            sessionContext: admitted?.context)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // CoachDriver coalesces triggers, so a new one doesn't cancel the running turn.
@@ -387,6 +380,18 @@ final class SessionComposition {
         }
         // Armed only after the synchronous source start, which can outlast the first-frame
         // deadline. Frames queued meanwhile still reach the monitor.
+        if let admitted {
+            do {
+                try referenceLibrary.accept(startID: admitted.startID)
+                referenceSessionID = admitted.sessionID
+            } catch {
+                stop(reason: .stoppedByUser)
+                return false
+            }
+        }
+        if case .omitted(_, let reason) = inputs.references, reason.warning != nil {
+            audit.record(.referencesOmitted(reason: reason))
+        }
         startCaptureReadiness(readinessSession: readinessSession)
         sessionIsLive = true
         // Only after every early return, so a failed Start leaves the desktop untouched.
@@ -401,8 +406,8 @@ final class SessionComposition {
     /// (`audit-health.json`), or nil when there was nothing to drain.
     @discardableResult
     func stop(reason: SessionEndReason) -> Task<Void, Never>? {
-        prepMaterialIndexTask?.cancel()
-        prepMaterialIndexTask = nil
+        let referenceSessionID = self.referenceSessionID
+        self.referenceSessionID = nil
         let hadAllocatedPipeline = hasAllocatedPipeline
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
@@ -439,6 +444,7 @@ final class SessionComposition {
         var drain: Task<Void, Never>?
         if reason == .applicationQuit {
             audit?.abandon()
+            if let referenceSessionID { referenceLibrary.release(sessionID: referenceSessionID) }
         } else if audit != nil || !cancelled.isEmpty || compaction != nil {
             let drainID = UUID()
             if !cancelled.isEmpty { pendingTurnDrainIDs.insert(drainID) }
@@ -446,6 +452,7 @@ final class SessionComposition {
             drain = Task { @MainActor [weak self] in
                 for task in cancelled { await task.value }
                 await compaction?.value
+                if let referenceSessionID { self?.referenceLibrary.release(sessionID: referenceSessionID) }
                 self?.pendingTurnDrainIDs.remove(drainID)
                 self?.onCoachingStateChanged?()
                 // close() waits for every accepted row, so a just-recorded outcome can't race the
@@ -455,6 +462,7 @@ final class SessionComposition {
                 self?.onCoachingStateChanged?()
             }
         }
+        if drain == nil, let referenceSessionID { referenceLibrary.release(sessionID: referenceSessionID) }
         onCoachingStateChanged?()
         return drain
     }
