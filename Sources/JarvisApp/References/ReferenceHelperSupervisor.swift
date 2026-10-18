@@ -9,6 +9,7 @@ final class ReferenceHelperSupervisor {
     var homeURL: URL { home }
     #if JARVIS_LIVE_E2E
     private var testFault = false
+    var beforeLaunchForTesting: (@MainActor () async -> Void)?
     #endif
     private let startupTimeout: Duration
     private var process: Process?
@@ -48,7 +49,12 @@ final class ReferenceHelperSupervisor {
         guard revision == stopRevision else { throw CancellationError() }
         if let startup { return try await startup.value }
         if process?.isRunning == true { return }
-        let task = Task { try await self.launch() }
+        let task = Task {
+            #if JARVIS_LIVE_E2E
+            await self.beforeLaunchForTesting?()
+            #endif
+            try await self.launch()
+        }
         startup = task
         defer { startup = nil }
         try await task.value

@@ -149,7 +149,12 @@ final class PermissionsStepView: NSView {
                     self?.render()
                     return
                 }
-                NSApp.terminate(nil)
+                // Return from the MainActor task before AppKit enters its modal termination loop.
+                RunLoop.main.perform {
+                    MainActor.assumeIsolated {
+                        NSApp.terminate(nil) // ghost-mode-allowed: complete the explicit onboarding relaunch
+                    }
+                }
             }
         }
     }

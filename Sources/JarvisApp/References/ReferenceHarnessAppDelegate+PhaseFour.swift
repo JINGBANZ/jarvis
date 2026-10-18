@@ -434,12 +434,8 @@ extension ReferenceHarnessAppDelegate {
             await Task.yield()
             try require(queued.processIdentifier == nil, "early Quit drains queued warmup before any later launch")
         }
-        let queuedHelper = ReferenceHelperSupervisor(bundle: bundle, home: fixture.store.deletingLastPathComponent().appendingPathComponent("queued-supervisor"))
-        let launching = Task { try await queuedHelper.start() }
-        launching.cancel()
-        await queuedHelper.stop()
-        _ = try? await launching.value
-        try require(queuedHelper.processIdentifier == nil, "cancelled queued supervisor start cannot launch after stop")
+        try await referenceStartupStopChecks(home: fixture.store.deletingLastPathComponent())
+        try await onboardingStopChecks(home: fixture.store.deletingLastPathComponent())
         library.release(sessionID: active.sessionID)
         do {
             _ = try await active.session.list(query: nil, cursor: nil)

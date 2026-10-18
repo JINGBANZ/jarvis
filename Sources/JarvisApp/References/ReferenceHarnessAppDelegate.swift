@@ -38,22 +38,26 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.appendingPathComponent("results.json").path)
             } catch { fputs("Reference harness: result write failed\n", stderr) }
             try? Data().write(to: output.appendingPathComponent("quit-invoked"))
-            NSApp.terminate(nil) // ghost-mode-allowed: explicit synthetic References harness completion
+            // Return from the MainActor task before AppKit enters its modal termination loop.
+            RunLoop.main.perform {
+                MainActor.assumeIsolated {
+                    NSApp.terminate(nil) // ghost-mode-allowed: explicit synthetic References harness completion
+                }
+            }
         }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let supervisor else { return .terminateNow }
-        guard !terminating else { return .terminateCancel }
+        guard !terminating else { return .terminateLater }
         terminating = true
-        // terminateLater runs AppKit's termination loop, which does not service MainActor tasks.
         Task {
             await supervisor.stop()
             try? Data().write(to: self.output.appendingPathComponent("quit-finished"))
             self.supervisor = nil
-            sender.terminate(nil) // ghost-mode-allowed: complete the explicit harness Quit after cleanup
+            sender.reply(toApplicationShouldTerminate: true)
         }
-        return .terminateCancel
+        return .terminateLater
     }
 
     private struct HelperIdentity: Decodable { let pid: Int32 }

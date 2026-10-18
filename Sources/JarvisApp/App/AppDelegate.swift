@@ -40,7 +40,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private let artifacts = SessionArtifacts()
     private let references = ReferenceRuntime()
     private var terminatingReferences = false
-    private var referencesStopped = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
@@ -62,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     private func startApp() {
+        guard !terminatingReferences else { return }
         didStartApp = true
         let supervisor = LocalProxySupervisor(
             executable: LocalProxySupervisor.bundledExecutable(),
@@ -238,20 +238,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !referencesStopped else { return .terminateNow }
+        guard !terminatingReferences else { return .terminateLater }
+        terminatingReferences = true
+        onboarding?.stop()
         if didStartApp {
             activityViewer?.cancelEvaluation()
             stop(reason: .applicationQuit)
             proxySupervisor?.terminateNow()
         }
-        guard !terminatingReferences else { return .terminateCancel }
-        terminatingReferences = true
         Task {
             await references.stop()
-            referencesStopped = true
-            sender.terminate(nil) // ghost-mode-allowed: complete explicit Quit after owned helper cleanup
+            sender.reply(toApplicationShouldTerminate: true)
         }
-        return .terminateCancel
+        return .terminateLater
     }
 
     private func configureReferences() {
