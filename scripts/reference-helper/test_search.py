@@ -248,6 +248,65 @@ class SearchContracts(unittest.TestCase):
         self.assertTrue(any("```swift\n# Not a section\nquasar code\n```" in passage for _, passage in passages))
         self.assertIn("| needle | table |", passages[0][1])
 
+    def test_same_byte_format_rename_keeps_distinct_pinned_indexes(self):
+        key = self.prepare("# Notes\n\nquasar evidence\n", "Notes.txt")
+        self.ready("absenttoken", count=1)
+        old_hit = self.search("quasar")["hits"][0]
+        self.assertIsNone(old_hit.get("section"))
+        old_session = self.session
+        (self.sources / "Notes.txt").rename(self.sources / "Notes.md")
+        self.configure()
+        self.session = str(uuid.uuid4()); self.start = str(uuid.uuid4())
+        self.assertEqual(self.admit()["entries"][0]["document_id"], key)
+        self.ready("absenttoken", count=1)
+        new_hit = self.search("quasar")["hits"][0]
+        self.assertNotEqual(new_hit["revision_id"], old_hit["revision_id"])
+        self.assertEqual(new_hit["section"], "# Notes")
+        self.session = old_session
+        self.assertEqual(self.search("quasar")["hits"][0], old_hit)
+        self.restart()
+        self.assertEqual(self.search("quasar")["hits"][0], old_hit)
+
+    def test_phase_two_store_keeps_text_and_pins_without_guessing_parser(self):
+        key = self.prepare("# Notes\n\nquasar legacy text\n", "Notes.md")
+        self.ready("absenttoken", count=1)
+        page = self.read(key)
+        self.result("shutdown")
+        self.assertEqual(self.child.wait(timeout=5), 0)
+        self.child.communicate(timeout=5)
+        with sqlite3.connect(self.database) as db:
+            for table in ["chunks", "passages", "search_state", "search_configuration", "revision_sources"]:
+                db.execute("DROP TABLE " + table)
+            db.execute("CREATE VIRTUAL TABLE chunks USING fts5(revision_id UNINDEXED,text,tokenize='unicode61 remove_diacritics 0')")
+        (self.sources / "Notes.md").unlink()
+        self.child = self.launch(); self.result("hello")
+        self.assertEqual(self.admit()["entries"][0]["document_id"], key)
+        self.assertEqual(self.read(key)["revision_id"], page["revision_id"])
+        self.assertEqual(self.read(key)["text"], page["text"])
+        result = self.search("quasar")
+        self.assertEqual(result["hits"], [])
+        self.assertFalse(result["complete"], result)
+        self.assertEqual(result["coverage"]["omissions"], {"unavailable": 1})
+
+    def test_delayed_indexes_use_captured_format_with_both_frozen_catalogs(self):
+        gate = self.gate("index-before-publish")
+        key = self.prepare("# Notes\n\nquasar evidence\n", "Notes.md")
+        self.arrived("index-before-publish")
+        old_page = self.read(key)
+        old_session = self.session
+        (self.sources / "Notes.md").rename(self.sources / "Notes.txt")
+        self.configure()
+        self.session = str(uuid.uuid4()); self.start = str(uuid.uuid4())
+        self.assertEqual(self.admit()["entries"][0]["document_id"], key)
+        new_page = self.read(key)
+        self.assertNotEqual(new_page["revision_id"], old_page["revision_id"])
+        gate.unlink()
+        self.ready("absenttoken", count=1)
+        self.assertIsNone(self.search("quasar")["hits"][0].get("section"))
+        self.session = old_session
+        self.ready("absenttoken", count=1)
+        self.assertEqual(self.search("quasar")["hits"][0]["section"], "# Notes")
+
     def test_index_respects_reservations_acquired_after_index_start(self):
         index_gate = self.gate("index-after-batch")
         key = self.prepare("quasar " + "x " * 20_000)
@@ -293,6 +352,12 @@ class SearchContracts(unittest.TestCase):
             time.sleep(.01)
         self.assertEqual(state, "cache_full")
         self.assertEqual(after, before)
+        # Failed unpublished postings have no reader, even while authoritative text is pinned.
+        self.result("release", {"start_id": str(uuid.uuid4())}, session=str(uuid.uuid4()))
+        with sqlite3.connect(self.database) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM passages").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT count(*) FROM chunks").fetchone()[0], 0)
+            self.assertEqual(db.execute("SELECT state FROM search_state WHERE revision_id=(SELECT current_revision FROM documents WHERE id=?)", (key,)).fetchone()[0], "cache_full")
         diagnostics = self.result("diagnostics")
         self.assertLessEqual(diagnostics["disk_bytes"] + diagnostics["reserved_bytes"], 1024 * 1024 * 1024)
         # Content remains readable even though indexing cannot spend the reserved capacity.
@@ -415,6 +480,24 @@ class SearchContracts(unittest.TestCase):
         self.assertEqual(result["id"], request)
         self.assertEqual(result["result"]["hits"], [])
         self.assertIsNone(self.pins()[first])
+
+    def test_source_changed_after_page_loading_is_not_first_search_pinned(self):
+        for name in ["unchanged.txt", "changed.txt"]:
+            (self.sources / name).write_text("quasar original " + name)
+        self.configure(); catalog = self.admit(); self.ready("absenttoken", count=2)
+        entries = {entry["name"]: entry["document_id"] for entry in catalog["entries"]}
+        gate = self.gate("search-before-pin")
+        request = self.send("search", {"query": "quasar"})
+        self.arrived("search-before-pin")
+        (self.sources / "changed.txt").write_text("replacement without the original evidence")
+        gate.unlink()
+        reply = self.receive(timeout=4)
+        self.assertEqual(reply["id"], request)
+        result = reply["result"]
+        self.assertEqual([hit["document_id"] for hit in result["hits"]], [entries["unchanged.txt"]], result)
+        self.assertIsNone(self.pins()[entries["changed.txt"]])
+        self.assertEqual(self.pins()[entries["unchanged.txt"]], result["hits"][0]["revision_id"])
+        self.assertFalse(result["complete"])
 
     def test_stale_index_writer_cannot_publish_or_delete_new_generation(self):
         gate = self.gate("index-before-publish")

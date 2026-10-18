@@ -2,13 +2,16 @@ import Foundation
 import JarvisCore
 
 struct ReferenceSearchIndex {
-    static let version = "passages-1-" + ReferenceSearchTokenizer.version
+    static let version = "passages-2-" + ReferenceSearchTokenizer.version
 
     static func initialize(_ db: ReferenceDatabase) throws {
         try db.script("""
-            CREATE TABLE IF NOT EXISTS revision_sources(revision_id TEXT PRIMARY KEY,source_state TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS revision_sources(revision_id TEXT PRIMARY KEY,source_state TEXT NOT NULL,format TEXT);
             CREATE TABLE IF NOT EXISTS search_configuration(id INTEGER PRIMARY KEY CHECK(id=1),version TEXT NOT NULL);
             """)
+        if try !db.rows("PRAGMA table_info(revision_sources)").contains(where: { $0[1] == "format" }) {
+            try db.execute("ALTER TABLE revision_sources ADD COLUMN format TEXT")
+        }
         if try db.scalar("SELECT version FROM search_configuration WHERE id=1") != version {
             try db.transaction {
                 try db.script("""

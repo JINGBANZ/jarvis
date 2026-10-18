@@ -65,7 +65,7 @@ extension ReferenceDocumentStore {
             }
             try db.execute("DELETE FROM content_parts WHERE revision_id NOT IN (SELECT id FROM revisions)")
             try db.execute("DELETE FROM chunks WHERE revision_id NOT IN (SELECT id FROM revisions)")
-            try db.execute("DELETE FROM passages WHERE revision_id NOT IN (SELECT id FROM revisions) OR NOT EXISTS(SELECT 1 FROM search_state s WHERE s.revision_id=passages.revision_id AND s.generation=passages.generation)")
+            try db.execute("DELETE FROM passages WHERE revision_id NOT IN (SELECT id FROM revisions) OR NOT EXISTS(SELECT 1 FROM search_state s WHERE s.revision_id=passages.revision_id AND s.generation=passages.generation AND s.state IN ('ready','preparing'))")
             try db.execute("DELETE FROM chunks WHERE rowid NOT IN (SELECT id FROM passages)")
             try db.execute("DELETE FROM search_state WHERE revision_id NOT IN (SELECT id FROM revisions)")
             try db.execute("DELETE FROM revision_sources WHERE revision_id NOT IN (SELECT id FROM revisions)")

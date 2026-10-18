@@ -16,11 +16,15 @@ extension ReferenceDocumentStore {
             let generation = UUID().uuidString.lowercased()
             do {
                 guard try db.scalar("SELECT ready FROM revisions WHERE id=? AND search_ready=0", [revision]) == "1" else { continue }
+                guard let format = try db.scalar("SELECT format FROM revision_sources WHERE revision_id=?", [revision]) else {
+                    try db.execute("INSERT INTO search_state(revision_id,generation,version,state) VALUES(?,?,?,'unavailable') ON CONFLICT(revision_id) DO UPDATE SET generation=excluded.generation,version=excluded.version,state='unavailable'", [revision, generation, ReferenceSearchIndex.version])
+                    continue
+                }
                 try db.transaction {
                     try db.execute("UPDATE revisions SET search_ready=0 WHERE id=?", [revision])
                     try db.execute("INSERT INTO search_state(revision_id,generation,version,state) VALUES(?,?,?,'preparing') ON CONFLICT(revision_id) DO UPDATE SET generation=excluded.generation,version=excluded.version,state='preparing'", [revision, generation, ReferenceSearchIndex.version])
                 }
-                let markdown = try db.scalar("SELECT 1 FROM revisions r JOIN session_documents sd ON sd.document_id=r.document_id WHERE r.id=? AND sd.format='md' UNION ALL SELECT 1 FROM revisions r JOIN metadata m ON m.document_id=r.document_id WHERE r.id=? AND m.format='md' LIMIT 1", [revision, revision]) != nil
+                let markdown = format == "md"
                 let path = databasePath, directory = home, budget = storageBudget
                 let task = Task.detached(priority: .utility) {
                     try await ReferenceSearchIndex.write(databasePath: path, home: directory, revision: revision, generation: generation, markdown: markdown, budget: budget)

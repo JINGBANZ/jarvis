@@ -137,7 +137,9 @@ immutable extracted revisions, and session membership/pins. Metadata discovery d
 Catalog serialization is bounded while paginated listing retains every admitted member. Text is
 published in bounded transactions independently of search readiness. Source capture hashes the exact
 authorized snapshot passed to a reader, checks source changes, and reuses a validated revision when
-its hash and processor version match. A successful first read, including an empty document or valid
+its hash, captured format and processor version match. Passage parsing uses that captured format,
+independent of frozen catalog metadata, so a same-byte TXT/Markdown rename has a distinct revision
+while existing pins keep their original interpretation. A successful first read, including an empty document or valid
 end-of-document page, commits a durable pin; invalid reads do not. The first emitted search evidence
 also pins its revision. Search validates candidates before one transaction commits every finalized
 result pin; any conflicting pin or index generation rolls back that entire transaction before
@@ -185,7 +187,8 @@ before ordering or limiting hits. Optional document filters use a bound JSON rel
 filter stays empty. Ranking and typed readiness coverage share one SQLite read snapshot. Results
 carry display names, sections, original offsets and bounded original text; readiness omissions are
 separate from top-three truncation. Only candidate sources are checked before first-use pinning,
-without hashing the whole corpus on each query. Unreadable or known-changed candidates are excluded
+including a final check after all evidence pages load, without hashing the whole corpus on each query.
+Unreadable or known-changed candidates are excluded
 and remaining eligible evidence is reranked, without pinning discarded evidence.
 
 A separate indexing lane prepares tokens outside transactions, commits each passage with its FTS
@@ -193,7 +196,9 @@ posting, and publishes readiness only for a complete matching generation. Unpubl
 ineligible. Authoritative reads and metadata admission remain available while indexing is held.
 Index configuration and interrupted-generation recovery affect only derived data. Startup verifies
 posting/passages counts and FTS integrity; rebuilding preserves text, IDs and durable pins. Cleanup
-rechecks retention in the same transaction as deletion. Limits and publication details live in
+rechecks retention in the same transaction as deletion. Failed unpublished postings are reclaimable
+while preparing generations and authoritative pinned text remain retained; failure coverage stays explicit.
+Limits and publication details live in
 `ReferenceSearchIndex` and `ReferenceDocumentStore+Index`.
 
 The Gate runs Core search contracts and real helper retrieval/publication/race tests, including a
@@ -204,7 +209,8 @@ checks contact no provider. Production context, tools, Settings, Activity instal
 cache validation remain separate integration work; the development harness does not prove that
 production behavior. Reconnection restores committed text and index generations. Never-converted
 files count as incomplete search coverage until a read or configuration preparation converts them.
-Search reports that incomplete coverage without retrying conversion.
+Search reports that incomplete coverage without retrying conversion. Retained text without captured
+parser metadata remains readable and pinned, with unavailable search coverage rather than a guessed parser.
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature

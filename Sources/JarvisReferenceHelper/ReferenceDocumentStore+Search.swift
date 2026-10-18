@@ -52,6 +52,20 @@ extension ReferenceDocumentStore {
             }
             if retry { await Task.yield(); continue }
             await ReferenceSearchIndex.barrier(home: home, name: "search-before-pin")
+            for (candidate, _) in finalized {
+                do {
+                    if try db.scalar("SELECT pin FROM session_documents WHERE session_id=? AND document_id=?", [session, candidate.document]) == nil {
+                        try await validateSearchSource(candidate, session: session)
+                    }
+                }
+                catch is CancellationError { throw CancellationError() }
+                catch ReferenceStoreError.superseded { retry = true }
+                catch {
+                    excluded[candidate.document] = (error as? ReferenceStoreError)?.rawValue ?? (error as? ReferenceConversionError)?.rawValue ?? "unavailable"
+                    retry = true
+                }
+            }
+            if retry { await Task.yield(); continue }
             try Task.checkCancellation()
             guard ContinuousClock.now < deadline else { break }
             do {
@@ -83,6 +97,10 @@ extension ReferenceDocumentStore {
             guard pin == candidate.revision else { throw ReferenceStoreError.superseded }
             return
         }
+        try await validateSearchSource(candidate, session: session)
+    }
+
+    func validateSearchSource(_ candidate: ReferenceSearchCandidate, session: String) async throws {
         let source = try sourceLocation(document: candidate.document, session: session)
         guard let state = try db.scalar("SELECT source_state FROM revision_sources WHERE revision_id=?", [candidate.revision]) else {
             // A pre-index cache revision must be revalidated without pinning or trusting stale bytes.

@@ -88,7 +88,7 @@ extension ReferenceDocumentStore {
             snapshot = captured.snapshotURL
             guard captured.sourceState == state else { throw ReferenceStoreError.source_changed }
             try Task.checkCancellation()
-            let identifier = hash(Data((document + "\n" + captured.sourceHash + "\n" + ReferenceConversionPool.processorVersion).utf8))
+            let identifier = hash(Data((document + "\n" + captured.sourceHash + "\n" + captured.format + "\n" + ReferenceConversionPool.processorVersion).utf8))
             revision = identifier
             if try db.scalar("SELECT ready FROM revisions WHERE id=?", [identifier]) != "1" {
                 let text = try await converters.convert(snapshotURL: captured.snapshotURL, format: captured.format)
@@ -106,7 +106,7 @@ extension ReferenceDocumentStore {
             try Task.checkCancellation()
             guard !closed, jobs[document]?.token == token else { throw CancellationError() }
             try db.transaction {
-                try db.execute("INSERT INTO revision_sources VALUES(?,?) ON CONFLICT(revision_id) DO UPDATE SET source_state=excluded.source_state", [identifier, captured.sourceState])
+                try db.execute("INSERT INTO revision_sources(revision_id,source_state,format) VALUES(?,?,?) ON CONFLICT(revision_id) DO UPDATE SET source_state=excluded.source_state,format=excluded.format", [identifier, captured.sourceState, captured.format])
                 try db.execute("UPDATE revisions SET ready=1,last_used=strftime('%s','now') WHERE id=?", [identifier])
                 try db.execute("UPDATE documents SET current_revision=?,identity=? WHERE id=? AND path=? AND present=1", [identifier, captured.sourceIdentity, document, source.url.path])
             }
