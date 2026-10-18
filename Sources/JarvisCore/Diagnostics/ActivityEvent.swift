@@ -145,7 +145,7 @@ public enum ActivityEvent: Sendable {
         case .referencesListed(let count):
             return (.referencesListed, "📎 listed \(count) references", nil)
         case .referencesSearched(let query, let count, let complete):
-            return (.referencesSearched, "📎 checked references for \"\(query)\" — \(count) matches" + (complete ? "" : "; partial coverage"), nil)
+            return (.referencesSearched, "📎 checked references for \"\(query)\" — \(count) match\(count == 1 ? "" : "es")" + (complete ? "" : "; partial coverage"), nil)
         case .referenceRead:
             return (.referenceRead, "📎 read a reference document", nil)
         case .prepNotesSearched(let query, let matchCount):
