@@ -77,6 +77,42 @@ struct ReferenceSearchTests {
         }
     }
 
+    @Test(arguments: ["# Empty\n\n## Still empty\n", "# Empty " + String(repeating: "heading ", count: 3_000) + "\n"])
+    func headingOnlyPassagesAreOmitted(_ headings: String) {
+        #expect(PrepMaterialChunker.passages(text: headings, markdown: true).isEmpty)
+        let evidence = "# Delivery\r\n\r\nWe shipped.\r\n\r\n"
+        let text = evidence + headings
+        let passages = PrepMaterialChunker.passages(text: text, markdown: true)
+        #expect(passages.map { String(text[$0.range]) }.joined() == evidence)
+        #expect(passages.first?.offset == 0)
+        #expect(PrepMaterialChunker.passages(text: headings, markdown: false).map { String(headings[$0.range]) }.joined() == headings)
+    }
+
+    @Test func headingGroupsAndLongHeadingBodiesKeepOriginalRanges() {
+        let grouped = "# Context\r\n\r\n## Details\r\n\r\nactual evidence\r\n"
+        let small = PrepMaterialChunker.passages(text: grouped, markdown: true, targetScalars: 8)
+        #expect(small.count == 1)
+        #expect(small.map { String(grouped[$0.range]) }.joined() == grouped)
+        let text = "# " + String(repeating: "heading ", count: 3_000) + "\nactual evidence\n"
+        let passages = PrepMaterialChunker.passages(text: text, markdown: true)
+        #expect(passages.count == 1)
+        #expect(passages.allSatisfy { text[$0.range].unicodeScalars.count <= 16_000 })
+        #expect(passages.last.map { text[$0.range].contains("actual evidence") } == true)
+        for passage in passages {
+            #expect(passage.offset == text[..<passage.range.lowerBound].unicodeScalars.count)
+        }
+    }
+
+    @Test func plainTextWhitespaceKeepsOriginalRanges() {
+        let text = String(repeating: " \t", count: 9_000) + "\r\n" + String(repeating: " \t\r\n", count: 4_001)
+        let passages = PrepMaterialChunker.passages(text: text, markdown: false)
+        #expect(passages.map { String(text[$0.range]) }.joined() == text)
+        #expect(passages.allSatisfy { text[$0.range].unicodeScalars.count <= 16_000 })
+        for passage in passages {
+            #expect(passage.offset == text[..<passage.range.lowerBound].unicodeScalars.count)
+        }
+    }
+
     @Test func hostileLongBlocksHaveBoundedPassages() {
         let text = "```\n" + String(repeating: "😀e\u{301}", count: 20_000) + "\n```"
         let passages = PrepMaterialChunker.passages(text: text, markdown: true)

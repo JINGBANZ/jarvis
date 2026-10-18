@@ -2,7 +2,7 @@ import Foundation
 import JarvisCore
 
 struct ReferenceSearchIndex {
-    static let version = "passages-2-" + ReferenceSearchTokenizer.version
+    static let version = "passages-3-" + ReferenceSearchTokenizer.version
 
     static func initialize(_ db: ReferenceDatabase) throws {
         try db.script("""

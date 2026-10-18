@@ -170,15 +170,18 @@ other active conversions keep their reservations.
 
 Ranked retrieval uses complete, versioned passages from the authoritative text. The range-producing
 `PrepMaterialChunker.passages` preserves original Unicode-scalar offsets, CRLF, Markdown sections,
-code fences and table rows, with a hard passage allocation bound. `ReferenceSearchTokenizer` emits
+code fences and table rows, omits heading-only Markdown ranges, and bounds passage allocation.
+`ReferenceSearchTokenizer` emits
 canonical Unicode case-folded word terms, CJK scalar/bigram terms, and punctuation-bearing identifiers.
 It encodes those terms for SQLite's ASCII tokenizer, so punctuation is never interpreted as FTS
 syntax and tokenization does not depend on the installed OS's language dictionaries. Ordinary topic
 terms use BM25 disjunction; explicit identifiers require their exact encoded terms, distinguishing
 `C++`, `C#`, `账单-42`, and `账单_42`. Topic words outside identifier spans influence BM25 ranking
 without relaxing required identifiers; excerpts keep their identifier anchors. Indexing and queries
-normalize trailing sentence delimiters consistently. Exact frozen display names
-have a separate lookup path with the same canonical Unicode case folding.
+normalize trailing sentence delimiters consistently. `ReferenceSearchNameScope` recognizes complete
+frozen filenames longest-first within the requested document subset, with the same canonical Unicode
+case folding. Duplicate-name qualifiers select their frozen document IDs. Remaining topic terms rank
+passages within that scope; a named document without topic matches supplies its first passage.
 Exact-name evidence includes empty readable revisions and uses the same durable pin contract.
 This is lexical retrieval; semantically similar paraphrases without shared terms are not guaranteed.
 BM25 corpus statistics can change while pinned document text stays immutable.
@@ -193,8 +196,9 @@ Ordinary reads keep their separate read contract. Results
 carry display names, sections, original offsets and bounded original text; readiness omissions are
 separate from top-three truncation. Only candidate sources are checked before first-use pinning,
 including a final check after all evidence pages load, without hashing the whole corpus on each query.
-Unreadable or known-changed candidates are excluded
-and remaining eligible evidence is reranked, without pinning discarded evidence.
+Unreadable or known-changed candidates are excluded and remaining eligible evidence is reranked,
+without pinning discarded evidence. A concurrent successful read's matching immutable pin remains
+valid if source validation fails; page-integrity failures still reject the evidence.
 
 A separate indexing lane prepares tokens outside transactions, commits each passage with its FTS
 posting, and publishes readiness only for a complete matching generation. Unpublished batches stay

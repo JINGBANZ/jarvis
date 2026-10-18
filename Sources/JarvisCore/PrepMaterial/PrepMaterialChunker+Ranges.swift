@@ -18,7 +18,7 @@ extension PrepMaterialChunker {
         var hasContent = false
         func flush(_ end: String.Index) {
             guard start < end else { return }
-            passages.append(Passage(range: start..<end, offset: scalarOffset, section: section))
+            if hasContent { passages.append(Passage(range: start..<end, offset: scalarOffset, section: section)) }
             scalarOffset += text[start..<end].unicodeScalars.count
             start = end; count = 0; hasContent = false
         }
@@ -41,16 +41,16 @@ extension PrepMaterialChunker {
             let lineCount = line.unicodeScalars.count
             if count + lineCount > targetScalars, hasContent, fence == nil, !wasInFence { flush(lineStart) }
             count += lineCount
-            hasContent = hasContent || !blank && !heading
+            hasContent = hasContent || !markdown || !blank && !heading
             // Even a hostile single line/fence has a bounded indexing allocation.
             while count > 16_000 {
                 let cut = text.unicodeScalars.index(start, offsetBy: 16_000)
                 let remaining = count - 16_000
                 flush(cut)
                 count = remaining
-                hasContent = remaining > 0
+                hasContent = remaining > 0 && (!markdown || !blank && !heading)
             }
-            if count >= targetScalars, fence == nil,
+            if count >= targetScalars, hasContent, fence == nil,
                wasInFence || blank || line.unicodeScalars.drop(while: { CharacterSet.whitespaces.contains($0) }).first == "|" {
                 flush(end)
             }

@@ -105,6 +105,118 @@ class SearchContracts(unittest.TestCase):
         result = self.search("How does retry backoff work?")
         self.assertEqual(names[result["hits"][0]["document_id"]], "Payment.md")
 
+    def test_filename_topics_scope_and_rank_original_passages(self):
+        text = "# Overview\n\nSetup only.\n\n" + "background evidence\n\n" * 1200 + "# Retry\n\nbackoff cancellation guidance\n"
+        (self.sources / "Payment.md").write_text(text)
+        (self.sources / "Other.md").write_text("Payment.md backoff cancellation misleading mention")
+        self.configure(); catalog = self.admit(); self.ready("absenttoken", count=2)
+        key = next(entry["document_id"] for entry in catalog["entries"] if entry["name"] == "Payment.md")
+        result = self.search("Payment.md backoff")
+        self.assertTrue(result["hits"], result)
+        self.assertTrue(all(hit["document_id"] == key for hit in result["hits"]), result)
+        hit = result["hits"][0]
+        self.assertGreater(hit["offset"], 16_000)
+        self.assertIn("backoff", hit["text"])
+        self.assertEqual(text[hit["offset"]:hit["next_offset"]], hit["text"])
+        fallback = self.search("Payment.md absenttopic")
+        self.assertEqual([hit["document_id"] for hit in fallback["hits"]], [key])
+        self.assertEqual(fallback["hits"][0]["offset"], 0)
+        self.assertEqual([hit["document_id"] for hit in self.search("Payment.md")["hits"]], [key])
+
+    def test_complete_filename_spans_preserve_longest_names_and_unicode(self):
+        fixtures = {"Payment System Design.md": "architecture retry guidance", "System Design.md": "architecture other guidance",
+                    "Straße.md": "canonical unicode retry guidance", "Überblick.md": "unicode composition retry guidance", "Other.md": "OtherPayment.md needle"}
+        for name, text in fixtures.items(): (self.sources / name).write_text(text)
+        self.configure(); self.admit(); self.ready("absenttoken", count=5)
+        for query in ["Payment System Design.md architecture", 'Read "Payment System Design.md".', "Payment System Design.md. retry"]:
+            self.assertEqual({hit["name"] for hit in self.search(query)["hits"]}, {"Payment System Design.md"}, query)
+        result = self.search("Compare Payment System Design.md with System Design.md architecture")
+        self.assertEqual({hit["name"] for hit in result["hits"]}, {"Payment System Design.md", "System Design.md"})
+        self.assertEqual({hit["name"] for hit in self.search("STRASSE.md retry")["hits"]}, {"Straße.md"})
+        self.assertEqual({unicodedata.normalize("NFC", hit["name"]) for hit in self.search("u\u0308berblick.md retry")["hits"]}, {"Überblick.md"})
+        self.assertEqual([hit["name"] for hit in self.search("OtherPayment.md needle")["hits"]], ["Other.md"])
+        for query in ["Payment System Design.md.bak needle", "Payment System Design.md-copy needle"]:
+            self.assertNotIn("Payment System Design.md", [hit["name"] for hit in self.search(query)["hits"]], query)
+
+    def test_filename_duplicate_qualifiers_respect_frozen_subset(self):
+        for folder in ["first", "second"]:
+            location = self.sources / folder; location.mkdir()
+            (location / "Payment.md").write_text("retry evidence " + folder)
+        self.configure(); catalog = self.admit(); self.ready("absenttoken", count=2)
+        first, second = catalog["entries"]
+        self.assertEqual({hit["document_id"] for hit in self.search("Payment.md retry")["hits"]}, {first["document_id"], second["document_id"]})
+        self.assertEqual([hit["document_id"] for hit in self.search(first["name"] + " retry")["hits"]], [first["document_id"]])
+        self.assertEqual(self.search(second["name"] + " retry", [first["document_id"]])["hits"], [])
+        for qualifier in ["00000000", "not-a-known-id"]:
+            self.assertEqual(self.search("Payment.md [" + qualifier + "] retry")["hits"], [])
+        self.assertEqual(self.search(first["name"] + " retry", [str(uuid.uuid4())])["hits"], [])
+        self.assertEqual(self.search(first["name"] + " retry", [])["hits"], [])
+
+    def test_heading_only_ranges_never_become_search_evidence(self):
+        for name, text in {"Trailing.md": "# Delivery\n\nWe shipped.\n\n# Emptyquasar\n\n## Still empty\n",
+                           "Only.md": "# Emptyquasar\n\n## Still empty\n",
+                           "Long.md": "# Emptyquasar " + "heading " * 3000 + "\n"}.items():
+            (self.sources / name).write_text(text)
+        self.configure(); self.admit(); self.ready("absenttoken", count=3)
+        self.assertEqual(self.search("Emptyquasar")["hits"], [])
+        self.assertTrue(self.search("shipped")["hits"])
+        with sqlite3.connect(self.database) as db:
+            self.assertEqual(db.execute("SELECT count(*) FROM passages p JOIN revisions r ON r.id=p.revision_id JOIN documents d ON d.current_revision=r.id WHERE d.path LIKE '%/Only.md' OR d.path LIKE '%/Long.md'").fetchone()[0], 0)
+
+    def test_plaintext_whitespace_remains_readable_by_exact_name(self):
+        text = " \t\r\n" * 4_001
+        (self.sources / "Whitespace.txt").write_text(text)
+        self.configure(); catalog = self.admit(); self.ready("absenttoken", count=1)
+        result = self.search("Whitespace.txt")
+        self.assertEqual(len(result["hits"]), 1, result)
+        hit = result["hits"][0]
+        self.assertEqual(hit["document_id"], catalog["entries"][0]["document_id"])
+        self.assertEqual(text[hit["offset"]:hit["next_offset"]], hit["text"])
+        self.assertEqual(self.pins()[hit["document_id"]], hit["revision_id"])
+
+    def source_pin_race(self, final_validation=False, different_revision=False):
+        key = self.prepare("quasar original evidence")
+        self.ready("absenttoken", count=1)
+        if final_validation:
+            before_pin = self.gate("search-before-pin")
+            request = self.send("search", {"query": "quasar"})
+            self.arrived("search-before-pin")
+            gate = self.gate("search-source-before-stat")
+            before_pin.unlink()
+        else:
+            gate = self.gate("search-source-before-stat")
+            request = self.send("search", {"query": "quasar"})
+        self.arrived("search-source-before-stat")
+        if different_revision: (self.sources / "fixture.txt").write_text("quasar replacement evidence")
+        page = self.read(key)
+        self.assertEqual(page["status"], "ok", page)
+        deadline = time.monotonic() + 1
+        while not self.read(key)["search_ready"]:
+            self.assertLess(time.monotonic(), deadline)
+        (self.sources / "fixture.txt").write_text("edited after the concurrent durable pin")
+        gate.unlink()
+        reply = self.receive(timeout=4)
+        self.assertEqual(reply["id"], request)
+        result = reply["result"]
+        self.assertTrue(result["complete"], result)
+        self.assertEqual([hit["revision_id"] for hit in result["hits"]], [page["revision_id"]], result)
+        self.assertEqual(result["hits"][0]["text"], page["text"])
+        # Matching pins do not excuse corruption in the authoritative cached page.
+        with sqlite3.connect(self.database) as db:
+            db.execute("UPDATE content_parts SET bytes=? WHERE revision_id=? AND part=0", (b"corrupt", page["revision_id"]))
+        corrupted = self.search("quasar")
+        self.assertEqual(corrupted["hits"], [])
+        self.assertEqual(corrupted["coverage"]["omissions"], {"unavailable": 1})
+
+    def test_matching_pin_acquired_during_initial_source_validation(self):
+        self.source_pin_race()
+
+    def test_matching_pin_acquired_during_final_source_validation(self):
+        self.source_pin_race(final_validation=True)
+
+    def test_different_pin_acquired_during_source_validation_recomputes(self):
+        self.source_pin_race(different_revision=True)
+
     def test_identifier_topics_influence_ranking_without_broadening_matches(self):
         fixtures = {"noise.txt": "client-side " * 8 + "unrelated " * 20,
                     "topic.txt": "client-side cancellation cancellation cancellation guidance " + "ordinary " * 20,

@@ -9,7 +9,6 @@ extension ReferenceDocumentStore {
               query.unicodeScalars.count <= 512 else { throw ReferenceStoreError.limit_exceeded }
         guard (payload.document_ids?.count ?? 0) <= 2_000 else { throw ReferenceStoreError.limit_exceeded }
         let subset = try payload.document_ids.map { String(decoding: try JSONEncoder().encode($0.map { $0.uuidString.lowercased() }), as: UTF8.self) }
-        let expression = ReferenceSearchTokenizer.matchExpression(query) ?? "\"t0\""
         guard let generation = try db.scalar("SELECT generation FROM sessions WHERE id=?", [session]).flatMap(Int.init),
               let eligible = try db.scalar("SELECT count(*) FROM session_documents WHERE session_id=? AND (? IS NULL OR document_id IN (SELECT value FROM json_each(?)))", [session, subset, subset]).flatMap(Int.init) else { throw ReferenceStoreError.unavailable }
         if eligible == 0 {
@@ -26,7 +25,7 @@ extension ReferenceDocumentStore {
             let exclusion = String(decoding: try JSONEncoder().encode(excluded.keys.sorted()), as: UTF8.self)
             let lookup = Task.detached(priority: .userInitiated) {
                 return try await ReferenceSearchCandidate.query(databasePath: path, session: session, subset: subset,
-                                                          excluded: exclusion, expression: expression, query: query, deadline: deadline)
+                                                          excluded: exclusion, query: query, deadline: deadline)
             }
             let batch: ReferenceSearchBatch
             do { batch = try await withTaskCancellationHandler { try await lookup.value } onCancel: { lookup.cancel() } }
@@ -43,7 +42,7 @@ extension ReferenceDocumentStore {
                 guard ContinuousClock.now < deadline else { retry = true; break }
                 do {
                     try await validateSearchCandidate(candidate, session: session)
-                    let excerpt = candidate.excerpt(query: query)
+                    let excerpt = candidate.excerpt(query: batch.query)
                     let page = try await pageForPinnedRevision(id: candidate.revision, offset: excerpt.offset, deadline: deadline)
                     guard page.text.unicodeScalars.starts(with: excerpt.text.unicodeScalars), page.totalScalars == candidate.total else { throw ReferenceStoreError.unavailable }
                     guard let documentID = UUID(uuidString: candidate.document) else { throw ReferenceStoreError.unavailable }
@@ -122,11 +121,25 @@ extension ReferenceDocumentStore {
             Task { _ = try? await self.prepare(document: candidate.document, session: session, waiter: UUID(), background: true) }
             throw ReferenceStoreError.preparing
         }
+        #if JARVIS_LIVE_E2E
+        let directory = home
+        #endif
         let validation = Task.detached(priority: .userInitiated) {
+            #if JARVIS_LIVE_E2E
+            await ReferenceSearchIndex.barrier(home: directory, name: "search-source-before-stat")
+            #endif
             guard try ReferenceSourceCapture.statState(url: source.url, root: source.root) == state else { throw ReferenceStoreError.source_changed }
         }
         do { try await withTaskCancellationHandler { try await validation.value } onCancel: { validation.cancel() } }
+        catch is CancellationError { throw CancellationError() }
         catch {
+            try Task.checkCancellation()
+            try requireActiveSession(session)
+            if let pin = try db.scalar("SELECT pin FROM session_documents WHERE session_id=? AND document_id=?", [session, candidate.document]) {
+                guard pin == candidate.revision else { throw ReferenceStoreError.superseded }
+                guard try db.scalar("SELECT ready FROM revisions WHERE id=?", [pin]) == "1" else { throw ReferenceStoreError.unavailable }
+                return
+            }
             let document = candidate.document
             Task { _ = try? await self.prepare(document: document, session: session, waiter: UUID(), background: true) }
             throw error
