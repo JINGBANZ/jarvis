@@ -74,8 +74,12 @@ extension ReferenceDocumentStore {
     func performPreparation(document: String, source: SourceLocation, state: String, token: UUID) async {
         var snapshot: URL?
         var revision: String?
-        let result: Result<String, Error>
+        var result: Result<String, Error>
         do {
+            #if JARVIS_LIVE_E2E
+            await ReferenceSearchIndex.barrier(home: home, name: "preparation-after-reserve")
+            #endif
+            try Task.checkCancellation()
             let staging = self.staging
             let captureTask = Task.detached(priority: .utility) {
                 try ReferenceSourceCapture.capture(url: source.url, root: source.root, staging: staging, expectedIdentity: source.identity)
@@ -84,7 +88,7 @@ extension ReferenceDocumentStore {
             snapshot = captured.snapshotURL
             guard captured.sourceState == state else { throw ReferenceStoreError.source_changed }
             try Task.checkCancellation()
-            let identifier = hash(Data((document + "\n" + captured.sourceHash + "\n" + ReferenceConversionPool.processorVersion).utf8))
+            let identifier = hash(Data((document + "\n" + captured.sourceHash + "\n" + captured.format + "\n" + ReferenceConversionPool.processorVersion).utf8))
             revision = identifier
             if try db.scalar("SELECT ready FROM revisions WHERE id=?", [identifier]) != "1" {
                 let text = try await converters.convert(snapshotURL: captured.snapshotURL, format: captured.format)
@@ -102,6 +106,7 @@ extension ReferenceDocumentStore {
             try Task.checkCancellation()
             guard !closed, jobs[document]?.token == token else { throw CancellationError() }
             try db.transaction {
+                try db.execute("INSERT INTO revision_sources(revision_id,source_state,format) VALUES(?,?,?) ON CONFLICT(revision_id) DO UPDATE SET source_state=excluded.source_state,format=excluded.format", [identifier, captured.sourceState, captured.format])
                 try db.execute("UPDATE revisions SET ready=1,last_used=strftime('%s','now') WHERE id=?", [identifier])
                 try db.execute("UPDATE documents SET current_revision=?,identity=? WHERE id=? AND path=? AND present=1", [identifier, captured.sourceIdentity, document, source.url.path])
             }
@@ -117,7 +122,17 @@ extension ReferenceDocumentStore {
             result = .failure(error)
         }
         if let snapshot { try? FileManager.default.removeItem(at: snapshot) }
-        reservations.remove(token)
+        storageBudget.release(token)
+        if case .success(let identifier) = result {
+            do {
+                try enqueueIndex(identifier)
+                #if JARVIS_LIVE_E2E
+                if FileManager.default.fileExists(atPath: home.appendingPathComponent("preparation-after-index-enqueue").path) {
+                    await ReferenceSearchIndex.barrier(home: home, name: "preparation-after-index-enqueue")
+                }
+                #endif
+            } catch { result = .failure(error) }
+        }
         guard let job = jobs[document], job.token == token else { return }
         jobs.removeValue(forKey: document)
         for (waiter, continuation) in job.waiters {

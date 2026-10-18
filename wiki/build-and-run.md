@@ -125,7 +125,7 @@ reconciled against the library's owned session set after helper reconnection. Ac
 access when future configuration is disabled or roots are removed.
 
 The supervisor coalesces startup and bounds hello, requests, cancellation, and shutdown. Search
-transport allows headroom after the helper's indexing budget so partial results can return. The library
+transport allows headroom after the helper's search budget so partial results can return. The library
 permits bounded helper recovery without replaying uncertain content calls; committed pins survive a
 helper restart for the same app instance. A fresh instance closes orphaned sessions after obtaining
 exclusive store ownership. The helper and reader workers receive a minimal environment without
@@ -137,9 +137,14 @@ immutable extracted revisions, and session membership/pins. Metadata discovery d
 Catalog serialization is bounded while paginated listing retains every admitted member. Text is
 published in bounded transactions independently of search readiness. Source capture hashes the exact
 authorized snapshot passed to a reader, checks source changes, and reuses a validated revision when
-its hash and processor version match. A successful first read, including an empty document or valid
-end-of-document page, commits a durable pin; invalid reads do not. Later
-pages use that text after an edit, deletion, or helper restart. Unpinned access revalidates the source
+its hash, captured format and processor version match. Passage parsing uses that captured format,
+independent of frozen catalog metadata, so a same-byte TXT/Markdown rename has a distinct revision
+while existing pins keep their original interpretation. A successful first read, including an empty document or valid
+end-of-document page, commits a durable pin; invalid reads do not. The first emitted search evidence
+also pins its revision. Search validates candidates before one transaction commits every finalized
+result pin; any conflicting pin or index generation rolls back that entire transaction before
+reranking. Discarded candidates never acquire pins. Later pages use the pinned text after an edit,
+deletion, or helper restart. Unpinned access revalidates the source
 and cannot fall back to stale cached contents. Unicode-scalar pages are defined by the new read
 contract, independently of the existing prep tool's Character offsets.
 
@@ -156,15 +161,65 @@ the limits and processor version live in `ReferenceConversionPool`, `ReferenceSo
 does not reproduce Word layout. Image-only PDFs need OCR, which this reader does not implement.
 RSS sampling can overshoot its threshold and is not a hard OS memory limit. Workers exit when their
 owning helper disappears. Private staging is reclaimed after use or exclusive-owner restart.
-Disk accounting includes SQLite/WAL and staging; cleanup preserves active pins and reports capacity
-failure rather than deleting them. Logical deletion and checkpointing do not promise secure erasure.
+Disk accounting includes SQLite/WAL and staging. `ReferenceStorageBudget` serializes conversion
+reservations with each bounded index write so indexing cannot spend reserved capacity. Cleanup
+preserves active pins and reports capacity failure rather than deleting them. Logical deletion and
+checkpointing do not promise secure erasure.
+Completed conversion removes its staging snapshot and releases its reservation before indexing;
+other active conversions keep their reservations.
 
-The basic FTS packaging check searches bounded first pages of already-pinned revisions and explicitly
-reports incomplete coverage. It shares the authoritative SQLite records and never reopens a source
-to replace a pin. Complete corpus indexing, multilingual/exact-identifier matching, useful excerpts,
-and search-first pin publication belong to the ranked-retrieval phase. Production context, tools,
-Settings, and Activity installation remain separate integration work; the development harness is not
-proof of that production behavior.
+Ranked retrieval uses complete, versioned passages from the authoritative text. The range-producing
+`PrepMaterialChunker.passages` preserves original Unicode-scalar offsets, CRLF, Markdown sections,
+code fences and table rows, omits heading-only Markdown ranges, and bounds passage allocation.
+`ReferenceSearchTokenizer` emits
+canonical Unicode case-folded word terms, CJK scalar/bigram terms, and punctuation-bearing identifiers.
+It encodes those terms for SQLite's ASCII tokenizer, so punctuation is never interpreted as FTS
+syntax and tokenization does not depend on the installed OS's language dictionaries. Ordinary topic
+terms use BM25 disjunction; explicit identifiers require their exact encoded terms, distinguishing
+`C++`, `C#`, `账单-42`, and `账单_42`. Topic words outside identifier spans influence BM25 ranking
+without relaxing required identifiers; excerpts keep their identifier anchors. Indexing and queries
+normalize trailing sentence delimiters consistently. `ReferenceSearchNameScope` recognizes complete
+frozen filenames longest-first within the requested document subset, with the same canonical Unicode
+case folding. Duplicate-name qualifiers select their frozen document IDs. Remaining topic terms rank
+passages within that scope; a named document without topic matches supplies its first passage.
+Exact-name evidence includes empty readable revisions and uses the same durable pin contract.
+This is lexical retrieval; semantically similar paraphrases without shared terms are not guaranteed.
+BM25 corpus statistics can change while pinned document text stays immutable.
+
+`ReferenceSearchCandidate` joins frozen session membership and the selected pinned/current revision
+before ordering or limiting hits. Optional document filters use a bound JSON relation; an empty
+filter stays empty. Ranking and typed readiness coverage share one SQLite read snapshot. If the first
+query exhausts its budget, coverage retains the frozen filtered membership count and metadata
+generation, with deadline omissions instead of an empty scope. The same absolute search deadline
+bounds evidence-page scanning and hashing; expiry returns partial coverage without first-use pins.
+Ordinary reads keep their separate read contract. Results
+carry display names, sections, original offsets and bounded original text; readiness omissions are
+separate from top-three truncation. Only candidate sources are checked before first-use pinning,
+including a final check after all evidence pages load, without hashing the whole corpus on each query.
+Unreadable or known-changed candidates are excluded and remaining eligible evidence is reranked,
+without pinning discarded evidence. A concurrent successful read's matching immutable pin remains
+valid if source validation fails; page-integrity failures still reject the evidence.
+
+A separate indexing lane prepares tokens outside transactions, commits each passage with its FTS
+posting, and publishes readiness only for a complete matching generation. Unpublished batches stay
+ineligible. Authoritative reads and metadata admission remain available while indexing is held.
+Index configuration and interrupted-generation recovery affect only derived data. Startup verifies
+posting/passages counts and FTS integrity; rebuilding preserves text, IDs and durable pins. Cleanup
+rechecks retention in the same transaction as deletion. Failed unpublished postings are reclaimable
+while preparing generations and authoritative pinned text remain retained; failure coverage stays explicit.
+Limits and publication details live in
+`ReferenceSearchIndex` and `ReferenceDocumentStore+Index`.
+
+The Gate runs Core search contracts and real helper retrieval/publication/race tests, including a
+seeded 10,000-member cache with full-length revision keys and retained historical revisions. The signed
+app harness additionally prepares 10,000 actual small TXT files and measures complete
+`DocumentSession.search` calls through the Swift adapter and process transport. Those synthetic
+checks contact no provider. Production context, tools, Settings, Activity installation and provider
+cache validation remain separate integration work; the development harness does not prove that
+production behavior. Reconnection restores committed text and index generations. Never-converted
+files count as incomplete search coverage until a read or configuration preparation converts them.
+Search reports that incomplete coverage without retrying conversion. Retained text without captured
+parser metadata remains readable and pinned, with unavailable search coverage rather than a guessed parser.
 
 **Permission persistence is a signing problem.** macOS TCC keys Screen-Recording, Microphone, and
 System Audio Recording grants to **code signature + bundle id + bundle path**. An ad-hoc signature

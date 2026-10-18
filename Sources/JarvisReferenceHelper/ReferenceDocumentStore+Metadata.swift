@@ -150,9 +150,9 @@ extension ReferenceDocumentStore {
         guard cursor >= 0 else { throw ReferenceStoreError.invalid_cursor }
         let query = payload.query ?? ""
         guard query.unicodeScalars.count <= 512 else { throw ReferenceStoreError.limit_exceeded }
-        let count = Int(try db.scalar("SELECT count(*) FROM session_documents WHERE session_id=? AND instr(lower(name),lower(?))>0", [session, query]) ?? "0") ?? 0
+        let count = Int(try db.scalar("SELECT count(*) FROM session_documents WHERE session_id=? AND instr(reference_casefold(name),reference_casefold(?))>0", [session, query]) ?? "0") ?? 0
         guard cursor <= count else { throw ReferenceStoreError.invalid_cursor }
-        let rows = try db.rows("SELECT document_id,name,format FROM session_documents WHERE session_id=? AND instr(lower(name),lower(?))>0 ORDER BY name,document_id LIMIT 100 OFFSET ?", [session, query, String(cursor)])
+        let rows = try db.rows("SELECT document_id,name,format FROM session_documents WHERE session_id=? AND instr(reference_casefold(name),reference_casefold(?))>0 ORDER BY name,document_id LIMIT 100 OFFSET ?", [session, query, String(cursor)])
         let entries = rows.map { ["document_id": $0[0] ?? "", "name": $0[1] ?? "", "format": $0[2] ?? ""] }
         return try json(["status": "ok", "entries": entries, "total_count": count,
                          "next_cursor": cursor + rows.count < count ? cursor + rows.count : NSNull()])

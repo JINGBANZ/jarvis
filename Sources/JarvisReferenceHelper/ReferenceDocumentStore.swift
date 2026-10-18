@@ -35,8 +35,10 @@ actor ReferenceDocumentStore {
     var configurationTask: Task<Void, Never>?
     var configurationToken = UUID()
     var backgroundTask: Task<Void, Never>?
+    var indexTask: Task<Void, Never>?
+    var pendingIndexes: Set<String> = []
     var jobs: [String: Preparation] = [:]
-    var reservations: Set<UUID> = []
+    let storageBudget = ReferenceStorageBudget()
     var closed = false
     var waiterSessions: [UUID: String] = [:]
     var waiterTimers: [UUID: Task<Void, Never>] = [:]
@@ -90,7 +92,9 @@ actor ReferenceDocumentStore {
                 CREATE TABLE IF NOT EXISTS documents(id TEXT PRIMARY KEY,path TEXT NOT NULL,identity TEXT NOT NULL,present INTEGER NOT NULL,current_revision TEXT);
                 CREATE INDEX IF NOT EXISTS documents_path ON documents(path);
                 CREATE INDEX IF NOT EXISTS documents_identity ON documents(identity);
+                CREATE INDEX IF NOT EXISTS documents_revision ON documents(current_revision);
                 CREATE TABLE IF NOT EXISTS metadata(generation INTEGER,document_id TEXT,name TEXT,format TEXT,path TEXT,root TEXT,identity TEXT,PRIMARY KEY(generation,document_id));
+                CREATE INDEX IF NOT EXISTS metadata_document ON metadata(document_id);
                 CREATE TABLE IF NOT EXISTS source_members(generation INTEGER,source_id TEXT,document_id TEXT,PRIMARY KEY(generation,source_id,document_id));
                 CREATE TABLE IF NOT EXISTS revisions(id TEXT PRIMARY KEY,document_id TEXT NOT NULL,source_hash TEXT NOT NULL,processor TEXT NOT NULL,scalar_count INTEGER NOT NULL,text_hash TEXT NOT NULL,ready INTEGER NOT NULL,search_ready INTEGER NOT NULL DEFAULT 0,last_used INTEGER NOT NULL);
                 CREATE TABLE IF NOT EXISTS content_parts(revision_id TEXT NOT NULL,part INTEGER NOT NULL,bytes BLOB NOT NULL,PRIMARY KEY(revision_id,part));
@@ -103,6 +107,7 @@ actor ReferenceDocumentStore {
                 DELETE FROM content_parts WHERE revision_id NOT IN (SELECT id FROM revisions);
                 UPDATE configuration SET state='failed',error='preparing' WHERE state='preparing';
                 """)
+            try ReferenceSearchIndex.initialize(db)
             converters = ReferenceConversionPool(staging: staging)
         } catch { Darwin.close(lock); throw error }
     }
@@ -110,7 +115,7 @@ actor ReferenceDocumentStore {
     func close() async {
         guard !closed else { return }
         closed = true
-        configurationTask?.cancel(); backgroundTask?.cancel()
+        configurationTask?.cancel(); backgroundTask?.cancel(); indexTask?.cancel()
         let running = Array(jobs.values)
         for job in running {
             job.task.cancel()
@@ -120,6 +125,7 @@ actor ReferenceDocumentStore {
         for timer in waiterTimers.values { timer.cancel() }
         waiterTimers.removeAll(); waiterSessions.removeAll()
         await converters.close()
+        await indexTask?.value
         for job in running { await job.task.value }
         try? db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         Darwin.close(lock)
@@ -142,7 +148,7 @@ actor ReferenceDocumentStore {
             case "release": return try release(request, payload)
             case "abandon": return try abandon(payload)
             case "reconcile": return try reconcile(payload)
-            case "diagnostics": return try json(["status": "ok", "disk_bytes": diskBytes(), "reserved_bytes": Int64(reservations.count) * Self.reservationBytes, "peak_disk_bytes": peakDiskBytes])
+            case "diagnostics": return try json(["status": "ok", "disk_bytes": diskBytes(), "reserved_bytes": storageBudget.reservedBytes, "peak_disk_bytes": peakDiskBytes])
             default: throw ReferenceStoreError.unavailable
             }
         } catch is CancellationError { throw CancellationError() }
@@ -164,6 +170,7 @@ actor ReferenceDocumentStore {
         }
         instance = app
         try cleanup()
+        try resumeIndexes()
     }
 
     func requireSession(_ request: ReferenceHelperRequest, _ payload: Payload) throws -> String {
