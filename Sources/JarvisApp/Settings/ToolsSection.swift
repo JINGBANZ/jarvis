@@ -28,6 +28,9 @@ final class ToolsSection: NSObject, SettingsSection {
     /// Built once per page so the switch is never re-parented while it is being toggled.
     private var switchRow: SettingsRowView?
     private let addButton = NSButton(title: "＋ Add files or folders…", target: nil, action: nil)
+    private let addRow = NSView()
+    private let addSeparator = SettingsStyle.separator()
+    private let formatsLabel = NSTextField(labelWithString: "TXT, Markdown, PDF, DOCX")
     private var selectionNotice: String?
     private var listViews: [NSView] = []
     private var rowsBySourceID: [UUID: SettingsRowView] = [:]
@@ -41,12 +44,18 @@ final class ToolsSection: NSObject, SettingsSection {
         super.init()
         referencesSwitch.target = self
         referencesSwitch.action = #selector(referencesSwitchChanged)
-        referencesSwitch.setAccessibilityLabel("Use my References")
+        referencesSwitch.setAccessibilityLabel("References")
         referencesSwitch.identifier = NSUserInterfaceItemIdentifier("tool-references")
         addButton.target = self
         addButton.action = #selector(addSource)
         addButton.bezelStyle = .rounded
         addButton.setAccessibilityLabel("Add References")
+        formatsLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        formatsLabel.textColor = SettingsTheme.mutedText
+        formatsLabel.lineBreakMode = .byTruncatingTail
+        addRow.addSubview(addSeparator)
+        addRow.addSubview(addButton)
+        addRow.addSubview(formatsLabel)
     }
 
     private var referencesEnabled: Bool {
@@ -62,21 +71,19 @@ final class ToolsSection: NSObject, SettingsSection {
         } else {
             list = 0
         }
-        return SettingsStyle.cardHeaderHeight + Self.switchRowHeight + list + (selectionNotice == nil ? 0 : Self.messageRowHeight)
+        return Self.switchRowHeight + list + (selectionNotice == nil ? 0 : Self.messageRowHeight)
     }
 
     func makePage() -> SettingsPageView {
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: cardHeight))
-        card.setHeader(title: "References", detail: "TXT, Markdown, PDF and DOCX · prepared on this Mac")
         card.onLayout = { [weak self] in self?.layoutCard() }
         self.card = card
         let switchRow = SettingsRowView(
-            title: "Use my References",
-            detail: "",
+            title: "References",
+            detail: "Find relevant context in files you choose.",
             controlView: referencesSwitch,
             controlSize: NSSize(width: 44, height: 26),
             preferredHeight: Self.switchRowHeight,
-            // The card header already draws the line above the first row.
             showsSeparator: false)
         card.contentView?.addSubview(switchRow)
         self.switchRow = switchRow
@@ -117,16 +124,8 @@ final class ToolsSection: NSObject, SettingsSection {
         let sources = referencePreferences.sources
         referencesSwitch.state = isOn ? .on : .off
         if isOn {
-            switchRow?.setDetail(sources.isEmpty
-                ? "Add References below so I can read or search them."
-                : "I can read or search these files when the conversation needs them.")
-        } else {
-            switchRow?.setDetail("")
-        }
-
-        if isOn {
             if sources.isEmpty {
-                listViews.append(messageLabel("No References yet."))
+                listViews.append(messageLabel("Add files or folders to get started."))
             }
             for source in sources {
                 let remove = ClosureButton(title: "×") { [weak self] in
@@ -139,14 +138,15 @@ final class ToolsSection: NSObject, SettingsSection {
                 remove.setAccessibilityLabel("Remove \(source.displayName)")
                 let row = SettingsRowView(
                     title: source.displayName,
-                    detail: source.path,
+                    detail: (URL(fileURLWithPath: source.path).deletingLastPathComponent().path as NSString)
+                        .abbreviatingWithTildeInPath,
                     controlView: remove,
                     controlSize: NSSize(width: 30, height: 30),
                     preferredHeight: Self.sourceRowHeight)
                 listViews.append(row)
                 rowsBySourceID[source.id] = row
             }
-            listViews.append(addButton)
+            listViews.append(addRow)
         }
         if let selectionNotice { listViews.append(messageLabel(selectionNotice)) }
         listViews.forEach { content.addSubview($0) }
@@ -190,13 +190,18 @@ final class ToolsSection: NSObject, SettingsSection {
             let height: CGFloat
             switch view {
             case let row as SettingsRowView: height = row.preferredHeight
-            case addButton: height = Self.addRowHeight
+            case addRow: height = Self.addRowHeight
             default: height = Self.messageRowHeight
             }
             top -= height
             switch view {
-            case addButton:
-                view.frame = NSRect(x: SettingsStyle.rowHorizontalInset, y: top + 7, width: 210, height: 32)
+            case addRow:
+                view.frame = NSRect(x: 0, y: top, width: body.width, height: height)
+                addSeparator.frame = NSRect(x: 0, y: height - 1, width: body.width, height: 1)
+                addButton.frame = NSRect(x: SettingsStyle.rowHorizontalInset, y: 7, width: 210, height: 32)
+                let formatsX = addButton.frame.maxX + 12
+                formatsLabel.frame = NSRect(x: formatsX, y: 14,
+                    width: max(0, body.width - SettingsStyle.rowHorizontalInset - formatsX), height: 18)
             case is SettingsRowView:
                 view.frame = NSRect(x: 0, y: top, width: body.width, height: height)
             default:

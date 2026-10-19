@@ -489,9 +489,11 @@ every key and default value it reads comes from
 The Tools page lists the coaching tools the user can switch. References is the only card: the
 always-on tools (screen capture, speak, stay silent) aren't listed, because Jarvis cannot start
 without screen capture and a turn cannot end without one of the other two. Its one card holds the
-**Use my References** switch and, below it, the list of local files and folders the helper
-reads, with **Add files or folders…** and a remove button per source. The switch is always enabled.
-When it is on with no sources, its detail asks the user to add files. Switching it off hides the
+**References** title, a brief introduction, and its switch in one row. The introduction stays
+visible in both states. Below it, the list shows each selected file or folder's name and parent
+location, with a remove button per source. **Add files or folders…** sits beside the supported
+formats in the footer. The switch is always enabled. When it is on with no sources, an empty
+state asks the user to add files or folders. Switching it off hides the
 list and keeps it; switching it back on shows the same list. Source edits and the switch notify
 `ReferenceRuntime` immediately to prepare future admission. A session already using References
 retains its frozen access; the [References contract](./architecture.md#references) defines Start,
@@ -499,9 +501,8 @@ omission, and current-session behavior.
 
 `ReferencePreferences` persists the selected paths and stable source identities. The source files
 stay where they are and remain authoritative. The helper keeps a private, reusable cache of extracted
-text and search data; removing a selection does not delete its file. The card header names supported
-formats and local preparation. Cache retention, the filename catalog, and bounded read/search text
-sent to the brain provider are defined in
+text and search data; removing a selection does not delete its file. Cache retention, the filename
+catalog, and bounded read/search text sent to the brain provider are defined in
 [sandbox.md → References data](./sandbox.md#references-data).
 
 The picker accepts TXT, Markdown, PDF, DOCX, and folders; an unsupported direct file selection shows
