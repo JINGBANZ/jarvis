@@ -116,9 +116,13 @@ final class ToolsSection: NSObject, SettingsSection {
         let isOn = referencesEnabled
         let sources = referencePreferences.sources
         referencesSwitch.state = isOn ? .on : .off
-        switchRow?.setDetail(isOn && sources.isEmpty
-            ? "Add References below so I can read or search them."
-            : "I can read or search these files when the conversation needs them.")
+        if isOn {
+            switchRow?.setDetail(sources.isEmpty
+                ? "Add References below so I can read or search them."
+                : "I can read or search these files when the conversation needs them.")
+        } else {
+            switchRow?.setDetail("")
+        }
 
         if isOn {
             if sources.isEmpty {

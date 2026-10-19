@@ -272,7 +272,7 @@ final class ReferenceLibrary {
 
     private func configuration(generation: Int, enabled: Bool, sources: [ReferenceSource]) throws -> Data {
         try encode(["app_instance_id": appInstanceID.uuidString, "generation": generation, "enabled": enabled,
-                    "sources": sources.map { ["source_id": $0.id.uuidString, "path": $0.url.path] }])
+                    "sources": sources.map { ["source_id": $0.id.uuidString, "path": $0.url.path, "is_directory": $0.isDirectory] }])
     }
     private func encode(_ value: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: value) }
     private func remaining(_ deadline: ContinuousClock.Instant) -> Duration { max(.zero, ContinuousClock.now.duration(to: deadline)) }

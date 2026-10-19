@@ -12,7 +12,7 @@ extension ReferenceHarnessAppDelegate {
         try "C# managed types 账单_42".write(to: folder.appendingPathComponent("managed.md"), atomically: true, encoding: .utf8)
         let grapheme = "grapheme " + String(repeating: "x", count: 1_990) + "e\u{301} trailing text"
         try grapheme.write(to: folder.appendingPathComponent("grapheme.txt"), atomically: true, encoding: .utf8)
-        try await library.configure(enabled: true, sources: [ReferenceSource(id: UUID(), url: folder)])
+        try await library.configure(enabled: true, sources: [ReferenceSource(id: UUID(), url: folder, isDirectory: true)])
         let access = try await admission(library)
         let list = try await access.session.list(query: nil, cursor: nil)
         let payment = try requireEntry(list, name: "Payment.md")
@@ -55,7 +55,7 @@ extension ReferenceHarnessAppDelegate {
             try (common + "\nscaleID-\(index)\n").write(to: scale.appendingPathComponent("document-\(index).txt"), atomically: true, encoding: .utf8)
         }
         let preparation = ContinuousClock.now
-        try await library.configure(enabled: true, sources: [ReferenceSource(id: UUID(), url: scale)])
+        try await library.configure(enabled: true, sources: [ReferenceSource(id: UUID(), url: scale, isDirectory: true)])
         let large = try await admission(library)
         try require(large.context.documentCatalog?.totalCount == 10_000, "complete 10k frozen membership")
         try await waitForSearch(large.session, count: 10_000, timeout: .seconds(280))

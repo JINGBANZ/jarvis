@@ -39,7 +39,7 @@ final class ReferenceRuntime {
 
     func reconcile() {
         library.prepare(enabled: enabled, sources: sources.map {
-            ReferenceSource(id: $0.id, url: URL(fileURLWithPath: $0.path))
+            ReferenceSource(id: $0.id, url: URL(fileURLWithPath: $0.path), isDirectory: $0.isDirectory)
         }, disabledTools: disabledTools)
     }
 

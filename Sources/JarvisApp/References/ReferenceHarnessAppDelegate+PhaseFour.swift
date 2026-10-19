@@ -130,6 +130,17 @@ extension ReferenceHarnessAppDelegate {
             let failed = try await library.admit(startID: UUID())
             guard case .omitted(_, .failed) = failed else { throw ReferenceProtocolError.malformed }
             try require(ReferenceOmissionReason.failed.warning != nil, "failed metadata produces one typed omission reason")
+            fixture.sources.sources = [.init(path: fixture.root.appendingPathComponent("alpha.md").path, isDirectory: false)]
+            runtime.configure(preferences: fixture.preferences, sources: fixture.sources)
+            let selectedFile = try await admission(library)
+            let selectedEntries = try await selectedFile.session.list(query: nil, cursor: nil)
+            try require(selectedEntries.entries.count == 1, "direct file selection admits only the selected file")
+            library.release(sessionID: selectedFile.sessionID)
+            fixture.sources.sources = [.init(path: fixture.root.path, isDirectory: false)]
+            runtime.configure(preferences: fixture.preferences, sources: fixture.sources)
+            let changedKind = try await library.admit(startID: UUID())
+            guard case .omitted(_, .failed) = changedKind else { throw ReferenceProtocolError.malformed }
+            try await referenceOmittedProjection(changedKind)
             let delay = fixture.store.appendingPathComponent("metadata-delay-ms")
             try "2500".write(to: delay, atomically: true, encoding: .utf8)
             fixture.sources.sources = [.init(path: fixture.root.path, isDirectory: true)]

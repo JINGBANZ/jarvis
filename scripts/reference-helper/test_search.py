@@ -609,7 +609,7 @@ class SearchContracts(unittest.TestCase):
         preparation_gate = self.gate("preparation-after-reserve")
         new_sources = self.root / "new-sources"; new_sources.mkdir()
         for name in ["first.txt", "second.txt"]: (new_sources / name).write_text("new reference")
-        self.configure(sources=[{"source_id": str(uuid.uuid4()), "path": str(new_sources)}])
+        self.configure(sources=[{"source_id": str(uuid.uuid4()), "path": str(new_sources), "is_directory": True}])
         self.session = str(uuid.uuid4()); self.start = str(uuid.uuid4())
         catalog = self.admit()
         self.arrived("preparation-after-reserve")

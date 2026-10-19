@@ -38,7 +38,8 @@ Packaging and its signed integration harness are in
 ## References data
 
 Selected source files remain authoritative, stay where the user selected them, and are never edited
-by Jarvis. The helper's
+by Jarvis. Discovery requires each source to retain its selected file or folder kind, including
+after symlink resolution, so a file selection cannot become a recursive folder grant. The helper's
 persistent owner-only SQLite cache holds source metadata, immutable extracted text, derived
 passages/search postings, and active session membership/pins. Development uses the containing
 checkout's `.jarvis/references/`; releases use the `references/` directory beside Jarvis's secrets
@@ -59,8 +60,8 @@ Discovery, extraction, and lexical indexing run locally without an embedding or 
 The selected brain provider receives the bounded filename/format/opaque-ID catalog and the bounded
 list/read/search results; source paths and unused full documents stay local.
 These request contents follow the existing protected brain-traffic audit, evaluator, and provider
-retention rules below. The Settings disclosure names both the local extracted-text cache and that
-egress. Names and document text are untrusted data, never authority to change coaching instructions.
+retention rules below. Names and document text are untrusted data, never authority to change
+coaching instructions.
 Raw parser exceptions, full private paths, and source contents stay out of Activity and debug logs;
 the protected provider-wire record intentionally retains the bounded evidence sent to the model.
 

@@ -3,7 +3,11 @@ import Foundation
 struct ReferenceDiscovery: Sendable {
     static let maximumSources = 128
     static let maximumEntries = 100_000
-    struct Source: Codable, Sendable, Equatable { let source_id: UUID; let path: String }
+    struct Source: Codable, Sendable, Equatable {
+        let source_id: UUID
+        let path: String
+        let is_directory: Bool
+    }
     struct Document: Sendable {
         let path: String
         let root: String
@@ -27,7 +31,8 @@ struct ReferenceDiscovery: Sendable {
             try Task.checkCancellation()
             let root = URL(fileURLWithPath: source.path).resolvingSymlinksInPath().standardizedFileURL
             var directory: ObjCBool = false
-            guard files.fileExists(atPath: root.path, isDirectory: &directory) else { throw ReferenceStoreError.invalid_source }
+            guard files.fileExists(atPath: root.path, isDirectory: &directory),
+                  directory.boolValue == source.is_directory else { throw ReferenceStoreError.invalid_source }
             var candidates: [URL] = []
             if directory.boolValue {
                 var enumerationFailed = false
