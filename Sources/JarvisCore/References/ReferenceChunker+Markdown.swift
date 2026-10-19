@@ -1,6 +1,6 @@
 import Foundation
 
-extension PrepMaterialChunker {
+extension ReferenceChunker {
     /// Block boundaries only; blank lines and `#` comments inside a fence stay code.
     static func markdownParagraphs(_ text: String) -> [String] {
         var paragraphs: [String] = []

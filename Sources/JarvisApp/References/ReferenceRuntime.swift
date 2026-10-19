@@ -7,7 +7,7 @@ final class ReferenceRuntime {
     private let supervisor: ReferenceHelperSupervisor
     private var enabled = false
     private var disabledTools: Set<String> = []
-    private var sources: [PrepMaterialSource] = []
+    private var sources: [ReferenceSourceSelection] = []
     private lazy var watcher = ReferenceSourceWatcher { [weak self] in self?.reconcile() }
 
     init(home: URL? = nil) {
@@ -24,12 +24,12 @@ final class ReferenceRuntime {
     var processIdentifier: Int32? { supervisor.processIdentifier }
     #endif
 
-    func configure(preferences: BrainPreferences, sources: PrepMaterialPreferences) {
+    func configure(preferences: BrainPreferences, sources: ReferencePreferences) {
         let disabled = preferences.disabledTools
         configure(enabled: !disabled.contains(searchReferencesTool.name), sources: sources.sources, disabledTools: disabled)
     }
 
-    func configure(enabled: Bool, sources: [PrepMaterialSource], disabledTools: Set<String> = []) {
+    func configure(enabled: Bool, sources: [ReferenceSourceSelection], disabledTools: Set<String> = []) {
         self.disabledTools = disabledTools
         self.enabled = enabled
         self.sources = sources

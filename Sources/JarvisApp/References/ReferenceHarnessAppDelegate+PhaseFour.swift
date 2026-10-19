@@ -39,7 +39,7 @@ extension ReferenceHarnessAppDelegate {
         let store: URL
         let defaults: UserDefaults
         let preferences: BrainPreferences
-        let sources: PrepMaterialPreferences
+        let sources: ReferencePreferences
     }
 
     func runPhaseFourChecks(selection: String) async throws {
@@ -58,7 +58,7 @@ extension ReferenceHarnessAppDelegate {
             let defaults = UserDefaults(suiteName: domain)!
             let preferences = BrainPreferences(defaults: defaults)
             preferences.disabledTools = []
-            let sources = PrepMaterialPreferences(defaults: defaults)
+            let sources = ReferencePreferences(defaults: defaults)
             sources.add(.init(path: source.path, isDirectory: true))
             let runtime = ReferenceRuntime(home: store)
             let fixture = PhaseFixture(runtime: runtime, root: source, store: store, defaults: defaults,

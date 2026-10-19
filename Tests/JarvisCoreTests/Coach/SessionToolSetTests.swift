@@ -49,7 +49,7 @@ import Testing
             == brain.offeredTools[1].map(\.parametersJSON))
     }
 
-    @Test func aSessionComposedWithoutPrepMaterialNeverGainsTheTool() async {
+    @Test func aSessionComposedWithoutReferencesNeverGainsTheTool() async {
         let brain = ScriptedBrain(script: [staySilent, staySilent])
         let (driver, transcript) = makeDriver(brain: brain, documents: nil)
         transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100))

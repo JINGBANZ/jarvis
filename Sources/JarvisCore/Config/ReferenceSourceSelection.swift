@@ -1,6 +1,6 @@
 import Foundation
 
-public struct PrepMaterialSource: Equatable, Sendable {
+public struct ReferenceSourceSelection: Equatable, Sendable {
     public let id: UUID
     public let path: String
     public let isDirectory: Bool

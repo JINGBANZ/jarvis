@@ -181,7 +181,7 @@ Completed conversion removes its staging snapshot and releases its reservation b
 other active conversions keep their reservations.
 
 Ranked retrieval uses complete, versioned passages from the authoritative text. The range-producing
-`PrepMaterialChunker.passages` preserves original Unicode-scalar offsets, CRLF, Markdown sections,
+`ReferenceChunker.passages` preserves original Unicode-scalar offsets, CRLF, Markdown sections,
 code fences and table rows, omits heading-only Markdown ranges, and bounds passage allocation.
 `ReferenceSearchTokenizer` emits
 canonical Unicode case-folded word terms, CJK scalar/bigram terms, and punctuation-bearing identifiers.

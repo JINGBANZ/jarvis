@@ -24,7 +24,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var composition: SessionComposition!
     private let transcriptionPreferences = TranscriptionPreferences()
     private let screenPreferences = ScreenCapturePreferences()
-    private let prepMaterialPreferences = PrepMaterialPreferences()
+    private let referencePreferences = ReferencePreferences()
     private let permissionPreferences = PermissionPreferences()
     private let onboardingPreferences = OnboardingPreferences()
     private var onboarding: OnboardingGate!
@@ -192,7 +192,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 }),
             OverlaySection(appearance: appearance, box: overlayBox),
             connectionsSection,
-            ToolsSection(brainPreferences: brain.preferences, prepPreferences: prepMaterialPreferences, onChanged: { [weak self] in self?.configureReferences() }),
+            ToolsSection(brainPreferences: brain.preferences, referencePreferences: referencePreferences, onChanged: { [weak self] in self?.configureReferences() }),
             SkillsSection(preferences: brain.preferences),
             hotkeySection,
             ActivitySection(viewer: activityViewer),
@@ -254,7 +254,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     }
 
     private func configureReferences() {
-        references.configure(preferences: BrainPreferences(), sources: prepMaterialPreferences)
+        references.configure(preferences: BrainPreferences(), sources: referencePreferences)
     }
 
     /// True once the Start is accepted, before preparation finishes. Stop, a newer Start, or a

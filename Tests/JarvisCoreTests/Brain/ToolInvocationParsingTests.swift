@@ -45,7 +45,7 @@ import Testing
             callId: "p1", name: "search_references", argumentsJSON: #"{"query":"q"}"#)
         #expect(parsed == .searchReferences(callId: "p1", query: "q"))
     }
-    @Test func readPrepNoteArgumentsAreValidatedThroughDispatcher() {
+    @Test func readReferenceArgumentsAreValidatedThroughDispatcher() {
         let valid = ToolInvocation.parse(callId: "read", name: "call_tool",
             argumentsJSON: #"{"name":"read_reference","arguments":{"document_id":"00000000-0000-0000-0000-000000000001","offset":0}}"#)
         #expect(valid != nil)

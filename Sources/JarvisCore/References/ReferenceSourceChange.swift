@@ -2,7 +2,7 @@ import Foundation
 
 public enum ReferenceSourceChange {
     public static func affects(_ path: String, directory: Bool, structural: Bool,
-                               sources: [PrepMaterialSource], excluding: [String]) -> Bool {
+                               sources: [ReferenceSourceSelection], excluding: [String]) -> Bool {
         let changed = URL(fileURLWithPath: path).standardizedFileURL
         func contains(_ root: String) -> Bool {
             changed.pathComponents.starts(with: URL(fileURLWithPath: root).standardizedFileURL.pathComponents)

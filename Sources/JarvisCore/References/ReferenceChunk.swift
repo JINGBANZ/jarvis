@@ -1,6 +1,6 @@
 import Foundation
 
-public struct PrepMaterialChunk: Sendable, Equatable {
+public struct ReferenceChunk: Sendable, Equatable {
     public let sourceDisplayName: String
     public let text: String
 

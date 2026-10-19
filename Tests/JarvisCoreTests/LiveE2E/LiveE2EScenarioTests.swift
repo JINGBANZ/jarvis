@@ -152,7 +152,7 @@ struct LiveE2EScenarioTests {
     func prepNotesKeepEachStoryWholeAndSeparate() throws {
         let notes = try String(
             contentsOf: Self.liveTests.appendingPathComponent("Fixtures/prep-notes.md"), encoding: .utf8)
-        let chunks = PrepMaterialChunker.chunk(text: notes, sourceDisplayName: "prep-notes.md")
+        let chunks = ReferenceChunker.chunk(text: notes, sourceDisplayName: "prep-notes.md")
         let layout = chunks.map { "\($0.text.split(separator: " ").count) words: \($0.text.prefix(30))" }
         #expect(chunks.count >= 4, "\(layout)")
         let manager = try #require(chunks.first { $0.text.contains("Marcus Webb") })
@@ -171,7 +171,7 @@ struct LiveE2EScenarioTests {
     func searchDesignPreparationIncludesInvalidation() throws {
         let notes = try String(
             contentsOf: Self.liveTests.appendingPathComponent("Fixtures/prep-notes.md"), encoding: .utf8)
-        let chunks = PrepMaterialChunker.chunk(text: notes, sourceDisplayName: "prep-notes.md")
+        let chunks = ReferenceChunker.chunk(text: notes, sourceDisplayName: "prep-notes.md")
         let result = try #require(chunks.first { $0.text.contains("Product search architecture") })
         #expect(result.text.contains("invalidation"))
         #expect(result.text.contains("version"))

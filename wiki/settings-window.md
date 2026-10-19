@@ -497,11 +497,11 @@ list and keeps it; switching it back on shows the same list. Source edits and th
 retains its frozen access; the [References contract](./architecture.md#references) defines Start,
 omission, and current-session behavior.
 
-`PrepMaterialPreferences` persists the selected paths and stable source identities. The source files
+`ReferencePreferences` persists the selected paths and stable source identities. The source files
 stay where they are and remain authoritative. The helper keeps a private, reusable cache of extracted
 text and search data; removing a selection does not delete its file. The card header names supported
-formats and local preparation, and its callout discloses the local text cache, filename catalog, and bounded
-read/search text sent to the brain provider. Cache retention and egress are defined in
+formats and local preparation. Cache retention, the filename catalog, and bounded read/search text
+sent to the brain provider are defined in
 [sandbox.md → References data](./sandbox.md#references-data).
 
 The picker accepts TXT, Markdown, PDF, DOCX, and folders; an unsupported direct file selection shows
@@ -822,7 +822,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisEvaluation/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |
 | `Sources/JarvisCore/Config/Defaults.swift` | Every user setting's key, default, and valid range |
 | `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + route validation |
-| `Sources/JarvisCore/Config/PrepMaterialPreferences.swift` | The reference sources Tools lists |
+| `Sources/JarvisCore/Config/ReferencePreferences.swift` | The reference sources Tools lists |
 | `Sources/JarvisCore/Coach/CoachDriver.swift` | Between-attempt route application and attempt orchestration |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |
 | `Sources/JarvisScreenCapture/ScreenCaptureCLI.swift` | Executes the attempt's frozen `SessionPlan` capture selection and handles main-display fallback |

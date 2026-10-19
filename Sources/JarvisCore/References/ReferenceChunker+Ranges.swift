@@ -1,6 +1,6 @@
 import Foundation
 
-extension PrepMaterialChunker {
+extension ReferenceChunker {
     public struct Passage: Equatable, Sendable {
         public let range: Range<String.Index>
         public let offset: Int

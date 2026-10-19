@@ -98,7 +98,7 @@ import Testing
         let ordinary = attempt.messages(for: turn)
         let final = attempt.messages(for: turn, finalResponse: true, allowsSilence: false)
         #expect(sameMessages(Array(final.prefix(ordinary.count)), ordinary))
-        #expect(final.last?.text == JarvisPrompts.Coach.finalAnswerCycle(prepEnabled: false, allowsSilence: false))
+        #expect(final.last?.text == JarvisPrompts.Coach.finalAnswerCycle(referencesEnabled: false, allowsSilence: false))
         #expect(sameMessages(attempt.messages(for: turn), ordinary))
         #expect(context.history.snapshot().isEmpty)
     }

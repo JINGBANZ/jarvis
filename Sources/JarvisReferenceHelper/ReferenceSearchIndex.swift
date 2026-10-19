@@ -67,7 +67,7 @@ struct ReferenceSearchIndex {
                 try db.execute("DELETE FROM passages WHERE id IN (SELECT id FROM passages WHERE revision_id=? AND generation<>? LIMIT 64)", [revision, generation])
             }
         }
-        let passages = PrepMaterialChunker.passages(text: text, markdown: markdown)
+        let passages = ReferenceChunker.passages(text: text, markdown: markdown)
         for (ordinal, passage) in passages.enumerated() {
             try Task.checkCancellation()
             let original = String(text[passage.range])

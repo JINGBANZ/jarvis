@@ -72,7 +72,7 @@ final class LiveE2ERunner: BrainCompositionHost {
     private let supervisor = LocalProxySupervisor(
         executable: LocalProxySupervisor.bundledExecutable(),
         home: FileSecretStore().directoryURL.appendingPathComponent("proxy", isDirectory: true))
-    private var prepSources: [PrepMaterialSource] = []
+    private var prepSources: [ReferenceSourceSelection] = []
     private var sessionEnd: SessionEndReason?
     private var expectsSessionEnd = false
     private var drain: Task<Void, Never>?
@@ -160,7 +160,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             secrets: secrets, host: self, supervisor: supervisor,
             preferences: preferences, send: send)
         prepSources = scenario.prepNotes.map {
-            [PrepMaterialSource(
+            [ReferenceSourceSelection(
                 path: options.fixturesDirectory.appendingPathComponent($0).path,
                 isDirectory: false)]
         } ?? []

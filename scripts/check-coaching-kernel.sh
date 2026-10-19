@@ -15,7 +15,7 @@ kernel_paths=(
     Sources/JarvisCore/Brain
     Sources/JarvisCore/Prompts
     Sources/JarvisCore/Screen
-    Sources/JarvisCore/PrepMaterial
+    Sources/JarvisCore/References
     Sources/JarvisCore/Providers
     Sources/JarvisCore/Diagnostics/CaptureReadinessMonitor.swift
     Sources/JarvisCore/Diagnostics/AudioContinuityWitness.swift

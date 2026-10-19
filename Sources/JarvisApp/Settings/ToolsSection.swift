@@ -21,10 +21,10 @@ final class ToolsSection: NSObject, SettingsSection {
 
     private let onChanged: () -> Void
     private let brainPreferences: BrainPreferences
-    private let prepPreferences: PrepMaterialPreferences
+    private let referencePreferences: ReferencePreferences
     private var stack: SettingsCardStack?
     private var card: SettingsCardView?
-    private let prepSwitch = NSSwitch()
+    private let referencesSwitch = NSSwitch()
     /// Built once per page so the switch is never re-parented while it is being toggled.
     private var switchRow: SettingsRowView?
     private let addButton = NSButton(title: "＋ Add files or folders…", target: nil, action: nil)
@@ -34,33 +34,33 @@ final class ToolsSection: NSObject, SettingsSection {
     /// Guards a background existence check against a stale result landing after a newer render.
     private var renderGeneration = 0
 
-    init(brainPreferences: BrainPreferences, prepPreferences: PrepMaterialPreferences, onChanged: @escaping () -> Void) {
+    init(brainPreferences: BrainPreferences, referencePreferences: ReferencePreferences, onChanged: @escaping () -> Void) {
         self.onChanged = onChanged
         self.brainPreferences = brainPreferences
-        self.prepPreferences = prepPreferences
+        self.referencePreferences = referencePreferences
         super.init()
-        prepSwitch.target = self
-        prepSwitch.action = #selector(prepSwitchChanged)
-        prepSwitch.setAccessibilityLabel("Use my References")
-        prepSwitch.identifier = NSUserInterfaceItemIdentifier("tool-references")
+        referencesSwitch.target = self
+        referencesSwitch.action = #selector(referencesSwitchChanged)
+        referencesSwitch.setAccessibilityLabel("Use my References")
+        referencesSwitch.identifier = NSUserInterfaceItemIdentifier("tool-references")
         addButton.target = self
         addButton.action = #selector(addSource)
         addButton.bezelStyle = .rounded
         addButton.setAccessibilityLabel("Add References")
     }
 
-    private var isPrepSearchOn: Bool {
+    private var referencesEnabled: Bool {
         !brainPreferences.disabledTools.contains(searchReferencesTool.name)
     }
 
     private var cardHeight: CGFloat {
         let list: CGFloat
-        if isPrepSearchOn {
-            let count = prepPreferences.sources.count
+        if referencesEnabled {
+            let count = referencePreferences.sources.count
             list = (count == 0 ? Self.messageRowHeight : CGFloat(count) * Self.sourceRowHeight)
                 + Self.addRowHeight
         } else {
-            list = Self.messageRowHeight
+            list = 0
         }
         return SettingsStyle.cardHeaderHeight + Self.switchRowHeight + list + (selectionNotice == nil ? 0 : Self.messageRowHeight)
     }
@@ -73,7 +73,7 @@ final class ToolsSection: NSObject, SettingsSection {
         let switchRow = SettingsRowView(
             title: "Use my References",
             detail: "",
-            controlView: prepSwitch,
+            controlView: referencesSwitch,
             controlSize: NSSize(width: 44, height: 26),
             preferredHeight: Self.switchRowHeight,
             // The card header already draws the line above the first row.
@@ -81,11 +81,8 @@ final class ToolsSection: NSObject, SettingsSection {
         card.contentView?.addSubview(switchRow)
         self.switchRow = switchRow
 
-        let callout = SettingsCalloutView(text: "I keep a private local copy of extracted reference text. Your original files stay unchanged. "
-            + "I send their filenames to my Brain provider, and send bounded text when I search or read a reference. "
-            + "Removing a file here doesn't delete it.")
         let stack = SettingsCardStack()
-        stack.install([(card, cardHeight), (callout, SettingsCalloutView.preferredHeight)])
+        stack.install([(card, cardHeight)])
         self.stack = stack
         render()
         return SettingsPageView(
@@ -116,9 +113,9 @@ final class ToolsSection: NSObject, SettingsSection {
         listViews.removeAll()
         rowsBySourceID.removeAll()
 
-        let isOn = isPrepSearchOn
-        let sources = prepPreferences.sources
-        prepSwitch.state = isOn ? .on : .off
+        let isOn = referencesEnabled
+        let sources = referencePreferences.sources
+        referencesSwitch.state = isOn ? .on : .off
         switchRow?.setDetail(isOn && sources.isEmpty
             ? "Add References below so I can read or search them."
             : "I can read or search these files when the conversation needs them.")
@@ -129,7 +126,7 @@ final class ToolsSection: NSObject, SettingsSection {
             }
             for source in sources {
                 let remove = ClosureButton(title: "×") { [weak self] in
-                    self?.prepPreferences.remove(id: source.id)
+                    self?.referencePreferences.remove(id: source.id)
                     self?.onChanged()
                     self?.render()
                 }
@@ -146,8 +143,6 @@ final class ToolsSection: NSObject, SettingsSection {
                 rowsBySourceID[source.id] = row
             }
             listViews.append(addButton)
-        } else {
-            listViews.append(messageLabel("Switched off. Your list is kept; applies at the next Start."))
         }
         if let selectionNotice { listViews.append(messageLabel(selectionNotice)) }
         listViews.forEach { content.addSubview($0) }
@@ -166,7 +161,7 @@ final class ToolsSection: NSObject, SettingsSection {
         }
     }
 
-    private func applyMissingState(_ missing: [PrepMaterialSource], generation: Int) {
+    private func applyMissingState(_ missing: [ReferenceSourceSelection], generation: Int) {
         guard generation == renderGeneration else { return }
         for source in missing {
             rowsBySourceID[source.id]?.setTitleColor(SettingsTheme.amber)
@@ -208,7 +203,7 @@ final class ToolsSection: NSObject, SettingsSection {
         }
     }
 
-    @objc private func prepSwitchChanged(_ sender: NSSwitch) {
+    @objc private func referencesSwitchChanged(_ sender: NSSwitch) {
         var disabled = brainPreferences.disabledTools
         if sender.state == .on {
             disabled.remove(searchReferencesTool.name)
@@ -232,7 +227,7 @@ final class ToolsSection: NSObject, SettingsSection {
         panel.message = "Choose References I can read while coaching. Files stay where they are."
         guard panel.runModal() == .OK else { return } // ghost-mode-allowed: explicit user action in Settings
 
-        var newSources: [PrepMaterialSource] = []
+        var newSources: [ReferenceSourceSelection] = []
         selectionNotice = nil
         for url in panel.urls {
             var isDirectory: ObjCBool = false
@@ -241,9 +236,9 @@ final class ToolsSection: NSObject, SettingsSection {
                 selectionNotice = "Unsupported file skipped. Choose TXT, Markdown, PDF or DOCX."
                 continue
             }
-            newSources.append(PrepMaterialSource(path: url.path, isDirectory: isDirectory.boolValue))
+            newSources.append(ReferenceSourceSelection(path: url.path, isDirectory: isDirectory.boolValue))
         }
-        prepPreferences.add(newSources)
+        referencePreferences.add(newSources)
         onChanged()
         render()
     }

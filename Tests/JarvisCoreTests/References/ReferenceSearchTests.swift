@@ -66,7 +66,7 @@ struct ReferenceSearchTests {
 
     @Test func passageRangesPreserveCRLFCodeTablesAndUnicode() {
         let source = "# First\r\n\r\n😀e\u{301} content\r\n\r\n```swift\r\n# code\r\n\r\nlet answer = 42\r\n```\r\n\r\n# Second\r\n| key | value |\r\n| --- | --- |\r\n| x | y |\r\n"
-        let passages = PrepMaterialChunker.passages(text: source, markdown: true, targetScalars: 80)
+        let passages = ReferenceChunker.passages(text: source, markdown: true, targetScalars: 80)
         #expect(passages.map { String(source[$0.range]) }.joined() == source)
         #expect(passages.contains { source[$0.range].contains("```swift\r\n# code\r\n\r\nlet answer = 42\r\n```") })
         #expect(passages.last?.section == "# Second")
@@ -79,22 +79,22 @@ struct ReferenceSearchTests {
 
     @Test(arguments: ["# Empty\n\n## Still empty\n", "# Empty " + String(repeating: "heading ", count: 3_000) + "\n"])
     func headingOnlyPassagesAreOmitted(_ headings: String) {
-        #expect(PrepMaterialChunker.passages(text: headings, markdown: true).isEmpty)
+        #expect(ReferenceChunker.passages(text: headings, markdown: true).isEmpty)
         let evidence = "# Delivery\r\n\r\nWe shipped.\r\n\r\n"
         let text = evidence + headings
-        let passages = PrepMaterialChunker.passages(text: text, markdown: true)
+        let passages = ReferenceChunker.passages(text: text, markdown: true)
         #expect(passages.map { String(text[$0.range]) }.joined() == evidence)
         #expect(passages.first?.offset == 0)
-        #expect(PrepMaterialChunker.passages(text: headings, markdown: false).map { String(headings[$0.range]) }.joined() == headings)
+        #expect(ReferenceChunker.passages(text: headings, markdown: false).map { String(headings[$0.range]) }.joined() == headings)
     }
 
     @Test func headingGroupsAndLongHeadingBodiesKeepOriginalRanges() {
         let grouped = "# Context\r\n\r\n## Details\r\n\r\nactual evidence\r\n"
-        let small = PrepMaterialChunker.passages(text: grouped, markdown: true, targetScalars: 8)
+        let small = ReferenceChunker.passages(text: grouped, markdown: true, targetScalars: 8)
         #expect(small.count == 1)
         #expect(small.map { String(grouped[$0.range]) }.joined() == grouped)
         let text = "# " + String(repeating: "heading ", count: 3_000) + "\nactual evidence\n"
-        let passages = PrepMaterialChunker.passages(text: text, markdown: true)
+        let passages = ReferenceChunker.passages(text: text, markdown: true)
         #expect(passages.count == 1)
         #expect(passages.allSatisfy { text[$0.range].unicodeScalars.count <= 16_000 })
         #expect(passages.last.map { text[$0.range].contains("actual evidence") } == true)
@@ -105,7 +105,7 @@ struct ReferenceSearchTests {
 
     @Test func plainTextWhitespaceKeepsOriginalRanges() {
         let text = String(repeating: " \t", count: 9_000) + "\r\n" + String(repeating: " \t\r\n", count: 4_001)
-        let passages = PrepMaterialChunker.passages(text: text, markdown: false)
+        let passages = ReferenceChunker.passages(text: text, markdown: false)
         #expect(passages.map { String(text[$0.range]) }.joined() == text)
         #expect(passages.allSatisfy { text[$0.range].unicodeScalars.count <= 16_000 })
         for passage in passages {
@@ -115,14 +115,14 @@ struct ReferenceSearchTests {
 
     @Test func hostileLongBlocksHaveBoundedPassages() {
         let text = "```\n" + String(repeating: "😀e\u{301}", count: 20_000) + "\n```"
-        let passages = PrepMaterialChunker.passages(text: text, markdown: true)
+        let passages = ReferenceChunker.passages(text: text, markdown: true)
         #expect(passages.allSatisfy { text[$0.range].unicodeScalars.count <= 16_000 })
         #expect(passages.map { String(text[$0.range]) }.joined() == text)
     }
 
     @Test func headingAfterLongParagraphDoesNotRelabelItsTail() {
         let text = "# Original\n" + String(repeating: "x", count: 40_000) + "\n# Next\nnext section"
-        let passages = PrepMaterialChunker.passages(text: text, markdown: true)
+        let passages = ReferenceChunker.passages(text: text, markdown: true)
         #expect(passages.map { String(text[$0.range]) }.joined() == text)
         #expect(passages.filter { text[$0.range].contains("xxxx") }.allSatisfy { $0.section == "# Original" })
         #expect(passages.last?.section == "# Next")
@@ -130,7 +130,7 @@ struct ReferenceSearchTests {
 
     @Test func longFenceSuffixAndHeadingClassificationRemainExact() {
         let text = "# Original\n```swift\n```" + String(repeating: " ", count: 32_000) + "not a closing fence\n# Still code\n```\n# Final\nlast\n"
-        let passages = PrepMaterialChunker.passages(text: text, markdown: true)
+        let passages = ReferenceChunker.passages(text: text, markdown: true)
         #expect(passages.map { String(text[$0.range]) }.joined() == text)
         #expect(passages.allSatisfy { text[$0.range].unicodeScalars.count <= 16_000 })
         #expect(passages.filter { text[$0.range].contains("# Still code") }.allSatisfy { $0.section == "# Original" })

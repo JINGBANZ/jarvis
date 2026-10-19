@@ -23,7 +23,7 @@ final class ReferenceSourceWatcher {
 
     init(onChange: @escaping () -> Void) { self.onChange = onChange }
 
-    func watch(_ sources: [PrepMaterialSource], excluding: [URL] = []) {
+    func watch(_ sources: [ReferenceSourceSelection], excluding: [URL] = []) {
         stop()
         guard !sources.isEmpty else { return }
         let paths = Set(sources.map {

@@ -313,7 +313,7 @@ func referenceHit(name: String, text: String) -> ReferenceSearchHit {
         #expect(page.nextOffset == 96000)
         #expect(page.totalScalars > page.nextOffset)
         #expect(brain.calls[0].contains { $0.text?.lowercased().contains(id.uuidString.lowercased()) == true })
-        let completion = JarvisPrompts.Coach.finalAnswerCycle(prepEnabled: true, allowsSilence: true)
+        let completion = JarvisPrompts.Coach.finalAnswerCycle(referencesEnabled: true, allowsSilence: true)
         #expect(completion.contains("explicitly state that your review is incomplete"))
         #expect(brain.calls[6].contains { $0.text == completion })
         #expect(await driver.handleTrigger(.manualExplanation) == .spoke)
