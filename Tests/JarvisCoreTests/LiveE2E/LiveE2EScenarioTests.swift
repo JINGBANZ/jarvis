@@ -23,6 +23,18 @@ struct LiveE2EScenarioTests {
         #expect(scenario.id == id)
     }
 
+    @Test("screen fixtures accept source text for runtime rendering")
+    func textScreenFixture() throws {
+        let fixtures = try makeFixtures()
+        defer { try? FileManager.default.removeItem(at: fixtures) }
+        try Data("Weighted route\nUnapplied proposal; no tests run.".utf8)
+            .write(to: fixtures.appendingPathComponent("route.txt"))
+        let decoded = try LiveE2EScenario.decode(
+            Data(Self.scenario(steps: #"[{ "screen": "route.txt" }, \#(Self.stop)]"#).utf8),
+            fixturesDirectory: fixtures)
+        #expect(decoded.steps.first == .screen(fixture: "route.txt"))
+    }
+
     @Test func languageScenarioUsesTheSelectedProvidersCredential() throws {
         let data = try Data(contentsOf: Self.liveTests.appendingPathComponent("Scenarios/L.json"))
         var json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
@@ -189,6 +201,22 @@ struct LiveE2EScenarioTests {
             #expect(!index.search(query: query).contains { $0.text.contains("Product search architecture") })
             #expect(index.search(query: query).first.map(isWholeManagerStory) == true,
                     "\"\(query)\" did not rank the whole manager story first; chunks: \(layout)")
+        }
+    }
+
+    @Test("behavioral search results retain the fixture's fictional status")
+    func behavioralSearchRetainsFictionalStatus() throws {
+        let notes = try String(
+            contentsOf: Self.liveTests.appendingPathComponent("Fixtures/prep-notes.md"), encoding: .utf8)
+        let index = PrepMaterialIndex(chunks: PrepMaterialChunker.chunk(
+            text: notes, sourceDisplayName: "prep-notes.md"))
+        for (query, section) in [
+            ("disagreed with a teammate conflict story", "Disagreement with a teammate"),
+            ("pushed back on manager decision story", "Pushing back on my manager"),
+        ] {
+            let story = try #require(index.search(query: query).first { $0.text.contains(section) })
+            #expect(story.text.localizedCaseInsensitiveContains("fictional practice"))
+            #expect(story.text.contains("not the candidate's personal history"))
         }
     }
 

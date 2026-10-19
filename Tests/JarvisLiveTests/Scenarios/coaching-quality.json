@@ -558,5 +558,53 @@
     ],
     "input": "Synthetic supplier-email pilot agreed: intake, extract, check identity/evidence/rules, draft routine response or hand off manually, mandatory human verification/approval before send, record/audit. them: Now sketch just the normal approved reply flow. me: Help me keep it clear.",
     "pass": "Connected focused flow with 3–6 short logical boxes, shared boxes once, explicit checks and required approval before sending. Keeps ordinary returned fields/records in brief supporting text rather than reciprocal arrows. Does not reproduce every exception branch or separate each connection into duplicated component rows; current operation labels and explicit highlight remain."
+  },
+  {
+    "id": "behavioral-sample-is-not-personal",
+    "skills": [
+      "behavioral"
+    ],
+    "input": "them: Tell me about a time you pushed back on your manager. Prep search returns sample notes with fictional people: I found data-loss bugs in offline sync, proposed a staged rollout, and my manager delayed the launch. The candidate has not confirmed this event or requested fictional practice.",
+    "pass": "Names the assessment focus and asks one focused recall question for a real event. Does not recommend using the sample as the candidate's own experience or attribute its manager, proposal, or result to them."
+  },
+  {
+    "id": "behavioral-help-does-not-request-fiction",
+    "skills": [
+      "behavioral"
+    ],
+    "input": "Prep notes explicitly label the offline-sync story an illustrative practice example. them: Tell me about a difficult decision you challenged. me: I am stuck. Help me answer. No personal event has been supplied.",
+    "pass": "Gives a focused question to recall relevant personal evidence. Being stuck does not authorize supplying the practice story as a personal answer or an unsolicited fictional script."
+  },
+  {
+    "id": "behavioral-explicit-fictional-practice",
+    "skills": [
+      "behavioral"
+    ],
+    "input": "Prep notes explicitly label this as a fictional sample, not personal history: My manager wanted a Friday offline-sync launch. I found three data-loss bugs, brought reproduction steps, and proposed a feature-flagged staged rollout. The manager took the proposal to marketing; launch moved one week and the team fixed the bugs before full rollout. me: I explicitly want a fictional practice answer to Tell me about a time you pushed back on your manager. Use this sample to show me the structure.",
+    "pass": "Provides a useful practice answer labeled Illustrative example on its first line. Keeps it separate from the candidate's actual history and does not refuse an explicit practice request."
+  },
+  {
+    "id": "behavioral-practice-followup-keeps-status",
+    "skills": [
+      "behavioral"
+    ],
+    "input": "Earlier the candidate explicitly requested fiction and Jarvis supplied an Illustrative example about delaying an offline-sync launch. No real personal event has been supplied. them: What did you learn from that? me: Help me with the follow-up.",
+    "pass": "Retains the illustrative-practice status while helping with the lesson. Does not turn the example or its outcome into something the candidate actually experienced."
+  },
+  {
+    "id": "behavioral-confirmed-personal-notes",
+    "skills": [
+      "behavioral"
+    ],
+    "input": "Prep notes say: Confirmed personal experience; people's names are anonymized. My manager wanted a Friday offline-sync launch. I challenged that decision after discovering three data-loss bugs and proposed a feature-flagged rollout. My manager took the plan to marketing. The launch moved one week; the team fixed the bugs. me: Those notes describe my own experience. them: Tell me about a time you pushed back on your manager.",
+    "pass": "Uses the supported personal facts without requiring another confirmation. Retains the candidate's proposal, the manager's marketing conversation, and the team's fixes as distinct ownership. Anonymized names do not make the event fictional."
+  },
+  {
+    "id": "behavioral-mixed-sources-choose-personal",
+    "skills": [
+      "behavioral"
+    ],
+    "input": "them: Tell me about a time you disagreed with your manager. Prep search returns two notes: (1) Fictional practice example: manager wanted to launch offline sync despite data-loss bugs; a staged rollout ended with zero incidents. (2) My confirmed experience: I challenged a retry-policy change using a duplicate-charge trace; my manager approved a small experiment. No experiment result is recorded.",
+    "pass": "Chooses the confirmed retry-policy event, retains its unknown outcome, and asks only for a missing fact if needed. Does not prefer the more complete fictional story or merge its zero-incident result into the real one."
   }
 ]

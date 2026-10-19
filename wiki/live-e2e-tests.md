@@ -173,8 +173,10 @@ Capabilities are fixed at Start, so each capability configuration is its own sce
 run on Codex by default or on the selected single provider. With `--provider scenario`, brain switches
 happen inside a scenario, applied the way a Settings edit applies them. Steps live in
 `Tests/JarvisLiveTests/Scenarios/`; fixtures in `Tests/JarvisLiveTests/Fixtures/` are the coding
-screenshot `coding-problem.jpg` and fictional `prep-notes.md`, including a short search-design
-section with cache invalidation. Each story is one section with no sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
+screenshot `coding-problem.jpg`, the runtime-rendered `weighted-route.txt`, and fictional
+`prep-notes.md`, including a short search-design section with cache invalidation. Each story carries
+its fictional-practice label in the same section, so retrieval exposes the source status used by the
+content review. Each story is one section with no sub-headings, so one search returns the whole story and the behavioral skill has no reason to search
 again. The manager story stays out of everything a teammate query returns, so the first behavioral
 search never already answers the second. Both behavioral questions precede the design search,
 which can also return a behavioral story on shared vocabulary, so C08 tests a new lookup rather
@@ -229,8 +231,9 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   fails if that first outcome rejects or fails, even if a later request could succeed. Its optional
   `historyCompactionTokenThreshold` affects only that debug scenario; production keeps `Config.default`.
   H prints coach and summarizer usage separately, plus the accepted before/after history estimates.
-- **An injected screen.** A `screen` step hands a JPEG fixture to `FixtureScreenCapture`, and every
-  later capture returns that image with its on-device OCR as current-viewport text evidence, the
+- **An injected screen.** A `screen` step hands a JPEG fixture or plain text source to
+  `FixtureScreenCapture`; text is rendered to JPEG in memory. Every later capture returns that
+  image with its on-device OCR as current-viewport text evidence, the
   snapshot the window path produces for a non-browser window. Only coding needs one: an interviewer states behavioral and design questions aloud,
   so Scenario A speaks its design question rather than showing it.
 
@@ -322,9 +325,11 @@ C29 and C30 evaluate the automatic reply for their spoken stage together with th
 press. Either can supply the stage's supporting detail; a detail from an earlier stage cannot satisfy
 the check. A subsequent hint can omit detail when the stage's reference is already available.
 
-Scenario D's AI proposal and test output are candidate reports carried through real transcription.
-Its JPEG remains the coding fixture, so its assertions do not establish Chrome panel detection or
-observed test execution. Advice quality, restrictions, and factual caveats are judged against the
+Scenario D switches from the Merge Intervals screen to a matching weighted-route proposal at
+stage 4, then restores Merge Intervals for stage 5. Its screen and spoken report preserve the
+proposal's unapplied, untested status. Earlier test output remains a candidate report carried
+through real transcription. These fixtures do not establish Chrome panel detection or observed
+test execution. Advice quality, restrictions, and factual caveats are judged against the
 [scenario rubric](../Tests/JarvisLiveTests/Scenarios/D-review.md). Results explicitly record semantic
 review as not evaluated; structural success alone does not establish that the advice is correct.
 
@@ -410,7 +415,7 @@ C31 checks Scenario A's selective technical retrieval: the existing design quest
 answering, its cache-invalidation follow-up reuses the excerpt, and the one-pass coding question
 answers without a prep search. The Gate checks that the technical section includes the follow-up
 and stays out of the teammate and manager searches. C32 covers the cold coding hint and small talk.
-A5/A9 replies are recorded for the manual content rubric in
+A3/A4 behavioral replies and A5/A9 design replies are assessed with the manual content rubric in
 [`A-prep-review.md`](../Tests/JarvisLiveTests/Scenarios/A-prep-review.md); a search-count pass alone
 must not be reported as proof of grounded answer content.
 

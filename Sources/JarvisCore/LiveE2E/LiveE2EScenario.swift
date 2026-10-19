@@ -208,8 +208,8 @@ extension LiveE2EScenario {
                 let fixture = raw.screen ?? ""
                 try requireFixture(fixture, in: fixturesDirectory, field: "\(label).screen")
                 // The coach receives it as a screen capture, which is always JPEG.
-                guard ["jpg", "jpeg"].contains(URL(fileURLWithPath: fixture).pathExtension.lowercased()) else {
-                    throw Failure.invalid("\(label).screen must be a JPEG image, got \"\(fixture)\"")
+                guard ["jpg", "jpeg", "txt"].contains(URL(fileURLWithPath: fixture).pathExtension.lowercased()) else {
+                    throw Failure.invalid("\(label).screen must be a JPEG image or plain .txt source, got \"\(fixture)\"")
                 }
                 step = .screen(fixture: fixture)
             case "press":

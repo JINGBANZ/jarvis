@@ -4,6 +4,11 @@ Run `./scripts/run-live-tests.sh H`. C35 verifies that the first real summary is
 token budget and reduces history size. C36 verifies that the recall request carries condensed
 history with the queue decision and delivers a reply. These checks do not establish factual quality.
 
+Read the final spoken step's actual transcript first: it must ask which message-broker technology
+was chosen for Project Cedar. If that meaning was lost, record recall as not observed and identify
+the transcription gap before assessing the coach. The English-only scenario declares English as
+recognition guidance; that setting alone does not prove accurate transcription.
+
 Read the first summarizer exchange and the final spoken step's request and reply in the owner-only
 session evidence. Confirm the summarized prefix contains the planted facts; later messages must not
 be the only source of the answer. Judge meaning rather than exact wording:
