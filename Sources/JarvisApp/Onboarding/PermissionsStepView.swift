@@ -10,13 +10,22 @@ final class PermissionsStepView: NSView {
     private let preferences: PermissionPreferences
     private var rows: [JarvisReadiness.Permission: PermissionRowView] = [:]
     private var shell: OnboardingStepView?
+    private var isStopped = false
     private var isRequesting = false
+    private var permissionTask: Task<Void, Never>?
     private var activationObserver: (any NSObjectProtocol)?
     private var asking: JarvisReadiness.Permission?
     private var sentToSettings: Set<JarvisReadiness.Permission> = []
     private var hasWalked = false
     /// Read at init, before this launch asks: only an earlier, still-missing ask proves refusal.
     private let screenAskedInEarlierLaunch: Bool
+    #if JARVIS_LIVE_E2E
+    var testIsGranted: ((JarvisReadiness.Permission) -> Bool)?
+    var testRequestPermission: ((JarvisReadiness.Permission) async -> Bool)?
+    var testOnOpenSettings: (([JarvisReadiness.Permission]) -> Void)?
+    func testStartWalk() -> Task<Void, Never>? { requestAll(); return permissionTask }
+    func testStartRecheck() -> Task<Void, Never>? { recheck([.systemAudio]); return permissionTask }
+    #endif
 
     init(
         preferences: PermissionPreferences, followsKeyStep: Bool,
@@ -44,7 +53,7 @@ final class PermissionsStepView: NSView {
             forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                guard let self, !self.isRequesting else { return }
+                guard let self, !self.isStopped, !self.isRequesting else { return }
                 self.render()
             }
         }
@@ -56,16 +65,21 @@ final class PermissionsStepView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func stopObservingActivation() {
-        guard let activationObserver else { return }
-        NotificationCenter.default.removeObserver(activationObserver)
-        self.activationObserver = nil
+    func stop() {
+        isStopped = true
+        onFinished = nil
+        permissionTask?.cancel()
+        permissionTask = nil
+        if let activationObserver {
+            NotificationCenter.default.removeObserver(activationObserver)
+            self.activationObserver = nil
+        }
     }
 
     // MARK: - The walk
 
     private func primaryAction() {
-        guard !isRequesting else { return }
+        guard !isStopped, !isRequesting else { return }
         switch terminalState {
         case .none:
             requestAll()
@@ -80,15 +94,19 @@ final class PermissionsStepView: NSView {
 
     /// One dialog at a time: macOS queues TCC dialogs, and several at once stack confusingly.
     private func requestAll() {
+        guard !isStopped, !isRequesting else { return }
         isRequesting = true
         render()
-        Task { @MainActor in
-            for permission in JarvisReadiness.Permission.allCases
-            where !Permissions.isGranted(permission) {
+        permissionTask = Task { @MainActor in
+            for permission in JarvisReadiness.Permission.allCases {
+                guard !isStopped, !Task.isCancelled else { return }
+                guard !isGranted(permission) else { continue }
                 asking = permission
                 render()
-                _ = await Permissions.request(permission, remembering: preferences)
+                _ = await requestPermission(permission)
+                guard !isStopped, !Task.isCancelled else { return }
             }
+            permissionTask = nil
             asking = nil
             isRequesting = false
             hasWalked = true
@@ -98,14 +116,18 @@ final class PermissionsStepView: NSView {
 
     /// System audio can't be read, so re-prove it before sending the user back to its toggle.
     private func recheck(_ refused: [JarvisReadiness.Permission]) {
+        guard !isStopped, !isRequesting else { return }
         guard refused.contains(.systemAudio) else {
             openSystemSettings(for: refused)
             return
         }
         isRequesting = true
         render()
-        Task { @MainActor in
-            _ = await Permissions.request(.systemAudio, remembering: preferences)
+        permissionTask = Task { @MainActor in
+            guard !isStopped, !Task.isCancelled else { return }
+            _ = await requestPermission(.systemAudio)
+            guard !isStopped, !Task.isCancelled else { return }
+            permissionTask = nil
             isRequesting = false
             render()
             if case .refused(let stillRefused) = terminalState {
@@ -115,6 +137,10 @@ final class PermissionsStepView: NSView {
     }
 
     private func openSystemSettings(for permissions: [JarvisReadiness.Permission]) {
+        guard !isStopped else { return }
+        #if JARVIS_LIVE_E2E
+        if let testOnOpenSettings { testOnOpenSettings(permissions); return }
+        #endif
         // Screen and system audio share one pane on macOS 15+, and a click opens only one pane.
         let opensMicrophonePane = permissions.first == .microphone
         let anchor = opensMicrophonePane ? "Privacy_Microphone" : "Privacy_ScreenCapture"
@@ -168,10 +194,24 @@ final class PermissionsStepView: NSView {
         case satisfied
     }
 
+    private func isGranted(_ permission: JarvisReadiness.Permission) -> Bool {
+        #if JARVIS_LIVE_E2E
+        if let testIsGranted { return testIsGranted(permission) }
+        #endif
+        return Permissions.isGranted(permission)
+    }
+
+    private func requestPermission(_ permission: JarvisReadiness.Permission) async -> Bool {
+        #if JARVIS_LIVE_E2E
+        if let testRequestPermission { return await testRequestPermission(permission) }
+        #endif
+        return await Permissions.request(permission, remembering: preferences)
+    }
+
     private var terminalState: TerminalState {
         guard !isRequesting else { return .none }
         let missing = JarvisReadiness.Permission.allCases.filter {
-            !Permissions.isGranted($0)
+            !isGranted($0)
         }
         guard !missing.isEmpty else { return .satisfied }
 
@@ -204,8 +244,9 @@ final class PermissionsStepView: NSView {
     }
 
     private func render() {
+        guard !isStopped else { return }
         for permission in JarvisReadiness.Permission.allCases {
-            let granted = Permissions.isGranted(permission)
+            let granted = isGranted(permission)
             let isAsking = asking == permission
             let tone: PermissionRowView.Tone = granted ? .granted
                 : isBeyondAsking(permission) ? .refused

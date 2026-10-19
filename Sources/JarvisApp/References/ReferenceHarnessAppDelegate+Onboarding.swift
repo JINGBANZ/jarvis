@@ -59,6 +59,60 @@ extension ReferenceHarnessAppDelegate {
                 try require(completions == 1, "stopped completed onboarding cannot restart the app")
             }
         }
+        try await permissionWalkStopChecks(home: home)
+    }
+
+    private func permissionWalkStopChecks(home: URL) async throws {
+        var violations: [String] = []
+        for mode in ["queued", "walk", "recheck"] {
+            let domain = "jarvis.permission-walk-stop.\(UUID())"
+            let defaults = UserDefaults(suiteName: domain)!
+            defer { defaults.removePersistentDomain(forName: domain) }
+            let permissions = PermissionPreferences(defaults: defaults)
+            permissions.screenRecordingAsked = true
+            let secrets = FileSecretStore(directoryURL: home.appendingPathComponent("walk-empty-secrets"))
+            let gate = OnboardingGate(preferences: OnboardingPreferences(defaults: defaults),
+                permissionPreferences: permissions, secrets: secrets, keyStore: secrets,
+                brainPreferences: BrainPreferences(defaults: defaults),
+                transcriptionPreferences: TranscriptionPreferences(defaults: defaults))
+            let view = PermissionsStepView(preferences: permissions, followsKeyStep: false,
+                                           step: 1, of: 1, onQuit: {})
+            gate.testInstallPermissionsStep(view)
+            view.testIsGranted = { mode == "recheck" && $0 == .systemAudio }
+            var requests = 0
+            var settingsOpens = 0
+            var suspend = mode == "walk"
+            var pending: CheckedContinuation<Bool, Never>?
+            view.testRequestPermission = { _ in
+                requests += 1
+                if suspend {
+                    suspend = false
+                    return await withCheckedContinuation { pending = $0 }
+                }
+                return false
+            }
+            view.testOnOpenSettings = { _ in settingsOpens += 1 }
+            guard let walk = view.testStartWalk() else { throw ReferenceProtocolError.malformed }
+            let operation: Task<Void, Never>
+            if mode == "recheck" {
+                await walk.value
+                try require(requests == 2, "live synthetic walk requests both missing readable grants")
+                suspend = true
+                guard let recheck = view.testStartRecheck() else { throw ReferenceProtocolError.malformed }
+                operation = recheck
+            } else {
+                operation = walk
+            }
+            if mode != "queued" {
+                while pending == nil { await Task.yield() }
+            }
+            let beforeStop = requests
+            gate.stop()
+            pending?.resume(returning: false)
+            await operation.value
+            if requests != beforeStop || settingsOpens != 0 { violations.append(mode) }
+        }
+        try require(violations.isEmpty, "Quit stops additional permission requests and Settings opens: \(violations)")
     }
 }
 #endif

@@ -27,6 +27,7 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
     #if JARVIS_LIVE_E2E
     var testGrantProbe: (@MainActor () async -> Bool)?
     var testOnPresentation: (@MainActor () -> Void)?
+    func testInstallPermissionsStep(_ step: PermissionsStepView) { permissionsStep = step }
     #endif
 
     init(
@@ -71,7 +72,7 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
         keyStep?.onFinished = nil
         keyStep?.stop()
         permissionsStep?.onFinished = nil
-        permissionsStep?.stopObservingActivation()
+        permissionsStep?.stop()
         window?.delegate = nil
         window?.close()
         window = nil
@@ -190,7 +191,7 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
         guard !isStopped else { return }
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: restoring the menu-bar-only app
         keyStep?.stop()
-        permissionsStep?.stopObservingActivation()
+        permissionsStep?.stop()
         guard isComplete else {
             // Closing before the end is declining: Jarvis can't coach without a key and the grants.
             NSApp.terminate(nil)
