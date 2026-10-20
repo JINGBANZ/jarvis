@@ -37,7 +37,7 @@ import Testing
         return await runner.runAttempt(.init(reason: reason), using: .init(
             plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
             target: target, brain: brain, summarizer: nil, onSelected: nil,
-            prepMaterial: nil)).result
+            documents: nil)).result
     }
 
     private func reply(_ calls: RawToolCall..., text: String? = nil) -> BrainResponse {
@@ -156,7 +156,7 @@ import Testing
         let overlay = FakeOverlay()
         let (driver, _) = makeDriver(brain: brain, overlay: overlay,
                                      capabilities: CoachCapabilities.compose(
-                                        disabledTools: [], prepSourcesConfigured: false))
+                                        disabledTools: [], referencesAdmitted: false))
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(brain.calls.count == 2)

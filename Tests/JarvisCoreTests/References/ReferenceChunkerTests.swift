@@ -1,15 +1,15 @@
 import Testing
 @testable import JarvisCore
 
-@Suite struct PrepMaterialChunkerTests {
+@Suite struct ReferenceChunkerTests {
     @Test func emptyTextProducesNoChunks() {
-        #expect(PrepMaterialChunker.chunk(text: "", sourceDisplayName: "notes.md").isEmpty)
-        #expect(PrepMaterialChunker.chunk(text: "   \n\n  ", sourceDisplayName: "notes.md").isEmpty)
+        #expect(ReferenceChunker.chunk(text: "", sourceDisplayName: "notes.md").isEmpty)
+        #expect(ReferenceChunker.chunk(text: "   \n\n  ", sourceDisplayName: "notes.md").isEmpty)
     }
 
     @Test func shortParagraphsMergeIntoOneChunk() {
         let text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph."
-        let chunks = PrepMaterialChunker.chunk(
+        let chunks = ReferenceChunker.chunk(
             text: text, sourceDisplayName: "notes.md", targetWordCount: 400)
         #expect(chunks.count == 1)
         #expect(chunks[0].text == text)
@@ -20,7 +20,7 @@ import Testing
         let first = Array(repeating: "word", count: 10).joined(separator: " ")
         let second = Array(repeating: "word", count: 10).joined(separator: " ")
         let text = "\(first)\n\n\(second)"
-        let chunks = PrepMaterialChunker.chunk(
+        let chunks = ReferenceChunker.chunk(
             text: text, sourceDisplayName: "notes.md", targetWordCount: 15)
         #expect(chunks.count == 2)
         #expect(chunks[0].text == first)
@@ -29,7 +29,7 @@ import Testing
 
     @Test func oversizedSingleParagraphBecomesItsOwnChunk() {
         let long = Array(repeating: "word", count: 1000).joined(separator: " ")
-        let chunks = PrepMaterialChunker.chunk(
+        let chunks = ReferenceChunker.chunk(
             text: long, sourceDisplayName: "notes.md", targetWordCount: 400)
         #expect(chunks.count == 1)
         #expect(chunks[0].text == long)
@@ -50,10 +50,9 @@ import Testing
 
         A different experience.
         """
-        let chunks = PrepMaterialChunker.chunk(
+        let chunks = ReferenceChunker.chunk(
             text: text, sourceDisplayName: "notes.md", targetWordCount: 30)
-        let index = PrepMaterialIndex(chunks: chunks)
-        let result = try #require(index.search(query: "dependency mistake").first)
+        let result = try #require(chunks.first { $0.text.contains("### Dependency mistake") })
         #expect(result.text.contains("I shipped a smaller milestone"))
         #expect(result.text.contains("No missed commitment is established."))
         #expect(!result.text.contains("First story"))
@@ -63,7 +62,7 @@ import Testing
     @Test func longTableSplitsBetweenRowsWithoutLosingQuestions() {
         let rows = (1...20).map { "| \($0) | Question number \($0) | Partial |" }
         let table = (["| ID | Question | Status |", "|---|---|---|"] + rows).joined(separator: "\n")
-        let chunks = PrepMaterialChunker.chunk(
+        let chunks = ReferenceChunker.chunk(
             text: "## Question map\n\n\(table)", sourceDisplayName: "notes.md", targetWordCount: 40)
         #expect(chunks.count > 1)
         #expect(chunks.allSatisfy { $0.text.split(whereSeparator: \.isWhitespace).count <= 40 })

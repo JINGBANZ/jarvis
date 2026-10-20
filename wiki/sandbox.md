@@ -28,15 +28,47 @@ and session files; provider choice and egress are explicit in Jarvis's code. Bec
 off, **“screen, not disk” is not a current OS guarantee**: another bug in this process could reach
 files available to the signed-in user.
 
-The native References helper is exercised through the explicit development harness described in
-[build-and-run.md](./build-and-run.md#references-helper-packaging-and-integration-checks). Its synthetic
-reference store contains metadata, extracted text, derived passage/search postings, and durable
-session pins in owner-only SQLite and
-private staging under that harness's workspace directory. It stores no captured audio, transcript,
-screenshot, or browser evidence and has no provider client. Normal coaching does not use this
-persistent reference store. Source containment, bounded parsing, and environment filtering are
-application controls; reader subprocesses retain the signed-in user's OS authority. Cleanup does
-not promise secure erasure of SQLite free pages or filesystem blocks.
+The native References helper serves production coaching through private stdio and has no provider
+client or network listener. Source containment, bounded parsing, and environment filtering are
+application controls; reader subprocesses retain the signed-in user's OS authority. The persistent
+document cache and provider-data boundary are defined under [References data](#references-data).
+Packaging and its signed integration harness are in
+[build-and-run.md](./build-and-run.md#references-helper-packaging-and-integration-checks).
+
+## References data
+
+Selected source files remain authoritative, stay where the user selected them, and are never edited
+by Jarvis. Discovery requires each source to retain its selected file or folder kind, including
+after symlink resolution, so a file selection cannot become a recursive folder grant. The helper's
+persistent owner-only SQLite cache holds source metadata, immutable extracted text, derived
+passages/search postings, and active session membership/pins. Development uses the containing
+checkout's `.jarvis/references/`; releases use the `references/` directory beside Jarvis's secrets
+storage. `ReferenceRuntime` owns this location. Cache files are `0600` in `0700` directories and
+remain outside session-history retention. The cache contains no captured audio, transcript,
+screenshot, or browser evidence.
+
+Jarvis keeps no permanent copy of the original files. Bounded private staging snapshots let the
+helper hash and parse the same authorized bytes; it removes them after use and reclaims abandoned
+staging after exclusive-owner restart. Unpinned first use revalidates source access and content,
+even when extracted text is cached. A previously pinned revision remains usable until its session
+ends, including after file deletion or Settings removal. Turning References off stops preparation
+needed only by future sessions and prevents future admission; it does not erase already supplied
+conversation evidence or revoke an active session's access. Cleanup preserves active pins and does
+not promise secure erasure of SQLite free pages, WAL contents, or filesystem blocks.
+
+Discovery, extraction, and lexical indexing run locally without an embedding or indexing service.
+The selected brain provider receives the bounded filename/format/opaque-ID catalog and the bounded
+list/read/search results; source paths and unused full documents stay local.
+These request contents follow the existing protected brain-traffic audit, evaluator, and provider
+retention rules below. Names and document text are untrusted data, never authority to change
+coaching instructions.
+Raw parser exceptions, full private paths, and source contents stay out of Activity and debug logs;
+the protected provider-wire record intentionally retains the bounded evidence sent to the model.
+
+The helper and parser children receive a minimal environment without provider credentials, proxy
+settings, or loader overrides. This and process separation do not confine a compromised reader at
+the OS level. The [References session contract](./architecture.md#references) defines frozen
+membership, first-use pins, and Stop/Quit ownership.
 
 ## Repository automation
 
@@ -57,8 +89,8 @@ credential, so the Git history is kept rather than rewritten.
 
 > **Current build:** App Sandbox is **off**; the app is signed with a stable self-signed identity
 > (`Jarvis Dev`) and relies on TCC prompts. The description below is a future target, not a claim
-> about the downloadable or locally built app. It requires explicit design work for the bundled subscription helper,
-> session storage, and the `screencapture` helper before it can be enabled.
+> about the downloadable or locally built app. It requires explicit design work for the bundled helpers,
+> selected reference files, session storage, and the `screencapture` helper before it can be enabled.
 
 The app ships with the macOS App Sandbox enabled and requests **only** the entitlements it needs:
 
@@ -136,6 +168,9 @@ Narrow and explicit. Data leaves the machine only via:
   explicitly enables **Read Chrome page text** and grants Accessibility, it also contains bounded
   semantic text from the exact foreground Chrome tab. No screen content leaves the
   machine on idle turns.
+- **Admitted reference metadata and requested reference text → the selected brain provider/model**
+  through the ordinary coaching request, with the local cache and bounded egress described under
+  [References data](#references-data).
 - **With Codex or Claude Code selected for coaching**
   ([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)),
   the same brain payload goes to the CLIProxyAPI helper bundled in the app, listening on 127.0.0.1

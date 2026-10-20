@@ -104,7 +104,7 @@ import Testing
             #expect(!skill.body.contains("description:"))
             #expect(skill.body.count > 200)
             // A skill names the task, never a deferred tool, which would invite a call before its load.
-            #expect(!skill.body.contains(searchPrepNotesTool.name))
+            #expect(!skill.body.contains(searchReferencesTool.name))
         }
         let behavioral = try #require(skills.first { $0.name == "behavioral" })
         #expect(behavioral.body.contains("STAR"))
@@ -118,7 +118,7 @@ import Testing
         let skills = SkillCatalog.bundled()
         let ai = try #require(skills.first { $0.name == "coding-with-ai" })
         let enabled = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false, skills: skills)
+            disabledTools: [], referencesAdmitted: false, skills: skills)
         #expect(enabled.skill(named: ai.name) == ai)
         #expect(enabled.tool(named: "load_skill")?.parametersJSON.contains(ai.name) == true)
         let prompt = JarvisPrompts.Coach.system(capabilities: enabled)
@@ -127,7 +127,7 @@ import Testing
 
         let disabled = CoachCapabilities.compose(
             disabledTools: [], disabledSkills: [ai.name],
-            prepSourcesConfigured: false, skills: skills)
+            referencesAdmitted: false, skills: skills)
         #expect(disabled.skill(named: ai.name) == nil)
         #expect(disabled.skill(named: "coding") != nil)
         #expect(disabled.tool(named: "load_skill")?.parametersJSON.contains(ai.name) == false)
@@ -138,7 +138,7 @@ import Testing
         let skills = SkillCatalog.bundled()
         let customer = try #require(skills.first { $0.name == "customer-scenario-design" })
         let enabled = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false, skills: skills)
+            disabledTools: [], referencesAdmitted: false, skills: skills)
         #expect(enabled.skill(named: customer.name) == customer)
         #expect(enabled.tool(named: "load_skill")?.parametersJSON.contains(customer.name) == true)
         let prompt = JarvisPrompts.Coach.system(capabilities: enabled)
@@ -154,7 +154,7 @@ import Testing
 
         let disabled = CoachCapabilities.compose(
             disabledTools: [], disabledSkills: [customer.name],
-            prepSourcesConfigured: false, skills: skills)
+            referencesAdmitted: false, skills: skills)
         #expect(disabled.skill(named: customer.name) == nil)
         #expect(disabled.skill(named: "system-design") != nil)
         #expect(disabled.tool(named: "load_skill")?.parametersJSON.contains(customer.name) == false)
@@ -163,7 +163,7 @@ import Testing
 
     @Test func noSkillsMeansNoLoaderAndNoCatalog() {
         let capabilities = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: false, skills: [])
+            disabledTools: [], referencesAdmitted: false, skills: [])
         let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
 
         #expect(capabilities.skills.isEmpty)

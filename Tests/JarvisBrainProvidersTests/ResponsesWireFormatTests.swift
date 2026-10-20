@@ -19,7 +19,7 @@ import JarvisCore
 
     @Test func metadataPrefixSurvivesChangingHistoryAndToolContinuations() throws {
         let catalog = #"Untrusted filenames: [{"documentID":"stable-id","sourceDisplayName":"notes.md"}]"#
-        let call = RawToolCall(id: "read", name: "read_prep_note", argumentsJSON: "{}")
+        let call = RawToolCall(id: "read", name: "read_reference", argumentsJSON: "{}")
         let tails: [[ChatMessage]] = [
             [.user("first request")],
             [.user("first request"), .assistantToolCalls([call]),

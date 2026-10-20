@@ -11,7 +11,7 @@ import Testing
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: FakeScreen(), overlay: overlay, clock: ManualClock(now: 100),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false))
+                disabledTools: [], referencesAdmitted: false))
     }
 
     private func response(_ argumentsJSON: String) throws -> BrainResponse {

@@ -13,8 +13,10 @@ final class ReferenceLibrary {
 
     let appInstanceID: UUID
     private let supervisor: ReferenceHelperSupervisor
+    private var stopped = false
     private var generation = 0
     private var enabled = false
+    private var disabledTools: Set<String> = []
     private var sources: [ReferenceSource] = []
     private var metadata: ReferenceAdmission.Metadata?
     private var owned: [UUID: Ownership] = [:]
@@ -32,15 +34,38 @@ final class ReferenceLibrary {
         self.supervisor = supervisor; self.appInstanceID = appInstanceID
     }
 
-    func configure(enabled: Bool, sources: [ReferenceSource]) async throws {
+    func shutdown() {
+        stopped = true
+        connection?.cancel()
+    }
+
+    func prepare(enabled: Bool, sources: [ReferenceSource], disabledTools: Set<String> = []) {
+        guard !stopped else { return }
+        self.disabledTools = disabledTools
+        let configured = updateConfiguration(enabled: enabled, sources: sources)
+        Task { try? await sendConfiguration(configured, enabled: enabled, sources: sources) }
+    }
+
+    func configure(enabled: Bool, sources: [ReferenceSource], disabledTools: Set<String> = []) async throws {
+        try Task.checkCancellation()
+        guard !stopped else { throw CancellationError() }
+        self.disabledTools = disabledTools
+        let configured = updateConfiguration(enabled: enabled, sources: sources)
+        try await sendConfiguration(configured, enabled: enabled, sources: sources)
+    }
+
+    private func updateConfiguration(enabled: Bool, sources: [ReferenceSource]) -> Int {
         generation += 1
-        let configured = generation
         self.enabled = enabled; self.sources = sources
-        metadata = .preparing(generation: configured)
+        metadata = .preparing(generation: generation)
+        return generation
+    }
+
+    private func sendConfiguration(_ configured: Int, enabled: Bool, sources: [ReferenceSource]) async throws {
         do {
             try await connect()
             try Task.checkCancellation()
-            if configuredGeneration == configured { return }
+            if generation != configured || configuredGeneration == configured { return }
             let data = try await supervisor.request("configure", payload: configuration(generation: configured, enabled: enabled, sources: sources))
             let reply = try JSONDecoder().decode(Metadata.self, from: data)
             if generation == configured { configuredGeneration = configured; update(reply) }
@@ -57,6 +82,9 @@ final class ReferenceLibrary {
         guard !owned.values.contains(where: { ownership in
             switch ownership { case .pending(let id), .active(let id): id == startID }
         }) else { throw ReferenceAccessFailure(reason: .duplicateStart) }
+        try Task.checkCancellation()
+        guard enabled else { return .omitted(startID: startID, reason: .disabled) }
+        guard !sources.isEmpty else { return .omitted(startID: startID, reason: .empty) }
         restartAvailable = true
         connectionFailed = false
         let started = ContinuousClock.now
@@ -105,7 +133,8 @@ final class ReferenceLibrary {
                         guard let catalog = reply.catalog else { throw ReferenceProtocolError.malformed }
                         let context = try SessionContext(documentCatalog: catalog)
                         let result = ReferenceAdmissionResult.Admitted(startID: startID, sessionID: sessionID,
-                            session: HelperDocumentSession(sessionID: sessionID, library: self), context: context)
+                            session: HelperDocumentSession(sessionID: sessionID, library: self), context: context,
+                            accessPolicy: .init(disabledTools: disabledTools))
                         admitted[startID] = result
                         return .admitted(result)
                     case "preparing", "superseded": metadata = nil
@@ -159,6 +188,8 @@ final class ReferenceLibrary {
             payload["app_instance_id"] = appInstanceID.uuidString
             let timeout: Duration = operation == "search" ? .seconds(3) : .seconds(2)
             let data = try await supervisor.request(operation, session: sessionID, payload: encode(payload), timeout: timeout)
+            try Task.checkCancellation()
+            guard owned[sessionID] != nil else { throw ReferenceAccessFailure(reason: .released) }
             struct Status: Decodable { let status: String? }
             if let status = try JSONDecoder().decode(Status.self, from: data).status, status != "ok", status != "partial" {
                 guard let reason = ReferenceAccessFailure.Reason(rawValue: status) else { throw ReferenceProtocolError.malformed }
@@ -193,12 +224,13 @@ final class ReferenceLibrary {
     }
 
     private func beginConnection() {
-        guard connection == nil, connectedID != supervisor.connectionID || !supervisor.isRunning else { return }
+        guard !stopped, connection == nil, connectedID != supervisor.connectionID || !supervisor.isRunning else { return }
         guard restartAvailable else { connectionFailed = true; return }
         if hasConnected { restartAvailable = false }
         connection = Task {
             defer { connection = nil }
             do {
+                try Task.checkCancellation()
                 try await supervisor.start()
                 let reconciledEnds = Set(ended.keys)
                 _ = try await supervisor.request("reconcile", payload: encode([
@@ -223,6 +255,8 @@ final class ReferenceLibrary {
     }
 
     private func connect() async throws {
+        try Task.checkCancellation()
+        guard !stopped else { throw CancellationError() }
         beginConnection()
         if let connection { try await connection.value }
         guard connectedID == supervisor.connectionID, supervisor.isRunning else { throw ReferenceAccessFailure(reason: .unavailable) }
@@ -241,7 +275,7 @@ final class ReferenceLibrary {
 
     private func configuration(generation: Int, enabled: Bool, sources: [ReferenceSource]) throws -> Data {
         try encode(["app_instance_id": appInstanceID.uuidString, "generation": generation, "enabled": enabled,
-                    "sources": sources.map { ["source_id": $0.id.uuidString, "path": $0.url.path] }])
+                    "sources": sources.map { ["source_id": $0.id.uuidString, "path": $0.url.path, "is_directory": $0.isDirectory] }])
     }
     private func encode(_ value: [String: Any]) throws -> Data { try JSONSerialization.data(withJSONObject: value) }
     private func remaining(_ deadline: ContinuousClock.Instant) -> Duration { max(.zero, ContinuousClock.now.duration(to: deadline)) }

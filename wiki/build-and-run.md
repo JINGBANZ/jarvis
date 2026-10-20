@@ -38,7 +38,9 @@ in [`coloredDashedArrowsRenderTheirStyle`](../Tests/JarvisOverlayTests/DiagramHi
   the session evaluator uses), composed by the app at Start. `JarvisEvaluation` is the
   Foundation-only sealed-session evaluation library shared by the app and `EvalPrep`.
   `JarvisApp` is the thin executable that wires the libraries to the side-effectful macOS
-  frameworks (mic, ScreenCaptureKit, the realtime websocket, the menu bar). That split is what
+  frameworks (mic, ScreenCaptureKit, the realtime websocket, the menu bar). `JarvisReferenceHelper`
+  is the native document parsing and SQLite process boundary, composed through Core's
+  `DocumentSession` port. That split is what
   lets most of the system be verified headless. `JarvisLiveTests` is the test target of the
   [live e2e tests](./live-e2e-tests.md): it drives the signed app, and it is the only test target
   that reaches real providers.
@@ -96,15 +98,27 @@ resources, and its license is in `THIRD_PARTY_NOTICES.md`. No interpreter, model
 package installation, or runtime download is needed on the user's machine. The dedicated target is
 the process boundary; shared domain values and admission policy remain Foundation-only in Core.
 
-The explicit development harness, `./scripts/run-reference-tests.sh`, exercises this integration;
-normal coaching uses the existing prep-material implementation. It launches the signed app through
-Launch Services on the shared temporary test display and calls the same `ReferenceLibrary` and
-helper-backed `DocumentSession` adapter intended for production composition. Synthetic TXT, Markdown,
-PDF, and DOCX fixtures cover document access and admission; debug-only process faults cover transport
-and teardown. Results are owner-only files in the checkout's `.jarvis/reference-harness/` directory.
-It contacts no provider and needs no capture grants. The ordinary `./scripts/run-tests.sh` also runs
-Core contracts and native helper process/resource checks; host Python drives those checks and is
-absent from the installed app.
+Production coaching uses `ReferenceRuntime` to connect Settings and filesystem changes to
+`ReferenceLibrary`, the helper-backed `DocumentSession`, and the app's Start/Stop/Quit ownership.
+The immutable context and admission behavior are defined in
+[architecture.md → References](./architecture.md#references); Settings source controls are in
+[settings-window.md → Tools](./settings-window.md#tools).
+
+The explicit development harness, `./scripts/run-reference-tests.sh`, launches the signed app
+through Launch Services on the shared temporary test display and exercises the production library,
+adapter, and reference tool handlers. Synthetic TXT, Markdown, PDF, and DOCX fixtures cover document
+access and admission; debug-only process faults cover transport and teardown. Results are owner-only
+files in the checkout's `.jarvis/reference-harness/` directory. It contacts no provider and needs no
+capture grants. The ordinary `./scripts/run-tests.sh` also runs Core contracts and native helper
+process/resource checks; host Python drives those checks and is absent from the installed app.
+Without an argument, the signed harness runs its complete suite, including REF01–REF07. A selector
+runs one References integration case plus app/helper Quit validation; `--quit-only` focuses on Quit.
+The case predicates live in
+[`ReferenceHarnessAppDelegate+PhaseFour.swift`](../Sources/JarvisApp/References/ReferenceHarnessAppDelegate+PhaseFour.swift).
+These deterministic checks cover admission, frozen access across Settings changes, watcher events,
+source deletion, independent read/search readiness, compaction, and cancellation.
+The separate spoken [H, P, and CACHE scenarios](./live-e2e-tests.md#scenarios) exercise real provider
+requests rather than substituting deterministic helper evidence for model behavior.
 
 The helper accepts the extensions declared in `ReferenceSourceCapture.supportedFormats`. Unsupported
 files inside a directory, escaping or broken links, and non-regular entries are excluded from its
@@ -112,17 +126,15 @@ catalog. A directly selected unsupported file fails that metadata generation wit
 `unsupported_format`; a missing or inaccessible selected root or enumeration failure also fails the
 generation. Discovery limits in `ReferenceDiscovery` bound both the number of selected sources and
 the total entries visited across overlapping roots, including unsupported entries; exceeding them
-reports a resource failure instead of silently truncating membership. Production Settings feedback
-for unsupported selections is part of the pending integration.
+reports a resource failure instead of silently truncating membership. Settings exposes selected-source
+feedback on the [Tools page](./settings-window.md#tools).
 
-`ReferenceLibrary` owns configuration generations and each pending or accepted session. It uses one
-absolute metadata-admission deadline, follows the latest generation without extending that deadline,
-and returns one admitted catalog/access handle or a typed omission reason. Disabled and empty
-configurations are silent. A failed or timed-out admission omits References for that session.
-Cancellation propagates and releases pending ownership. The caller explicitly accepts ownership
-only after its larger Start succeeds; abandoned admissions and uncertain release acknowledgments are
-reconciled against the library's owned session set after helper reconnection. Active handles retain
-access when future configuration is disabled or roots are removed.
+`ReferenceLibrary` owns configuration generations and each pending or accepted session. The caller
+explicitly accepts ownership only after its larger Start succeeds; abandoned admissions and uncertain
+release acknowledgments are reconciled against the library's owned session set after helper
+reconnection. `ReferenceSourceWatcher` filters selected files and supported changes within selected
+directories, excludes the helper cache, and requests a full reconciliation after dropped events.
+Explicit Start also reconciles independently of watcher delivery.
 
 The supervisor coalesces startup and bounds hello, requests, cancellation, and shutdown. Search
 transport allows headroom after the helper's search budget so partial results can return. The library
@@ -145,8 +157,8 @@ also pins its revision. Search validates candidates before one transaction commi
 result pin; any conflicting pin or index generation rolls back that entire transaction before
 reranking. Discarded candidates never acquire pins. Later pages use the pinned text after an edit,
 deletion, or helper restart. Unpinned access revalidates the source
-and cannot fall back to stale cached contents. Unicode-scalar pages are defined by the new read
-contract, independently of the existing prep tool's Character offsets.
+and cannot fall back to stale cached contents. Read pages use Unicode-scalar offsets; the protocol
+and result types are in `Sources/JarvisCore/References/`.
 
 Reliable renames preserve the opaque document ID. An observed deletion and later re-addition creates
 a new ID. Without filesystem event history, a replacement at the same path between scans is treated
@@ -169,7 +181,7 @@ Completed conversion removes its staging snapshot and releases its reservation b
 other active conversions keep their reservations.
 
 Ranked retrieval uses complete, versioned passages from the authoritative text. The range-producing
-`PrepMaterialChunker.passages` preserves original Unicode-scalar offsets, CRLF, Markdown sections,
+`ReferenceChunker.passages` preserves original Unicode-scalar offsets, CRLF, Markdown sections,
 code fences and table rows, omits heading-only Markdown ranges, and bounds passage allocation.
 `ReferenceSearchTokenizer` emits
 canonical Unicode case-folded word terms, CJK scalar/bigram terms, and punctuation-bearing identifiers.
@@ -190,8 +202,11 @@ BM25 corpus statistics can change while pinned document text stays immutable.
 before ordering or limiting hits. Optional document filters use a bound JSON relation; an empty
 filter stays empty. Ranking and typed readiness coverage share one SQLite read snapshot. If the first
 query exhausts its budget, coverage retains the frozen filtered membership count and metadata
-generation, with deadline omissions instead of an empty scope. The same absolute search deadline
-bounds evidence-page scanning and hashing; expiry returns partial coverage without first-use pins.
+generation, with deadline omissions instead of an empty scope. Evidence-page scanning and hashing
+check the same absolute search deadline; expiry returns partial coverage without first-use pins.
+These checks do not impose a hard timeout on synchronous source filesystem metadata calls; a slow
+volume can outlast the helper's retrieval budget. Start metadata admission has its separate deadline
+described in [architecture.md](./architecture.md#references).
 Ordinary reads keep their separate read contract. Results
 carry display names, sections, original offsets and bounded original text; readiness omissions are
 separate from top-three truncation. Only candidate sources are checked before first-use pinning,
@@ -210,13 +225,12 @@ while preparing generations and authoritative pinned text remain retained; failu
 Limits and publication details live in
 `ReferenceSearchIndex` and `ReferenceDocumentStore+Index`.
 
-The Gate runs Core search contracts and real helper retrieval/publication/race tests, including a
-seeded 10,000-member cache with full-length revision keys and retained historical revisions. The signed
-app harness additionally prepares 10,000 actual small TXT files and measures complete
-`DocumentSession.search` calls through the Swift adapter and process transport. Those synthetic
-checks contact no provider. Production context, tools, Settings, Activity installation and provider
-cache validation remain separate integration work; the development harness does not prove that
-production behavior. Reconnection restores committed text and index generations. Never-converted
+Core and helper contracts cover retrieval, publication, and races, including a seeded 10,000-member
+cache with full-length revision keys and retained historical revisions. The signed app harness also
+prepares actual TXT files and measures complete `DocumentSession.search` calls through the Swift
+adapter and process transport. These synthetic checks contact no provider. Provider context and
+cache validation use the [live e2e scenarios](./live-e2e-tests.md). Reconnection restores committed
+text and index generations. Never-converted
 files count as incomplete search coverage until a read or configuration preparation converts them.
 Search reports that incomplete coverage without retrying conversion. Retained text without captured
 parser metadata remains readable and pinned, with unavailable search coverage rather than a guessed parser.
@@ -367,7 +381,8 @@ omits the item rather than offering an action that a self-signed build could nev
 | `./scripts/build-app.sh --run` | Same development build, then launch it. Per-session logs land in the workspace `.jarvis/` (see below). |
 | `./scripts/run-capture-privacy-tests.sh [hold-seconds]` | Check real signed-app windows in a continuous stream; see [capture validation](./overlay-invisibility.md#validation-layers). |
 | `./scripts/test-proxy-privacy.sh` | Build the bundled helper and check unrelated startup/sign-in HTTP requests with empty accounts. |
-| `./scripts/run-live-tests.sh [scenario] [--evaluate] [--keep-going]` | Build the debug app and run the live e2e scenarios against real providers ([live-e2e-tests.md](./live-e2e-tests.md)). |
+| `./scripts/run-reference-tests.sh [REF01\|REF02\|REF03\|REF04\|REF05\|REF06\|REF07\|--quit-only]` | Build the debug app and run signed deterministic References integration checks; no provider calls or capture grants. |
+| `./scripts/run-live-tests.sh [scenario] [--evaluate] [--keep-going]` | Build the debug app and run spoken scenarios against real providers; explicit REF selectors delegate to the deterministic References harness ([live-e2e-tests.md](./live-e2e-tests.md)). |
 
 - **Always launch with `open "./Jarvis Dev.app"`**, never the bare binary — running it from a shell makes
   TCC attribute the grant to the *terminal*, so the app reports Microphone, System Audio Recording,
@@ -417,7 +432,7 @@ coaching, a settings preflight that was not applied, and a failed live brain swi
 the previous provider. A failure notice keeps a fixed frame and quotes what the provider actually
 said inside it: its status or close code, its error code, and its message after redaction, so a
 screenshot of Activity is enough to diagnose a cause nobody has classified yet (see
-[architecture.md → One failure record](./architecture.md#one-failure-record-one-table-per-vendor)).
+[architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost)).
 Lifecycle sequencing, retries, and timing remain in `jarvis-debug.log`. Successful
 screen-view events carry their thumbnails as in-memory `data:` URIs. Chosen over a local HTTP server +
 SSE: for an app that already holds the entries in memory, pushing into an embedded WebView is less

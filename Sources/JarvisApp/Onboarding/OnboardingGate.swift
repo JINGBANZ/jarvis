@@ -23,6 +23,12 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
     private var keyStep: APIKeyStepView?
     private var permissionsStep: PermissionsStepView?
     private var isComplete = false
+    private var isStopped = false
+    #if JARVIS_LIVE_E2E
+    var testGrantProbe: (@MainActor () async -> Bool)?
+    var testOnPresentation: (@MainActor () -> Void)?
+    func testInstallPermissionsStep(_ step: PermissionsStepView) { permissionsStep = step }
+    #endif
 
     init(
         preferences: OnboardingPreferences,
@@ -42,6 +48,7 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
 
     /// Once onboarding has completed, returns at once without probing anything.
     func begin() async {
+        guard !isStopped else { return }
         guard !preferences.isCompleted else {
             onFinished?()
             return
@@ -49,6 +56,7 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
         let needsAPIKey = Onboarding.needsAPIKey(
             secrets: secrets, brain: brainPreferences, transcription: transcriptionPreferences)
         let holdsGrants = await holdsEveryGrant()
+        guard !isStopped else { return }
         steps = Onboarding.steps(needsAPIKey: needsAPIKey, holdsEveryGrant: holdsGrants)
         guard let first = steps.first else {
             complete()
@@ -57,8 +65,24 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
         present(first)
     }
 
+    func stop() {
+        guard !isStopped else { return }
+        isStopped = true
+        onFinished = nil
+        keyStep?.onFinished = nil
+        keyStep?.stop()
+        permissionsStep?.onFinished = nil
+        permissionsStep?.stop()
+        window?.delegate = nil
+        window?.close()
+        window = nil
+    }
+
     /// Runs the system-audio probe, which may prompt, only once the readable grants are held.
     private func holdsEveryGrant() async -> Bool {
+        #if JARVIS_LIVE_E2E
+        if let testGrantProbe { return await testGrantProbe() }
+        #endif
         // Clear the asked marker once granted, or a later TCC reset would read as a refusal.
         if Permissions.isGranted(.screenRecording) {
             permissionPreferences.screenRecordingAsked = false
@@ -69,6 +93,10 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
     }
 
     private func present(_ first: Onboarding.Step) {
+        guard !isStopped else { return }
+        #if JARVIS_LIVE_E2E
+        if let testOnPresentation { testOnPresentation(); return }
+        #endif
         NSApp.setActivationPolicy(.regular) // ghost-mode-allowed: first-run onboarding window
         if window == nil { build() }
         show(first)
@@ -135,6 +163,7 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
     }
 
     private func advance(past step: Onboarding.Step) {
+        guard !isStopped else { return }
         keyStep = nil
         guard let index = steps.firstIndex(of: step), index + 1 < steps.count else {
             complete()
@@ -145,6 +174,7 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
 
     /// The one place the completed flag is written, with or without a window.
     private func complete() {
+        guard !isStopped else { return }
         preferences.isCompleted = true
         if Permissions.isGranted(.screenRecording) {
             permissionPreferences.screenRecordingAsked = false
@@ -158,9 +188,10 @@ final class OnboardingGate: NSObject, NSWindowDelegate {
     }
 
     func windowWillClose(_ notification: Notification) {
+        guard !isStopped else { return }
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: restoring the menu-bar-only app
         keyStep?.stop()
-        permissionsStep?.stopObservingActivation()
+        permissionsStep?.stop()
         guard isComplete else {
             // Closing before the end is declining: Jarvis can't coach without a key and the grants.
             NSApp.terminate(nil)

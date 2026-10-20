@@ -148,62 +148,33 @@ struct LiveE2EScenarioTests {
         ])
     }
 
-    /// Live checks C07 and C08 count searches, so each story must come back whole to its own query
-    /// and the teammate search must not already return the manager story.
-    @Test("scenario A's prep notes return each behavioral story whole to its own search")
-    func prepNotesReturnEachStoryWholeToItsOwnSearch() throws {
+    @Test("scenario A's prep notes keep behavioral stories whole and separate")
+    func prepNotesKeepEachStoryWholeAndSeparate() throws {
         let notes = try String(
             contentsOf: Self.liveTests.appendingPathComponent("Fixtures/prep-notes.md"), encoding: .utf8)
-        let chunks = PrepMaterialChunker.chunk(text: notes, sourceDisplayName: "prep-notes.md")
-        let index = PrepMaterialIndex(chunks: chunks)
+        let chunks = ReferenceChunker.chunk(text: notes, sourceDisplayName: "prep-notes.md")
         let layout = chunks.map { "\($0.text.split(separator: " ").count) words: \($0.text.prefix(30))" }
-        func carriesManagerStory(_ result: PrepMaterialSearchResult) -> Bool {
-            result.text.contains("Marcus") || result.text.contains("feature flag")
-        }
-        func isWholeManagerStory(_ result: PrepMaterialSearchResult) -> Bool {
-            result.text.contains("Marcus Webb") && result.text.contains("zero data-loss")
-        }
-        func isWholeTeammateStory(_ result: PrepMaterialSearchResult) -> Bool {
-            result.text.contains("my teammate Priya") && result.text.contains("0.01%")
-        }
-
         #expect(chunks.count >= 4, "\(layout)")
-        for query in [
-            "time you disagreed with a teammate", "disagreed with a teammate",
-            "disagreed with a teammate conflict story", "disagreed with a teammate conflict",
-            "teammate disagreement", "conflict with a teammate",
-        ] {
-            let results = index.search(query: query)
-            #expect(!results.contains { $0.text.contains("Product search architecture") })
-            #expect(!results.contains(where: carriesManagerStory),
-                    "\"\(query)\" returned the manager story; chunks: \(layout)")
-            #expect(results.contains(where: isWholeTeammateStory),
-                    "\"\(query)\" did not return the whole teammate story; chunks: \(layout)")
-        }
-        for query in [
-            "time you pushed back on a decision from your manager",
-            "pushed back on manager decision story",
-            "pushed back on manager decision evidence alternative outcome",
-            "pushed back on manager decision launch data loss bugs staged rollout",
-        ] {
-            #expect(!index.search(query: query).contains { $0.text.contains("Product search architecture") })
-            #expect(index.search(query: query).first.map(isWholeManagerStory) == true,
-                    "\"\(query)\" did not rank the whole manager story first; chunks: \(layout)")
-        }
+        let manager = try #require(chunks.first { $0.text.contains("Marcus Webb") })
+        let teammate = try #require(chunks.first { $0.text.contains("my teammate Priya") })
+        #expect(manager.text.contains("zero data-loss"), "\(layout)")
+        #expect(teammate.text.contains("0.01%"), "\(layout)")
+        #expect(chunks.filter { $0.text.contains("Marcus Webb") }.count == 1)
+        #expect(chunks.filter { $0.text.contains("my teammate Priya") }.count == 1)
+        #expect(!teammate.text.contains("Marcus") && !teammate.text.contains("feature flag"))
+        #expect(!manager.text.contains("Priya"))
+        #expect(!manager.text.contains("Product search architecture"))
+        #expect(!teammate.text.contains("Product search architecture"))
     }
 
     @Test("scenario A's technical preparation includes its cache follow-up")
     func searchDesignPreparationIncludesInvalidation() throws {
         let notes = try String(
             contentsOf: Self.liveTests.appendingPathComponent("Fixtures/prep-notes.md"), encoding: .utf8)
-        let index = PrepMaterialIndex(chunks: PrepMaterialChunker.chunk(
-            text: notes, sourceDisplayName: "prep-notes.md"))
-        for query in ["product search high level architecture read path", "slow search endpoint redesign"] {
-            let result = try #require(index.search(query: query).first)
-            #expect(result.text.contains("Product search architecture"))
-            #expect(result.text.contains("invalidation"))
-            #expect(result.text.contains("version"))
-        }
+        let chunks = ReferenceChunker.chunk(text: notes, sourceDisplayName: "prep-notes.md")
+        let result = try #require(chunks.first { $0.text.contains("Product search architecture") })
+        #expect(result.text.contains("invalidation"))
+        #expect(result.text.contains("version"))
     }
 
     @Test("scenario B ships its capability switches")
@@ -217,7 +188,7 @@ struct LiveE2EScenarioTests {
         let capabilities = CoachCapabilities.compose(
             disabledTools: Set(b.capabilities.disabledTools),
             disabledSkills: Set(b.capabilities.disabledSkills),
-            prepSourcesConfigured: true, skills: SkillCatalog.bundled())
+            referencesAdmitted: true, skills: SkillCatalog.bundled())
         #expect(capabilities.skills.map(\.name) == ["coding"])
         #expect(capabilities.deferredTools.isEmpty)
         #expect(b.steps.contains(.switchBrain(.gemini)))
@@ -232,7 +203,7 @@ struct LiveE2EScenarioTests {
           "id": "Mixed-1",
           "audio": "fixture",
           "brain": { "primary": "claude-subscription", "fallbacks": ["openai", "codex-subscription"] },
-          "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": ["coding"] },
+          "capabilities": { "disabledTools": ["search_references"], "disabledSkills": ["coding"] },
           "prepNotes": "prep-notes.md",
           "transcription": { "model": "gpt-transcribe", "key": "invalid" },
           "voices": { "them": "Samantha", "me": "Daniel" },
@@ -255,7 +226,7 @@ struct LiveE2EScenarioTests {
         #expect(scenario.audio == .fixture)
         #expect(scenario.brain == .init(primary: .claudeSubscription, fallbacks: [.openAI, .codexSubscription]))
         #expect(scenario.capabilities == .init(
-            disabledTools: ["search_prep_notes"], disabledSkills: ["coding"]))
+            disabledTools: ["search_references"], disabledSkills: ["coding"]))
         #expect(scenario.prepNotes == "prep-notes.md")
         #expect(scenario.transcription == .init(target: .openAI(.gptTranscribe), expectedLanguages: [], key: .invalid))
         #expect(scenario.steps == [
@@ -291,7 +262,7 @@ struct LiveE2EScenarioTests {
             from: Self.liveTests.appendingPathComponent("Scenarios/H.json"),
             fixturesDirectory: Self.liveTests.appendingPathComponent("Fixtures", isDirectory: true))
         #expect(scenario.brain.primary == .codexSubscription)
-        #expect(scenario.historyCompactionTokenThreshold == 1000)
+        #expect(scenario.historyCompactionTokenThreshold == 1800)
         let waitIndex = try #require(scenario.steps.firstIndex(of: .waitForCompaction))
         guard case .say = scenario.steps[waitIndex + 1] else {
             Issue.record("The recall question must follow accepted compaction")

@@ -27,15 +27,15 @@ public struct CoachCapabilities: Sendable, Equatable {
         loadToolName, callToolName, loadSkillName,
     ]
 
-    /// `prepSourcesConfigured` means sources are configured, not that the index has been built.
+    /// `referencesAdmitted` means metadata admission succeeded; content and search may still prepare.
     /// Disabled names that match nothing or name a fixed tool are ignored.
     public static func compose(disabledTools: Set<String>,
                                disabledSkills: Set<String> = [],
-                               prepSourcesConfigured: Bool,
+                               referencesAdmitted: Bool,
                                skills: [Skill] = []) -> CoachCapabilities {
         let disabled = disabledTools.subtracting(fixedToolNames)
-        let prepEnabled = prepSourcesConfigured && !disabled.contains(searchPrepNotesTool.name)
-        let extras = (prepEnabled ? [searchPrepNotesTool, readPrepNoteTool] : [])
+        let referencesEnabled = referencesAdmitted && !disabled.contains(searchReferencesTool.name)
+        let extras = (referencesEnabled ? [listReferencesTool, searchReferencesTool, readReferenceTool] : [])
             .filter { !disabled.contains($0.name) }
         let deferred = extras.filter(\.deferLoading)
         let offeredSkills = skills
@@ -64,7 +64,7 @@ public struct CoachCapabilities: Sendable, Equatable {
             .joined(separator: ",")
     }
 
-    public static let `default` = compose(disabledTools: [], prepSourcesConfigured: false)
+    public static let `default` = compose(disabledTools: [], referencesAdmitted: false)
 
     /// What a request may call, never what it declares: a loader with nothing left to load drops
     /// out, and `call_tool` joins once a deferred tool is loaded. The choice sits outside the cached

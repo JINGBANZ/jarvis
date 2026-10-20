@@ -6,8 +6,10 @@ final class ReferenceHelperSupervisor {
     enum Failure: Error, Equatable { case unavailable, timeout, protocolFailure }
     private let bundle: URL
     private let home: URL
+    var homeURL: URL { home }
     #if JARVIS_LIVE_E2E
     private var testFault = false
+    var beforeLaunchForTesting: (@MainActor () async -> Void)?
     #endif
     private let startupTimeout: Duration
     private var process: Process?
@@ -22,6 +24,7 @@ final class ReferenceHelperSupervisor {
     private var timers: [UUID: Task<Void, Never>] = [:]
     private var startup: Task<Void, Error>?
     private var stopping: Task<Void, Never>?
+    private var stopRevision: UInt = 0
     private var generation = UUID()
     private let writes = DispatchQueue(label: "jarvis.references.write")
 
@@ -39,16 +42,26 @@ final class ReferenceHelperSupervisor {
     #endif
 
     func start() async throws {
+        let revision = stopRevision
+        try Task.checkCancellation()
         if let stopping { await stopping.value }
+        try Task.checkCancellation()
+        guard revision == stopRevision else { throw CancellationError() }
         if let startup { return try await startup.value }
         if process?.isRunning == true { return }
-        let task = Task { try await self.launch() }
+        let task = Task {
+            #if JARVIS_LIVE_E2E
+            await self.beforeLaunchForTesting?()
+            #endif
+            try await self.launch()
+        }
         startup = task
         defer { startup = nil }
         try await task.value
     }
 
     private func launch() async throws {
+        try Task.checkCancellation()
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true,
                                                attributes: [.posixPermissions: 0o700])
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: home.path)
@@ -93,7 +106,7 @@ final class ReferenceHelperSupervisor {
                 throw Failure.protocolFailure
             }
         } catch {
-            await stop()
+            if stopping == nil { await shutdown() }
             throw error
         }
     }
@@ -181,8 +194,15 @@ final class ReferenceHelperSupervisor {
     }
 
     func stop() async {
+        stopRevision &+= 1
+        startup?.cancel()
+        failAll(Failure.unavailable)
         if let stopping { return await stopping.value }
-        let task = Task { await self.shutdown() }
+        let starting = startup
+        let task = Task {
+            await self.shutdown()
+            _ = try? await starting?.value
+        }
         stopping = task
         await task.value
         stopping = nil

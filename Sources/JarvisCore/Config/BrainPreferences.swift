@@ -5,6 +5,13 @@ public final class BrainPreferences {
 
     public init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
+        if !defaults.bool(forKey: "references.capabilityMigration") {
+            var disabled = Set(defaults.stringArray(forKey: Defaults.Brain.disabledToolsKey) ?? Defaults.Brain.disabledTools)
+            if disabled.remove("search_prep_notes") != nil { disabled.insert("search_references") }
+            if disabled.remove("read_prep_note") != nil { disabled.insert("read_reference") }
+            defaults.set(disabled.sorted(), forKey: Defaults.Brain.disabledToolsKey)
+            defaults.set(true, forKey: "references.capabilityMigration")
+        }
     }
 
     public var provider: BrainProvider {

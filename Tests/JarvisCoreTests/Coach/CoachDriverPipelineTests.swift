@@ -228,7 +228,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                             coachingAttempts: (any CoachingAttemptAuditing)? = nil,
                             automaticAttemptDelay: @escaping CoachDriver.AutomaticAttemptDelay = { _ in },
                             onRouteFailure: (@MainActor @Sendable (ProviderFailure) -> Void)? = nil,
-                            prepMaterial: (any PrepMaterialSearching)? = nil)
+                            documents: (any DocumentSession)? = nil)
         -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let provider = brainProvider ?? .openAI
@@ -249,7 +249,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             automaticAttemptDelay: automaticAttemptDelay,
             activity: activity,
             capabilities: capabilities,
-            prepMaterial: prepMaterial
+            documents: documents
         )
         return (driver, transcript)
     }
@@ -1944,7 +1944,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false))
+                disabledTools: [], referencesAdmitted: false))
         transcript.append(.init(speaker: .me, text: "first attempt", at: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
@@ -1968,7 +1968,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false),
+                disabledTools: [], referencesAdmitted: false),
             automaticAttemptDelay: { _ in await delayGate.enter() })
         driver.updateTranscriptionWork(.pending(since: nil), for: .them)
 

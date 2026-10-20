@@ -6,7 +6,7 @@ import Testing
     private func makeDriver(
         brain: BrainClient,
         capabilities: CoachCapabilities = .default,
-        prepMaterial: (any PrepMaterialSearching)? = nil
+        documents: (any DocumentSession)? = nil
     ) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let target = BrainTarget(
@@ -18,7 +18,7 @@ import Testing
             screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(now: 100),
             automaticAttemptDelay: { _ in },
             capabilities: capabilities,
-            prepMaterial: prepMaterial)
+            documents: documents)
         return (driver, transcript)
     }
 
@@ -31,13 +31,13 @@ import Testing
         let brain = ScriptedBrain(script: [staySilent, staySilent])
         let (driver, transcript) = makeDriver(
             brain: brain,
-            capabilities: .compose(disabledTools: [], prepSourcesConfigured: true),
-            prepMaterial: nil)
+            capabilities: .compose(disabledTools: [], referencesAdmitted: true),
+            documents: nil)
         transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100))
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        driver.installPrepMaterial(FakePrepMaterialSearch())
+        // A session has no late-install interface; later preparation changes only outcomes.
         transcript.append(.init(speaker: .me, text: "so the map keeps the last index", at: 140))
 
         _ = await driver.handleTrigger(.turnEnd)
@@ -49,19 +49,19 @@ import Testing
             == brain.offeredTools[1].map(\.parametersJSON))
     }
 
-    @Test func aSessionComposedWithoutPrepMaterialNeverGainsTheTool() async {
+    @Test func aSessionComposedWithoutReferencesNeverGainsTheTool() async {
         let brain = ScriptedBrain(script: [staySilent, staySilent])
-        let (driver, transcript) = makeDriver(brain: brain, prepMaterial: nil)
+        let (driver, transcript) = makeDriver(brain: brain, documents: nil)
         transcript.append(.init(speaker: .me, text: "let me think about the ordering", at: 100))
 
         _ = await driver.handleTrigger(.turnEnd)
 
-        driver.installPrepMaterial(FakePrepMaterialSearch())
+        // A session has no late-install interface; later preparation changes only outcomes.
         transcript.append(.init(speaker: .me, text: "so the map keeps the last index", at: 140))
 
         _ = await driver.handleTrigger(.turnEnd)
 
         #expect(brain.offeredTools.count == 2)
-        #expect(!brain.offeredTools[1].map(\.name).contains(searchPrepNotesTool.name))
+        #expect(!brain.offeredTools[1].map(\.name).contains(searchReferencesTool.name))
     }
 }

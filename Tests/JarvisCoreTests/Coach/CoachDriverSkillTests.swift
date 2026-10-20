@@ -10,7 +10,7 @@ import Testing
               body: "# System-design questions\n\nSix stages."),
     ]
     private var offered: CoachCapabilities {
-        .compose(disabledTools: [], prepSourcesConfigured: false, skills: skills)
+        .compose(disabledTools: [], referencesAdmitted: false, skills: skills)
     }
 
     private func loadCall(_ name: String, id: String = "k1") -> BrainResponse {
@@ -54,13 +54,13 @@ import Testing
     private func run(_ runner: CoachAttemptRunner, brain: BrainClient)
         async -> CoachAttemptRunner.AttemptResult {
         var work = CoachAttemptRunner.PendingCoachingWork(reason: .turnEnd)
-        work.prepNotesObservation = .user("a question is pending")
+        work.referencesObservation = .user("a question is pending")
         let target = BrainTarget(
             provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         return await runner.runAttempt(work, using: .init(
             plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
             target: target, brain: brain, summarizer: nil, onSelected: nil,
-            prepMaterial: nil)).result
+            documents: nil)).result
     }
 
     @Test func aLoadedSkillGuidesTheSameAttempt() async throws {
@@ -114,7 +114,7 @@ import Testing
         let (driver, transcript) = makeDriver(
             brain: brain,
             capabilities: .compose(disabledTools: [], disabledSkills: ["system-design"],
-                                   prepSourcesConfigured: false, skills: skills),
+                                   referencesAdmitted: false, skills: skills),
             activity: activity)
         transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 100))
 
@@ -147,17 +147,17 @@ import Testing
     }
 
     @Test func skillAndToolNamesCannotCollideInTheLoadedSet() async throws {
-        let sameName = [Skill(name: "search_prep_notes", description: "d", body: "skill body")]
+        let sameName = [Skill(name: "search_references", description: "d", body: "skill body")]
         let capabilities = CoachCapabilities.compose(
-            disabledTools: [], prepSourcesConfigured: true, skills: sameName)
+            disabledTools: [], referencesAdmitted: true, skills: sameName)
         let runner = makeRunner(capabilities: capabilities)
         let brain = ScriptedBrain(script: [
-            loadCall("search_prep_notes"),
-            .init(toolCalls: [.loadTool(callId: "t1", name: "search_prep_notes")],
+            loadCall("search_references"),
+            .init(toolCalls: [.loadTool(callId: "t1", name: "search_references")],
                   rawToolCalls: [RawToolCall(id: "t1", name: "load_tool",
-                                             argumentsJSON: #"{"name":"search_prep_notes"}"#)]),
+                                             argumentsJSON: #"{"name":"search_references"}"#)]),
             speak,
-            loadCall("search_prep_notes", id: "k2"),
+            loadCall("search_references", id: "k2"),
             speak,
         ])
 
@@ -167,12 +167,12 @@ import Testing
         let skillResult = try #require(brain.calls[1].first { $0.toolCallId == "k1" })
         let toolResult = try #require(brain.calls[2].first { $0.toolCallId == "t1" })
         #expect(skillResult.text?.contains("skill body") == true)
-        #expect(toolResult.text?.contains(searchPrepNotesTool.parametersJSON) == true)
+        #expect(toolResult.text?.contains(searchReferencesTool.parametersJSON) == true)
 
         guard case .completed = await run(runner, brain: brain) else {
             Issue.record("expected the second attempt to commit a turn"); return
         }
         let remembered = try #require(brain.calls[4].first { $0.toolCallId == "k2" })
-        #expect(remembered.text == JarvisPrompts.Coach.loadSkillAlreadyLoaded("search_prep_notes"))
+        #expect(remembered.text == JarvisPrompts.Coach.loadSkillAlreadyLoaded("search_references"))
     }
 }

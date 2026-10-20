@@ -38,22 +38,26 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
                 try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: output.appendingPathComponent("results.json").path)
             } catch { fputs("Reference harness: result write failed\n", stderr) }
             try? Data().write(to: output.appendingPathComponent("quit-invoked"))
-            NSApp.terminate(nil) // ghost-mode-allowed: explicit synthetic References harness completion
+            // Return from the MainActor task before AppKit enters its modal termination loop.
+            RunLoop.main.perform {
+                MainActor.assumeIsolated {
+                    NSApp.terminate(nil) // ghost-mode-allowed: explicit synthetic References harness completion
+                }
+            }
         }
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard let supervisor else { return .terminateNow }
-        guard !terminating else { return .terminateCancel }
+        guard !terminating else { return .terminateLater }
         terminating = true
-        // terminateLater runs AppKit's termination loop, which does not service MainActor tasks.
         Task {
             await supervisor.stop()
             try? Data().write(to: self.output.appendingPathComponent("quit-finished"))
             self.supervisor = nil
-            sender.terminate(nil) // ghost-mode-allowed: complete the explicit harness Quit after cleanup
+            sender.reply(toApplicationShouldTerminate: true)
         }
-        return .terminateCancel
+        return .terminateLater
     }
 
     private struct HelperIdentity: Decodable { let pid: Int32 }
@@ -71,6 +75,16 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
             results.append(["case": "application-quit", "helper_pid": helper.processIdentifier!])
             return
         }
+        if let index = CommandLine.arguments.firstIndex(of: "--reference-harness-case"),
+           CommandLine.arguments.indices.contains(index + 1) {
+            try await runPhaseFourChecks(selection: CommandLine.arguments[index + 1])
+            let helper = ReferenceHelperSupervisor(bundle: bundle, home: output.appendingPathComponent("quit-store"))
+            supervisor = helper
+            try await helper.start()
+            results.append(["case": "application-quit", "helper_pid": helper.processIdentifier!])
+            return
+        }
+        try await runPhaseFourChecks(selection: "all")
         let fixture = output.appendingPathComponent("fixtures")
         try FileManager.default.createDirectory(at: fixture, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try "Uniquequasar synthetic reference. 😀é\n".write(to: fixture.appendingPathComponent("sample.txt"), atomically: true, encoding: .utf8)

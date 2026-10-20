@@ -14,11 +14,11 @@ import Testing
         var work = CoachAttemptRunner.PendingCoachingWork(reason: .manualExplanation)
         work.preparedManualReason = .manualHint
         work.screenObservation = [.userImage("stale-image"), .user("stale-ocr")]
-        work.prepNotesObservation = .user("retained-prep")
+        work.referencesObservation = .user("retained-prep")
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         _ = await runner.runAttempt(work, using: .init(plan: .default, routeRevision: 0,
             routeTopologyRevision: 0, routeIndex: 0, target: target, brain: brain,
-            summarizer: nil, onSelected: nil, prepMaterial: nil))
+            summarizer: nil, onSelected: nil, documents: nil))
         let messages = try #require(brain.calls.first)
         #expect(!messages.contains { $0.imageBase64JPEG == "stale-image" || $0.text == "stale-ocr" })
         #expect(messages.filter { $0.text == "retained-prep" }.count == 1)
@@ -62,7 +62,7 @@ import Testing
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: ReviewScreen(succeeds: true), overlay: box, clock: ManualClock(now: 100),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false))
+                disabledTools: [], referencesAdmitted: false))
         let task = Task { await driver.handleTrigger(.manualExplanation) }
         await gate.waitUntilEntered()
         box.acceptsDetail = false
@@ -88,7 +88,7 @@ import Testing
             route: ConfiguredBrainRoute(targets: [.init(target: target, brain: brain)]),
             screen: ReviewScreen(succeeds: true), overlay: ReviewDetailSink(), clock: ManualClock(now: 100),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false))
+                disabledTools: [], referencesAdmitted: false))
         // A plan edit cannot change the detail capability fixed at Start.
         driver.updatePlan(SessionPlan(revision: 1, screen: SessionPlan.default.screen))
         #expect(await driver.handleTrigger(.manualHint) == .spoke)

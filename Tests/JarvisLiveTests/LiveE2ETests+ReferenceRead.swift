@@ -11,8 +11,8 @@ extension LiveE2ETests {
             try launcher.finish(results)
             return
         }
-        let search = evidence.activity.first { $0.kind == "prepNotesSearched" }
-        let read = evidence.activity.first { $0.kind == "prepNoteRead" }
+        let search = evidence.activity.first { $0.kind == "referencesSearched" }
+        let read = evidence.activity.first { $0.kind == "referenceRead" }
         let tip = evidence.activity.first { $0.kind == "tip" }
         results.check("C34", [
             (search == nil, "the named document was read directly from the catalog without a search"),
@@ -28,7 +28,12 @@ extension LiveE2ETests {
                   let input = request["input"] as? [[String: Any]] else { return false }
             return input.contains {
                 $0["type"] as? String == "function_call_output"
-                    && ($0["output"] as? String)?.contains(original) == true
+                    && ($0["output"] as? String).flatMap { text -> String? in
+                        guard let start = text.firstIndex(of: "{"),
+                              let data = String(text[start...]).data(using: .utf8),
+                              let evidence = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+                        return evidence["text"] as? String
+                    } == original
             }
         }
         results.check("C34", completeTextReachedBrain, "the complete extracted fixture reached the brain")

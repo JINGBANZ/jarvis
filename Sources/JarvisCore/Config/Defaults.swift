@@ -121,11 +121,12 @@ public enum Defaults {
         }
     }
 
-    // MARK: - Prep material
+    // MARK: - References
 
-    public enum PrepMaterial {
+    public enum References {
+        // Keep the persisted key so existing reference selections survive source-level renames.
         public static let sourcesKey = "prepMaterial.sources"
-        public static let sources: [PrepMaterialSource] = []
+        public static let sources: [ReferenceSourceSelection] = []
     }
 
     // MARK: - Permissions

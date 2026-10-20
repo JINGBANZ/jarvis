@@ -106,7 +106,7 @@ class HelperContracts(unittest.TestCase):
     def configure(self, enabled=True, sources=None, readiness_timeout=5):
         self.generation += 1
         result = self.result("configure", {"generation": self.generation, "enabled": enabled,
-                             "sources": sources if sources is not None else [{"source_id": self.source, "path": str(self.sources)}]})
+                             "sources": sources if sources is not None else [{"source_id": self.source, "path": str(self.sources), "is_directory": True}]})
         deadline = time.monotonic() + readiness_timeout
         while result.get("state") == "preparing" and time.monotonic() < deadline:
             time.sleep(.01)
@@ -337,17 +337,65 @@ class HelperContracts(unittest.TestCase):
             catalog = self.admit()
             self.assertEqual([entry["name"] for entry in catalog["entries"]], ["good.txt"])
         unsupported = self.sources / "sheet.xlsx"
-        failed = self.configure(sources=[{"source_id": identifier(), "path": str(unsupported)}])
+        failed = self.configure(sources=[{"source_id": identifier(), "path": str(unsupported), "is_directory": False}])
         self.assertEqual(failed["state"], "failed")
         self.assertEqual(failed["error"], "unsupported_format")
 
+    def test_selected_file_replaced_by_directory_does_not_expand_access(self):
+        selected = self.sources / "selected.md"
+        selected.write_text("original selected file")
+        sources = [{"source_id": self.source, "path": str(selected), "is_directory": False}]
+        self.assertEqual(self.configure(sources=sources)["state"], "ready")
+        key = self.admit()["entries"][0]["document_id"]
+        first = self.read(key)
+        selected.unlink()
+        selected.mkdir()
+        (selected / "unselected.txt").write_text("must not become a reference")
+        failed = self.configure(sources=sources)
+        self.assertEqual(failed["state"], "failed", failed)
+        self.assertEqual(failed["error"], "invalid_source")
+        self.assertEqual(self.read(key)["text"], first["text"])
+
+    def test_selected_file_symlink_retargeted_to_directory_does_not_expand_access(self):
+        target = self.sources / "target.md"
+        target.write_text("original symlink target")
+        selected = self.root / "selected.md"
+        selected.symlink_to(target)
+        sources = [{"source_id": self.source, "path": str(selected), "is_directory": False}]
+        self.assertEqual(self.configure(sources=sources)["state"], "ready")
+        self.assertEqual(self.admit()["total_count"], 1)
+        selected.unlink()
+        selected.symlink_to(self.sources, target_is_directory=True)
+        failed = self.configure(sources=sources)
+        self.assertEqual(failed["state"], "failed", failed)
+        self.assertEqual(failed["error"], "invalid_source")
+
+    def test_selected_directory_replaced_by_file_is_rejected(self):
+        selected = self.sources / "selected.md"
+        selected.mkdir()
+        sources = [{"source_id": self.source, "path": str(selected), "is_directory": True}]
+        self.assertEqual(self.configure(sources=sources)["state"], "ready")
+        selected.rmdir()
+        selected.write_text("replacement file")
+        failed = self.configure(sources=sources)
+        self.assertEqual(failed["state"], "failed", failed)
+        self.assertEqual(failed["error"], "invalid_source")
+
+    def test_source_kind_is_required_and_must_be_boolean(self):
+        for kind in [None, "false"]:
+            source = {"source_id": self.source, "path": str(self.sources)}
+            if kind is not None:
+                source["is_directory"] = kind
+            result = self.result("configure", {"generation": 1, "enabled": True, "sources": [source]})
+            self.assertEqual(result["status"], "unavailable", result)
+
     def test_discovery_bounds_sources_and_total_traversal_work(self):
-        many = [{"source_id": identifier(), "path": str(self.sources)} for _ in range(129)]
+        many = [{"source_id": identifier(), "path": str(self.sources), "is_directory": True} for _ in range(129)]
         reply = self.result("configure", {"generation": 1, "enabled": True, "sources": many})
         self.assertEqual(reply["status"], "resource_limit")
         # Repeated roots must share one work budget even when all entries are unsupported.
         for index in range(1024): (self.sources / f"{index}.bin").touch()
-        overlapping = [{"source_id": identifier(), "path": str(self.sources)} for _ in range(98)]
+        overlapping = [{"source_id": identifier(), "path": str(self.sources), "is_directory": True} for _ in range(98)]
         failed = self.configure(sources=overlapping, readiness_timeout=30)
         self.assertEqual(failed["state"], "failed", failed)
         self.assertEqual(failed["error"], "resource_limit")
@@ -390,8 +438,8 @@ class HelperContracts(unittest.TestCase):
         nested.mkdir()
         (self.sources / "same.txt").write_text("first")
         (nested / "same.txt").write_text("second")
-        self.configure(sources=[{"source_id": self.source, "path": str(self.sources)},
-                                {"source_id": identifier(), "path": str(nested)}])
+        self.configure(sources=[{"source_id": self.source, "path": str(self.sources), "is_directory": True},
+                                {"source_id": identifier(), "path": str(nested), "is_directory": True}])
         catalog = self.admit()
         self.assertEqual(catalog["total_count"], 2)
         self.assertEqual(len({entry["document_id"] for entry in catalog["entries"]}), 2)

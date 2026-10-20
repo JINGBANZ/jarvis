@@ -158,7 +158,7 @@ import Testing
             screen: screen, overlay: overlay, clock: ManualClock(now: 100),
             plan: SessionPlan(revision: 0, screen: SessionPlan.default.screen),
             capabilities: CoachCapabilities.compose(
-                disabledTools: [], prepSourcesConfigured: false))
+                disabledTools: [], referencesAdmitted: false))
     }
 }
 

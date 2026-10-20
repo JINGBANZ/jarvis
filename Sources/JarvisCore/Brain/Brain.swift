@@ -67,8 +67,9 @@ public enum ToolInvocation: Sendable, Equatable {
     case speak(callId: String, hint: String, detail: String? = nil)
     /// A tool call, not an absence, so `tool_choice: required` can forbid plain-text replies.
     case staySilent(callId: String)
-    case searchPrepNotes(callId: String, query: String)
-    case readPrepNote(callId: String, documentID: String, offset: Int)
+    case searchReferences(callId: String, query: String, documentIDs: [UUID]? = nil)
+    case listReferences(callId: String, query: String?, cursor: Int?)
+    case readReference(callId: String, documentID: UUID, offset: Int, revisionID: String? = nil)
     case loadTool(callId: String, name: String)
     case loadSkill(callId: String, name: String)
 }

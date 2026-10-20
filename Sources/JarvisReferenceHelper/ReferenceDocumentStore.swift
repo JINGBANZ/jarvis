@@ -182,7 +182,7 @@ actor ReferenceDocumentStore {
     }
     #if JARVIS_LIVE_E2E
     func replyDelay(for operation: String) -> Int {
-        guard operation == "admit" || operation == "search",
+        guard operation == "admit" || operation == "search" || operation == "read",
               let value = try? String(contentsOf: home.appendingPathComponent("\(operation)-reply-delay-ms"), encoding: .utf8),
               let delay = Int(value.trimmingCharacters(in: .whitespacesAndNewlines)), (0...5000).contains(delay) else { return 0 }
         return delay

@@ -54,9 +54,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)?,
         activity: (any ActivityEventRecording)?,
         ledger: CoachTranscriptLedger,
-        capabilities: CoachCapabilities
+        capabilities: CoachCapabilities,
+        sessionContext: SessionContext? = nil
     ) {
-        self.context = CoachContext(capabilities: capabilities)
+        self.context = CoachContext(capabilities: capabilities, sessionContext: sessionContext)
         self.config = config
         self.transcript = transcript
         self.screen = screen
@@ -87,10 +88,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
         /// Retry context excludes reasoning and tool-call linkage. Searches replace stale hits;
         /// document pages accumulate because a later page cannot replace earlier document text.
         var screenObservation: [ChatMessage] = []
-        var prepNotesObservation: ChatMessage?
-        var prepDocumentPages: [String] = []
+        var referencesObservation: ChatMessage?
+        var referencePages: [String] = []
         var observations: [ChatMessage] {
-            screenObservation + (prepNotesObservation.map { [$0] } ?? []) + prepDocumentPages.map(ChatMessage.user)
+            screenObservation + (referencesObservation.map { [$0] } ?? []) + referencePages.map(ChatMessage.user)
         }
         var preparedManualReason: TriggerReason?
         /// Speech finalized during inference lies past this boundary, so a failure cannot discard
@@ -237,7 +238,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
             ledger.commit(through: delta.upTo)
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
-        let attemptContext = self.context.beginAttempt(prepCatalog: attempt.prepMaterial?.catalog ?? [])
+        let attemptContext = self.context.beginAttempt()
         jlog("💭 thinking… [\(attempt.target.provider.displayName)]")
 
         var requestPhase: CoachingAttemptAuditEvent.RequestPhase = .initial
@@ -634,52 +635,52 @@ final class CoachAttemptRunner: @unchecked Sendable {
                     ledger.commit(through: delta.upTo)
                     return .completed(.silentByModel)
 
-                case .searchPrepNotes(let callID, let query):
-                    if Task.isCancelled {
-                        jlog("… attempt cancelled (stopped) before searching prep notes")
-                        return .cancelled
+                case .listReferences(let callID, let query, let cursor):
+                    do {
+                        guard let documents = attempt.documents else { throw ReferenceAccessFailure(reason: .unavailable) }
+                        let result = try await documents.list(query: query, cursor: cursor)
+                        try Task.checkCancellation()
+                        activity?.record(.referencesListed(count: result.entries.count))
+                        appendToolContinuation(toolCallId: callID, resultText: try ReferenceToolEvidence.render(result),
+                                               newPhase: .listReferencesContinuation)
+                    } catch {
+                        if Task.isCancelled || error is CancellationError { return .cancelled }
+                        activity?.record(.referencesUnavailable)
+                        appendToolContinuation(toolCallId: callID, resultText: ReferenceToolEvidence.failure(error),
+                                               newPhase: .listReferencesContinuation)
                     }
-                    // No port yet (still indexing, or nothing usable). `prepNotesObservation` stays
-                    // unset so a retry after the index lands searches for real.
-                    guard let prepMaterial = attempt.prepMaterial else {
-                        jlog("📎 no prep-notes index yet (still building, or no source held usable "
-                             + "text) — answering without them")
-                        activity?.record(.prepNotesUnavailable)
-                        appendToolContinuation(
-                            toolCallId: callID,
-                            resultText: JarvisPrompts.Coach.prepNotesUnavailable,
-                            newPhase: .searchPrepNotesContinuation)
-                        continue
-                    }
-                    let results = prepMaterial.search(query: query)
-                    jlog("📎 searched prep notes for \"\(query)\" — \(results.count) match(es)")
-                    activity?.record(.prepNotesSearched(query: query, matchCount: results.count))
-                    work.prepNotesObservation = .user(JarvisPrompts.Coach.prepNotesResult(results))
-                    appendToolContinuation(
-                        toolCallId: callID,
-                        resultText: JarvisPrompts.Coach.prepNotesResult(results),
-                        newPhase: .searchPrepNotesContinuation)
 
-                case .readPrepNote(let callID, let documentID, let offset):
-                    if Task.isCancelled { return .cancelled }
-                    let resultText: String
-                    if let prepMaterial = attempt.prepMaterial {
-                        if let page = prepMaterial.read(documentID: documentID, offset: offset) {
-                            resultText = JarvisPrompts.Coach.prepNotePage(page, offset: offset)
-                            if !work.prepDocumentPages.contains(resultText) {
-                                work.prepDocumentPages.append(resultText)
-                            }
-                            activity?.record(.prepNoteRead(sourceDisplayName: page.sourceDisplayName))
-                            jlog("📎 read prep document at offset \(offset) — \(page.text.count) characters")
-                        } else {
-                            resultText = JarvisPrompts.Coach.prepNoteReadFailed
-                        }
-                    } else {
-                        resultText = JarvisPrompts.Coach.prepNotesUnavailable
-                        activity?.record(.prepNotesUnavailable)
+                case .searchReferences(let callID, let query, let documentIDs):
+                    do {
+                        guard let documents = attempt.documents else { throw ReferenceAccessFailure(reason: .unavailable) }
+                        let result = try await documents.search(query: query, documentIDs: documentIDs)
+                        try Task.checkCancellation()
+                        let text = try ReferenceToolEvidence.render(result)
+                        activity?.record(.referencesSearched(query: query, matchCount: result.hits.count, complete: result.complete))
+                        work.referencesObservation = .user(text)
+                        appendToolContinuation(toolCallId: callID, resultText: text, newPhase: .searchReferencesContinuation)
+                    } catch {
+                        if Task.isCancelled || error is CancellationError { return .cancelled }
+                        activity?.record(.referencesUnavailable)
+                        appendToolContinuation(toolCallId: callID, resultText: ReferenceToolEvidence.failure(error),
+                                               newPhase: .searchReferencesContinuation)
                     }
-                    appendToolContinuation(toolCallId: callID, resultText: resultText,
-                                           newPhase: .readPrepNoteContinuation)
+
+                case .readReference(let callID, let documentID, let offset, let revisionID):
+                    do {
+                        guard let documents = attempt.documents else { throw ReferenceAccessFailure(reason: .unavailable) }
+                        let result = try await documents.read(documentID: documentID, offset: offset, revisionID: revisionID)
+                        try Task.checkCancellation()
+                        let text = try ReferenceToolEvidence.render(result)
+                        if !work.referencePages.contains(text) { work.referencePages.append(text) }
+                        activity?.record(.referenceRead(documentID: documentID))
+                        appendToolContinuation(toolCallId: callID, resultText: text, newPhase: .readReferenceContinuation)
+                    } catch {
+                        if Task.isCancelled || error is CancellationError { return .cancelled }
+                        activity?.record(.referencesUnavailable)
+                        appendToolContinuation(toolCallId: callID, resultText: ReferenceToolEvidence.failure(error),
+                                               newPhase: .readReferenceContinuation)
+                    }
 
                 case .loadTool(let callID, let name):
                     let resultText: String

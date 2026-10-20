@@ -1,13 +1,13 @@
 import Foundation
 
-public enum PrepMaterialChunker {
+public enum ReferenceChunker {
     /// Paragraphs, fences, and table rows are never split, so a chunk can exceed the target.
     /// Trailing headings with no content are dropped.
     public static func chunk(
         text: String,
         sourceDisplayName: String,
         targetWordCount: Int = 400
-    ) -> [PrepMaterialChunk] {
+    ) -> [ReferenceChunk] {
         // Extracted PDF and Word text can contain literal # and | with no Markdown meaning.
         let isMarkdown = (sourceDisplayName as NSString).pathExtension.lowercased() == "md"
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n")
@@ -15,14 +15,14 @@ public enum PrepMaterialChunker {
             .components(separatedBy: "\n\n")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
-        var chunks: [PrepMaterialChunk] = []
+        var chunks: [ReferenceChunk] = []
         var current: [String] = []
         var currentWordCount = 0
         var currentHasContent = false
 
         func flush() {
             guard !current.isEmpty else { return }
-            chunks.append(PrepMaterialChunk(
+            chunks.append(ReferenceChunk(
                 sourceDisplayName: sourceDisplayName, text: current.joined(separator: "\n\n")))
             current.removeAll()
             currentWordCount = 0

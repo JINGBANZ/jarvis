@@ -6,8 +6,9 @@ public extension ToolInvocation {
         case .captureScreen: captureScreenTool.name
         case .speak: speakToolName
         case .staySilent: staySilentTool.name
-        case .searchPrepNotes: searchPrepNotesTool.name
-        case .readPrepNote: readPrepNoteTool.name
+        case .searchReferences: searchReferencesTool.name
+        case .readReference: readReferenceTool.name
+        case .listReferences: listReferencesTool.name
         case .loadTool: CoachCapabilities.loadToolName
         case .loadSkill: CoachCapabilities.loadSkillName
         }
@@ -16,8 +17,9 @@ public extension ToolInvocation {
     var callID: String {
         switch self {
         case .captureScreen(let id), .staySilent(let id): id
-        case .speak(let id, _, _), .readPrepNote(let id, _, _): id
-        case .searchPrepNotes(let id, _), .loadTool(let id, _), .loadSkill(let id, _): id
+        case .speak(let id, _, _), .listReferences(let id, _, _), .searchReferences(let id, _, _): id
+        case .readReference(let id, _, _, _): id
+        case .loadTool(let id, _), .loadSkill(let id, _): id
         }
     }
 
@@ -39,22 +41,26 @@ public extension ToolInvocation {
                           detail: detail.flatMap { $0.isEmpty ? nil : $0 })
         case staySilentTool.name:
             return .staySilent(callId: callId)
-        case searchPrepNotesTool.name:
-            // Loose read: without `strict`, an oddly typed sibling field must not fail the call.
-            let object = (try? JSONSerialization.jsonObject(
-                with: Data(argumentsJSON.utf8))) as? [String: Any]
-            let query = (object?["query"] as? String ?? "").trimmingCharacters(in: .whitespaces)
-            guard !query.isEmpty else { return nil }
-            return .searchPrepNotes(callId: callId, query: query)
-        case readPrepNoteTool.name:
-            struct Arguments: Decodable {
-                let document_id: String
-                let offset: Int
-            }
-            guard let arguments = try? JSONDecoder().decode(Arguments.self, from: Data(argumentsJSON.utf8)),
-                  !arguments.document_id.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                  arguments.offset >= 0 else { return nil }
-            return .readPrepNote(callId: callId, documentID: arguments.document_id, offset: arguments.offset)
+        case listReferencesTool.name:
+            struct Arguments: Decodable { let query: String?; let cursor: Int? }
+            guard argumentsJSON.utf8.count <= 64 * 1024,
+                  let args = try? JSONDecoder().decode(Arguments.self, from: Data(argumentsJSON.utf8)),
+                  args.cursor.map({ $0 >= 0 }) ?? true,
+                  args.query.map({ $0.unicodeScalars.count <= 512 }) ?? true else { return nil }
+            return .listReferences(callId: callId, query: args.query, cursor: args.cursor)
+        case searchReferencesTool.name:
+            struct Arguments: Decodable { let query: String; let document_ids: [UUID]? }
+            guard argumentsJSON.utf8.count <= 512 * 1024,
+                  let args = try? JSONDecoder().decode(Arguments.self, from: Data(argumentsJSON.utf8)),
+                  !args.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  args.query.unicodeScalars.count <= 512, (args.document_ids?.count ?? 0) <= 2000 else { return nil }
+            return .searchReferences(callId: callId, query: args.query.trimmingCharacters(in: .whitespacesAndNewlines), documentIDs: args.document_ids)
+        case readReferenceTool.name:
+            struct Arguments: Decodable { let document_id: UUID; let offset: Int?; let revision_id: String? }
+            guard argumentsJSON.utf8.count <= 4096,
+                  let args = try? JSONDecoder().decode(Arguments.self, from: Data(argumentsJSON.utf8)),
+                  (args.offset ?? 0) >= 0, (args.revision_id?.utf8.count ?? 0) <= 256 else { return nil }
+            return .readReference(callId: callId, documentID: args.document_id, offset: args.offset ?? 0, revisionID: args.revision_id)
         case CoachCapabilities.loadToolName, CoachCapabilities.loadSkillName:
             let object = (try? JSONSerialization.jsonObject(
                 with: Data(argumentsJSON.utf8))) as? [String: Any]

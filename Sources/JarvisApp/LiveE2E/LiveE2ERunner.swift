@@ -65,12 +65,14 @@ final class LiveE2ERunner: BrainCompositionHost {
     private let screen = FixtureScreenCapture()
     private var brain: BrainComposition!
     private var composition: SessionComposition!
+    private let references: ReferenceRuntime
+    private var pendingReferenceAdmission: PendingReferenceAdmission?
     private var fixtureSource: FixtureAudioSource?
     /// Uses the developer's own sign-ins, not the run-local secrets directory.
     private let supervisor = LocalProxySupervisor(
         executable: LocalProxySupervisor.bundledExecutable(),
         home: FileSecretStore().directoryURL.appendingPathComponent("proxy", isDirectory: true))
-    private var prepSources: [PrepMaterialSource] = []
+    private var prepSources: [ReferenceSourceSelection] = []
     private var sessionEnd: SessionEndReason?
     private var expectsSessionEnd = false
     private var drain: Task<Void, Never>?
@@ -82,6 +84,7 @@ final class LiveE2ERunner: BrainCompositionHost {
 
     init(options: LiveE2EOptions) {
         self.options = options
+        references = ReferenceRuntime(home: options.outputDirectory.appendingPathComponent("references", isDirectory: true))
         // A run-local secrets directory lets a scenario supply an invalid key.
         secrets = ChainedSecretStore([
             FileSecretStore(directoryURL: options.secretsDirectory), EnvSecretStore(),
@@ -94,6 +97,14 @@ final class LiveE2ERunner: BrainCompositionHost {
 
     /// Writes `live-e2e-finished` only after the session evidence is sealed.
     func run() async {
+        await withTaskCancellationHandler {
+            await runBody()
+        } onCancel: {
+            Task { @MainActor in self.pendingReferenceAdmission?.cancel() }
+        }
+    }
+
+    private func runBody() async {
         runDeadline = Date().addingTimeInterval(Self.scenarioTimeout)
         do {
             try await runScenario()
@@ -114,14 +125,18 @@ final class LiveE2ERunner: BrainCompositionHost {
             }
             writeFailure(failure)
         }
+        await references.stop()
     }
 
     func removeGeneratedAudio() throws {
         try speech.removeDirectory()
     }
 
-    func terminateProxyHelper() {
+    func stopOwnedHelpers() async {
+        pendingReferenceAdmission?.cancel()
+        if let composition, sessionEnd == nil { drain = composition.stop(reason: .applicationQuit) }
         supervisor.terminateNow()
+        await references.stop()
     }
 
     // MARK: - Scenario
@@ -145,10 +160,11 @@ final class LiveE2ERunner: BrainCompositionHost {
             secrets: secrets, host: self, supervisor: supervisor,
             preferences: preferences, send: send)
         prepSources = scenario.prepNotes.map {
-            [PrepMaterialSource(
+            [ReferenceSourceSelection(
                 path: options.fixturesDirectory.appendingPathComponent($0).path,
                 isDirectory: false)]
         } ?? []
+        references.configure(enabled: !preferences.disabledTools.contains(searchReferencesTool.name), sources: prepSources, disabledTools: preferences.disabledTools)
         composition = makeComposition(for: scenario)
 
         let steps = scenario.steps
@@ -229,6 +245,16 @@ final class LiveE2ERunner: BrainCompositionHost {
         if case .blocked(let blocker) = readiness.status {
             throw Failure.notReadyToStart(String(describing: blocker))
         }
+        let referenceStartID = UUID()
+        let referenceDeadline = ContinuousClock.now + .seconds(2)
+        references.reconcile()
+        let referenceTask = PendingReferenceAdmission(library: references.library, deadline: referenceDeadline, startID: referenceStartID)
+        pendingReferenceAdmission = referenceTask
+        defer {
+            referenceTask.cancel()
+            references.library.abandon(startID: referenceStartID)
+            if pendingReferenceAdmission === referenceTask { pendingReferenceAdmission = nil }
+        }
         let proxy = await brain.proxyReadiness(for: route, preparingStart: true)
         if let failure = brain.availability(for: route, proxy: proxy, keys: brain.savedKeys(for: route)).blockingFailure {
             throw Failure.notReadyToStart(failure.activitySentence)
@@ -246,6 +272,8 @@ final class LiveE2ERunner: BrainCompositionHost {
         } else {
             appleLocale = nil
         }
+        let referenceAdmission = try await referenceTask.result()
+        try Task.checkCancellation()
         let inputs = SessionComposition.Inputs(
             transcription: scenario.transcription.target.configuration(
                 expectedLanguages: scenario.transcription.expectedLanguages),
@@ -254,7 +282,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             brainRoute: route,
             appleSpeechLocale: appleLocale,
             screen: SessionPlan.default.screen,
-            prepSources: prepSources)
+            references: referenceAdmission)
         guard composition.start(
             inputs, proxy: proxy, readinessSession: readinessSession,
             reportContext: .runtime)
@@ -290,6 +318,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         }
         let composition = SessionComposition(
             brain: brain,
+            referenceLibrary: references.library,
             artifacts: artifacts,
             overlayBox: box,
             readiness: readiness,

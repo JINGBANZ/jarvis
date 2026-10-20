@@ -2,7 +2,7 @@
   "id": "L",
   "audio": "fixture",
   "brain": { "primary": "codex-subscription", "fallbacks": [] },
-  "capabilities": { "disabledTools": ["search_prep_notes"], "disabledSkills": [] },
+  "capabilities": { "disabledTools": ["search_references"], "disabledSkills": [] },
   "prepNotes": null,
   "transcription": {
     "provider": "openai", "model": "gpt-4o-transcribe", "key": "standard",
