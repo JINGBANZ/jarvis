@@ -16,6 +16,8 @@ final class GeneralSettingsView: NSView {
             let button = NSButton(title: title, target: self, action: #selector(selectTab))
             button.tag = index
             button.setButtonType(.pushOnPushOff)
+            (button.cell as? NSButtonCell)?.showsStateBy = []
+            (button.cell as? NSButtonCell)?.highlightsBy = []
             button.bezelStyle = .rounded
             button.isBordered = false
             button.wantsLayer = true

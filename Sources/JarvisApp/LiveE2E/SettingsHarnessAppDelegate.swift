@@ -18,10 +18,11 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         guard Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true,
               let index = arguments.firstIndex(of: "--settings-harness-output"),
               arguments.indices.contains(index + 1) else { throw CocoaError(.fileWriteNoPermission) }
-        output = URL(fileURLWithPath: arguments[index + 1]).standardizedFileURL
+        let requested = URL(fileURLWithPath: arguments[index + 1]).standardizedFileURL
         let base = Bundle.main.bundleURL.deletingLastPathComponent().resolvingSymlinksInPath()
             .appendingPathComponent(".jarvis/settings-harness")
-        guard output.deletingLastPathComponent() == base,
+        output = base.appendingPathComponent(requested.lastPathComponent)
+        guard requested.deletingLastPathComponent().resolvingSymlinksInPath() == base,
               output.resolvingSymlinksInPath() == output,
               FileManager.default.fileExists(atPath: output.path) else { throw CocoaError(.fileWriteNoPermission) }
         relaunch = arguments.contains("--settings-harness-relaunch")
@@ -100,7 +101,10 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         }, "General has no subtitle")
         guard let privacy = views.compactMap({ $0 as? NSButton }).first(where: { $0.title == "Privacy" }),
               let shortcutsTab = views.compactMap({ $0 as? NSButton }).first(where: { $0.title == "Shortcuts" }),
-              let toggle = views.compactMap({ $0 as? NSSwitch }).first else { throw CocoaError(.coderValueNotFound) }
+              let toggle = views.compactMap({ $0 as? NSSwitch }).first,
+              let privacyCard = views.compactMap({ $0 as? SettingsCardView }).first(where: {
+                  descendants($0).contains { $0 === toggle }
+              }) else { throw CocoaError(.coderValueNotFound) }
         let rows = views.compactMap { $0 as? ShortcutSettingsRowView }
         func mouseControlsAreCentered() -> Bool {
             rows.allSatisfy { row in
@@ -132,6 +136,9 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         try require(recorder.accessibilityValue() as? String == originalValue
                     && recorder.accessibilityHelp()?.contains("Esc cancels") == true,
                     "keyboard recording retains accessible binding and instructions")
+        recorder.stopRecording()
+        try require(rowShows("Mouse shortcut inactive"), "cancelling keyboard recording restores the mouse warning")
+        recorder.performClick(nil)
         guard let key = NSEvent.keyEvent(with: .keyDown, location: .zero,
             modifierFlags: [.command, .option], timestamp: 0, windowNumber: window.windowNumber,
             context: nil, characters: "n", charactersIgnoringModifiers: "n", isARepeat: false, keyCode: 45) else {
@@ -153,6 +160,7 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         try require(newValue != originalValue && recorder.accessibilityValue() as? String == newValue
                     && recorder.accessibilityHelp()?.contains(newValue) == true,
                     "successful keyboard rebind updates accessibility")
+        try require(rowShows("Mouse shortcut inactive"), "successful keyboard recording restores the mouse warning")
         hotkeys[0].combination = originalCombination
         shortcuts.didBecomeActive()
         recorder.performClick(nil)
@@ -184,13 +192,23 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
                     row.subviews.allSatisfy { $0.frame.minX >= 0 && $0.frame.maxX <= row.bounds.width + 1 }
                 }, "shortcut controls fit at minimum and default sizes")
                 try require(mouseControlsAreCentered(), "mouse controls are centered in their column")
+                try require(!privacyCard.hasAmbiguousLayout && privacyCard.frame.height > 0
+                    && (privacyCard.contentView?.subviews.filter { !$0.isHidden } ?? []).allSatisfy {
+                        privacyCard.bounds.contains($0.convert($0.bounds, to: privacyCard))
+                    }, "Privacy card has a determinate height and contains its controls")
                 try snapshot(background, name: "\(tab.title.lowercased())-\(Int(size.width))")
+                tab.highlight(true)
+                try snapshot(background, name: "\(tab.title.lowercased())-\(Int(size.width))-pressed")
+                tab.highlight(false)
             }
         }
         background.appearance = NSAppearance(named: .darkAqua)
         for tab in [shortcutsTab, privacy] {
             tab.performClick(nil)
             try snapshot(background, name: "\(tab.title.lowercased())-dark")
+            tab.highlight(true)
+            try snapshot(background, name: "\(tab.title.lowercased())-dark-pressed")
+            tab.highlight(false)
         }
         if relaunch { return }
         let traffic = SettingsHarnessTraffic()

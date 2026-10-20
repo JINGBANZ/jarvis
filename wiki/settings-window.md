@@ -300,8 +300,8 @@ preview is running. The plain setters
 ## General
 
 The hub's **General** button opens one page with **Shortcuts** and **Privacy** tabs on the left.
-Shortcuts opens first. Changing tabs keeps their labels in place and cancels shortcut recording
-without changing any binding.
+Shortcuts opens first. Tab icons stay flat when selected or pressed. Changing tabs keeps their labels
+in place and cancels shortcut recording without changing any binding.
 
 Privacy contains **Save conversations with AI providers**, with one short explanation and the note
 **Applies next session. Local Jarvis history is unchanged.** The switch persists immediately through
@@ -373,9 +373,10 @@ binding active, and that row's detail turns into an amber warning until the page
 Mouse bindings reject duplicates across all five Jarvis actions, including temporarily unavailable
 actions, and keep the previous binding on failure. Other applications' mouse bindings cannot be
 reserved or checked through Carbon. If a binding could not become active at launch, its warning
-shows on every visit. Warnings live in the corresponding row. Starting keyboard recording clears a
-stale mouse warning so instructions and collision feedback stay visible; a subsequent mouse
-operation shows its own feedback. The Overlay Box shows
+shows on every visit. Warnings live in the corresponding row. Keyboard recording instructions and
+collision feedback take priority over a saved mouse warning; cancelling or successfully completing
+keyboard recording restores that warning. A subsequent mouse operation shows its own feedback.
+The Overlay Box shows
 semibold hints in its upper section and the reply's detail in the lower one; a hint whose reply
 carried a detail ends with a dim marker. Both use the configured text size, and the appearance
 preview shows an example.

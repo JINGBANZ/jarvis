@@ -11,6 +11,7 @@ final class ShortcutSettingsRowView: NSView {
     private var keyboardColor: NSColor?
     private var mouseNotice: String?
     private var mouseColor: NSColor?
+    private var prioritizesKeyboard = false
 
     static func height(for width: CGFloat) -> CGFloat { width < 530 ? 110 : 76 }
 
@@ -30,21 +31,24 @@ final class ShortcutSettingsRowView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func setDetail(_ text: String, color: NSColor? = nil) {
+    func setDetail(_ text: String, color: NSColor? = nil, prioritizesKeyboard: Bool = false) {
         keyboardDetail = text
         keyboardColor = color
+        self.prioritizesKeyboard = prioritizesKeyboard
         renderDetail()
     }
 
     func setMouseNotice(_ text: String?, color: NSColor?) {
         mouseNotice = text
         mouseColor = color
+        prioritizesKeyboard = false
         renderDetail()
     }
 
     private func renderDetail() {
-        detailLabel.stringValue = mouseNotice ?? keyboardDetail
-        detailLabel.textColor = (mouseNotice == nil ? keyboardColor : mouseColor) ?? SettingsTheme.mutedText
+        let notice = prioritizesKeyboard ? nil : mouseNotice
+        detailLabel.stringValue = notice ?? keyboardDetail
+        detailLabel.textColor = (notice == nil ? keyboardColor : mouseColor) ?? SettingsTheme.mutedText
         detailLabel.setAccessibilityHelp(detailLabel.stringValue)
     }
 
