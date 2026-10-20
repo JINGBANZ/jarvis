@@ -194,7 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             connectionsSection,
             ToolsSection(brainPreferences: brain.preferences, referencePreferences: referencePreferences, onChanged: { [weak self] in self?.configureReferences() }),
             SkillsSection(preferences: brain.preferences),
-            hotkeySection,
+            GeneralSection(preferences: brain.preferences, shortcuts: hotkeySection),
             ActivitySection(viewer: activityViewer),
         ]
         settingsHub = SettingsHubModel(

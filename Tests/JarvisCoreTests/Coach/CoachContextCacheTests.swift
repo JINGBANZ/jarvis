@@ -13,10 +13,17 @@ import JarvisBrainProviders
         .compose(disabledTools: [], referencesAdmitted: true, skills: [codingSkill])
     }
 
-    @Test(arguments: [BrainProvider.openAI, .claudeSubscription, .gemini])
-    func completedAttemptsPreserveTheirProviderVisibleInitialPrefixes(provider: BrainProvider) async throws {
+    @Test(arguments: [BrainProvider.openAI, .claudeSubscription, .gemini], [false, true])
+    func completedAttemptsPreserveTheirProviderVisibleInitialPrefixes(
+        provider: BrainProvider, saveConversations: Bool
+    ) async throws {
+        let reasoning: [[String: Any]] = provider == .openAI ? [[
+            "type": "reasoning", "id": "rs_seed", "summary": [],
+            "encrypted_content": "synthetic-opaque-reasoning",
+        ]] : []
         let script = try [
-            call("load_skill", id: "a1_skill", arguments: ["name": "coding"], provider: provider),
+            call("load_skill", id: "a1_skill", arguments: ["name": "coding"], provider: provider,
+                 preceding: reasoning),
             call("load_tool", id: "a1_tool", arguments: ["name": "search_references"], provider: provider),
             call("call_tool", id: "a1_search", arguments: [
                 "name": "search_references", "arguments": "{\"query\":\"ledger idempotency\"}"], provider: provider),
@@ -37,7 +44,8 @@ import JarvisBrainProviders
                   text: "Commit the deduplicated effect and checkpoint atomically.")])
         let driver = CoachDriver(
             config: .default, transcript: transcript,
-            route: ConfiguredBrainRoute(targets: [.init(target: target(provider), brain: accessor(transport, provider: provider))]),
+            route: ConfiguredBrainRoute(targets: [.init(target: target(provider), brain: accessor(
+                transport, provider: provider, saveConversations: saveConversations))]),
             screen: UnavailableScreen(), overlay: overlay, clock: ManualClock(now: 100),
             automaticAttemptDelay: { _ in }, capabilities: capabilities, documents: search,
             sessionContext: try SessionContext(documentCatalog: .bounded([.init(documentID: search.documentID, name: "synthetic-ledger.md", format: "md")])))
@@ -59,6 +67,19 @@ import JarvisBrainProviders
         let captured = await transport.captured
         #expect(captured.allSatisfy { $0.contextRevision == 0 && $0.contextRewriteReason == nil })
         let requests = try captured.map { try object($0.body) }
+        if provider != .claudeSubscription {
+            #expect(requests.allSatisfy { $0["store"] as? Bool == saveConversations })
+        }
+        if provider == .openAI {
+            for index in requests.indices.dropFirst() where captured[index].attempt == 1 {
+                let request = requests[index]
+                let replayed = try #require(items(request, provider: provider).first {
+                    $0["id"] as? String == "rs_seed"
+                })
+                #expect(try canonical(replayed) == canonical(reasoning[0]))
+                #expect(request["previous_response_id"] == nil)
+            }
+        }
         let initialIndices = captured.indices.filter { captured[$0].phase == .initial }
         #expect(initialIndices.count == 8)
         let initialRequests = initialIndices.map { requests[$0] }
@@ -128,8 +149,10 @@ import JarvisBrainProviders
         #expect(try output("retry_tool", in: object(retryTool.body), provider: provider).contains(searchReferencesTool.parametersJSON))
     }
 
-    @Test(arguments: [BrainProvider.openAI, .claudeSubscription, .gemini])
-    func rawReasoningReplaysWithinTheAttemptAndNormalizesAtCommit(provider: BrainProvider) async throws {
+    @Test(arguments: [BrainProvider.openAI, .claudeSubscription, .gemini], [false, true])
+    func rawReasoningReplaysWithinTheAttemptAndNormalizesAtCommit(
+        provider: BrainProvider, saveConversations: Bool
+    ) async throws {
         let reasoning: [String: Any] = switch provider {
         case .claudeSubscription: ["type": "thinking", "thinking": "synthetic reasoning", "signature": "synthetic-signature"]
         case .gemini: ["type": "thought", "signature": "synthetic-signature"]
@@ -141,7 +164,7 @@ import JarvisBrainProviders
             .response(try speak("raw_speak", provider: provider)),
             .response(try speak("next_speak", provider: provider))])
         let runner = makeRunner()
-        let brain = accessor(transport, provider: provider)
+        let brain = accessor(transport, provider: provider, saveConversations: saveConversations)
         guard case .completed = await run(runner, brain: brain, provider: provider),
               case .completed = await run(runner, brain: brain, provider: provider) else {
             Issue.record("expected completed attempts"); return
@@ -204,8 +227,10 @@ import JarvisBrainProviders
         return .init(provider: provider, modelID: modelID)
     }
 
-    private func accessor(_ transport: ContextCacheTransport, provider: BrainProvider) -> BrainAccessor {
+    private func accessor(_ transport: ContextCacheTransport, provider: BrainProvider,
+                          saveConversations: Bool = false) -> BrainAccessor {
         BrainAccessor(provider: provider, apiKey: "synthetic-key", model: target(provider).modelID,
+                      saveConversations: saveConversations,
                       send: { request in try await transport.send(request, context: CoachingRequestAttribution.current) })
     }
 

@@ -93,6 +93,14 @@ public final class BrainPreferences {
         set { defaults.set(newValue.rawValue, forKey: Defaults.Brain.effortKey) }
     }
 
+    public var saveConversations: Bool {
+        get {
+            defaults.object(forKey: Defaults.Brain.saveConversationsKey) as? Bool
+                ?? Defaults.Brain.saveConversations
+        }
+        set { defaults.set(newValue, forKey: Defaults.Brain.saveConversationsKey) }
+    }
+
     /// Stores what is off, so a tool added in a later version starts on. Required tools are dropped
     /// on write.
     public var disabledTools: Set<String> {

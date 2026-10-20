@@ -1,7 +1,7 @@
 import Foundation
 import JarvisCore
 
-/// Stateless (`store: false`). The live API enforces rules its reference omits; each is noted
+/// The live API enforces rules its reference omits; each is noted
 /// where it applies and pinned by a test. See wiki/architecture.md.
 struct InteractionsWireFormat: BrainWireFormat {
     /// Google documents this signature for injected calls on generateContent, and Interactions
@@ -17,6 +17,7 @@ struct InteractionsWireFormat: BrainWireFormat {
     let model: String
     let reasoningEffort: String
     let maxOutputTokens: Int
+    var store = false
 
     /// Gemini delivers a function call whole even when streaming, so the reply is read as one body.
     func makeStreamDecoder() -> (any BrainStreamDecoder)? { nil }
@@ -77,7 +78,7 @@ struct InteractionsWireFormat: BrainWireFormat {
             "thinking_summaries": "none",
             "max_output_tokens": maxOutputTokens,
         ]
-        var body: [String: Any] = ["model": model, "input": input, "store": false]
+        var body: [String: Any] = ["model": model, "input": input, "store": store]
         var verbatim = VerbatimJSON()
         if !tools.isEmpty {
             body["tools"] = try tools.map { tool -> [String: Any] in

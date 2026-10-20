@@ -22,7 +22,7 @@ final class SettingsHomeView: NSView {
         (.connections, "Connections", "link"),
         (.tools, "Tools", "wrench.and.screwdriver"),
         (.skills, "Skills", "sparkles"),
-        (.shortcuts, "Shortcuts", "command"),
+        (.general, "General", "gearshape"),
         (.activity, "Activity", "waveform.path.ecg"),
     ]
 

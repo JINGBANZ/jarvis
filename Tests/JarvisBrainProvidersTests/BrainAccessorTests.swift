@@ -286,18 +286,18 @@ private func speakResponseBody(arguments: String) -> Data {
         #expect(body.contains("\"call_id\":\"call_1\""))
         #expect(body.contains("\"input_image\""))
         #expect(body.contains("\"reasoning\""))
-        #expect(body.contains("\"store\":true"))   // keeps requests inspectable in the OpenAI dashboard
+        #expect(body.contains("\"store\":false"))
         #expect(body.contains("\"max_output_tokens\""))
         #expect(body.contains("\"parallel_tool_calls\":false"))
         #expect(body.contains("\"name\":\"capture_screen\""))
     }
 
-    /// A consumer subscription has no dashboard to inspect retained requests, so none are stored.
+    /// The subscription helper requires storage off regardless of the caller's preference.
     @Test func aSubscriptionTargetAsksForNoRetention() async throws {
         let box = CapturedBody()
         let client = BrainAccessor(
             provider: .codexSubscription, apiKey: "proxy-key", model: "gpt-5.5",
-            reasoningEffort: "low",
+            reasoningEffort: "low", saveConversations: true,
             send: sending { req in box.set(req.httpBody); return (Data(#"{"output":[]}"#.utf8), http(200)) })
         _ = try await client.respond(messages: [.user("transcript")], tools: coachTools)
         let body = String(data: box.get() ?? Data(), encoding: .utf8) ?? ""

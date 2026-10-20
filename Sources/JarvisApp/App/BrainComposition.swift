@@ -22,6 +22,7 @@ final class BrainComposition {
     private let secrets: any SecretStore
     private unowned let host: BrainCompositionHost
     private let send: BrainAccessor.Sender?
+    private var sessionSavesConversations = Defaults.Brain.saveConversations
 
     init(
         secrets: any SecretStore,
@@ -41,6 +42,7 @@ final class BrainComposition {
     /// unavailable, and an early edit would then record a change away from a provider that never
     /// ran.
     func sessionWillStart() {
+        sessionSavesConversations = preferences.saveConversations
         activeBrainTarget = nil
         pendingBrainChangeFrom = nil
     }
@@ -96,6 +98,7 @@ final class BrainComposition {
     ) -> ConfiguredBrainRoute {
         let factory = BrainClientFactory(
             keys: keys, proxyEndpoint: proxy?.endpoint, traffic: host.liveSessionEvidence,
+            saveConversations: sessionSavesConversations,
             send: send)
         let availability = availability(for: route, proxy: proxy, keys: keys)
         let targets = route.targets.map { target -> ConfiguredBrainTarget in

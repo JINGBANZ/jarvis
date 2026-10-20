@@ -7,8 +7,7 @@ final class MouseHotkeyBindingView: NSObject {
     private let controller: MouseHotkeyController
     private var recorder: MouseHotkeyRecorderButton?
     private var clearButton: NSButton?
-    private var label: NSTextField?
-    private var row: SettingsRowView?
+    var onNotice: ((String?, NSColor?) -> Void)?
     private var failure: String?
     private var isRecording = false
 
@@ -17,12 +16,7 @@ final class MouseHotkeyBindingView: NSObject {
         self.controller = controller
     }
 
-    func makeRow() -> SettingsRowView {
-        let label = NSTextField(labelWithString: "")
-        label.font = .systemFont(ofSize: 12, weight: .medium)
-        label.lineBreakMode = .byTruncatingTail
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        self.label = label
+    func makeControl() -> NSView {
         let recorder = MouseHotkeyRecorderButton()
         recorder.setAccessibilityLabel("Record \(preferences.shortcut.title) mouse shortcut")
         recorder.prepare = { [weak self] in
@@ -39,21 +33,19 @@ final class MouseHotkeyBindingView: NSObject {
         }
         recorder.onRecorded = { [weak self] in self?.apply($0) }
         self.recorder = recorder
-        let clear = NSButton(title: "Clear", target: self, action: #selector(clear))
+        let clear = NSButton(title: "×", target: self, action: #selector(clear))
         clear.bezelStyle = .rounded
         clear.setAccessibilityLabel("Clear \(preferences.shortcut.title) mouse shortcut")
         clearButton = clear
-        let controls = NSStackView(views: [label, recorder, clear])
+        let controls = NSStackView(views: [recorder, clear])
         controls.orientation = .horizontal
         controls.alignment = .centerY
-        controls.spacing = 8
-        recorder.setContentHuggingPriority(.required, for: .horizontal)
+        controls.spacing = 4
+        recorder.lineBreakMode = .byTruncatingMiddle
+        recorder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         clear.setContentHuggingPriority(.required, for: .horizontal)
-        let row = SettingsRowView(title: "\(preferences.shortcut.title) · Mouse", detail: "",
-            controlView: controls, controlSize: NSSize(width: 310, height: 32))
-        self.row = row
         render()
-        return row
+        return controls
     }
 
     func refresh() {
@@ -74,16 +66,20 @@ final class MouseHotkeyBindingView: NSObject {
 
     private func render() {
         clearButton?.isEnabled = preferences.mouseCombination != nil && !isRecording
-        label?.stringValue = preferences.mouseCombination.map(HotkeyKeyNames.displayString(for:)) ?? "Not set"
-        label?.setAccessibilityHelp(label?.stringValue)
+        clearButton?.isHidden = preferences.mouseCombination == nil
+        if !isRecording {
+            recorder?.title = preferences.mouseCombination.map(HotkeyKeyNames.displayString(for:)) ?? "Not set +"
+        }
+        recorder?.setAccessibilityHelp(preferences.mouseCombination.map(HotkeyKeyNames.displayString(for:))
+            ?? "Optional mouse button, with or without modifiers.")
         if isRecording {
-            row?.setDetail("Click here; left/right needs ⌘ or ⌥. Esc cancels.", color: SettingsTheme.teal)
+            onNotice?("Click here; left/right needs ⌘ or ⌥. Esc cancels.", SettingsTheme.teal)
         } else if let failure {
-            row?.setDetail(failure, color: SettingsTheme.amber)
+            onNotice?(failure, SettingsTheme.amber)
         } else if preferences.mouseCombination != nil && !controller.hasBinding(for: preferences.shortcut) {
-            row?.setDetail("Mouse shortcut inactive. Check Accessibility, then record again.", color: SettingsTheme.amber)
+            onNotice?("Mouse shortcut inactive. Check Accessibility, then record again.", SettingsTheme.amber)
         } else {
-            row?.setDetail("Optional mouse button, with or without modifiers.")
+            onNotice?(nil, nil)
         }
     }
 }

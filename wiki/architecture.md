@@ -649,7 +649,7 @@ The two detail-navigation shortcuts route directly to `OverlayBoxPanel`'s arrow 
 carry no `TriggerReason`, so browsing history never enters the coach loop, captures the screen,
 or writes a manual-hint Activity entry. They use the same session detail availability as the
 other detail shortcuts; unavailable navigation is silent. Their bindings and boundary behavior
-are defined in [Settings → Shortcuts](./settings-window.md#shortcuts).
+are defined in [General → Shortcuts](./settings-window.md#shortcuts).
 
 Keyboard shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
@@ -659,7 +659,7 @@ collision—including another Jarvis shortcut—keeps the prior working binding.
 an optional, separately persisted mouse binding. `MouseHotkeyController` uses a suppressing event tap
 with an existing Accessibility grant; `MouseShortcutRouter` matches only actions allowed in the live
 session and consumes the matched click through release. See
-[Settings → Shortcuts](./settings-window.md#shortcuts) for binding behavior and
+[General → Shortcuts](./settings-window.md#shortcuts) for binding behavior and
 [Sandbox → Data Egress](./sandbox.md#data-egress) for privacy scope.
 
 ## 3. Components
@@ -679,7 +679,7 @@ session and consumes the matched click through release. See
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
 | **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped, as the session's scrollable history. Movable, resizable, translucent, excluded from capture, and with no off switch. Its own header carries the box's controls: **collapse** on the left, which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. It is the `OverlayRendering` sink `CoachDriver` speaks to. On a streamed reply ([Latency](#latency)) the box opens a live entry on the reply's first character, stamped with that moment, and when the model writes the detail first the entry shows `Writing…` until the hint starts; each snapshot rewrites its hint text and grows its detail in the section below, `deliver` replaces both with the delivered hint and detail, and a `nil` progress removes both. A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
-| **HotkeyController / MouseHotkeyController** | Handle the coaching and detail-navigation bindings; AppDelegate routes coaching to the session and navigation to the overlay. See [Settings → Shortcuts](./settings-window.md#shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC) for keyboard; Core Graphics event tap with Accessibility permission for mouse. |
+| **HotkeyController / MouseHotkeyController** | Handle the coaching and detail-navigation bindings; AppDelegate routes coaching to the session and navigation to the overlay. See [General → Shortcuts](./settings-window.md#shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC) for keyboard; Core Graphics event tap with Accessibility permission for mouse. |
 | **OnboardingGate** | Run first-run onboarding once per install, before the rest of the app is built: one OpenAI or Gemini API key, then the three TCC grants, each step shown only when what it collects is missing. Closing the window before the end quits; completing it sets the one onboarding flag, so later launches go straight to the menu bar. `SystemAudioPermissionProbe` proves the silently enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Onboarding](#onboarding) and [§3 Permissions](#permissions). | AppKit window, `CredentialVerifier`, AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -771,7 +771,7 @@ session-plan revision so live teardown cannot produce privacy UI.
 
 Optional mouse shortcuts use the same Accessibility grant, independently of Chrome text. They require
 an existing grant and never request it; without permission, keyboard shortcuts and coaching remain
-available. See [Settings → Shortcuts](./settings-window.md#shortcuts).
+available. See [General → Shortcuts](./settings-window.md#shortcuts).
 
 The reason it happens at launch rather than at Start is the coaching context. A TCC dialog is system
 UI that no capture-exclusion trick can hide, so one arriving mid-interview is visible to whoever the
@@ -1072,9 +1072,10 @@ rather than a per-turn screenshot.
   and subsequent recall with a debug-only lower threshold. Server-side memory (a Conversations
   API conversation, or `previous_response_id` threading) is deliberately not used: it can only grow,
   so every screenshot and reply is re-billed as input on every later turn of a long session, and its
-  single-writer lock turns one slow turn into minutes of `conversation_locked` silence. OpenAI API requests are sent `store:true`
-  so they stay inspectable in the OpenAI dashboard for debugging — the retention tradeoff is
-  documented in [sandbox.md](./sandbox.md).
+  single-writer lock turns one slow turn into minutes of `conversation_locked` silence. Optional
+  provider storage is off by default and follows the session-frozen preference in
+  [General → Privacy](./settings-window.md#general); the retention boundary is documented in
+  [sandbox.md](./sandbox.md#provider-conversation-storage).
 - **Coaching guidance is loaded on demand, not chosen at Start** (see
   [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
   policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
@@ -1361,9 +1362,9 @@ is about 60 MB on disk and 20 MB per update.
   trusted on its own, and the runner checks every reply against the choice it asked for. Claude's
   reasoning floors at `low`, because `none` disables thinking and Fable 5.1 and Opus 5.5 reject that.
 - **What the helper changes on the wire.** On the Codex path it deletes `max_output_tokens`, so the
-  workload timeout is the output bound; forces `store: false`, which Jarvis also sends for every
-  subscription target, so the dashboard retention described in
-  [sandbox.md](./sandbox.md#data-egress) never covers plan traffic; forces `parallel_tool_calls: true`,
+  workload timeout is the output bound; forces `store: false`, which Jarvis also sends on that
+  route regardless of the General preference (the Claude Messages route has no equivalent field);
+  forces `parallel_tool_calls: true`,
   which the runner answers by running the first call; and reuses `prompt_cache_key` as the upstream
   session id, which is why Jarvis keeps that key stable. On the Claude route the request is already
   Anthropic's own shape
@@ -1443,9 +1444,9 @@ sends coaching to the stable version of Google's Interactions API
 (`BrainProviderDescriptor.geminiInteractionsEndpoint`) with the Gemini key saved in Connections. The
 key rides only in a request header, which the descriptor's auth scheme names and
 [`BrainAccessor`](../Sources/JarvisBrainProviders/Accessor/BrainAccessor.swift) sets. Brain requests
-never follow a redirect, so the key never leaves in a URL or goes to a 3xx target. Requests are
-stateless, so Google keeps no interaction for later reads, and carry the whole conversation, as every
-target's do.
+never follow a redirect, so the key never leaves in a URL or goes to a 3xx target. Requests carry the
+whole conversation, as every target's do, without server-side threading. Optional saved interactions
+follow [General → Privacy](./settings-window.md#general) and are off by default.
 
 Jarvis calls Google directly rather than through a gateway. The bundled helper would need the key
 copied into its configuration file, drops Gemini's narrowed tool choice, and marks every
@@ -1733,9 +1734,10 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   is the owner-only, bounded per-session record: Activity (spoken tips, deliberate-silence outcomes,
   failed-action and stop/degrade notices carrying the provider's redacted message, transcribed
   lines, and the screenshots the model saw), the coaching-attempt provenance needed to attribute those finalized lines, and redacted wire
-  traffic. Raw mic audio and a separate live-transcript archive are never persisted. OpenAI API
-  requests are sent `store:true`, so what the model saw does remain inspectable (and retained) server-side at
-  OpenAI for debugging (see [sandbox.md](./sandbox.md)).
+  traffic. Raw mic audio and a separate live-transcript archive are never persisted. Optional
+  provider conversation storage is off by default; this does not change local history or the
+  provider's separate abuse-monitoring retention (see
+  [sandbox.md](./sandbox.md#provider-conversation-storage)).
 - **Behavioral restraint (model-governed):** there is **no cooldown or rate cap during healthy operation**. Every
   substantive utterance — from either speaker; only clear non-semantic hesitation sounds are removed
   as pure cost — reaches the brain, and the brain decides whether it has anything worth

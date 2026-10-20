@@ -20,6 +20,18 @@ import Foundation
         #expect(p.fallbackTargets.isEmpty)
         #expect(p.route.targets == [p.primaryTarget])
         #expect(p.primaryTarget.provider == Defaults.Brain.provider)
+        #expect(!p.saveConversations)
+    }
+
+    @Test func conversationStorageIsOptInForExistingInstallsAndSurvivesReload() {
+        let defaults = freshDefaults()
+        defaults.set("gpt-5.5", forKey: Defaults.Brain.modelKey(for: .openAI))
+        let preferences = BrainPreferences(defaults: defaults)
+        #expect(!preferences.saveConversations)
+        preferences.saveConversations = true
+        #expect(BrainPreferences(defaults: defaults).saveConversations)
+        preferences.saveConversations = false
+        #expect(!BrainPreferences(defaults: defaults).saveConversations)
     }
 
     /// Storing what is off keeps a tool added in a later version on by default.

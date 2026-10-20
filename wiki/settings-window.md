@@ -49,8 +49,8 @@ Settings" for the Window menu and VoiceOver), so the window buttons sit on the b
 lay out in the window's content layout rect. Navigating never resizes the window; whatever size the
 user set stays. Every page uses `SettingsPageView`, so page margins and headers expand consistently
 while cards and trailing controls adapt to the available width. Brain, Ear, Connections, Tools, and
-Shortcuts stack their cards in `SettingsCardStack`; Mouth, Skills, and the hub scroll their own
-documents; Eye and Activity use the page shell without an outer scroll view.
+General's Shortcuts tab use `SettingsCardStack`; Mouth, Skills, and the hub scroll their own documents;
+Eye and Activity use the page shell without an outer scroll view.
 
 ### Shared visual system
 
@@ -116,7 +116,7 @@ VoiceOver reads as "<Part> settings" with the slot's value and detail. Hovering 
 lights its part of the head and its connector; hovering a part lights its slot.
 
 **Dock.** Five chamfered buttons (`HomeDockButton`) under the head open **Connections**, **Tools**,
-**Skills**, **Shortcuts**, and **Activity**.
+**Skills**, **General**, and **Activity**.
 
 **Layouts.** A window at least 780×560 shows the prototype's stage: the robot in the middle, Brain
 and Ear slots on the left, Eye and Mouth on the right, connector lines to their parts, and the dock
@@ -206,7 +206,7 @@ pages it moves.
 | `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts saved managed API keys. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | References, with its switch and its list of local files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
-| `HotkeySection` | **Shortcuts**: "Ask me for help, or step through my details." | One card with a row each for **Give me a hint**, **Explain more**, **Show code**, **Previous detail**, and **Next detail**: keyboard keycaps and **Record**, an optional mouse row with **Record**/**Clear**, and per-row failure feedback ([Shortcuts](#shortcuts)). |
+| `GeneralSection` | **General**: "Shortcuts and privacy." | Left-side **Shortcuts** and **Privacy** tabs. Shortcuts retain immediate keyboard/mouse binding edits; Privacy owns optional provider conversation storage, applied next session ([General](#general)). |
 | `ActivitySection` | **Activity**: "What I heard and said, session by session." | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**, which opens a menu of the installed Claude Code / Codex CLIs; the chosen one runs the sole `AgenticEvaluator` over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
 `AppDelegate` builds the hub model, the hub, and the section list at launch and passes them to
@@ -297,6 +297,26 @@ preview is running. The plain setters
 (`setFontSize`/`setBackgroundOpacity`/`setOpacity`) only change appearance and don't touch
 `sharingType`. See [overlay-invisibility.md](./overlay-invisibility.md).
 
+## General
+
+The hub's **General** button opens one page with **Shortcuts** and **Privacy** tabs on the left.
+Shortcuts opens first. Changing tabs cancels shortcut recording without changing any binding.
+
+Privacy contains **Save conversations with AI providers**, with one short explanation and the note
+**Applies next session. Local Jarvis history is unchanged.** The switch persists immediately through
+`BrainPreferences`; its key and default live in `Defaults.Brain`. It is off for new and existing
+installs unless explicitly enabled. Start freezes the value for coaching and summarization, and
+client rebuilds during a running session keep that value. The provider storage and retention
+boundaries are defined in [sandbox.md](./sandbox.md#provider-conversation-storage).
+
+`./scripts/run-settings-tests.sh` builds and launches the signed development app twice with a
+dedicated preference domain. It renders the real General page off screen at default/minimum sizes
+and in dark mode, checks shortcut descriptions and recording cancellation, changes the Privacy
+switch, and verifies persistence after relaunch. Synthetic provider traffic exercises storage flags
+across session changes and client rebuilds. Screenshots and results stay inside the owner-only
+`.jarvis/settings-harness/` directory. This check uses no real audio, screen, or provider requests;
+the [live cache scenario](./live-e2e-tests.md#cache-regression-window) separately verifies reuse.
+
 ## Shortcuts
 
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
@@ -309,14 +329,16 @@ scheduling behavior.
 of history, while stopped, or with the box disabled or collapsed, they silently do nothing. Stepping
 back holds the chosen detail; reaching the newest resumes following incoming details.
 
-The page is one scrolling card with a keyboard row (`HotkeyBindingView`) and an optional mouse row
-(`MouseHotkeyBindingView`) for each action. The keyboard row shows the action's name and purpose,
-keycaps (`ShortcutKeycapsView`), and **Record** (`HotkeyRecorderButton`). Keyboard recording requires
+General's Shortcuts tab is one scrolling card with a row for each action. Each row retains the
+action's name and brief purpose, with keyboard and optional mouse binding buttons alongside.
+Click the current keyboard binding (`HotkeyRecorderButton`) to record a replacement. Narrow windows
+place both controls below the description. Keyboard recording requires
 Command or Option; Escape cancels. Every action keeps its keyboard binding when a mouse binding is
 added or cleared. Successful edits take effect immediately and persist independently through
 `HotkeyPreferences`; defaults and storage keys live in `Defaults.Hotkey`.
 
-The mouse row starts at **Not set** and offers **Record** and **Clear**. Press Record, then click in
+The mouse button starts at **Not set +**; click it to record, or **×** to clear a saved binding.
+After starting recording, click in
 Jarvis with the desired button and modifiers. Middle and side buttons work alone or with modifiers;
 left and right clicks require Command or Option to protect ordinary clicking. The modifier set must
 match exactly. Escape, an ordinary unmodified primary click, focus loss, leaving the page, or closing
@@ -809,8 +831,9 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisScreenCapture/ScreenTextResolver.swift` | Combines optional Accessibility text with current-view OCR |
 | `Sources/JarvisApp/Settings/OverlaySurfaceSettingsView.swift` | The Overlay Box card and its slider/readout rows |
 | `Sources/JarvisApp/Settings/NSScreen+DisplayTitles.swift` | Display naming for the dropdown's entire-display entries |
-| `Sources/JarvisApp/Settings/HotkeySection.swift`, `HotkeyBindingView.swift` | Shortcuts page and one shortcut's row |
-| `Sources/JarvisApp/Settings/HotkeyRecorderButton.swift`, `ShortcutKeycapsView.swift` | The keyboard Record button and the drawn keycaps |
+| `Sources/JarvisApp/Settings/GeneralSection.swift`, `GeneralSettingsView.swift` | General's left-side tabs and Privacy switch |
+| `Sources/JarvisApp/Settings/HotkeySection.swift`, `HotkeyBindingView.swift`, `ShortcutSettingsRowView.swift` | Shortcut bindings, descriptions, and adaptive rows |
+| `Sources/JarvisApp/Settings/HotkeyRecorderButton.swift` | The keyboard binding and recording button |
 | `Sources/JarvisApp/Settings/MouseHotkeyBindingView.swift`, `MouseHotkeyRecorderButton.swift` | Optional mouse binding controls and cancellable recording |
 | `Sources/JarvisApp/Shortcuts/MouseHotkeyController.swift` | Permission-aware mouse event tap and dispatch |
 | `Sources/JarvisCore/Config/MouseHotkeyCombination.swift`, `MouseShortcutRouter.swift` | Mouse validation, duplicate rejection, exact matching, and click consumption |
@@ -822,7 +845,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisCore/Brain/ReasoningEffort.swift` | The four effort levels |
 | `Sources/JarvisEvaluation/AgenticEvaluator.swift` | Read-only Claude Code / Codex session audit invoked by Activity and `EvalPrep` |
 | `Sources/JarvisCore/Config/Defaults.swift` | Every user setting's key, default, and valid range |
-| `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence + route validation |
+| `Sources/JarvisCore/Config/BrainPreferences.swift` | UserDefaults persistence, provider storage preference, and route validation |
 | `Sources/JarvisCore/Config/ReferencePreferences.swift` | The reference sources Tools lists |
 | `Sources/JarvisCore/Coach/CoachDriver.swift` | Between-attempt route application and attempt orchestration |
 | `Sources/JarvisCore/Config/ScreenCapturePreferences.swift` | Capture scope + display persistence + clamping |

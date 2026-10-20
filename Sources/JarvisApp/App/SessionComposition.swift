@@ -162,6 +162,7 @@ final class SessionComposition {
                 ? "(none)" : capabilities.skills.map(\.name).joined(separator: ","))
             + " switched-off=" + (honoredDisabled.isEmpty
                 ? "(none)" : honoredDisabled.joined(separator: ",")))
+        brain.sessionWillStart()
         let configuredRoute = brain.makeConfiguredRoute(
             inputs.brainRoute,
             proxy: proxy,
@@ -327,7 +328,6 @@ final class SessionComposition {
         self.audioSource = source
         self.turns = turns
         self.coachDriver = driver
-        brain.sessionWillStart()
         micConnectionState = .connecting
         systemConnectionState = .connecting
         observeReadiness([

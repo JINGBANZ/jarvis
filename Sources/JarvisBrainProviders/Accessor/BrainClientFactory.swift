@@ -10,17 +10,20 @@ public struct BrainClientFactory: Sendable {
     private let keys: [Credential: String]
     private let proxyEndpoint: LocalProxySupervisor.Endpoint?
     private let traffic: (any BrainTrafficAuditing)?
+    private let saveConversations: Bool
     private let send: BrainAccessor.Sender?
 
     public init(
         keys: [Credential: String],
         proxyEndpoint: LocalProxySupervisor.Endpoint?,
         traffic: (any BrainTrafficAuditing)?,
+        saveConversations: Bool = Defaults.Brain.saveConversations,
         send: BrainAccessor.Sender? = nil
     ) {
         self.keys = keys
         self.proxyEndpoint = proxyEndpoint
         self.traffic = traffic
+        self.saveConversations = saveConversations
         self.send = send
     }
 
@@ -53,6 +56,7 @@ public struct BrainClientFactory: Sendable {
             timeout: BrainWorkloadTimeout.liveCoaching,
             maxOutputTokens: effort.maxOutputTokens,
             minimumReasoningEffort: provider.reasoningEffortFloor,
+            saveConversations: saveConversations,
             stream: true,
             traffic: traffic, trafficTag: "coach", send: send)
         let summarizer = BrainAccessor(
@@ -61,6 +65,7 @@ public struct BrainClientFactory: Sendable {
             reasoningEffort: ReasoningEffort.low.rawValue, endpoint: endpoint,
             timeout: BrainWorkloadTimeout.historyCompaction, maxOutputTokens: 2_048,
             minimumReasoningEffort: provider.reasoningEffortFloor,
+            saveConversations: saveConversations,
             traffic: traffic, trafficTag: "summarizer", send: send)
         return Clients(coach: coach, summarizer: summarizer)
     }
