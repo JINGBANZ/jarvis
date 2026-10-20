@@ -8,8 +8,7 @@ struct ResponsesWireFormat: BrainWireFormat {
     let model: String
     let reasoningEffort: String
     let maxOutputTokens: Int
-    /// True deliberately retains transcripts and screenshots at OpenAI for dashboard debugging
-    /// (wiki/sandbox.md); subscription targets pass false so a helper bump can't turn it back on.
+    /// Subscription targets keep storage off because the helper cannot enable it upstream.
     let store: Bool
     let stream: Bool
 

@@ -48,9 +48,24 @@ private func referenceHarnessDelegate() -> (any NSApplicationDelegate)? {
     #endif
 }
 
+@MainActor
+private func settingsHarnessDelegate() -> (any NSApplicationDelegate)? {
+    #if JARVIS_LIVE_E2E
+    guard CommandLine.arguments.contains("--settings-harness") else { return nil }
+    do { return try SettingsHarnessAppDelegate() } catch {
+        fputs("Settings harness: invalid development invocation\n", stderr)
+        exit(2)
+    }
+    #else
+    return nil
+    #endif
+}
+
 let app = NSApplication.shared
 let delegate: any NSApplicationDelegate
-if let references = referenceHarnessDelegate() {
+if let settings = settingsHarnessDelegate() {
+    delegate = settings
+} else if let references = referenceHarnessDelegate() {
     delegate = references
 } else if let capturePrivacy = capturePrivacyDelegate() {
     delegate = capturePrivacy

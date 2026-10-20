@@ -8,13 +8,15 @@ import JarvisCore
     func requests(
         for target: BrainTarget,
         keys: [Credential: String] = [.openAIAPIKey: "sk-openai"],
-        effort: ReasoningEffort = .none
+        effort: ReasoningEffort = .none,
+        saveConversations: Bool = false
     ) async throws -> (coach: URLRequest, summarizer: URLRequest) {
         let captured = CapturedRequests()
         let factory = BrainClientFactory(
             keys: keys,
             proxyEndpoint: .init(baseURL: URL(string: "http://127.0.0.1:4555")!, key: "launch-key"),
             traffic: nil,
+            saveConversations: saveConversations,
             send: sending { request in
                 captured.append(request)
                 let reply = request.url?.path.hasSuffix("/v1/messages") == true
@@ -42,12 +44,28 @@ import JarvisCore
         #expect(sent.coach.value(forHTTPHeaderField: "Authorization") == "Bearer sk-openai")
         #expect(try body(sent.coach)["model"] as? String == "gpt-6-astra")
         #expect((try body(sent.coach)["reasoning"] as? [String: Any])?["effort"] as? String == "low")
-        #expect(try body(sent.coach)["store"] as? Bool == true)
+        #expect(try body(sent.coach)["store"] as? Bool == false)
         #expect(try body(sent.coach)["stream"] as? Bool == true)
         #expect(sent.coach.timeoutInterval == BrainWorkloadTimeout.liveCoaching)
         #expect(try body(sent.summarizer)["model"] as? String == "gpt-5.4-mini")
         #expect(try body(sent.summarizer)["stream"] == nil, "the summarizer's reply is read whole")
         #expect(sent.summarizer.timeoutInterval == BrainWorkloadTimeout.historyCompaction)
+    }
+
+    @Test(arguments: BrainProvider.allCases, [false, true])
+    func storageChoiceReachesBothClientsWithoutChangingSubscriptionPolicies(
+        provider: BrainProvider, save: Bool
+    ) async throws {
+        let target = BrainTarget(provider: provider, modelID: BrainModelCatalog.defaultModel(for: provider).id)
+        let sent = try await requests(for: target, saveConversations: save)
+        for request in [sent.coach, sent.summarizer] {
+            let payload = try body(request)
+            switch provider {
+            case .openAI, .gemini: #expect(payload["store"] as? Bool == save)
+            case .codexSubscription: #expect(payload["store"] as? Bool == false)
+            case .claudeSubscription: #expect(payload["store"] == nil)
+            }
+        }
     }
 
     @Test func subscriptionTargetsCallTheHelperWithTheLaunchKey() async throws {

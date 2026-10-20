@@ -29,6 +29,7 @@ public struct BrainAccessor: BrainClient, Sendable {
                 // Reasoning plus output budget: it must track the effort or the run truncates.
                 maxOutputTokens: Int = Defaults.Brain.effort.maxOutputTokens,
                 minimumReasoningEffort: ReasoningEffort? = nil,
+                saveConversations: Bool = Defaults.Brain.saveConversations,
                 stream: Bool = false,
                 traffic: (any BrainTrafficAuditing)? = nil,
                 trafficTag: String = "coach",
@@ -50,12 +51,14 @@ public struct BrainAccessor: BrainClient, Sendable {
         case .responses:
             wire = ResponsesWireFormat(
                 model: model, reasoningEffort: effort, maxOutputTokens: cap,
-                store: !provider.servedByLocalProxy, stream: stream)
+                store: saveConversations && !provider.servedByLocalProxy, stream: stream)
         case .messages:
             wire = MessagesWireFormat(
                 model: model, reasoningEffort: effort, maxOutputTokens: cap, stream: stream)
         case .interactions:
-            wire = InteractionsWireFormat(model: model, reasoningEffort: effort, maxOutputTokens: cap)
+            wire = InteractionsWireFormat(
+                model: model, reasoningEffort: effort, maxOutputTokens: cap,
+                store: saveConversations)
         }
         self.endpoint = endpoint
         self.timeout = timeout

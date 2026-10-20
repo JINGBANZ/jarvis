@@ -9,8 +9,7 @@ final class HotkeyBindingView: NSObject {
     private let hasActiveHotkey: () -> Bool
     private let applyCombination: (HotkeyCombination) -> HotkeyRegistrationOutcome
 
-    private var row: SettingsRowView?
-    private var keycaps: ShortcutKeycapsView?
+    private var row: ShortcutSettingsRowView?
     private var recorder: HotkeyRecorderButton?
     /// A rejected rebind's warning stays until the page is revisited.
     private var lastOutcome: HotkeyRegistrationOutcome?
@@ -26,11 +25,8 @@ final class HotkeyBindingView: NSObject {
         self.applyCombination = applyCombination
     }
 
-    func makeRow(showsSeparator: Bool) -> SettingsRowView {
+    func makeRow(mouseBinding: MouseHotkeyBindingView, showsSeparator: Bool) -> ShortcutSettingsRowView {
         let title = preferences.shortcut.title
-        let keycaps = ShortcutKeycapsView(frame: .zero)
-        keycaps.keys = HotkeyKeyNames.keyCaps(for: preferences.combination)
-        keycaps.setAccessibilityLabel("\(title) shortcut")
         let recorder = HotkeyRecorderButton()
         recorder.setAccessibilityLabel("Record \(title) shortcut")
         recorder.onRecorded = { [weak self] combination in self?.recorded(combination) }
@@ -38,30 +34,12 @@ final class HotkeyBindingView: NSObject {
             self?.isRecording = recording
             self?.render()
         }
-        self.keycaps = keycaps
         self.recorder = recorder
-
-        let controls = NSStackView(views: [keycaps, recorder])
-        controls.orientation = .horizontal
-        controls.alignment = .centerY
-        controls.spacing = 10
-        keycaps.setContentHuggingPriority(.required, for: .horizontal)
-        recorder.setContentHuggingPriority(.required, for: .horizontal)
-        let container = NSView()
-        controls.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(controls)
-        NSLayoutConstraint.activate([
-            controls.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor),
-            controls.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            controls.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-        ])
-
-        let row = SettingsRowView(
-            title: title,
-            detail: "",
-            controlView: container,
-            controlSize: NSSize(width: 240, height: 32),
+        let row = ShortcutSettingsRowView(
+            title: title, keyboard: recorder, mouse: mouseBinding.makeControl(),
             showsSeparator: showsSeparator)
+        mouseBinding.onNotice = { [weak row] text, color in row?.setMouseNotice(text, color: color) }
+        mouseBinding.refresh()
         self.row = row
         lastOutcome = nil
         render()
@@ -84,11 +62,17 @@ final class HotkeyBindingView: NSObject {
     }
 
     private func render() {
-        keycaps?.keys = HotkeyKeyNames.keyCaps(for: preferences.combination)
+        let combination = HotkeyKeyNames.displayString(for: preferences.combination)
+        recorder?.setAccessibilityValue(combination)
+        recorder?.setAccessibilityHelp(isRecording
+            ? "Current shortcut: \(combination). Press the new shortcut with ⌘ or ⌥. Esc cancels."
+            : "Current shortcut: \(combination). Activate to record a new shortcut.")
         if isRecording {
-            row?.setDetail("Press the new shortcut with ⌘ or ⌥. Esc cancels.", color: SettingsTheme.teal)
+            row?.setDetail("Press the new shortcut with ⌘ or ⌥. Esc cancels.", color: SettingsTheme.teal,
+                           prioritizesKeyboard: true)
             return
         }
+        recorder?.title = HotkeyKeyNames.keyCaps(for: preferences.combination).joined(separator: " ")
         let showsFailure: Bool
         switch lastOutcome {
         case .registered: showsFailure = false
@@ -99,7 +83,7 @@ final class HotkeyBindingView: NSObject {
             row?.setDetail(hasActiveHotkey()
                 ? "That shortcut is already in use. Your previous shortcut still works."
                 : "That shortcut is already in use, so this one isn't active.",
-                color: SettingsTheme.amber)
+                color: SettingsTheme.amber, prioritizesKeyboard: true)
         } else {
             row?.setDetail(Self.summary(of: preferences.shortcut))
         }

@@ -18,6 +18,9 @@ public enum Defaults {
         /// Keeps a coaching turn fast (sub-2s target) while still allowing tool calls.
         public static let effort: ReasoningEffort = .low
 
+        public static let saveConversationsKey = "brain.saveConversations"
+        public static let saveConversations = false
+
         public static let disabledToolsKey = "brain.disabledTools"
         public static let disabledTools: [String] = []
 

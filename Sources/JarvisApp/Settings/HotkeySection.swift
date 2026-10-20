@@ -2,8 +2,7 @@ import AppKit
 import JarvisCore
 
 @MainActor
-final class HotkeySection: NSObject, SettingsSection {
-    let destination = SettingsDestination.shortcuts
+final class HotkeySection: NSObject {
     private let bindings: [HotkeyBindingView]
     private let mouseBindings: [MouseHotkeyBindingView]
     private var stack: SettingsCardStack?
@@ -22,30 +21,48 @@ final class HotkeySection: NSObject, SettingsSection {
         }
     }
 
-    func makePage() -> SettingsPageView {
-        let rows = bindings.enumerated().flatMap { index, binding in
-            [binding.makeRow(showsSeparator: index > 0), mouseBindings[index].makeRow()]
+    func makeView() -> NSView {
+        let rows = bindings.enumerated().map { index, binding in
+            binding.makeRow(mouseBinding: mouseBindings[index], showsSeparator: index > 0)
         }
-        let height = CGFloat(rows.count) * SettingsStyle.rowHeight
+        var height = CGFloat(rows.count) * ShortcutSettingsRowView.height(for: 600)
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: height))
+        let headings = ["Action", "Keyboard", "Mouse"].map { text in
+            let label = NSTextField(labelWithString: text)
+            label.font = .systemFont(ofSize: 10.5)
+            label.textColor = SettingsTheme.mutedText
+            card.contentView?.addSubview(label)
+            return label
+        }
         rows.forEach { card.contentView?.addSubview($0) }
-        card.onLayout = { [weak card] in
+        let stack = SettingsCardStack()
+        card.onLayout = { [weak card, weak stack] in
             guard let card else { return }
             let body = card.bodyFrame
+            let narrow = body.width < 530
+            let headerHeight: CGFloat = narrow ? 0 : 30
+            let rowHeight = ShortcutSettingsRowView.height(for: body.width)
+            let newHeight = CGFloat(rows.count) * rowHeight + headerHeight
+            if height != newHeight {
+                height = newHeight
+                stack?.setHeight(height, for: card)
+            }
+            headings.forEach { $0.isHidden = narrow }
+            headings[0].frame = NSRect(x: 16, y: body.maxY - 25, width: 150, height: 18)
+            headings[1].alignment = .center
+            headings[1].frame = NSRect(x: body.width - 270, y: body.maxY - 25, width: 106, height: 18)
+            headings[2].alignment = .center
+            headings[2].frame = NSRect(x: body.width - 152, y: body.maxY - 25, width: 136, height: 18)
             for (index, row) in rows.enumerated() {
                 row.frame = NSRect(
-                    x: body.minX, y: body.maxY - CGFloat(index + 1) * SettingsStyle.rowHeight,
-                    width: body.width, height: SettingsStyle.rowHeight)
+                    x: body.minX, y: body.maxY - headerHeight - CGFloat(index + 1) * rowHeight,
+                    width: body.width, height: rowHeight)
             }
         }
-        let stack = SettingsCardStack()
+        height += 30
         stack.install([(card, height)])
         self.stack = stack
-        return SettingsPageView(
-            title: "Shortcuts",
-            summary: "Ask me for help, or step through my details.",
-            chip: .neutral("Works during a session"),
-            bodyView: stack.scrollView)
+        return stack.scrollView
     }
 
     func didBecomeActive() {

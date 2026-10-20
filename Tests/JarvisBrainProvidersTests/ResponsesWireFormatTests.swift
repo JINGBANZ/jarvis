@@ -17,7 +17,8 @@ import JarvisCore
         }
     }
 
-    @Test func metadataPrefixSurvivesChangingHistoryAndToolContinuations() throws {
+    @Test(arguments: [false, true])
+    func metadataPrefixSurvivesChangingHistoryAndToolContinuations(store: Bool) throws {
         let catalog = #"Untrusted filenames: [{"documentID":"stable-id","sourceDisplayName":"notes.md"}]"#
         let call = RawToolCall(id: "read", name: "read_reference", argumentsJSON: "{}")
         let tails: [[ChatMessage]] = [
@@ -29,7 +30,7 @@ import JarvisCore
         ]
         var encodedPrefixes: [Data] = []
         for tail in tails {
-            let payload = try body([.system("Coaching instructions"), .user(catalog)] + tail)
+            let payload = try body([.system("Coaching instructions"), .user(catalog)] + tail, store: store)
             let input = try #require(payload["input"] as? [[String: Any]])
             let content = try #require(input.first?["content"] as? [[String: Any]])
             let prefix = try #require(content.first)

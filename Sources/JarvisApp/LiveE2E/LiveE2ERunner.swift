@@ -228,6 +228,7 @@ final class LiveE2ERunner: BrainCompositionHost {
         let key = credential.flatMap { secrets.apiKey(for: $0) } ?? ""
         guard credential == nil || !key.isEmpty else { throw Failure.credentialUnavailable }
         let route = brain.preferences.route
+        let saveConversations = brain.preferences.saveConversations
         // No system-audio probe: fixtures never open the tap, and the device scenario fails at
         // capture start when that grant is gone.
         let begun = readiness.begin(configuration: JarvisReadiness.Configuration(
@@ -280,6 +281,7 @@ final class LiveE2ERunner: BrainCompositionHost {
             transcriptionKey: key,
             brainKeys: brain.savedKeys(for: route),
             brainRoute: route,
+            saveConversations: saveConversations,
             appleSpeechLocale: appleLocale,
             screen: SessionPlan.default.screen,
             references: referenceAdmission)

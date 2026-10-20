@@ -194,7 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             connectionsSection,
             ToolsSection(brainPreferences: brain.preferences, referencePreferences: referencePreferences, onChanged: { [weak self] in self?.configureReferences() }),
             SkillsSection(preferences: brain.preferences),
-            hotkeySection,
+            GeneralSection(preferences: brain.preferences, shortcuts: hotkeySection),
             ActivitySection(viewer: activityViewer),
         ]
         settingsHub = SettingsHubModel(
@@ -267,6 +267,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         let transcriptionConfiguration = transcriptionPreferences.configuration
         let transcriptionProvider = transcriptionConfiguration.provider
         let brainRoute = brain.preferences.route
+        let saveConversations = brain.preferences.saveConversations
         let brainKeys = brain.savedKeys(for: brainRoute)
         let transcriptionKey = transcriptionProvider.ownCredential
             .flatMap { secrets.apiKey(for: $0) } ?? ""
@@ -441,6 +442,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 brainKeys: brainKeys,
                 transcriptionKey: transcriptionKey,
                 brainRoute: brainRoute,
+                saveConversations: saveConversations,
                 transcriptionConfiguration: transcriptionConfiguration,
                 appleSpeechLocale: appleSpeechLocale,
                 proxy: proxy,
@@ -497,6 +499,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         brainKeys: [Credential: String],
         transcriptionKey: String,
         brainRoute: BrainRoute,
+        saveConversations: Bool,
         transcriptionConfiguration: TranscriptionConfiguration,
         appleSpeechLocale: Locale?,
         proxy: LocalProxySupervisor.Readiness?,
@@ -526,6 +529,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 transcriptionKey: transcriptionKey,
                 brainKeys: brainKeys,
                 brainRoute: brainRoute,
+                saveConversations: saveConversations,
                 appleSpeechLocale: appleSpeechLocale,
                 screen: screenPreferences.selection,
                 references: references),

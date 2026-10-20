@@ -202,7 +202,8 @@ Narrow and explicit. Data leaves the machine only via:
   socket; Jarvis never logs that URL. Coaching sends the brain payload to
   `generativelanguage.googleapis.com/v1/interactions` with the key in a header
   ([architecture.md → Gemini API target](./architecture.md#gemini-api-target)). Coaching requests
-  send `store: false`, so Google keeps no interaction for later reads. That does not cover the 55
+  follow the [provider storage preference](#provider-conversation-storage), off by default. With it
+  off, `store: false` prevents saving interactions for later reads. That does not cover the 55
   days Google retains prompts and output for abuse monitoring. On an unpaid project, Google may also
   use them to improve its products, and people may review them. This posture assumes a paid project,
   meaning one tied to an active billing account.
@@ -245,16 +246,26 @@ current capture; older screenshots are not replayed, and older text evidence col
 capture is committed. Text included in provider requests follows the existing protected wire-audit
 and provider-retention paths described here.
 
-> **Server-side retention for debuggability (current behavior).** Session memory is client-managed
-> (`CoachHistory` — nothing at OpenAI is needed for continuity), but requests are still sent
-> `store:true` (`ResponsesWireFormat.swift`) so each request/response remains inspectable in the OpenAI
-> dashboard logs while the harness is being tuned. This **does** retain the transcript and the
-> screenshots sent to the model server-side at OpenAI (≈30-day TTL), so the no-local-retention
-> guarantee above does **not** extend to OpenAI's servers. This remains a deliberate
-> *debuggability-over-retention* choice. The separate [Advanced Settings storage control](https://github.com/JINGBANZ/jarvis/issues/456)
-> must preserve stateless tool-loop reasoning continuity; it is not implemented here. Requests to the Codex
-> subscription pass through the bundled helper, which forces `store:false`, so this retention applies
-> to the OpenAI API target only. Gemini requests send `store:false`.
+### Provider conversation storage
+
+**Settings → General → Privacy → Save conversations with AI providers** controls optional saved
+copies of brain requests and replies. It is off by default for both new and existing installs.
+Direct OpenAI Responses and Gemini Interactions requests explicitly send the selected `store`
+value. This covers coaching and history summarization, including transcript, reference, and screen
+content included in those requests. The Codex helper requires `store:false` regardless of the
+preference; the Claude Messages path has no equivalent per-request control.
+
+Start freezes this preference for the session. Changing it affects the next session, including when
+credentials, reasoning effort, or the route rebuild clients in the current session. Session memory
+remains client-managed (`CoachHistory`), with no server-side conversation or response-id threading.
+Within a tool loop, returned reasoning and tool items replay verbatim and in order, including opaque
+reasoning content needed with storage off; commit normalizes them into provider-neutral history.
+
+This switch does not stop requests reaching the selected provider, grant zero-data-retention status,
+change abuse-monitoring retention or training consent, or delete previously saved provider copies.
+Provider account terms and retention policies still govern those separate uses. Local Activity,
+screenshots, and protected wire evidence follow the same bounded session-history rules below in
+either state; **Clear history** deletes those local records only.
 
 **The per-session log directory is the bounded session-data persistence, hardened to stay
 owner-only.** Nothing else on this machine holds session-derived data: the helper runs in
