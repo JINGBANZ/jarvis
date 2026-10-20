@@ -61,6 +61,10 @@ extension ProviderFailure {
     private var subscriptionClauseAndAdvice: (clause: String, advice: String?)? {
         guard case .brain(let provider) = source, provider.servedByLocalProxy else { return nil }
         let name = source.displayName
+        if stage == .process, identity.errorCode == "model_cooldown" {
+            return ("The selected \(name) model is cooling down",
+                    "wait and try Start again, or choose another model in Settings → Brain")
+        }
         let signIn = (clause: "\(name) isn't signed in",
                       advice: "open Settings → Connections, press Sign in for it, then press Start")
         let usageLimit = (clause: "\(name) reached its usage limit",

@@ -92,6 +92,17 @@ import Testing
         #expect(!failure.activitySentence.contains("check billing"))
     }
 
+    @Test(arguments: [BrainProvider.codexSubscription, .claudeSubscription],
+          [ProviderFailure.Category.quota, .unavailable])
+    func modelCooldownAdvicePointsToBrain(provider: BrainProvider, category: ProviderFailure.Category) {
+        let failure = ProviderFailure(
+            source: .brain(provider), stage: .process, category: category,
+            disposition: .temporary, identity: .init(errorCode: "model_cooldown"), message: "")
+
+        #expect(failure.activitySentence
+                == "The selected \(provider.displayName) model is cooling down (model_cooldown); wait and try Start again, or choose another model in Settings → Brain")
+    }
+
     @Test func theRemainingClausesReadAsWritten() {
         #expect(make(source: .brain(.openAI), category: .quota).activitySentence
                 == "OpenAI API reported an exhausted quota; check billing")

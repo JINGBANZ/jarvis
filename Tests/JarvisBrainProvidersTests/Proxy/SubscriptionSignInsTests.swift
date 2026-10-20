@@ -44,9 +44,10 @@ import os
         stub?.stop()
     }
 
-    @Test(arguments: ["gpt-6.1-sol", " gpt-6.1-sol(high) "])
-    func aSelectedModelCooldownSkipsThePrimaryWithoutSigningOut(modelID: String) async throws {
-        let coolingDown = #"{"files":[{"name":"codex-fixture.json","provider":"codex","status":"active","disabled":false,"unavailable":false,"cooldowns":[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]}]}"#
+    @Test(arguments: ["gpt-6.1-sol", " gpt-6.1-sol(high) "], ["quota", "transient_error"])
+    func aSelectedModelCooldownSkipsThePrimaryWithoutSigningOut(modelID: String, reason: String) async throws {
+        let coolingDown = Self.credentialHealth(cooldowns:
+            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"\#(reason)","remaining_seconds":60}]"#)
         try await withSignIns(respond: { request in
             (200, request.contains("/v8/management/credentials") ? coolingDown : Self.models)
         }) { signIns, supervisor in
@@ -59,10 +60,14 @@ import os
                 subscriptions: signIns.health(among: [primary]))
 
             #expect(signIns.connection(for: .codexSubscription).tone == .ready)
+            #expect(signIns.connection(for: .codexSubscription).buttons.map(\.action) == [.signOut])
             #expect(signIns.selectable == [.codexSubscription])
             #expect(signIns.readiness?.unavailability(for:
                 BrainTarget(provider: .codexSubscription, modelID: modelID))?.disposition == .temporary)
-            #expect(availability.failure(for: primary)?.disposition == .temporary)
+            let failure = try #require(availability.failure(for: primary))
+            #expect(failure.disposition == .temporary)
+            #expect(failure.activityAdvice.contains("Settings → Brain"))
+            #expect(!failure.activityAdvice.contains("Connections"))
             guard case .ready(let selected, _) = availability.state else {
                 Issue.record("Expected the configured fallback to be usable")
                 return
