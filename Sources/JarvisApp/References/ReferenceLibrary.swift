@@ -82,6 +82,9 @@ final class ReferenceLibrary {
         guard !owned.values.contains(where: { ownership in
             switch ownership { case .pending(let id), .active(let id): id == startID }
         }) else { throw ReferenceAccessFailure(reason: .duplicateStart) }
+        try Task.checkCancellation()
+        guard enabled else { return .omitted(startID: startID, reason: .disabled) }
+        guard !sources.isEmpty else { return .omitted(startID: startID, reason: .empty) }
         restartAvailable = true
         connectionFailed = false
         let started = ContinuousClock.now

@@ -96,6 +96,7 @@ extension ReferenceHarnessAppDelegate {
         try require(!context.contains(fixture.root.path) && !context.contains("UNUSED-PRIVATE-CONTENT"), "metadata-only path-free catalog")
         switch name {
         case "REF01":
+            try await referenceSilentAdmissionChecks(home: fixture.store.deletingLastPathComponent(), source: fixture.root)
             let brain = ReferenceHarnessBrain([try referenceCall("list_references", ["query": NSNull(), "cursor": NSNull()], id: "list"), referenceFinish])
             let (driver, transcript, _) = referenceDriver(brain: brain, result: result)
             try await referenceTurn(driver, transcript, "List admitted references.")
@@ -352,6 +353,55 @@ extension ReferenceHarnessAppDelegate {
         try require(definitions.allSatisfy { $0.allSatisfy { !["list_references", "read_reference", "search_references", "call_tool", "load_tool"].contains($0.name) } },
                     "disabled/empty first request offers no reference capability")
         try require(sink.activityCount == 1 && sink.hintCount == 1, "disabled/empty coaching remains silent about References")
+    }
+
+    private func referenceSilentAdmissionChecks(home: URL, source: URL) async throws {
+        var violations: [String] = []
+        for (enabled, hasSources) in [(false, false), (false, true), (true, false)] {
+            for unavailable in [true, false] {
+                let name = "\(enabled ? "enabled" : "disabled")-\(hasSources ? "selected" : "empty")-\(unavailable ? "unavailable" : "warming")"
+                let helper = ReferenceHelperSupervisor(
+                    bundle: unavailable ? home.appendingPathComponent("missing-helper") : bundle,
+                    home: home.appendingPathComponent(name))
+                var resumeWarmup: CheckedContinuation<Void, Never>?
+                if !unavailable {
+                    helper.beforeLaunchForTesting = {
+                        await withCheckedContinuation { resumeWarmup = $0 }
+                    }
+                }
+                let library = ReferenceLibrary(supervisor: helper)
+                let sources: [ReferenceSource] = hasSources ? [.init(id: UUID(), url: source, isDirectory: true)] : []
+                let warming = Task { try await library.configure(enabled: enabled, sources: sources) }
+                if unavailable {
+                    if case .success = await warming.result { violations.append("\(name)-unexpected-helper") }
+                } else {
+                    while resumeWarmup == nil { await Task.yield() }
+                }
+                let expected: ReferenceOmissionReason = enabled ? .empty : .disabled
+                for expired in [false, true] {
+                    let startID = UUID()
+                    let result = try await library.admit(startID: startID,
+                        deadline: .now + (expired ? .seconds(-1) : .milliseconds(150)))
+                    if case .omitted(let actualStart, let reason) = result,
+                       actualStart == startID, reason == expected, reason.warning == nil {
+                        try await referenceOmittedProjection(result)
+                    } else {
+                        violations.append("\(name)-\(expired ? "expired" : "current")")
+                    }
+                }
+                let cancelled = Task { try await library.admit(startID: UUID()) }
+                cancelled.cancel()
+                switch await cancelled.result {
+                case .failure(let error) where error is CancellationError: break
+                default: violations.append("\(name)-cancelled")
+                }
+                library.shutdown()
+                resumeWarmup?.resume()
+                _ = await warming.result
+                await helper.stop()
+            }
+        }
+        try require(violations.isEmpty, "empty and disabled admission ignore helper health and deadline: \(violations)")
     }
 
     private func referenceWatcherChecks(_ fixture: PhaseFixture) async throws {
