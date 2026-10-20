@@ -2,7 +2,7 @@ import JarvisCore
 
 /// The only place the four head parts map to their pages.
 enum SettingsDestination: String, CaseIterable, Sendable {
-    case home, brain, ear, eye, mouth, connections, tools, skills, general, activity
+    case home, brain, ear, eye, mouth, connections, tools, skills, activity, general
 
     init(_ part: RobotPart) {
         switch part {

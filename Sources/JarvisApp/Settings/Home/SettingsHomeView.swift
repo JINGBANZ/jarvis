@@ -22,8 +22,8 @@ final class SettingsHomeView: NSView {
         (.connections, "Connections", "link"),
         (.tools, "Tools", "wrench.and.screwdriver"),
         (.skills, "Skills", "sparkles"),
-        (.general, "General", "gearshape"),
         (.activity, "Activity", "waveform.path.ecg"),
+        (.general, "General", "gearshape"),
     ]
 
     let robot = RobotHeadView(style: .hero)

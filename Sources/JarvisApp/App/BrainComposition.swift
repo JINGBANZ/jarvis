@@ -41,8 +41,8 @@ final class BrainComposition {
     /// Leaves the active target nil rather than the primary: the primary may be skipped as
     /// unavailable, and an early edit would then record a change away from a provider that never
     /// ran.
-    func sessionWillStart() {
-        sessionSavesConversations = preferences.saveConversations
+    func sessionWillStart(saveConversations: Bool) {
+        sessionSavesConversations = saveConversations
         activeBrainTarget = nil
         pendingBrainChangeFrom = nil
     }

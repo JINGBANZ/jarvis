@@ -31,6 +31,7 @@ final class HotkeyBindingView: NSObject {
         recorder.setAccessibilityLabel("Record \(title) shortcut")
         recorder.onRecorded = { [weak self] combination in self?.recorded(combination) }
         recorder.onRecordingChanged = { [weak self] recording in
+            if recording { self?.row?.setMouseNotice(nil, color: nil) }
             self?.isRecording = recording
             self?.render()
         }
@@ -62,6 +63,11 @@ final class HotkeyBindingView: NSObject {
     }
 
     private func render() {
+        let combination = HotkeyKeyNames.displayString(for: preferences.combination)
+        recorder?.setAccessibilityValue(combination)
+        recorder?.setAccessibilityHelp(isRecording
+            ? "Current shortcut: \(combination). Press the new shortcut with ⌘ or ⌥. Esc cancels."
+            : "Current shortcut: \(combination). Activate to record a new shortcut.")
         if isRecording {
             row?.setDetail("Press the new shortcut with ⌘ or ⌥. Esc cancels.", color: SettingsTheme.teal)
             return

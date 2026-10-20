@@ -73,9 +73,10 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         let preferences = BrainPreferences(defaults: defaults)
         try require(preferences.saveConversations == relaunch, "storage default or cross-process persistence")
         let hotkeys = CoachingShortcut.allCases.map { HotkeyPreferences(defaults: defaults, shortcut: $0) }
+        var registrationOutcome = HotkeyRegistrationOutcome.registered
         let shortcuts = HotkeySection(preferences: hotkeys,
             mouseController: MouseHotkeyController(preferences: hotkeys),
-            hasActiveHotkey: { _ in true }, applyCombination: { _, _ in .registered })
+            hasActiveHotkey: { _ in true }, applyCombination: { _, _ in registrationOutcome })
         let section = GeneralSection(preferences: preferences, shortcuts: shortcuts)
         try require(section.destination == .general, "General navigation")
         let page = section.makePage()
@@ -91,10 +92,24 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         defer { section.didResignActive(); section.windowWillClose(); window.orderOut(nil) }
         page.layoutSubtreeIfNeeded()
         let views = descendants(page)
+        let home = SettingsHomeView(frame: background.bounds)
+        try require(home.subviews.compactMap { $0 as? HomeDockButton }.last?.destination == .general,
+                    "General is the last dock item")
+        try require(!views.compactMap { $0 as? NSTextField }.contains {
+            $0.stringValue == "Shortcuts and privacy."
+        }, "General has no subtitle")
         guard let privacy = views.compactMap({ $0 as? NSButton }).first(where: { $0.title == "Privacy" }),
               let shortcutsTab = views.compactMap({ $0 as? NSButton }).first(where: { $0.title == "Shortcuts" }),
               let toggle = views.compactMap({ $0 as? NSSwitch }).first else { throw CocoaError(.coderValueNotFound) }
         let rows = views.compactMap { $0 as? ShortcutSettingsRowView }
+        func mouseControlsAreCentered() -> Bool {
+            rows.allSatisfy { row in
+                guard let mouse = descendants(row).compactMap({ $0 as? MouseHotkeyRecorderButton }).first,
+                      let group = mouse.superview, let column = group.superview else { return false }
+                return abs(group.frame.midX - column.bounds.midX) < 1
+                    && group.frame.minX >= -1 && group.frame.maxX <= column.bounds.width + 1
+            }
+        }
         try require(rows.count == 5 && rows.allSatisfy {
             descendants($0).compactMap { $0 as? NSTextField }.filter { !$0.stringValue.isEmpty }.count == 2
         }, "all shortcuts retain their name and description")
@@ -102,10 +117,49 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         guard let recorder = views.compactMap({ $0 as? HotkeyRecorderButton }).first else {
             throw CocoaError(.coderValueNotFound)
         }
+        let tabTitleRects = [shortcutsTab, privacy].map { $0.cell!.titleRect(forBounds: $0.bounds) }
+        let originalCombination = hotkeys[0].combination
+        let originalValue = HotkeyKeyNames.displayString(for: originalCombination)
+        try require(recorder.accessibilityValue() as? String == originalValue, "current keyboard binding is accessible")
+        guard let row = rows.first else { throw CocoaError(.coderValueNotFound) }
+        func rowShows(_ text: String) -> Bool {
+            descendants(row).compactMap { $0 as? NSTextField }.contains { $0.stringValue.contains(text) }
+        }
+        row.setMouseNotice("Mouse shortcut inactive.", color: SettingsTheme.amber)
         recorder.performClick(nil)
         try require(recorder.title == "Press keys…", "keyboard recording starts")
+        try require(rowShows("Press the new shortcut"), "keyboard instructions supersede stale mouse warning")
+        try require(recorder.accessibilityValue() as? String == originalValue
+                    && recorder.accessibilityHelp()?.contains("Esc cancels") == true,
+                    "keyboard recording retains accessible binding and instructions")
+        guard let key = NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: [.command, .option], timestamp: 0, windowNumber: window.windowNumber,
+            context: nil, characters: "n", charactersIgnoringModifiers: "n", isARepeat: false, keyCode: 45) else {
+            throw CocoaError(.coderValueNotFound)
+        }
+        registrationOutcome = .failed(status: -9878)
+        recorder.keyDown(with: key)
+        try require(rowShows("already in use") && hotkeys[0].combination == originalCombination,
+                    "keyboard collision is visible over stale mouse warning and keeps the binding")
+        try require(recorder.accessibilityValue() as? String == originalValue, "rejected binding stays accessible")
+        row.setMouseNotice("Click the mouse.", color: SettingsTheme.teal)
+        try require(rowShows("Click the mouse"), "active mouse recording takes precedence")
+        row.setMouseNotice("Mouse shortcut inactive.", color: SettingsTheme.amber)
+        try require(rowShows("Mouse shortcut inactive"), "a new mouse warning remains visible")
+        registrationOutcome = .registered
+        recorder.performClick(nil)
+        recorder.keyDown(with: key)
+        let newValue = HotkeyKeyNames.displayString(for: hotkeys[0].combination)
+        try require(newValue != originalValue && recorder.accessibilityValue() as? String == newValue
+                    && recorder.accessibilityHelp()?.contains(newValue) == true,
+                    "successful keyboard rebind updates accessibility")
+        hotkeys[0].combination = originalCombination
+        shortcuts.didBecomeActive()
+        recorder.performClick(nil)
         privacy.performClick(nil)
         try require(recorder.title != "Press keys…", "switching tabs cancels recording")
+        try require([shortcutsTab, privacy].map { $0.cell!.titleRect(forBounds: $0.bounds) } == tabTitleRects,
+                    "selecting tabs keeps their text in place")
         try require(toggle.state == (relaunch ? .on : .off), "persisted switch value")
         try require(!views.compactMap({ $0 as? NSTextField }).contains {
             $0.stringValue.contains("Provider retention") || $0.stringValue.contains("Provider coverage")
@@ -114,12 +168,22 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         for size in [NSSize(width: 560, height: 460), NSSize(width: 820, height: 600)] {
             background.frame.size = size
             background.layoutSubtreeIfNeeded()
+            for combination: MouseHotkeyCombination? in [nil, .init(button: 2, modifiers: []),
+                .init(button: 31, modifiers: [.control, .option, .shift, .command])] {
+                hotkeys[0].mouseCombination = combination
+                shortcuts.didBecomeActive()
+                background.layoutSubtreeIfNeeded()
+                try require(mouseControlsAreCentered(), "unset and saved mouse controls are centered")
+            }
+            hotkeys[0].mouseCombination = nil
+            shortcuts.didBecomeActive()
             for tab in [shortcutsTab, privacy] {
                 tab.performClick(nil)
                 background.layoutSubtreeIfNeeded()
                 try require(rows.allSatisfy { row in
                     row.subviews.allSatisfy { $0.frame.minX >= 0 && $0.frame.maxX <= row.bounds.width + 1 }
                 }, "shortcut controls fit at minimum and default sizes")
+                try require(mouseControlsAreCentered(), "mouse controls are centered in their column")
                 try snapshot(background, name: "\(tab.title.lowercased())-\(Int(size.width))")
             }
         }
@@ -134,23 +198,25 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
             supervisor: LocalProxySupervisor(executable: nil, home: output.appendingPathComponent("proxy")),
             preferences: preferences,
             send: { request in try await traffic.send(request) })
-        brain.sessionWillStart()
-        try await request(brain)
+        let acceptedStorage = preferences.saveConversations
         toggle.state = .on
         NSApp.sendAction(toggle.action!, to: toggle.target, from: toggle)
         try require(BrainPreferences(defaults: defaults).saveConversations, "switch writes the preference")
+        await Task.yield()
+        brain.sessionWillStart(saveConversations: acceptedStorage)
+        try await request(brain)
         try await request(brain)
         brain.sessionDidStop()
-        brain.sessionWillStart()
+        brain.sessionWillStart(saveConversations: preferences.saveConversations)
         try await request(brain)
         toggle.state = .off
         NSApp.sendAction(toggle.action!, to: toggle.target, from: toggle)
         try await request(brain)
         brain.sessionDidStop()
-        brain.sessionWillStart()
+        brain.sessionWillStart(saveConversations: preferences.saveConversations)
         try await request(brain)
         let stores = await traffic.stores
-        try require(stores == [false, false, true, true, false], "session policy survives client rebuilds")
+        try require(stores == [false, false, true, true, false], "accepted Start policy survives preparation and client rebuilds")
         toggle.state = .on
         NSApp.sendAction(toggle.action!, to: toggle.target, from: toggle)
         defaults.synchronize()

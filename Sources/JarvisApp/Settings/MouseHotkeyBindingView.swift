@@ -44,8 +44,17 @@ final class MouseHotkeyBindingView: NSObject {
         recorder.lineBreakMode = .byTruncatingMiddle
         recorder.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         clear.setContentHuggingPriority(.required, for: .horizontal)
+        let container = NSView()
+        controls.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(controls)
+        NSLayoutConstraint.activate([
+            controls.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            controls.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            controls.leadingAnchor.constraint(greaterThanOrEqualTo: container.leadingAnchor),
+            controls.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor),
+        ])
         render()
-        return controls
+        return container
     }
 
     func refresh() {

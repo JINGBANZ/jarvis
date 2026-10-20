@@ -12,6 +12,7 @@ final class SessionComposition {
         /// Only keyed route targets appear; a subscription needs none.
         let brainKeys: [Credential: String]
         let brainRoute: BrainRoute
+        let saveConversations: Bool
         let appleSpeechLocale: Locale?
         let screen: ScreenCaptureSelection
         let references: ReferenceAdmissionResult
@@ -162,7 +163,7 @@ final class SessionComposition {
                 ? "(none)" : capabilities.skills.map(\.name).joined(separator: ","))
             + " switched-off=" + (honoredDisabled.isEmpty
                 ? "(none)" : honoredDisabled.joined(separator: ",")))
-        brain.sessionWillStart()
+        brain.sessionWillStart(saveConversations: inputs.saveConversations)
         let configuredRoute = brain.makeConfiguredRoute(
             inputs.brainRoute,
             proxy: proxy,

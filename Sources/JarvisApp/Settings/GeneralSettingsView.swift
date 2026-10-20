@@ -18,6 +18,8 @@ final class GeneralSettingsView: NSView {
             button.setButtonType(.pushOnPushOff)
             button.bezelStyle = .rounded
             button.isBordered = false
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 6
             button.alignment = .left
             button.font = .systemFont(ofSize: 12, weight: .medium)
             button.image = NSImage(systemSymbolName: index == 0 ? "command" : "lock", accessibilityDescription: nil)
@@ -46,12 +48,21 @@ final class GeneralSettingsView: NSView {
     private func render() {
         for (index, button) in buttons.enumerated() {
             button.state = index == selected ? .on : .off
-            button.contentTintColor = index == selected ? SettingsTheme.text : SettingsTheme.mutedText
-            button.isBordered = index == selected
+            let tint = index == selected ? SettingsTheme.text : SettingsTheme.mutedText
+            button.contentTintColor = tint
+            button.attributedTitle = NSAttributedString(string: button.title, attributes: [
+                .font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: tint,
+            ])
+            button.layer?.backgroundColor = button.themedCGColor(index == selected ? SettingsTheme.iconWell : .clear)
             pages[index].isHidden = index != selected
         }
         heading.stringValue = buttons[selected].title
         needsLayout = true
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        render()
     }
 
     override func layout() {

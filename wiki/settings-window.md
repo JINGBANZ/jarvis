@@ -116,7 +116,7 @@ VoiceOver reads as "<Part> settings" with the slot's value and detail. Hovering 
 lights its part of the head and its connector; hovering a part lights its slot.
 
 **Dock.** Five chamfered buttons (`HomeDockButton`) under the head open **Connections**, **Tools**,
-**Skills**, **General**, and **Activity**.
+**Skills**, **Activity**, and **General**.
 
 **Layouts.** A window at least 780×560 shows the prototype's stage: the robot in the middle, Brain
 and Ear slots on the left, Eye and Mouth on the right, connector lines to their parts, and the dock
@@ -206,7 +206,7 @@ pages it moves.
 | `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts saved managed API keys. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | References, with its switch and its list of local files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
-| `GeneralSection` | **General**: "Shortcuts and privacy." | Left-side **Shortcuts** and **Privacy** tabs. Shortcuts retain immediate keyboard/mouse binding edits; Privacy owns optional provider conversation storage, applied next session ([General](#general)). |
+| `GeneralSection` | **General** | Left-side **Shortcuts** and **Privacy** tabs. Shortcuts retain immediate keyboard/mouse binding edits; Privacy owns optional provider conversation storage, applied next session ([General](#general)). |
 | `ActivitySection` | **Activity**: "What I heard and said, session by session." | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**, which opens a menu of the installed Claude Code / Codex CLIs; the chosen one runs the sole `AgenticEvaluator` over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
 
 `AppDelegate` builds the hub model, the hub, and the section list at launch and passes them to
@@ -300,20 +300,23 @@ preview is running. The plain setters
 ## General
 
 The hub's **General** button opens one page with **Shortcuts** and **Privacy** tabs on the left.
-Shortcuts opens first. Changing tabs cancels shortcut recording without changing any binding.
+Shortcuts opens first. Changing tabs keeps their labels in place and cancels shortcut recording
+without changing any binding.
 
 Privacy contains **Save conversations with AI providers**, with one short explanation and the note
 **Applies next session. Local Jarvis history is unchanged.** The switch persists immediately through
 `BrainPreferences`; its key and default live in `Defaults.Brain`. It is off for new and existing
-installs unless explicitly enabled. Start freezes the value for coaching and summarization, and
-client rebuilds during a running session keep that value. The provider storage and retention
+installs unless explicitly enabled. Accepting Start freezes the value before asynchronous preparation
+for coaching and summarization; edits during preparation apply to the next Start. Client rebuilds
+during a running session keep that value. The provider storage and retention
 boundaries are defined in [sandbox.md](./sandbox.md#provider-conversation-storage).
 
 `./scripts/run-settings-tests.sh` builds and launches the signed development app twice with a
 dedicated preference domain. It renders the real General page off screen at default/minimum sizes
-and in dark mode, checks shortcut descriptions and recording cancellation, changes the Privacy
-switch, and verifies persistence after relaunch. Synthetic provider traffic exercises storage flags
-across session changes and client rebuilds. Screenshots and results stay inside the owner-only
+and in dark mode, checks stable tab labels, centered mouse controls, accessible keyboard bindings,
+shortcut feedback and recording cancellation, changes the Privacy switch, and verifies persistence
+after relaunch. Synthetic provider traffic exercises storage flags across preparation, session changes,
+and client rebuilds. Screenshots and results stay inside the owner-only
 `.jarvis/settings-harness/` directory. This check uses no real audio, screen, or provider requests;
 the [live cache scenario](./live-e2e-tests.md#cache-regression-window) separately verifies reuse.
 
@@ -331,6 +334,8 @@ back holds the chosen detail; reaching the newest resumes following incoming det
 
 General's Shortcuts tab is one scrolling card with a row for each action. Each row retains the
 action's name and brief purpose, with keyboard and optional mouse binding buttons alongside.
+VoiceOver exposes the current keyboard binding and recording instructions. Mouse controls are
+centered in their column, including a saved binding's clear button.
 Click the current keyboard binding (`HotkeyRecorderButton`) to record a replacement. Narrow windows
 place both controls below the description. Keyboard recording requires
 Command or Option; Escape cancels. Every action keeps its keyboard binding when a mouse binding is
@@ -368,7 +373,9 @@ binding active, and that row's detail turns into an amber warning until the page
 Mouse bindings reject duplicates across all five Jarvis actions, including temporarily unavailable
 actions, and keep the previous binding on failure. Other applications' mouse bindings cannot be
 reserved or checked through Carbon. If a binding could not become active at launch, its warning
-shows on every visit. Warnings live in the corresponding row. The Overlay Box shows
+shows on every visit. Warnings live in the corresponding row. Starting keyboard recording clears a
+stale mouse warning so instructions and collision feedback stay visible; a subsequent mouse
+operation shows its own feedback. The Overlay Box shows
 semibold hints in its upper section and the reply's detail in the lower one; a hint whose reply
 carried a detail ends with a dim marker. Both use the configured text size, and the appearance
 preview shows an example.

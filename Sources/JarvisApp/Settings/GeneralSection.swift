@@ -16,7 +16,7 @@ final class GeneralSection: NSObject, SettingsSection {
     func makePage() -> SettingsPageView {
         let body = GeneralSettingsView(shortcuts: shortcuts.makeView(), privacy: makePrivacyView())
         body.onSelectionChanged = { [weak shortcuts] in shortcuts?.didResignActive() }
-        return SettingsPageView(title: "General", summary: "Shortcuts and privacy.", bodyView: body)
+        return SettingsPageView(title: "General", summary: "", bodyView: body)
     }
 
     func didBecomeActive() {
