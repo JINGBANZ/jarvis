@@ -28,17 +28,24 @@ public actor LocalProxySupervisor {
     public enum Readiness: Sendable, Equatable {
         case superseded
         case unavailable(reason: String)
-        case ready(Endpoint, signedIn: Set<BrainProvider>, failures: [BrainProvider: ProviderFailure] = [:])
+        case ready(Endpoint, signedIn: Set<BrainProvider>, failures: [BrainProvider: ProviderFailure] = [:],
+                   modelCooldowns: [BrainTarget: ProviderFailure] = [:])
 
         public var signedIn: Set<BrainProvider> {
-            if case .ready(_, let providers, _) = self { providers } else { [] }
+            if case .ready(_, let providers, _, _) = self { providers } else { [] }
         }
 
         public var endpoint: Endpoint? {
-            if case .ready(let endpoint, _, _) = self { endpoint } else { nil }
+            if case .ready(let endpoint, _, _, _) = self { endpoint } else { nil }
         }
 
-        /// The failure a route skips `provider` with, or nil when it can serve now.
+        public func unavailability(for target: BrainTarget) -> ProviderFailure? {
+            if let failure = unavailability(for: target.provider) { return failure }
+            guard case .ready(_, _, _, let cooldowns) = self else { return nil }
+            return cooldowns[BrainTarget(provider: target.provider, modelID: LocalProxyCredential.modelKey(target.modelID))]
+        }
+
+        /// Account-wide health; model cooldowns affect only target availability.
         public func unavailability(for provider: BrainProvider) -> ProviderFailure? {
             switch self {
             case .superseded:
@@ -50,7 +57,7 @@ public actor LocalProxySupervisor {
                     source: .brain(provider), stage: .process, category: .unavailable,
                     disposition: .temporary, identity: .init(),
                     message: "the sign-in service \(reason)")
-            case .ready(_, let signedIn, let failures):
+            case .ready(_, let signedIn, let failures, _):
                 if let failure = failures[provider] { return failure }
                 guard !signedIn.contains(provider) else { return nil }
                 return ProviderFailure(
@@ -162,6 +169,7 @@ public actor LocalProxySupervisor {
                 }
                 var signedIn: Set<BrainProvider> = []
                 var failures: [BrainProvider: ProviderFailure] = [:]
+                var modelCooldowns: [BrainTarget: ProviderFailure] = [:]
                 for provider in BrainProvider.allCases where provider.servedByLocalProxy {
                     let matches = matchingCredentials(for: provider, in: credentials)
                     if matches.count > 1 {
@@ -171,10 +179,13 @@ public actor LocalProxySupervisor {
                             message: "Only one subscription account is supported.")
                     } else if let credential = matches.first {
                         if let failure = credential.unavailability(for: provider) { failures[provider] = failure }
-                        else { signedIn.insert(provider) }
+                        else {
+                            signedIn.insert(provider)
+                            modelCooldowns.merge(credential.modelCooldowns(for: provider)) { _, latest in latest }
+                        }
                     }
                 }
-                return .ready(endpoint, signedIn: signedIn, failures: failures)
+                return .ready(endpoint, signedIn: signedIn, failures: failures, modelCooldowns: modelCooldowns)
             } catch {
                 guard launched == generation, revision == credentialRevision, !stopping else { return .superseded }
                 // A cancelled probe throws too; don't mistake it for a mute helper and kill it.

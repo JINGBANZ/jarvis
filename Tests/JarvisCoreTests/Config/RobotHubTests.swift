@@ -8,7 +8,7 @@ import Testing
             source: .brain(.claudeSubscription), stage: .process, category: .unavailable,
             disposition: .temporary, identity: .init(), message: "The subscription is temporarily unavailable. Try again.")
         var readiness = RobotReadiness.fixture(signedOut: [.codexSubscription])
-        readiness.subscriptions[.claudeSubscription] = .unavailable(failure)
+        readiness.subscriptions[claude] = .unavailable(failure)
         let state = RobotHub.state(for: .fixture(
             route: BrainRoute(primary: claude, fallbackTargets: [
                 BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol"),

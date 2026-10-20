@@ -95,7 +95,7 @@ final class SettingsHubModel {
             boxFontSize: appearance.boxFontSize,
             readiness: RobotReadiness(
                 subscriptions: signIns.health(
-                    among: Set(route.targets.map(\.provider).filter(\.servedByLocalProxy))),
+                    among: Set(route.targets.filter { $0.provider.servedByLocalProxy })),
                 availableCredentials: Set(Credential.allCases.filter {
                     secrets.apiKey(for: $0)?.isEmpty == false
                 }),

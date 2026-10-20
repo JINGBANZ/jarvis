@@ -32,12 +32,14 @@ extension RobotReadiness {
         credentials: Set<Credential> = [.openAIAPIKey, .geminiAPIKey],
         granted: Set<JarvisReadiness.Permission> = [.microphone, .screenRecording]
     ) -> RobotReadiness {
-        let subscriptions = Dictionary(uniqueKeysWithValues: BrainProvider.allCases.filter(\.servedByLocalProxy).map {
-            provider -> (BrainProvider, BrainRouteAvailability.ConnectionHealth) in
+        let subscriptions = Dictionary(uniqueKeysWithValues: BrainProvider.allCases.filter(\.servedByLocalProxy).flatMap {
+            provider -> [(BrainTarget, BrainRouteAvailability.ConnectionHealth)] in
             let health: BrainRouteAvailability.ConnectionHealth = signedOut.contains(provider) ? .unavailable(ProviderFailure(
                 source: .brain(provider), stage: .process, category: .authentication,
                 disposition: .permanent, identity: .init(), message: "Sign in again in Connections.")) : .ready
-            return (provider, health)
+            return BrainModelCatalog.models(for: provider).map {
+                (BrainTarget(provider: provider, modelID: $0.id), health)
+            }
         })
         return RobotReadiness(
             subscriptions: subscriptions,

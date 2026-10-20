@@ -17,7 +17,7 @@ import Testing
     @Test func aUsablePrimaryDoesNotWaitForUnusedFallbacks() {
         let availability = BrainRouteAvailability(
             route: BrainRoute(primary: codex, fallbackTargets: [openAI, claude]),
-            availableCredentials: [], subscriptions: [.codexSubscription: .ready])
+            availableCredentials: [], subscriptions: [codex: .ready])
 
         #expect(availability.state == .ready(codex, primaryFailure: nil))
         #expect(availability.blockingFailure == nil)
@@ -30,7 +30,7 @@ import Testing
         let route = BrainRoute(primary: codex, fallbackTargets: [claude, gemini])
         let checking = BrainRouteAvailability(
             route: route, availableCredentials: [.geminiAPIKey],
-            subscriptions: [.codexSubscription: .unavailable(primaryFailure)])
+            subscriptions: [codex: .unavailable(primaryFailure)])
 
         #expect(checking.state == .checking)
         #expect(checking.blockingFailure == primaryFailure)
@@ -38,8 +38,8 @@ import Testing
 
         let answered = BrainRouteAvailability(
             route: route, availableCredentials: [.geminiAPIKey], subscriptions: [
-                .codexSubscription: .unavailable(primaryFailure),
-                .claudeSubscription: .unavailable(failure(.claudeSubscription)),
+                codex: .unavailable(primaryFailure),
+                claude: .unavailable(failure(.claudeSubscription)),
             ])
         #expect(answered.state == .ready(gemini, primaryFailure: primaryFailure))
         #expect(answered.blockingFailure == nil)
@@ -50,7 +50,7 @@ import Testing
         let availability = BrainRouteAvailability(
             route: BrainRoute(primary: codex, fallbackTargets: [gemini]),
             availableCredentials: [.openAIAPIKey],
-            subscriptions: [.codexSubscription: .unavailable(primaryFailure)])
+            subscriptions: [codex: .unavailable(primaryFailure)])
 
         #expect(availability.state == .unavailable(primaryFailure))
         #expect(availability.blockingFailure == primaryFailure)

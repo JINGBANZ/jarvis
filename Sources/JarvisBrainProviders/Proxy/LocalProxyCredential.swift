@@ -15,6 +15,7 @@ struct LocalProxyCredential: Decodable, Sendable {
 
     struct Cooldown: Decodable, Sendable {
         let scope: String
+        let model_key: String?
         let reason: String
         let remaining_seconds: Int
     }
@@ -44,16 +45,36 @@ struct LocalProxyCredential: Decodable, Sendable {
             return failure(provider, category: .unavailable,
                            message: "The sign-in service couldn't determine credential health.")
         }
-        if status == "active", unavailable == false { return nil }
         if let cooldown = cooldowns?.first(where: { $0.remaining_seconds > 0 && $0.scope == "credential" }) {
             let quota = ["quota", "credential_quota"].contains(cooldown.reason)
             return failure(provider, category: quota ? .quota : .unavailable,
                            message: quota ? "The subscription has reached its usage limit and is cooling down."
                                : "The subscription is temporarily unavailable during its cooldown.")
         }
+        if status == "active", unavailable == false { return nil }
         return failure(provider, category: .unavailable,
                        message: needsRefresh ? "The saved access token has expired; refresh hasn't succeeded."
                            : "The subscription is temporarily unavailable.")
+    }
+
+    func modelCooldowns(for provider: BrainProvider) -> [BrainTarget: ProviderFailure] {
+        var failures: [BrainTarget: ProviderFailure] = [:]
+        for cooldown in cooldowns ?? [] where cooldown.scope == "model" && cooldown.remaining_seconds > 0 {
+            guard let key = cooldown.model_key, !key.isEmpty else { continue }
+            let target = BrainTarget(provider: provider, modelID: key)
+            failures[target] = failure(
+                provider, category: cooldown.reason == "quota" ? .quota : .unavailable,
+                code: "model_cooldown", message: "The selected model is temporarily unavailable during its cooldown.")
+        }
+        return failures
+    }
+
+    // Match canonicalModelKey in the pinned helper's sdk/cliproxy/auth/selector.go.
+    static func modelKey(_ model: String) -> String {
+        let trimmed = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasSuffix(")"), let suffix = trimmed.lastIndex(of: "(") else { return trimmed }
+        let base = trimmed[..<suffix].trimmingCharacters(in: .whitespacesAndNewlines)
+        return base.isEmpty ? trimmed : base
     }
 
     private func failure(

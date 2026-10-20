@@ -125,7 +125,7 @@ import os
     @Test func readinessNamesTheSubscriptionsTheHelperServes() async throws {
         try await withSupervisor(script: "idle") { supervisor, _, _ in
             let readiness = await supervisor.readiness()
-            guard case .ready(_, let signedIn, _) = readiness else {
+            guard case .ready(_, let signedIn, _, _) = readiness else {
                 Issue.record("expected a ready helper, got \(readiness)")
                 return
             }
@@ -541,7 +541,7 @@ import os
 
         stub = try ModelListStub(port: port, body: Self.openAIModels)
         let recovered = await supervisor.readiness()
-        guard case .ready(let replacement, _, _) = recovered else {
+        guard case .ready(let replacement, _, _, _) = recovered else {
             Issue.record("expected a replacement helper, got \(recovered)")
             return
         }
