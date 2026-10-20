@@ -4,9 +4,37 @@ import Testing
 @testable import JarvisBrainProviders
 
 @Suite struct LocalProxyCredentialTests {
-    private func credential(_ cooldowns: String, statusMessage: String = "") throws -> LocalProxyCredential {
-        let json = #"{"name":"codex-fixture.json","status":"active","disabled":false,"unavailable":false,"status_message":"\#(statusMessage)","cooldowns":\#(cooldowns)}"#
+    private func credential(
+        _ cooldowns: String, statusMessage: String = "", status: String = "active",
+        disabled: Bool = false, unavailable: Bool = false
+    ) throws -> LocalProxyCredential {
+        let json = #"{"name":"codex-fixture.json","status":"\#(status)","disabled":\#(disabled),"unavailable":\#(unavailable),"status_message":"\#(statusMessage)","cooldowns":\#(cooldowns)}"#
         return try JSONDecoder().decode(LocalProxyCredential.self, from: Data(json.utf8))
+    }
+
+    @Test(arguments: ["quota", "transient_error"])
+    func aggregateModelCooldownStatusDoesNotBlockTheAccount(reason: String) throws {
+        let value = try credential(
+            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"\#(reason)","remaining_seconds":60}]"#,
+            status: "error", unavailable: true)
+        #expect(value.unavailability(for: .codexSubscription) == nil)
+        #expect(value.modelCooldowns(for: .codexSubscription).count == 1)
+    }
+
+    @Test(arguments: ["token expired", " Token Expired ", "invalid_grant", "invalid grant (retrying)"])
+    func tokenFailuresStayUnavailableDuringAModelCooldown(message: String) throws {
+        let value = try credential(
+            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#,
+            statusMessage: message, status: "error", unavailable: true)
+        #expect(value.unavailability(for: .codexSubscription)?.category == .unavailable)
+    }
+
+    @Test func aDisabledAccountStaysUnavailableDuringAModelCooldown() throws {
+        let value = try credential(
+            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#,
+            status: "disabled", disabled: true, unavailable: true)
+        #expect(value.unavailability(for: .codexSubscription)?.category == .configuration)
+        #expect(value.unavailability(for: .codexSubscription)?.disposition == .permanent)
     }
 
     @Test(arguments: ["gpt-6.1-sol", " gpt-6.1-sol(high) ", "gpt-6.1-sol()"])
@@ -38,9 +66,18 @@ import Testing
         #expect(value.modelCooldowns(for: .codexSubscription).isEmpty)
     }
 
-    @Test func rejectedAuthenticationTakesPrecedenceOverCooldowns() throws {
+    @Test func aCredentialCooldownTakesPrecedenceOverAModelCooldown() throws {
         let value = try credential(
-            #"[{"scope":"credential","reason":"quota","remaining_seconds":60}]"#,
+            #"[{"scope":"credential","reason":"credential_quota","remaining_seconds":60},{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#,
+            status: "error", unavailable: true)
+        #expect(value.unavailability(for: .codexSubscription)?.category == .quota)
+        #expect(value.unavailability(for: .codexSubscription)?.identity.errorCode == nil)
+    }
+
+    @Test(arguments: ["credential", "model"])
+    func rejectedAuthenticationTakesPrecedenceOverCooldowns(scope: String) throws {
+        let value = try credential(
+            #"[{"scope":"\#(scope)","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#,
             statusMessage: "unauthorized")
         #expect(value.unavailability(for: .codexSubscription)?.category == .authentication)
         #expect(value.unavailability(for: .codexSubscription)?.disposition == .permanent)

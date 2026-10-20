@@ -52,6 +52,10 @@ struct LocalProxyCredential: Decodable, Sendable {
                                : "The subscription is temporarily unavailable during its cooldown.")
         }
         if status == "active", unavailable == false { return nil }
+        // The helper can report an error when all recorded models are cooling down.
+        let tokenFailure = ["token expired", "invalid_grant", "invalid grant (retrying)"].contains(
+            status_message?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? "")
+        if status == "error", !tokenFailure, !modelCooldowns(for: provider).isEmpty { return nil }
         return failure(provider, category: .unavailable,
                        message: needsRefresh ? "The saved access token has expired; refresh hasn't succeeded."
                            : "The subscription is temporarily unavailable.")

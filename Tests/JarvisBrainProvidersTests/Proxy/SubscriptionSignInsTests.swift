@@ -12,8 +12,10 @@ import os
     private nonisolated static let active = #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"active","disabled":false,"unavailable":false,"status_message":"","cooldowns":[]}]}"#
     private nonisolated static let rejected = #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"unauthorized","cooldowns":[]}]}"#
 
-    private nonisolated static func credentialHealth(cooldowns: String) -> String {
-        #"{"files":[{"name":"codex-fixture.json","provider":"codex","status":"active","disabled":false,"unavailable":false,"cooldowns":\#(cooldowns)}]}"#
+    private nonisolated static func credentialHealth(
+        cooldowns: String, status: String = "active", unavailable: Bool = false
+    ) -> String {
+        #"{"files":[{"name":"codex-fixture.json","provider":"codex","status":"\#(status)","disabled":false,"unavailable":\#(unavailable),"cooldowns":\#(cooldowns)}]}"#
     }
 
     private func withSignIns(
@@ -76,9 +78,11 @@ import os
         }
     }
 
-    @Test func aModelCooldownAllowsAnotherModelOnTheSameSubscription() async throws {
+    @Test(arguments: [false, true])
+    func aModelCooldownAllowsAnotherModelOnTheSameSubscription(allRecordedModelsBlocked: Bool) async throws {
         let coolingDown = Self.credentialHealth(cooldowns:
-            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#)
+            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#,
+            status: allRecordedModelsBlocked ? "error" : "active", unavailable: allRecordedModelsBlocked)
         try await withSignIns(respond: { request in
             (200, request.contains("/v8/management/credentials") ? coolingDown : Self.models)
         }) { signIns, supervisor in
@@ -91,6 +95,8 @@ import os
                 availableCredentials: [], subscriptions: subscriptions)
             let failure = try #require(route.failure(for: primary))
 
+            #expect(signIns.connection(for: .codexSubscription).tone == .ready)
+            #expect(signIns.selectable == [.codexSubscription])
             #expect(failure.category == .quota)
             #expect(route.state == .ready(alternate, primaryFailure: failure))
             #expect(BrainRouteAvailability(
