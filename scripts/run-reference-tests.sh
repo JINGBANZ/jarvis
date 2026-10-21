@@ -5,6 +5,7 @@ umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/harness.sh
 source scripts/lib/test-display.sh
+isolate_test_display "$@"
 EXPECTED_CASES=41
 EXTRA_ARGS=()
 if [[ "${1:-}" == --quit-only ]]; then

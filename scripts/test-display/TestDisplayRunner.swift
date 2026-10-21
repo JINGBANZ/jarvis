@@ -16,10 +16,24 @@ final class TestDisplayRunner {
 
     private func run() async {
         let command = Array(CommandLine.arguments.dropFirst())
-        guard command.first == "--", command.count > 1 else {
-            fail("usage: test-display -- command [arguments]")
+        if command == ["--cleanup-profiles"] || command == ["--cleanup-profiles", "--apply"] {
+            do {
+                let apply = command.last == "--apply"
+                let profiles = try TestDisplayProfiles.cleanup(apply: apply)
+                for profile in profiles { print("\(apply ? "Removed" : "Would remove") \(profile.path)") }
+                print("\(profiles.count) inactive legacy Jarvis test profiles\(apply ? " removed." : "; preview only. Use --apply to remove (may require sudo).")")
+                exit(0)
+            } catch { fail("Test profile cleanup: \(error)") }
         }
-        let originalScreens = NSScreen.screens.map { (id: displayID($0), frame: $0.frame) }
+        guard command.first == "--", command.count > 1 else {
+            fail("usage: test-display -- command [arguments] | --cleanup-profiles [--apply]")
+        }
+        // macOS may shift existing test displays when adding another; their overlays follow that move.
+        let originalScreens = NSScreen.screens.filter {
+            guard let id = displayID($0) else { return true }
+            return CGDisplayVendorNumber(id) != TestDisplayIdentity.vendor
+                || CGDisplayModelNumber(id) != TestDisplayIdentity.product
+        }.map { (id: displayID($0), frame: $0.frame) }
         let mainDisplay = CGMainDisplayID()
         guard !originalScreens.isEmpty else {
             fail("No macOS desktop is accessible. Run tests from a logged-in desktop with WindowServer access.")
@@ -36,6 +50,8 @@ final class TestDisplayRunner {
             guard let screen,
                   CGMainDisplayID() == mainDisplay,
                   CGDisplayIsInMirrorSet(display.id) == 0,
+                  NSScreen.screens.filter({ displayID($0) != display.id })
+                    .allSatisfy({ !$0.frame.intersects(screen.frame) }),
                   originalScreens.allSatisfy({ original in
                       NSScreen.screens.first(where: { displayID($0) == original.id })?.frame == original.frame
                           && !original.frame.intersects(screen.frame)
@@ -49,11 +65,11 @@ final class TestDisplayRunner {
             var environment = ProcessInfo.processInfo.environment
             environment["JARVIS_TEST_DISPLAY_ID"] = String(display.id)
             process.environment = environment
-            try process.run()
             // Foundation starts a separate process group on macOS. Keep the display alive
             // until that group's script has handled cancellation, including live-app teardown.
             for number in [SIGINT, SIGTERM, SIGHUP] {
-                signal(number, SIG_IGN)
+                // A caught signal resets on exec; SIG_IGN would also disable the child's traps.
+                signal(number, { _ in })
                 let source = DispatchSource.makeSignalSource(signal: number, queue: .main)
                 source.setEventHandler { [weak self] in
                     self?.interrupt(process, signal: number)
@@ -61,6 +77,7 @@ final class TestDisplayRunner {
                 source.resume()
                 signalSources.append(source)
             }
+            try process.run()
             FileHandle.standardOutput.write(Data("▶ test windows isolated on Jarvis Tests (display \(display.id))\n".utf8))
             while process.isRunning {
                 if CGDisplayIsOnline(display.id) == 0 {

@@ -4,6 +4,7 @@ umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/harness.sh
 source scripts/lib/test-display.sh
+isolate_test_display "$@"
 ./scripts/build-app.sh debug
 run_dir="$(create_run_directory settings-harness)"
 app_path="$PWD/Jarvis Dev.app"

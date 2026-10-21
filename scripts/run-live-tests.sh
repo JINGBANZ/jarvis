@@ -59,7 +59,8 @@ if /usr/bin/pgrep -f "$APP_PROCESS_PATTERN" >/dev/null; then
   exit 1
 fi
 
-source scripts/lib/test-display.sh ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
+source scripts/lib/test-display.sh
+isolate_test_display ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
 
 # A full run takes about half an hour; keep the Mac from sleeping through it.
 if [[ -z "${JARVIS_LIVE_E2E_CAFFEINATED:-}" ]]; then
