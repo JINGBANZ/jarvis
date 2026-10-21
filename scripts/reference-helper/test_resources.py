@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 
-HELPER = Path(sys.argv.pop(1)).resolve()
+from support import HELPER
 
 
 class ConversionResources(unittest.TestCase):
@@ -82,7 +82,3 @@ time.sleep(60)
             if worker_pid:
                 try: os.kill(worker_pid, signal.SIGKILL)
                 except ProcessLookupError: pass
-
-
-if __name__ == "__main__":
-    unittest.main()

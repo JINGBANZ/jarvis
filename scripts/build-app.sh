@@ -62,24 +62,8 @@ swift build -c "$CONFIG"
 BIN_PATH="$(swift build -c "$CONFIG" --show-bin-path)/$BIN_NAME"
 
 echo "▶ assembling $APP"
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
-cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
-# Sparkle is linked dynamically, so dyld needs it even though the dev bundle has no update feed.
-ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$APP/Contents/Frameworks/Sparkle.framework"
-# SwiftPM emits resources as side-by-side bundles; `Bundle.module` finds them in Contents/Resources.
-ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisApp.bundle" \
-      "$APP/Contents/Resources/Jarvis_JarvisApp.bundle"
-ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisCore.bundle" \
-      "$APP/Contents/Resources/Jarvis_JarvisCore.bundle"
-rm -rf "$APP/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices" \
-       "$APP/Contents/Frameworks/Sparkle.framework/XPCServices"
-source scripts/lib/cliproxyapi.sh
-bundle_cliproxyapi "$APP"
-source scripts/lib/reference-helper.sh
-bundle_reference_helper "$APP" "$CONFIG"
-cp Resources/Info.plist "$APP/Contents/Info.plist"
-cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
+source scripts/lib/app-bundle.sh
+assemble_app "$APP" "$(dirname "$BIN_PATH")" "$CONFIG"
 # A distinct name and bundle id keep the dev build from sharing TCC grants or Launch Services
 # registration with an installed release.
 /usr/bin/plutil -replace CFBundleName -string "$APP_NAME" "$APP/Contents/Info.plist"

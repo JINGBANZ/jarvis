@@ -6,6 +6,7 @@ workflow=".github/workflows/release.yml"
 ci_workflow=".github/workflows/ci.yml"
 release_header=".github/release-header.md"
 package_script="scripts/package-app.sh"
+bundle_script="scripts/lib/app-bundle.sh"
 verify_script="scripts/verify-release.sh"
 sdk_guard="scripts/check-release-sdk.sh"
 dmg_settings="scripts/dmg-settings.py"
@@ -16,7 +17,7 @@ package_guard_call="./scripts/check-release-sdk.sh \"\$BIN_PATH\""
 verify_guard_call="./scripts/check-release-sdk.sh \"\$EXTRACTED_BIN\""
 
 for path in "$workflow" "$ci_workflow" "$release_header" "$package_script" "$verify_script" \
-    "$sdk_guard" "$dmg_settings" "$dmg_layout_guard" "$release_requirements" "$appcast_script"; do
+    "$bundle_script" "$sdk_guard" "$dmg_settings" "$dmg_layout_guard" "$release_requirements" "$appcast_script"; do
   if [[ ! -f "$path" || -L "$path" ]]; then
     echo "Release configuration guard: $path must be a regular file." >&2
     exit 1
@@ -88,8 +89,7 @@ if ! /usr/bin/grep -Fq -- '--only-binary=:all:' "$release_requirements" \
   echo "Release workflow must install the hash-pinned DMG layout tool in its own environment." >&2
   exit 1
 fi
-if ! /usr/bin/grep -Fq 'rm -rf "$SPARKLE/Versions/Current/XPCServices"' "$package_script" \
-    || ! /usr/bin/grep -Fq \
+if ! /usr/bin/grep -Fq \
       'for nested in Versions/Current/Autoupdate Versions/Current/Updater.app; do' \
       "$package_script" \
     || ! /usr/bin/grep -Fq \
@@ -133,8 +133,7 @@ if ! /usr/bin/grep -Eq '^CLIPROXYAPI_SOURCE_SHA256="[0-9a-f]{64}"$' "$cliproxyap
   exit 1
 fi
 package_flow=(
-  'ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$SPARKLE"'
-  'bundle_cliproxyapi "$APP"'
+  'assemble_app "$APP" "$(dirname "$BIN_PATH")" release'
   'codesign --force --options runtime --timestamp --sign "$IDENTITY" "$SPARKLE"'
   'codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/cliproxyapi"'
   'ditto -c -k --keepParent "$APP" "$APP_NOTARY_ARCHIVE"'

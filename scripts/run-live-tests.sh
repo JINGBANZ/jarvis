@@ -4,6 +4,7 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
+source scripts/lib/harness.sh
 
 usage() {
   echo "usage: $0 [A|B|C|D|H|L|P|R|F01|F02|CACHE|REF01|REF02|REF03|REF04|REF05|REF06|REF07|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going]" >&2
@@ -71,15 +72,7 @@ echo "▶ building the signed development app"
 ./scripts/build-app.sh debug
 
 BASE="$PWD/.jarvis/live-e2e"
-if [[ -L "$PWD/.jarvis" || -L "$BASE" ]]; then
-  echo "Refusing a symlinked live e2e directory; use the workspace-local .jarvis tree." >&2
-  exit 1
-fi
-mkdir -p "$BASE"
-chmod 700 "$PWD/.jarvis" "$BASE"
-RUN_DIR="$BASE/$(date '+%Y-%m-%d_%H-%M-%S')-$$"
-mkdir "$RUN_DIR"
-chmod 700 "$RUN_DIR"
+RUN_DIR="$(create_run_directory live-e2e)"
 # Keep the newest ten runs, the transcription benchmark's cap.
 find "$BASE" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort -r | tail -n +11 \
   | while IFS= read -r old_run; do
@@ -107,11 +100,8 @@ source scripts/lib/live-test-cancellation.sh
 
 source scripts/lib/swift-test-flags.sh
 echo "▶ running live e2e scenarios ($SCENARIO, provider $PROVIDER) into $RUN_DIR"
-set +e
-swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} ${SKIP_CACHE[@]+"${SKIP_CACHE[@]}"} --filter "$FILTER" 2>&1 \
-  | tee "$RUN_DIR/swift-test.log"
-test_status=${PIPESTATUS[0]}
-set -e
+test_status=0
+run_swift_tests "$RUN_DIR/swift-test.log" ${SKIP_CACHE[@]+"${SKIP_CACHE[@]}"} --filter "$FILTER" || test_status=$?
 
 {
   for scenario_results in "$RUN_DIR"/*/results.txt; do

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/guard.sh
 
 capture_source="Sources/JarvisApp/Capture/AggregateEchoCapture.swift"
 benchmark_capture_source="Sources/JarvisApp/Benchmark/SystemAudioBenchmarkCapture.swift"
@@ -16,26 +17,22 @@ normal_app_wiring=(
     "Sources/JarvisApp/App/SessionComposition.swift"
 )
 session_factory="Sources/JarvisApp/Capture/TranscriptionSessionFactory.swift"
-if [ ! -f "$capture_source" ]; then
-    echo "Audio capture guard: $capture_source not found; refusing to pass." >&2
-    exit 1
-fi
-if [ ! -f "$benchmark_capture_source" ]; then
-    echo "Audio capture guard: $benchmark_capture_source not found; refusing to pass." >&2
-    exit 1
-fi
-if [ ! -f "$benchmark_standard_source" ] || [ ! -f "$benchmark_reconnect_source" ] \
-    || [ ! -f "$benchmark_turns_source" ] || [ ! -f "$benchmark_script" ]; then
-    echo "Audio capture guard: transcription benchmark sources not found; refusing to pass." >&2
-    exit 1
-fi
+for path in "$capture_source" "$benchmark_capture_source" "$benchmark_standard_source" \
+    "$benchmark_reconnect_source" "$benchmark_turns_source" "$benchmark_runner_source" \
+    "$benchmark_fixtures_source" "$benchmark_script" "$normal_session_contract" \
+    "$session_factory" "${normal_app_wiring[@]}" Package.swift Resources/Info.plist; do
+    if [[ ! -f "$path" || ! -r "$path" ]]; then
+        echo "Audio capture guard: $path missing or unreadable; refusing to pass." >&2
+        exit 1
+    fi
+done
 if ! /usr/bin/grep -Fq 'TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)' \
     "$benchmark_standard_source" \
     || ! /usr/bin/grep -Fq 'TranscriptionBenchmarkEventRecorder(abortMarker: abortMarker)' \
     "$benchmark_turns_source" \
     || ! /usr/bin/grep -Fq 'TranscriptionBenchmarkAbortMonitor.run' \
     "$benchmark_runner_source" \
-    || ! /usr/bin/grep -Fq 'trap abort_run INT TERM' "$benchmark_script"; then
+    || ! /usr/bin/grep -Fq 'trap abort_run HUP INT TERM' "$benchmark_script"; then
     echo "Every transcription benchmark mode must stop capture when its command is interrupted." >&2
     exit 1
 fi
@@ -43,46 +40,24 @@ if ! /usr/bin/grep -Eq 'muteBehavior[[:space:]]*=[[:space:]]*CATapMuteBehavior\.
     echo "Transcription benchmark playback must be captured with hardware output muted." >&2
     exit 1
 fi
-if /usr/bin/grep -Eq '^[[:space:]]*kAudioAggregateDeviceTapAutoStartKey[[:space:]]*:' "$capture_source"; then
-    echo "Aggregate capture must start immediately; tap auto-start waits for system-audio writers and stalls the microphone." >&2
-    exit 1
-fi
-if /usr/bin/grep -Eq \
-    'confirm-network-interruption|request-(disable|restore)-network|ack-(disable|restore)-network' \
-    "$benchmark_reconnect_source" "$benchmark_script"; then
-    echo "Reconnect benchmark must not coordinate host network interruption." >&2
-    exit 1
-fi
-if /usr/bin/grep -Eq \
-    '(^|[[:space:]/])(networksetup|ifconfig|pfctl|route|ipconfig|airport)([[:space:]]|$)' \
-    "$benchmark_reconnect_source" "$benchmark_script"; then
-    echo "Reconnect benchmark must not change host network state." >&2
-    exit 1
-fi
+guard_forbid "Aggregate capture must start immediately; tap auto-start stalls the microphone." \
+    -nE '^[[:space:]]*kAudioAggregateDeviceTapAutoStartKey[[:space:]]*:' "$capture_source"
+guard_forbid "Reconnect benchmark must not coordinate host network interruption." \
+    -nE 'confirm-network-interruption|request-(disable|restore)-network|ack-(disable|restore)-network' \
+    "$benchmark_reconnect_source" "$benchmark_script"
+guard_forbid "Reconnect benchmark must not change host network state." \
+    -nE '(^|[[:space:]/])(networksetup|ifconfig|pfctl|route|ipconfig|airport)([[:space:]]|$)' \
+    "$benchmark_reconnect_source" "$benchmark_script"
 if ! /usr/bin/grep -Fq 'transportControl.beginInterruption()' "$benchmark_reconnect_source" \
     || ! /usr/bin/grep -Fq 'transportControl.endInterruption()' "$benchmark_reconnect_source"; then
     echo "Reconnect benchmark must scope interruption to Jarvis's transcription transport." >&2
     exit 1
 fi
-for wiring_source in "${normal_app_wiring[@]}"; do
-    if [ ! -f "$wiring_source" ]; then
-        echo "Audio capture guard: $wiring_source not found; refusing to pass." >&2
-        exit 1
-    fi
-done
-if /usr/bin/grep -Fq 'TranscriptionBenchmark' "$normal_session_contract" \
-    || /usr/bin/grep -Fq 'TranscriptionBenchmark' "${normal_app_wiring[@]}"; then
-    echo "Normal transcription contracts and app wiring must not expose benchmark capabilities." >&2
-    exit 1
-fi
+guard_forbid "Normal transcription contracts and app wiring must not expose benchmark capabilities." \
+    -nF 'TranscriptionBenchmark' "$normal_session_contract" "${normal_app_wiring[@]}"
 # main.swift alone may select the live e2e mode.
-live_e2e_status=0
-live_e2e_references="$(/usr/bin/grep -RIl 'LiveE2E' Sources/JarvisApp/App \
-    Sources/JarvisCore/Transcription Sources/JarvisCore/Coach)" || live_e2e_status=$?
-if [ "$live_e2e_status" -gt 1 ]; then
-    echo "Audio capture guard: live e2e scan failed; refusing to pass." >&2
-    exit 1
-fi
+live_e2e_references="$(guard_scan -RIl 'LiveE2E' Sources/JarvisApp/App \
+    Sources/JarvisCore/Transcription Sources/JarvisCore/Coach)"
 while IFS= read -r reference; do
     if [ -z "$reference" ] || [ "$reference" = "Sources/JarvisApp/App/main.swift" ]; then
         continue
@@ -90,12 +65,7 @@ while IFS= read -r reference; do
     echo "The live e2e mode must stay out of normal app wiring and the coaching kernel: $reference" >&2
     exit 1
 done <<< "$live_e2e_references"
-fixture_status=0
-fixture_references="$(/usr/bin/grep -RIlE 'FixtureAudioSource|FixtureScreenCapture' Sources)" || fixture_status=$?
-if [ "$fixture_status" -gt 1 ]; then
-    echo "Audio capture guard: fixture source scan failed; refusing to pass." >&2
-    exit 1
-fi
+fixture_references="$(guard_scan -RIlE 'FixtureAudioSource|FixtureScreenCapture' Sources)"
 while IFS= read -r reference; do
     case "$reference" in
         ""|Sources/JarvisApp/LiveE2E/*) ;;

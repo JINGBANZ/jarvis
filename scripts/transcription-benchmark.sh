@@ -4,6 +4,7 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
+source scripts/lib/harness.sh
 
 usage() {
   echo "usage:" >&2
@@ -51,22 +52,8 @@ if [[ -n "$FILTER" && "$MODE" != "standard" && "$MODE" != "languages" ]]; then
   exit 2
 fi
 
-BASE="$PWD/.jarvis/transcription-benchmarks"
 APP="Jarvis Dev.app"
-RUN_ID="$(date '+%Y-%m-%d_%H-%M-%S')-$$"
-RUN_DIR="$BASE/$RUN_ID"
-if [[ -L "$PWD/.jarvis" || -L "$BASE" ]]; then
-  echo "Refusing a symlinked benchmark log directory; use the workspace-local .jarvis tree." >&2
-  exit 1
-fi
-mkdir -p "$BASE"
-chmod 700 "$PWD/.jarvis" "$BASE"
-if [[ -e "$RUN_DIR" || -L "$RUN_DIR" ]]; then
-  echo "Refusing to reuse an existing benchmark run directory: $RUN_DIR" >&2
-  exit 1
-fi
-mkdir "$RUN_DIR"
-chmod 700 "$RUN_DIR"
+RUN_DIR="$(create_run_directory transcription-benchmarks)"
 
 echo "▶ building the signed benchmark app"
 ./scripts/build-app.sh debug
@@ -110,7 +97,7 @@ esac
 APP_WAITER_PID=""
 
 abort_run() {
-  trap - INT TERM
+  trap - HUP INT TERM
   touch "$RUN_DIR/abort"
   echo >&2
   echo "Transcription benchmark aborted." >&2
@@ -119,14 +106,14 @@ abort_run() {
   fi
   exit 130
 }
-trap abort_run INT TERM
+trap abort_run HUP INT TERM
 
 # `open -W` gives a waitable launcher, so the trap can reap it after the app sees the abort marker.
 open -W -n "./$APP" --args "${COMMON_ARGS[@]}" &
 APP_WAITER_PID=$!
 wait "$APP_WAITER_PID"
 APP_WAITER_PID=""
-trap - INT TERM
+trap - HUP INT TERM
 
 if show_failure_if_present; then
   exit 1
