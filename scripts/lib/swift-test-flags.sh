@@ -1,4 +1,5 @@
-# Sourced by run-tests.sh and run-live-tests.sh; defines SWIFT_TEST_FLAGS.
+#!/usr/bin/env bash
+# Sourced by run-tests.sh and run-live-tests.sh.
 #
 # The CLT ships swift-testing off the default search path; full Xcode (CI) already finds it.
 # Expand with ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} so an empty array survives `set -u`.
@@ -13,3 +14,17 @@ if [ "$(xcode-select -p 2>/dev/null)" = "/Library/Developer/CommandLineTools" ];
     -Xlinker -rpath -Xlinker "$IOP"
   )
 fi
+
+run_swift_tests() {
+  local log="$1"
+  shift
+  if swift test ${SWIFT_TEST_FLAGS[@]+"${SWIFT_TEST_FLAGS[@]}"} "$@" 2>&1 | tee "$log"; then
+    # A stopped main run loop can exit 0 before the summary; an empty filter also exits 0.
+    if ! /usr/bin/grep -Eq 'Test run with [1-9][0-9]* tests?.*passed after' "$log"; then
+      echo "swift test did not report a completed, nonempty passing test run: $log" >&2
+      return 1
+    fi
+  else
+    return "$?"
+  fi
+}

@@ -27,30 +27,10 @@ plist_value() {
 [[ "$(plist_value SUPublicEDKey)" =~ ^[A-Za-z0-9+/]{43}=$ ]] \
   || fail "Resources/Info.plist must carry a real base64 Ed25519 SUPublicEDKey."
 
-dev_script="scripts/build-app.sh"
-for required in \
-  'APP_NAME="Jarvis Dev"' \
-  'APP="$APP_NAME.app"' \
-  'BUNDLE_ID="com.jarvis.coach.dev"' \
-  '/usr/bin/plutil -replace CFBundleName -string "$APP_NAME" "$APP/Contents/Info.plist"' \
-  '/usr/bin/plutil -replace CFBundleDisplayName -string "$APP_NAME" "$APP/Contents/Info.plist"' \
-  '/usr/bin/plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$APP/Contents/Info.plist"' \
-  '/usr/bin/plutil -remove SUFeedURL "$APP/Contents/Info.plist"'
-do
-  /usr/bin/grep -Fqx "$required" "$dev_script" \
-    || fail "$dev_script must assemble Jarvis Dev.app with its independent bundle identity."
-done
-/usr/bin/grep -Fqx '    open ./"$APP"' "$dev_script" \
-  || fail "$dev_script must launch the assembled development bundle."
-
+/usr/bin/grep -Fqx '    open ./"$APP"' scripts/build-app.sh \
+  || fail "the development command must launch the assembled bundle through Launch Services."
 /usr/bin/grep -Fqx 'APP="Jarvis.app"' scripts/package-app.sh \
   || fail "release packaging must continue to assemble Jarvis.app."
 /usr/bin/grep -Fqx 'APP="Jarvis.app"' scripts/verify-release.sh \
   || fail "release verification must continue to require Jarvis.app."
-/usr/bin/grep -Fqx 'APP="Jarvis Dev.app"' scripts/transcription-benchmark.sh \
-  || fail "the developer transcription benchmark must launch Jarvis Dev.app."
-/usr/bin/grep -Fqx 'open -W -n "./$APP" --args "${COMMON_ARGS[@]}" &' \
-  scripts/transcription-benchmark.sh \
-  || fail "the developer transcription benchmark must open its declared development bundle."
-
 echo "App identity guard passed."

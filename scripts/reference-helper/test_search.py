@@ -1,36 +1,15 @@
 """Host-only ranked retrieval contracts; real helper/SQLite and public framed protocol."""
 import hashlib
-import importlib.util
-import json
-import os
 from pathlib import Path
 import sqlite3
-import sys
 import time
-import unittest
 import unicodedata
 import uuid
 
-spec = importlib.util.spec_from_file_location("reference_contracts", Path(__file__).with_name("test_helper.py"))
-base = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(base)
+from support import HelperTestCase
 
 
-class SearchContracts(unittest.TestCase):
-    setUp = base.HelperContracts.setUp
-    launch = base.HelperContracts.launch
-    close_child = base.HelperContracts.close_child
-    read_exact = base.HelperContracts.read_exact
-    send = base.HelperContracts.send
-    receive = base.HelperContracts.receive
-    call = base.HelperContracts.call
-    result = base.HelperContracts.result
-    configure = base.HelperContracts.configure
-    admit = base.HelperContracts.admit
-    prepare = base.HelperContracts.prepare
-    read = base.HelperContracts.read
-    restart = base.HelperContracts.restart
-
+class SearchContracts(HelperTestCase):
     @property
     def database(self):
         return self.root / "store/documents.sqlite"
@@ -879,7 +858,3 @@ class SearchContracts(unittest.TestCase):
         self.assertEqual([h["document_id"] for h in selected["hits"]], [target])
         self.assertEqual(selected["coverage"]["eligible_documents"], 1)
         print(f"10k full-key IPC query with 9999 retained revisions: {elapsed * 1000:.2f} ms", flush=True)
-
-
-if __name__ == "__main__":
-    unittest.main()

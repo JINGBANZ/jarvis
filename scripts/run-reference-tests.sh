@@ -3,6 +3,7 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
+source scripts/lib/harness.sh
 source scripts/lib/test-display.sh
 EXPECTED_CASES=41
 EXTRA_ARGS=()
@@ -17,12 +18,7 @@ elif (( $# > 0 )); then
   exit 2
 fi
 ./scripts/build-app.sh debug
-BASE="$PWD/.jarvis/reference-harness"
-[[ ! -L "$PWD/.jarvis" && ! -L "$BASE" ]] || exit 1
-mkdir -p "$BASE"
-chmod 700 "$PWD/.jarvis" "$BASE"
-RUN_DIR="$BASE/$(date '+%Y-%m-%d_%H-%M-%S')-$$"
-mkdir -m 700 "$RUN_DIR"
+RUN_DIR="$(create_run_directory reference-harness)"
 POLLUTION="$RUN_DIR/pollution"
 mkdir -p "$POLLUTION/cwd"
 printf '#!/bin/sh\n: > "%s"\nexit 99\n' "$RUN_DIR/hostile-helper-executed" > "$POLLUTION/cwd/JarvisReferenceHelper"
@@ -69,14 +65,7 @@ open -n -g --env "HOME=$POLLUTION" --env "PATH=$POLLUTION/cwd" --env "PYTHONPATH
   --env "OPENAI_API_KEY=synthetic-secret-canary" --env "GEMINI_API_KEY=synthetic-secret-canary" \
   --stdout "$RUN_DIR/stdout.log" --stderr "$RUN_DIR/stderr.log" \
   "$PWD/Jarvis Dev.app" --args --reference-harness --reference-harness-output "$RUN_DIR" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
-deadline=$((SECONDS + 600))
-while [[ ! -f "$RUN_DIR/results.json" ]]; do
-  if (( SECONDS >= deadline )); then
-    echo "Reference harness timed out: $RUN_DIR" >&2
-    exit 1
-  fi
-  sleep 0.2
-done
+wait_for_file "$RUN_DIR/results.json" 600 "Reference harness"
 python3 - "$RUN_DIR/results.json" "$EXPECTED_CASES" <<'PY'
 import json, sys
 report = json.load(open(sys.argv[1]))

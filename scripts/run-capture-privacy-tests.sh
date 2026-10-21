@@ -3,6 +3,7 @@
 set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
+source scripts/lib/harness.sh
 
 if (( $# > 1 )); then
   echo "usage: $0 [hold-seconds: 1...30]" >&2
@@ -19,15 +20,7 @@ if /usr/bin/pgrep -f '/Jarvis Dev[.]app/Contents/MacOS/JarvisApp' >/dev/null; th
 fi
 ./scripts/build-app.sh debug
 
-BASE="$PWD/.jarvis/capture-privacy"
-if [[ -L "$PWD/.jarvis" || -L "$BASE" ]]; then
-  echo "Refusing a symlinked capture-privacy directory." >&2
-  exit 1
-fi
-mkdir -p "$BASE"
-chmod 700 "$PWD/.jarvis" "$BASE"
-RUN_DIR="$BASE/$(date '+%Y-%m-%d_%H-%M-%S')-$$"
-mkdir -m 700 "$RUN_DIR"
+RUN_DIR="$(create_run_directory capture-privacy)"
 git rev-parse HEAD > "$RUN_DIR/source-commit.txt"
 git status --porcelain > "$RUN_DIR/source-status.txt"
 codesign --verify --deep --strict 'Jarvis Dev.app'
@@ -43,17 +36,10 @@ stop_test_app() {
   done || true
 }
 trap stop_test_app EXIT
-trap 'exit 130' INT TERM
+trap 'exit 130' HUP INT TERM
 open -n "$PWD/Jarvis Dev.app" --args --capture-privacy \
   --capture-privacy-output-dir "$RUN_DIR" --capture-privacy-hold-seconds "$HOLD_SECONDS"
-deadline=$((SECONDS + 60 + 12 * HOLD_SECONDS))
-while [[ ! -f "$RUN_DIR/finished" ]]; do
-  if (( SECONDS >= deadline )); then
-    echo "Capture privacy check timed out: $RUN_DIR" >&2
-    exit 1
-  fi
-  sleep 0.2
-done
+wait_for_file "$RUN_DIR/finished" "$((60 + 12 * HOLD_SECONDS))" "Capture privacy check"
 python3 - "$RUN_DIR/results.json" <<'PY'
 import json
 import sys

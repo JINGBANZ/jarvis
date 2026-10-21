@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/guard.sh
 
 # Gate: the coaching kernel may not reach the OS, evaluator/session types, or control-plane storage.
 # Design: wiki/lean-coaching-core.md
@@ -42,24 +43,10 @@ check() {
     shift 2
     local paths=("$@")
 
-    local scan_status=0
-    local matches
-    matches="$(/usr/bin/grep -RInE "$pattern" "${paths[@]}")" \
-        || scan_status=$?
-    if [ "$scan_status" -gt 1 ]; then
-        echo "Coaching-kernel $label scan failed; refusing to pass without a complete scan." >&2
-        exit "$scan_status"
-    fi
-
-    # Skip whole-line `//` comments; trailing comments on code lines still count, which errs strict.
-    local filter_status=0
-    local violations
-    violations="$(printf '%s' "$matches" | /usr/bin/grep -vE '^[^:]+:[0-9]+:[[:space:]]*//')" \
-        || filter_status=$?
-    if [ "$filter_status" -gt 1 ]; then
-        echo "Coaching-kernel $label comment filtering failed; refusing to pass." >&2
-        exit "$filter_status"
-    fi
+    local matches violations
+    matches="$(guard_scan -RInE "$pattern" "${paths[@]}")"
+    # Whole-line comments are prose; trailing comments on code lines still count.
+    violations="$(printf '%s' "$matches" | guard_scan -vE '^[^:]+:[0-9]+:[[:space:]]*//')"
     if [ -n "$violations" ]; then
         echo "Coaching-kernel $label violation — inject a port instead of reaching through:" >&2
         echo "$violations" >&2

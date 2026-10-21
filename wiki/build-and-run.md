@@ -47,10 +47,11 @@ in [`coloredDashedArrowsRenderTheirStyle`](../Tests/JarvisOverlayTests/DiagramHi
 - **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
   search/rpath flags that plain `swift test` lacks CLT-only and passes `--skip JarvisLiveTests`, so
-  the Gate compiles the live target but never runs it. It also fails a run that exits 0 without
-  swift-testing's `Test run with N tests` summary, because anything that stops the main run loop
-  (such as `NSButton.performClick`) ends the runner early with success. `run-live-tests.sh`
-  sources the same flags from `scripts/lib/swift-test-flags.sh`. (One sharp edge: a direct
+  the Gate compiles the live target but never runs it. Both commands use
+  `scripts/lib/swift-test-flags.sh` to apply the toolchain flags and require a completed, nonempty
+  passing swift-testing summary. An empty filter exits 0, and stopping the main run loop (such as
+  `NSButton.performClick`) can end the runner early with success, so exit status alone is insufficient.
+  (One sharp edge: a direct
   `@MainActor async @Test` miscompiles on the CLT swift-testing — async UI tests use a `nonisolated`
   `@Test` that `await`s a `@MainActor` helper; see `OverlayInvisibilityTests`.)
 - **Stub executables are slow to start the first time.** On a desktop Mac, macOS checks each newly
@@ -66,6 +67,9 @@ in [`coloredDashedArrowsRenderTheirStyle`](../Tests/JarvisOverlayTests/DiagramHi
 identity remains the source in `Resources/Info.plist`; the development script edits only the assembled
 copy, rewriting its name and bundle id, dropping its update feed, and stamping it as a development
 build so the menu's footer caption reads a red `Dev` rather than the release version the plist carries.
+Both bundle commands use [`assemble_app`](../scripts/lib/app-bundle.sh) for resources, frameworks,
+and helper placement. Development identity creation and release signing/notarization stay in their
+respective commands so a headless release build cannot enter the development keychain setup.
 
 Both `build-app.sh` and `package-app.sh` build the subscription helper,
 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), from the same pinned upstream source and
@@ -111,6 +115,9 @@ access and admission; debug-only process faults cover transport and teardown. Re
 files in the checkout's `.jarvis/reference-harness/` directory. It contacts no provider and needs no
 capture grants. The ordinary `./scripts/run-tests.sh` also runs Core contracts and native helper
 process/resource checks; host Python drives those checks and is absent from the installed app.
+[`run-tests.py`](../scripts/reference-helper/run-tests.py) discovers the helper contract suites with
+an explicit executable, and [`support.py`](../scripts/reference-helper/support.py) owns their shared
+framed client and fixtures. Importing a test suite does not consume command-line arguments.
 Without an argument, the signed harness runs its complete suite, including REF01–REF07. A selector
 runs one References integration case plus app/helper Quit validation; `--quit-only` focuses on Quit.
 The case predicates live in
@@ -396,6 +403,17 @@ omits the item rather than offering an action that a self-signed build could nev
   saved to owner-only files; `OPENAI_API_KEY` and `GEMINI_API_KEY` are headless fallbacks. The icon is a quiet
   monochrome tile while stopped and a lit Listening Lens in every other state: amber while starting or
   reconnecting, violet once ready, red when a Start is blocked by a requirement needing attention.
+
+The signed harnesses share [`scripts/lib/harness.sh`](../scripts/lib/harness.sh) for fresh owner-only
+run directories under the checkout's `.jarvis/` tree and bounded waits for result files. Each harness
+owns its launch arguments, completion checks, timeouts, and app teardown. The transcription benchmark
+requests abort and waits for its detached app on hangup, interrupt, and termination.
+
+The Gate also runs [`scripts/test-script-workflows.py`](../scripts/test-script-workflows.py). Synthetic
+executables exercise bundle assembly, independent development identity, empty-run rejection,
+cancellation, private directories, source-scan failures, and AEC setup failures without using signing
+keys, capture grants, or providers. Source guards share [`guard_scan`](../scripts/lib/guard.sh), which
+allows an empty match set but rejects scan errors.
 
 ### Automatic test display
 

@@ -68,27 +68,10 @@ BIN_PATH="$(swift build -c release --show-bin-path)/$BIN_NAME"
 ./scripts/check-release-sdk.sh "$BIN_PATH"
 
 echo "▶ assembling $APP"
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
-cp "$BIN_PATH" "$APP/Contents/MacOS/$BIN_NAME"
-cp Resources/Info.plist "$APP/Contents/Info.plist"
-cp Resources/Jarvis.icns "$APP/Contents/Resources/Jarvis.icns"
+source scripts/lib/app-bundle.sh
+assemble_app "$APP" "$(dirname "$BIN_PATH")" release
 cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
-
-# The target's rpath expects Sparkle at Contents/Frameworks.
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
-ditto "$(dirname "$BIN_PATH")/Sparkle.framework" "$SPARKLE"
-# SwiftPM emits resources as side-by-side bundles; `Bundle.module` finds them in Contents/Resources.
-ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisApp.bundle" \
-      "$APP/Contents/Resources/Jarvis_JarvisApp.bundle"
-ditto "$(dirname "$BIN_PATH")/Jarvis_JarvisCore.bundle" \
-      "$APP/Contents/Resources/Jarvis_JarvisCore.bundle"
-# Sparkle's XPC services only serve sandboxed apps. Remove the top-level alias too, or it dangles.
-rm -rf "$SPARKLE/Versions/Current/XPCServices" "$SPARKLE/XPCServices"
-source scripts/lib/cliproxyapi.sh
-bundle_cliproxyapi "$APP"
-source scripts/lib/reference-helper.sh
-bundle_reference_helper "$APP" release
 
 echo "▶ signing (hardened runtime + timestamp)"
 # Sign inner code before outer. Not --deep: Apple calls it unsuitable for distribution because it
