@@ -161,19 +161,20 @@ public final class SubscriptionSignIns {
         notifyObservers()
     }
 
-    public func health(among providers: Set<BrainProvider>) -> [BrainProvider: BrainRouteAvailability.ConnectionHealth] {
-        Dictionary(uniqueKeysWithValues: providers.map { provider in
+    public func health(among targets: Set<BrainTarget>) -> [BrainTarget: BrainRouteAvailability.ConnectionHealth] {
+        Dictionary(uniqueKeysWithValues: targets.map { target in
+            let provider = target.provider
             let health: BrainRouteAvailability.ConnectionHealth
             if supervisor.accountFiles(for: provider).isEmpty {
                 health = .unavailable(ProviderFailure(
                     source: .brain(provider), stage: .process, category: .authentication,
                     disposition: .permanent, identity: .init(), message: "Sign in in Settings → Connections."))
             } else if let readiness {
-                health = readiness.unavailability(for: provider).map { .unavailable($0) } ?? .ready
+                health = readiness.unavailability(for: target).map { .unavailable($0) } ?? .ready
             } else {
                 health = .checking
             }
-            return (provider, health)
+            return (target, health)
         })
     }
 

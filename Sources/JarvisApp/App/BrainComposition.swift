@@ -80,9 +80,9 @@ final class BrainComposition {
         keys: [Credential: String]
     ) -> BrainRouteAvailability {
         let proxy = proxy ?? .unavailable(reason: "isn't running")
-        let subscriptions = Dictionary(uniqueKeysWithValues: Set(route.targets
-            .map(\.provider).filter(\.servedByLocalProxy)).map { provider in
-                (provider, proxy.unavailability(for: provider)
+        let subscriptions = Dictionary(uniqueKeysWithValues: route.targets
+            .filter { $0.provider.servedByLocalProxy }.map { target in
+                (target, proxy.unavailability(for: target)
                     .map { BrainRouteAvailability.ConnectionHealth.unavailable($0) } ?? .ready)
             })
         return BrainRouteAvailability(

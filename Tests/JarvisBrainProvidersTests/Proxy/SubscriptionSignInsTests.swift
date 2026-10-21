@@ -6,10 +6,17 @@ import os
 
 @MainActor
 @Suite struct SubscriptionSignInsTests {
+    private nonisolated static let codex = BrainTarget(provider: .codexSubscription, modelID: "gpt-6.1-sol")
     private nonisolated static let models = #"{"data":[{"id":"gpt-6.1-sol","owned_by":"openai"}]}"#
     private nonisolated static let expired = #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"token expired","cooldowns":[]}]}"#
     private nonisolated static let active = #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"active","disabled":false,"unavailable":false,"status_message":"","cooldowns":[]}]}"#
     private nonisolated static let rejected = #"{"files":[{"name":"codex-fixture.json","auth_index":"one","provider":"codex","status":"error","disabled":false,"unavailable":true,"status_message":"unauthorized","cooldowns":[]}]}"#
+
+    private nonisolated static func credentialHealth(
+        cooldowns: String, status: String = "active", unavailable: Bool = false
+    ) -> String {
+        #"{"files":[{"name":"codex-fixture.json","provider":"codex","status":"\#(status)","disabled":false,"unavailable":\#(unavailable),"cooldowns":\#(cooldowns)}]}"#
+    }
 
     private func withSignIns(
         script: String = "idle",
@@ -37,6 +44,91 @@ import os
         }
         await supervisor.stop()
         stub?.stop()
+    }
+
+    @Test(arguments: ["gpt-6.1-sol", " gpt-6.1-sol(high) "], ["quota", "transient_error"])
+    func aSelectedModelCooldownSkipsThePrimaryWithoutSigningOut(modelID: String, reason: String) async throws {
+        let coolingDown = Self.credentialHealth(cooldowns:
+            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"\#(reason)","remaining_seconds":60}]"#)
+        try await withSignIns(respond: { request in
+            (200, request.contains("/v8/management/credentials") ? coolingDown : Self.models)
+        }) { signIns, supervisor in
+            signIns.record(await supervisor.readiness())
+            let primary = Self.codex
+            let fallback = BrainTarget(provider: .gemini, modelID: "gemini-3.8-flash")
+            let availability = BrainRouteAvailability(
+                route: BrainRoute(primary: primary, fallbackTargets: [fallback]),
+                availableCredentials: [.geminiAPIKey],
+                subscriptions: signIns.health(among: [primary]))
+
+            #expect(signIns.connection(for: .codexSubscription).tone == .ready)
+            #expect(signIns.connection(for: .codexSubscription).buttons.map(\.action) == [.signOut])
+            #expect(signIns.selectable == [.codexSubscription])
+            #expect(signIns.readiness?.unavailability(for:
+                BrainTarget(provider: .codexSubscription, modelID: modelID))?.disposition == .temporary)
+            let failure = try #require(availability.failure(for: primary))
+            #expect(failure.disposition == .temporary)
+            #expect(failure.activityAdvice.contains("Settings → Brain"))
+            #expect(!failure.activityAdvice.contains("Connections"))
+            guard case .ready(let selected, _) = availability.state else {
+                Issue.record("Expected the configured fallback to be usable")
+                return
+            }
+            #expect(selected == fallback)
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func aModelCooldownAllowsAnotherModelOnTheSameSubscription(allRecordedModelsBlocked: Bool) async throws {
+        let coolingDown = Self.credentialHealth(cooldowns:
+            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#,
+            status: allRecordedModelsBlocked ? "error" : "active", unavailable: allRecordedModelsBlocked)
+        try await withSignIns(respond: { request in
+            (200, request.contains("/v8/management/credentials") ? coolingDown : Self.models)
+        }) { signIns, supervisor in
+            signIns.record(await supervisor.readiness())
+            let primary = Self.codex
+            let alternate = BrainTarget(provider: .codexSubscription, modelID: "gpt-6-astra")
+            let subscriptions = signIns.health(among: [primary, alternate])
+            let route = BrainRouteAvailability(
+                route: BrainRoute(primary: primary, fallbackTargets: [alternate]),
+                availableCredentials: [], subscriptions: subscriptions)
+            let failure = try #require(route.failure(for: primary))
+
+            #expect(signIns.connection(for: .codexSubscription).tone == .ready)
+            #expect(signIns.selectable == [.codexSubscription])
+            #expect(failure.category == .quota)
+            #expect(route.state == .ready(alternate, primaryFailure: failure))
+            #expect(BrainRouteAvailability(
+                route: BrainRoute(primary: alternate, fallbackTargets: []),
+                availableCredentials: [], subscriptions: subscriptions).state == .ready(alternate, primaryFailure: nil))
+            #expect(BrainRouteAvailability(
+                route: BrainRoute(primary: primary, fallbackTargets: []),
+                availableCredentials: [], subscriptions: subscriptions).blockingFailure == failure)
+        }
+    }
+
+    @Test(arguments: ["[]",
+        #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":0}]"#])
+    func theNextPassiveCheckClearsAnEndedModelCooldown(nextCooldowns: String) async throws {
+        let cooldowns = OSAllocatedUnfairLock(initialState:
+            #"[{"scope":"model","model_key":"gpt-6.1-sol","reason":"quota","remaining_seconds":60}]"#)
+        let posts = OSAllocatedUnfairLock(initialState: 0)
+        try await withSignIns(respond: { request in
+            if request.hasPrefix("POST ") { posts.withLock { $0 += 1 } }
+            return (200, request.contains("/v8/management/credentials")
+                ? Self.credentialHealth(cooldowns: cooldowns.withLock { $0 }) : Self.models)
+        }) { signIns, supervisor in
+            signIns.record(await supervisor.readiness())
+            #expect(signIns.readiness?.unavailability(for: Self.codex)?.disposition == .temporary)
+
+            cooldowns.withLock { $0 = nextCooldowns }
+            signIns.refresh()
+
+            #expect(await eventually { await signIns.health(among: [Self.codex])[Self.codex] == .ready })
+            #expect(signIns.connection(for: .codexSubscription).tone == .ready)
+            #expect(posts.withLock { $0 } == 0)
+        }
     }
 
     @Test func anExplicitRetryReplacesAPassiveCheckAndIgnoresItsLateAnswer() async throws {
@@ -144,7 +236,7 @@ import os
                 #expect(await eventually { await signIns.retrying == nil })
                 #expect(posts.withLock { $0 } == expectedPosts)
                 #expect(signIns.readiness?.unavailability(for: .codexSubscription)?.disposition == .temporary)
-                #expect(signIns.health(among: [.codexSubscription])[.codexSubscription]
+                #expect(signIns.health(among: [Self.codex])[Self.codex]
                     == signIns.readiness?.unavailability(for: .codexSubscription).map { .unavailable($0) })
                 #expect(supervisor.accountFiles(for: .codexSubscription).count == 1)
                 #expect(signIns.connection(for: .codexSubscription).buttons == [.init(.retry), .init(.signOut)])
@@ -273,7 +365,7 @@ import os
 
         #expect(await supervisor.state == .stopped)
         #expect(signIns.selectable == [])
-        #expect(signIns.health(among: [.codexSubscription])[.codexSubscription]
+        #expect(signIns.health(among: [Self.codex])[Self.codex]
             != .checking)
     }
 }

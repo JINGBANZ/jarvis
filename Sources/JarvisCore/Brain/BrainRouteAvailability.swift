@@ -15,12 +15,12 @@ public struct BrainRouteAvailability: Sendable, Equatable {
 
     private let route: BrainRoute
     private let availableCredentials: Set<Credential>
-    private let subscriptions: [BrainProvider: ConnectionHealth]
+    private let subscriptions: [BrainTarget: ConnectionHealth]
 
     public init(
         route: BrainRoute,
         availableCredentials: Set<Credential>,
-        subscriptions: [BrainProvider: ConnectionHealth]
+        subscriptions: [BrainTarget: ConnectionHealth]
     ) {
         self.route = route
         self.availableCredentials = availableCredentials
@@ -32,7 +32,7 @@ public struct BrainRouteAvailability: Sendable, Equatable {
             return .unavailable(failure)
         }
         guard target.provider.servedByLocalProxy else { return .ready }
-        return subscriptions[target.provider] ?? .checking
+        return subscriptions[target] ?? .checking
     }
 
     public var state: State {

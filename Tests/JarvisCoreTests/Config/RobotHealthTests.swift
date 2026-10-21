@@ -39,6 +39,28 @@ import Testing
         #expect(result.fix == .openConnections)
     }
 
+    @Test func aModelCooldownUsesAmberForAnAlternateModelAndRedWithoutOne() {
+        let alternate = BrainTarget(provider: .codexSubscription, modelID: "gpt-6-astra")
+        let failure = ProviderFailure(
+            source: .brain(.codexSubscription), stage: .process, category: .quota,
+            disposition: .temporary, identity: .init(errorCode: "model_cooldown"),
+            message: "The selected model is cooling down.")
+        var readiness = RobotReadiness.fixture()
+        readiness.subscriptions[codex] = .unavailable(failure)
+
+        let withFallback = health(.brain, .fixture(
+            route: BrainRoute(primary: codex, fallbackTargets: [alternate])), readiness)
+        #expect(withFallback.reason == "PRIMARY UNAVAILABLE")
+        #expect(withFallback.tone == .attention)
+        #expect(withFallback.advice?.contains(failure.activitySentence) == true)
+
+        let withoutFallback = health(.brain, .fixture(
+            route: BrainRoute(primary: codex, fallbackTargets: [])), readiness)
+        #expect(withoutFallback.reason == "NO BRAIN AVAILABLE")
+        #expect(withoutFallback.tone == .blocked)
+        #expect(withoutFallback.advice?.contains(failure.activitySentence) == true)
+    }
+
     @Test func anOpenAIPrimaryNeedsAKey() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: openAI, fallbackTargets: [codex]))
         let result = health(.brain, inputs, .fixture(credentials: []))
@@ -81,7 +103,7 @@ import Testing
             source: .brain(.claudeSubscription), stage: .process, category: category,
             disposition: .temporary, identity: .init(), message: "Cannot serve right now.")
         var readiness = RobotReadiness.fixture()
-        readiness.subscriptions[.claudeSubscription] = .unavailable(failure)
+        readiness.subscriptions[claude] = .unavailable(failure)
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: claude, fallbackTargets: [openAI]))
         let result = health(.brain, inputs, readiness)
         #expect(result.reason == "PRIMARY UNAVAILABLE")
@@ -92,10 +114,10 @@ import Testing
 
     @Test func uncheckedSubscriptionsShowCheckingUntilAUsableRouteIsKnown() {
         var readiness = RobotReadiness.fixture()
-        readiness.subscriptions[.claudeSubscription] = nil
+        readiness.subscriptions[claude] = nil
         #expect(health(.brain, .fixture(route: BrainRoute(primary: claude, fallbackTargets: [])), readiness) == .checking)
-        readiness.subscriptions[.codexSubscription] = RobotReadiness.fixture(signedOut: [.codexSubscription])
-            .subscriptions[.codexSubscription]
+        readiness.subscriptions[codex] = RobotReadiness.fixture(signedOut: [.codexSubscription])
+            .subscriptions[codex]
         #expect(health(.brain, .fixture(route: BrainRoute(primary: codex, fallbackTargets: [claude])), readiness) == .checking)
         #expect(health(.brain, .fixture(route: BrainRoute(primary: openAI, fallbackTargets: [claude])), readiness) == .ready)
     }
@@ -103,22 +125,22 @@ import Testing
     @Test func anEarlierUncheckedFallbackMustAnswerBeforeNamingALaterReadyFallback() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [claude, openAI]))
         var readiness = RobotReadiness.fixture(signedOut: [.codexSubscription])
-        readiness.subscriptions[.claudeSubscription] = .checking
+        readiness.subscriptions[claude] = .checking
 
         #expect(health(.brain, inputs, readiness) == .checking)
 
-        readiness.subscriptions[.claudeSubscription] = .ready
+        readiness.subscriptions[claude] = .ready
         #expect(health(.brain, inputs, readiness).advice?.contains("I'll use Claude Code") == true)
 
-        readiness.subscriptions[.claudeSubscription] = RobotReadiness.fixture(signedOut: [.claudeSubscription])
-            .subscriptions[.claudeSubscription]
+        readiness.subscriptions[claude] = RobotReadiness.fixture(signedOut: [.claudeSubscription])
+            .subscriptions[claude]
         #expect(health(.brain, inputs, readiness).advice?.contains("I'll use OpenAI API") == true)
     }
 
     @Test func aLaterUncheckedFallbackDoesNotDelayAnEarlierReadyFallback() {
         let inputs = RobotHubInputs.fixture(route: BrainRoute(primary: codex, fallbackTargets: [openAI, claude]))
         var readiness = RobotReadiness.fixture(signedOut: [.codexSubscription])
-        readiness.subscriptions[.claudeSubscription] = .checking
+        readiness.subscriptions[claude] = .checking
 
         let result = health(.brain, inputs, readiness)
 

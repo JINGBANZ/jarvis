@@ -151,6 +151,13 @@ way a Start would meet them, and name only what Settings can fix or explain:
 `BrainRouteAvailability` in Core evaluates target eligibility and fallback order for both the hub
 and session Start. `RobotHealth` turns that result into the hub's wording and colors.
 
+Subscription eligibility is checked per configured model. An active model cooldown from the helper
+temporarily blocks that model while other models on the same signed-in account remain eligible;
+a credential-wide cooldown blocks every model on that account. Matching follows the pinned helper's
+model-key semantics, including its thinking suffix normalization. A later passive check makes a
+model eligible again when the helper reports its cooldown expired or cleared. There is no countdown
+or polling, and this does not switch a running session back to its primary.
+
 A subscription counts as signed out only when that is proven: it has no saved sign-in, or the
 helper reports a permanent authentication rejection. Temporary failures and an unanswered health
 check prove no sign-out. Foundation-only `SubscriptionSignIns` owns Settings health checks, explicit
@@ -656,8 +663,8 @@ claim that the account is healthy.
 
 The **Subscriptions** card (`SubscriptionControls`) has one row each for **Codex**
 and **Claude Code**. Opening Connections probes the bundled helper, starting it if it is
-not running, through `SubscriptionSignIns`, so each row says what a Start would find. The card
-renders that shared owner's answer, so the hub and the Brain page agree with it. The state
+not running, through `SubscriptionSignIns`. The card renders account health from that shared owner's
+answer; [model eligibility](#status) also informs the hub, Brain page, and Start. The state
 reads under the row's title, as the key rows' does, with actions on the right. Foundation-only
 `SubscriptionConnectionState` in Core derives those actions from saved accounts, health, and the
 operation in progress. `SubscriptionSignIns` uses the same decision to accept clicks, so a stale
@@ -670,7 +677,7 @@ on the user's explicit request:
   means Sign in stays available even when an old health answer named that account healthy.
 - **Sign in again** (amber) when the helper reports rejected credentials, with the redacted cause
   and a **Sign in** button.
-- **Temporarily unavailable** (amber) for an expired access token, cooldown, or unknown credential
+- **Temporarily unavailable** (amber) for an expired access token, credential-wide cooldown, or unknown credential
   health, with **Try again** and **Sign out**; none proves the account signed out. Retry keeps the
   saved credentials; Sign out removes them so the user can start a fresh login.
 - **Not running** (amber), with the helper's own reason and **Try again** plus **Sign out** when
