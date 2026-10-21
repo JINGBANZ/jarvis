@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.8](https://github.com/JINGBANZ/jarvis/compare/v0.5.7...v0.5.8) (2026-10-21)
+
+
+### Features
+
+* **settings:** add general privacy controls ([#465](https://github.com/JINGBANZ/jarvis/issues/465)) ([f065fd7](https://github.com/JINGBANZ/jarvis/commit/f065fd7ecf48cb6a92fd15613ad11dd2b5851b10))
+
+
+### Bug Fixes
+
+* **readiness:** respect subscription model cooldowns ([#464](https://github.com/JINGBANZ/jarvis/issues/464)) ([488059d](https://github.com/JINGBANZ/jarvis/commit/488059d69f23cea752d9fc137ca5df920bf08f4d))
+
 ## [0.5.7](https://github.com/JINGBANZ/jarvis/compare/v0.5.6...v0.5.7) (2026-10-20)
 
 
