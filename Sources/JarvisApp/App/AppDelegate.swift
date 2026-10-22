@@ -273,10 +273,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             .flatMap { secrets.apiKey(for: $0) } ?? ""
         let requiredCredentials = Set([transcriptionProvider.ownCredential].compactMap { $0 })
         let preparesAppleSpeech = transcriptionProvider == .appleSpeech
-        // System audio is left to the probe below: requiring its last answer here would let one
-        // failed probe refuse every later Start until relaunch.
         let readinessConfiguration = JarvisReadiness.Configuration(
-            requiredPermissions: Set(JarvisReadiness.Permission.allCases).subtracting([.systemAudio]),
             requiredCredentials: requiredCredentials,
             requiresTranscriptionPreparation: preparesAppleSpeech)
         pendingStartRevision &+= 1
@@ -300,10 +297,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
 
         let grantedPermissions = Permissions.grantedReadinessPermissions()
-        composition.observeReadiness(.permissions(granted: grantedPermissions), for: readinessSession)
+        // A previous system-audio answer cannot gate Start; only the fresh probe can prove it.
         let missingPermissions = readinessConfiguration.requiredPermissions
+            .subtracting([.systemAudio])
             .subtracting(grantedPermissions)
         guard missingPermissions.isEmpty else {
+            composition.observeReadiness(
+                .permissions(granted: grantedPermissions), for: readinessSession)
             jlog("Jarvis: can't start — required permissions are missing: "
                  + missingPermissions.map(\.rawValue).sorted().joined(separator: ", "))
             if wasRunning {
@@ -350,8 +350,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
 
             // Re-prove per session: a revoked grant's tap still delivers silent frames, and capture
             // health counts frames, not amplitude.
-            guard await Permissions.request(.systemAudio, remembering: self.permissionPreferences)
-            else {
+            let systemAudioGranted = await Permissions.request(
+                .systemAudio, remembering: self.permissionPreferences)
+            guard !Task.isCancelled,
+                  self.pendingStartRevision == revision,
+                  self.readiness.activeSession == readinessSession else { return }
+            guard systemAudioGranted else {
                 self.rejectStartWithoutSystemAudio(
                     revision: revision,
                     wasRunning: wasRunning,
@@ -359,6 +363,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                     readinessSession: readinessSession)
                 return
             }
+            self.composition.observeReadiness(
+                .permissions(granted: Permissions.grantedReadinessPermissions()),
+                for: readinessSession)
 
             var appleSpeechLocale: Locale?
             if preparesAppleSpeech {
@@ -490,7 +497,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         if wasRunning {
             artifacts.sessionAudit?.record(.settingsChangeNotApplied)
         }
-        errorReporter.reportImmediately(.permissionsMissing([.systemAudio]), context: context)
+        let error: UserFacingError = Permissions.systemAudioProof == nil
+            ? .systemAudioCheckFailed : .permissionsMissing([.systemAudio])
+        errorReporter.reportImmediately(error, context: context)
     }
 
     /// Refuses a route with no usable target before stopping the running pipeline.

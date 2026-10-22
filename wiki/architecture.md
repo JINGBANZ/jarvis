@@ -813,6 +813,10 @@ longer a configuration with nothing to await, and nothing before the probe gates
 answer, so a Start that failed on system audio is retried by pressing Start again. A probe that
 cannot run proves nothing: it blocks the attempt at hand without counting as a refusal, so the
 permissions step keeps offering to ask rather than sending the user to a toggle that may already be on.
+Start reports the same distinction: an inconclusive probe offers a retry without stopping a running
+session; a proven refusal names the missing grant. Readiness requires all three grants and stays
+in the permissions check until fresh probe evidence arrives. A failed pre-session check remains
+blocked in the menu and Activity until the next Start, including after its failure notice is shown.
 
 The one thing that persists is `screenRecordingAsked`, and it is not a grant: it records that Jarvis
 asked, which no later grant or refusal makes untrue. It is cleared once the grant is observed held,

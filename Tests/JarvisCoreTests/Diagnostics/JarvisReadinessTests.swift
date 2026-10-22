@@ -207,6 +207,35 @@ import Testing
         #expect(effects == [.statusChanged(.blocked(.permissions([.systemAudio])))])
     }
 
+    @Test func freshPermissionProofIsRequiredAfterADeniedStart() {
+        let readiness = JarvisReadiness()
+        let denied = readiness.begin(configuration: .init())
+        _ = readiness.observe(
+            .permissions(granted: [.microphone, .screenRecording]), for: denied.session)
+        #expect(readiness.status == .blocked(.permissions([.systemAudio])))
+
+        let retry = readiness.begin(configuration: .init())
+        _ = readiness.observe([
+            .brainPreparation(.ready),
+            .transcriptionEndpoint(stream: .microphone, state: .ready),
+            .transcriptionEndpoint(stream: .system, state: .ready),
+            .capture(.ready),
+        ], for: retry.session)
+        #expect(readiness.status == .checking(.permissions))
+        #expect(readiness.observe(
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
+            for: denied.session).isEmpty)
+        #expect(readiness.status == .checking(.permissions))
+
+        let effects = readiness.observe(
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
+            for: retry.session)
+        #expect(effects == [
+            .statusChanged(.ready(.full)),
+            .readinessEstablished(.full),
+        ])
+    }
+
     @Test func unselectedScreenRecordingPermissionDoesNotBlockAudioReadiness() {
         let readiness = JarvisReadiness()
         let start = readiness.begin(configuration: .init(requiredPermissions: [.microphone]))
