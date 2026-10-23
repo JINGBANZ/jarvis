@@ -31,6 +31,7 @@ def launch_owned(arguments, **options):
         subprocess.run([*reporter, 'register-child', str(child.pid), launch], check=True, timeout=25)
     except BaseException:
         if child.poll() is None:
-            child.terminate()
+            child.kill()
+        child.wait()
         raise
     return child

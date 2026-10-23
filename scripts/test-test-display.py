@@ -445,6 +445,244 @@ CHILD
         self.assertEqual(self.state()['test_status'],0)
         self.assertNotEqual(self.state()['phase'],'completed')
 
+    def check_outer_cancellation(self, ignore):
+        self.prepare()
+        for path in self.repo.glob('fixture-*'):
+            path.unlink()
+        shutil.copy2(ROOT / 'scripts/lib/test-display.sh', self.repo / 'scripts/lib')
+        handler = (ROOT / 'scripts/lib/live-test-cancellation.sh').read_text()
+        (self.repo / 'scripts/lib/live-test-cancellation.sh').write_text(
+            handler.replace('sleep 10', 'sleep 3'))
+        text = self.source.read_text().replace('CANCEL_GRACE_SECONDS = 10', 'CANCEL_GRACE_SECONDS = 4')
+        text = text.replace("                    elif operation == 'wait-app':\n",
+                            "                    elif operation == 'wait-app':\n"
+                            "                        (HERE.parent.parent / 'fixture-wait-entered').touch()\n")
+        self.source.write_text(text)
+        (self.repo / 'scripts/drain-app.py').write_text("""import os, runpy, signal, subprocess, sys, time
+from pathlib import Path
+ignore = sys.argv[1] == 'ignore'
+def terminated(number, frame):
+    Path('fixture-term').touch()
+    if not ignore: raise SystemExit(128 + number)
+signal.signal(signal.SIGTERM, terminated)
+subprocess.run([sys.executable, os.environ['JARVIS_TEST_SUPERVISOR'], 'register-app'], check=True)
+Path('fixture-app-pid').write_text(str(os.getpid()))
+deadline = time.monotonic() + 10
+while not Path('run/A/abort').exists():
+    if time.monotonic() >= deadline: raise RuntimeError('fixture abort was not forwarded')
+    time.sleep(.01)
+launch_owned = runpy.run_path('scripts/lib/test-command-ownership.py')['launch_owned']
+worker = launch_owned([sys.executable, '-c', 'import time; time.sleep(.1)'], start_new_session=True)
+assert worker.wait(timeout=3) == 0
+try: launch_owned(['/does-not-exist/jarvis-fixture'])
+except FileNotFoundError: pass
+else: raise AssertionError('missing fixture executable launched')
+Path('fixture-receipts-complete').touch()
+while ignore or not Path('fixture-allow-seal').exists():
+    if time.monotonic() >= deadline: raise RuntimeError('fixture seal was not released')
+    time.sleep(.01)
+Path('fixture-sealed').touch()
+""")
+        (self.repo / 'scripts/drain-controller.py').write_text("""import importlib.util, os, signal, subprocess, sys
+from pathlib import Path
+signal.signal(signal.SIGTERM, lambda *_: None)
+spec=importlib.util.spec_from_file_location('owner',os.environ['JARVIS_TEST_SUPERVISOR'])
+m=importlib.util.module_from_spec(spec); spec.loader.exec_module(m)
+prepared=m.client('prepare-app', bundle=str(Path('Jarvis Dev.app').resolve()))
+app=subprocess.Popen([sys.executable, 'scripts/drain-app.py', sys.argv[1]],
+    env={**os.environ, 'JARVIS_TEST_APP_LAUNCH':prepared['launch']}, start_new_session=True)
+try: m.client('wait-app')
+finally: app.wait(timeout=8)
+""")
+        self.script('''source scripts/lib/test-display.sh
+isolate_test_display
+RUN_DIR="$PWD/run"
+mkdir -p "$RUN_DIR/A"
+rm -f "$RUN_DIR/A/abort"
+echo '{}' > "$RUN_DIR/A/scenario.json"
+source scripts/lib/live-test-cancellation.sh
+python3 scripts/drain-controller.py "$1" &
+wait $!
+''')
+        owner = self.start('run', 'run-tests.sh', 'ignore' if ignore else 'drain')
+        try:
+            deadline = time.monotonic() + 4
+            while not (self.repo / 'fixture-wait-entered').exists():
+                self.assertIsNone(owner.poll(), 'owner exited before app wait')
+                self.assertLess(time.monotonic(), deadline, 'app wait did not begin')
+                time.sleep(.01)
+            owner.send_signal(signal.SIGTERM)
+            while not (self.repo / 'fixture-receipts-complete').exists():
+                self.assertIsNone(owner.poll(), 'owner exited before drain receipts')
+                self.assertFalse((self.repo / 'fixture-term').exists(), 'app was signalled before drain')
+                self.assertLess(time.monotonic(), deadline, 'drain receipts were starved')
+                time.sleep(.01)
+            self.assertTrue(self.module.same(self.state()['worker_owner']), 'worker died during drain')
+            self.assertFalse((self.repo / 'fixture-term').exists(), 'app was signalled before seal')
+            (self.repo / 'fixture-allow-seal').touch()
+            output, error = owner.communicate(timeout=9)
+            self.assertEqual(owner.returncode, 128 + signal.SIGTERM, output + error)
+            self.assertEqual((self.repo / 'fixture-sealed').exists(), not ignore, output + error)
+            self.assertEqual((self.repo / 'fixture-term').exists(), ignore, output + error)
+            pid = int((self.repo / 'fixture-app-pid').read_text())
+            with self.assertRaises(ProcessLookupError): os.kill(pid, 0)
+            self.assertNotEqual(self.state()['phase'], 'completed')
+            self.assertFalse(self.state()['pending_children'])
+            self.assertEqual(self.result(self.start())[0], 70)
+        finally:
+            if (self.repo / 'fixture-app-pid').exists():
+                pid = int((self.repo / 'fixture-app-pid').read_text())
+                try: os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+
+    def test_outer_cancellation_serves_drain_receipts_before_teardown(self):
+        self.check_outer_cancellation(False)
+
+    def test_outer_cancellation_forces_term_ignoring_app_after_grace(self):
+        self.check_outer_cancellation(True)
+
+    def test_signal_during_teardown_never_completes(self):
+        self.prepare()
+        text = self.source.read_text().replace(
+            '    def request_cancel(self, number, frame):\n',
+            "    def request_cancel(self, number, frame):\n"
+            "        (HERE.parent.parent / 'fixture-signal-observed').touch()\n")
+        text = text.replace('    def cancelled(number, frame):\n',
+                            "    def cancelled(number, frame):\n"
+                            "        (HERE.parent.parent / 'fixture-signal-observed').touch()\n")
+        self.source.write_text(text)
+        (self.source.parent / 'fake-worker.py').write_text("""import json, sys, time
+from pathlib import Path
+print(json.dumps({'display': 77, 'uuid': 'fixture-uuid', 'expected_profile': 'fixture.icc'}), flush=True)
+assert sys.stdin.readline() == 'stop\\n'
+Path('fixture-teardown-entered').touch()
+deadline = time.monotonic() + 5
+while not Path('fixture-release-teardown').exists():
+    if time.monotonic() >= deadline: raise RuntimeError('fixture teardown was not released')
+    time.sleep(.01)
+print('{"stopped": true}', flush=True)
+""")
+        owner = self.start()
+        deadline = time.monotonic() + 4
+        while not (self.repo / 'fixture-teardown-entered').exists():
+            self.assertIsNone(owner.poll(), 'owner exited before teardown')
+            self.assertLess(time.monotonic(), deadline, 'teardown did not begin')
+            time.sleep(.01)
+        owner.send_signal(signal.SIGTERM)
+        while not (self.repo / 'fixture-signal-observed').exists():
+            self.assertLess(time.monotonic(), deadline, 'signal was not observed')
+            time.sleep(.01)
+        (self.repo / 'fixture-release-teardown').touch()
+        result = self.result(owner)
+        self.assertEqual(result[0], 128 + signal.SIGTERM, result)
+        self.assertEqual(self.state()['test_status'], 0)
+        self.assertNotEqual(self.state()['phase'], 'completed')
+        self.assertFalse(self.module.same(self.state()['worker_owner']))
+        self.assertEqual(self.result(self.start())[0], 70)
+
+    def test_observed_command_group_absence_prevents_recycled_group_signals(self):
+        self.prepare()
+        lease = self.module.Lease()
+        supervisor = self.module.Supervisor(lease)
+        self.addCleanup(supervisor.socket.close)
+        self.addCleanup(lambda: os.close(lease.fd))
+        supervisor.root = {'pid': 12345}
+        with patch.object(self.module.os, 'killpg', side_effect=[ProcessLookupError(), None]) as killpg:
+            self.assertFalse(supervisor.command_group_exists())
+            supervisor.signal_command_group(signal.SIGTERM)
+            supervisor.signal_command_group(signal.SIGKILL)
+            killpg.assert_called_once_with(12345, 0)
+
+    def test_disappearing_client_does_not_poison_wait_or_skip_other_cleanup(self):
+        self.prepare()
+        lease = self.module.Lease()
+        supervisor = self.module.Supervisor(lease)
+        self.addCleanup(supervisor.socket.close)
+        self.addCleanup(lambda: os.close(lease.fd))
+        clients = [{'pid': pid, 'start': [1, pid], 'scope': 'app'} for pid in (111, 222)]
+        alive = {111: True, 222: True}
+
+        def disappeared(pid, number):
+            alive[pid] = False
+            if pid == 111:
+                raise ProcessLookupError()
+
+        supervisor.clients = clients[:1]
+        supervisor.app_waiters = [MagicMock()]
+        supervisor.app_stop = True
+        supervisor.app_wait_deadline = time.monotonic() + 5
+        with patch.object(self.module, 'same', side_effect=lambda x: alive[x['pid']]), \
+             patch.object(self.module.os, 'kill', side_effect=disappeared) as kill:
+            supervisor.poll_app_wait()
+            supervisor.poll_app_wait()
+            self.assertIsNone(supervisor.failure)
+            self.assertFalse(supervisor.app_waiters)
+            alive[111] = True
+            supervisor.clients = clients
+            supervisor.interruption = self.module.Interrupted(signal.SIGTERM)
+            with patch.object(self.module, 'CANCEL_GRACE_SECONDS', 0), \
+                 patch.object(supervisor, 'command_group_exists', return_value=False), \
+                 patch.object(supervisor, 'service'):
+                supervisor.cancel_command(MagicMock())
+            self.assertFalse(any(alive.values()), 'one vanished child skipped another client')
+            self.assertIsNone(supervisor.failure)
+            self.assertIn(unittest.mock.call(222, signal.SIGTERM), kill.call_args_list)
+        with patch.object(self.module, 'same', return_value=True), \
+             patch.object(self.module.os, 'kill', side_effect=PermissionError('fixture denied')):
+            with self.assertRaises(PermissionError):
+                self.module.signal_owned(clients[0], signal.SIGTERM)
+
+    def test_forced_cancel_rejects_prepare_but_kills_late_registered_child(self):
+        self.prepare()
+        lease = self.module.Lease()
+        supervisor = self.module.Supervisor(lease)
+        self.addCleanup(supervisor.socket.close)
+        self.addCleanup(lambda: os.close(lease.fd))
+        lease.write('intent')
+        lease.write('command-running')
+        supervisor.root = self.module.birth(os.getpid())
+        supervisor.interruption = self.module.Interrupted(signal.SIGTERM)
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        listener = MagicMock()
+        listener.accept.return_value = (connection, None)
+        birth = self.module.birth
+        reporter_pid = 2147483000
+
+        def identity(pid):
+            return {'pid': pid, 'parent': os.getpid(), 'start': [1, 1]} if pid == reporter_pid else birth(pid)
+
+        def request(operation, **values):
+            connection.recv.return_value = json.dumps({'token': supervisor.token,
+                'operation': operation, **values}).encode() + b'\n'
+            supervisor.handle()
+            return json.loads(connection.sendall.call_args.args[0])
+
+        with patch.object(supervisor, 'socket', listener), \
+             patch.object(self.module, 'peer_pid', return_value=reporter_pid), \
+             patch.object(self.module, 'birth', side_effect=identity):
+            launched = request('prepare-child')['launch']
+            absent = request('prepare-child')['launch']
+            supervisor.cancel_forced = True
+            self.assertIn('Forced cancellation', request('prepare-child')['error'])
+            self.assertEqual(len(supervisor.pending_children), 2)
+            self.assertIsNone(supervisor.failure)
+            child = subprocess.Popen([sys.executable, '-I', '-c',
+                'import signal,time; signal.signal(signal.SIGTERM,signal.SIG_IGN); '
+                'print("ready",flush=True); time.sleep(10)'], env=BASE_ENV,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+            self.processes.append(child)
+            import select
+            self.assertTrue(select.select([child.stdout], [], [], 3)[0], 'child did not become ready')
+            self.assertEqual(child.stdout.readline().strip(), 'ready')
+            supervisor.cancel_killed = True
+            self.assertEqual(request('register-child', pid=child.pid, launch=launched), {})
+            self.assertEqual(child.wait(timeout=3), -signal.SIGKILL)
+            self.assertEqual(request('no-child', launch=absent), {})
+        self.assertFalse(supervisor.pending_children)
+        self.assertIsNone(supervisor.failure)
+        self.assertNotEqual(self.state()['phase'], 'completed')
+
     def test_admitted_command_sigkill_remains_unfinished(self):
         self.prepare()
         self.script('python3 "$JARVIS_TEST_SUPERVISOR" admit\nkill -KILL $$\n')
@@ -555,6 +793,61 @@ CHILD
         self.assertEqual(result[0],0,result)
         self.assertEqual(len(self.state()['owned_processes']),2)
         self.assertFalse(self.state()['pending_children'])
+
+    def test_host_registration_failure_kills_and_reaps_term_ignoring_child(self):
+        self.prepare()
+        text = self.source.read_text().replace(
+            "                        if operation == 'register-child':\n",
+            """                        if operation == 'register-child':
+                            deadline = time.monotonic() + 3
+                            while not (HERE.parent.parent / 'helper-ready').exists():
+                                if time.monotonic() >= deadline:
+                                    raise Refused('fixture child did not become ready')
+                                time.sleep(.01)
+                            raise Refused('fixture registration failure')
+""")
+        self.source.write_text(text)
+        (self.repo / 'scripts/late-helper.py').write_text("""import os, signal, time
+from pathlib import Path
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+Path('helper-pid').write_text(str(os.getpid()))
+Path('helper-ready').touch()
+deadline = time.monotonic() + 5
+while not Path('allow-late-write').exists():
+    if time.monotonic() >= deadline: raise RuntimeError('fixture write was not released')
+    time.sleep(.01)
+Path('late-write').touch()
+""")
+        self.script('''python3 "$JARVIS_TEST_SUPERVISOR" admit
+python3 - <<'CHILD'
+import os, pathlib, runpy, signal, subprocess, sys, time
+launch_owned=runpy.run_path('scripts/lib/test-command-ownership.py')['launch_owned']
+try:
+    try: launch_owned([sys.executable, '-I', 'scripts/late-helper.py'])
+    except subprocess.CalledProcessError: pass
+    else: raise AssertionError('registration failure did not propagate')
+    pid=int(pathlib.Path('helper-pid').read_text())
+    try: os.kill(pid, 0)
+    except ProcessLookupError: pass
+    else: raise AssertionError('failed launch returned with a surviving or unreaped child')
+    pathlib.Path('allow-late-write').touch()
+    time.sleep(.1)
+    assert not pathlib.Path('late-write').exists(), 'child wrote after launch returned'
+finally:
+    if pathlib.Path('helper-pid').exists():
+        pid=int(pathlib.Path('helper-pid').read_text())
+        try: os.kill(pid, signal.SIGKILL)
+        except ProcessLookupError: pass
+        try: os.waitpid(pid, 0)
+        except ChildProcessError: pass
+CHILD
+''')
+        result = self.result(self.start())
+        self.assertEqual(result[0], 70, result)
+        self.assertEqual(self.state().get('test_status'), 0, result)
+        self.assertTrue(self.state()['pending_children'])
+        self.assertNotEqual(self.state()['phase'], 'completed')
+        self.assertEqual(self.result(self.start())[0], 70)
 
     def test_process_arguments_are_not_app_identity_and_real_conflict_is_retryable(self):
         self.prepare()

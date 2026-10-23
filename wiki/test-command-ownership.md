@@ -115,7 +115,8 @@ their launcher explicitly; there is no mutable global fallback. App composition 
 launcher through proxy sign-in, Activity detection/evaluation and session capture. Helper composition
 forwards it through the document store and conversion pool, including `--test-conversion`.
 The host helper fixtures use the same handshake through
-[`test-command-ownership.py`](../scripts/lib/test-command-ownership.py). A parent dying between spawn
+[`test-command-ownership.py`](../scripts/lib/test-command-ownership.py), including exact child
+kill/reap before propagating a registration failure. A parent dying between spawn
 and registration leaves uncertainty, even if a result already exists. Pending app-scope launches
 also prevent the next app phase. Control processes remain observed at final teardown without
 waiting for themselves during app-phase RPCs.
@@ -123,6 +124,17 @@ waiting for themselves during app-phase RPCs.
 Routine native-helper fixture cleanup requests protocol shutdown and waits for its conversion pool
 to close before the owner exits. Intentional crash tests retain their crash behavior. A shutdown
 failure fails the fixture; forced cleanup cannot certify a pending launch as completed.
+
+Cancellation forwards the signal to the admitted command group while retaining the lease, socket
+and display for a bounded natural-exit grace. The live shell writes its abort marker before waiting
+for evidence to drain. App waits progress in the supervisor's poll loop, so pending app/helper
+registrations and proven no-child receipts can finish during that grace; a pending receipt alone
+does not fail a wait before its deadline. New app phases are refused. Forced teardown then rejects
+new helper preparations, signals each exact client once per force level, and applies the current
+TERM/KILL policy to late registrations of already-prepared children. Observed command-group absence
+is permanent for that run. Cancellation remains unfinished, including signals during final teardown.
+Wait RPC client budgets cover the initial wait plus cancellation grace and forced exit; they do
+not block the supervisor from serving other receipts.
 
 Ownership reporters use the supervisor-selected absolute Python interpreter with `-I`. Restricted
 helper environments receive only explicit ownership context; hostile PATH, PYTHONPATH, PYTHONHOME,
@@ -181,8 +193,10 @@ registration, full timing order, cancellation, failed exec, helper shutdown duri
 native defaults under foreign ownership context, and capture cleanup after failed registration of
 a TERM-ignoring child. The latter permits a late write only after capture returns and first proves
 that the child is absent; it never invokes real screen capture.
-The script/workflow and cancellation fixtures also use non-GUI stand-ins. Fixture environments
-strip all inherited `JARVIS_TEST_*` context before adding deliberate inputs, including when Gate
+The script/workflow and cancellation fixtures also use non-GUI stand-ins. Coverage includes
+outer-supervisor signals during an outstanding app wait, slow evidence drain, bounded
+TERM-ignoring fallback, late registration, teardown interruption and process-disappearance races.
+Fixture environments strip all inherited `JARVIS_TEST_*` context before adding deliberate inputs, including when Gate
 itself runs them under a real supervisor. No fixture can contact the outer owner.
 
 The accepted independent design reviews cover three sets of requirements:

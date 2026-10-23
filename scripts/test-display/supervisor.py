@@ -24,6 +24,7 @@ WAIT_SECONDS = 120
 WORKER_SECONDS = 20
 COMMAND_SECONDS = 7200
 EXIT_SECONDS = 15
+CANCEL_GRACE_SECONDS = 10
 LABEL = 'jarvis-test-4a560001'
 ENTRYPOINTS = {'run-tests.sh', 'run-live-tests.sh', 'run-settings-tests.sh',
                'run-reference-tests.sh', 'run-capture-privacy-tests.sh', 'transcription-benchmark.sh', 'build-app.sh'}
@@ -96,6 +97,14 @@ def executable(pid, missing_ok=False):
 def same(identity):
     current = process(identity['pid'])
     return current is not None and current['start'] == identity['start']
+
+
+def signal_owned(identity, number):
+    if same(identity):
+        try:
+            os.kill(identity['pid'], number)
+        except ProcessLookupError:
+            pass
 
 
 def birth(pid):
@@ -266,7 +275,10 @@ def client(operation, **values):
     if not address or not token:
         raise Refused('Run through an admitted test entrypoint')
     with socket.socket(socket.AF_UNIX) as connection:
-        connection.settimeout(EXIT_SECONDS + 5)
+        timeout = EXIT_SECONDS + 5
+        if operation in ('wait-app', 'stop-app'):
+            timeout += EXIT_SECONDS + CANCEL_GRACE_SECONDS
+        connection.settimeout(timeout)
         connection.connect(address)
         connection.sendall((json.dumps({'operation': operation, 'token': token, **values}) + '\n').encode())
         response = b''
@@ -340,6 +352,15 @@ class Supervisor:
         self.socket.listen(8)
         self.worker = None
         self.awake = None
+        self.interruption = None
+        self.cancel_forced = False
+        self.cancel_killed = False
+        self.cancel_signalled = set()
+        self.command_group_gone = False
+        self.app_waiters = []
+        self.app_wait_deadline = None
+        self.app_stop = False
+        self.app_signalled = set()
 
     def descendant(self, pid):
         for _ in range(64):
@@ -382,6 +403,7 @@ class Supervisor:
                     app['scope'] = 'app'
                     self.apps.append(app)
                     self.clients.append(app)
+                    self.signal_cancelling_client(app)
                     self.pending_launch = None
                     lifecycle_request = True
                     self.record_clients()
@@ -396,6 +418,8 @@ class Supervisor:
                     scope = next((x['scope'] for x in self.clients
                                   if x['pid'] == parent and x['start'] == owner['start']), 'command')
                     if operation == 'prepare-child':
+                        if self.cancel_forced:
+                            raise Refused('Forced cancellation rejects new helper launches')
                         lifecycle_request = True
                         nonce = uuid.uuid4().hex
                         self.pending_children[nonce] = {'owner': owner, 'scope': scope}
@@ -413,6 +437,7 @@ class Supervisor:
                                     raise Refused('Child ancestry mismatch')
                                 child['scope'] = pending['scope']
                                 self.clients.append(child)
+                                self.signal_cancelling_client(child)
                         del self.pending_children[nonce]
                         result = {}
                     self.record_clients()
@@ -440,10 +465,13 @@ class Supervisor:
                         self.admitted = False
                         result = {}
                     elif operation == 'prepare-app':
+                        if self.interruption:
+                            raise Refused('Command cancellation rejects new app phases')
                         if self.failure:
                             raise Refused(self.failure)
-                        if self.pending_launch or any(x['scope'] == 'app' for x in self.pending_children.values()) or any(
-                            same(x) for x in self.clients if x['scope'] == 'app'):
+                        if (self.app_waiters or self.pending_launch
+                            or any(x['scope'] == 'app' for x in self.pending_children.values())
+                            or any(same(x) for x in self.clients if x['scope'] == 'app')):
                             raise Refused('Previous app/helper has not exited')
                         bundle = Path(request['bundle']).resolve()
                         if bundle != HERE.parent.parent / 'Jarvis Dev.app':
@@ -455,12 +483,12 @@ class Supervisor:
                         result = {'launch': self.pending_launch['nonce']}
                     elif operation == 'wait-app':
                         lifecycle_request = True
-                        self.wait_clients(False, 'app')
-                        result = {}
+                        self.defer_app_wait(connection, False)
+                        return
                     elif operation == 'stop-app':
                         lifecycle_request = True
-                        self.wait_clients(True, 'app')
-                        result = {}
+                        self.defer_app_wait(connection, True)
+                        return
                     else:
                         raise Refused('Unknown operation')
                 reply = result
@@ -468,11 +496,112 @@ class Supervisor:
                 if lifecycle_request:
                     self.failure = self.failure or str(error)
                 reply = {'error': str(error)}
+            self.reply(connection, reply, lifecycle_request)
+
+    def reply(self, connection, value, lifecycle=True):
+        try:
+            connection.sendall((json.dumps(value) + '\n').encode())
+        except OSError as error:
+            if lifecycle:
+                self.failure = self.failure or f'Lifecycle reply lost: {error}'
+
+    def defer_app_wait(self, connection, stop):
+        if not self.app_waiters:
+            self.app_wait_deadline = time.monotonic() + EXIT_SECONDS
+            self.app_stop = False
+            self.app_signalled.clear()
+        self.app_stop = self.app_stop or stop
+        self.app_waiters.append(connection.dup())
+
+    def poll_app_wait(self):
+        if not self.app_waiters:
+            return
+        try:
+            if self.failure:
+                raise Refused(self.failure)
+            clients = [x for x in self.clients if x['scope'] == 'app' and same(x)]
+            if self.app_stop and not self.interruption:
+                for identity in clients:
+                    key = (identity['pid'], str(identity['start']))
+                    if key not in self.app_signalled:
+                        signal_owned(identity, signal.SIGTERM)
+                        self.app_signalled.add(key)
+            if clients:
+                if self.interruption or time.monotonic() < self.app_wait_deadline:
+                    return
+                for identity in clients:
+                    signal_owned(identity, signal.SIGKILL)
+                raise Refused('App/helper exit deadline; journal remains unfinished')
+            if self.pending_launch or any(x['scope'] == 'app' for x in self.pending_children.values()):
+                if self.interruption or time.monotonic() < self.app_wait_deadline:
+                    return
+                raise Refused('Launch never registered; lifecycle is uncertain')
+            result = {}
+        except Exception as error:
+            self.failure = self.failure or str(error)
+            result = {'error': str(error)}
+        waiters, self.app_waiters = self.app_waiters, []
+        for connection in waiters:
+            with connection:
+                self.reply(connection, result)
+
+    def service(self):
+        if select.select([self.socket], [], [], .05)[0]:
+            self.handle()
+        self.poll_app_wait()
+
+    def request_cancel(self, number, frame):
+        self.interruption = self.interruption or Interrupted(number)
+
+    def command_group_exists(self):
+        if self.command_group_gone:
+            return False
+        try:
+            os.killpg(self.root['pid'], 0)
+        except ProcessLookupError:
+            self.command_group_gone = True
+        return not self.command_group_gone
+
+    def signal_command_group(self, number):
+        if self.command_group_exists():
             try:
-                connection.sendall((json.dumps(reply) + '\n').encode())
-            except OSError as error:
-                if lifecycle_request:
-                    self.failure = self.failure or f'Lifecycle reply lost: {error}'
+                os.killpg(self.root['pid'], number)
+            except ProcessLookupError:
+                self.command_group_gone = True
+
+    def signal_cancelling_client(self, identity):
+        if self.cancel_forced:
+            number = signal.SIGKILL if self.cancel_killed else signal.SIGTERM
+            key = (identity['pid'], str(identity['start']), number)
+            if key not in self.cancel_signalled:
+                signal_owned(identity, number)
+                self.cancel_signalled.add(key)
+
+    def cancel_command(self, command):
+        # Keep the lease, socket and display alive while the shell's abort marker drains evidence.
+        self.signal_command_group(self.interruption.number)
+        grace = time.monotonic() + CANCEL_GRACE_SECONDS
+        kill_deadline = grace + EXIT_SECONDS
+        deadline = kill_deadline + 2
+        while True:
+            now = time.monotonic()
+            if now >= grace and not self.cancel_forced:
+                self.cancel_forced = True
+                self.signal_command_group(signal.SIGTERM)
+            if now >= kill_deadline and not self.cancel_killed:
+                self.cancel_killed = True
+                self.signal_command_group(signal.SIGKILL)
+            for identity in self.clients:
+                self.signal_cancelling_client(identity)
+            self.service()
+            command.poll()
+            group_alive = self.command_group_exists()
+            if not group_alive and not any(same(x) for x in self.clients):
+                if self.cancel_killed or not self.pending_launch and not self.pending_children:
+                    break
+            if time.monotonic() >= deadline:
+                break
+        command.wait(timeout=2)
 
     def record_clients(self):
         self.lease.write(self.lease.state['phase'], owned_processes=self.clients,
@@ -559,6 +688,7 @@ class Supervisor:
                          command=[entry, *arguments], worktree=str(HERE.parent.parent), campaign=decision['stage'],
                          consumed_campaigns=consumed,
                          test_status=None, lifecycle_status='unfinished')
+        handlers = {}
         try:
             try:
                 protect_apps()
@@ -586,17 +716,27 @@ class Supervisor:
                 environment['JARVIS_TEST_DISPLAY_ID'] = str(self.lease.state['display'])
             if entry == 'run-live-tests.sh' and sys.platform == 'darwin':
                 self.awake = subprocess.Popen(['/usr/bin/caffeinate', '-d', '-i', '-w', str(os.getpid())])
+            for number in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+                handlers[number] = signal.signal(number, self.request_cancel)
             command = subprocess.Popen(['/bin/bash', str(HERE.parent / entry), *arguments], env=environment, start_new_session=True)
             self.root = birth(command.pid)
             self.lease.write('command-running', command_owner=self.root)
             deadline = time.monotonic() + decision.get('command_seconds', COMMAND_SECONDS)
-            while command.poll() is None:
+            while True:
+                if self.interruption:
+                    self.cancel_command(command)
+                    raise self.interruption
+                if command.poll() is not None:
+                    break
                 if time.monotonic() >= deadline:
                     raise Refused('Complete command deadline expired')
                 if self.worker and self.worker.poll() is not None:
                     raise Refused('Display worker died during command')
-                if select.select([self.socket], [], [], .05)[0]:
-                    self.handle()
+                self.service()
+            for number, handler in handlers.items():
+                signal.signal(number, handler)
+            if self.interruption:
+                raise self.interruption
             status = command.wait()
             self.lease.write('command-exited', test_status=status)
             if status < 0:
@@ -631,10 +771,9 @@ class Supervisor:
             self.report_pending()
             # No desktop queries or completion writes on uncertainty. Intent remains durable.
             if self.root and same(self.root):
-                os.killpg(self.root['pid'], signal.SIGTERM)
+                self.signal_command_group(signal.SIGTERM)
             for identity in self.clients:
-                if same(identity):
-                    os.kill(identity['pid'], signal.SIGTERM)
+                signal_owned(identity, signal.SIGTERM)
             if self.awake and self.awake.poll() is None:
                 self.awake.terminate()
             if self.worker and self.worker.poll() is None:
@@ -644,6 +783,9 @@ class Supervisor:
                 except subprocess.TimeoutExpired:
                     pass
             raise
+        finally:
+            for number, handler in handlers.items():
+                signal.signal(number, handler)
 
 
 def launch_app(arguments):

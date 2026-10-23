@@ -6,6 +6,8 @@ abort_run() {
       touch "$scenario_dir/abort"
     fi
   done
+  # Leave the supervisor free to serve helper receipts while the app drains its evidence.
+  sleep 10
   stop_test_app
   echo "Live e2e run aborted; partial results are in $RUN_DIR." >&2
   exit 130
