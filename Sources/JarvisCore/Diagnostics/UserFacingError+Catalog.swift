@@ -53,6 +53,13 @@ public extension UserFacingError {
             sessionEndReason: .permissionsMissing)
     }
 
+    static var systemAudioCheckFailed: UserFacingError {
+        .init(
+            title: "Couldn’t check system audio",
+            message: "Jarvis couldn’t check System Audio Recording just now. Press Start again.",
+            severity: .warning)
+    }
+
     private static func sentenceList(_ items: [String]) -> String {
         guard items.count > 1 else { return items.first ?? "" }
         guard items.count > 2 else { return "\(items[0]) and \(items[1])" }

@@ -57,6 +57,19 @@ import Testing
         #expect(all.message.contains("Microphone, System Audio Recording, and Screen Recording"))
     }
 
+    @Test func inconclusiveSystemAudioCheckOffersRetryWithoutStopping() {
+        let error = UserFacingError.systemAudioCheckFailed
+        #expect(error.message.contains("couldn’t check System Audio Recording"))
+        #expect(error.message.contains("Press Start again"))
+        #expect(!error.message.contains("Enable"))
+        #expect(!error.message.contains("System Settings"))
+        #expect(error.severity == .warning)
+        #expect(error.severity.showsAlert(in: .startup))
+        #expect(!error.severity.showsAlert(in: .runtime))
+        #expect(!error.severity.stopsSession)
+        #expect(error.sessionEndReason == nil)
+    }
+
     @Test func aMissingScreenGrantAsksForARelaunchRatherThanAnotherStart() {
         // macOS applies a Screen Recording grant only to a new process, so Start again would loop.
         let screen = UserFacingError.permissionsMissing([.screenRecording])
