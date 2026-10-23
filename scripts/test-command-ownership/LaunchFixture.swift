@@ -76,7 +76,14 @@ import os
             for pid in children { kill(pid, SIGTERM) }
             first.cancel(); second.cancel()
             await first.value; await second.value
-            exit(published ? 0 : 1)
+            // A cancelled stream consumer can finish before its producer's registration/defer.
+            let cleanupDeadline = ContinuousClock.now + .seconds(3)
+            while !pids.withLock({ $0.isEmpty }) && ContinuousClock.now < cleanupDeadline {
+                try await Task.sleep(for: .milliseconds(5))
+            }
+            let cleaned = pids.withLock { $0.isEmpty }
+            print("Sign-in producer cleanup completed: \(cleaned)")
+            exit(published && cleaned ? 0 : 1)
         } else if mode == "no-spawn" || mode == "registration-error" {
             let child = Process()
             child.executableURL = URL(fileURLWithPath: mode == "no-spawn"
