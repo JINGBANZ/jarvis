@@ -1,7 +1,7 @@
 #if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import AVFoundation
 import Foundation
-import JarvisCore
+import JarvisTestSupport
 
 /// Speech files stay owner-only and are deleted once decoded, so no audio outlives the run.
 struct FixtureSpeech {

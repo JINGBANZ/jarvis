@@ -1,6 +1,6 @@
 import Darwin
 import Foundation
-import JarvisCore
+import JarvisTestSupport
 
 actor ReferenceConversionPool {
     static let processorVersion = ReferenceConversionWorker.processorVersion

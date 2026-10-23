@@ -1,5 +1,6 @@
 import Foundation
 import JarvisCore
+import JarvisTestSupport
 
 @MainActor
 final class ReferenceHelperSupervisor {

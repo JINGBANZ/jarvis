@@ -1,6 +1,7 @@
 #if JARVIS_LIVE_E2E
 import AppKit
 import JarvisCore
+import JarvisTestSupport
 
 @MainActor
 final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {

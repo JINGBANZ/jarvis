@@ -2,6 +2,7 @@ import AVFoundation
 import CryptoKit
 import Foundation
 import JarvisCore
+import JarvisTestSupport
 
 final class SyntheticSpeechFixtures {
     struct Fixture: Sendable {

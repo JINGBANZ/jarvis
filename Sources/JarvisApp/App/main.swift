@@ -1,5 +1,6 @@
 import AppKit
 import JarvisCore
+import JarvisTestSupport
 
 @MainActor
 private func liveE2EDelegate() -> (any NSApplicationDelegate)? {

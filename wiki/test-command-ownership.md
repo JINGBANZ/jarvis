@@ -87,9 +87,11 @@ inspection/permission errors. It never signals a process merely because its name
 | Registered launch controller descended from the test runner | Excluded, so it can request/wait for an app phase | Exact exit required. |
 | Detached registered app and its helper descendants | Exact exit required before the next app phase | Exact exit required. |
 
-Helper scope derives from its owning parent. The Foundation-only
-[`TestCommandOwnership`](../Sources/JarvisCore/Support/TestCommandOwnership.swift) launch wrapper
+Helper scope derives from its owning parent. The OS-bound
+[`TestCommandOwnership`](../Sources/JarvisTestSupport/TestCommandOwnership.swift) launch wrapper
 obtains a durable pending receipt **before** `Process.run()`, then registers the observed child.
+Its dependency-free `JarvisTestSupport` target is shared by the app, native helper, provider/capture
+adapters, and live test controller. The coaching kernel has no dependency on this process boundary.
 The host helper fixtures use the same handshake through
 [`test-command-ownership.py`](../scripts/lib/test-command-ownership.py). A parent dying between spawn
 and registration leaves uncertainty, even if a result already exists. Pending app-scope launches

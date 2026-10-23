@@ -42,6 +42,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisCore/Overlay/`: the overlay output port, with its text model, code snippets, and diagram hints ([architecture.md → The detail box](./architecture.md#the-detail-box)).
 - `Sources/JarvisCore/Config/` + `Sources/JarvisCore/Resources/Skills/`: preferences, owner-only secrets, the immutable `SessionPlan`, and the bundled coaching skills.
 - `Sources/JarvisCore/Support/`: small shared runtime primitives.
+- `Sources/JarvisTestSupport/`: the OS-bound app/helper launch and reporting adapter shared by [test command ownership](./test-command-ownership.md) clients.
 - `Sources/JarvisCore/Diagnostics/`: session evidence, Activity, readiness, capture health, and session history ([session-audit.md](./session-audit.md)).
 - `Sources/JarvisCore/Prompts/`: the predefined model-facing text.
 - `Sources/JarvisEvaluation/`: sealed-session evaluation, from evidence parsing and metrics to the agentic evaluator and its report.

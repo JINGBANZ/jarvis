@@ -479,7 +479,7 @@ CHILD
             text=True, capture_output=True, timeout=3)
         self.assertEqual(report.returncode, 70, report.stderr)
         self.assertIn('admitted test entrypoint', report.stderr)
-        swift = (ROOT / 'Sources/JarvisCore/Support/TestCommandOwnership.swift').read_text()
+        swift = (ROOT / 'Sources/JarvisTestSupport/TestCommandOwnership.swift').read_text()
         self.assertIn('reporter.arguments = ["-I", script]', swift)
 
     def test_host_helper_launch_preserves_restricted_environment_and_tracks_descendants(self):

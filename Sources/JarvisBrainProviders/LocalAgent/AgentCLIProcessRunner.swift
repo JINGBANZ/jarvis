@@ -5,6 +5,7 @@ import Darwin
 import Glibc
 #endif
 import JarvisCore
+import JarvisTestSupport
 
 /// Blocking work runs on a GCD thread, never the cooperative pool. Cancelling kills the CLI at
 /// once: a cancelled turn's reply is never used, so the CLI must not keep burning the user's quota.

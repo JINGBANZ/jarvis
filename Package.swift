@@ -24,10 +24,12 @@ let package = Package(
         // `.copy`, not `.process`: SkillCatalog enumerates the `<name>/SKILL.md` folders.
         .target(
             name: "JarvisCore", resources: [.copy("Resources/Skills")], swiftSettings: liveE2ESettings),
-        .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore"]),
+        // OS-bound harness ownership shared by executables and their process-launch adapters.
+        .target(name: "JarvisTestSupport"),
+        .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore", "JarvisTestSupport"]),
         .target(name: "JarvisEvaluation", dependencies: ["JarvisCore", "JarvisBrainProviders"]),
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
-        .target(name: "JarvisScreenCapture", dependencies: ["JarvisCore"]),
+        .target(name: "JarvisScreenCapture", dependencies: ["JarvisCore", "JarvisTestSupport"]),
         // lib/libjarvis-aec.a is prebuilt by scripts/build-aec.sh; only the C facade compiles here.
         .target(
             name: "CJarvisAEC",
@@ -42,7 +44,7 @@ let package = Package(
             name: "JarvisApp",
             dependencies: [
                 "JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisOverlay",
-                "JarvisScreenCapture", "CJarvisAEC",
+                "JarvisScreenCapture", "JarvisTestSupport", "CJarvisAEC",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             // Prebuilt by scripts/build-vad.sh. `.process` would flatten the .mlmodelc directory.
@@ -55,7 +57,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "JarvisReferenceHelper",
-            dependencies: ["JarvisCore", .product(name: "ZIPFoundation", package: "ZIPFoundation")],
+            dependencies: ["JarvisCore", "JarvisTestSupport", .product(name: "ZIPFoundation", package: "ZIPFoundation")],
             swiftSettings: liveE2ESettings,
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
@@ -87,7 +89,7 @@ let package = Package(
         // The Gate compiles this target but never runs it; scripts/run-live-tests.sh does.
         .testTarget(
             name: "JarvisLiveTests",
-            dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisEvaluation"],
+            dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisTestSupport"],
             exclude: ["Fixtures", "Scenarios"]
         ),
         // Separate from JarvisCoreTests so that target stays Foundation-only.

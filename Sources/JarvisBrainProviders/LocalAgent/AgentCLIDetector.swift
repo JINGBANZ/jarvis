@@ -1,5 +1,5 @@
 import Foundation
-import JarvisCore
+import JarvisTestSupport
 #if canImport(Darwin)
 import Darwin
 #else
