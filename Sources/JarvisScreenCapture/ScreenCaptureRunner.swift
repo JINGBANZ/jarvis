@@ -58,14 +58,18 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
                 lock.unlock()
                 return .cancelled
             }
+            var launched = false
             do {
-                try TestCommandOwnership.launchChild(process)
-                started = true
-                #if canImport(Darwin)
-                identity = Self.processIdentity(process.processIdentifier)
-                #endif
-                lock.unlock()
+                try TestCommandOwnership.launchChild(process) {
+                    started = true
+                    #if canImport(Darwin)
+                    identity = Self.processIdentity(process.processIdentifier)
+                    #endif
+                    launched = true
+                    lock.unlock()
+                }
             } catch {
+                if launched { lock.lock() }
                 finished = true
                 lock.unlock()
                 return .failed

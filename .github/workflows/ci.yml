@@ -45,6 +45,7 @@ jobs:
           name: test-failure-${{ matrix.os }}
           path: |
             .build/run-tests.log
+            .build/test-ownership.json
             .build/test-diagnostics/
           include-hidden-files: true
           retention-days: 7

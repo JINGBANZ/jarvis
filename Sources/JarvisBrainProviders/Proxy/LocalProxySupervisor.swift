@@ -328,13 +328,14 @@ public actor LocalProxySupervisor {
             let status = exited.terminationStatus
             Task { await self?.helperExited(generation: launched, status: status) }
         }
-        try TestCommandOwnership.launchChild(process)
-        self.process = process
-        helperRunning = true
-        lastExitStatus = nil
-        let pid = process.processIdentifier
-        helperPID.withLock { $0 = pid }
-        try? Data("\(pid)\n".utf8).write(to: pidURL)
+        try TestCommandOwnership.launchChild(process) {
+            self.process = process
+            helperRunning = true
+            lastExitStatus = nil
+            let pid = process.processIdentifier
+            helperPID.withLock { $0 = pid }
+            try? Data("\(pid)\n".utf8).write(to: pidURL)
+        }
     }
 
     private func awaitReady(_ endpoint: Endpoint) async -> State {

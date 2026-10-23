@@ -1,4 +1,5 @@
 """Pre-spawn receipts for host-driven native helper fixtures."""
+import errno
 import json
 import os
 from pathlib import Path
@@ -19,7 +20,13 @@ def launch_owned(arguments, **options):
     launch = json.loads(receipt)['launch']
     if options.get('env') is not None:
         options['env'] = {**options['env'], **context}
-    child = subprocess.Popen(arguments, **options)
+    try:
+        child = subprocess.Popen(arguments, **options)
+    except OSError as error:
+        # Known exec failures are reaped by Popen; ambiguous constructor errors stay unfinished.
+        if error.errno in (errno.ENOENT, errno.EACCES, errno.ENOEXEC, errno.ENOTDIR):
+            subprocess.run([*reporter, 'no-child', launch], check=True, timeout=25)
+        raise
     try:
         subprocess.run([*reporter, 'register-child', str(child.pid), launch], check=True, timeout=25)
     except BaseException:

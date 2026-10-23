@@ -386,7 +386,7 @@ class Supervisor:
                     lifecycle_request = True
                     self.record_clients()
                     result = {}
-                elif operation in ('prepare-child', 'register-child'):
+                elif operation in ('prepare-child', 'register-child', 'no-child'):
                     owner = birth(parent)
                     if not self.descendant(parent) and not any(
                         x['pid'] == parent and x['start'] == owner['start'] for x in self.clients):
@@ -406,12 +406,13 @@ class Supervisor:
                         if pending is None or pending['owner'] != owner:
                             raise Refused('Missing pending helper launch')
                         lifecycle_request = True
-                        child = process(int(request['pid']))
-                        if child is not None:
-                            if child['parent'] != parent:
-                                raise Refused('Child ancestry mismatch')
-                            child['scope'] = pending['scope']
-                            self.clients.append(child)
+                        if operation == 'register-child':
+                            child = process(int(request['pid']))
+                            if child is not None:
+                                if child['parent'] != parent:
+                                    raise Refused('Child ancestry mismatch')
+                                child['scope'] = pending['scope']
+                                self.clients.append(child)
                         del self.pending_children[nonce]
                         result = {}
                     self.record_clients()
@@ -468,6 +469,23 @@ class Supervisor:
     def record_clients(self):
         self.lease.write(self.lease.state['phase'], owned_processes=self.clients,
                          pending_app=self.pending_launch, pending_children=self.pending_children)
+
+    def report_pending(self):
+        pending = list(self.pending_children.values())
+        report = {'phase': self.lease.state['phase'], 'pending_app': self.pending_launch is not None,
+                  'pending_children': [{'owner_pid': x['owner']['pid'],
+                                        'owner_parent_pid': x['owner']['parent'],
+                                        'scope': x['scope'], 'phase': 'awaiting-registration'}
+                                       for x in pending[:16]],
+                  'omitted_children': max(0, len(pending) - 16)}
+        message = json.dumps(report, sort_keys=True)
+        print('Test ownership receipt: ' + message, file=sys.stderr, flush=True)
+        try:
+            output = HERE.parent.parent / '.build/test-ownership.json'
+            output.parent.mkdir(exist_ok=True)
+            output.write_text(message + '\n')
+        except OSError as error:
+            print('Test ownership diagnostic write failed: ' + str(error), file=sys.stderr, flush=True)
 
     def wait_clients(self, stop, scope=None):
         if self.failure:
@@ -602,6 +620,7 @@ class Supervisor:
             print(f'{LABEL}: test exit {status}; lifecycle passed', flush=True)
             return status if status >= 0 else 128 - status
         except BaseException:
+            self.report_pending()
             # No desktop queries or completion writes on uncertainty. Intent remains durable.
             if self.root and same(self.root):
                 os.killpg(self.root['pid'], signal.SIGTERM)
@@ -662,6 +681,9 @@ def main():
         return 0
     if operation == 'register-child':
         client(operation, pid=int(arguments[0]), launch=arguments[1])
+        return 0
+    if operation == 'no-child':
+        client(operation, launch=arguments[0])
         return 0
     if operation in ('stop-app', 'wait-app'):
         client(operation)

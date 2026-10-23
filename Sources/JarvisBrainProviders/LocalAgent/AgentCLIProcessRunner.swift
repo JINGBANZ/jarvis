@@ -99,48 +99,51 @@ public enum AgentCLIProcessRunner {
               onFirstByte: { timings.mark(.firstStdoutByte) })
         drain(stderrPipe.fileHandleForReading, into: stderrBox, done: stderrDone)
 
-        try TestCommandOwnership.launchChild(process)
-        timings.mark(.processLaunched)
-
-        // Watchdogs capture only the pid, not the Process. The SIGKILL keeps `waitUntilExit` from
-        // hanging on a CLI that ignores SIGTERM.
         let timedOut = Box(false)
-        let pid = process.processIdentifier
-        // Re-check after publishing, for a cancel that fired between spawn and publish.
-        pidBox.set(pid)
-        if cancelled.get() { terminate(pid) }
-        let watchdog = DispatchWorkItem {
-            timedOut.set(true)
-            kill(pid, SIGTERM)
-        }
-        let killer = DispatchWorkItem { kill(pid, SIGKILL) }
-        DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout, execute: watchdog)
-        DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout + 5, execute: killer)
-
-        // Writing stdin inline is safe because the output pipes are already draining.
-        #if canImport(Darwin)
-        // A CLI that exits before reading must cause EPIPE, not a SIGPIPE that kills Jarvis.
-        _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-        #else
-        // Linux has no per-pipe F_SETNOSIGPIPE, so ignore SIGPIPE process-wide.
-        _ = signal(SIGPIPE, SIG_IGN)
-        #endif
-        var stdinDelivered = true
-        do {
-            if let stdin = run.stdin {
-                try stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+        var watchdog: DispatchWorkItem?
+        var killer: DispatchWorkItem?
+        defer { watchdog?.cancel(); killer?.cancel() }
+        try TestCommandOwnership.launchChild(process) {
+            timings.mark(.processLaunched)
+            let pid = process.processIdentifier
+            pidBox.set(pid)
+            if cancelled.get() { terminate(pid) }
+            // Start the CLI budget at spawn, independently of ownership RPC latency.
+            let timeout = DispatchWorkItem {
+                timedOut.set(true)
+                kill(pid, SIGTERM)
             }
-            try stdinPipe.fileHandleForWriting.close()
-        } catch {
-            stdinDelivered = false
-            try? stdinPipe.fileHandleForWriting.close()
+            let forceExit = DispatchWorkItem { kill(pid, SIGKILL) }
+            watchdog = timeout
+            killer = forceExit
+            DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout, execute: timeout)
+            DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout + 5, execute: forceExit)
+
+            // Writing stdin inline is safe because the output pipes are already draining.
+            #if canImport(Darwin)
+            // A CLI that exits before reading must cause EPIPE, not a SIGPIPE that kills Jarvis.
+            _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            #else
+            // Linux has no per-pipe F_SETNOSIGPIPE, so ignore SIGPIPE process-wide.
+            _ = signal(SIGPIPE, SIG_IGN)
+            #endif
+            var stdinDelivered = true
+            do {
+                if let stdin = run.stdin {
+                    try stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+                }
+                try stdinPipe.fileHandleForWriting.close()
+            } catch {
+                stdinDelivered = false
+                try? stdinPipe.fileHandleForWriting.close()
+            }
+            if stdinDelivered { timings.mark(.stdinDelivered) }
         }
-        if stdinDelivered { timings.mark(.stdinDelivered) }
 
         process.waitUntilExit()
         let processExited = DispatchTime.now().uptimeNanoseconds
-        watchdog.cancel()
-        killer.cancel()
+        watchdog?.cancel()
+        killer?.cancel()
         // A grandchild holding the pipes' write ends would delay EOF, so bound the wait.
         _ = stdoutDone.wait(timeout: .now() + 2)
         _ = stderrDone.wait(timeout: .now() + 2)

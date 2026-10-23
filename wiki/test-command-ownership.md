@@ -90,6 +90,10 @@ inspection/permission errors. It never signals a process merely because its name
 Helper scope derives from its owning parent. The OS-bound
 [`TestCommandOwnership`](../Sources/JarvisTestSupport/TestCommandOwnership.swift) launch wrapper
 obtains a durable pending receipt **before** `Process.run()`, then registers the observed child.
+Immediate spawn bookkeeping (timing, stdin, cancellation PID and watchdog setup) runs before the
+blocking registration round trip, so ownership reporting cannot delay the child's normal lifecycle.
+Only a proven failed exec with no child resolves a receipt through authenticated `no-child`;
+registration failure and ambiguous spawn errors remain unfinished.
 Its dependency-free `JarvisTestSupport` target is shared by the app, native helper, provider/capture
 adapters, and live test controller. The coaching kernel has no dependency on this process boundary.
 The host helper fixtures use the same handshake through
@@ -97,6 +101,10 @@ The host helper fixtures use the same handshake through
 and registration leaves uncertainty, even if a result already exists. Pending app-scope launches
 also prevent the next app phase. Control processes remain observed at final teardown without
 waiting for themselves during app-phase RPCs.
+
+Routine native-helper fixture cleanup requests protocol shutdown and waits for its conversion pool
+to close before the owner exits. Intentional crash tests retain their crash behavior. A shutdown
+failure fails the fixture; forced cleanup cannot certify a pending launch as completed.
 
 Ownership reporters use the supervisor-selected absolute Python interpreter with `-I`. Restricted
 helper environments receive only explicit ownership context; hostile PATH, PYTHONPATH, PYTHONHOME,
@@ -124,6 +132,9 @@ eventual child death, or zero test exit cannot clear it. Error cleanup can signa
 and stop the worker, but that is not verified teardown and does not reopen admission. An ordinary
 assertion exit can complete verified teardown and admit the next command while preserving its test
 status. Zero exit requires successful tests and lifecycle completion.
+Failure diagnostics report at most sixteen pending owner PIDs, parent PIDs, scopes and phases,
+plus an omitted count, to stderr and `.build/test-ownership.json` for hosted failure artifacts.
+Tokens and launch nonces are excluded; diagnostics do not clear uncertainty or authorize admission.
 
 ## CI and display-free checks
 
@@ -135,6 +146,9 @@ persistence and preserves the workflow's ordinary draft-PR behavior.
 
 [`test-test-display.py`](../scripts/test-test-display.py) runs only copied-checkout, display-free
 fixtures. Its fake backend cannot be enabled in the production supervisor by an environment flag.
+The real Swift launch paths also run against fake subprocesses in
+[`test-test-command-ownership.py`](../scripts/test-test-command-ownership.py), including delayed
+registration, full timing order, cancellation, failed exec and helper shutdown during registration.
 The script/workflow and cancellation fixtures also use non-GUI stand-ins. Fixture environments
 strip all inherited `JARVIS_TEST_*` context before adding deliberate inputs, including when Gate
 itself runs them under a real supervisor. No fixture can contact the outer owner.

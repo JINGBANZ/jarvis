@@ -11,20 +11,43 @@ public enum TestCommandOwnership {
         _ = try report(["register-app"])
     }
 
-    public static func launchChild(_ child: Process) throws {
+    public static func launchChild(_ child: Process, onLaunch: () -> Void = {}) throws {
         guard ProcessInfo.processInfo.environment["JARVIS_TEST_RUN_SOCKET"] != nil else {
             try child.run()
+            onLaunch()
             return
         }
         let receipt = try report(["prepare-child"])
         guard let launch = receipt["launch"] as? String else { throw CocoaError(.coderInvalidValue) }
         do {
             try child.run()
+        } catch {
+            if child.processIdentifier == 0, !child.isRunning, isNoSpawnError(error) {
+                _ = try report(["no-child", launch])
+            }
+            throw error
+        }
+        // Publish timing/cancellation ownership before the registration round trip can block.
+        onLaunch()
+        do {
             _ = try report(["register-child", String(child.processIdentifier), launch])
         } catch {
             if child.isRunning { child.terminate() }
             throw error
         }
+    }
+
+    private static func isNoSpawnError(_ error: Error) -> Bool {
+        let failure = error as NSError
+        if failure.domain == NSPOSIXErrorDomain {
+            return [POSIXErrorCode.ENOENT, .EACCES, .ENOEXEC, .ENOTDIR].contains {
+                Int($0.rawValue) == failure.code
+            }
+        }
+        return failure.domain == NSCocoaErrorDomain && [
+            CocoaError.Code.fileNoSuchFile, .fileReadNoSuchFile, .fileReadNoPermission,
+            .executableNotLoadable,
+        ].contains { $0.rawValue == failure.code }
     }
 
     private static func report(_ arguments: [String]) throws -> [String: Any] {

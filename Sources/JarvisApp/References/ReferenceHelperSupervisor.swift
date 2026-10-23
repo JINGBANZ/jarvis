@@ -95,9 +95,10 @@ final class ReferenceHelperSupervisor {
         child.terminationHandler = { [weak self] _ in
             Task { @MainActor in self?.exited(generation: launched) }
         }
-        try TestCommandOwnership.launchChild(child)
-        process = child
-        input = stdin.fileHandleForWriting
+        try TestCommandOwnership.launchChild(child) {
+            process = child
+            input = stdin.fileHandleForWriting
+        }
         do {
             let reply = try await request("hello", timeout: startupTimeout)
             handshake = reply

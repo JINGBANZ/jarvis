@@ -13,6 +13,7 @@ isolate_test_display "$@"
 python3 scripts/test-live-cancellation.py
 python3 scripts/test-script-workflows.py
 python3 scripts/test-test-display.py
+python3 scripts/test-test-command-ownership.py
 ./scripts/test-reference-helper.sh
 
 source scripts/lib/swift-test-flags.sh

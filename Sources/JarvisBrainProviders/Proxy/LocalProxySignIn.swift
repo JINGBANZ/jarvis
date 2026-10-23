@@ -70,8 +70,15 @@ public struct LocalProxySignIn: Sendable {
             exited.yield(finished.terminationStatus)
             exited.finish()
         }
+        defer {
+            if process.processIdentifier > 0 {
+                _ = signInPIDs.withLock { $0.remove(process.processIdentifier) }
+            }
+        }
         do {
-            try TestCommandOwnership.launchChild(process)
+            try TestCommandOwnership.launchChild(process) {
+                _ = signInPIDs.withLock { $0.insert(process.processIdentifier) }
+            }
         } catch {
             events.yield(.failed(message: "the sign-in service couldn't start: \(error.localizedDescription)"))
             return
@@ -79,8 +86,6 @@ public struct LocalProxySignIn: Sendable {
         // The child holds its own copy; closing ours is what lets the read below end at its exit.
         try? output.fileHandleForWriting.close()
         let pid = process.processIdentifier
-        signInPIDs.withLock { $0.insert(pid) }
-        defer { signInPIDs.withLock { $0.remove(pid) } }
         let timedOut = OSAllocatedUnfairLock(initialState: false)
         let watchdog = Task {
             try? await Task.sleep(for: Self.deadline)

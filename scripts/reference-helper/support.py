@@ -52,10 +52,24 @@ class HelperTestCase(unittest.TestCase):
                                 cwd=self.root)
 
     def close_child(self):
-        if self.child.poll() is None:
-            self.child.kill()
-        self.child.communicate(timeout=5)
-        self.temporary.cleanup()
+        try:
+            if self.child.poll() is None:
+                # Shutdown waits for converter launch handshakes and exact worker exit.
+                request = self.send("shutdown")
+                deadline = time.monotonic() + 5
+                reply = self.receive(timeout=max(0, deadline - time.monotonic()))
+                while reply["id"] != request:
+                    self.assertLess(time.monotonic(), deadline, "bounded native helper shutdown")
+                    reply = self.receive(timeout=max(0, deadline - time.monotonic()))
+                self.assertEqual(reply["status"], "ok", reply)
+                self.assertEqual(self.child.wait(timeout=max(0, deadline - time.monotonic())), 0)
+        finally:
+            try:
+                if self.child.poll() is None:
+                    self.child.kill()
+                self.child.communicate(timeout=5)
+            finally:
+                self.temporary.cleanup()
 
     def read_exact(self, count, deadline):
         result = bytearray()
