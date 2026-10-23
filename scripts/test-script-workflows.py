@@ -22,9 +22,16 @@ class ScriptTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         shutil.copytree(REPOSITORY / "scripts", self.root / "scripts")
+        # Replace admission only inside this copied fixture checkout. Production has no bypass.
+        (self.root / "scripts/lib/test-display.sh").write_text("""isolate_test_display() { :; }
+launch_test_app() { open -W -n "$@"; }
+wait_test_app() { :; }
+stop_test_app() { :; }
+""")
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        self.environment = {**os.environ, "PATH": str(self.bin) + ":" + os.environ["PATH"]}
+        self.environment = {**{k: v for k, v in os.environ.items() if not k.startswith("JARVIS_TEST_")},
+                            "PATH": str(self.bin) + ":" + os.environ["PATH"]}
 
     def executable(self, path, body):
         path.write_text(body)
@@ -119,12 +126,6 @@ class HarnessDirectoryTests(ScriptTests):
 
 class LiveRunnerTests(ScriptTests):
     def test_empty_live_run_fails_and_completed_run_passes(self):
-        script = self.root / "scripts/run-live-tests.sh"
-        script.write_text(script.read_text().replace(
-            'APP_PROCESS_PATTERN="/Jarvis Dev[.]app/Contents/MacOS/JarvisApp"',
-            'APP_PROCESS_PATTERN="jarvis-script-tests-no-running-app"'))
-        self.environment.update(JARVIS_TEST_DISPLAY_ID="synthetic",
-                                JARVIS_LIVE_E2E_CAFFEINATED="1")
         self.executable(self.root / "scripts/build-app.sh", "#!/bin/bash\nexit 0\n")
         self.executable(self.bin / "swift", "#!/bin/bash\necho 'warning: No matching test cases were run'\n")
         empty = self.run_script("run-live-tests.sh", "A")

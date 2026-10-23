@@ -58,7 +58,7 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
                 return .cancelled
             }
             do {
-                try process.run()
+                try TestCommandOwnership.launchChild(process)
                 started = true
                 #if canImport(Darwin)
                 identity = Self.processIdentity(process.processIdentifier)

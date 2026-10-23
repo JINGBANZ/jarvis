@@ -76,7 +76,11 @@ final class CapturePrivacyAppDelegate: NSObject, NSApplicationDelegate {
             throw NSError(domain: "CapturePrivacy", code: 1, userInfo: [NSLocalizedDescriptionKey:
                 "Screen Recording is not granted to Jarvis Dev. Grant it explicitly, then rerun."])
         }
-        guard let screen = NSScreen.main,
+        guard let value = ProcessInfo.processInfo.environment["JARVIS_TEST_DISPLAY_ID"],
+              let target = UInt32(value),
+              let screen = NSScreen.screens.first(where: {
+                  $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == target
+              }),
               let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
         else { throw CocoaError(.featureUnsupported) }
         let stream = CapturePrivacyStream()

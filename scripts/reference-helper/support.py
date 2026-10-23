@@ -14,6 +14,7 @@ import zipfile
 
 HELPER = None
 FIXTURES = runpy.run_path(str(Path(__file__).with_name("generate-fixtures.py")))
+launch_owned = runpy.run_path(str(Path(__file__).resolve().parents[1] / "lib/test-command-ownership.py"))["launch_owned"]
 
 
 def identifier():
@@ -45,7 +46,7 @@ class HelperTestCase(unittest.TestCase):
         self.assertEqual(hello["engine"], "sqlite-fts5")
 
     def launch(self):
-        return subprocess.Popen([str(getattr(self, "executable", HELPER)), str(self.root / "store")], stdin=subprocess.PIPE,
+        return launch_owned([str(getattr(self, "executable", HELPER)), str(self.root / "store")], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 env={"PATH": "/usr/bin:/bin", "HOME": str(self.root / "store"), "LANG": "en_US.UTF-8"},
                                 cwd=self.root)

@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import JarvisCore
 
 actor ReferenceConversionPool {
     static let processorVersion = ReferenceConversionWorker.processorVersion
@@ -56,7 +57,7 @@ actor ReferenceConversionPool {
         process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
         process.arguments = ["--worker", snapshotURL.path, format, output.path]
         process.currentDirectoryURL = directory
-        process.environment = ["LANG": "en_US.UTF-8", "HOME": directory.path, "TMPDIR": directory.path, "PATH": "/usr/bin:/bin"]
+        process.environment = TestCommandOwnership.environment.merging(["LANG": "en_US.UTF-8", "HOME": directory.path, "TMPDIR": directory.path, "PATH": "/usr/bin:/bin"]) { _, safe in safe }
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -69,7 +70,7 @@ actor ReferenceConversionPool {
             try? FileManager.default.removeItem(at: directory)
         }
         do {
-            try process.run()
+            try TestCommandOwnership.launchChild(process)
             let deadline = ContinuousClock.now + Self.wallTime
             while process.isRunning {
                 try Task.checkCancellation()

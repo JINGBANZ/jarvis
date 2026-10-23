@@ -1,4 +1,5 @@
 import Foundation
+import JarvisCore
 #if canImport(Darwin)
 import Darwin
 #else
@@ -146,7 +147,7 @@ public struct AgentCLIDetector: Sendable {
         process.environment = environment
 
         do {
-            try process.run()
+            try TestCommandOwnership.launchChild(process)
         } catch {
             return nil
         }

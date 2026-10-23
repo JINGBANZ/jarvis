@@ -128,7 +128,7 @@ final class SyntheticSpeechFixtures {
         ]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try process.run()
+        try TestCommandOwnership.launchChild(process)
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             throw Failure.synthesisFailed(phrase.id, process.terminationStatus)

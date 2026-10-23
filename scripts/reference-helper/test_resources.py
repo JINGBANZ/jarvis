@@ -9,7 +9,7 @@ import tempfile
 import time
 import unittest
 
-from support import HELPER
+from support import HELPER, launch_owned
 
 
 class ConversionResources(unittest.TestCase):
@@ -22,10 +22,14 @@ class ConversionResources(unittest.TestCase):
         self.environment = {"PATH": "/usr/bin:/bin", "HOME": str(self.root), "LANG": "en_US.UTF-8"}
 
     def evaluate(self, format):
-        result = subprocess.run([str(HELPER), "--test-conversion", str(self.fixture), format, str(self.root / "staging")],
-                                capture_output=True, env=self.environment, timeout=25)
-        self.assertEqual(result.returncode, 0, result.stderr.decode(errors="replace"))
-        report = json.loads(result.stdout)
+        child = launch_owned([str(HELPER), "--test-conversion", str(self.fixture), format, str(self.root / "staging")],
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=self.environment)
+        try:
+            output, error = child.communicate(timeout=25)
+        finally:
+            if child.poll() is None: child.kill(); child.communicate(timeout=5)
+        self.assertEqual(child.returncode, 0, error.decode(errors="replace"))
+        report = json.loads(output)
         self.assertEqual(report["remaining_workers"], 0)
         self.assertLessEqual(report["peak_workers"], 2)
         self.assertEqual(report["poll_interval_ms"], 20)
@@ -55,13 +59,15 @@ class ConversionResources(unittest.TestCase):
 
     def test_worker_exits_when_owning_process_dies(self):
         pidfile = self.root / "pid"
-        wrapper_code = """import pathlib,subprocess,sys,time
-worker=subprocess.Popen([sys.argv[1],'--worker',sys.argv[2],'__test_hang',sys.argv[3]],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        wrapper_code = """import pathlib,runpy,subprocess,sys,time
+launch_owned=runpy.run_path(sys.argv[5])['launch_owned']
+worker=launch_owned([sys.argv[1],'--worker',sys.argv[2],'__test_hang',sys.argv[3]],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
 pathlib.Path(sys.argv[4]).write_text(str(worker.pid))
 time.sleep(60)
 """
-        owner = subprocess.Popen([sys.executable, "-I", "-c", wrapper_code, str(HELPER), str(self.fixture),
-                                  str(self.root / "output"), str(pidfile)], env=self.environment)
+        owner = launch_owned([sys.executable, "-I", "-c", wrapper_code, str(HELPER), str(self.fixture),
+                              str(self.root / "output"), str(pidfile),
+                              str(Path(__file__).resolve().parents[1] / "lib/test-command-ownership.py")], env=self.environment)
         worker_pid = None
         try:
             deadline = time.monotonic() + 5

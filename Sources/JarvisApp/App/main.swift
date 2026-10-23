@@ -61,6 +61,11 @@ private func settingsHarnessDelegate() -> (any NSApplicationDelegate)? {
     #endif
 }
 
+do { try TestCommandOwnership.registerApplication() } catch {
+    fputs("Test command ownership registration failed\n", stderr)
+    exit(70)
+}
+
 let app = NSApplication.shared
 let delegate: any NSApplicationDelegate
 if let settings = settingsHarnessDelegate() {

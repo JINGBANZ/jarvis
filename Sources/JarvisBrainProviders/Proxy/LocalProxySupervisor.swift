@@ -318,7 +318,7 @@ public actor LocalProxySupervisor {
         process.executableURL = executable
         // `-local-model` keeps the model catalog embedded instead of fetched at every start.
         process.arguments = ["-config", configURL.path, "-local-model"]
-        process.environment = Self.helperEnvironment()
+        process.environment = Self.helperEnvironment().merging(TestCommandOwnership.environment) { _, ownership in ownership }
         // The helper writes its own rotating logs; nothing reads its console.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
@@ -327,7 +327,7 @@ public actor LocalProxySupervisor {
             let status = exited.terminationStatus
             Task { await self?.helperExited(generation: launched, status: status) }
         }
-        try process.run()
+        try TestCommandOwnership.launchChild(process)
         self.process = process
         helperRunning = true
         lastExitStatus = nil

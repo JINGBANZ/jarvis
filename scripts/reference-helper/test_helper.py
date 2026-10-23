@@ -10,7 +10,7 @@ import subprocess
 import time
 import zipfile
 
-from support import FIXTURES, HELPER, HelperTestCase, docx, identifier
+from support import FIXTURES, HELPER, HelperTestCase, docx, identifier, launch_owned
 
 
 class HelperContracts(HelperTestCase):
@@ -475,7 +475,7 @@ class HelperContracts(HelperTestCase):
         self.assertEqual(self.call("hello")["status"], "ok")
 
     def test_ambient_secrets_reported_without_echo(self):
-        child = subprocess.Popen([str(HELPER), str(self.root / "polluted-store")], stdin=subprocess.PIPE,
+        child = launch_owned([str(HELPER), str(self.root / "polluted-store")], stdin=subprocess.PIPE,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                  env={"OPENAI_API_KEY": "synthetic-secret-canary", "PYTHONPATH": str(self.root)})
         try:

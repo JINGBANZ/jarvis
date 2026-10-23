@@ -417,57 +417,24 @@ allows an empty match set but rejects scan errors.
 
 ### Automatic test display
 
-The ordinary and live test commands and the signed Settings/References harnesses create a temporary
-virtual display on local Macs and place the test Overlay Box there before showing it.
-Developers use the same commands, with no display app, installation,
-configuration, or additional permission grant. Ordinary tests exercise deterministic logic and
-rendering without provider credentials; live e2e tests launch the signed app and exercise real
-providers, retaining their existing credential and capture-permission prerequisites.
+The local test commands share one fixed descriptor named `Jarvis Tests`, with the diagnostic label
+`jarvis-test-4a560001`. One ordinary-user external supervisor owns the complete command across
+worktrees. It creates a short-lived live display, observes exact app/helper exit, verifies display
+teardown, and retains the approved ICC profile and ColorSync registration. There is no routine
+profile deletion or unregister operation.
 
-[`scripts/lib/test-display.sh`](../scripts/lib/test-display.sh) compiles and caches a small helper with
-the existing Swift toolchain. Its display creation reuses MIT-licensed code from
-[DeskPad](../scripts/test-display/DeskPad/README.md), pinned in the repository, so startup needs no
-download. The helper owns the display until the command and its cancellation cleanup finish, then
-removes it. Hangup, interrupt, and termination signals all invoke the live runner's cancellation
-handler, which lets the separately launched app finish cleanup before the display is removed.
-The Gate exercises that handler with a detached stand-in app without launching Jarvis or providers.
-The live launcher passes the display identity explicitly through LaunchServices and
-opens the app in the background. Overlay placement is checked before presentation and after resizing.
+[Test command ownership](./test-command-ownership.md) defines the machine-visible lease, durable
+unfinished state, process roles, six entrypoints, explicit hosted CI policy, and failure behavior.
+The same page defines the required worktree inventory, reviewed finite A/B campaign, complete
+profile/registration snapshots, and passive health checks before local rollout or Gate. Missing
+evidence and legacy extras remain partial and cannot authorize Gate. Display-free fixture checks
+do not call the native worker; hosted CI does not establish local persistence.
 
-[`TestDisplayIdentity`](../scripts/test-display/TestDisplayIdentity.swift) reserves one of four stable
-monitor identities across worktrees with owner-only, per-user file locks in `/private/tmp/`.
-The kernel releases a reservation when its helper exits, including on cancellation or a crash.
-Lock files stay in place so concurrent helpers always lock the same inode; do not delete the lock
-directory during a run. Online identities are also excluded. If all slots are occupied, tests stop
-before launching their child command. macOS can move existing test displays as another is added;
-their overlays follow display changes, while physical monitor frames and the main display must stay
-unchanged and the new test display must remain separate from every other screen.
-
-ColorSync retains monitor profiles after displays disappear. Stable identities bound new profiles to
-the pool size across repeated runs, following the pattern described in
-[ExtendPilot's investigation](https://extendpilot.com/blog/the-mac-got-slower).
-[`scripts/cleanup-test-display-profiles.sh`](../scripts/cleanup-test-display-profiles.sh) previews
-inactive historical Jarvis profiles. Add `--apply` to remove the listed files; the system-owned
-`/Library/ColorSync/Profiles/Displays` directory normally requires an administrator, so preview first,
-then run `sudo ./scripts/cleanup-test-display-profiles.sh --apply` if needed. The command checks the
-Jarvis filename and embedded ICC vendor/product metadata, skips symlinks and malformed files, and
-preserves pool identities, online displays, and historical PID identities whose process still exists.
-Physical-monitor and unrelated profiles are preserved. The command requires desktop access and
-refuses cleanup if online displays cannot be inspected. It does not modify ColorSync's registry or
-claim to resolve desktop stalls or ColorSync CPU usage.
-
-The Gate runs `python3 scripts/test-test-display.py` for offline identity reservation, cancellation,
-profile-selection, and preservation contracts. From a logged-in local desktop with no other test run
-active, `python3 scripts/test-test-display.py --live` additionally checks repeated real helper cycles,
-persisted profile counts, four concurrent helpers, pool exhaustion, HUP/INT/TERM teardown, and the
-original desktop layout. This focused lifecycle check needs no provider, capture, or signing grants.
-
-Virtual displays use private macOS interfaces, confined to the test helper. If creation or placement
-fails, local tests stop with an error instead of falling back to the developer's screen. The helper
-requires an accessible, logged-in macOS desktop; a shell sandbox without WindowServer access cannot
-run it. GitHub Actions compiles the helper on each matrix toolchain, then keeps its existing test
-environment without launching the helper or creating an extra display. Hosted CI therefore cannot
-prove ColorSync persistence behavior; use the local lifecycle check for that evidence.
+Normal admitted commands require no display app, privileged helper, or administrator prompt.
+Virtual displays use private macOS interfaces confined to the bounded worker and require a
+responsive logged-in desktop. Failure stops the run and leaves uncertain state blocked for explicit
+recovery. The contract preserves physical-display configuration and unrelated applications, without
+promising that macOS can never create extra state or stall.
 
 ## The live activity viewer
 

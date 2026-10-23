@@ -98,7 +98,7 @@ public enum AgentCLIProcessRunner {
               onFirstByte: { timings.mark(.firstStdoutByte) })
         drain(stderrPipe.fileHandleForReading, into: stderrBox, done: stderrDone)
 
-        try process.run()
+        try TestCommandOwnership.launchChild(process)
         timings.mark(.processLaunched)
 
         // Watchdogs capture only the pid, not the Process. The SIGKILL keeps `waitUntilExit` from

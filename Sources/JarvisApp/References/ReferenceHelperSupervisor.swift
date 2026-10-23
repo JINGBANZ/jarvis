@@ -71,8 +71,8 @@ final class ReferenceHelperSupervisor {
         #if JARVIS_LIVE_E2E
         if testFault { child.arguments?.append("--test-fault") }
         #endif
-        child.environment = ["HOME": home.path, "TMPDIR": home.appendingPathComponent("staging").path,
-                             "LANG": "en_US.UTF-8", "PATH": "/usr/bin:/bin"]
+        child.environment = TestCommandOwnership.environment.merging(["HOME": home.path, "TMPDIR": home.appendingPathComponent("staging").path,
+                             "LANG": "en_US.UTF-8", "PATH": "/usr/bin:/bin"]) { _, safe in safe }
         child.currentDirectoryURL = home
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         guard fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else {
@@ -94,7 +94,7 @@ final class ReferenceHelperSupervisor {
         child.terminationHandler = { [weak self] _ in
             Task { @MainActor in self?.exited(generation: launched) }
         }
-        try child.run()
+        try TestCommandOwnership.launchChild(child)
         process = child
         input = stdin.fileHandleForWriting
         do {

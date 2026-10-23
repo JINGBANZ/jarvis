@@ -41,11 +41,15 @@ class LiveCancellationTests(unittest.TestCase):
                 try:
                     runner = subprocess.Popen(
                         ["/bin/bash", "-c",
-                         'set -euo pipefail\nsource "$1"\n'
+                         'set -euo pipefail\nFIXTURE_PYTHON="$2"\n'
+                         'stop_test_app() { "$FIXTURE_PYTHON" -c \'import os,sys,time; p=int(sys.argv[1]); '
+                         'end=time.monotonic()+5; '
+                         'exec("while time.monotonic()<end:\\n try: os.kill(p,0)\\n except ProcessLookupError: sys.exit(0)\\n time.sleep(.02)\\nsys.exit(1)")'
+                         '\' "$FIXTURE_APP_PID"; }\nsource "$1"\n'
                          '"$2" -c \'import time; print("ready", flush=True); time.sleep(30)\'\necho done',
                          "live-cancellation-test", str(HANDLER), sys.executable],
-                        env={**os.environ, "RUN_DIR": directory,
-                             "APP_PROCESS_PATTERN": re.escape(str(scenario))},
+                        env={**{k: v for k, v in os.environ.items() if not k.startswith('JARVIS_TEST_')}, "RUN_DIR": directory,
+                             "FIXTURE_APP_PID": str(app.pid)},
                         start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                         text=True,
                     )

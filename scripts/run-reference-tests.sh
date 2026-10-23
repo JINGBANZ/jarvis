@@ -26,46 +26,14 @@ printf '#!/bin/sh\n: > "%s"\nexit 99\n' "$RUN_DIR/hostile-helper-executed" > "$P
 chmod 700 "$POLLUTION/cwd/JarvisReferenceHelper"
 python3 scripts/reference-helper/generate-fixtures.py "$RUN_DIR/formats"
 codesign --verify --deep --strict 'Jarvis Dev.app'
-cleanup() {
-  python3 - "$RUN_DIR" "$PWD/Jarvis Dev.app" "$EXPECTED_CASES" <<'PY_CLEANUP'
-import os, signal, subprocess, sys, time
-from pathlib import Path
-root, app = map(Path, sys.argv[1:3])
-def aliases(path):
-    value = str(path)
-    return {value, value.replace('/private/tmp/', '/tmp/', 1)} if value.startswith('/private/tmp/') else {value}
-app_commands = [executable + ' --reference-harness --reference-harness-output ' + directory
-                for executable in aliases(app / 'Contents/MacOS/JarvisApp') for directory in aliases(root)]
-if sys.argv[3] == '1': app_commands = [command + ' --reference-harness-quit-only' for command in app_commands]
-helper = app / 'Contents/Resources/ReferenceHelper'
-prefixes = [executable + ' ' + directory + '/' for executable in aliases(helper / 'JarvisReferenceHelper')
-            for directory in aliases(root)]
-def owned():
-    rows = subprocess.check_output(['/bin/ps', '-axo', 'pid=,command='], text=True)
-    result = []
-    for row in rows.splitlines():
-        parts = row.strip().split(None, 1)
-        if len(parts) == 2 and (any(parts[1] == command or parts[1].startswith(command + ' ') for command in app_commands)
-                or any(parts[1].startswith(p) for p in prefixes)):
-            result.append(int(parts[0]))
-    return result
-for pid in owned():
-    try: os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError: pass
-deadline = time.monotonic() + 2
-while owned() and time.monotonic() < deadline: time.sleep(.05)
-for pid in owned():
-    try: os.kill(pid, signal.SIGKILL)
-    except ProcessLookupError: pass
-PY_CLEANUP
-}
-trap cleanup EXIT
+trap stop_test_app EXIT
 trap 'exit 130' HUP INT TERM
-open -n -g --env "HOME=$POLLUTION" --env "PATH=$POLLUTION/cwd" --env "PYTHONPATH=$POLLUTION/cwd" \
+launch_test_app --env "HOME=$POLLUTION" --env "PATH=$POLLUTION/cwd" --env "PYTHONPATH=$POLLUTION/cwd" \
   --env "HTTPS_PROXY=http://127.0.0.1:1" \
   --env "OPENAI_API_KEY=synthetic-secret-canary" --env "GEMINI_API_KEY=synthetic-secret-canary" \
   --stdout "$RUN_DIR/stdout.log" --stderr "$RUN_DIR/stderr.log" \
-  "$PWD/Jarvis Dev.app" --args --reference-harness --reference-harness-output "$RUN_DIR" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
+  "$PWD/Jarvis Dev.app" --args --reference-harness --reference-harness-output "$RUN_DIR" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} &
+app_waiter=$!
 wait_for_file "$RUN_DIR/results.json" 600 "Reference harness"
 python3 - "$RUN_DIR/results.json" "$EXPECTED_CASES" <<'PY'
 import json, sys
@@ -87,4 +55,5 @@ while time.monotonic() < deadline:
     time.sleep(.05)
 else: raise AssertionError(('Quit failed to reap app/helper', alive))
 PY
+wait "$app_waiter"
 echo "Reference harness passed: $RUN_DIR/results.json"

@@ -5,6 +5,8 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/harness.sh
+source scripts/lib/test-display.sh
+isolate_test_display "$@"
 
 usage() {
   echo "usage: $0 [A|B|C|D|H|L|P|R|F01|F02|CACHE|REF01|REF02|REF03|REF04|REF05|REF06|REF07|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going]" >&2
@@ -34,6 +36,7 @@ while (( $# > 0 )); do
 done
 if [[ "$SCENARIO" =~ ^REF0[1-7]$ ]]; then
   echo "$SCENARIO uses the deterministic signed References harness (synthetic tool traffic; no provider or capture)."
+  python3 scripts/test-display/supervisor.py transition-reference "$SCENARIO"
   exec ./scripts/run-reference-tests.sh "$SCENARIO"
 fi
 case "$PROVIDER" in
@@ -50,23 +53,6 @@ fi
 if [[ "$EVALUATE" == 1 && "$SCENARIO" != A && "$SCENARIO" != all ]]; then
   echo "--evaluate needs Scenario A: run A or all." >&2
   exit 2
-fi
-
-# Two live instances would contend for the capture device and the session folder.
-APP_PROCESS_PATTERN="/Jarvis Dev[.]app/Contents/MacOS/JarvisApp"
-if /usr/bin/pgrep -f "$APP_PROCESS_PATTERN" >/dev/null; then
-  echo "Quit the running Jarvis Dev.app before a live e2e run." >&2
-  exit 1
-fi
-
-source scripts/lib/test-display.sh
-isolate_test_display ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
-
-# A full run takes about half an hour; keep the Mac from sleeping through it.
-if [[ -z "${JARVIS_LIVE_E2E_CAFFEINATED:-}" ]]; then
-  export JARVIS_LIVE_E2E_CAFFEINATED=1
-  # Not "$0": the cd above moved to the repository root, where a relative $0 no longer resolves.
-  exec /usr/bin/caffeinate -d -i ./scripts/run-live-tests.sh ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
 fi
 
 echo "▶ building the signed development app"

@@ -70,7 +70,7 @@ public struct LocalProxySignIn: Sendable {
             exited.finish()
         }
         do {
-            try process.run()
+            try TestCommandOwnership.launchChild(process)
         } catch {
             events.yield(.failed(message: "the sign-in service couldn't start: \(error.localizedDescription)"))
             return

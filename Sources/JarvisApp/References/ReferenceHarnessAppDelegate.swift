@@ -104,7 +104,7 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         let metricOutput = Pipe()
         metrics.standardOutput = metricOutput
         metrics.standardError = FileHandle.nullDevice
-        try metrics.run()
+        try TestCommandOwnership.launchChild(metrics)
         let rss = String(decoding: metricOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         metrics.waitUntilExit()
         try require(metrics.terminationStatus == 0 && Int(rss) != nil, "idle RSS measurement")

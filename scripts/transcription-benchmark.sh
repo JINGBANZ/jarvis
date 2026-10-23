@@ -5,6 +5,8 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/harness.sh
+source scripts/lib/test-display.sh
+isolate_test_display "$@"
 
 usage() {
   echo "usage:" >&2
@@ -109,7 +111,7 @@ abort_run() {
 trap abort_run HUP INT TERM
 
 # `open -W` gives a waitable launcher, so the trap can reap it after the app sees the abort marker.
-open -W -n "./$APP" --args "${COMMON_ARGS[@]}" &
+launch_test_app "./$APP" --args "${COMMON_ARGS[@]}" &
 APP_WAITER_PID=$!
 wait "$APP_WAITER_PID"
 APP_WAITER_PID=""

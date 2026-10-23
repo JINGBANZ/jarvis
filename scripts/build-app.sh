@@ -6,6 +6,8 @@
 # self-signed identity; ad-hoc signing would re-prompt on every build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/test-display.sh
+isolate_test_display "$@"
 
 CONFIG="release"
 LAUNCH=""
@@ -80,16 +82,8 @@ codesign --force --deep --sign "$IDENTITY" "$APP"
 codesign --verify --verbose "$APP"
 echo "✅ built $APP"
 
-# Launch via `open`, never the bare binary: from a terminal, macOS attributes TCC grants to the shell.
-launch() {
-  # Kill only a dev build; an installed release may keep running alongside it.
-  /usr/bin/pkill -f "/${APP_NAME}[.]app/Contents/MacOS/$BIN_NAME" 2>/dev/null || true
-  sleep 1
-}
-
 case "$LAUNCH" in
   run)
-    launch
     echo "▶ launching $APP_NAME — open Settings → Activity to watch the log; sessions stay beside the bundle"
     open ./"$APP"
     ;;
