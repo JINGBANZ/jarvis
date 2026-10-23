@@ -1,7 +1,7 @@
 #if JARVIS_LIVE_E2E // Debug builds only: see liveE2ESettings in Package.swift
 import AVFoundation
 import Foundation
-import JarvisTestSupport
+import JarvisProcess
 
 /// Speech files stay owner-only and are deleted once decoded, so no audio outlives the run.
 struct FixtureSpeech {
@@ -18,6 +18,7 @@ struct FixtureSpeech {
     }
 
     let directory: URL
+    let launcher: any ProcessLaunching
 
     func prepareDirectory() throws {
         try FileManager.default.createDirectory(
@@ -39,7 +40,7 @@ struct FixtureSpeech {
         ]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try TestCommandOwnership.launchChild(process)
+        try launcher.launch(process)
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             throw Failure.synthesisFailed(process.terminationStatus)

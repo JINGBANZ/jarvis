@@ -153,14 +153,16 @@ final class CapturePrivacyAppDelegate: NSObject, NSApplicationDelegate {
         let suite = "com.jarvis.capture-privacy.\(UUID().uuidString)"
         guard let defaults = UserDefaults(suiteName: suite) else { throw CocoaError(.coderInvalidValue) }
         defer { defaults.removePersistentDomain(forName: suite) }
-        let supervisor = LocalProxySupervisor(executable: nil, home: output.appendingPathComponent("proxy"))
+        let supervisor = LocalProxySupervisor(executable: nil, home: output.appendingPathComponent("proxy"),
+            launcher: AppProcessComposition.makeLauncher())
         let brain = BrainPreferences(defaults: defaults)
         let signIns = SubscriptionSignIns(supervisor: supervisor)
         let hub = SettingsHubModel(
             brainPreferences: brain, transcriptionPreferences: TranscriptionPreferences(defaults: defaults),
             screenPreferences: ScreenCapturePreferences(defaults: defaults), appearance: OverlayAppearance(defaults: defaults),
             secrets: FileSecretStore(directoryURL: output.appendingPathComponent("empty-secrets")), signIns: signIns)
-        let viewer = ActivityViewer(log: .shared, store: SessionStore(base: output, current: nil))
+        let viewer = ActivityViewer(log: .shared, store: SessionStore(base: output, current: nil),
+            launcher: AppProcessComposition.makeLauncher())
         let settings = SettingsWindow(home: SettingsHome(model: hub), sections: [ActivitySection(viewer: viewer)], hub: hub)
         defer {
             NSApp.windows.first { $0.title == "Jarvis Settings" }?.close()

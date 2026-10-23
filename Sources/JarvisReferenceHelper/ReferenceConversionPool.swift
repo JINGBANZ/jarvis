@@ -1,6 +1,6 @@
 import Darwin
 import Foundation
-import JarvisTestSupport
+import JarvisProcess
 
 actor ReferenceConversionPool {
     static let processorVersion = ReferenceConversionWorker.processorVersion
@@ -19,7 +19,12 @@ actor ReferenceConversionPool {
     private var peakWorkerCount = 0
     #endif
 
-    init(staging: URL) { self.staging = staging }
+    private let launcher: any ProcessLaunching
+
+    init(staging: URL, launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.staging = staging
+        self.launcher = launcher
+    }
 
     func convert(snapshotURL: URL, format: String) async throws -> String {
         let foreground = Task.currentPriority >= .medium
@@ -57,7 +62,7 @@ actor ReferenceConversionPool {
         process.executableURL = URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL
         process.arguments = ["--worker", snapshotURL.path, format, output.path]
         process.currentDirectoryURL = directory
-        process.environment = TestCommandOwnership.environment.merging(["LANG": "en_US.UTF-8", "HOME": directory.path, "TMPDIR": directory.path, "PATH": "/usr/bin:/bin"]) { _, safe in safe }
+        process.environment = ["LANG": "en_US.UTF-8", "HOME": directory.path, "TMPDIR": directory.path, "PATH": "/usr/bin:/bin"]
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
@@ -70,7 +75,7 @@ actor ReferenceConversionPool {
             try? FileManager.default.removeItem(at: directory)
         }
         do {
-            try TestCommandOwnership.launchChild(process)
+            try launcher.launch(process)
             let deadline = ContinuousClock.now + Self.wallTime
             while process.isRunning {
                 try Task.checkCancellation()

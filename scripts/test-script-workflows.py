@@ -4,6 +4,7 @@
 import os
 from pathlib import Path
 import plistlib
+import runpy
 import shutil
 import signal
 import subprocess
@@ -44,6 +45,51 @@ stop_test_app() { :; }
 
 
 class GuardTests(ScriptTests):
+    def test_process_boundary_guard_rejects_context_import_and_transitive_dependency(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []}
+                              for name in (*guard['PRODUCTION_TARGETS'], 'Intermediate')]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        check = guard['check_boundary']
+        check(self.root, package)
+        source = self.root / 'Sources/JarvisProcess/Fixture.swift'
+        for forbidden in ('import JarvisTestSupport',
+                          'let context = environment["JARVIS_TEST_RUN_SOCKET"]',
+                          'TestCommandOwnership.makeLauncher()'):
+            source.write_text(forbidden)
+            with self.assertRaisesRegex(ValueError, 'test ownership in production logic'):
+                check(self.root, package)
+        source.unlink()
+        package['targets'][0]['dependencies'] = [{'byName': ['Intermediate', None]}]
+        package['targets'][-1]['dependencies'] = [{'target': ['JarvisTestSupport', None]}]
+        with self.assertRaisesRegex(ValueError, 'depends on JarvisTestSupport'):
+            check(self.root, package)
+
+    def test_non_debug_tests_refused_before_admission_in_both_entrypoints(self):
+        # Admission and every Python command must remain untouched, even under a foreign owner.
+        marker = self.root / 'admission-touched'
+        (self.root / 'scripts/lib/test-display.sh').write_text(
+            'isolate_test_display() { touch admission-touched; exit 99; }\n')
+        self.executable(self.bin / 'python3', '#!/bin/bash\ntouch admission-touched\nexit 99\n')
+        self.environment.update(JARVIS_TEST_RUN_SOCKET='/foreign-owner', JARVIS_TEST_RUN_TOKEN='foreign')
+        for entry in ('run-tests.sh', 'run-ci-tests.sh'):
+            for flags in (['-c', 'release'], ['--configuration', 'release'],
+                          ['--configuration=release'], ['-crelease'], ['-c=release'],
+                          ['-c', 'debug', '--configuration=release'],
+                          ['-c', 'release', '-c', 'debug'], ['-c'], ['--configuration=']):
+                with self.subTest(entry=entry, flags=flags):
+                    result = self.run_script(entry, *flags)
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn('require debug configuration', result.stderr)
+                    self.assertFalse(marker.exists())
+            for flags in ([], ['-c', 'debug'], ['--configuration=debug'], ['-cdebug'], ['-c=debug']):
+                with self.subTest(entry=entry, flags=flags):
+                    result = self.run_script(entry, *flags)
+                    self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
+                    self.assertTrue(marker.exists())
+                    marker.unlink()
+
     def test_missing_source_cannot_pass_audio_guard(self):
         for name in ("Sources", "Resources"):
             shutil.copytree(REPOSITORY / name, self.root / name)

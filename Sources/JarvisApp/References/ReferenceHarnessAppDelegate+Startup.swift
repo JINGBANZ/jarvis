@@ -4,7 +4,8 @@ import Foundation
 extension ReferenceHarnessAppDelegate {
     func referenceStartupStopChecks(home: URL) async throws {
         let queuedHome = home.appendingPathComponent("queued-supervisor")
-        let helper = ReferenceHelperSupervisor(bundle: bundle, home: queuedHome)
+        let helper = ReferenceHelperSupervisor(bundle: bundle, home: queuedHome,
+            launcher: AppProcessComposition.makeLauncher())
         let barrier = ReferenceStartupBarrier()
         helper.beforeLaunchForTesting = { await barrier.wait() }
         let starting = Task { try await helper.start() }
@@ -38,7 +39,8 @@ extension ReferenceHarnessAppDelegate {
                                                attributes: [.posixPermissions: 0o700])
         try "startup-hang".write(to: handshakeHome.appendingPathComponent("fault"), atomically: true, encoding: .utf8)
         let handshaking = ReferenceHelperSupervisor(bundle: bundle, home: handshakeHome,
-                                                   testFault: true, startupTimeout: .seconds(30))
+                                                   testFault: true, startupTimeout: .seconds(30),
+                                                   launcher: AppProcessComposition.makeLauncher())
         let handshake = Task { try await handshaking.start() }
         while handshaking.processIdentifier == nil { await Task.yield() }
         let handshakePID = handshaking.processIdentifier!

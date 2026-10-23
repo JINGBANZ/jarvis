@@ -1,4 +1,5 @@
 import Foundation
+import JarvisProcess
 import CryptoKit
 import JarvisCore
 import SQLite3
@@ -48,7 +49,7 @@ actor ReferenceDocumentStore {
     static let reservationBytes: Int64 = 450 * 1024 * 1024
     static let cacheTarget: Int64 = 1024 * 1024 * 1024
 
-    init(home: URL) throws {
+    init(home: URL, launcher: any ProcessLaunching = NativeProcessLauncher()) throws {
         let files = FileManager.default
         var homeInfo = stat()
         if lstat(home.path, &homeInfo) == 0, homeInfo.st_mode & S_IFMT != S_IFDIR { throw ReferenceStoreError.unavailable }
@@ -108,7 +109,7 @@ actor ReferenceDocumentStore {
                 UPDATE configuration SET state='failed',error='preparing' WHERE state='preparing';
                 """)
             try ReferenceSearchIndex.initialize(db)
-            converters = ReferenceConversionPool(staging: staging)
+            converters = ReferenceConversionPool(staging: staging, launcher: launcher)
         } catch { Darwin.close(lock); throw error }
     }
 

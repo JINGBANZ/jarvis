@@ -6,9 +6,6 @@
 # self-signed identity; ad-hoc signing would re-prompt on every build.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-source scripts/lib/test-display.sh
-isolate_test_display "$@"
-
 CONFIG="release"
 LAUNCH=""
 for arg in "$@"; do
@@ -18,6 +15,9 @@ for arg in "$@"; do
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
+
+source scripts/lib/test-display.sh
+isolate_test_display "$@"
 
 APP_NAME="Jarvis Dev"
 APP="$APP_NAME.app"

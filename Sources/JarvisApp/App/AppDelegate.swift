@@ -1,4 +1,5 @@
 import AppKit
+import JarvisProcess
 import JarvisBrainProviders
 import JarvisCore
 import JarvisEvaluation
@@ -38,8 +39,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var hotkeys: HotkeyController?
     private var mouseHotkeys: MouseHotkeyController?
     private let artifacts = SessionArtifacts()
-    private let references = ReferenceRuntime()
+    private let launcher: any ProcessLaunching
+    private let references: ReferenceRuntime
     private var terminatingReferences = false
+
+    init(launcher: any ProcessLaunching) {
+        self.launcher = launcher
+        self.references = ReferenceRuntime(launcher: launcher)
+    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory) // ghost-mode-allowed: launch configuration
@@ -65,15 +72,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         didStartApp = true
         let supervisor = LocalProxySupervisor(
             executable: LocalProxySupervisor.bundledExecutable(),
-            home: secretFile.directoryURL.appendingPathComponent("proxy", isDirectory: true))
+            home: secretFile.directoryURL.appendingPathComponent("proxy", isDirectory: true),
+            launcher: launcher)
         proxySupervisor = supervisor
         brain = BrainComposition(secrets: secrets, host: self, supervisor: supervisor)
         if brain.preferences.route.targets.contains(where: { $0.provider.servedByLocalProxy }) {
             Task { await supervisor.ensureRunning() }
         }
 
-        activityViewer = ActivityViewer(log: .shared,
-                                        store: SessionStore(base: artifacts.logDirectory(), current: nil))
+        activityViewer = ActivityViewer(
+            log: .shared, store: SessionStore(base: artifacts.logDirectory(), current: nil),
+            launcher: launcher)
         // Ghost mode: evaluation UI stays unavailable while coaching runs or a cancelled turn
         // drains, so it can't reveal Jarvis.
         activityViewer.isCoachingRunning = { [weak self] in
@@ -95,7 +104,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         activityViewer.makeEvaluator = { [weak self] session, cli in
             guard let self else { return nil }
             return AgenticEvaluator(source: self.artifacts.evaluationSource(for: session),
-                                    preferredCLI: cli)
+                                    preferredCLI: cli, launcher: self.launcher)
         }
 
         overlayBox = OverlayBoxPanel(contentSize: NSSize(
@@ -116,6 +125,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             overlayBox: overlayBox,
             readiness: readiness,
             errorReporter: errorReporter,
+            launcher: launcher,
             makeAudioSource: { audioFormat, localTurnDetectionSilenceDuration, delivery in
                 AggregateEchoCapture(
                     audioFormat: audioFormat,

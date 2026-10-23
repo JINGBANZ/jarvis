@@ -1,6 +1,7 @@
 import Foundation
 import JarvisCore
 import JarvisBrainProviders
+import JarvisProcess
 
 /// No cache on purpose: the agent CLI needs the network anyway, so one could never rescue an
 /// offline run. Never copy session artifacts here.
@@ -43,12 +44,15 @@ public struct ReleaseSourceStore: Sendable {
     }
 
     public typealias Fetcher = @Sendable (_ url: URL, _ destination: URL) async throws -> Void
+    private let launcher: any ProcessLaunching
     private let root: URL
     private let fetcher: Fetcher
 
     /// The temporary directory lets the OS reclaim a run that Quit abandoned mid-download.
     public init(root: URL = FileManager.default.temporaryDirectory,
+                launcher: any ProcessLaunching = NativeProcessLauncher(),
                 fetcher: @escaping Fetcher = ReleaseSourceStore.download) {
+        self.launcher = launcher
         self.root = root
         self.fetcher = fetcher
     }
@@ -102,7 +106,7 @@ public struct ReleaseSourceStore: Sendable {
                 executable: URL(fileURLWithPath: "/usr/bin/tar"),
                 arguments: ["-xzf", archive.path, "-C", extracted.path,
                             "--no-same-owner", "--no-same-permissions"], stdin: nil,
-                workingDirectory: container, timeout: 60))
+                workingDirectory: container, timeout: 60), launcher: launcher)
             guard output.exitCode == 0 else {
                 jlog("Jarvis: source unpack for \(version) failed — \(output.stderr)")
                 throw Failure.unpackFailed(version)

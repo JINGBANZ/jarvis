@@ -2,7 +2,7 @@ import AVFoundation
 import CryptoKit
 import Foundation
 import JarvisCore
-import JarvisTestSupport
+import JarvisProcess
 
 final class SyntheticSpeechFixtures {
     struct Fixture: Sendable {
@@ -17,7 +17,7 @@ final class SyntheticSpeechFixtures {
     private let directory: URL
     private let outputDirectory: URL
 
-    init(outputDirectory: URL) throws {
+    init(outputDirectory: URL, launcher: any ProcessLaunching) throws {
         let standardizedOutput = outputDirectory.standardizedFileURL
         let fixtureDirectory = outputDirectory.appendingPathComponent("fixtures", isDirectory: true)
             .standardizedFileURL
@@ -38,7 +38,7 @@ final class SyntheticSpeechFixtures {
                 if phrase.text.isEmpty {
                     try Self.writeControl(duration: 3, noise: phrase.id == "noise", to: url)
                 } else {
-                    try Self.synthesize(phrase, to: url)
+                    try Self.synthesize(phrase, to: url, launcher: launcher)
                 }
                 let data = try Data(contentsOf: url)
                 generated[phrase.id] = Fixture(
@@ -116,7 +116,7 @@ final class SyntheticSpeechFixtures {
 
     private static func synthesize(
         _ phrase: TranscriptionBenchmark.Phrase,
-        to url: URL
+        to url: URL, launcher: any ProcessLaunching
     ) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/say")
@@ -129,7 +129,7 @@ final class SyntheticSpeechFixtures {
         ]
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
-        try TestCommandOwnership.launchChild(process)
+        try launcher.launch(process)
         process.waitUntilExit()
         guard process.terminationStatus == 0 else {
             throw Failure.synthesisFailed(phrase.id, process.terminationStatus)

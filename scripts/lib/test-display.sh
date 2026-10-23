@@ -2,7 +2,7 @@
 isolate_test_display() {
   if [[ -n "${JARVIS_TEST_RUN_SOCKET:-}" || -n "${JARVIS_TEST_RUN_TOKEN:-}" ]]; then
     if [[ "$(basename "$0")" == build-app.sh ]]; then
-      python3 scripts/test-display/supervisor.py build-guard
+      python3 scripts/test-display/supervisor.py build-guard "$@"
     else
       python3 scripts/test-display/supervisor.py admit
     fi

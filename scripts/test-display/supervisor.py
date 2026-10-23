@@ -420,7 +420,10 @@ class Supervisor:
                     if not self.descendant(pid):
                         raise Refused('Caller is outside the admitted command chain')
                     if operation == 'build-guard':
-                        if self.entry == 'build-app.sh' and parent == self.root['pid'] and not self.admitted:
+                        root_build = self.entry == 'build-app.sh' and parent == self.root['pid'] and same(self.root)
+                        if request.get('launch') and not root_build:
+                            raise Refused('Nested build-app.sh --run is unsupported; use a tracked debug harness. Nested builds without --run are supported.')
+                        if root_build and not self.admitted:
                             self.admitted = True
                         result = {}
                     elif operation == 'admit':
@@ -460,11 +463,16 @@ class Supervisor:
                         result = {}
                     else:
                         raise Refused('Unknown operation')
-                connection.sendall((json.dumps(result) + '\n').encode())
+                reply = result
             except Exception as error:
                 if lifecycle_request:
                     self.failure = self.failure or str(error)
-                connection.sendall((json.dumps({'error': str(error)}) + '\n').encode())
+                reply = {'error': str(error)}
+            try:
+                connection.sendall((json.dumps(reply) + '\n').encode())
+            except OSError as error:
+                if lifecycle_request:
+                    self.failure = self.failure or f'Lifecycle reply lost: {error}'
 
     def record_clients(self):
         self.lease.write(self.lease.state['phase'], owned_processes=self.clients,
@@ -668,7 +676,7 @@ def main():
         client(operation, scenario=arguments[0])
         return 0
     if operation == 'build-guard':
-        client(operation)
+        client(operation, launch='--run' in arguments)
         return 0
     if operation == 'admit':
         client('admit')

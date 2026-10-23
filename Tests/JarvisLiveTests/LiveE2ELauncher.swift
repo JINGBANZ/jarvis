@@ -133,7 +133,7 @@ struct LiveE2ELauncher {
         let opener = Process()
         opener.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["JARVIS_TEST_PYTHON"] ?? "/usr/bin/python3")
         opener.arguments = arguments
-        try TestCommandOwnership.launchChild(opener)
+        try TestCommandOwnership.makeLauncher().launch(opener)
 
         let deadline = Date().addingTimeInterval(Self.launchTimeout)
         var abortDeadline: Date?
@@ -154,7 +154,8 @@ struct LiveE2ELauncher {
 
         guard !opener.isRunning, opener.terminationReason == .exit, opener.terminationStatus == 0 else {
             throw NSError(domain: "LiveE2ELauncher", code: 70, userInfo: [NSLocalizedDescriptionKey:
-                "The supervised launcher did not complete app/helper teardown"])
+                (timedOut ? "Timed out after \(Int(Self.launchTimeout))s; " : "")
+                + "the supervised launcher did not complete app/helper teardown"])
         }
 
         let sessionRoot = directory.appendingPathComponent("session", isDirectory: true)

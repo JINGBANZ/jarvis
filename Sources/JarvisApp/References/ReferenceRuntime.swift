@@ -1,4 +1,5 @@
 import Foundation
+import JarvisProcess
 import JarvisCore
 
 @MainActor
@@ -10,13 +11,14 @@ final class ReferenceRuntime {
     private var sources: [ReferenceSourceSelection] = []
     private lazy var watcher = ReferenceSourceWatcher { [weak self] in self?.reconcile() }
 
-    init(home: URL? = nil) {
+    init(home: URL? = nil, launcher: any ProcessLaunching = NativeProcessLauncher()) {
         let bundle = Bundle.main.bundleURL
         let development = Bundle.main.infoDictionary?["JarvisDevelopmentBuild"] as? Bool == true
         let root = home ?? (development
             ? bundle.deletingLastPathComponent().appendingPathComponent(".jarvis/references", isDirectory: true)
             : FileSecretStore().directoryURL.appendingPathComponent("references", isDirectory: true))
-        supervisor = ReferenceHelperSupervisor(bundle: bundle.appendingPathComponent("Contents/Resources/ReferenceHelper"), home: root)
+        supervisor = ReferenceHelperSupervisor(bundle: bundle.appendingPathComponent("Contents/Resources/ReferenceHelper"), home: root,
+            launcher: launcher)
         library = ReferenceLibrary(supervisor: supervisor)
     }
 

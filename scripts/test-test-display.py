@@ -11,7 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 BASE_ENV = {k: v for k, v in os.environ.items() if not k.startswith('JARVIS_TEST_')}
 ROOT = Path(__file__).resolve().parent.parent
@@ -87,6 +87,57 @@ if sys.stdin.readline() == 'stop\\n': print('{"stopped": true}', flush=True)
 
     def state(self):
         return json.loads((self.root / 'lease/journal.json').read_text())
+
+    def test_build_root_reentry_allows_manual_run_but_nested_run_is_refused(self):
+        shutil.copy2(ROOT / 'scripts/lib/test-display.sh', self.repo / 'scripts/lib')
+        # Real parsing/admission prelude; stop before signing, compiling, or any real open.
+        prelude = (ROOT / 'scripts/build-app.sh').read_text().split('APP_NAME="Jarvis Dev"')[0]
+        (self.repo / 'scripts/build-app.sh').write_text(prelude + '''
+printf 'built:%s launch:%s\\n' "$CONFIG" "$LAUNCH"
+''')
+        result = self.result(self.start('run', 'build-app.sh', '--run'))
+        self.assertEqual(result[0], 0, result)
+        self.assertIn('built:release launch:run', result[1])
+        self.assertEqual(self.state()['phase'], 'completed')
+        self.prepare()
+        self.script('''python3 "$JARVIS_TEST_SUPERVISOR" admit
+bash scripts/build-app.sh debug
+if bash scripts/build-app.sh --run; then exit 1; fi
+''')
+        result = self.result(self.start())
+        self.assertEqual(result[0], 0, result)
+        self.assertIn('built:debug launch:', result[1])
+        self.assertIn('Nested build-app.sh --run is unsupported', result[1])
+        self.assertNotIn('launch:run', result[1])
+        self.assertEqual(self.state()['phase'], 'completed')
+
+    def test_closed_refusal_reply_does_not_poison_but_lifecycle_reply_loss_does(self):
+        self.prepare()
+        lease = self.module.Lease()
+        supervisor = self.module.Supervisor(lease)
+        self.addCleanup(supervisor.socket.close)
+        self.addCleanup(lambda: os.close(lease.fd))
+        lease.write('intent')
+        lease.write('command-running')
+        supervisor.root = self.module.birth(os.getppid())
+        connection = MagicMock()
+        connection.__enter__.return_value = connection
+        connection.sendall.side_effect = BrokenPipeError('fixture disconnected client')
+        listener = MagicMock()
+        listener.accept.return_value = (connection, None)
+        with patch.object(supervisor, 'socket', listener), \
+             patch.object(self.module, 'peer_pid', return_value=os.getpid()):
+            connection.recv.return_value = json.dumps({'token': 'forged', 'operation': 'admit'}).encode() + b'\n'
+            supervisor.handle()
+            self.assertIsNone(supervisor.failure)
+            self.assertEqual(supervisor.pending_children, {})
+            connection.recv.return_value = json.dumps({'token': supervisor.token,
+                'operation': 'prepare-child'}).encode() + b'\n'
+            supervisor.handle()
+        self.assertIn('Lifecycle reply lost', supervisor.failure)
+        self.assertEqual(len(supervisor.pending_children), 1)
+        with self.assertRaises(self.module.Refused): supervisor.wait_clients(False)
+        self.assertNotEqual(self.state()['phase'], 'completed')
 
     def test_complete_and_nonzero_test_status(self):
         self.prepare()

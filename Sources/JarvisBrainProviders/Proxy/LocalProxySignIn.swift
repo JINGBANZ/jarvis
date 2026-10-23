@@ -1,6 +1,6 @@
 import Foundation
 import JarvisCore
-import JarvisTestSupport
+import JarvisProcess
 import os
 #if canImport(Darwin)
 import Darwin
@@ -23,6 +23,7 @@ public struct LocalProxySignIn: Sendable {
         "auth.openai.com", "claude.ai", "console.anthropic.com",
     ]
 
+    private let processLauncher: any ProcessLaunching
     private let executable: URL
     private let configURL: URL
     private let authDirectory: URL
@@ -30,7 +31,9 @@ public struct LocalProxySignIn: Sendable {
     private let signInPIDs: OSAllocatedUnfairLock<Set<Int32>>
 
     public init(executable: URL, configURL: URL, authDirectory: URL,
-                signInPIDs: OSAllocatedUnfairLock<Set<Int32>> = .init(initialState: [])) {
+                signInPIDs: OSAllocatedUnfairLock<Set<Int32>> = .init(initialState: []),
+                launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.processLauncher = launcher
         self.executable = executable
         self.configURL = configURL
         self.authDirectory = authDirectory
@@ -76,7 +79,7 @@ public struct LocalProxySignIn: Sendable {
             }
         }
         do {
-            try TestCommandOwnership.launchChild(process) {
+            try processLauncher.launch(process) {
                 _ = signInPIDs.withLock { $0.insert(process.processIdentifier) }
             }
         } catch {

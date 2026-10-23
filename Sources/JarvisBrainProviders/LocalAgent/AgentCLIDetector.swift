@@ -1,5 +1,5 @@
 import Foundation
-import JarvisTestSupport
+import JarvisProcess
 #if canImport(Darwin)
 import Darwin
 #else
@@ -7,6 +7,7 @@ import Glibc
 #endif
 
 public struct AgentCLIDetector: Sendable {
+    private let processLauncher: any ProcessLaunching
     private let home: URL
     private let pathVariable: String?
     private let applicationDirectories: [URL]
@@ -17,7 +18,9 @@ public struct AgentCLIDetector: Sendable {
                 pathVariable: String? = ProcessInfo.processInfo.environment["PATH"],
                 authStatusTimeout: TimeInterval = 2,
                 temporaryDirectory: URL = FileManager.default.temporaryDirectory,
-                applicationDirectories: [URL]? = nil) {
+                applicationDirectories: [URL]? = nil,
+                launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.processLauncher = launcher
         self.home = home
         self.applicationDirectories = applicationDirectories ?? [
             home.appendingPathComponent("Applications"), URL(fileURLWithPath: "/Applications"),
@@ -147,7 +150,7 @@ public struct AgentCLIDetector: Sendable {
         process.environment = environment
 
         do {
-            try TestCommandOwnership.launchChild(process)
+            try processLauncher.launch(process)
         } catch {
             return nil
         }

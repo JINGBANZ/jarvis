@@ -1,3 +1,4 @@
+import JarvisTestSupport
 import Foundation
 import JarvisBrainProviders
 import JarvisCore
@@ -12,7 +13,7 @@ func releaseArchive(_ version: String, in fixture: URL) async throws -> URL {
     let output = try await AgentCLIProcessRunner.run(AgentCLIRun(
         executable: URL(fileURLWithPath: "/usr/bin/tar"),
         arguments: ["-czf", archive.path, "-C", fixture.path, source.lastPathComponent],
-        stdin: nil, workingDirectory: fixture, timeout: 5))
+        stdin: nil, workingDirectory: fixture, timeout: 5), launcher: TestCommandOwnership.makeLauncher())
     #expect(output.exitCode == 0)
     return archive
 }

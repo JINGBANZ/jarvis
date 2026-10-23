@@ -1,6 +1,6 @@
 import Foundation
 import JarvisCore
-import JarvisTestSupport
+import JarvisProcess
 
 @MainActor
 final class ReferenceHelperSupervisor {
@@ -12,6 +12,7 @@ final class ReferenceHelperSupervisor {
     private var testFault = false
     var beforeLaunchForTesting: (@MainActor () async -> Void)?
     #endif
+    private let processLauncher: any ProcessLaunching
     private let startupTimeout: Duration
     private var process: Process?
     private(set) var handshake: Data?
@@ -29,15 +30,18 @@ final class ReferenceHelperSupervisor {
     private var generation = UUID()
     private let writes = DispatchQueue(label: "jarvis.references.write")
 
-    init(bundle: URL, home: URL, startupTimeout: Duration = .seconds(30)) {
+    init(bundle: URL, home: URL, startupTimeout: Duration = .seconds(30),
+         launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.processLauncher = launcher
         self.bundle = bundle
         self.home = home
         self.startupTimeout = startupTimeout
     }
 
     #if JARVIS_LIVE_E2E
-    convenience init(bundle: URL, home: URL, testFault: Bool, startupTimeout: Duration) {
-        self.init(bundle: bundle, home: home, startupTimeout: startupTimeout)
+    convenience init(bundle: URL, home: URL, testFault: Bool, startupTimeout: Duration,
+                     launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.init(bundle: bundle, home: home, startupTimeout: startupTimeout, launcher: launcher)
         self.testFault = testFault
     }
     #endif
@@ -72,8 +76,8 @@ final class ReferenceHelperSupervisor {
         #if JARVIS_LIVE_E2E
         if testFault { child.arguments?.append("--test-fault") }
         #endif
-        child.environment = TestCommandOwnership.environment.merging(["HOME": home.path, "TMPDIR": home.appendingPathComponent("staging").path,
-                             "LANG": "en_US.UTF-8", "PATH": "/usr/bin:/bin"]) { _, safe in safe }
+        child.environment = ["HOME": home.path, "TMPDIR": home.appendingPathComponent("staging").path,
+                             "LANG": "en_US.UTF-8", "PATH": "/usr/bin:/bin"]
         child.currentDirectoryURL = home
         let stdin = Pipe(), stdout = Pipe(), stderr = Pipe()
         guard fcntl(stdin.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1) == 0 else {
@@ -95,7 +99,7 @@ final class ReferenceHelperSupervisor {
         child.terminationHandler = { [weak self] _ in
             Task { @MainActor in self?.exited(generation: launched) }
         }
-        try TestCommandOwnership.launchChild(child) {
+        try processLauncher.launch(child) {
             process = child
             input = stdin.fileHandleForWriting
         }

@@ -4,16 +4,37 @@ import JarvisCore
 import JarvisTestSupport
 import os
 @testable import JarvisBrainProviders
+@testable import JarvisScreenCapture
 
 @main enum LaunchFixture {
     static func main() async throws {
         let mode = CommandLine.arguments[1]
-        if mode == "timing" {
+        if mode == "native" {
+            // Omit injection deliberately: production's default must ignore foreign test context.
+            let result = try await AgentCLIProcessRunner.run(AgentCLIRun(
+                executable: URL(fileURLWithPath: "/bin/echo"), arguments: ["native-default"],
+                stdin: nil, workingDirectory: FileManager.default.temporaryDirectory, timeout: 3))
+            guard result.stdout.contains("native-default"), result.exitCode == 0 else { exit(1) }
+        } else if mode == "capture-registration-error" {
+            let directory = URL(fileURLWithPath: CommandLine.arguments[2])
+            let runner = ScreenCaptureRunner(
+                captureDirectory: directory, executable: directory.appendingPathComponent("late-writer"),
+                launcher: TestCommandOwnership.makeLauncher())
+            guard case .failed = runner.capture(arguments: []) else { exit(1) }
+            let pidText = try String(contentsOf: directory.appendingPathComponent("writer.pid"), encoding: .utf8)
+            guard let pid = Int32(pidText), kill(pid, 0) == -1, errno == ESRCH else { exit(1) }
+            try Data().write(to: directory.appendingPathComponent("allow-late-write"))
+            let names = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            guard !names.contains(where: { $0.hasSuffix(".jpg") }),
+                  !names.contains("late-write") else { exit(1) }
+            print("Registration failure reaped TERM-ignoring child before capture cleanup; no late JPEG")
+        } else if mode == "timing" {
             let timings = AgentCLIPhaseTimings()
             let output = try await AgentCLIProcessRunner.run(AgentCLIRun(
                 executable: URL(fileURLWithPath: "/bin/sh"),
                 arguments: ["-c", "sleep 0.2; echo ready; sleep 0.2; exit 0"], stdin: "hi",
-                workingDirectory: FileManager.default.temporaryDirectory, timeout: 10), timings: timings)
+                workingDirectory: FileManager.default.temporaryDirectory, timeout: 10), timings: timings,
+                    launcher: TestCommandOwnership.makeLauncher())
             guard let entered = timings.instant(.runnerEntered),
                   let launched = timings.instant(.processLaunched),
                   let stdin = timings.instant(.stdinDelivered),
@@ -33,7 +54,8 @@ import os
                 try await AgentCLIProcessRunner.run(AgentCLIRun(
                     executable: URL(fileURLWithPath: "/bin/sleep"), arguments: ["5"], stdin: nil,
                     workingDirectory: FileManager.default.temporaryDirectory,
-                    timeout: mode == "timeout" ? 0.05 : 10), timings: timings)
+                    timeout: mode == "timeout" ? 0.05 : 10), timings: timings,
+                    launcher: TestCommandOwnership.makeLauncher())
             }
             if mode == "cancel" {
                 let deadline = ContinuousClock.now + .seconds(3)
@@ -55,7 +77,7 @@ import os
             let pids = OSAllocatedUnfairLock<Set<Int32>>(initialState: [])
             let login = LocalProxySignIn(executable: directory.appendingPathComponent("login"),
                 configURL: directory.appendingPathComponent("config"), authDirectory: directory,
-                signInPIDs: pids)
+                signInPIDs: pids, launcher: TestCommandOwnership.makeLauncher())
             let first = Task { for await _ in login.run(.codexSubscription) {} }
             let second = Task { for await _ in login.run(.claudeSubscription) {} }
             var children: [Int32] = []
@@ -89,7 +111,7 @@ import os
             child.executableURL = URL(fileURLWithPath: mode == "no-spawn"
                 ? "/jarvis-fixture-does-not-exist" : "/bin/sleep")
             child.arguments = mode == "no-spawn" ? [] : ["5"]
-            do { try TestCommandOwnership.launchChild(child); exit(1) }
+            do { try TestCommandOwnership.makeLauncher().launch(child); exit(1) }
             catch {
                 print("Launch failed: pid=\(child.processIdentifier); running=\(child.isRunning)")
                 if mode == "no-spawn" && (child.processIdentifier != 0 || child.isRunning) { exit(1) }

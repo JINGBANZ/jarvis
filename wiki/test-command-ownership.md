@@ -66,6 +66,9 @@ All six entrypoints call [`test-display.sh`](../scripts/lib/test-display.sh) bef
 `build-app.sh` also holds the lease to protect development bundles and artifacts. Its nested build
 guard validates command ancestry; a standalone build takes the same machine lock. A user-requested
 `--run` opens the development app, which must quit before another test command can pass preflight.
+Only the admitted standalone build root may use `--run`; a nested build may build artifacts but
+must use its caller's tracked debug harness to launch an app. The bundle's development plist label
+does not select tracking: a standalone release development build runs the native production path.
 Independent edits/builds are safe only when they cannot replace an active command's binaries,
 bundle, or artifacts. Direct legacy binaries do not cooperate with this lock.
 
@@ -87,15 +90,30 @@ inspection/permission errors. It never signals a process merely because its name
 | Registered launch controller descended from the test runner | Excluded, so it can request/wait for an app phase | Exact exit required. |
 | Detached registered app and its helper descendants | Exact exit required before the next app phase | Exact exit required. |
 
-Helper scope derives from its owning parent. The OS-bound
-[`TestCommandOwnership`](../Sources/JarvisTestSupport/TestCommandOwnership.swift) launch wrapper
-obtains a durable pending receipt **before** `Process.run()`, then registers the observed child.
+Helper scope derives from its owning parent. Production OS adapters depend only on the immutable,
+one-method [`ProcessLaunching`](../Sources/JarvisProcess/ProcessLaunching.swift) interface. Its native
+default runs a normal process and ignores test ownership context. Provider, capture, evaluation,
+and reference logic neither depend on the test runner nor parse its environment.
+
+Development executable composition and test hosts explicitly inject
+[`TrackedProcessLauncher`](../Sources/JarvisTestSupport/TrackedProcessLauncher.swift). It obtains a
+durable pending receipt **before** the native spawn, adds ownership context to sanitized child
+environments internally, then registers the observed child.
 Immediate spawn bookkeeping (timing, stdin, cancellation PID and watchdog setup) runs before the
 blocking registration round trip, so ownership reporting cannot delay the child's normal lifecycle.
 Only a proven failed exec with no child resolves a receipt through authenticated `no-child`;
 registration failure and ambiguous spawn errors remain unfinished.
-Its dependency-free `JarvisTestSupport` target is shared by the app, native helper, provider/capture
-adapters, and live test controller. The coaching kernel has no dependency on this process boundary.
+If launch throws after a known spawn, the launcher kills and reaps that exact child before returning
+the error. Capture may therefore finish output cleanup without a surviving writer; this local
+cleanup never clears a failed registration receipt. Blocking cleanup is still bounded by the
+external supervisor's command deadline.
+
+The entire `JarvisTestSupport` implementation is compiled only with `DEBUG`, including its context
+parser and Python reporter. Release app and native-helper artifacts exclude reporting code.
+App bootstrap, helper bootstrap, evaluator CLI, unit process tests and the live controller select
+their launcher explicitly; there is no mutable global fallback. App composition forwards the
+launcher through proxy sign-in, Activity detection/evaluation and session capture. Helper composition
+forwards it through the document store and conversion pool, including `--test-conversion`.
 The host helper fixtures use the same handshake through
 [`test-command-ownership.py`](../scripts/lib/test-command-ownership.py). A parent dying between spawn
 and registration leaves uncertainty, even if a result already exists. Pending app-scope launches
@@ -144,11 +162,25 @@ An inherited `GITHUB_ACTIONS` value or display ID cannot select that policy. Loc
 requests and nested supervisors are rejected. Hosted CI proves neither display reuse nor ColorSync
 persistence and preserves the workflow's ordinary draft-PR behavior.
 
+[`check-process-launching.py`](../scripts/check-process-launching.py) enforces the production source
+and transitive target dependency boundary; its negative fixtures reject ownership context, test
+imports and indirect dependencies. Compiled release artifacts are inspected for reporter symbols
+and context/protocol strings when validating changes to this boundary.
+
+Both ordinary and hosted unit-test wrappers reject non-debug Swift test configurations before
+supervisor or display preflight, including short and equals-form configuration arguments. A release
+test host cannot silently use native launches inside a supervised command. Ordinary
+`swift build -c release` and standalone `build-app.sh release` / `--run` remain supported. Signed
+harness wrappers and native-helper fixture builds use debug configuration explicitly.
+
 [`test-test-display.py`](../scripts/test-test-display.py) runs only copied-checkout, display-free
 fixtures. Its fake backend cannot be enabled in the production supervisor by an environment flag.
 The real Swift launch paths also run against fake subprocesses in
 [`test-test-command-ownership.py`](../scripts/test-test-command-ownership.py), including delayed
-registration, full timing order, cancellation, failed exec and helper shutdown during registration.
+registration, full timing order, cancellation, failed exec, helper shutdown during registration,
+native defaults under foreign ownership context, and capture cleanup after failed registration of
+a TERM-ignoring child. The latter permits a late write only after capture returns and first proves
+that the child is absent; it never invokes real screen capture.
 The script/workflow and cancellation fixtures also use non-GUI stand-ins. Fixture environments
 strip all inherited `JARVIS_TEST_*` context before adding deliberate inputs, including when Gate
 itself runs them under a real supervisor. No fixture can contact the outer owner.

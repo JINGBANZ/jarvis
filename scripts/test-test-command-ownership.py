@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import socket
 
 ROOT = Path(__file__).resolve().parent.parent
 BASE_ENV = {k: v for k, v in os.environ.items() if not k.startswith('JARVIS_TEST_')}
@@ -20,7 +21,11 @@ spec.loader.exec_module(lifecycle)
 class LaunchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        subprocess.run(['swift', 'build', '--target', 'JarvisBrainProviders'], cwd=ROOT,
+        subprocess.run(['swift', 'build', '-c', 'debug', '--target', 'JarvisScreenCapture'], cwd=ROOT,
+                       env=BASE_ENV, check=True, timeout=120)
+        subprocess.run(['swift', 'build', '-c', 'debug', '--target', 'JarvisBrainProviders'], cwd=ROOT,
+                       env=BASE_ENV, check=True, timeout=120)
+        subprocess.run(['swift', 'build', '-c', 'debug', '--target', 'JarvisTestSupport'], cwd=ROOT,
                        env=BASE_ENV, check=True, timeout=120)
         build = Path(subprocess.check_output(['swift', 'build', '--show-bin-path'],
                      cwd=ROOT, env=BASE_ENV, text=True, timeout=30).strip())
@@ -29,7 +34,7 @@ class LaunchTests(unittest.TestCase):
         cls.binary = Path(cls.temporary.name) / 'launch-fixture'
         command = ['swiftc', '-parse-as-library', '-swift-version', '6', '-I', str(build / 'Modules'),
                    str(ROOT / 'scripts/test-command-ownership/LaunchFixture.swift'), '-o', str(cls.binary)]
-        for target in ('JarvisCore', 'JarvisBrainProviders', 'JarvisTestSupport'):
+        for target in ('JarvisCore', 'JarvisProcess', 'JarvisBrainProviders', 'JarvisScreenCapture', 'JarvisTestSupport'):
             objects = sorted((build / (target + '.build')).glob('*.o'))
             if not objects:
                 raise RuntimeError('Missing compiled launch fixture dependency: ' + target)
@@ -93,6 +98,54 @@ class LaunchTests(unittest.TestCase):
         self.assertNotEqual(self.fixture.state()['phase'], 'completed')
         self.assertEqual(len(self.fixture.state()['pending_children']), 1)
         self.assertIn('Test ownership receipt:', result[1])
+        self.assertEqual(self.fixture.result(self.fixture.start())[0], 70)
+
+    def test_native_default_ignores_foreign_context(self):
+        with socket.socket(socket.AF_UNIX) as foreign:
+            address = str(self.fixture.root / 'foreign.sock')
+            foreign.bind(address)
+            foreign.listen()
+            environment = {**BASE_ENV, 'JARVIS_TEST_RUN_SOCKET': address,
+                           'JARVIS_TEST_RUN_TOKEN': 'foreign', 'JARVIS_TEST_PYTHON': '/not-an-interpreter',
+                           'JARVIS_TEST_DISPLAY_ID': 'foreign'}
+            result = subprocess.run([str(self.binary), 'native'], env=environment, text=True,
+                                    capture_output=True, timeout=5)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            foreign.setblocking(False)
+            with self.assertRaises(BlockingIOError): foreign.accept()
+        print('Native production default: zero foreign-owner connections', flush=True)
+
+    def test_capture_registration_failure_reaps_term_ignoring_late_writer(self):
+        writer = self.fixture.root / 'late-writer'
+        writer.write_text('#!' + sys.executable + '\n' + '''import os, pathlib, signal, sys, time
+root = pathlib.Path(__file__).parent
+signal.signal(signal.SIGTERM, signal.SIG_IGN)
+(root / 'writer.pid').write_text(str(os.getpid()))
+pathlib.Path(sys.argv[-1]).write_bytes(b'early')
+(root / 'writer-ready').touch()
+deadline = time.monotonic() + 5
+while not (root / 'allow-late-write').exists():
+    if time.monotonic() >= deadline: sys.exit(2)
+    time.sleep(.005)
+pathlib.Path(sys.argv[-1]).write_bytes(b'late')
+(root / 'late-write').touch()
+''')
+        writer.chmod(0o700)
+        injection = '''                        if operation == 'register-child':
+                            ready = HERE.parents[2] / 'writer-ready'
+                            deadline = time.monotonic() + 2
+                            while not ready.exists() and time.monotonic() < deadline: time.sleep(.005)
+                            if not ready.exists(): raise Refused('Fixture writer never became ready')
+                            raise Refused('Fixture registration error after writer ready')
+'''
+        self.fixture.source.write_text(self.fixture.source.read_text().replace(
+            "                        if operation == 'register-child':\n", injection))
+        result = self.run_native('capture-registration-error')
+        print(result[1], end='', flush=True)
+        self.assertIn('reaped TERM-ignoring child', result[1])
+        self.assertEqual(result[0], 70, result)
+        self.assertNotEqual(self.fixture.state()['phase'], 'completed')
+        self.assertEqual(len(self.fixture.state()['pending_children']), 1)
         self.assertEqual(self.fixture.result(self.fixture.start())[0], 70)
 
     def run_python(self, text):

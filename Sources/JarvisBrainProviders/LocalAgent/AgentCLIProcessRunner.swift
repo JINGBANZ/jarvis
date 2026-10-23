@@ -5,7 +5,7 @@ import Darwin
 import Glibc
 #endif
 import JarvisCore
-import JarvisTestSupport
+import JarvisProcess
 
 /// Blocking work runs on a GCD thread, never the cooperative pool. Cancelling kills the CLI at
 /// once: a cancelled turn's reply is never used, so the CLI must not keep burning the user's quota.
@@ -14,7 +14,8 @@ public enum AgentCLIProcessRunner {
 
     /// `timings` is passed in, not returned, so a throw still leaves the caller the phases so far.
     public static func run(_ invocation: AgentCLIRun,
-                           timings: AgentCLIPhaseTimings = AgentCLIPhaseTimings()) async throws -> AgentCLIOutput {
+                           timings: AgentCLIPhaseTimings = AgentCLIPhaseTimings(),
+                           launcher: any ProcessLaunching = NativeProcessLauncher()) async throws -> AgentCLIOutput {
         try Task.checkCancellation()
         let pidBox = Box<Int32?>(nil)
         let cancelled = Box(false)
@@ -23,7 +24,7 @@ public enum AgentCLIProcessRunner {
                 DispatchQueue.global(qos: .userInitiated).async {
                     continuation.resume(with: Result {
                         try runBlocking(invocation, timings: timings,
-                                        pidBox: pidBox, cancelled: cancelled)
+                                        pidBox: pidBox, cancelled: cancelled, launcher: launcher)
                     })
                 }
             }
@@ -54,7 +55,8 @@ public enum AgentCLIProcessRunner {
 
     private static func runBlocking(_ run: AgentCLIRun, timings: AgentCLIPhaseTimings,
                                     pidBox: Box<Int32?>,
-                                    cancelled: Box<Bool>) throws -> AgentCLIOutput {
+                                    cancelled: Box<Bool>,
+                                    launcher: any ProcessLaunching) throws -> AgentCLIOutput {
         timings.mark(.runnerEntered)
         let process = Process()
         process.executableURL = run.executable
@@ -103,7 +105,7 @@ public enum AgentCLIProcessRunner {
         var watchdog: DispatchWorkItem?
         var killer: DispatchWorkItem?
         defer { watchdog?.cancel(); killer?.cancel() }
-        try TestCommandOwnership.launchChild(process) {
+        try launcher.launch(process) {
             timings.mark(.processLaunched)
             let pid = process.processIdentifier
             pidBox.set(pid)

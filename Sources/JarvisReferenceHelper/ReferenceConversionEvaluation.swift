@@ -1,13 +1,14 @@
 #if JARVIS_LIVE_E2E
 import Foundation
+import JarvisProcess
 
 enum ReferenceConversionEvaluation {
-    static func run(arguments: [String]) async -> Int32 {
+    static func run(arguments: [String], launcher: any ProcessLaunching) async -> Int32 {
         guard arguments.count == 3 else { return 64 }
         let staging = URL(fileURLWithPath: arguments[2], isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            let pool = ReferenceConversionPool(staging: staging)
+            let pool = ReferenceConversionPool(staging: staging, launcher: launcher)
             let start = ContinuousClock.now
             var status = "ok"
             var textBytes = 0

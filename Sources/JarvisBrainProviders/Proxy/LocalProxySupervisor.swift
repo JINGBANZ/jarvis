@@ -1,6 +1,6 @@
 import Foundation
 import JarvisCore
-import JarvisTestSupport
+import JarvisProcess
 import os
 #if canImport(Darwin)
 import Darwin
@@ -75,6 +75,7 @@ public actor LocalProxySupervisor {
 
     public nonisolated let executable: URL?
     public nonisolated let home: URL
+    private let processLauncher: any ProcessLaunching
     private let clock: any _Concurrency.Clock<Swift.Duration>
     // Fresh per instance; never persisted outside this launch's owner-only configuration.
     private let key = (0..<16).map { _ in String(format: "%02x", UInt8.random(in: .min ... .max)) }
@@ -118,10 +119,12 @@ public actor LocalProxySupervisor {
             }
     }
 
-    public init(executable: URL?, home: URL, clock: any _Concurrency.Clock<Swift.Duration> = ContinuousClock()) {
+    public init(executable: URL?, home: URL, clock: any _Concurrency.Clock<Swift.Duration> = ContinuousClock(),
+                launcher: any ProcessLaunching = NativeProcessLauncher()) {
         self.executable = executable
         self.home = home
         self.clock = clock
+        self.processLauncher = launcher
     }
 
     /// Callers arriving mid-start wait for that start. Clears a crash streak that gave up.
@@ -214,7 +217,8 @@ public actor LocalProxySupervisor {
         credentialRevision += 1
         guard case .running = await ensureRunning(), let executable else { return nil }
         return LocalProxySignIn(executable: executable, configURL: configURL,
-                                authDirectory: authDirectory, signInPIDs: signInPIDs)
+                                authDirectory: authDirectory, signInPIDs: signInPIDs,
+                                launcher: processLauncher)
     }
 
     public func credentialsDidChange() {
@@ -319,7 +323,7 @@ public actor LocalProxySupervisor {
         process.executableURL = executable
         // `-local-model` keeps the model catalog embedded instead of fetched at every start.
         process.arguments = ["-config", configURL.path, "-local-model"]
-        process.environment = Self.helperEnvironment().merging(TestCommandOwnership.environment) { _, ownership in ownership }
+        process.environment = Self.helperEnvironment()
         // The helper writes its own rotating logs; nothing reads its console.
         process.standardInput = FileHandle.nullDevice
         process.standardOutput = FileHandle.nullDevice
@@ -328,7 +332,7 @@ public actor LocalProxySupervisor {
             let status = exited.terminationStatus
             Task { await self?.helperExited(generation: launched, status: status) }
         }
-        try TestCommandOwnership.launchChild(process) {
+        try processLauncher.launch(process) {
             self.process = process
             helperRunning = true
             lastExitStatus = nil
