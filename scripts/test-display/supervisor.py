@@ -52,6 +52,25 @@ def digest():
     return hashlib.sha256(json.dumps(descriptor(), sort_keys=True).encode()).hexdigest()
 
 
+def executable_basename(pid):
+    class ShortBSDInfo(ctypes.Structure):
+        _fields_ = [('words', ctypes.c_uint32 * 4), ('comm', ctypes.c_char * 16),
+                    ('credentials', ctypes.c_uint32 * 8)]
+    info = ShortBSDInfo()
+    lib = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
+    # SHORTBSDINFO exposes raw p_comm without the full snapshot's effective-UID restriction.
+    count = lib.proc_pidinfo(int(pid), 13, 0, ctypes.byref(info), ctypes.sizeof(info))
+    if count == 0:
+        error = ctypes.get_errno()
+        if error == errno.ESRCH:
+            return None
+        raise Refused(f'Executable basename inspection failed for {pid}: errno {error}')
+    name = bytes(info.comm)
+    if count != ctypes.sizeof(info) or info.words[0] != int(pid) or not name or len(name) >= 16 or b'/' in name:
+        raise Refused(f'Cannot determine kernel executable basename for {pid}')
+    return name
+
+
 def process(pid):
     """Kernel process birth identity; never treat a recycled PID as owned."""
     if sys.platform == 'darwin':
@@ -82,9 +101,10 @@ def executable(pid, missing_ok=False):
         buffer = ctypes.create_string_buffer(4096)
         lib = ctypes.CDLL('/usr/lib/libproc.dylib', use_errno=True)
         if lib.proc_pidpath(int(pid), buffer, len(buffer)) <= 0:
+            error = ctypes.get_errno()
             if missing_ok and process(pid) is None:
                 return None
-            raise Refused('Cannot inspect app executable')
+            raise Refused(f'Cannot inspect app executable for {pid}: errno {error}')
         return str(Path(os.fsdecode(buffer.value)).resolve())
     try:
         return str(Path(f'/proc/{pid}/exe').resolve(strict=True))
@@ -309,7 +329,17 @@ def inspect_apps():
     for pid in pids:
         if time.monotonic() >= deadline:
             raise Refused('Process inspection deadline')
+        if sys.platform == 'darwin' and executable_basename(pid) != b'JarvisApp':
+            continue
+        identity = process(pid)
+        if identity is None:
+            continue
         path = executable(pid, missing_ok=True)
+        current = process(pid)
+        if current is None:
+            continue
+        if current['start'] != identity['start']:
+            raise Refused(f'App process identity changed during inspection for {pid}')
         if path and path.endswith('/Jarvis Dev.app/Contents/MacOS/JarvisApp'):
             return True
     return False

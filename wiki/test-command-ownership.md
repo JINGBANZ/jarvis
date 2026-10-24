@@ -46,11 +46,22 @@ flushed journal replacement and marker removal; a failed write or directory flus
 blocked even if a visible journal already says `completed`. A dead PID, unlocked file, or reboot
 does not prove completion. Normal execution never removes the lock or repairs unfinished state.
 
-The process-only preflight compares kernel executable paths, not command arguments, against the
-development app pathname. Inspection runs in a bounded isolated Python worker and makes no display
-queries. A proven existing-app conflict before GUI work records `not-started` completion and refuses
-without signalling that app; quitting it permits another attempt. Inspection errors remain uncertain.
-Campaign consumption starts only after this clean conflict check.
+The process-only preflight selects possible development apps by the kernel's executable basename
+(`pbsi_comm` from `PROC_PIDT_SHORTBSDINFO`), then compares their full kernel executable paths and
+process birth identities against the development app pathname. The supported app executable is named `JarvisApp`; unrelated
+executables need neither a path lookup nor full process metadata, so an unrelated process whose
+executable file was removed or whose effective user differs cannot block admission. The short
+snapshot's [kernel access policy](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/proc_info.c)
+permits that candidate filter without the full snapshot's effective-user restriction.
+Mutable process titles (`pbi_name`) and command arguments supply no identity proof.
+Apple's [exec implementation](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_exec.c)
+sets the executable basename; its
+[process-name sysctl](https://github.com/apple-oss-distributions/xnu/blob/main/bsd/kern/kern_sysctl.c)
+changes the separate process title. Missing kernel metadata, unknown candidate paths, or a changed
+candidate birth identity stop admission. Inspection runs in a bounded isolated Python worker and
+makes no display queries. A proven existing-app conflict before GUI work records `not-started`
+completion and refuses without signalling that app; quitting it permits another attempt. Inspection
+errors remain uncertain. Campaign consumption starts only after this clean conflict check.
 
 ## Whole commands and process roles
 

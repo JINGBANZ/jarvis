@@ -965,6 +965,74 @@ CHILD
         self.assertEqual(self.state()['phase'],'completed')
         self.assertIsNone(mentioned.poll())
 
+    def test_preflight_ignores_unrelated_exec_basename_even_with_unlinked_path(self):
+        with patch.object(self.module.sys, 'platform', 'darwin'), \
+             patch.object(self.module.subprocess, 'check_output', return_value='42\n'), \
+             patch.object(self.module.ctypes, 'CDLL') as library, \
+             patch.object(self.module, 'process', side_effect=self.module.Refused('EPERM')) as full, \
+             patch.object(self.module, 'executable', side_effect=self.module.Refused('ENOENT')) as path:
+            for name, effective_uid in ((b'node_repl', 501), (b'login', 0)):
+                def snapshot(pid, flavor, arg, pointer, size):
+                    self.assertEqual((pid, flavor, arg, size), (42, 13, 0, 64))
+                    info = pointer._obj
+                    info.words[0] = pid
+                    info.comm = name
+                    info.credentials[1] = effective_uid
+                    info.credentials[3] = 501
+                    return size
+                library.return_value.proc_pidinfo.side_effect = snapshot
+                with self.subTest(name=name):
+                    self.assertFalse(self.module.inspect_apps())
+            full.assert_not_called()
+            path.assert_not_called()
+
+    def test_preflight_app_candidate_requires_known_path_and_stable_birth(self):
+        identity = {'pid': 42, 'start': [123, 456], 'parent': 1}
+        with patch.object(self.module.sys, 'platform', 'darwin'), \
+             patch.object(self.module.subprocess, 'check_output', return_value='42\n'), \
+             patch.object(self.module, 'executable_basename', return_value=b'JarvisApp'), \
+             patch.object(self.module, 'process', return_value=identity) as current, \
+             patch.object(self.module, 'executable') as path:
+            path.return_value = '/worktree/Jarvis Dev.app/Contents/MacOS/JarvisApp'
+            self.assertTrue(self.module.inspect_apps())
+            path.return_value = '/Applications/Jarvis.app/Contents/MacOS/JarvisApp'
+            self.assertFalse(self.module.inspect_apps())
+            path.side_effect = self.module.Refused('Cannot inspect app executable for 42: errno 2')
+            with self.assertRaisesRegex(self.module.Refused, 'errno 2'):
+                self.module.inspect_apps()
+            path.side_effect = None
+            current.side_effect = [identity, {**identity, 'start': [999, 456]}]
+            with self.assertRaisesRegex(self.module.Refused, 'identity changed'):
+                self.module.inspect_apps()
+
+    def test_preflight_refuses_missing_or_malformed_kernel_basename(self):
+        with patch.object(self.module.sys, 'platform', 'darwin'), \
+             patch.object(self.module.subprocess, 'check_output', return_value='42\n'), \
+             patch.object(self.module.ctypes, 'CDLL') as library, \
+             patch.object(self.module.ctypes, 'get_errno') as error, \
+             patch.object(self.module, 'process') as full, \
+             patch.object(self.module, 'executable') as path:
+            for name, returned_pid, count in ((b'', 42, 64), (b'x' * 16, 42, 64),
+                                              (b'path/JarvisApp', 42, 64), (b'node_repl', 43, 64),
+                                              (b'node_repl', 42, 63)):
+                def snapshot(pid, flavor, arg, pointer, size):
+                    pointer._obj.words[0] = returned_pid
+                    pointer._obj.comm = name
+                    return count
+                library.return_value.proc_pidinfo.side_effect = snapshot
+                with self.subTest(name=name, pid=returned_pid, count=count), \
+                     self.assertRaisesRegex(self.module.Refused, 'kernel executable basename'):
+                    self.module.inspect_apps()
+            library.return_value.proc_pidinfo.side_effect = None
+            library.return_value.proc_pidinfo.return_value = 0
+            error.return_value = self.module.errno.EPERM
+            with self.assertRaisesRegex(self.module.Refused, 'errno 1'):
+                self.module.inspect_apps()
+            error.return_value = self.module.errno.ESRCH
+            self.assertFalse(self.module.inspect_apps())
+            full.assert_not_called()
+            path.assert_not_called()
+
     def test_reviewed_campaign_command_deadline_is_enforced(self):
         self.prepare(stage='campaign-A', manifest_sha256='deadline-fixture-manifest',
                      worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60, command_seconds=1)
