@@ -1,3 +1,4 @@
+import JarvisTestSupport
 import Testing
 import Foundation
 @testable import JarvisBrainProviders
@@ -11,7 +12,7 @@ import JarvisCore
                               stdin: "hello",
                               workingDirectory: FileManager.default.temporaryDirectory,
                               timeout: 10)
-        let output = try await AgentCLIProcessRunner.run(run)
+        let output = try await AgentCLIProcessRunner.run(run, launcher: TestCommandOwnership.makeLauncher())
         #expect(output.stdout == "hello")
         #expect(output.stderr.contains("oops"))
         #expect(output.exitCode == 3)
@@ -24,7 +25,10 @@ import JarvisCore
                               timeout: 60)
         let timings = AgentCLIPhaseTimings()
         let started = Date()
-        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+        let task = Task {
+            try await AgentCLIProcessRunner.run(run, timings: timings,
+                launcher: TestCommandOwnership.makeLauncher())
+        }
         #expect(await waitUntil { timings.instant(.processLaunched) != nil })
         task.cancel()
         let result = await task.result
@@ -42,7 +46,8 @@ import JarvisCore
                               workingDirectory: FileManager.default.temporaryDirectory,
                               timeout: 10)
         let timings = AgentCLIPhaseTimings()
-        let output = try await AgentCLIProcessRunner.run(run, timings: timings)
+        let output = try await AgentCLIProcessRunner.run(run, timings: timings,
+            launcher: TestCommandOwnership.makeLauncher())
         #expect(output.stdout.contains("ready"))
 
         let entered = try #require(timings.instant(.runnerEntered))
@@ -67,7 +72,8 @@ import JarvisCore
                               workingDirectory: FileManager.default.temporaryDirectory,
                               timeout: 10)
         let timings = AgentCLIPhaseTimings()
-        _ = try await AgentCLIProcessRunner.run(run, timings: timings)
+        _ = try await AgentCLIProcessRunner.run(run, timings: timings,
+            launcher: TestCommandOwnership.makeLauncher())
         #expect(timings.instant(.firstStdoutByte) == nil)
         #expect(timings.instant(.processLaunched) != nil)
         #expect(timings.instant(.processExited) != nil)
@@ -82,7 +88,8 @@ import JarvisCore
                                   workingDirectory: FileManager.default.temporaryDirectory,
                                   timeout: 10)
             let timings = AgentCLIPhaseTimings()
-            let output = try await AgentCLIProcessRunner.run(run, timings: timings)
+            let output = try await AgentCLIProcessRunner.run(run, timings: timings,
+                launcher: TestCommandOwnership.makeLauncher())
             #expect(output.stdout == "ready")
             let firstOut = try #require(timings.instant(.firstStdoutByte))
             let exited = try #require(timings.instant(.processExited))
@@ -116,7 +123,8 @@ import JarvisCore
                               workingDirectory: FileManager.default.temporaryDirectory,
                               timeout: 10)
         let timings = AgentCLIPhaseTimings()
-        let output = try await AgentCLIProcessRunner.run(run, timings: timings)
+        let output = try await AgentCLIProcessRunner.run(run, timings: timings,
+            launcher: TestCommandOwnership.makeLauncher())
         #expect(output.exitCode == 2)
         #expect(timings.instant(.processLaunched) != nil)
         #expect(timings.instant(.stdinDelivered) == nil)
@@ -129,7 +137,8 @@ import JarvisCore
                               workingDirectory: FileManager.default.temporaryDirectory,
                               timeout: 0.3)
         let timings = AgentCLIPhaseTimings()
-        _ = try? await AgentCLIProcessRunner.run(run, timings: timings)
+        _ = try? await AgentCLIProcessRunner.run(run, timings: timings,
+            launcher: TestCommandOwnership.makeLauncher())
         #expect(timings.instant(.processLaunched) != nil)
         #expect(timings.instant(.firstStdoutByte) != nil)
         #expect(timings.instant(.processExited) != nil)
@@ -141,7 +150,10 @@ import JarvisCore
                               workingDirectory: FileManager.default.temporaryDirectory,
                               timeout: 60)
         let timings = AgentCLIPhaseTimings()
-        let task = Task { try await AgentCLIProcessRunner.run(run, timings: timings) }
+        let task = Task {
+            try await AgentCLIProcessRunner.run(run, timings: timings,
+                launcher: TestCommandOwnership.makeLauncher())
+        }
         #expect(await waitUntil { timings.instant(.processLaunched) != nil })
         task.cancel()
         _ = await task.result
@@ -158,7 +170,7 @@ import JarvisCore
                               workingDirectory: FileManager.default.temporaryDirectory,
                               timeout: 0.3)
         do {
-            _ = try await AgentCLIProcessRunner.run(run)
+            _ = try await AgentCLIProcessRunner.run(run, launcher: TestCommandOwnership.makeLauncher())
             Issue.record("expected timeout")
         } catch {
             #expect(error.localizedDescription.contains("timed out"))

@@ -1,5 +1,6 @@
 import Foundation
 import JarvisCore
+import JarvisProcess
 #if canImport(Darwin)
 import Darwin
 #else
@@ -30,6 +31,7 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
 
         private let lock = NSLock()
         private let process: Process
+        private let launcher: any ProcessLaunching
         private var started = false
         private var finished = false
         private var cancelled = false
@@ -37,7 +39,9 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
         private var identity: ProcessIdentity?
         #endif
 
-        init(executable: URL, arguments: [String], output: URL) {
+        init(executable: URL, arguments: [String], output: URL,
+             launcher: any ProcessLaunching = NativeProcessLauncher()) {
+            self.launcher = launcher
             let process = Process()
             // The child's umask makes the JPEG owner-only from its first write: `screencapture`
             // recreates its output, so pre-creating it 0600 fails, and a process-wide umask would
@@ -57,14 +61,18 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
                 lock.unlock()
                 return .cancelled
             }
+            var launched = false
             do {
-                try process.run()
-                started = true
-                #if canImport(Darwin)
-                identity = Self.processIdentity(process.processIdentifier)
-                #endif
-                lock.unlock()
+                try launcher.launch(process) {
+                    started = true
+                    #if canImport(Darwin)
+                    identity = Self.processIdentity(process.processIdentifier)
+                    #endif
+                    launched = true
+                    lock.unlock()
+                }
             } catch {
+                if launched { lock.lock() }
                 finished = true
                 lock.unlock()
                 return .failed
@@ -183,16 +191,19 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
 
     private let captureDirectory: URL
     private let executable: URL
+    private let launcher: any ProcessLaunching
     private let lock = NSLock()
     private var activeCommand: Command?
     private var cleanupFailed = false
 
-    public init(captureDirectory: URL) {
+    public init(captureDirectory: URL, launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.launcher = launcher
         self.captureDirectory = captureDirectory
         self.executable = URL(fileURLWithPath: "/usr/sbin/screencapture")
     }
 
-    init(captureDirectory: URL, executable: URL) {
+    init(captureDirectory: URL, executable: URL, launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.launcher = launcher
         self.captureDirectory = captureDirectory
         self.executable = executable
     }
@@ -200,7 +211,8 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
     public func capture(arguments: [String]) -> Outcome {
         let output = captureDirectory
             .appendingPathComponent("capture-\(UUID().uuidString).jpg")
-        let command = Command(executable: executable, arguments: arguments, output: output)
+        let command = Command(executable: executable, arguments: arguments, output: output,
+            launcher: launcher)
 
         lock.lock()
         guard !cleanupFailed else {

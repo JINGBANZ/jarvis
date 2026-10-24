@@ -1,6 +1,7 @@
 import Foundation
 import JarvisCore
 import JarvisBrainProviders
+import JarvisProcess
 
 /// The agent CLI run must stay read-only and non-persisted.
 public struct AgenticEvaluator: Sendable {
@@ -31,16 +32,19 @@ public struct AgenticEvaluator: Sendable {
     private let sourceStore: ReleaseSourceStore
     private let preferredCLI: AgentCLI?
     private let detector: AgentCLIDetector
+    private let launcher: any ProcessLaunching
     private let timeout: TimeInterval
 
     public init(source: EvaluationSource, preferredCLI: AgentCLI? = nil,
-                detector: AgentCLIDetector = AgentCLIDetector(),
-                sourceStore: ReleaseSourceStore = ReleaseSourceStore(),
-                timeout: TimeInterval = 15 * 60) {
+                detector: AgentCLIDetector? = nil,
+                sourceStore: ReleaseSourceStore? = nil,
+                timeout: TimeInterval = 15 * 60,
+                launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.launcher = launcher
         self.source = source
-        self.sourceStore = sourceStore
+        self.sourceStore = sourceStore ?? ReleaseSourceStore(launcher: launcher)
         self.preferredCLI = preferredCLI
-        self.detector = detector
+        self.detector = detector ?? AgentCLIDetector(launcher: launcher)
         self.timeout = timeout
     }
 
@@ -78,7 +82,7 @@ public struct AgenticEvaluator: Sendable {
             sessionDirectory: sessionDirectory, timeout: timeout, isReleaseSource: isRelease)
         let output: AgentCLIOutput
         do {
-            output = try await AgentCLIProcessRunner.run(invocation)
+            output = try await AgentCLIProcessRunner.run(invocation, launcher: launcher)
         } catch is CancellationError {
             throw CancellationError()
         } catch {

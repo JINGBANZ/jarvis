@@ -1,0 +1,15 @@
+{
+  "protocol": 1,
+  "vendor": 19030,
+  "product": 21587,
+  "serial": 1247150081,
+  "name": "Jarvis Tests",
+  "maxPixelsWide": 3840,
+  "maxPixelsHigh": 2160,
+  "millimetersWide": 600,
+  "millimetersHigh": 340,
+  "width": 1920,
+  "height": 1080,
+  "refreshRate": 60,
+  "hiDPI": 1
+}

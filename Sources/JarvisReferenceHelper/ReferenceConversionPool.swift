@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import JarvisProcess
 
 actor ReferenceConversionPool {
     static let processorVersion = ReferenceConversionWorker.processorVersion
@@ -18,7 +19,12 @@ actor ReferenceConversionPool {
     private var peakWorkerCount = 0
     #endif
 
-    init(staging: URL) { self.staging = staging }
+    private let launcher: any ProcessLaunching
+
+    init(staging: URL, launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.staging = staging
+        self.launcher = launcher
+    }
 
     func convert(snapshotURL: URL, format: String) async throws -> String {
         let foreground = Task.currentPriority >= .medium
@@ -69,7 +75,7 @@ actor ReferenceConversionPool {
             try? FileManager.default.removeItem(at: directory)
         }
         do {
-            try process.run()
+            try launcher.launch(process)
             let deadline = ContinuousClock.now + Self.wallTime
             while process.isRunning {
                 try Task.checkCancellation()

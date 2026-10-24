@@ -1,3 +1,4 @@
+import JarvisTestSupport
 import Foundation
 import JarvisBrainProviders
 import JarvisCore
@@ -28,7 +29,8 @@ import os
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
         let supervisor = LocalProxySupervisor(
-            executable: try proxyStubExecutable(in: home, script: script), home: home, clock: clock)
+            executable: try proxyStubExecutable(in: home, script: script), home: home, clock: clock,
+            launcher: TestCommandOwnership.makeLauncher())
         let starting = Task { await supervisor.ensureRunning() }
         var stub: ModelListStub?
         do {
@@ -108,7 +110,7 @@ import os
 
         let supervisor = LocalProxySupervisor(
             executable: try proxyStubExecutable(in: home, script: "idle"),
-            home: home, clock: ContinuousClock())
+            home: home, clock: ContinuousClock(), launcher: TestCommandOwnership.makeLauncher())
         let starting = Task { await supervisor.ensureRunning() }
         let stub = try ModelListStub(
             port: try await configuredPort(supervisor), body: Self.openAIModels)
@@ -210,7 +212,8 @@ import os
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
         let supervisor = LocalProxySupervisor(
-            executable: try proxyStubExecutable(in: home, script: "idle"), home: home)
+            executable: try proxyStubExecutable(in: home, script: "idle"), home: home,
+            launcher: TestCommandOwnership.makeLauncher())
         let calls = OSAllocatedUnfairLock(initialState: [String]())
         let starting = Task { await supervisor.ensureRunning() }
         let stub = try ModelListStub(port: try await configuredPort(supervisor), respond: { request in
@@ -248,7 +251,8 @@ import os
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
         let supervisor = LocalProxySupervisor(
-            executable: try proxyStubExecutable(in: home, script: "idle"), home: home)
+            executable: try proxyStubExecutable(in: home, script: "idle"), home: home,
+            launcher: TestCommandOwnership.makeLauncher())
         let starting = Task { await supervisor.ensureRunning() }
         let stub = try ModelListStub(port: try await configuredPort(supervisor), respond: { request in
             request.contains("/v8/management/credentials") ? (503, "unavailable") : (200, Self.openAIModels)
@@ -275,7 +279,7 @@ import os
                 trap ': > "$dir/stopping"' TERM
                 : > "$dir/ready"
                 wait_for "$dir/exit"
-                """), home: home)
+                """), home: home, launcher: TestCommandOwnership.makeLauncher())
         let held = OSAllocatedUnfairLock(initialState: false)
         let posts = OSAllocatedUnfairLock(initialState: 0)
         let release = DispatchSemaphore(value: 0)
@@ -321,7 +325,8 @@ import os
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
         let supervisor = LocalProxySupervisor(
-            executable: try proxyStubExecutable(in: home, script: "idle"), home: home)
+            executable: try proxyStubExecutable(in: home, script: "idle"), home: home,
+            launcher: TestCommandOwnership.makeLauncher())
         let held = OSAllocatedUnfairLock(initialState: false)
         let release = DispatchSemaphore(value: 0)
         let starting = Task { await supervisor.ensureRunning() }
@@ -347,7 +352,8 @@ import os
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
         let supervisor = LocalProxySupervisor(
-            executable: try proxyStubExecutable(in: home, script: "exit 3"), home: home)
+            executable: try proxyStubExecutable(in: home, script: "exit 3"), home: home,
+            launcher: TestCommandOwnership.makeLauncher())
 
         #expect(await supervisor.ensureRunning() == .failed(reason: "stopped with status 3 while starting"))
         let unavailable = await supervisor.readiness().unavailability(for: .claudeSubscription)
@@ -372,7 +378,7 @@ import os
                 mv "$dir/pid.partial" "$dir/pid"
                 wait_for "$dir/exit"
                 """),
-            home: home, clock: ImmediateClock())
+            home: home, clock: ImmediateClock(), launcher: TestCommandOwnership.makeLauncher())
         let starting = Task { await supervisor.ensureRunning() }
         let stub = try ModelListStub(
             port: try await configuredPort(supervisor), body: Self.openAIModels
@@ -410,7 +416,8 @@ import os
     @Test func aBuildWithoutTheHelperFailsWithoutLaunching() async {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
-        let supervisor = LocalProxySupervisor(executable: nil, home: home)
+        let supervisor = LocalProxySupervisor(executable: nil, home: home,
+            launcher: TestCommandOwnership.makeLauncher())
         #expect(await supervisor.ensureRunning() == .failed(reason: "is missing from this build"))
     }
 
@@ -519,7 +526,7 @@ import os
                 mv "$(dirname "$0")/pid.partial" "$(dirname "$0")/pid"
                 idle
                 """),
-            home: home, clock: ImmediateClock())
+            home: home, clock: ImmediateClock(), launcher: TestCommandOwnership.makeLauncher())
         let starting = Task { await supervisor.ensureRunning() }
         let port = try await configuredPort(supervisor)
         var stub: ModelListStub? = try ModelListStub(port: port, body: Self.openAIModels)
@@ -604,7 +611,8 @@ import os
     @Test func signOutRemovesOnlyThatSubscriptionsCredentials() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
-        let supervisor = LocalProxySupervisor(executable: nil, home: home)
+        let supervisor = LocalProxySupervisor(executable: nil, home: home,
+            launcher: TestCommandOwnership.makeLauncher())
         try FileManager.default.createDirectory(at: supervisor.authDirectory, withIntermediateDirectories: true)
         for name in ["claude-1-a@example.com.json", "codex-2-a@example.com-plus.json"] {
             FileManager.default.createFile(

@@ -14,6 +14,7 @@ import zipfile
 
 HELPER = None
 FIXTURES = runpy.run_path(str(Path(__file__).with_name("generate-fixtures.py")))
+launch_owned = runpy.run_path(str(Path(__file__).resolve().parents[1] / "lib/test-command-ownership.py"))["launch_owned"]
 
 
 def identifier():
@@ -45,16 +46,30 @@ class HelperTestCase(unittest.TestCase):
         self.assertEqual(hello["engine"], "sqlite-fts5")
 
     def launch(self):
-        return subprocess.Popen([str(getattr(self, "executable", HELPER)), str(self.root / "store")], stdin=subprocess.PIPE,
+        return launch_owned([str(getattr(self, "executable", HELPER)), str(self.root / "store")], stdin=subprocess.PIPE,
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 env={"PATH": "/usr/bin:/bin", "HOME": str(self.root / "store"), "LANG": "en_US.UTF-8"},
                                 cwd=self.root)
 
     def close_child(self):
-        if self.child.poll() is None:
-            self.child.kill()
-        self.child.communicate(timeout=5)
-        self.temporary.cleanup()
+        try:
+            if self.child.poll() is None:
+                # Shutdown waits for converter launch handshakes and exact worker exit.
+                request = self.send("shutdown")
+                deadline = time.monotonic() + 5
+                reply = self.receive(timeout=max(0, deadline - time.monotonic()))
+                while reply["id"] != request:
+                    self.assertLess(time.monotonic(), deadline, "bounded native helper shutdown")
+                    reply = self.receive(timeout=max(0, deadline - time.monotonic()))
+                self.assertEqual(reply["status"], "ok", reply)
+                self.assertEqual(self.child.wait(timeout=max(0, deadline - time.monotonic())), 0)
+        finally:
+            try:
+                if self.child.poll() is None:
+                    self.child.kill()
+                self.child.communicate(timeout=5)
+            finally:
+                self.temporary.cleanup()
 
     def read_exact(self, count, deadline):
         result = bytearray()

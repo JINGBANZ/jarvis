@@ -1,4 +1,5 @@
 import Foundation
+import JarvisProcess
 import JarvisBrainProviders
 import JarvisCore
 import JarvisOverlay
@@ -69,11 +70,10 @@ final class SessionComposition {
         readiness: JarvisReadiness,
         errorReporter: ErrorReporter,
         config: Config = .default,
+        launcher: any ProcessLaunching = NativeProcessLauncher(),
         loadSkills: @escaping () -> [Skill] = { SkillCatalog.bundled() },
         makeAttemptAuditing: @escaping (FileSessionAudit) -> any CoachingAttemptAuditing = { $0 },
-        makeScreenCapture: @escaping (URL) -> any ScreenCapturing = {
-            WindowScopedScreenCapture(captureDirectory: $0)
-        },
+        makeScreenCapture: ((URL) -> any ScreenCapturing)? = nil,
         makeAudioSource: @escaping MakeAudioSource
     ) {
         self.brain = brain
@@ -85,7 +85,9 @@ final class SessionComposition {
         self.config = config
         self.loadSkills = loadSkills
         self.makeAttemptAuditing = makeAttemptAuditing
-        self.makeScreenCapture = makeScreenCapture
+        self.makeScreenCapture = makeScreenCapture ?? {
+            WindowScopedScreenCapture(captureDirectory: $0, launcher: launcher)
+        }
         self.makeAudioSource = makeAudioSource
         networkDiagnostics.start()
     }

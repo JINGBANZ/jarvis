@@ -2,6 +2,7 @@ import Foundation
 import CoreGraphics
 import JarvisCore
 import JarvisScreenCapture
+import JarvisProcess
 
 /// `screencapture -l` reads the window's own backing image, so the shot is clean even when the
 /// window is partly covered; `-o` omits the shadow.
@@ -12,8 +13,8 @@ struct WindowScopedScreenCapture: ScreenCapturing {
         browser: BrowserAccessibilityReader(),
         ocr: ScreenTextRecognizer())
 
-    init(captureDirectory: URL) {
-        let runner = ScreenCaptureRunner(captureDirectory: captureDirectory)
+    init(captureDirectory: URL, launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        let runner = ScreenCaptureRunner(captureDirectory: captureDirectory, launcher: launcher)
         self.runner = runner
         self.fallback = ScreenCaptureCLI(runner: runner)
     }

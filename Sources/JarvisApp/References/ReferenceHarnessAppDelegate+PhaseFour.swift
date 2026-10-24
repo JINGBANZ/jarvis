@@ -60,7 +60,7 @@ extension ReferenceHarnessAppDelegate {
             preferences.disabledTools = []
             let sources = ReferencePreferences(defaults: defaults)
             sources.add(.init(path: source.path, isDirectory: true))
-            let runtime = ReferenceRuntime(home: store)
+            let runtime = ReferenceRuntime(home: store, launcher: AppProcessComposition.makeLauncher())
             let fixture = PhaseFixture(runtime: runtime, root: source, store: store, defaults: defaults,
                                        preferences: preferences, sources: sources)
             do {
@@ -362,7 +362,7 @@ extension ReferenceHarnessAppDelegate {
                 let name = "\(enabled ? "enabled" : "disabled")-\(hasSources ? "selected" : "empty")-\(unavailable ? "unavailable" : "warming")"
                 let helper = ReferenceHelperSupervisor(
                     bundle: unavailable ? home.appendingPathComponent("missing-helper") : bundle,
-                    home: home.appendingPathComponent(name))
+                    home: home.appendingPathComponent(name), launcher: AppProcessComposition.makeLauncher())
                 var resumeWarmup: CheckedContinuation<Void, Never>?
                 if !unavailable {
                     helper.beforeLaunchForTesting = {
@@ -489,7 +489,8 @@ extension ReferenceHarnessAppDelegate {
         try FileManager.default.removeItem(at: delay)
 
         for index in 0..<3 {
-            let queued = ReferenceRuntime(home: fixture.store.deletingLastPathComponent().appendingPathComponent("queued-\(index)"))
+            let queued = ReferenceRuntime(home: fixture.store.deletingLastPathComponent().appendingPathComponent("queued-\(index)"),
+                launcher: AppProcessComposition.makeLauncher())
             queued.configure(preferences: fixture.preferences, sources: fixture.sources)
             await queued.stop()
             await Task.yield()

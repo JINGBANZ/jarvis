@@ -1,3 +1,4 @@
+import JarvisTestSupport
 import Foundation
 import JarvisBrainProviders
 import JarvisCore
@@ -34,7 +35,8 @@ import Testing
             exit 0
             """)
         let config = home.appendingPathComponent("config.yaml")
-        let signIn = LocalProxySignIn(executable: login, configURL: config, authDirectory: auth)
+        let signIn = LocalProxySignIn(executable: login, configURL: config, authDirectory: auth,
+            launcher: TestCommandOwnership.makeLauncher())
 
         let seen = await events(signIn.run(.claudeSubscription))
 
@@ -63,7 +65,8 @@ import Testing
             """)
         let signIn = LocalProxySignIn(
             executable: login, configURL: home.appendingPathComponent("config.yaml"),
-            authDirectory: home)
+            authDirectory: home,
+            launcher: TestCommandOwnership.makeLauncher())
 
         let seen = await events(signIn.run(.codexSubscription))
 
@@ -83,7 +86,8 @@ import Testing
         try Data("{}".utf8).write(to: old)
         try Data("{}".utf8).write(to: claude)
         let login = try proxyStubExecutable(in: home, script: "printf '{}' > '\(new.path)'\nexit 0")
-        let signIn = LocalProxySignIn(executable: login, configURL: home.appendingPathComponent("config.yaml"), authDirectory: auth)
+        let signIn = LocalProxySignIn(executable: login, configURL: home.appendingPathComponent("config.yaml"), authDirectory: auth,
+            launcher: TestCommandOwnership.makeLauncher())
         let seen = await events(signIn.run(.codexSubscription))
         #expect(seen.last == .finished(accountFiles: LocalProxyAccountFile.all(in: auth, for: .codexSubscription)))
         #expect(!FileManager.default.fileExists(atPath: old.path))
@@ -108,7 +112,8 @@ import Testing
             """)
         let signIn = LocalProxySignIn(
             executable: login, configURL: home.appendingPathComponent("config.yaml"),
-            authDirectory: home)
+            authDirectory: home,
+            launcher: TestCommandOwnership.makeLauncher())
 
         let seen = await events(signIn.run(.codexSubscription))
 
@@ -133,7 +138,8 @@ import Testing
             """)
         let signIn = LocalProxySignIn(
             executable: login, configURL: home.appendingPathComponent("config.yaml"),
-            authDirectory: home)
+            authDirectory: home,
+            launcher: TestCommandOwnership.makeLauncher())
 
         let seen = await events(signIn.run(.codexSubscription))
 
@@ -155,7 +161,8 @@ import Testing
             """)
         let signIn = LocalProxySignIn(
             executable: login, configURL: home.appendingPathComponent("config.yaml"),
-            authDirectory: home)
+            authDirectory: home,
+            launcher: TestCommandOwnership.makeLauncher())
 
         let seen = await events(signIn.run(.claudeSubscription))
 
@@ -182,7 +189,8 @@ import Testing
             """)
         let signIn = LocalProxySignIn(
             executable: login, configURL: home.appendingPathComponent("config.yaml"),
-            authDirectory: home)
+            authDirectory: home,
+            launcher: TestCommandOwnership.makeLauncher())
 
         let consumer = Task {
             for await event in signIn.run(.claudeSubscription) {

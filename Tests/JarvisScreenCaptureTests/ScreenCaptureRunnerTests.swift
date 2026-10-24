@@ -1,3 +1,4 @@
+import JarvisTestSupport
 import Darwin
 import Foundation
 import JarvisCore
@@ -17,7 +18,8 @@ import Testing
                 """)
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
-            executable: executable)
+            executable: executable,
+            launcher: TestCommandOwnership.makeLauncher())
 
         switch runner.capture(arguments: []) {
         case .captured(let data):
@@ -41,7 +43,8 @@ import Testing
                 """)
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
-            executable: executable)
+            executable: executable,
+            launcher: TestCommandOwnership.makeLauncher())
 
         switch runner.capture(arguments: []) {
         case .failed:
@@ -79,7 +82,8 @@ import Testing
             scope: .entireDisplay, explicitDisplay: 2, browserTextEnabled: false)
         let runner = ScreenCaptureRunner(
             captureDirectory: captureDirectory,
-            executable: executable)
+            executable: executable,
+            launcher: TestCommandOwnership.makeLauncher())
         let screen = ScreenCaptureCLI(runner: runner)
 
         #expect(screen.capture(selection) == nil)
@@ -115,7 +119,8 @@ import Testing
                 """)
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
-            executable: executable)
+            executable: executable,
+            launcher: TestCommandOwnership.makeLauncher())
         let capture = captureOffPool(runner)
         let pid: pid_t
         do {
@@ -160,7 +165,8 @@ import Testing
                 """)
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
-            executable: executable)
+            executable: executable,
+            launcher: TestCommandOwnership.makeLauncher())
 
         let capture = captureOffPool(runner)
         try await waitForFile(exitedFile, pollNanoseconds: 500_000)
@@ -194,7 +200,8 @@ import Testing
         let command = ScreenCaptureRunner.Command(
             executable: executable,
             arguments: [],
-            output: directory.appendingPathComponent("capture.jpg"))
+            output: directory.appendingPathComponent("capture.jpg"),
+            launcher: TestCommandOwnership.makeLauncher())
 
         _ = command.run()
         command.cancel()
@@ -214,7 +221,8 @@ import Testing
                 """)
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
-            executable: executable)
+            executable: executable,
+            launcher: TestCommandOwnership.makeLauncher())
 
         runner.cancelCapture()
 
@@ -241,7 +249,8 @@ import Testing
                 """)
         let runner = ScreenCaptureRunner(
             captureDirectory: directory,
-            executable: executable)
+            executable: executable,
+            launcher: TestCommandOwnership.makeLauncher())
         let capture = captureOffPool(runner)
         do {
             try await waitForTransientJPEG(in: directory)

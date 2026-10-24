@@ -5,6 +5,7 @@ import Darwin
 import Glibc
 #endif
 import JarvisCore
+import JarvisProcess
 
 /// Blocking work runs on a GCD thread, never the cooperative pool. Cancelling kills the CLI at
 /// once: a cancelled turn's reply is never used, so the CLI must not keep burning the user's quota.
@@ -13,7 +14,8 @@ public enum AgentCLIProcessRunner {
 
     /// `timings` is passed in, not returned, so a throw still leaves the caller the phases so far.
     public static func run(_ invocation: AgentCLIRun,
-                           timings: AgentCLIPhaseTimings = AgentCLIPhaseTimings()) async throws -> AgentCLIOutput {
+                           timings: AgentCLIPhaseTimings = AgentCLIPhaseTimings(),
+                           launcher: any ProcessLaunching = NativeProcessLauncher()) async throws -> AgentCLIOutput {
         try Task.checkCancellation()
         let pidBox = Box<Int32?>(nil)
         let cancelled = Box(false)
@@ -22,7 +24,7 @@ public enum AgentCLIProcessRunner {
                 DispatchQueue.global(qos: .userInitiated).async {
                     continuation.resume(with: Result {
                         try runBlocking(invocation, timings: timings,
-                                        pidBox: pidBox, cancelled: cancelled)
+                                        pidBox: pidBox, cancelled: cancelled, launcher: launcher)
                     })
                 }
             }
@@ -53,7 +55,8 @@ public enum AgentCLIProcessRunner {
 
     private static func runBlocking(_ run: AgentCLIRun, timings: AgentCLIPhaseTimings,
                                     pidBox: Box<Int32?>,
-                                    cancelled: Box<Bool>) throws -> AgentCLIOutput {
+                                    cancelled: Box<Bool>,
+                                    launcher: any ProcessLaunching) throws -> AgentCLIOutput {
         timings.mark(.runnerEntered)
         let process = Process()
         process.executableURL = run.executable
@@ -98,48 +101,51 @@ public enum AgentCLIProcessRunner {
               onFirstByte: { timings.mark(.firstStdoutByte) })
         drain(stderrPipe.fileHandleForReading, into: stderrBox, done: stderrDone)
 
-        try process.run()
-        timings.mark(.processLaunched)
-
-        // Watchdogs capture only the pid, not the Process. The SIGKILL keeps `waitUntilExit` from
-        // hanging on a CLI that ignores SIGTERM.
         let timedOut = Box(false)
-        let pid = process.processIdentifier
-        // Re-check after publishing, for a cancel that fired between spawn and publish.
-        pidBox.set(pid)
-        if cancelled.get() { terminate(pid) }
-        let watchdog = DispatchWorkItem {
-            timedOut.set(true)
-            kill(pid, SIGTERM)
-        }
-        let killer = DispatchWorkItem { kill(pid, SIGKILL) }
-        DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout, execute: watchdog)
-        DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout + 5, execute: killer)
-
-        // Writing stdin inline is safe because the output pipes are already draining.
-        #if canImport(Darwin)
-        // A CLI that exits before reading must cause EPIPE, not a SIGPIPE that kills Jarvis.
-        _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-        #else
-        // Linux has no per-pipe F_SETNOSIGPIPE, so ignore SIGPIPE process-wide.
-        _ = signal(SIGPIPE, SIG_IGN)
-        #endif
-        var stdinDelivered = true
-        do {
-            if let stdin = run.stdin {
-                try stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+        var watchdog: DispatchWorkItem?
+        var killer: DispatchWorkItem?
+        defer { watchdog?.cancel(); killer?.cancel() }
+        try launcher.launch(process) {
+            timings.mark(.processLaunched)
+            let pid = process.processIdentifier
+            pidBox.set(pid)
+            if cancelled.get() { terminate(pid) }
+            // Start the CLI budget at spawn, independently of ownership RPC latency.
+            let timeout = DispatchWorkItem {
+                timedOut.set(true)
+                kill(pid, SIGTERM)
             }
-            try stdinPipe.fileHandleForWriting.close()
-        } catch {
-            stdinDelivered = false
-            try? stdinPipe.fileHandleForWriting.close()
+            let forceExit = DispatchWorkItem { kill(pid, SIGKILL) }
+            watchdog = timeout
+            killer = forceExit
+            DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout, execute: timeout)
+            DispatchQueue.global().asyncAfter(deadline: .now() + run.timeout + 5, execute: forceExit)
+
+            // Writing stdin inline is safe because the output pipes are already draining.
+            #if canImport(Darwin)
+            // A CLI that exits before reading must cause EPIPE, not a SIGPIPE that kills Jarvis.
+            _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+            #else
+            // Linux has no per-pipe F_SETNOSIGPIPE, so ignore SIGPIPE process-wide.
+            _ = signal(SIGPIPE, SIG_IGN)
+            #endif
+            var stdinDelivered = true
+            do {
+                if let stdin = run.stdin {
+                    try stdinPipe.fileHandleForWriting.write(contentsOf: Data(stdin.utf8))
+                }
+                try stdinPipe.fileHandleForWriting.close()
+            } catch {
+                stdinDelivered = false
+                try? stdinPipe.fileHandleForWriting.close()
+            }
+            if stdinDelivered { timings.mark(.stdinDelivered) }
         }
-        if stdinDelivered { timings.mark(.stdinDelivered) }
 
         process.waitUntilExit()
         let processExited = DispatchTime.now().uptimeNanoseconds
-        watchdog.cancel()
-        killer.cancel()
+        watchdog?.cancel()
+        killer?.cancel()
         // A grandchild holding the pipes' write ends would delay EOF, so bound the wait.
         _ = stdoutDone.wait(timeout: .now() + 2)
         _ = stderrDone.wait(timeout: .now() + 2)

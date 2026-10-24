@@ -10,7 +10,8 @@ enum ReferenceHelperMain {
             }
             #if JARVIS_LIVE_E2E
             if CommandLine.arguments.dropFirst().first == "--test-conversion" {
-                exit(await ReferenceConversionEvaluation.run(arguments: Array(CommandLine.arguments.dropFirst(2))))
+                exit(await ReferenceConversionEvaluation.run(arguments: Array(CommandLine.arguments.dropFirst(2)),
+                    launcher: ReferenceHelperProcessComposition.makeLauncher()))
             }
             #endif
             guard CommandLine.arguments.count >= 2 else { exit(64) }
@@ -22,7 +23,8 @@ enum ReferenceHelperMain {
             }
             #endif
             guard CommandLine.arguments.count == 2 else { exit(64) }
-            let store = try ReferenceDocumentStore(home: home)
+            let store = try ReferenceDocumentStore(home: home,
+                launcher: ReferenceHelperProcessComposition.makeLauncher())
             let server = ReferenceHelperServer(store: store)
             try await server.run()
             exit(0)

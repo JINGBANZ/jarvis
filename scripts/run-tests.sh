@@ -2,15 +2,21 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+source scripts/lib/test-configuration.sh
+require_debug_test_configuration "$@"
 source scripts/lib/test-display.sh
+isolate_test_display "$@"
 
 ./scripts/check-ghost-mode.sh
 ./scripts/check-coaching-kernel.sh
 ./scripts/check-audio-capture-config.sh
 ./scripts/check-app-identities.sh
 ./scripts/check-release-config.sh
+python3 scripts/check-process-launching.py
 python3 scripts/test-live-cancellation.py
 python3 scripts/test-script-workflows.py
+python3 scripts/test-test-display.py
+python3 scripts/test-test-command-ownership.py
 ./scripts/test-reference-helper.sh
 
 source scripts/lib/swift-test-flags.sh

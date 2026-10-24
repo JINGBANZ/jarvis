@@ -213,7 +213,8 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         if relaunch { return }
         let traffic = SettingsHarnessTraffic()
         let brain = BrainComposition(secrets: FileSecretStore(), host: self,
-            supervisor: LocalProxySupervisor(executable: nil, home: output.appendingPathComponent("proxy")),
+            supervisor: LocalProxySupervisor(executable: nil, home: output.appendingPathComponent("proxy"),
+                launcher: AppProcessComposition.makeLauncher()),
             preferences: preferences,
             send: { request in try await traffic.send(request) })
         let acceptedStorage = preferences.saveConversations

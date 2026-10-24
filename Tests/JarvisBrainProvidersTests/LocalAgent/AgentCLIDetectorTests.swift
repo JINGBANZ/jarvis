@@ -1,3 +1,4 @@
+import JarvisTestSupport
 import Testing
 import Foundation
 #if canImport(Darwin)
@@ -45,8 +46,8 @@ import JarvisCore
             authStatusTimeout: authStatusTimeout,
             temporaryDirectory: temporaryDirectory
                 ?? home.appendingPathComponent("synthetic-system-temporary-directory"),
-            applicationDirectories: [home.appendingPathComponent("Applications")]
-        )
+            applicationDirectories: [home.appendingPathComponent("Applications")],
+            launcher: TestCommandOwnership.makeLauncher())
     }
 
     /// The detector always checks these dirs, so negative tests skip when a real CLI lives there.
@@ -91,7 +92,7 @@ import JarvisCore
         let executable = try #require(cli?.executableURL)
         let output = try await AgentCLIProcessRunner.run(AgentCLIRun(
             executable: executable, arguments: [], stdin: nil,
-            workingDirectory: home, timeout: 10))
+            workingDirectory: home, timeout: 10), launcher: TestCommandOwnership.makeLauncher())
         #expect(output.exitCode == 0)
         #expect(output.stdout.contains("\"loggedIn\":true"))
     }

@@ -71,7 +71,8 @@ final class LiveE2ERunner: BrainCompositionHost {
     /// Uses the developer's own sign-ins, not the run-local secrets directory.
     private let supervisor = LocalProxySupervisor(
         executable: LocalProxySupervisor.bundledExecutable(),
-        home: FileSecretStore().directoryURL.appendingPathComponent("proxy", isDirectory: true))
+        home: FileSecretStore().directoryURL.appendingPathComponent("proxy", isDirectory: true),
+        launcher: AppProcessComposition.makeLauncher())
     private var prepSources: [ReferenceSourceSelection] = []
     private var sessionEnd: SessionEndReason?
     private var expectsSessionEnd = false
@@ -84,7 +85,8 @@ final class LiveE2ERunner: BrainCompositionHost {
 
     init(options: LiveE2EOptions) {
         self.options = options
-        references = ReferenceRuntime(home: options.outputDirectory.appendingPathComponent("references", isDirectory: true))
+        references = ReferenceRuntime(home: options.outputDirectory.appendingPathComponent("references", isDirectory: true),
+            launcher: AppProcessComposition.makeLauncher())
         // A run-local secrets directory lets a scenario supply an invalid key.
         secrets = ChainedSecretStore([
             FileSecretStore(directoryURL: options.secretsDirectory), EnvSecretStore(),
@@ -92,7 +94,8 @@ final class LiveE2ERunner: BrainCompositionHost {
         artifacts = SessionArtifacts(
             baseDirectory: options.outputDirectory.appendingPathComponent("session", isDirectory: true))
         speech = FixtureSpeech(
-            directory: options.outputDirectory.appendingPathComponent("fixtures", isDirectory: true))
+            directory: options.outputDirectory.appendingPathComponent("fixtures", isDirectory: true),
+            launcher: AppProcessComposition.makeLauncher())
     }
 
     /// Writes `live-e2e-finished` only after the session evidence is sealed.

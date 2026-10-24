@@ -1,3 +1,4 @@
+import JarvisTestSupport
 import Foundation
 import Testing
 import JarvisBrainProviders
@@ -9,7 +10,8 @@ import JarvisBrainProviders
         defer { try? FileManager.default.removeItem(at: fixture) }
         let root = fixture.appendingPathComponent("runs")
         let archive = try await releaseArchive("0.2.1", in: fixture)
-        let store = ReleaseSourceStore(root: root) { url, destination in
+        let store = ReleaseSourceStore(root: root,
+            launcher: TestCommandOwnership.makeLauncher()) { url, destination in
             #expect(url.absoluteString
                     == "https://github.com/JINGBANZ/jarvis/archive/refs/tags/v0.2.1.tar.gz")
             try FileManager.default.copyItem(at: archive, to: destination)
@@ -27,7 +29,7 @@ import JarvisBrainProviders
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
         let requested = Requests()
-        let store = ReleaseSourceStore(root: root) { url, _ in
+        let store = ReleaseSourceStore(root: root, launcher: TestCommandOwnership.makeLauncher()) { url, _ in
             await requested.record(url.lastPathComponent)
             throw URLError(.notConnectedToInternet)
         }
@@ -43,7 +45,8 @@ import JarvisBrainProviders
         defer { try? FileManager.default.removeItem(at: fixture) }
         let archive = try await releaseArchive("0.2.2", in: fixture)
         let requested = Requests()
-        let store = ReleaseSourceStore(root: fixture.appendingPathComponent("runs")) { url, destination in
+        let store = ReleaseSourceStore(root: fixture.appendingPathComponent("runs"),
+            launcher: TestCommandOwnership.makeLauncher()) { url, destination in
             await requested.record(url.lastPathComponent)
             if url.lastPathComponent == "v0.2.1.tar.gz" { throw URLError(.fileDoesNotExist) }
             try FileManager.default.copyItem(at: archive, to: destination)
@@ -57,7 +60,8 @@ import JarvisBrainProviders
     @Test func missingTagWithoutAFallbackReportsTheRecordedVersion() async throws {
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = ReleaseSourceStore(root: root) { _, _ in throw URLError(.fileDoesNotExist) }
+        let store = ReleaseSourceStore(root: root,
+            launcher: TestCommandOwnership.makeLauncher()) { _, _ in throw URLError(.fileDoesNotExist) }
         await #expect(throws: ReleaseSourceStore.Failure.tagNotFound("0.2.1")) {
             _ = try await store.fetch(version: "0.2.1", fallbackVersion: nil)
         }
@@ -67,7 +71,8 @@ import JarvisBrainProviders
         let fixture = tmp()
         defer { try? FileManager.default.removeItem(at: fixture) }
         let archive = try await releaseArchive("0.2.2", in: fixture)
-        let store = ReleaseSourceStore(root: fixture.appendingPathComponent("runs")) { url, destination in
+        let store = ReleaseSourceStore(root: fixture.appendingPathComponent("runs"),
+            launcher: TestCommandOwnership.makeLauncher()) { url, destination in
             #expect(url.lastPathComponent == "v0.2.2.tar.gz")
             try FileManager.default.copyItem(at: archive, to: destination)
         }
@@ -79,7 +84,8 @@ import JarvisBrainProviders
     @Test func noVersionAndNoRunningReleaseReportsNoSource() async throws {
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = ReleaseSourceStore(root: root) { _, _ in Issue.record("Fetched without a version") }
+        let store = ReleaseSourceStore(root: root,
+            launcher: TestCommandOwnership.makeLauncher()) { _, _ in Issue.record("Fetched without a version") }
         await #expect(throws: ReleaseSourceStore.Failure.noAvailableSource) {
             _ = try await store.fetch(version: nil, fallbackVersion: nil)
         }
@@ -91,14 +97,16 @@ import JarvisBrainProviders
         let root = fixture.appendingPathComponent("runs")
         let archive = try await releaseArchive("0.2.1", in: fixture)
         let bytes = try Data(contentsOf: archive)
-        let broken = ReleaseSourceStore(root: root) { _, destination in
+        let broken = ReleaseSourceStore(root: root,
+            launcher: TestCommandOwnership.makeLauncher()) { _, destination in
             try bytes.prefix(bytes.count / 2).write(to: destination)
         }
         await #expect(throws: ReleaseSourceStore.Failure.unpackFailed("0.2.1")) {
             _ = try await broken.checkout(version: "0.2.1")
         }
         #expect(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
-        let repaired = ReleaseSourceStore(root: root) { _, destination in
+        let repaired = ReleaseSourceStore(root: root,
+            launcher: TestCommandOwnership.makeLauncher()) { _, destination in
             try FileManager.default.copyItem(at: archive, to: destination)
         }
         let checkout = try await repaired.checkout(version: "0.2.1")
@@ -113,7 +121,8 @@ import JarvisBrainProviders
         defer { try? FileManager.default.removeItem(at: fixture) }
         let root = fixture.appendingPathComponent("runs")
         let archive = try await releaseArchive("0.2.1", in: fixture)
-        let store = ReleaseSourceStore(root: root) { _, destination in
+        let store = ReleaseSourceStore(root: root,
+            launcher: TestCommandOwnership.makeLauncher()) { _, destination in
             try FileManager.default.copyItem(at: archive, to: destination)
         }
         let checkout = try await store.checkout(version: "0.2.1")
@@ -129,7 +138,8 @@ import JarvisBrainProviders
         let fixture = tmp()
         defer { try? FileManager.default.removeItem(at: fixture) }
         let root = fixture.appendingPathComponent("runs")
-        let store = ReleaseSourceStore(root: root) { _, _ in Issue.record("Invalid version fetched") }
+        let store = ReleaseSourceStore(root: root,
+            launcher: TestCommandOwnership.makeLauncher()) { _, _ in Issue.record("Invalid version fetched") }
         await #expect(throws: ReleaseSourceStore.Failure.invalidVersion) {
             _ = try await store.checkout(version: "../0.2.1;id")
         }
@@ -140,7 +150,8 @@ import JarvisBrainProviders
         let root = tmp()
         defer { try? FileManager.default.removeItem(at: root) }
         let (started, signal) = AsyncStream<Void>.makeStream()
-        let store = ReleaseSourceStore(root: root) { _, destination in
+        let store = ReleaseSourceStore(root: root,
+            launcher: TestCommandOwnership.makeLauncher()) { _, destination in
             try Data("partial download".utf8).write(to: destination)
             signal.yield(())
             try await Task.sleep(for: .seconds(60))
@@ -157,7 +168,7 @@ import JarvisBrainProviders
         defer { try? FileManager.default.removeItem(at: root) }
         let (started, signal) = AsyncStream<Void>.makeStream()
         let requested = Requests()
-        let store = ReleaseSourceStore(root: root) { url, _ in
+        let store = ReleaseSourceStore(root: root, launcher: TestCommandOwnership.makeLauncher()) { url, _ in
             await requested.record(url.lastPathComponent)
             signal.yield(())
             try await Task.sleep(for: .seconds(60))
@@ -177,10 +188,12 @@ import JarvisBrainProviders
         try FileManager.default.createDirectory(at: session, withIntermediateDirectories: true)
         let report = session.appendingPathComponent(AgenticEvaluation.reportFilename)
         try Data("Previous report".utf8).write(to: report)
-        let store = ReleaseSourceStore(root: root.appendingPathComponent("runs")) { _, _ in
+        let store = ReleaseSourceStore(root: root.appendingPathComponent("runs"),
+            launcher: TestCommandOwnership.makeLauncher()) { _, _ in
             throw URLError(code)
         }
-        let evaluator = AgenticEvaluator(source: .release(version: "0.2.1"), sourceStore: store)
+        let evaluator = AgenticEvaluator(source: .release(version: "0.2.1"), sourceStore: store,
+            launcher: TestCommandOwnership.makeLauncher())
         let expected: ReleaseSourceStore.Failure = code == .fileDoesNotExist
             ? .tagNotFound("0.2.1") : .fetchFailed("0.2.1")
         await #expect(throws: expected) { _ = try await evaluator.evaluate(sessionDirectory: session) }

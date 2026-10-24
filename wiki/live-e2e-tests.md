@@ -83,6 +83,7 @@ The run is not:
 ## Prerequisites and standing conditions
 
 The toolchain is the one [build-and-run.md → Toolchain](./build-and-run.md#toolchain) describes.
+Local runs require the [test-command ownership acceptance prerequisites](./test-command-ownership.md#acceptance-and-recovery).
 Set up once per machine:
 
 - **Microphone, System Audio Recording, and Screen Recording**, granted to the development identity.
@@ -127,8 +128,9 @@ The second form accepts any selector from REF01 through REF07 and delegates to
 spoken scenarios; use the [References harness](./build-and-run.md#references-helper-packaging-and-integration-checks)
 directly for its full suite or Quit-only check.
 
-The script refuses while a Jarvis Dev.app runs, re-executes itself under `caffeinate -d -i`, builds
-with `./scripts/build-app.sh debug`, creates the run directory, and runs the `JarvisLiveTests` target
+The script acquires whole-command ownership before preflight and refuses a proven running
+Jarvis Dev.app without signalling it. Its external supervisor owns the keep-awake process while it
+builds with `./scripts/build-app.sh debug`, creates the run directory, and runs the `JarvisLiveTests` target
 filtered to the chosen scenarios. `F01` selects both F01 scenario files. Each test launches the app
 with its scenario, waits for the app to exit, and asserts on the session folder.
 `Tests/JarvisLiveTests/LiveE2ELauncher.swift` holds the preflight and the launch.

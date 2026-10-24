@@ -1,3 +1,4 @@
+import JarvisTestSupport
 import Foundation
 import JarvisBrainProviders
 import JarvisCore
@@ -26,7 +27,8 @@ import os
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
         let supervisor = LocalProxySupervisor(
-            executable: try proxyStubExecutable(in: home, script: script), home: home)
+            executable: try proxyStubExecutable(in: home, script: script), home: home,
+            launcher: TestCommandOwnership.makeLauncher())
         let starting = Task { await supervisor.ensureRunning() }
         var stub: ModelListStub?
         do {
@@ -249,7 +251,8 @@ import os
     func anUnavailableHelperDoesNotBlockLocalSignOutOrAllowDuplicateActions(provider: BrainProvider) async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
-        let supervisor = LocalProxySupervisor(executable: nil, home: home)
+        let supervisor = LocalProxySupervisor(executable: nil, home: home,
+            launcher: TestCommandOwnership.makeLauncher())
         try FileManager.default.createDirectory(at: supervisor.authDirectory, withIntermediateDirectories: true)
         let names: [BrainProvider: String] = [.codexSubscription: "codex-fixture.json", .claudeSubscription: "claude-fixture.json"]
         for name in names.values { try Data("{}".utf8).write(to: supervisor.authDirectory.appendingPathComponent(name)) }
@@ -278,7 +281,8 @@ import os
     @Test func failedSignOutKeepsCredentialsAndItsNextActionClearsTheError() async throws {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
-        let supervisor = LocalProxySupervisor(executable: nil, home: home)
+        let supervisor = LocalProxySupervisor(executable: nil, home: home,
+            launcher: TestCommandOwnership.makeLauncher())
         try FileManager.default.createDirectory(at: supervisor.authDirectory, withIntermediateDirectories: true)
         try Data("{}".utf8).write(to: supervisor.authDirectory.appendingPathComponent("codex-fixture.json"))
         try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: supervisor.authDirectory.path)
@@ -358,7 +362,8 @@ import os
     @Test func aPassiveSettingsCheckWithoutAccountsDoesNotStartTheHelper() async {
         let home = tmp()
         defer { try? FileManager.default.removeItem(at: home) }
-        let supervisor = LocalProxySupervisor(executable: nil, home: home)
+        let supervisor = LocalProxySupervisor(executable: nil, home: home,
+            launcher: TestCommandOwnership.makeLauncher())
         let signIns = SubscriptionSignIns(supervisor: supervisor)
 
         signIns.refresh()
