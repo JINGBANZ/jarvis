@@ -246,7 +246,14 @@ def approval(entry, arguments):
         raise Refused('Machine reconciliation and reviewed campaign are required')
     if not value.get('worktrees_paused') or not value.get('baseline_profiles') or not value.get('baseline_registry'):
         raise Refused('Complete baseline evidence and old-runner pause inventory are required')
-    if any(not isinstance(value.get(field), str) or not value[field] for field in ('approved_uuid', 'approved_profile')):
+    if 'empty_baseline_receipt' in value:
+        if (value['stage'] != 'campaign-A'
+            or not isinstance(value['empty_baseline_receipt'], str) or not value['empty_baseline_receipt']
+            or any(field not in value or value[field] is not None for field in ('approved_uuid', 'approved_profile'))):
+            raise Refused('Empty baseline provisioning requires campaign A, its reviewed receipt, and null identity')
+        if entry in ('transcription-benchmark.sh', 'build-app.sh'):
+            raise Refused('Empty baseline provisioning requires a display command')
+    elif any(not isinstance(value.get(field), str) or not value[field] for field in ('approved_uuid', 'approved_profile')):
         raise Refused('Reviewed persistent UUID and observed profile identity are required')
     if value['stage'] != 'accepted':
         if value.get('worktree') != str(HERE.parent.parent) or value.get('command') != [entry, *arguments]:
@@ -678,6 +685,10 @@ class Supervisor:
             if ticket in consumed:
                 raise Refused('Campaign run already consumed; no retry')
             next_consumed = [*consumed, ticket]
+        if 'empty_baseline_receipt' in decision and any(
+            self.lease.state.get(field) is not None for field in ('persistent_uuid', 'profile')
+        ):
+            raise Refused('Empty baseline provisioning conflicts with a recorded persistent identity')
         for field, approved in (('persistent_uuid', 'approved_uuid'), ('profile', 'approved_profile')):
             previous, reviewed = self.lease.state.get(field), decision.get(approved)
             if previous and reviewed and previous != reviewed:

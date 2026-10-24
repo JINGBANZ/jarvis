@@ -267,6 +267,83 @@ if JARVIS_TEST_RUN_TOKEN=forged python3 "$JARVIS_TEST_SUPERVISOR" admit; then ex
         self.assertEqual(self.state()['phase'],'completed')
         self.assertIsNone(self.state()['persistent_uuid'])
 
+    def test_empty_baseline_campaign_records_identity_once_and_requires_post_A_review(self):
+        campaign = dict(stage='campaign-A', manifest_sha256='initial-fixture-manifest',
+                        worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60,
+                        command_seconds=2, approved_uuid=None, approved_profile=None)
+        self.prepare(**campaign, empty_baseline_receipt='reviewed-empty-baseline')
+        worker = self.source.parent / 'fake-worker.py'
+        marker = self.root / 'worker-starts'
+        worker.write_text(f"with open({str(marker)!r}, 'a') as stream: stream.write('start\\n')\n" + worker.read_text())
+        result = self.result(self.start())
+        self.assertEqual(result[0], 0, result)
+        self.assertEqual(self.state()['persistent_uuid'], 'fixture-uuid')
+        self.assertIsNone(self.state()['profile'])
+        self.assertEqual(self.state()['expected_profile'], 'fixture.icc')
+        self.assertEqual(self.state()['phase'], 'completed')
+        result = self.result(self.start())
+        self.assertEqual(result[0], 70, result)
+        self.assertIn('already consumed', result[1])
+        self.assertEqual(marker.read_text(), 'start\n')
+
+        campaign['stage'] = 'campaign-B'
+        self.prepare(**campaign, A_pass_receipt='reviewed-post-A')
+        result = self.result(self.start())
+        self.assertEqual(result[0], 70, result)
+        self.assertIn('observed profile identity', result[1])
+        self.assertEqual(marker.read_text(), 'start\n')
+        campaign.update(approved_uuid='fixture-uuid', approved_profile='fixture.icc')
+        self.prepare(**campaign)
+        result = self.result(self.start())
+        self.assertEqual(result[0], 70, result)
+        self.assertIn('A pass receipt', result[1])
+        self.prepare(**campaign, A_pass_receipt='reviewed-post-A')
+        result = self.result(self.start())
+        self.assertEqual(result[0], 0, result)
+        self.assertEqual(self.state()['profile'], 'fixture.icc')
+        self.assertEqual(marker.read_text(), 'start\nstart\n')
+
+    def test_empty_baseline_exception_requires_complete_explicit_campaign_A_approval(self):
+        campaign = dict(stage='campaign-A', manifest_sha256='initial-fixture-manifest',
+                        worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60,
+                        command_seconds=2, approved_uuid=None, approved_profile=None,
+                        empty_baseline_receipt='reviewed-empty-baseline')
+        cases = [
+            {key: value for key, value in campaign.items() if key != 'empty_baseline_receipt'},
+            *({**campaign, **change} for change in (
+                {'empty_baseline_receipt': ''}, {'empty_baseline_receipt': True},
+                {'stage': 'campaign-B'}, {'stage': 'accepted'},
+                {'approved_uuid': 'fixture-uuid'}, {'approved_profile': 'fixture.icc'},
+                {'baseline_profiles': None}, {'baseline_registry': None},
+                {'command': ['transcription-benchmark.sh']},
+            )),
+        ]
+        for values in cases:
+            with self.subTest(values=values):
+                self.prepare(**values)
+                result = self.result(self.start('run', values['command'][0]))
+                self.assertEqual(result[0], 70, result)
+                self.assertEqual(self.state()['phase'], 'completed')
+                self.assertNotIn('worker_owner', self.state())
+                self.assertFalse(self.state().get('consumed_campaigns'))
+
+    def test_empty_baseline_receipt_cannot_replace_recorded_journal_identity(self):
+        self.prepare(stage='campaign-A', manifest_sha256='initial-fixture-manifest',
+                     worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60,
+                     command_seconds=2, approved_uuid=None, approved_profile=None,
+                     empty_baseline_receipt='reviewed-empty-baseline')
+        original = self.state()
+        for field, value in (('persistent_uuid', 'previous-uuid'), ('profile', 'previous.icc')):
+            with self.subTest(field=field):
+                self.module.durable(self.root / 'lease/journal.json', {**original, field: value})
+                result = self.result(self.start())
+                self.assertEqual(result[0], 70, result)
+                self.assertIn('recorded persistent identity', result[1])
+                self.assertEqual(self.state()[field], value)
+                self.assertEqual(self.state()['phase'], 'completed')
+                self.assertNotIn('worker_owner', self.state())
+                self.assertFalse(self.state().get('consumed_campaigns'))
+
     def test_exact_process_identity_and_inspection_error(self):
         identity = self.module.birth(os.getpid())
         self.assertEqual(identity['parent'], os.getppid())

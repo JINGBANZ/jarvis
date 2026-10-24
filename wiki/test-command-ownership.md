@@ -21,6 +21,8 @@ and profile filename. The supervisor records the observed UUID and the reviewed 
 when known. The worker's constructed `expected_profile` pathname is an expectation, never evidence
 that a profile exists or matches its metadata. An approved baseline and an existing journal must
 agree before desktop work; unknown identity may be initialized from the reviewed baseline.
+First provisioning on a Mac with no Jarvis profiles or registrations uses the reviewed
+[empty-baseline campaign A](#acceptance-and-recovery).
 
 The selected serial belongs to the known legacy inventory. There is no alternate identity,
 random/PID serial, pool, or fallback. Descriptor/protocol changes require explicit reconciliation.
@@ -219,6 +221,16 @@ machine's owner-only `approval.json` records that review and baseline reconcilia
 generated from inherited environment or an automatic repair. See `approval()` in `supervisor.py`
 for ticket fields. Baseline profile/registry references and pass receipts represent reviewed,
 complete evidence; a pathname expectation or a partial snapshot cannot supply them.
+
+A fresh Mac may use campaign A to provision the fixed identity when complete baseline evidence
+proves there are no Jarvis profiles or registrations. Its explicit empty-baseline receipt permits
+both approved identity fields to be null; see `approval()` for the required fields. The journal
+must also contain no persistent identity, and the approved command must create a display. This
+uses the same single-use campaign ticket, one creation/release, and terminal-failure rules.
+The worker's observed UUID is recorded, while its expected profile path remains unapproved.
+Complete post-A evidence pins the actual UUID and profile before campaign B; B and accepted
+operation require the known identity and omit the empty-baseline receipt. Ordinary test commands
+cannot automatically provision a fresh Mac or convert a failed first run into another attempt.
 
 The manifest fixes worktree/commit/source hashes, exact supported commands, per-stage call limits,
 deadlines, passive observation schedule, settling interval, health thresholds, and abort criteria
