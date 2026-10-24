@@ -5,7 +5,6 @@ umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/harness.sh
 source scripts/lib/test-display.sh
-isolate_test_display "$@"
 
 if (( $# > 1 )); then
   echo "usage: $0 [hold-seconds: 1...30]" >&2
@@ -16,6 +15,7 @@ if ! [[ "$HOLD_SECONDS" =~ ^([1-9]|[12][0-9]|30)$ ]]; then
   echo "hold-seconds must be an integer from 1 through 30" >&2
   exit 2
 fi
+isolate_test_display "$@"
 ./scripts/build-app.sh debug
 
 RUN_DIR="$(create_run_directory capture-privacy)"

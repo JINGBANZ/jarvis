@@ -5,7 +5,6 @@ umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/harness.sh
 source scripts/lib/test-display.sh
-isolate_test_display "$@"
 EXPECTED_CASES=41
 EXTRA_ARGS=()
 if [[ "${1:-}" == --quit-only ]]; then
@@ -18,6 +17,7 @@ elif (( $# > 0 )); then
   echo "usage: $0 [REF01|REF02|REF03|REF04|REF05|REF06|REF07|--quit-only]" >&2
   exit 2
 fi
+isolate_test_display "$@"
 ./scripts/build-app.sh debug
 RUN_DIR="$(create_run_directory reference-harness)"
 POLLUTION="$RUN_DIR/pollution"

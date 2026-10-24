@@ -6,7 +6,6 @@ umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/harness.sh
 source scripts/lib/test-display.sh
-isolate_test_display "$@"
 
 usage() {
   echo "usage: $0 [A|B|C|D|H|L|P|R|F01|F02|CACHE|REF01|REF02|REF03|REF04|REF05|REF06|REF07|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going]" >&2
@@ -35,6 +34,7 @@ while (( $# > 0 )); do
   shift
 done
 if [[ "$SCENARIO" =~ ^REF0[1-7]$ ]]; then
+  isolate_test_display ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
   echo "$SCENARIO uses the deterministic signed References harness (synthetic tool traffic; no provider or capture)."
   python3 scripts/test-display/supervisor.py transition-reference "$SCENARIO"
   exec ./scripts/run-reference-tests.sh "$SCENARIO"
@@ -55,6 +55,7 @@ if [[ "$EVALUATE" == 1 && "$SCENARIO" != A && "$SCENARIO" != all ]]; then
   exit 2
 fi
 
+isolate_test_display ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
 echo "▶ building the signed development app"
 ./scripts/build-app.sh debug
 

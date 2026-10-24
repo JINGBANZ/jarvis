@@ -2,6 +2,7 @@
 """Synthetic command contracts; no signing keys, app launches, capture, or providers."""
 
 import os
+import json
 from pathlib import Path
 import plistlib
 import runpy
@@ -108,6 +109,78 @@ class GuardTests(ScriptTests):
                  'source scripts/lib/guard.sh; guard_forbid "violation" -nE "$1" source',
                  "guard-test", pattern], cwd=self.root, text=True, capture_output=True)
             self.assertEqual(result.returncode, expected, result.stderr)
+
+
+class EntrypointAdmissionTests(ScriptTests):
+    def setUp(self):
+        super().setUp()
+        shutil.copy2(REPOSITORY / 'scripts/lib/test-display.sh', self.root / 'scripts/lib')
+        (self.root / 'scripts/test-display/supervisor.py').write_text('''import json, os, subprocess, sys
+from pathlib import Path
+operation, *arguments = sys.argv[1:]
+with open('admission.jsonl', 'a') as stream:
+    stream.write(json.dumps([operation, *arguments]) + '\\n')
+if operation == 'run':
+    entry, *arguments = arguments
+    environment = {**os.environ, 'JARVIS_TEST_RUN_SOCKET': 'fixture', 'JARVIS_TEST_RUN_TOKEN': 'fixture'}
+    result = subprocess.run(['/bin/bash', str(Path(__file__).resolve().parent.parent / entry), *arguments],
+                            env=environment)
+    sys.exit(result.returncode)
+if operation not in ('admit', 'transition-reference'):
+    raise AssertionError(operation)
+''')
+        self.executable(self.root / 'scripts/build-app.sh', '''#!/bin/bash
+echo '["build"]' >> admission.jsonl
+exit 99
+''')
+        self.environment['EVAL_AGENT'] = 'codex'
+
+    def test_help_and_invalid_arguments_do_not_enter_supervisor(self):
+        cases = (
+            ('run-live-tests.sh', ['--help'], 0),
+            ('run-live-tests.sh', ['-h'], 0),
+            ('run-live-tests.sh', ['unknown'], 2),
+            ('run-live-tests.sh', ['--provider'], 2),
+            ('run-live-tests.sh', ['--provider=unknown'], 2),
+            ('run-live-tests.sh', ['B', '--evaluate'], 2),
+            ('run-reference-tests.sh', ['unknown'], 2),
+            ('run-capture-privacy-tests.sh', ['0'], 2),
+            ('run-capture-privacy-tests.sh', ['1', '2'], 2),
+            ('transcription-benchmark.sh', [], 2),
+            ('transcription-benchmark.sh', ['unknown'], 2),
+            ('transcription-benchmark.sh', ['standard', '--repetitions'], 2),
+            ('transcription-benchmark.sh', ['standard', '--repetitions', '2'], 2),
+            ('transcription-benchmark.sh', ['turns', '--filter', 'arm'], 2),
+        )
+        for context in ({}, {'JARVIS_TEST_RUN_SOCKET': 'foreign', 'JARVIS_TEST_RUN_TOKEN': 'foreign'}):
+            self.environment.update(context)
+            for entry, arguments, status in cases:
+                with self.subTest(entry=entry, arguments=arguments, inherited=bool(context)):
+                    result = self.run_script(entry, *arguments)
+                    self.assertEqual(result.returncode, status, result.stdout + result.stderr)
+                    self.assertFalse((self.root / 'admission.jsonl').exists())
+                    self.assertFalse((self.root / '.jarvis').exists())
+
+    def test_valid_arguments_survive_reentry_and_reference_transition(self):
+        cases = (
+            ('run-live-tests.sh', ['A', '--provider=openai', '--keep-going']),
+            ('run-live-tests.sh', ['A', '--provider', 'openai', '--evaluate']),
+            ('run-live-tests.sh', ['REF01']),
+            ('run-reference-tests.sh', ['REF03']),
+            ('run-capture-privacy-tests.sh', ['2']),
+            ('transcription-benchmark.sh', ['standard', '--repetitions', '4', '--filter', 'arm with spaces']),
+        )
+        for entry, arguments in cases:
+            with self.subTest(entry=entry, arguments=arguments):
+                result = self.run_script(entry, *arguments)
+                self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
+                expected = [['run', entry, *arguments], ['admit']]
+                if arguments == ['REF01']:
+                    expected += [['transition-reference', 'REF01'], ['admit']]
+                expected += [['build']]
+                marker = self.root / 'admission.jsonl'
+                self.assertEqual([json.loads(row) for row in marker.read_text().splitlines()], expected)
+                marker.unlink()
 
 
 class AppBundleTests(ScriptTests):
