@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.9](https://github.com/JINGBANZ/jarvis/compare/v0.5.8...v0.5.9) (2026-10-25)
+
+
+### Features
+
+* **overlay:** add a configurable shortcut to collapse the overlay box ([#472](https://github.com/JINGBANZ/jarvis/issues/472)) ([aad107a](https://github.com/JINGBANZ/jarvis/commit/aad107a308c9cc87b430960e7add8d091aa42513))
+
+
+### Bug Fixes
+
+* **startup:** preserve system audio proof and blocked readiness ([#470](https://github.com/JINGBANZ/jarvis/issues/470)) ([d5dccd3](https://github.com/JINGBANZ/jarvis/commit/d5dccd3e1d1b0b0170b6825a3725b2c7d78535c6))
+* **test:** supervise one retained display identity per mac ([#469](https://github.com/JINGBANZ/jarvis/issues/469)) ([66a8a1a](https://github.com/JINGBANZ/jarvis/commit/66a8a1a407e223a6147e6c70decda55212a2b2d4))
+
 ## [0.5.8](https://github.com/JINGBANZ/jarvis/compare/v0.5.7...v0.5.8) (2026-10-21)
 
 
