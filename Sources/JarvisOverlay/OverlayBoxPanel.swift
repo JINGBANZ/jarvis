@@ -256,6 +256,13 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         press(detailView.nextButton)
     }
 
+    /// The collapse shortcut. Declines while stopped, which also covers the appearance preview: it
+    /// shows only then, and snapshots and restores collapse itself.
+    public func toggleCollapse() {
+        guard isSessionLive else { return }
+        press(header.collapseButton)
+    }
+
     // Not performClick: its nested event wait can queue a CFRunLoopStop on the main run loop, which
     // ends an async-main process such as the swift-testing runner with exit 0.
     private func press(_ button: NSButton) {
