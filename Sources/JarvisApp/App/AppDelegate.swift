@@ -236,6 +236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             switch shortcut {
             case .previousDetail: self.overlayBox.showPreviousDetail()
             case .nextDetail: self.overlayBox.showNextDetail()
+            case .collapseOverlay: self.overlayBox.toggleCollapse()
             case .hint, .explainMore, .showCode: self.composition.requestShortcut(shortcut)
             }
         }

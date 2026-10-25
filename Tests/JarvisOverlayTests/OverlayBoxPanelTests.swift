@@ -230,6 +230,30 @@ import JarvisCore
     }
 
     @MainActor @Test
+    func collapseShortcutTogglesLikeTheHeaderButton() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 700))
+        panel.setSessionLive(true)
+        panel.toggleCollapse()
+        #expect(panel.isCollapsed)
+        #expect(panel.currentContentSize.height == panel.currentHeaderHeight)
+        panel.toggleCollapse()
+        #expect(!panel.isCollapsed)
+        #expect(panel.currentContentSize.height == 700)
+    }
+
+    @MainActor @Test
+    func collapseShortcutIgnoresAStoppedBoxAndTheAppearancePreview() {
+        let stopped = OverlayBoxPanel()
+        stopped.toggleCollapse()
+        #expect(!stopped.isCollapsed, "the shortcut must not reshape a box that isn't on screen")
+
+        let previewing = liveBox()
+        previewing.showAppearancePreview(true)
+        previewing.toggleCollapse()
+        #expect(!previewing.isCollapsed, "the preview owns its collapse snapshot")
+    }
+
+    @MainActor @Test
     func expandingRestoresTheHeightTheUserDraggedTo() {
         let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 700))
         panel.clickCollapseButton()

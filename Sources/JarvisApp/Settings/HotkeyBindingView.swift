@@ -96,6 +96,7 @@ final class HotkeyBindingView: NSObject {
         case .showCode: "I write the code for the current step in the Overlay Box."
         case .previousDetail: "I show my previous detail in the Overlay Box."
         case .nextDetail: "I show my next detail in the Overlay Box."
+        case .collapseOverlay: "I collapse or expand the Overlay Box."
         }
     }
 }

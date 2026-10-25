@@ -11,6 +11,7 @@ public final class HotkeyPreferences: @unchecked Sendable {
         case .showCode: Defaults.Hotkey.codeKeyCodeKey
         case .previousDetail: Defaults.Hotkey.previousDetailKeyCodeKey
         case .nextDetail: Defaults.Hotkey.nextDetailKeyCodeKey
+        case .collapseOverlay: Defaults.Hotkey.collapseOverlayKeyCodeKey
         }
     }
     private var modifiersKey: String {
@@ -20,6 +21,7 @@ public final class HotkeyPreferences: @unchecked Sendable {
         case .showCode: Defaults.Hotkey.codeModifiersKey
         case .previousDetail: Defaults.Hotkey.previousDetailModifiersKey
         case .nextDetail: Defaults.Hotkey.nextDetailModifiersKey
+        case .collapseOverlay: Defaults.Hotkey.collapseOverlayModifiersKey
         }
     }
     private var defaultCombination: HotkeyCombination {
@@ -29,6 +31,7 @@ public final class HotkeyPreferences: @unchecked Sendable {
         case .showCode: Defaults.Hotkey.codeCombination
         case .previousDetail: Defaults.Hotkey.previousDetailCombination
         case .nextDetail: Defaults.Hotkey.nextDetailCombination
+        case .collapseOverlay: Defaults.Hotkey.collapseOverlayCombination
         }
     }
 

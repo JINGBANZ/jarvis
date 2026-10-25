@@ -103,6 +103,11 @@ public enum Defaults {
         public static let nextDetailModifiersKey = "hotkey.nextDetail.modifiers"
         public static let nextDetailCombination = HotkeyCombination(
             keyCode: 124, modifiers: [.command, .option])
+        public static let collapseOverlayKeyCodeKey = "hotkey.collapseOverlay.keyCode"
+        public static let collapseOverlayModifiersKey = "hotkey.collapseOverlay.modifiers"
+        /// kVK_ANSI_Comma. Not ⌥⌘M: AppKit treats Option-⌘M as Minimize All in every app.
+        public static let collapseOverlayCombination = HotkeyCombination(
+            keyCode: 43, modifiers: [.command, .option])
         public static let codeKeyCodeKey = "hotkey.code.keyCode"
         public static let codeModifiersKey = "hotkey.code.modifiers"
         /// kVK_ANSI_K.

@@ -27,6 +27,19 @@ import Foundation
         #expect(CoachingShortcut.nextDetail.triggerReason == nil)
     }
 
+    @Test func collapseOverlayBindingDefaultsToOptionCommandCommaAndPersistsIndependently() {
+        let defaults = freshDefaults()
+        let collapse = HotkeyPreferences(defaults: defaults, shortcut: .collapseOverlay)
+        // kVK_ANSI_Comma.
+        #expect(collapse.combination == HotkeyCombination(keyCode: 43, modifiers: [.command, .option]))
+        collapse.combination = HotkeyCombination(keyCode: 7, modifiers: [.command, .shift])
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .collapseOverlay).combination
+            == HotkeyCombination(keyCode: 7, modifiers: [.command, .shift]))
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .nextDetail).combination
+            == Defaults.Hotkey.nextDetailCombination)
+        #expect(CoachingShortcut.collapseOverlay.triggerReason == nil)
+    }
+
     @Test func defaultsToShippedCombinationWhenUnset() {
         #expect(HotkeyPreferences(defaults: freshDefaults()).combination == Defaults.Hotkey.combination)
     }

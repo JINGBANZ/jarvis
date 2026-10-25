@@ -339,6 +339,10 @@ scheduling behavior.
 of history, while stopped, or with the box disabled or collapsed, they silently do nothing. Stepping
 back holds the chosen detail; reaching the newest resumes following incoming details.
 
+**Collapse overlay** defaults to **⌥⌘,** and toggles the Overlay Box exactly like its header's
+collapse button, without activating Jarvis. While stopped or during the Overlay tab's preview, it
+silently does nothing. The default avoids ⌥⌘M, which macOS reserves for Minimize All in every app.
+
 General's Shortcuts tab is one scrolling card with a row for each action. Each row retains the
 action's name and brief purpose, with keyboard and optional mouse binding buttons alongside.
 VoiceOver exposes the current keyboard binding and recording instructions. Mouse controls are
@@ -363,7 +367,7 @@ shows instructions for **System Settings → Privacy & Security → Accessibilit
 it never prompts or opens another app. After granting access, record again. A saved mouse binding
 that cannot become active remains saved and shows an inline warning; keyboard shortcuts stay usable.
 `MouseHotkeyController` installs a mouse-only Core Graphics event tap and routes through the same
-coaching/navigation actions as the keyboard controller. During a live session, a matching enabled
+actions as the keyboard controller. During a live session, a matching enabled
 binding fires once on button-down and consumes the down, drag, and up events so the foreground app
 does not also act on the click. While stopped or when an action is unavailable, clicks pass through.
 An already consumed press finishes consuming its release even if the session or modifiers change;
@@ -377,7 +381,7 @@ is live. None has a switch of its own.
 
 A keyboard collision with another application or another Jarvis shortcut leaves the old working
 binding active, and that row's detail turns into an amber warning until the page is visited again.
-Mouse bindings reject duplicates across all five Jarvis actions, including temporarily unavailable
+Mouse bindings reject duplicates across every Jarvis action, including temporarily unavailable
 actions, and keep the previous binding on failure. Other applications' mouse bindings cannot be
 reserved or checked through Carbon. If a binding could not become active at launch, its warning
 shows on every visit. Warnings live in the corresponding row. Keyboard recording instructions and
