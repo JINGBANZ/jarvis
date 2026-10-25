@@ -30,7 +30,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/`: the transcription benchmark matrix, scoring, and signed-app runner ([transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/LiveE2E/` + `Sources/JarvisApp/LiveE2E/`: the debug-only live e2e scenario model and signed-app mode ([live-e2e-tests.md](./live-e2e-tests.md)).
 - `Tests/JarvisLiveTests/` + `scripts/run-live-tests.sh`: the live e2e checker, scenarios, fixtures, and command; the Gate compiles the target but never runs it.
-- `scripts/run-tests.sh` + `scripts/test-script-workflows.py` + `scripts/test-display/`: the ordinary test command, synthetic script contracts, and the [automatic display](./build-and-run.md#automatic-test-display) shared by both local test commands.
+- `scripts/run-tests.sh` + `scripts/run-ci-tests.sh` + `scripts/test-script-workflows.py` + `scripts/test-test-display.py` + `scripts/test-display/`: ordinary/hosted test entrypoints and the [command ownership and retained display](./test-command-ownership.md) shared by local harnesses.
 - `Sources/JarvisCore/Brain/`: the provider-neutral brain domain: client and attempt-scoped conversation contracts, route targets, and the model catalog.
 - `Sources/JarvisCore/Providers/`: provider failure classification, redaction, and credential checks shared by brain, transcription, and Settings.
 - `Sources/JarvisBrainProviders/`: the concrete brain adapters: the Responses client, the bundled subscription helper's supervisor and sign-in, and the CLI detector and runner the session evaluator uses ([architecture.md → Subscription targets through the bundled proxy](./architecture.md#subscription-targets-through-the-bundled-proxy)).
@@ -42,6 +42,8 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisCore/Overlay/`: the overlay output port, with its text model, code snippets, and diagram hints ([architecture.md → The detail box](./architecture.md#the-detail-box)).
 - `Sources/JarvisCore/Config/` + `Sources/JarvisCore/Resources/Skills/`: preferences, owner-only secrets, the immutable `SessionPlan`, and the bundled coaching skills.
 - `Sources/JarvisCore/Support/`: small shared runtime primitives.
+- `Sources/JarvisProcess/`: the ordinary process-launch interface and native implementation shared by production OS adapters ([test command ownership](./test-command-ownership.md#whole-commands-and-process-roles)).
+- `Sources/JarvisTestSupport/`: the debug-only tracked launch and reporting adapter supplied by development/test composition ([test command ownership](./test-command-ownership.md)).
 - `Sources/JarvisCore/Diagnostics/`: session evidence, Activity, readiness, capture health, and session history ([session-audit.md](./session-audit.md)).
 - `Sources/JarvisCore/Prompts/`: the predefined model-facing text.
 - `Sources/JarvisEvaluation/`: sealed-session evaluation, from evidence parsing and metrics to the agentic evaluator and its report.

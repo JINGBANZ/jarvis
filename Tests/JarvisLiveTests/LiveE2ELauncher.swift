@@ -1,6 +1,7 @@
 import Foundation
 import JarvisBrainProviders
 import JarvisCore
+import JarvisTestSupport
 import JarvisEvaluation
 import Testing
 
@@ -23,13 +24,7 @@ struct LiveE2ELauncher {
     static let scenariosDirectory = repository
         .appendingPathComponent("Tests/JarvisLiveTests/Scenarios", isDirectory: true)
     private static let stopMarker = "stop-after-failure"
-    private static let appProcessPattern = "/Jarvis Dev[.]app/Contents/MacOS/JarvisApp"
     private static let launchTimeout: TimeInterval = 22 * 60
-
-    private var helperProcessPattern: String {
-        NSRegularExpression.escapedPattern(
-            for: app.appendingPathComponent("Contents/MacOS/cliproxyapi").path)
-    }
 
     /// Nil when the scenario must not launch; the issue or skipped line is already recorded.
     static func begin(
@@ -101,7 +96,7 @@ struct LiveE2ELauncher {
         do {
             return try await launchAndWait(secretsDirectory: secretsDirectory)
         } catch {
-            Self.run("/usr/bin/pkill", ["-f", Self.appProcessPattern])
+            Self.stopOwnedApp()
             stopLaterScenarios()
             throw error
         }
@@ -125,23 +120,20 @@ struct LiveE2ELauncher {
         let scenarioCopy = directory.appendingPathComponent("scenario.json")
         try scenarioData.write(to: scenarioCopy)
 
-        let processesBefore = Self.processIDs(matching: helperProcessPattern)
         var arguments = [
-            "-g", "-W", "-n", app.path, "--args",
+            Self.repository.appendingPathComponent("scripts/test-display/supervisor.py").path,
+            "launch-app", app.path, "--args",
             "--live-e2e",
             "--live-e2e-scenario", scenarioCopy.path,
             "--live-e2e-output-dir", directory.path,
             "--live-e2e-repo-dir", Self.repository.path,
             "--live-e2e-fixtures-dir", Self.fixturesDirectory.path,
         ]
-        if let displayID = ProcessInfo.processInfo.environment["JARVIS_TEST_DISPLAY_ID"] {
-            arguments.insert(contentsOf: ["--env", "JARVIS_TEST_DISPLAY_ID=\(displayID)"], at: 0)
-        }
         if let secretsDirectory { arguments += ["--live-e2e-secrets-dir", secretsDirectory.path] }
         let opener = Process()
-        opener.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+        opener.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["JARVIS_TEST_PYTHON"] ?? "/usr/bin/python3")
         opener.arguments = arguments
-        try opener.run()
+        try TestCommandOwnership.makeLauncher().launch(opener)
 
         let deadline = Date().addingTimeInterval(Self.launchTimeout)
         var abortDeadline: Date?
@@ -154,22 +146,16 @@ struct LiveE2ELauncher {
                 abortDeadline = Date().addingTimeInterval(10)
             }
             if let abortDeadline, Date() > abortDeadline {
-                Self.run("/usr/bin/pkill", ["-f", Self.appProcessPattern])
+                Self.stopOwnedApp()
                 break
             }
             try await Task.sleep(for: .milliseconds(200))
         }
 
-        // The app signals its helper on exit; give the helper up to 5s before calling it leftover.
-        var leftovers = Self.processIDs(matching: helperProcessPattern).subtracting(processesBefore)
-        for _ in 0..<25 where !leftovers.isEmpty {
-            try await Task.sleep(for: .milliseconds(200))
-            leftovers = Self.processIDs(matching: helperProcessPattern).subtracting(processesBefore)
-        }
-        // A forced teardown never signalled the helper. G08 still fails on it, but killing it keeps
-        // it out of the next scenario's baseline.
-        if timedOut, !leftovers.isEmpty {
-            Self.run("/bin/kill", leftovers.sorted().map(String.init))
+        guard !opener.isRunning, opener.terminationReason == .exit, opener.terminationStatus == 0 else {
+            throw NSError(domain: "LiveE2ELauncher", code: 70, userInfo: [NSLocalizedDescriptionKey:
+                (timedOut ? "Timed out after \(Int(Self.launchTimeout))s; " : "")
+                + "the supervised launcher did not complete app/helper teardown"])
         }
 
         let sessionRoot = directory.appendingPathComponent("session", isDirectory: true)
@@ -187,7 +173,7 @@ struct LiveE2ELauncher {
             sessionDirectory: sessionDirectory,
             evidence: try sessionDirectory.map { try LiveSessionEvidence(sessionDirectory: $0) },
             stepAttempts: Self.stepAttempts(in: directory),
-            leftoverHelperIDs: leftovers.sorted())
+            leftoverHelperIDs: [])
     }
 
     func makeInvalidKeyDirectory() throws -> URL {
@@ -229,9 +215,9 @@ struct LiveE2ELauncher {
         return map
     }
 
-    private static func processIDs(matching pattern: String) -> Set<Int32> {
-        let output = run("/usr/bin/pgrep", ["-f", pattern])
-        return Set(output.split(separator: "\n").compactMap { Int32($0) })
+    private static func stopOwnedApp() {
+        run(ProcessInfo.processInfo.environment["JARVIS_TEST_PYTHON"] ?? "/usr/bin/python3",
+            [repository.appendingPathComponent("scripts/test-display/supervisor.py").path, "stop-app"])
     }
 
     @discardableResult

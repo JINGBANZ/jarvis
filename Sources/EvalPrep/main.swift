@@ -41,7 +41,8 @@ do {
             preferredCLI = requested
         }
         let evaluator = AgenticEvaluator(source: .localCheckout(repository),
-                                         preferredCLI: preferredCLI)
+                                         preferredCLI: preferredCLI,
+                                             launcher: EvalPrepProcessComposition.makeLauncher())
         let markdown = try await evaluator.evaluate(sessionDirectory: sessionDir)
         let page = try EvalReportPage.write(
             markdown: markdown, in: sessionDir,

@@ -5,6 +5,7 @@ set -euo pipefail
 umask 077
 cd "$(dirname "$0")/.."
 source scripts/lib/harness.sh
+source scripts/lib/test-display.sh
 
 usage() {
   echo "usage:" >&2
@@ -14,6 +15,7 @@ usage() {
   echo "--filter runs only standard or languages arms whose id contains TEXT, e.g. gpt-live-transcribe" >&2
 }
 
+RUN_ARGUMENTS=("$@")
 MODE="${1:-}"
 if [[ "$MODE" != "standard" && "$MODE" != "reconnect" && "$MODE" != "turns" && "$MODE" != "languages" ]]; then
   usage
@@ -52,6 +54,7 @@ if [[ -n "$FILTER" && "$MODE" != "standard" && "$MODE" != "languages" ]]; then
   exit 2
 fi
 
+isolate_test_display ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
 APP="Jarvis Dev.app"
 RUN_DIR="$(create_run_directory transcription-benchmarks)"
 
@@ -102,14 +105,17 @@ abort_run() {
   echo >&2
   echo "Transcription benchmark aborted." >&2
   if [[ -n "$APP_WAITER_PID" ]]; then
+    # Leave the supervisor serving receipts while the app seals its evidence.
+    sleep 10
+    stop_test_app
     wait "$APP_WAITER_PID" || true
   fi
   exit 130
 }
 trap abort_run HUP INT TERM
 
-# `open -W` gives a waitable launcher, so the trap can reap it after the app sees the abort marker.
-open -W -n "./$APP" --args "${COMMON_ARGS[@]}" &
+# `open -W` gives a waitable launcher to reap after graceful or forced app exit.
+launch_test_app "./$APP" --args "${COMMON_ARGS[@]}" &
 APP_WAITER_PID=$!
 wait "$APP_WAITER_PID"
 APP_WAITER_PID=""

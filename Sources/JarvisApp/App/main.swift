@@ -61,6 +61,14 @@ private func settingsHarnessDelegate() -> (any NSApplicationDelegate)? {
     #endif
 }
 
+#if DEBUG
+do { try AppProcessComposition.registerApplication() } catch {
+    fputs("Test command ownership registration failed\n", stderr)
+    exit(70)
+}
+#endif
+
+let processLauncher = AppProcessComposition.makeLauncher()
 let app = NSApplication.shared
 let delegate: any NSApplicationDelegate
 if let settings = settingsHarnessDelegate() {
@@ -74,13 +82,13 @@ if let settings = settingsHarnessDelegate() {
 } else if TranscriptionBenchmarkOptions.isRequested {
     do {
         delegate = try TranscriptionBenchmarkAppDelegate(
-            options: TranscriptionBenchmarkOptions())
+            options: TranscriptionBenchmarkOptions(), launcher: processLauncher)
     } catch {
         fputs("Jarvis benchmark: \(error)\n", stderr)
         exit(2)
     }
 } else {
-    delegate = AppDelegate()
+    delegate = AppDelegate(launcher: processLauncher)
 }
 app.delegate = delegate
 app.run()

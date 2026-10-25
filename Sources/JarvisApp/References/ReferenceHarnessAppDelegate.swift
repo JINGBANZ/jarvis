@@ -69,7 +69,8 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
 
     private func run() async throws {
         if CommandLine.arguments.contains("--reference-harness-quit-only") {
-            let helper = ReferenceHelperSupervisor(bundle: bundle, home: output.appendingPathComponent("store"))
+            let helper = ReferenceHelperSupervisor(bundle: bundle, home: output.appendingPathComponent("store"),
+                launcher: AppProcessComposition.makeLauncher())
             supervisor = helper
             try await helper.start()
             results.append(["case": "application-quit", "helper_pid": helper.processIdentifier!])
@@ -78,7 +79,8 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         if let index = CommandLine.arguments.firstIndex(of: "--reference-harness-case"),
            CommandLine.arguments.indices.contains(index + 1) {
             try await runPhaseFourChecks(selection: CommandLine.arguments[index + 1])
-            let helper = ReferenceHelperSupervisor(bundle: bundle, home: output.appendingPathComponent("quit-store"))
+            let helper = ReferenceHelperSupervisor(bundle: bundle, home: output.appendingPathComponent("quit-store"),
+                launcher: AppProcessComposition.makeLauncher())
             supervisor = helper
             try await helper.start()
             results.append(["case": "application-quit", "helper_pid": helper.processIdentifier!])
@@ -90,7 +92,8 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         try "Uniquequasar synthetic reference. 😀é\n".write(to: fixture.appendingPathComponent("sample.txt"), atomically: true, encoding: .utf8)
         let store = output.appendingPathComponent("store")
         let sentinel = output.appendingPathComponent("hostile-helper-executed")
-        let real = ReferenceHelperSupervisor(bundle: bundle, home: store)
+        let real = ReferenceHelperSupervisor(bundle: bundle, home: store,
+            launcher: AppProcessComposition.makeLauncher())
         supervisor = real
         let clock = ContinuousClock()
         let launched = clock.now
@@ -104,7 +107,7 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         let metricOutput = Pipe()
         metrics.standardOutput = metricOutput
         metrics.standardError = FileHandle.nullDevice
-        try metrics.run()
+        try AppProcessComposition.makeLauncher().launch(metrics)
         let rss = String(decoding: metricOutput.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         metrics.waitUntilExit()
         try require(metrics.terminationStatus == 0 && Int(rss) != nil, "idle RSS measurement")
@@ -117,7 +120,8 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
             let home = output.appendingPathComponent(fault)
             try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
             try fault.write(to: home.appendingPathComponent("fault"), atomically: true, encoding: .utf8)
-            let fake = ReferenceHelperSupervisor(bundle: bundle, home: home, testFault: true, startupTimeout: .milliseconds(300))
+            let fake = ReferenceHelperSupervisor(bundle: bundle, home: home, testFault: true, startupTimeout: .milliseconds(300),
+                launcher: AppProcessComposition.makeLauncher())
             supervisor = fake
             let begin = clock.now
             if fault.hasPrefix("startup-") {
@@ -173,7 +177,8 @@ final class ReferenceHarnessAppDelegate: NSObject, NSApplicationDelegate {
         let raceHome = output.appendingPathComponent("stop-during-start")
         try FileManager.default.createDirectory(at: raceHome, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         try "startup-hang".write(to: raceHome.appendingPathComponent("fault"), atomically: true, encoding: .utf8)
-        let racing = ReferenceHelperSupervisor(bundle: bundle, home: raceHome, testFault: true, startupTimeout: .milliseconds(300))
+        let racing = ReferenceHelperSupervisor(bundle: bundle, home: raceHome, testFault: true, startupTimeout: .milliseconds(300),
+            launcher: AppProcessComposition.makeLauncher())
         supervisor = racing
         let starting = Task { try await racing.start() }
         try await Task.sleep(for: .milliseconds(50))

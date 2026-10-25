@@ -2,8 +2,10 @@
 """Synthetic command contracts; no signing keys, app launches, capture, or providers."""
 
 import os
+import json
 from pathlib import Path
 import plistlib
+import runpy
 import shutil
 import signal
 import subprocess
@@ -22,9 +24,16 @@ class ScriptTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         shutil.copytree(REPOSITORY / "scripts", self.root / "scripts")
+        # Replace admission only inside this copied fixture checkout. Production has no bypass.
+        (self.root / "scripts/lib/test-display.sh").write_text("""isolate_test_display() { :; }
+launch_test_app() { open -W -n "$@"; }
+wait_test_app() { :; }
+stop_test_app() { :; }
+""")
         self.bin = self.root / "bin"
         self.bin.mkdir()
-        self.environment = {**os.environ, "PATH": str(self.bin) + ":" + os.environ["PATH"]}
+        self.environment = {**{k: v for k, v in os.environ.items() if not k.startswith("JARVIS_TEST_")},
+                            "PATH": str(self.bin) + ":" + os.environ["PATH"]}
 
     def executable(self, path, body):
         path.write_text(body)
@@ -37,6 +46,51 @@ class ScriptTests(unittest.TestCase):
 
 
 class GuardTests(ScriptTests):
+    def test_process_boundary_guard_rejects_context_import_and_transitive_dependency(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []}
+                              for name in (*guard['PRODUCTION_TARGETS'], 'Intermediate')]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        check = guard['check_boundary']
+        check(self.root, package)
+        source = self.root / 'Sources/JarvisProcess/Fixture.swift'
+        for forbidden in ('import JarvisTestSupport',
+                          'let context = environment["JARVIS_TEST_RUN_SOCKET"]',
+                          'TestCommandOwnership.makeLauncher()'):
+            source.write_text(forbidden)
+            with self.assertRaisesRegex(ValueError, 'test ownership in production logic'):
+                check(self.root, package)
+        source.unlink()
+        package['targets'][0]['dependencies'] = [{'byName': ['Intermediate', None]}]
+        package['targets'][-1]['dependencies'] = [{'target': ['JarvisTestSupport', None]}]
+        with self.assertRaisesRegex(ValueError, 'depends on JarvisTestSupport'):
+            check(self.root, package)
+
+    def test_non_debug_tests_refused_before_admission_in_both_entrypoints(self):
+        # Admission and every Python command must remain untouched, even under a foreign owner.
+        marker = self.root / 'admission-touched'
+        (self.root / 'scripts/lib/test-display.sh').write_text(
+            'isolate_test_display() { touch admission-touched; exit 99; }\n')
+        self.executable(self.bin / 'python3', '#!/bin/bash\ntouch admission-touched\nexit 99\n')
+        self.environment.update(JARVIS_TEST_RUN_SOCKET='/foreign-owner', JARVIS_TEST_RUN_TOKEN='foreign')
+        for entry in ('run-tests.sh', 'run-ci-tests.sh'):
+            for flags in (['-c', 'release'], ['--configuration', 'release'],
+                          ['--configuration=release'], ['-crelease'], ['-c=release'],
+                          ['-c', 'debug', '--configuration=release'],
+                          ['-c', 'release', '-c', 'debug'], ['-c'], ['--configuration=']):
+                with self.subTest(entry=entry, flags=flags):
+                    result = self.run_script(entry, *flags)
+                    self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                    self.assertIn('require debug configuration', result.stderr)
+                    self.assertFalse(marker.exists())
+            for flags in ([], ['-c', 'debug'], ['--configuration=debug'], ['-cdebug'], ['-c=debug']):
+                with self.subTest(entry=entry, flags=flags):
+                    result = self.run_script(entry, *flags)
+                    self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
+                    self.assertTrue(marker.exists())
+                    marker.unlink()
+
     def test_missing_source_cannot_pass_audio_guard(self):
         for name in ("Sources", "Resources"):
             shutil.copytree(REPOSITORY / name, self.root / name)
@@ -55,6 +109,78 @@ class GuardTests(ScriptTests):
                  'source scripts/lib/guard.sh; guard_forbid "violation" -nE "$1" source',
                  "guard-test", pattern], cwd=self.root, text=True, capture_output=True)
             self.assertEqual(result.returncode, expected, result.stderr)
+
+
+class EntrypointAdmissionTests(ScriptTests):
+    def setUp(self):
+        super().setUp()
+        shutil.copy2(REPOSITORY / 'scripts/lib/test-display.sh', self.root / 'scripts/lib')
+        (self.root / 'scripts/test-display/supervisor.py').write_text('''import json, os, subprocess, sys
+from pathlib import Path
+operation, *arguments = sys.argv[1:]
+with open('admission.jsonl', 'a') as stream:
+    stream.write(json.dumps([operation, *arguments]) + '\\n')
+if operation == 'run':
+    entry, *arguments = arguments
+    environment = {**os.environ, 'JARVIS_TEST_RUN_SOCKET': 'fixture', 'JARVIS_TEST_RUN_TOKEN': 'fixture'}
+    result = subprocess.run(['/bin/bash', str(Path(__file__).resolve().parent.parent / entry), *arguments],
+                            env=environment)
+    sys.exit(result.returncode)
+if operation not in ('admit', 'transition-reference'):
+    raise AssertionError(operation)
+''')
+        self.executable(self.root / 'scripts/build-app.sh', '''#!/bin/bash
+echo '["build"]' >> admission.jsonl
+exit 99
+''')
+        self.environment['EVAL_AGENT'] = 'codex'
+
+    def test_help_and_invalid_arguments_do_not_enter_supervisor(self):
+        cases = (
+            ('run-live-tests.sh', ['--help'], 0),
+            ('run-live-tests.sh', ['-h'], 0),
+            ('run-live-tests.sh', ['unknown'], 2),
+            ('run-live-tests.sh', ['--provider'], 2),
+            ('run-live-tests.sh', ['--provider=unknown'], 2),
+            ('run-live-tests.sh', ['B', '--evaluate'], 2),
+            ('run-reference-tests.sh', ['unknown'], 2),
+            ('run-capture-privacy-tests.sh', ['0'], 2),
+            ('run-capture-privacy-tests.sh', ['1', '2'], 2),
+            ('transcription-benchmark.sh', [], 2),
+            ('transcription-benchmark.sh', ['unknown'], 2),
+            ('transcription-benchmark.sh', ['standard', '--repetitions'], 2),
+            ('transcription-benchmark.sh', ['standard', '--repetitions', '2'], 2),
+            ('transcription-benchmark.sh', ['turns', '--filter', 'arm'], 2),
+        )
+        for context in ({}, {'JARVIS_TEST_RUN_SOCKET': 'foreign', 'JARVIS_TEST_RUN_TOKEN': 'foreign'}):
+            self.environment.update(context)
+            for entry, arguments, status in cases:
+                with self.subTest(entry=entry, arguments=arguments, inherited=bool(context)):
+                    result = self.run_script(entry, *arguments)
+                    self.assertEqual(result.returncode, status, result.stdout + result.stderr)
+                    self.assertFalse((self.root / 'admission.jsonl').exists())
+                    self.assertFalse((self.root / '.jarvis').exists())
+
+    def test_valid_arguments_survive_reentry_and_reference_transition(self):
+        cases = (
+            ('run-live-tests.sh', ['A', '--provider=openai', '--keep-going']),
+            ('run-live-tests.sh', ['A', '--provider', 'openai', '--evaluate']),
+            ('run-live-tests.sh', ['REF01']),
+            ('run-reference-tests.sh', ['REF03']),
+            ('run-capture-privacy-tests.sh', ['2']),
+            ('transcription-benchmark.sh', ['standard', '--repetitions', '4', '--filter', 'arm with spaces']),
+        )
+        for entry, arguments in cases:
+            with self.subTest(entry=entry, arguments=arguments):
+                result = self.run_script(entry, *arguments)
+                self.assertEqual(result.returncode, 99, result.stdout + result.stderr)
+                expected = [['run', entry, *arguments], ['admit']]
+                if arguments == ['REF01']:
+                    expected += [['transition-reference', 'REF01'], ['admit']]
+                expected += [['build']]
+                marker = self.root / 'admission.jsonl'
+                self.assertEqual([json.loads(row) for row in marker.read_text().splitlines()], expected)
+                marker.unlink()
 
 
 class AppBundleTests(ScriptTests):
@@ -119,12 +245,6 @@ class HarnessDirectoryTests(ScriptTests):
 
 class LiveRunnerTests(ScriptTests):
     def test_empty_live_run_fails_and_completed_run_passes(self):
-        script = self.root / "scripts/run-live-tests.sh"
-        script.write_text(script.read_text().replace(
-            'APP_PROCESS_PATTERN="/Jarvis Dev[.]app/Contents/MacOS/JarvisApp"',
-            'APP_PROCESS_PATTERN="jarvis-script-tests-no-running-app"'))
-        self.environment.update(JARVIS_TEST_DISPLAY_ID="synthetic",
-                                JARVIS_LIVE_E2E_CAFFEINATED="1")
         self.executable(self.root / "scripts/build-app.sh", "#!/bin/bash\nexit 0\n")
         self.executable(self.bin / "swift", "#!/bin/bash\necho 'warning: No matching test cases were run'\n")
         empty = self.run_script("run-live-tests.sh", "A")
@@ -140,26 +260,54 @@ echo '✔ Test run with 1 test passed after 0.001 seconds.'
 
 
 class BenchmarkCancellationTests(ScriptTests):
-    def test_signals_request_abort_and_reap_detached_app(self):
+    def check_cancellation(self, numbers, ignore_abort=False):
         self.executable(self.root / "scripts/build-app.sh", "#!/bin/bash\nexit 0\n")
+        script = self.root / "scripts/transcription-benchmark.sh"
+        script.write_text(script.read_text().replace('sleep 10', 'sleep 0.4'))
+        self.environment.update(FIXTURE_PYTHON=sys.executable,
+                                FIXTURE_IGNORE_ABORT=str(int(ignore_abort)))
+        (self.root / "scripts/lib/test-display.sh").write_text('''isolate_test_display() { :; }
+launch_test_app() { open -W -n "$@"; }
+stop_test_app() { "$FIXTURE_PYTHON" "$PWD/stop.py" "$RUN_DIR"; }
+''')
+        (self.root / "stop.py").write_text('''from pathlib import Path
+import os, signal, sys, time
+root = Path(sys.argv[1])
+(root / 'stop-called').touch()
+pid = int((root / 'synthetic-app.pid').read_text())
+try: os.kill(pid, signal.SIGTERM)
+except ProcessLookupError: sys.exit(0)
+deadline = time.monotonic() + .2
+while time.monotonic() < deadline:
+    try: os.kill(pid, 0)
+    except ProcessLookupError: sys.exit(0)
+    time.sleep(.01)
+os.kill(pid, signal.SIGKILL)
+''')
         self.executable(self.bin / "open", "#!" + sys.executable + "\n" + '''
 from pathlib import Path
-import subprocess, sys
+import subprocess, sys, time
 assert '-W' in sys.argv and '-n' in sys.argv
 assert './Jarvis Dev.app' in sys.argv
 root = Path(sys.argv[sys.argv.index('--benchmark-output-dir') + 1])
 app = subprocess.Popen([sys.executable, '-c', """
 from pathlib import Path
-import sys, time
+import os, signal, sys, time
 root = Path(sys.argv[1])
+ignore = os.environ['FIXTURE_IGNORE_ABORT'] == '1'
+if ignore: signal.signal(signal.SIGTERM, signal.SIG_IGN)
+(root / 'app-ready').touch()
+if ignore: time.sleep(30)
 while not (root / 'abort').exists(): time.sleep(.01)
+time.sleep(.15)
 (root / 'sealed').touch()
 """, str(root)], start_new_session=True)
 (root / 'synthetic-app.pid').write_text(str(app.pid))
+while not (root / 'app-ready').exists(): time.sleep(.01)
 (root / 'ready').touch()
 app.wait()
 ''')
-        for number in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        for number in numbers:
             with self.subTest(signal=number.name):
                 runner = subprocess.Popen(
                     ["/bin/bash", str(self.root / "scripts/transcription-benchmark.sh"), "standard"],
@@ -179,7 +327,10 @@ app.wait()
                     os.kill(runner.pid, number)
                     output, error = runner.communicate(timeout=5)
                     self.assertEqual(runner.returncode, 130, error + output)
-                    self.assertTrue((directory / "sealed").exists(), "detached app did not seal")
+                    self.assertTrue((directory / "abort").exists(), "abort was not requested")
+                    self.assertTrue((directory / "stop-called").exists(), "exact stop was skipped")
+                    self.assertEqual((directory / "sealed").exists(), not ignore_abort,
+                                     "cooperative app lost its evidence-drain grace")
                     with self.assertRaises(ProcessLookupError): os.kill(app_pid, 0)
                     shutil.rmtree(directory)
                 finally:
@@ -190,6 +341,12 @@ app.wait()
                     except ProcessLookupError: pass
                     runner.communicate(timeout=5)
                     if directory is not None and directory.exists(): shutil.rmtree(directory)
+
+    def test_signals_request_abort_and_reap_detached_app(self):
+        self.check_cancellation((signal.SIGHUP, signal.SIGINT, signal.SIGTERM))
+
+    def test_shell_only_term_bounds_an_app_ignoring_abort_and_term(self):
+        self.check_cancellation((signal.SIGTERM,), ignore_abort=True)
 
 
 class AECBuildTests(ScriptTests):

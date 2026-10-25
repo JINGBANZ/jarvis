@@ -12,6 +12,7 @@
 
 - **[architecture.md](./architecture.md)** — the vision, the harness loop, components, data flow, the models/APIs rationale, resilience, safety, and design principles. The design *why*; the *what* lives in `Sources/`.
 - **[build-and-run.md](./build-and-run.md)** — the operational *how*: toolchain (SwiftPM + Command Line Tools, Xcode optional), the three-target split (Core/Overlay/App), swift-testing, packaging/signing and why TCC grants persist, running, and the activity viewer.
+- **[test-command-ownership.md](./test-command-ownership.md)** — one retained test-display identity per Mac, whole-command admission across worktrees, exact process teardown, terminal uncertainty, and finite rollout evidence.
 - **[transcription-benchmark.md](./transcription-benchmark.md)** — the explicit signed-app transcription regression harness: fixed synthetic inputs, the standard, scoped-reconnect, and two-turn session modes, deterministic scoring, privacy boundaries, result interpretation, and when to run it.
 - **[live-e2e-tests.md](./live-e2e-tests.md)**: the one-command live run of the signed app through scripted interview scenarios, with its prerequisites, results vocabulary, evidence rules, case index, and the manual checks that stay outside it.
 - **[sandbox.md](./sandbox.md)** — the security/isolation model (file-access restriction, entitlements, egress, server-side retention tradeoff).

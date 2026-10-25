@@ -1,4 +1,5 @@
 import AppKit
+import JarvisProcess
 import WebKit
 import JarvisCore
 import JarvisEvaluation
@@ -7,6 +8,7 @@ import JarvisOverlay
 
 @MainActor
 final class ActivityViewer: NSObject, WKNavigationDelegate {
+    private let launcher: any ProcessLaunching
     private let log: ActivityLog
     private var store: SessionStore
 
@@ -42,7 +44,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
     /// UI state only, never written to Activity.
     private var readinessStatus: JarvisReadiness.Status = .stopped
 
-    init(log: ActivityLog, store: SessionStore) {
+    init(log: ActivityLog, store: SessionStore, launcher: any ProcessLaunching = NativeProcessLauncher()) {
+        self.launcher = launcher
         self.log = log
         self.store = store
     }
@@ -356,8 +359,8 @@ final class ActivityViewer: NSObject, WKNavigationDelegate {
         }
         isFindingAgents = true
         refreshEvaluateButtonState()
-        findingAgentsTask = Task { [weak self] in
-            let agents = await AgentCLIDetector().detectAllAsync(AgenticEvaluator.searchOrder)
+        findingAgentsTask = Task { [weak self, launcher] in
+            let agents = await AgentCLIDetector(launcher: launcher).detectAllAsync(AgenticEvaluator.searchOrder)
             // Detection ignores cancellation, so a cancelled run must still stop here.
             guard !Task.isCancelled else { return }
             self?.findingAgentsTask = nil

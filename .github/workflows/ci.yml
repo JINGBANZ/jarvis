@@ -36,7 +36,7 @@ jobs:
         run: swift build
 
       - name: Run tests and static guards
-        run: ./scripts/run-tests.sh
+        run: ./scripts/run-ci-tests.sh
 
       - name: Upload test failure evidence
         if: failure()
@@ -45,6 +45,7 @@ jobs:
           name: test-failure-${{ matrix.os }}
           path: |
             .build/run-tests.log
+            .build/test-ownership.json
             .build/test-diagnostics/
           include-hidden-files: true
           retention-days: 7

@@ -1,4 +1,5 @@
 import Foundation
+import JarvisProcess
 import JarvisCore
 
 @MainActor
@@ -46,7 +47,10 @@ final class TranscriptionBenchmarkRunner {
         FileManager.default.fileExists(atPath: abortMarker.path)
     }
 
-    init(options: TranscriptionBenchmarkOptions) {
+    private let launcher: any ProcessLaunching
+
+    init(options: TranscriptionBenchmarkOptions, launcher: any ProcessLaunching) {
+        self.launcher = launcher
         self.options = options
     }
 
@@ -76,7 +80,8 @@ final class TranscriptionBenchmarkRunner {
         TranscriptionBenchmarkFiles.writeProgress(
             phase: "preparing-synthetic-fixtures", to: options.outputDirectory)
 
-        let fixtures = try SyntheticSpeechFixtures(outputDirectory: options.outputDirectory)
+        let fixtures = try SyntheticSpeechFixtures(outputDirectory: options.outputDirectory,
+            launcher: launcher)
         do {
             try await run(fixtures: fixtures)
         } catch {

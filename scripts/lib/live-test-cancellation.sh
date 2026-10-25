@@ -6,13 +6,9 @@ abort_run() {
       touch "$scenario_dir/abort"
     fi
   done
-  # LaunchServices started the app outside this process group, so the signal never reached it.
-  # Give it the launcher's 10s to seal its session, then kill it so capture cannot outlive the run.
-  for _ in {1..50}; do
-    /usr/bin/pgrep -f "$APP_PROCESS_PATTERN" >/dev/null || break
-    sleep 0.2
-  done
-  /usr/bin/pkill -f "$APP_PROCESS_PATTERN" || true
+  # Leave the supervisor free to serve helper receipts while the app drains its evidence.
+  sleep 10
+  stop_test_app
   echo "Live e2e run aborted; partial results are in $RUN_DIR." >&2
   exit 130
 }

@@ -1,3 +1,4 @@
+import JarvisTestSupport
 import Foundation
 import Testing
 import JarvisCore
@@ -57,12 +58,14 @@ import JarvisBrainProviders
             home: home,
             pathVariable: bin.path,
             authStatusTimeout: 10,
-            temporaryDirectory: root.appendingPathComponent("unrelated-system-temp"))
+            temporaryDirectory: root.appendingPathComponent("unrelated-system-temp"),
+            launcher: TestCommandOwnership.makeLauncher())
         let evaluator = AgenticEvaluator(
             source: source,
             preferredCLI: .claude,
             detector: detector,
-            sourceStore: ReleaseSourceStore(root: sourceRoot) { url, destination in
+            sourceStore: ReleaseSourceStore(root: sourceRoot,
+                launcher: TestCommandOwnership.makeLauncher()) { url, destination in
                 guard let archive else { Issue.record("Development source was fetched"); return }
                 if scenario == "fallback" && url.lastPathComponent == "v0.2.1.tar.gz" {
                     throw URLError(.fileDoesNotExist)
@@ -70,7 +73,7 @@ import JarvisBrainProviders
                 #expect(url.lastPathComponent == "v\(actualVersion).tar.gz")
                 try FileManager.default.copyItem(at: archive, to: destination)
             },
-            timeout: 60)
+            timeout: 60, launcher: TestCommandOwnership.makeLauncher())
 
         let report = try await evaluator.evaluate(sessionDirectory: session)
 
@@ -121,8 +124,9 @@ import JarvisBrainProviders
                 home: home,
                 pathVariable: bin.path,
                 authStatusTimeout: 10,
-                temporaryDirectory: root.appendingPathComponent("unrelated-system-temp")),
-            timeout: 60)
+                temporaryDirectory: root.appendingPathComponent("unrelated-system-temp"),
+                launcher: TestCommandOwnership.makeLauncher()),
+            timeout: 60, launcher: TestCommandOwnership.makeLauncher())
 
         await #expect(throws: AgenticEvaluator.EvaluationError.agentFailed(
             cli: AgentCLI.claude.displayName,
