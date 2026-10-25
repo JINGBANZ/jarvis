@@ -1,7 +1,7 @@
 import Foundation
 
 public protocol ProcessLaunching: Sendable {
-    /// Calls `onLaunch` synchronously after spawn. A known spawned child must exit before throwing.
+    /// Calls `onLaunch` synchronously after a successful spawn.
     func launch(_ process: Process, onLaunch: () -> Void) throws
 }
 

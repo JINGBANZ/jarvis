@@ -105,13 +105,16 @@ abort_run() {
   echo >&2
   echo "Transcription benchmark aborted." >&2
   if [[ -n "$APP_WAITER_PID" ]]; then
+    # Leave the supervisor serving receipts while the app seals its evidence.
+    sleep 10
+    stop_test_app
     wait "$APP_WAITER_PID" || true
   fi
   exit 130
 }
 trap abort_run HUP INT TERM
 
-# `open -W` gives a waitable launcher, so the trap can reap it after the app sees the abort marker.
+# `open -W` gives a waitable launcher to reap after graceful or forced app exit.
 launch_test_app "./$APP" --args "${COMMON_ARGS[@]}" &
 APP_WAITER_PID=$!
 wait "$APP_WAITER_PID"

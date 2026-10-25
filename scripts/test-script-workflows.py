@@ -260,26 +260,54 @@ echo '✔ Test run with 1 test passed after 0.001 seconds.'
 
 
 class BenchmarkCancellationTests(ScriptTests):
-    def test_signals_request_abort_and_reap_detached_app(self):
+    def check_cancellation(self, numbers, ignore_abort=False):
         self.executable(self.root / "scripts/build-app.sh", "#!/bin/bash\nexit 0\n")
+        script = self.root / "scripts/transcription-benchmark.sh"
+        script.write_text(script.read_text().replace('sleep 10', 'sleep 0.4'))
+        self.environment.update(FIXTURE_PYTHON=sys.executable,
+                                FIXTURE_IGNORE_ABORT=str(int(ignore_abort)))
+        (self.root / "scripts/lib/test-display.sh").write_text('''isolate_test_display() { :; }
+launch_test_app() { open -W -n "$@"; }
+stop_test_app() { "$FIXTURE_PYTHON" "$PWD/stop.py" "$RUN_DIR"; }
+''')
+        (self.root / "stop.py").write_text('''from pathlib import Path
+import os, signal, sys, time
+root = Path(sys.argv[1])
+(root / 'stop-called').touch()
+pid = int((root / 'synthetic-app.pid').read_text())
+try: os.kill(pid, signal.SIGTERM)
+except ProcessLookupError: sys.exit(0)
+deadline = time.monotonic() + .2
+while time.monotonic() < deadline:
+    try: os.kill(pid, 0)
+    except ProcessLookupError: sys.exit(0)
+    time.sleep(.01)
+os.kill(pid, signal.SIGKILL)
+''')
         self.executable(self.bin / "open", "#!" + sys.executable + "\n" + '''
 from pathlib import Path
-import subprocess, sys
+import subprocess, sys, time
 assert '-W' in sys.argv and '-n' in sys.argv
 assert './Jarvis Dev.app' in sys.argv
 root = Path(sys.argv[sys.argv.index('--benchmark-output-dir') + 1])
 app = subprocess.Popen([sys.executable, '-c', """
 from pathlib import Path
-import sys, time
+import os, signal, sys, time
 root = Path(sys.argv[1])
+ignore = os.environ['FIXTURE_IGNORE_ABORT'] == '1'
+if ignore: signal.signal(signal.SIGTERM, signal.SIG_IGN)
+(root / 'app-ready').touch()
+if ignore: time.sleep(30)
 while not (root / 'abort').exists(): time.sleep(.01)
+time.sleep(.15)
 (root / 'sealed').touch()
 """, str(root)], start_new_session=True)
 (root / 'synthetic-app.pid').write_text(str(app.pid))
+while not (root / 'app-ready').exists(): time.sleep(.01)
 (root / 'ready').touch()
 app.wait()
 ''')
-        for number in (signal.SIGHUP, signal.SIGINT, signal.SIGTERM):
+        for number in numbers:
             with self.subTest(signal=number.name):
                 runner = subprocess.Popen(
                     ["/bin/bash", str(self.root / "scripts/transcription-benchmark.sh"), "standard"],
@@ -299,7 +327,10 @@ app.wait()
                     os.kill(runner.pid, number)
                     output, error = runner.communicate(timeout=5)
                     self.assertEqual(runner.returncode, 130, error + output)
-                    self.assertTrue((directory / "sealed").exists(), "detached app did not seal")
+                    self.assertTrue((directory / "abort").exists(), "abort was not requested")
+                    self.assertTrue((directory / "stop-called").exists(), "exact stop was skipped")
+                    self.assertEqual((directory / "sealed").exists(), not ignore_abort,
+                                     "cooperative app lost its evidence-drain grace")
                     with self.assertRaises(ProcessLookupError): os.kill(app_pid, 0)
                     shutil.rmtree(directory)
                 finally:
@@ -310,6 +341,12 @@ app.wait()
                     except ProcessLookupError: pass
                     runner.communicate(timeout=5)
                     if directory is not None and directory.exists(): shutil.rmtree(directory)
+
+    def test_signals_request_abort_and_reap_detached_app(self):
+        self.check_cancellation((signal.SIGHUP, signal.SIGINT, signal.SIGTERM))
+
+    def test_shell_only_term_bounds_an_app_ignoring_abort_and_term(self):
+        self.check_cancellation((signal.SIGTERM,), ignore_abort=True)
 
 
 class AECBuildTests(ScriptTests):

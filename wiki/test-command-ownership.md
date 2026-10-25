@@ -116,10 +116,11 @@ Immediate spawn bookkeeping (timing, stdin, cancellation PID and watchdog setup)
 blocking registration round trip, so ownership reporting cannot delay the child's normal lifecycle.
 Only a proven failed exec with no child resolves a receipt through authenticated `no-child`;
 registration failure and ambiguous spawn errors remain unfinished.
-If launch throws after a known spawn, the launcher kills and reaps that exact child before returning
+If launch throws after a known spawn, the tracked launcher kills and reaps that exact child before returning
 the error. Capture may therefore finish output cleanup without a surviving writer; this local
 cleanup never clears a failed registration receipt. Blocking cleanup is still bounded by the
-external supervisor's command deadline.
+external supervisor's command deadline. The native production launcher preserves Foundation's
+normal launch and error behavior without adding a blocking cleanup wait.
 
 The entire `JarvisTestSupport` implementation is compiled only with `DEBUG`, including its context
 parser and Python reporter. Release app and native-helper artifacts exclude reporting code.
@@ -139,8 +140,9 @@ to close before the owner exits. Intentional crash tests retain their crash beha
 failure fails the fixture; forced cleanup cannot certify a pending launch as completed.
 
 Cancellation forwards the signal to the admitted command group while retaining the lease, socket
-and display for a bounded natural-exit grace. The live shell writes its abort marker before waiting
-for evidence to drain. App waits progress in the supervisor's poll loop, so pending app/helper
+and display for a bounded natural-exit grace. Live and benchmark shells write their abort markers,
+allow a bounded evidence drain, then request exact app shutdown before waiting for the launcher.
+App waits progress in the supervisor's poll loop, so pending app/helper
 registrations and proven no-child receipts can finish during that grace; a pending receipt alone
 does not fail a wait before its deadline. New app phases are refused. Forced teardown then rejects
 new helper preparations, signals each exact client once per force level, and applies the current
@@ -260,7 +262,12 @@ restart, or parked privileged-helper experiment belongs in this campaign.
 
 Pass requires exactly one approved Jarvis ICC and registration with the same persistent UUID and
 validated profile metadata, no surviving live display/owned processes, unchanged physical-display
-configuration and unrelated records, and healthy passive observations. Persistent profile requests
+configuration and unrelated records, and healthy passive observations. macOS may replace an ICC
+file during display creation or release with an updated creation date. Accept that replacement only
+when complete byte comparison or exact hash reconstruction proves that only the ICC creation-date
+field changed; profile paths, counts, identity and all other bytes must match. Preserve the raw
+hashes and file metadata in the evidence. The replacement must fall within the bounded display
+operation and stop before the complete settling observation. Persistent profile requests
 or rewrites, an unresponsive app, timeout, unexpected state growth, missing evidence, or any anomaly
 stops the campaign immediately. Non-growth with legacy extras is partial. Missing complete registry
 evidence is partial. Neither result authorizes the updated Gate. Only the complete accepted A/B

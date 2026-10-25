@@ -15,7 +15,9 @@ public struct TrackedProcessLauncher: ProcessLaunching {
         do {
             try NativeProcessLauncher().launch(process, onLaunch: onLaunch)
         } catch {
-            if process.processIdentifier == 0, !process.isRunning, Self.isNoSpawnError(error) {
+            if process.processIdentifier > 0 {
+                Self.reap(process)
+            } else if process.processIdentifier == 0, !process.isRunning, Self.isNoSpawnError(error) {
                 _ = try TestCommandOwnership.report(["no-child", launch])
             }
             throw error
