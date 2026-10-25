@@ -256,9 +256,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         press(detailView.nextButton)
     }
 
-    /// The collapse shortcut. Declines while the preview shows: it snapshots and restores collapse.
+    /// The collapse shortcut. Declines while stopped, which also covers the appearance preview: it
+    /// shows only then, and snapshots and restores collapse itself.
     public func toggleCollapse() {
-        guard isSessionLive, display == .log else { return }
+        guard isSessionLive else { return }
         press(header.collapseButton)
     }
 

@@ -340,8 +340,8 @@ of history, while stopped, or with the box disabled or collapsed, they silently 
 back holds the chosen detail; reaching the newest resumes following incoming details.
 
 **Collapse overlay** defaults to **⌥⌘,** and toggles the Overlay Box exactly like its header's
-collapse button, without activating Jarvis. While stopped or during the Overlay tab's preview, it
-silently does nothing. The default avoids ⌥⌘M, which macOS reserves for Minimize All in every app.
+collapse button, without activating Jarvis. While stopped, including while the Overlay tab's preview
+shows, it silently does nothing. The default avoids ⌥⌘M, which macOS reserves for Minimize All in every app.
 
 General's Shortcuts tab is one scrolling card with a row for each action. Each row retains the
 action's name and brief purpose, with keyboard and optional mouse binding buttons alongside.

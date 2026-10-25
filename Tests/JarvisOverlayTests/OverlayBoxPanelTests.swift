@@ -242,15 +242,17 @@ import JarvisCore
     }
 
     @MainActor @Test
-    func collapseShortcutIgnoresAStoppedBoxAndTheAppearancePreview() {
+    func collapseShortcutIgnoresAStoppedBoxIncludingItsAppearancePreview() {
         let stopped = OverlayBoxPanel()
         stopped.toggleCollapse()
         #expect(!stopped.isCollapsed, "the shortcut must not reshape a box that isn't on screen")
 
-        let previewing = liveBox()
+        // The sample replaces the log only while stopped; the preview owns its collapse snapshot.
+        let previewing = OverlayBoxPanel()
         previewing.showAppearancePreview(true)
         previewing.toggleCollapse()
-        #expect(!previewing.isCollapsed, "the preview owns its collapse snapshot")
+        #expect(!previewing.isCollapsed)
+        #expect(previewing.currentText.contains("Ask about the time complexity"))
     }
 
     @MainActor @Test
