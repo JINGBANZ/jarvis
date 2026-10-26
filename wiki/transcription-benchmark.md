@@ -40,12 +40,12 @@ This is separate from session auditing:
 | Question | Does known synthetic audio survive and transcribe correctly? | What happened during a real coaching session, and why? |
 | Input | Fixed non-user audio and benchmark lifecycle events | User-visible Activity, coaching-attempt provenance, provider traffic, and screenshots |
 | Invocation | Explicit developer command | Normal session persistence plus an explicit completed-session evaluation |
-| Output location | `.jarvis/transcription-benchmarks/<run>/` | The matching `.jarvis/<session>/` directory |
+| Output location | `.jarvis/transcription-benchmarks/<run>/` | The matching build-specific session directory; see [history isolation](./build-and-run.md#the-live-activity-viewer) |
 | Code ownership | `JarvisCore/Benchmark` and `JarvisApp/Benchmark` | `JarvisCore/Diagnostics`, the coach/provider observer seams, and the app session lifecycle |
 
-They share only the repository's owner-only `.jarvis/` privacy posture and the architectural rule
-that deterministic logic belongs in Core. Benchmark scoring neither writes session-audit evidence
-nor participates in coaching.
+The benchmark uses the shared evidence transport for its diagnostics: the runner opens one
+`FileSessionAudit` handle in its run directory and closes it on success or failure. Scoring remains
+benchmark-owned and does not participate in coaching or completed-session evaluation.
 
 ## Isolation From Normal Use
 

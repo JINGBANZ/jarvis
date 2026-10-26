@@ -1,7 +1,7 @@
 # Status
 
 > Snapshot of what is true *right now*. This is the entry point for picking the project up mid-stream:
-> read [`index.md`](./index.md) first, then this page, then the relevant core page. Edit it only when
+> use [`index.md`](./index.md) to choose the relevant core page after reading this snapshot. Edit it only when
 > one of its sections changes, per [`AGENTS.md`](./AGENTS.md) → "Keep-in-sync checklist"; a behavior
 > change updates its design page, not this one. Every file pointer below either resolves to a real
 > file or this page is wrong — fix the page.

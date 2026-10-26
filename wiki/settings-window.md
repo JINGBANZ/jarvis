@@ -160,7 +160,7 @@ or polling, and this does not switch a running session back to its primary.
 
 A subscription counts as signed out only when that is proven: it has no saved sign-in, or the
 helper reports a permanent authentication rejection. Temporary failures and an unanswered health
-check prove no sign-out. Foundation-only `SubscriptionSignIns` owns Settings health checks, explicit
+check prove no sign-out. Foundation-only `SubscriptionSignIns` in `JarvisBrainProviders` owns Settings health checks, explicit
 connection actions, and their cached answer, shared by Connections, the hub, and the Brain page.
 The answer includes temporary failures and an unchecked state. Hub and Brain visits ask the helper only when a sign-in is saved;
 an explicit Connections visit can also start the helper to check empty accounts. Passive checks
@@ -208,13 +208,13 @@ pages it moves.
 |---|---|---|
 | `BrainSection` | **Brain**: "Who does my thinking, and how hard I think." | The ordered provider route and the reasoning effort ([Brain](#brain)). Valid route and effort changes take effect between coaching attempts while running, which the header chip says. |
 | `TranscriptionSection` | **Ear**: "How I turn the conversation into text." | The transcription provider and its model, language, vocabulary, mode, or locale rows ([Ear](#ear)). Applies on the next Start. |
-| `DisplaySection` | **Eye**: "What I look at when I check your screen." | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — and the optional Chrome text switch, followed by a short fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next screenshot ([Capture Scope](#capture-scope)). |
+| `DisplaySection` | **Eye**: "What I look at when I check your screen." | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — and the optional Chrome text switch, followed by a short fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next coaching attempt ([Capture Scope](#capture-scope)). |
 | `OverlaySection` | **Mouth**: "How my hints show up on your screen." | One **Overlay Box** card (the persistent response history) with an icon, description, text size and opacity rows, and the detail box's own rows. It has no On/Off switch: the box shows for every session. Its live sample appears only while the Mouth page is visible (`didBecomeActive`/`didResignActive`). The header's live chip says the sliders act on screen. Persists via `OverlayAppearance` ([Overlay Appearance](#overlay-appearance)). |
 | `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts saved managed API keys. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | References, with its switch and its list of local files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
 | `GeneralSection` | **General** | Left-side **Shortcuts** and **Privacy** tabs. Shortcuts retain immediate keyboard/mouse binding edits; Privacy owns optional provider conversation storage, applied next session ([General](#general)). |
-| `ActivitySection` | **Activity**: "What I heard and said, session by session." | Embeds the `ActivityViewer` content (`makeContentView()` / `teardown()`) in the shared page/card shell so the adaptive light/dark feed stretches with the window. Its compact toolbar shows the selected session's exact directory ID with **Copy ID**. A session without a report shows **Evaluate**, which opens a menu of the installed Claude Code / Codex CLIs; the chosen one runs the sole `AgenticEvaluator` over the source checkout plus the complete session directory, writes owner-only `eval-report.md`, and opens it. Development uses the live checkout containing the bundle; releases read build identity from the session directory name and use matching or available release source with a disclosed mismatch, as defined in [build-and-run.md](./build-and-run.md#the-live-activity-viewer), including progress states, saved-report reuse, and failure handling. The agent reads the full unfiltered `jarvis-activity.jsonl` whenever it needs the user-visible sequence and correlates it with `coaching-attempts.jsonl`, `brain-traffic.jsonl`, screenshots, and source. The derived transcript leads with a neutral artifact/distribution/correlation-field index and normalized provider-call telemetry; missing evidence remains unavailable, and neither table declares a defect. The findings-driven prompt gives the read-only agent file and source-search tools instead of a historical-incident checklist, and the report uses generic Summary / Findings / Evidence gaps / Recommendations sections. `scripts/eval-session.sh` is a second launcher for this same `JarvisEvaluation` evaluator, not another evaluation path. `EvalReportPage` renders the markdown as `eval-report.html`; **Copy as Markdown** hands the raw report to an agent chat. Evaluation, report opening, and history clearing stay disabled through the live coaching/teardown lifecycle. |
+| `ActivitySection` | **Activity**: "What I heard and said, session by session." | Embeds the viewer in the shared page shell, with the session directory ID, Copy ID, history, export, and evaluation controls. [Build and run](./build-and-run.md#the-live-activity-viewer) owns evaluation, report reuse, source provenance, and failure behavior. Evaluation, report opening, and history clearing stay disabled through live coaching and teardown. |
 
 `AppDelegate` builds the hub model, the hub, and the section list at launch and passes them to
 `SettingsWindow`. Every page is always reachable, but its content is created lazily on its first
@@ -447,18 +447,11 @@ so visual order and failover order are identical. Exact duplicate targets are re
 model from the same provider is allowed as a deliberate separate target. Edits save immediately and
 apply on the next coaching attempt, which the header chip says.
 
-The list is finite and follows the [ordered provider-route contract](./architecture.md#ordered-provider-route).
-One target owns a complete coaching attempt. A provider error ends that attempt without replaying its
-failed request; pending conversation schedules a new attempt with the newest finalized transcript.
-Consecutive temporary/unknown failures advance when the active row reaches Core's code-owned failure
-budget (see
-[`BrainRouteSession.failuresPerTarget`](../Sources/JarvisCore/Coach/BrainRouteSession.swift)).
-A failure proven permanent by the provider adapter exhausts the active row immediately, so the next
-fresh attempt uses the next row; it never switches provider inside the failed attempt. A successful
-attempt clears the active row's failure count but keeps that row active, including after fallback
-activation. The runtime never returns to the primary or an exhausted row. When every row is
-exhausted, coaching stops and Activity receives fixed typed route-exhausted copy; request details and
-attempt counts remain in `jarvis-debug.log`.
+The [ordered provider-route contract](./architecture.md#ordered-provider-route) owns failure
+budgets, fresh-attempt advancement, successful fallback retention, cycle cooldowns, and terminal
+limits. Exhausting a cycle keeps listening active; a later eligible trigger can start a fresh cycle.
+Proven permanent target failures remain excluded for the session. Activity shows typed failure
+notices while request and scheduling detail stays in `jarvis-debug.log`.
 
 A signed-out subscription is hidden from new selection while editing; an existing saved row stays
 visible so the user can repair or remove it. A configured target that cannot serve when the session
@@ -484,8 +477,8 @@ Haiku 5.5. Each provider remembers its own model; without a valid preference, th
 that provider's catalog is selected.
 Moving a route row moves that provider's remembered model with it when the row becomes the primary.
 The **Reasoning effort** group (`ReasoningEffort`: None / Low / Medium / High) is a four-segment
-control whose segments show short labels and the prototype's bar glyphs, with the full name as each
-segment's tooltip, so all four fit at the window's minimum width. The effort is stored once and
+control whose segments show short labels and bar glyphs, so all four fit at the window's minimum
+width. The effort is stored once and
 applies uniformly to whichever provider is active; its default lives with the others in
 [`Defaults.Brain`](../Sources/JarvisCore/Config/Defaults.swift). The brain client raises None to Low,
 and the output budget to at least the Low budget, for Claude Code, whose provider descriptor carries
@@ -501,8 +494,8 @@ unrecognized provider/effort likewise uses its existing default rather than reac
 running `CoachDriver` applies valid brain edits atomically at the coaching-attempt boundary while
 transcript, client-managed history, audio pipeline, and session logs continue unchanged. A provider,
 model, or route-order edit, moving the primary included, replaces the route for the next attempt
-and resets the session-local cursor to the newly selected primary. This topology edit is the only way
-to revisit a target that automatic failover left behind. The old active provider is not retained as
+and resets the session-local cursor to the newly selected primary. Cycle recovery can also restart
+at the primary, subject to session-long permanent exclusions. The old active provider is not retained as
 a hidden fallback; it remains available only when the user includes it in the new list.
 
 A reasoning-effort edit instead rebuilds the clients at the current forward-only cursor and preserves
@@ -556,7 +549,7 @@ progress stays out of the coaching conversation.
 
 ## Skills
 
-The Skills page shows one card per bundled coaching skill (`SkillCatalog.bundled()`; there are four),
+The Skills page shows one card per bundled coaching skill (`SkillCatalog.bundled()`),
 titled from the skill's folder name (`Skill.displayTitle`) and described by its `SKILL.md`
 `description` verbatim, so the text the model reads and the text the user reads have one source.
 Every card uses the same sparkles icon. Each card has its own switch and reads **EQUIPPED** or
@@ -741,7 +734,7 @@ own provider.
 What `capture_screen` shoots, chosen on the Eye page — one dropdown covering both the scope and, for
 entire-display capture, the display: **Active window (recommended)** plus one **Entire display**
 entry per connected display. Active-window mode reads the window server's single front-to-back z-order at capture time
-(`WindowScopedScreenCapture` in `JarvisApp/Capture`, with the pick itself pure logic in Core's
+(`WindowScopedScreenCapture` in `JarvisScreenCapture`, with the pick itself pure logic in Core's
 `FrontWindowSelector`) and shoots the window the user last clicked or typed into — whichever
 display it lives on — via `screencapture -l`, which reads the window's own backing image (clean
 even when partially covered; `-o` omits the shadow). Jarvis's own windows, non-app layers (dock,

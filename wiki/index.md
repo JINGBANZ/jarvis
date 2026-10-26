@@ -11,16 +11,16 @@
 ## Core Pages
 
 - **[architecture.md](./architecture.md)** — the vision, the harness loop, components, data flow, the models/APIs rationale, resilience, safety, and design principles. The design *why*; the *what* lives in `Sources/`.
-- **[build-and-run.md](./build-and-run.md)** — the operational *how*: toolchain (SwiftPM + Command Line Tools, Xcode optional), the three-target split (Core/Overlay/App), swift-testing, packaging/signing and why TCC grants persist, running, and the activity viewer.
+- **[build-and-run.md](./build-and-run.md)** — the operational *how*: toolchain (SwiftPM + Command Line Tools, Xcode optional), the library/executable boundaries, swift-testing, packaging/signing and why TCC grants persist, running, and the activity viewer.
 - **[test-command-ownership.md](./test-command-ownership.md)** — one retained test-display identity per Mac, whole-command admission across worktrees, exact process teardown, terminal uncertainty, and finite rollout evidence.
 - **[transcription-benchmark.md](./transcription-benchmark.md)** — the explicit signed-app transcription regression harness: fixed synthetic inputs, the standard, scoped-reconnect, and two-turn session modes, deterministic scoring, privacy boundaries, result interpretation, and when to run it.
 - **[live-e2e-tests.md](./live-e2e-tests.md)**: the one-command live run of the signed app through scripted interview scenarios, with its prerequisites, results vocabulary, evidence rules, case index, and the manual checks that stay outside it.
 - **[sandbox.md](./sandbox.md)** — the security/isolation model (file-access restriction, entitlements, egress, server-side retention tradeoff).
-- **[overlay-invisibility.md](./overlay-invisibility.md)** — how the coaching overlay stays out of screen recordings and screen shares (the `sharingType = .none` mechanism), with empirical verification on macOS 26.5 and the limits.
-- **[landscape-survey.md](./landscape-survey.md)** — every tool and product we tried or evaluated, and how each measured up. ("What I tried.")
-- **[fork-evaluation.md](./fork-evaluation.md)** — code-level evaluation of open-source apps as a fork base for the PoC, and why they're all Electron/Tauri rather than native Swift.
+- **[overlay-invisibility.md](./overlay-invisibility.md)** — how the coaching overlay stays out of screen recordings and screen shares (the `sharingType = .none` mechanism), with validation layers and receiving-app evidence requirements.
+- **[landscape-survey.md](./landscape-survey.md)** — the proactive-assistant requirement and reference-selection criteria behind building Jarvis.
+- **[fork-evaluation.md](./fork-evaluation.md)** — the native Swift build-versus-fork decision and the limits of borrowing capture and overlay implementations.
 - **[settings-window.md](./settings-window.md)** — the unified Settings window: one menu item → `SettingsWindow`, which opens on a hub drawn as Jarvis's head with live status per part, computed in Core by `RobotHub`. The brain, ear, eye, and mouth open Brain (the ordered coaching route and reasoning effort), Ear (transcription provider/model/expected-language list or Apple locale), Eye (active window or an entire display for `capture_screen`), and Mouth (the Overlay Box); the dock opens Connections (API keys and the Codex and Claude Code sign-ins), Tools (References and its sources), Skills (one switch per coaching skill), Activity, and General (Shortcuts and Privacy).
-- **[lean-coaching-core.md](./lean-coaching-core.md)** — the approved issue #147 target architecture and phased roadmap: one critical coaching lane, one shared `SessionEvidence` stack with Activity and agent projections, capture heartbeat, preserved fresh-attempt routing, and the per-slice implementation contracts every phase was reviewed against.
+- **[lean-coaching-core.md](./lean-coaching-core.md)** — the critical coaching lane, state ownership, immutable plan boundaries, capture heartbeat, and isolation of optional evidence and offline work.
 - **[session-audit.md](./session-audit.md)** — the one session-evidence stack: typed producer ports, one bounded worker and per-session handle, the Activity and session-folder projections, Start/Stop/Quit ownership, the uniform loss contract, completeness evidence, and the evaluator boundary.
 
 ## Meta

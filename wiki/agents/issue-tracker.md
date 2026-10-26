@@ -37,8 +37,8 @@ being worked automatically.
 
 ## Numbers are shared with PRs, and PRs dominate
 
-GitHub draws issues and PRs from one sequence. This repo has 27 issues against 157 PRs, so an
-unqualified `#142` is much more likely a PR. Resolve with `gh pr view <n>`, falling back to
+GitHub draws issues and PRs from one sequence. An unqualified number does not establish its type.
+For a likely PR, resolve with `gh pr view <n>`, falling back to
 `gh issue view <n>` — not the other way round.
 
 ## Pull requests as a triage surface

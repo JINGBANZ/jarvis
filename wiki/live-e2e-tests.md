@@ -68,8 +68,8 @@ The run is not:
 - **A transcription accuracy comparison.** The benchmark owns isolated recognition comparisons and
   reconnect. Scenario L verifies that bilingual speech from both speakers reaches real coaching on
   every remote transcription target.
-- **A UI test.** Nothing asserts on Settings, the menu, or overlay rendering. Overlay rendering and
-  capture exclusion are covered by the overlay tests in the Gate.
+- **A UI test.** Nothing asserts on Settings, the menu, or overlay rendering. Overlay rendering has Gate coverage; capture protection needs the separate
+  [validation layers](./overlay-invisibility.md#validation-layers), including signed-app and receiving-app checks.
 - **A way to force rare paths.** A real model cannot be made to hit the response cap, load inside a
   failed attempt or call an unknown name on purpose, and the recovery cooldown
   and ceiling need a clock the run does not control. Those stay in scripted-brain tests in the Gate.
@@ -445,7 +445,7 @@ must not be reported as proof of grounded answer content.
 | G04 | The screen gate captures once, only when needed, and passes the recognized text | A: the first press and the explicit return to the coding screen; none on stated questions |
 | G05 | A deliberate no-op is visible | A: the interviewer's logistics line |
 | G06 | Each shortcut works, and a second press advances | A: the two hint presses and the Show code press |
-| G07 | Overlays are excluded from screenshots | Offline, in the Gate |
+| G07 | Overlay capture protection | Separate [capture checks](./overlay-invisibility.md#validation-layers); skipped by this command |
 | G08 | Stop ends cleanly, the evidence seals, and no subscription helper outlives the app | Every scenario |
 | G09 | Evaluate works on the stopped session | `--evaluate`, on A's session, with Codex by default |
 | G10 | The development menu has no update item | Dropped; `build-app.sh` strips the feed |
@@ -540,8 +540,9 @@ it as unverified in its description.
 - **Audio-route switch,** because it needs a real device change. Switch devices mid-session and confirm
   Activity says listening continues, the next turn includes any unsent speech, and capture recovers
   without rotating the session.
-- **Overlay toggles,** because they live in Settings and persist across launches. Toggle each overlay,
-  confirm its controls and preview follow the toggle, and confirm the choice survives relaunch.
+- **Overlay appearance and visibility,** when the Mouth page or panel lifecycle changes. Adjust the
+  appearance controls and confirm preview behavior and persistence after relaunch. Confirm Start
+  shows the cleared box, collapse/expand preserves content, and Stop hides it. The box has no off switch.
 - **Session lifecycle in the app,** because the live e2e mode has no menu, Settings, or Activity window.
   Start, Stop, and restart immediately; apply a Settings change to a running session and trigger a
   failed preflight; browse a finished session in Activity.
