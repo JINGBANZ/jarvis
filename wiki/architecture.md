@@ -5,16 +5,11 @@
 > `Sources/JarvisCore/` (`Prompts/`, `Coach/Tools/`, `Config/Config.swift`).
 
 > **Scope:** This page describes the **native Swift app**, built directly rather than on a fork of
-> an existing tool; why no existing product or open-source base fit is the record in
+> an existing tool; the selection criteria and build-versus-fork rationale are in
 > [landscape-survey.md](./landscape-survey.md) and [fork-evaluation.md](./fork-evaluation.md).
-> Exact schemas, the coach prompt, and config are **not duplicated here** — they live in code
-> (`Sources/JarvisCore/`, especially `Prompts/`, `Coach/Tools/`, and
-> `Config/Config.swift`); this page is
-> the *why*, the code is the *what*.
 
 > The cross-cutting contract for isolating optional runtime work is
-> [lean-coaching-core.md](./lean-coaching-core.md); every phase of its roadmap is built, and this
-> page describes the resulting runtime.
+> [lean-coaching-core.md](./lean-coaching-core.md).
 
 ## 1. Vision
 
@@ -131,7 +126,7 @@ moments the model judges worthwhile.
    keeps the complete finalized transcription. Context-dependent short replies such as "Yes", "No",
    "Okay", "对", and "可以" fail open for either speaker, as do unknown short fragments. Interviewer
    questions remain first-class and may draw a proactive tip. Consumed noise never rides into a
-   later request; silence checks and both coaching shortcuts always go through. The gate is a small explicit
+   later request; silence checks and all three coaching shortcuts always go through. The gate is a small explicit
    class on purpose: a classifier model would add latency and cost for it, and asking the
    transcription model to drop filler is not a deterministic boundary and would silently alter the
    audit record.
@@ -242,69 +237,19 @@ recover from; concatenating every skill into the prompt pays for all of them on 
 was what a single "general technical" skill existed to work around. The description is written for
 the model, with an example, because that line is all it sees before deciding.
 
-`customer-scenario-design` coaches enterprise workflow automation scenarios, including FDE/RRK
-customer role-play. Its description names that setting and an inbound-email example because selection
-sees only the catalog line. The generic name describes a question shape rather than one employer;
-the explicit workflow scope prevents it from claiming generative media/content creation coverage.
-An ordinary URL-shortener question belongs to `system-design`. Manufacturing can supply the customer
-context for an inspection workflow; it is not a separate interview category.
+The bundled skill files own domain coaching policy. In particular,
+[`customer-scenario-design`](../Sources/JarvisCore/Resources/Skills/customer-scenario-design/SKILL.md)
+covers enterprise workflow-automation role-play. It remains independent of `system-design` because
+customer discovery and scope agreement need their own staging; loading a mandatory companion would
+introduce a competing progression and unnecessary context. Personal examples belong in optional
+References rather than bundled guidance.
 
-The skill is standalone: understand today → agree scope → sketch and walkthrough → focused deep
-dives → evaluate → rollout, with a symptom-driven troubleshooting branch. Explicit requests and spoken transitions determine the current segment, not elapsed time.
-If `system-design` is also loaded, the customer-scenario skill owns staging while that role-play
-continues. Loading it as a mandatory companion was rejected because the
-requirements/entities/API progression would compete with customer discovery and add unnecessary
-context. A compact copy of the supported diagram vocabulary keeps architecture hints self-contained;
-the parser still owns the grammar and limits. A warranted flow hint starts with a small overview,
-then a warranted follow-up expands the relevant part. Both preserve decision branches and explicit
-approval or safety gates before risky actions. These are private sketches, never assumed edits to
-the customer's shared drawing.
-
-Guidance follows one customer item from current work through decisions and error costs to the proposed
-system. Delivery defaults to the next usable cue: discovery asks one next question, with a short
-reason when helpful; playback frames the problem, goal, and boundaries with a scope confirmation;
-overload replaces the earlier explanation with one plain sentence and one next move while preserving
-approval and safety constraints. Full scripts require an explicit request and begin with a short complete plain-English answer.
-Guided practice identifies the current step and one next move. After a complete scenario or substantive
-customer answer, consulting coaching uses the evidence to select the next unresolved question without
-requiring a help request. When the problem, goal, feasible first slice, and human boundaries are clear,
-it cues a recap and scope recommendation instead of exhausting a discovery checklist. Material gaps
-still need clarification; incidental missing numbers do not block the recap. Only the candidate's
-explicit request to pause Jarvis coaching makes a mock uncoached; the interviewer's feedback arrangement
-does not. Useful candidate follow-ups, acknowledgments, and still-unanswered cues call for silence.
-A short recap precedes scope agreement. Discovery evidence and its material unknowns ground the design,
-deep dives and evaluation; history briefings retain those decision-relevant facts and distinguish
-customer agreement from coach proposals. Corrections supersede older facts without fabricating answers.
-The candidate sketches while explaining, then walks a concrete case through what happened,
-what evidence is checked, what it means, and the resulting action. Coaching distinguishes accurate
-extraction from a justified business decision. Corrections require code recalculation, refreshed
-drafts and renewed approval; capacity claims use measured human effort and actual adoption rather
-than draft coverage. Expansion keeps the agreed approval requirements; changing authority is a
-separate decision.
-Design proposes one missing
-mechanism and its consequence; evaluation ties a metric, slice, or failure mode to the customer's risk.
-The domain sections supply a silent knowledge checklist, and productive progress calls for silence.
-Deterministic rules handle known paths, with bounded agent steps where judgment is needed.
-The skill covers workflow state, runtime
-choice, integrations, human approval, recovery, security, capacity/cost, evaluation, and versioned
-change. It adapts to explicit requirements instead of prescribing an agent, retrieval, or durable
-engine for every problem. General cloud knowledge is sufficient; vendor names are optional.
-
-The body targets 15 KB so a loaded skill remains usable under time pressure. It compresses repeated
-explanation and example scripts, omits the generative-content scenario, and keeps workflow mechanisms
-and their failure modes. Timings, sample sizes, routing shares, and rollout thresholds are illustrative;
-none establish company policy, universal statistical confidence, or a customer's measured baseline.
-Personal stories, previous practice designs, scores, and debriefs remain in optional References.
-Missing notes leave generic coaching available without fabricated personal history; invalid skill
-files and disabled skills retain the catalog's existing degradation behavior.
-
-Catalog tests cover loading, deferred body delivery, disabling, and content/size smoke checks.
-The customer cases in [the instruction regressions](../Tests/JarvisLiveTests/Scenarios/coaching-quality.json)
-cover stage boundaries, workflow failure mechanisms, silence, and unrelated-question controls.
-Their [review guide](../Tests/JarvisLiveTests/Scenarios/coaching-quality-review.md) separates semantic
-coaching evidence from catalog selection and signed-app validation; keyword assertions alone do not
-establish coaching quality. No runtime classifier, new tool, round setting, or personal material is
-needed for this skill.
+Catalog tests verify loading, deferred delivery, disabling, and content/size boundaries. Semantic
+coaching cases live in
+[`coaching-quality.json`](../Tests/JarvisLiveTests/Scenarios/coaching-quality.json); its
+[review guide](../Tests/JarvisLiveTests/Scenarios/coaching-quality-review.md) distinguishes advice
+quality from catalog selection and signed-app delivery. Keyword assertions alone cannot establish
+coaching quality.
 
 A load belongs to the attempt that made it and becomes session state only when that attempt commits
 a turn. An attempt that fails simply loads again, at the cost of one round trip, and in exchange
@@ -710,8 +655,8 @@ built-in mic.
 
 ### Onboarding
 
-A new install can't coach without an API key and the three macOS grants, so `OnboardingGate`
-collects both before `AppDelegate` builds the rest of the app. It runs once: completing it sets
+`OnboardingGate` collects the credentials required by the selected setup and the three macOS
+grants before `AppDelegate` builds the rest of the app. It runs once: completing it sets
 `OnboardingPreferences.isCompleted`, and every later launch goes straight to the menu bar without
 probing anything. The flag records completion, never a key or a grant; those are always read live.
 After onboarding, a missing key, Microphone, or Screen Recording grant shows as needing the user on
@@ -1026,8 +971,8 @@ rather than a per-turn screenshot.
 - **Gemini brain: the selected Gemini Flash model via Google's Interactions API.** See
   [Gemini API target](#gemini-api-target).
 - **Per-session memory — client-managed (`CoachHistory`).** The coach needs to remember its *own*
-  prior replies (the transcript only holds user speech), so `CoachDriver` keeps the session memory
-  itself. `CoachContext` composes immutable instructions and tools, `SessionContext`,
+  prior replies (the transcript only holds user speech), so `CoachAttemptRunner` owns the session
+  memory. `CoachContext` composes immutable instructions and tools, `SessionContext`,
   committed memory, and the current attempt's delta in that order. A load's original call and result
   are the model-facing evidence that it is loaded; the runner's internal loaded set commits with
   that evidence and answers duplicate loads without repeating the body. A reminder excluded from
@@ -1083,49 +1028,16 @@ rather than a per-turn screenshot.
 - **Coaching guidance is loaded on demand, not chosen at Start** (see
   [Capabilities](#capabilities) for the mechanism). The prompt holds Jarvis's identity, its action
   policy, and the guidance of its always-on tools; everything else is a one-line catalog entry the
-  model loads when the question calls for it. Five skills ship: behavioral shapes candidate-owned
-  experience answers with STAR, handles personal and hypothetical questions directly, preserves
-  reference caveats, and reserves labeled fictional examples for an explicit practice request.
-  It avoids refining an answer that is already concrete and complete; coding covers representation and invariant guidance,
-  local implementation and defect diagnosis, workload-grounded performance reasoning, and
-  discriminating tests with explicit expected results. Understanding questions precede implementation
-  detail, and ambiguous requirements are resolved before labeling a design a bug. Boundary tests
-  remain available for a post-completion hint the base policy already warrants; coding-with-ai adds
-  guidance for directing another AI, reviewing its proposals, challenging an approach against constraints, distinguishing adopted code and execution
-  evidence, verifying counterexamples, and checking minimal fixes against reproducing and regression
-  cases. Verification reminders follow changed evidence or impending unsupported completion rather
-  than repeating during learning; delegated prompts leave routine algorithm steps to the other AI.
-  Instruction-level regression inputs and their semantic criteria live in
-  [`coaching-quality.json`](../Tests/JarvisLiveTests/Scenarios/coaching-quality.json), with evaluation
-  limits in the [review guide](../Tests/JarvisLiveTests/Scenarios/coaching-quality-review.md).
-  It composes with coding when offered and applies only once AI collaboration is established:
-  the candidate is using a coding assistant, or the interviewer or candidate has said it is allowed.
-  A visible assistant panel alone is a hint, not that establishment. Its separate catalog entry keeps
-  that workflow conditional without a round or seniority setting
-  (see [`coding-with-ai`](../Sources/JarvisCore/Resources/Skills/coding-with-ai/SKILL.md)).
-  Customer-scenario-design supplies workflow-automation discovery, architecture, evaluation, and
-  change guidance for enterprise customer role-play (see [Capabilities](#capabilities)).
-  System-design supplies the stage vocabulary from requirements through trade-offs and checks
-  state ownership, durable background-work creation, replenishment, and recovery against the current
-  requirements. It targets the highest-impact missing mechanism at the current stage and asks for
-  a diagram in the one stage that benefits. An explicitly requested stage takes precedence over
-  screen notes; generic hints continue the stage established in conversation. Warranted stage-entry
-  hints provide a usable starting structure and one next move. Architecture flow hints include a
-  compact diagram in detail, including on the ordinary hint shortcut, because naming disconnected
-  steps leaves the candidate to assemble the design under pressure. They identify application-work
-  and durable-write ownership before suggesting connections, without forcing redundant services.
-  Deep dives keep the current question, operation and retry boundary distinct; alternatives are
-  explained before replacing the candidate's approach. Scaling hints locate batching and parallelism
-  in that approach and explain the work saved and latency trade-off. Expressed confusion prompts a
-  small worked example immediately rather than repeated terminology or an extra shortcut press.
-  Productive progress remains silent; these are skill instructions, not runtime stage tracking. Canvas navigation controls are
-  interface state and become the answer when navigation is what the candidate asks for; an unseen
-  drawing calls for a conversation-grounded hint with its visual limitation stated. Unresolved
-  requirements call for a specific question the candidate can put to the interviewer, without needing
-  to answer Jarvis during the interview. The base prompt keeps what is
-  true of every session: when to speak or stay silent, hint length, and comprehension before
-  strategy. Finishing code alone still does not trigger a hint, and there is no runtime classifier
+  model loads when the question calls for it. The bundled catalog is in
+  [`Resources/Skills`](../Sources/JarvisCore/Resources/Skills/); those files own the domain policies
+  for behavioral, coding, coding-with-ai, customer-scenario-design, and system-design questions.
+  The base prompt owns the common action policy and restraint. There is no runtime stage classifier
   or persisted question classification.
+
+  `coding-with-ai` is conditional on established AI collaboration rather than a visible assistant
+  panel alone; its separate catalog entry keeps that workflow optional without a round or seniority
+  setting. It composes with `coding` when both apply. Instruction regressions and semantic review
+  limits live in the [coaching-quality review guide](../Tests/JarvisLiveTests/Scenarios/coaching-quality-review.md).
 
   A skill body describes a *kind of question*, never "this session", because a load can arrive
   mid-interview into a discussion that has already been about something else. New skills need only a
@@ -1754,7 +1666,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
   pipeline down entirely. Cost is accepted as tracking usage for now (a future improvement, not a
   v1 guardrail).
 
-## 6. Non-Goals (v1)
+## 6. Non-Goals
 
 - A tiered sensitivity dial, or code-level coaching modes with separate trigger gates or
   runtime state. One harness spans behavioral, system-design, and coding questions; the model loads

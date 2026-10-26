@@ -7,8 +7,8 @@
 
 Two layers below are **not OS-enforced** in the current build:
 
-- **No App Sandbox.** The app is **unsandboxed**, signed with a **stable self-signed identity
-  (`Jarvis Dev`)** — not ad-hoc, so TCC grants persist across rebuilds (see
+- **No App Sandbox.** The app is **unsandboxed**, signed with a stable identity: self-signed
+  `Jarvis Dev` for local builds and Developer ID for releases, so TCC grants persist across matching builds (see
   [build-and-run.md](./build-and-run.md)). Screen Recording, Microphone, and System Audio Recording
   are granted via **TCC prompts at first launch**
   ([architecture.md](./architecture.md#permissions)). Consequence: the app has the filesystem authority of the signed-in
@@ -74,36 +74,28 @@ membership, first-use pins, and Stop/Quit ownership.
 
 The source repository is public, so its automation treats public input as untrusted and gives it no
 direct path to a credential-bearing agent. CI, release, and agent workflows run only on GitHub-hosted
-runners, and no self-hosted runner is registered. The Claude review workflow runs only on
+runners, and no self-hosted runner is registered. When enabled, the Claude review workflow accepts only
 same-repository pull request branches, and `@claude` answers only the repository owner
 (`.github/workflows/claude-code-review.yml`, `.github/workflows/claude.yml`). CodeRabbit reviews every
 pull request, forks included, as a GitHub App that receives no repository secret. Issue Opener runs on
 a schedule or manual dispatch, and Issue Worker acts only for authors with write access, a check the
 shared workflow owns. The reusable agent workflows track `JINGBANZ/workflows` at `main`; third-party
-Actions are SHA-pinned and updated weekly by Dependabot. A full-history secret scan found no leaked
-credential, so the Git history is kept rather than rewritten.
+Actions are SHA-pinned and updated weekly by Dependabot. Live workflow enablement is repository
+state; inspect it with `gh workflow list --all` as [issue-tracker.md](./agents/issue-tracker.md)
+describes. Credential-scan results belong in their audit evidence.
 
 ## Layers
 
-### 1. App Sandbox (OS-enforced) — *hardened model; relaxed in the current build*
+### 1. App Sandbox — future design boundary
 
-> **Current build:** App Sandbox is **off**; the app is signed with a stable self-signed identity
-> (`Jarvis Dev`) and relies on TCC prompts. The description below is a future target, not a claim
-> about the downloadable or locally built app. It requires explicit design work for the bundled helpers,
-> selected reference files, session storage, and the `screencapture` helper before it can be enabled.
+App Sandbox is off in both development and release builds. The current entitlements are defined in
+[`Resources/Jarvis.entitlements`](../Resources/Jarvis.entitlements); the hardened-runtime microphone
+entitlement is separate from App Sandbox and does not confine filesystem access.
 
-The app ships with the macOS App Sandbox enabled and requests **only** the entitlements it needs:
-
-- Screen recording (for `capture_screen` / ScreenCaptureKit).
-- Microphone / audio input.
-- Outbound network (to reach selected remote providers; Apple manages Speech model downloads).
-
-System-audio process-tap access is separately purpose-described in `Resources/Info.plist` and gated
-by TCC; it is not a general filesystem entitlement.
-
-It requests **no** general filesystem entitlement. It cannot read the user's documents, browser
-data, or home directory. The only files it touches are its own sandbox container and transient
-screenshot temp files it creates and deletes.
+Enabling App Sandbox requires explicit design work for bundled helpers, selected reference files,
+session storage, and the `screencapture` helper. A future design must specify those access paths and
+validate them in the signed app before claiming OS filesystem isolation. TCC capture grants remain
+separate permission checks; they do not establish an App Sandbox boundary.
 
 ### 2. Restricted macOS User Account (optional development hardening)
 
@@ -111,11 +103,10 @@ screenshot temp files it creates and deletes.
 > but **not** an OS file-access boundary. The agent is instructed to confine all writes to the
 > worktree. The description below is recommended before any long *unattended* autonomous run.
 
-The hardened requirement: run the autonomous build agent inside a **separate, low-privilege
-(Standard, non-admin) macOS user account** — never the user's primary account — so that *no file on
-the user's main account is readable or writable by the build agent*. A separate account is a hard OS
-boundary; the agent's reach is confined to that throwaway account's home folder, bounding the blast
-radius of both the build agent and the running app.
+For optional hardening, run the autonomous build agent inside a **separate, low-privilege
+(Standard, non-admin) macOS user account** — never the user's primary account — to separate its home-directory access from the primary account. Standard account permissions
+provide an OS boundary for private files, but shared locations and files readable by other users
+remain accessible; a separate account is not confinement to its home directory.
 
 Create one through **System Settings → Users & Groups → Add User → Standard**, then run the build
 agent as that user. Any required administrator setup remains a separate, explicit operator action.
@@ -135,11 +126,8 @@ don't have this problem: they key to the stable signing identity, not the `cdhas
 to avoid the re-prompt are an
 Apple Developer Team ID (stable `teamid:` partition) or moving off the Keychain. A `0600` file has
 the same practical trust boundary as the `OPENAI_API_KEY` headless fallback — any process running as
-this user can read it — but never prompts and survives every rebuild. If Jarvis ever ships under a
-real Developer ID, revisit this and move the key back into the Keychain.
-
-Upgrading from an older Keychain build: the key isn't migrated — re-paste it once (the file starts
-empty), and optionally delete the now-orphaned item with `security delete-generic-password -s com.jarvis.coach`.
+this user can read it — but never prompts and survives every rebuild. Release builds use Developer ID, but both variants currently share the same file-based store.
+A Keychain change would need to define access for both signing identities and existing credentials.
 
 The subscription sign-ins are the same class of secret and live beside the key under
 `~/Library/Application Support/Jarvis/proxy/`, all `0700` directories: `auth/` holds the OAuth token
@@ -286,8 +274,9 @@ directory under the build-specific base defined by
 [`SessionStore.baseDirectory`](../Sources/JarvisCore/Diagnostics/SessionStore.swift), following the
 [history isolation contract](./build-and-run.md#the-live-activity-viewer), at **`0600`**
 owner-only permissions inside a **`0700`** dir, **fresh each session**, and **never `/tmp`**
-(world-readable, shared across user accounts). Growth is bounded: each Start prunes to the **10 most recent** session
-dirs, and the viewer's clear-history removes all but the current. So the persisted record is small, owner-only, and
+(world-readable, shared across user accounts). Retention runs asynchronously after Start;
+`SessionArtifacts` owns the retained count and protects current and still-closing sessions. The
+viewer's Clear history also preserves protected sessions. So the persisted record is small, owner-only, and
 readable by this user account and by nothing else. See [build-and-run.md](./build-and-run.md).
 
 Build identity lives in the session directory name, with its validation defined by
@@ -302,13 +291,15 @@ failed, cancelled, or incomplete extraction takes its directory with it.
 
 ## Behavioral Restraint (anti-annoyance = anti-misbehavior)
 
-- **Model-governed restraint.** There is **no cooldown, rate cap, or mute** in code. Every utterance
-  reaches the brain, which decides whether it has
+- **Model-governed restraint.** There is **no coaching cooldown or rate cap during healthy operation**. Substantive speech
+  reaches the brain under the [admission rules](./architecture.md#the-turn), and the model decides whether it has
   anything worth saying — that restraint lives in the system prompt. This keeps conversation natural
-  (a follow-up question is never stranded behind a timer). See [architecture.md §5](./architecture.md#5-safety-model).
+  during healthy operation. Provider failures use the finite
+  [cycle recovery cooldown and terminal limits](./architecture.md#ordered-provider-route).
 - **Manual Start/Stop** in the menu bar — the only hard gate. Coaching never runs until started, and
   Stop tears the pipeline down entirely.
-- **Visible "listening" indicator** — the user always knows when Jarvis is active (also a consent cue).
+- **Menu-bar readiness indicator** — the current state distinguishes listening from startup, recovery,
+  and blocked operation (see [Components](./architecture.md#3-components)).
   Cost is accepted as tracking usage for now (a future improvement, not a v1 guardrail).
 
 ## Consent Note

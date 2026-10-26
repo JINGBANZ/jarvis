@@ -15,8 +15,8 @@ The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Lin
 no Xcode project exists. CI uses the hosted runners' selected Xcode toolchains. Developer desktops
 also have full Xcode and the Xcode MCP,
 whose macOS workflow builds, launches, stops, and reads logs, so an agent may drive the app that way;
-the scripts use `open`. The live e2e tests assume the three TCC grants, an OpenAI key and a Gemini
-key saved in the secrets file, and Codex and Claude Code signed in from Settings → Connections.
+the scripts use `open`. The [live-test prerequisites](./live-e2e-tests.md#prerequisites-and-standing-conditions) depend on
+the selected scenarios and coaching provider.
 
 Pull-request CI covers multiple macOS environments because AppKit and toolchain behavior can differ
 across them; see [`ci.yml`](../.github/workflows/ci.yml) for the matrix, required-check wiring, and
@@ -400,9 +400,8 @@ omits the item rather than offering an action that a self-signed build could nev
   controls directly or quit the other variant when testing the shortcut.
 - Jarvis does **not** auto-start: choose transcription and Primary brain providers in Settings, meet
   their credential or local sign-in requirements, then **Start / Stop** from the menu. API keys are
-  saved to owner-only files; `OPENAI_API_KEY` and `GEMINI_API_KEY` are headless fallbacks. The icon is a quiet
-  monochrome tile while stopped and a lit Listening Lens in every other state: amber while starting or
-  reconnecting, violet once ready, red when a Start is blocked by a requirement needing attention.
+  saved to owner-only files; `OPENAI_API_KEY` and `GEMINI_API_KEY` are headless fallbacks. The menu icon and readiness states follow
+  [the MenuBar component contract](./architecture.md#3-components).
 
 The signed harnesses share [`scripts/lib/harness.sh`](../scripts/lib/harness.sh) for fresh owner-only
 run directories under the checkout's `.jarvis/` tree and bounded waits for result files. Each harness
@@ -462,16 +461,17 @@ runtime). It also sidesteps the `file://` `fetch()` restriction that forced the 
   persisted as owner-only `jarvis-activity.jsonl` + `shot-N.jpg`; the same directory contains
   `coaching-attempts.jsonl` for evaluator-only trigger/delta/outcome provenance and
   `brain-traffic.jsonl` for redacted wire evidence. Past runs can be browsed and the history cleared
-  from the viewer. Old sessions are pruned to the most recent few at each Start.
+  from the viewer. Retention runs asynchronously after Start and protects current and still-closing sessions;
+  `SessionArtifacts` owns the retained count.
 - [`SessionDirectoryID`](../Sources/JarvisCore/Diagnostics/SessionDirectoryID.swift) puts the release
   version or development identity in the session directory name, beside its timestamp and random
   suffix. Start only constructs that name in memory and creates its usual session directory; there
   is no separate version-file write or version-dependent failure gate. Timestamp-only historical
   sessions remain readable with unknown version identity. Activity, retention, and the terminal
   evaluator order by the timestamp portion, so a version prefix cannot reorder history.
-- **The viewer and its file logging are always on** (they used to be `--dev`-gated; that flag is gone).
-  On every Start, `ActivityLog` writes the coaching exchange to `jarvis-activity.jsonl` while `jlog`
-  writes agent-facing diagnostics to the unified log (Console.app) and `jarvis-debug.log`. Both files
+- **Session evidence is always enabled.** On every Start, producers submit Activity and diagnostics
+  through the [shared evidence worker](./session-audit.md), which owns persistence and Console
+  emission. `ActivityLog` is the in-memory projection, and `jlog` is diagnostic admission. Files
   use the base selected by
   [`SessionStore.baseDirectory`](../Sources/JarvisCore/Diagnostics/SessionStore.swift): development
   history belongs to the checkout containing the running bundle, while releases use per-user app
