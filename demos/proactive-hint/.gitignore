@@ -1,0 +1,8 @@
+node_modules/
+assets/
+.hyperframes/
+.media/
+.thumbnails/
+snapshots/
+renders/
+dist/
