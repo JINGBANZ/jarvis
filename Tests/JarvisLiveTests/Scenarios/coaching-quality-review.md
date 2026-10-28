@@ -261,3 +261,39 @@ runs or a reliability estimate. They used full skill text but not the production
 loop. The probes establish an observed shape change, not guaranteed coaching quality; the fixture
 protocol above remains the production evaluation procedure. Gate checks catalog packaging and code,
 not these semantic outcomes. Rendering and visual checks are reported separately.
+
+## Discovery closure and automatic MVP checks
+
+The eight `customer-discovery-*` fixtures cover automatic closing, the last material gap, open-ended
+workflow exploration, recap precision, candidate-led closing, explicit design redirection, unchanged
+recommendation suppression and unresolved authority. Preserve normal interviewer clarification and
+steering: the closing-progress input ends with an explicit request for design, so a useful design cue
+or silence is acceptable; repeating the MVP or reopening discovery is not.
+
+Development probes on base `065f280` used two separate fresh-context subagents, each answering all
+eight inputs in one conversation. They read extracted production coach base text (loading omitted
+because the skill was preloaded), Speak tip/detail guidance, a JSON-action adapter using `hint`, and
+inputs without pass criteria. Both inherited the Codex host model; the exact provider snapshot was
+not exposed. Host instructions remained. These are single-pass development observations, not
+independent repeated trials, held-out transfer evidence, or production-provider/loader/rendering
+validation. Responses are recorded in the implementation chat.
+
+| Behavior | Baseline observation | Revised observation |
+| --- | --- | --- |
+| Automatic closing | Recognized sufficient coverage and gave a short proposed scope, but omitted the concrete journey. | “Discovery is sufficient—recommend the MVP now,” followed by the full journey, authority, exclusions, success, dependencies/fallback and confirmation. |
+| Last material gap | Asked who authorizes labels, detail null. | Asked the same question and supplied next-gap/readiness notes, but omitted known facts; this prompted the explicit instruction to retain key confirmed facts when available. |
+| Unresolved authority | Kept authority as the blocker. | Kept that blocker and separated it from assigned baseline/integration validation. |
+| Open workflow and recap accuracy | Asked about recent work and corrected units, population, percentile/endpoint and unagreed cancellation. | Preserved those behaviors without fabricated time or scope. |
+| Candidate close and design redirect | Followed the explicit design request without repeating the recommendation. | Preserved that transition; unchanged recommendation case stayed silent. |
+
+The closing-progress criterion was clarified after these observations to avoid treating the
+interviewer's explicit design request as a mandatory-silence case. No skill change was made to force
+that choice. Earlier exploratory probes used the older local checkout and the `lines` schema; they
+are not evidence for this final revision. The repository Gate checks packaging/code, not these
+semantic outcomes. Repeat the production-context protocol above for provider-level claims and test
+catalog selection separately. Fixtures contain only synthetic cases, not private session material.
+
+A final fresh-context agent checked the explicit known-facts adjustment using the same base and
+adapter: five last-gap samples retained confirmed facts beside the authority question and indicated
+closure after that decision; one closing sample supplied the automatic MVP with its journey and
+fallback. These samples shared one conversation and are not independent reliability measurements.
