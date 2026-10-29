@@ -7,6 +7,8 @@
 <p align="center">
   <a href="https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg"><img src="https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="Download the macOS version"></a>
   <a href="https://t.me/+-FDYU99oXTBlZmQx"><img src="https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&amp;logo=telegram&amp;logoColor=white" alt="Join us on Telegram"></a>
+  <br>
+  <sub>Apple silicon · macOS 14.2 or later</sub>
 </p>
 
 **Your voice-only AI agent. Like Jarvis for Tony Stark.** Think out loud, ask a question, or just
@@ -14,15 +16,6 @@ keep the conversation going. Jarvis listens to both sides, checks your screen wh
 offers a quiet nudge in a private on-screen overlay so you can stay focused on the conversation.
 Today, it helps you work through behavioral interviews, system-design discussions, and coding
 questions. No typing, no prompt box—just talk naturally.
-
-## Install Jarvis
-
-Jarvis runs on Apple silicon Macs with macOS 14.2 or later.
-
-[**Download the macOS version**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
-
-Open Jarvis from **Applications**, set up your providers in **Settings**, then select **Start
-Jarvis**. macOS will guide you through the permissions Jarvis needs.
 
 ## How it works
 

@@ -7,17 +7,11 @@
 <p align="center">
   <a href="https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg"><img src="https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="下载 macOS 版本"></a>
   <a href="https://t.me/+-FDYU99oXTBlZmQx"><img src="https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&amp;logo=telegram&amp;logoColor=white" alt="加入 Telegram 社区"></a>
+  <br>
+  <sub>Apple 芯片 · macOS 14.2 或更高版本</sub>
 </p>
 
 **你的纯语音 AI 助手，就像托尼·斯塔克的贾维斯。** 说出你的想法，随口问个问题，或是继续眼前的对话。Jarvis 会聆听双方的交流，在有帮助时查看屏幕，通过私密的屏幕浮层轻轻提醒，让你专注于对话本身。目前，它可以陪你梳理行为面试、系统设计和编程问题。无需打字，也没有提示词输入框，自然地说话就好。
-
-## 安装 Jarvis
-
-准备一台搭载 Apple 芯片、运行 macOS 14.2 或更高版本的 Mac，即可开始使用。
-
-[**下载 macOS 版本**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
-
-从 **Applications（应用程序）** 打开 Jarvis，在 **Settings（设置）** 中配置服务提供商，然后选择 **Start Jarvis（启动 Jarvis）**。macOS 会引导你授予 Jarvis 所需的权限。
 
 ## 工作原理
 
