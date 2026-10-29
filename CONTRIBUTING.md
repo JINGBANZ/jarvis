@@ -5,6 +5,9 @@ local-process boundaries. Small, testable changes are preferred.
 
 ## Developer setup
 
+The coding agent performs this setup and runs the tests. Human contributors are not expected to run
+tests manually.
+
 Use an Apple silicon Mac with macOS 14.2+, Swift 6, Python 3, and the
 [Command Line Tools](./wiki/build-and-run.md#toolchain). Keep a responsive logged-in macOS GUI session
 and run tests as your ordinary development account. A physical monitor and full Xcode are optional.
@@ -35,6 +38,8 @@ Do not delete the journal or lock, destroy the test display, use the hosted-CI w
 raw `swift test` to get around a refusal. Include the error when reporting a setup blocker.
 
 ## Before opening a pull request
+
+The coding agent completes this checklist:
 
 1. Complete [developer setup](#developer-setup) and read [`AGENTS.md`](./AGENTS.md).
 2. Create an isolated worktree on a feature branch; never commit directly to `main`.

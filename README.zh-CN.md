@@ -39,18 +39,12 @@ flowchart TD
 
 需要 Apple 芯片 Mac、macOS 14.2 或更高版本、Swift 6、Python 3 和 macOS
 [命令行工具](./wiki/build-and-run.md#toolchain)，并保持 macOS 图形会话登录。
-无需连接实体显示器；在无显示器的 Mac 上，共用测试显示器充当主屏幕，并在测试结束后保留。
 
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
 cd jarvis
-swift build && ./scripts/run-tests.sh
 ./scripts/build-app.sh --run
 ```
-
-测试显示器会自动初始化。请完成[开发环境设置](./CONTRIBUTING.md#developer-setup)，
-每次创建 PR 前运行完整的本地 Gate，并附上通过的输出。再次测试前请退出 `Jarvis Dev`。
-离线 Gate 不需要 API 密钥或录屏、录音权限。
 
 签名、权限和故障排查说明请参阅[构建与运行](./wiki/build-and-run.md)。
 
