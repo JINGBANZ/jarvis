@@ -168,11 +168,14 @@ import Testing
 
     @Test func aManualModePressStopsWaitingAfterTheGrace() async {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Start with the API.")])])
-        let (driver, _) = makeDriver(brain: brain, clock: ManualClock(now: 100))
+        let grace = Duration.milliseconds(50)
+        let (driver, _) = makeDriver(brain: brain, clock: ManualClock(now: 100), manualSettlementGrace: grace)
         driver.setMode(.manual)
         driver.updateTranscriptionWork(.pending(since: nil), for: .them)
 
+        let pressedAt = ContinuousClock.now
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(ContinuousClock.now - pressedAt >= grace, "the deadline, not settlement, must end the wait")
         #expect(brain.calls.count == 1)
     }
 
