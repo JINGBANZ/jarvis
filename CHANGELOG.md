@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.10](https://github.com/JINGBANZ/jarvis/compare/v0.5.9...v0.5.10) (2026-10-29)
+
+
+### Features
+
+* **shortcuts:** add a start-new-session hotkey ([#475](https://github.com/JINGBANZ/jarvis/issues/475)) ([a88fa1e](https://github.com/JINGBANZ/jarvis/commit/a88fa1e16d1e0fd81ef7efd49f9fe94cbaf10b31))
+* **website:** add a simple settings-themed landing page ([#481](https://github.com/JINGBANZ/jarvis/issues/481)) ([5b902e7](https://github.com/JINGBANZ/jarvis/commit/5b902e74bf61a66b3980ac86226574ccaf013acf))
+
+
+### Bug Fixes
+
+* **build:** support the swift 6.4 build backend in app and test scripts ([#477](https://github.com/JINGBANZ/jarvis/issues/477)) ([73cda08](https://github.com/JINGBANZ/jarvis/commit/73cda086782896a40a0383ca8d3bf18e73c74512))
+* **test:** retain the shared display and require the local gate ([#482](https://github.com/JINGBANZ/jarvis/issues/482)) ([adcea81](https://github.com/JINGBANZ/jarvis/commit/adcea815edf00ba12615ffeb1c47246db54489d5))
+
 ## [0.5.9](https://github.com/JINGBANZ/jarvis/compare/v0.5.8...v0.5.9) (2026-10-25)
 
 
