@@ -7,7 +7,8 @@ import Testing
         brain: BrainClient,
         activity: (any ActivityEventRecording)? = nil,
         clock: ManualClock = ManualClock(),
-        manualSettlementGrace: @escaping CoachDriver.ManualSettlementGrace = {}
+        manualSettlementGrace: Duration = .zero,
+        automaticAttemptDelay: @escaping CoachDriver.AutomaticAttemptDelay = { _ in }
     ) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let target = BrainTarget(
@@ -19,7 +20,7 @@ import Testing
                 ConfiguredBrainTarget(target: target, brain: brain),
             ]),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: clock,
-            automaticAttemptDelay: { _ in },
+            automaticAttemptDelay: automaticAttemptDelay,
             manualSettlementGrace: manualSettlementGrace,
             activity: activity)
         return (driver, transcript)
@@ -150,7 +151,7 @@ import Testing
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Ask about read volume.")])])
         let (driver, transcript) = makeDriver(
-            brain: brain, clock: clock, manualSettlementGrace: { try await Task.sleep(for: .seconds(60)) })
+            brain: brain, clock: clock, manualSettlementGrace: .seconds(60))
         driver.setMode(.manual)
         transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 1))
         driver.updateTranscriptionWork(.pending(since: 2), for: .them)
@@ -179,7 +180,7 @@ import Testing
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Start with the API.")])])
         let (driver, _) = makeDriver(
-            brain: brain, clock: clock, manualSettlementGrace: { try await Task.sleep(for: .seconds(60)) })
+            brain: brain, clock: clock, manualSettlementGrace: .seconds(60))
         driver.setMode(.manual)
         clock.advance(by: 3)
         driver.updateTranscriptionWork(.pending(since: 5), for: .me)
@@ -191,10 +192,135 @@ import Testing
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Start with the API.")])])
         let (driver, _) = makeDriver(
             brain: brain, clock: ManualClock(now: 100),
-            manualSettlementGrace: { try await Task.sleep(for: .seconds(60)) })
+            manualSettlementGrace: .seconds(60))
         driver.updateTranscriptionWork(.pending(since: nil), for: .them)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
+    }
+
+    // MARK: - Every shortcut path waits for speech already in progress
+
+    @Test func aPressQueuedBehindARunningAnswerWaitsForSpeechInProgress() async throws {
+        let clock = ManualClock(now: 100)
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, script: [
+            .init(toolCalls: [.speak(callId: "first", hint: "Clarify the read path.")]),
+            .init(toolCalls: [.speak(callId: "second", hint: "Batch the writes.")]),
+        ])
+        let (driver, transcript) = makeDriver(brain: brain, clock: clock, manualSettlementGrace: .seconds(60))
+        driver.setMode(.manual)
+        let running = Task { await driver.handleTrigger(.manualHint) }
+        await gate.waitUntilEntered()
+
+        driver.updateTranscriptionWork(.pending(since: 2), for: .them)
+        clock.advance(by: 3)
+        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        await gate.release()
+        #expect(!(await eventually { brain.callCount == 2 }), "the queued press must wait")
+        transcript.append(.init(speaker: .them, text: "And what about writes?", at: 2))
+        driver.updateTranscriptionWork(.settled, for: .them)
+
+        #expect(await running.value == .spoke)
+        #expect(brain.callCount == 2)
+        #expect(Self.userText(brain.calls[1]).contains("And what about writes?"))
+    }
+
+    @Test func aQueuedPressIsNotHeldBackBySpeechThatStartsAfterIt() async {
+        let clock = ManualClock(now: 100)
+        let gate = AsyncGate()
+        let brain = GatedBrain(gate: gate, script: [
+            .init(toolCalls: [.speak(callId: "first", hint: "Clarify the read path.")]),
+            .init(toolCalls: [.speak(callId: "second", hint: "Batch the writes.")]),
+        ])
+        let (driver, _) = makeDriver(brain: brain, clock: clock, manualSettlementGrace: .seconds(60))
+        driver.setMode(.manual)
+        let running = Task { await driver.handleTrigger(.manualHint) }
+        await gate.waitUntilEntered()
+
+        clock.advance(by: 3)
+        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        driver.updateTranscriptionWork(.pending(since: 5), for: .them)
+        await gate.release()
+
+        #expect(await running.value == .spoke)
+        #expect(brain.callCount == 2)
+    }
+
+    @Test func aPressDuringAPendingRetryWaitsForSpeechInProgress() async throws {
+        let clock = ManualClock(now: 100)
+        let gate = AsyncGate()
+        let brain = GatedFailureThenSpeakingBrain(gate: gate)
+        let (driver, transcript) = makeDriver(
+            brain: brain, clock: clock, manualSettlementGrace: .seconds(60),
+            automaticAttemptDelay: { _ in try await Task.sleep(for: .seconds(60)) })
+        driver.setMode(.manual)
+        let failing = Task { await driver.handleTrigger(.manualHint) }
+        await gate.waitUntilEntered()
+
+        driver.updateTranscriptionWork(.pending(since: 2), for: .them)
+        clock.advance(by: 3)
+        await gate.release()
+        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        #expect(!(await eventually { brain.calls.count == 2 }), "the press must wait before the retry")
+        transcript.append(.init(speaker: .them, text: "What's the time complexity?", at: 2))
+        driver.updateTranscriptionWork(.settled, for: .them)
+
+        #expect(await failing.value == .spoke)
+        #expect(Self.userText(try #require(brain.calls.last)).contains("What's the time complexity?"))
+    }
+
+    @Test func aSecondPressDoesNotCutTheFirstPressesWaitShort() async throws {
+        let clock = ManualClock(now: 100)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Ask about scale.")])])
+        let (driver, transcript) = makeDriver(brain: brain, clock: clock, manualSettlementGrace: .seconds(60))
+        driver.setMode(.manual)
+        driver.updateTranscriptionWork(.pending(since: 2), for: .them)
+        clock.advance(by: 3)
+        let first = Task { await driver.handleTrigger(.manualHint) }
+        #expect(!(await eventually { brain.calls.count == 1 }))
+
+        clock.advance(by: 2)
+        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        #expect(!(await eventually { brain.calls.count == 1 }), "the second press must not end the wait")
+        transcript.append(.init(speaker: .them, text: "Assume ten million users.", at: 2))
+        driver.updateTranscriptionWork(.settled, for: .them)
+
+        #expect(await first.value == .spoke)
+        #expect(brain.calls.count == 1)
+        #expect(Self.userText(try #require(brain.calls.first)).contains("Assume ten million users."))
+    }
+
+    // MARK: - Shortcuts keep their retry budget
+
+    @Test func aShortcutRetriesATemporaryFailureInManualMode() async {
+        let gate = AsyncGate()
+        await gate.release()
+        let brain = GatedFailureThenSpeakingBrain(gate: gate)
+        let (driver, _) = makeDriver(brain: brain)
+        driver.setMode(.manual)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(brain.calls.count == 2)
+    }
+
+    @Test func aShortcutAdvancesToTheFallbackInManualMode() async {
+        let primary = ThrowingBrain()
+        let fallback = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "fallback tip")])])
+        let driver = CoachDriver(
+            config: .default, transcript: RollingTranscript(),
+            route: ConfiguredBrainRoute(targets: [
+                ConfiguredBrainTarget(target: BrainTarget(provider: .openAI, modelID: "gpt-5.5"), brain: primary),
+                ConfiguredBrainTarget(
+                    target: BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5"),
+                    brain: fallback),
+            ]),
+            screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(),
+            automaticAttemptDelay: { _ in })
+        driver.setMode(.manual)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(primary.callCount == 3)
+        #expect(fallback.calls.count == 1)
     }
 
     @Test func toggledFlipsBetweenTheTwoModes() {

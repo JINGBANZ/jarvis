@@ -626,15 +626,23 @@ It is an admission rule, not a second coaching loop: every question type, prompt
 transcript ledger stay the same.
 
 In manual mode `CoachDriver` refuses turn-end and silence triggers, drops a queued automatic trigger
-when the mode switches, and stops automatic follow-ups (queued work, the
+when the mode switches, and stops automatic work's follow-ups (queued work, the
 [failure retry](#resilience), and the fresh cycle after a failure) at the next attempt boundary. An
-attempt already running finishes, and a shortcut pressed during a stopped retry still gets its tip.
+attempt already running finishes. A shortcut press is the user's own request, not unsolicited
+coaching, so it keeps the whole retry budget: a temporary failure retries it and the route advances
+to a configured fallback exactly as in automatic mode, without another press. A press that arrives
+while automatic work is being stopped takes that work's place and still gets its tip.
 Because the committed transcript boundary advances only when an attempt commits, a press carries
 every line finalized since the last committed attempt; manual mode keeps no buffer of its own.
+
 A press there usually comes right after the speech it is about, so unlike an automatic-mode press it
 first waits, at most two seconds, for speech that started before the press to finalize; speech that
 starts after the press never holds it back. Without the wait the tail of a question the user pressed
-on would ride with the next press instead.
+on would ride with the next press instead. Each press records its moment and carries it on whichever
+path reaches an attempt: pressed while another answer runs, while a failed request waits to retry, or
+while an earlier press is still waiting. One settlement step applies the bound to all of them; a
+newer press joins the waiting work, moves the moment forward, and restarts the bound.
+
 Returning to automatic sends nothing by itself: the next turn-end carries the speech heard meanwhile.
 The gate lives in the driver rather than in `SessionComposition`'s transcriber callbacks, which would
 miss the driver's own automatic follow-ups.
