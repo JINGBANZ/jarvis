@@ -1,20 +1,17 @@
 # Jarvis
 
+[English](./README.md) · [简体中文](./README.zh-CN.md)
+
 **Your voice-only AI agent. Like Jarvis for Tony Stark.**
 
 [![Download the macOS version](https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
 [![Join us on Telegram](https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+-FDYU99oXTBlZmQx)
 
-Think out loud. Ask Jarvis a question. It listens to both sides of the conversation, checks your
-screen when useful, and offers help at the right moment. **No text input. No prompt box.**
-
-Jarvis is experimental and open source. Its current focus is coaching technical conversations:
-behavioral, system-design, and coding questions. Replies appear in a private on-screen overlay.
-Jarvis helps proactively and stays quiet when it has nothing useful to add. You can also press
-**⌥⌘J** during a session for an immediate, screen-aware hint.
-
-Every feature is built around spoken interaction: accurate listening, conversation context, and
-timely help. See the [voice-only product direction](./wiki/architecture.md#1-vision).
+Jarvis is an experimental, open-source AI agent built around [spoken
+interaction](./wiki/architecture.md#1-vision). Think out loud or ask a question: it listens to both
+sides of the conversation, checks your screen when useful, and offers timely help in a private
+on-screen overlay. Its current focus is coaching technical conversations, including behavioral,
+system-design, and coding questions. **No text input. No prompt box.**
 
 ## Install Jarvis
 
@@ -37,6 +34,19 @@ flowchart TD
     F --> E
     G["⌥⌘J<br/>Optional hint shortcut"] --> F
 ```
+
+### Features
+
+- **Voice-only interaction:** talk naturally without typing prompts.
+- **Two-sided listening:** follow both your microphone and system audio to keep the conversation
+  in context.
+- **Proactive coaching:** get help when there is something useful to add; otherwise, Jarvis stays
+  quiet.
+- **Screen-aware hints:** use visual context when needed, or press **⌥⌘J** during a session for
+  an immediate hint.
+- **Private overlay:** read concise tips without leaving the conversation.
+- **Technical-conversation support:** get coaching for behavioral, system-design, and coding
+  questions.
 
 ## Developer quick start
 
