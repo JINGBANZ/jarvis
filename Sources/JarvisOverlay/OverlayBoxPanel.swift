@@ -8,6 +8,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private let box: ResizeReportingView
     private let textView: NSTextView
     private let historyBackground = NSView(frame: .zero)
+    /// The box fill under the transcript column and the header strip above it; the history fill
+    /// covers only the tips' width.
+    private let columnBackground = NSView(frame: .zero)
     private var detailFontSize = CGFloat(Defaults.Overlay.Detail.fontSize)
     private let detailView: DetailView
     private let detailDivider = OverlayDetailDividerView(frame: .zero)
@@ -104,6 +107,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             white: Self.boxWhite,
             alpha: CGFloat(Defaults.Overlay.Box.opacity)).cgColor
         box.addSubview(historyBackground)
+        columnBackground.wantsLayer = true
+        columnBackground.layer?.backgroundColor = historyBackground.layer?.backgroundColor
+        box.addSubview(columnBackground)
         box.layer?.cornerRadius = OverlayBoxChrome.cornerRadius
         box.layer?.masksToBounds = true
         self.box = box
@@ -200,6 +206,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
                               width: bounds.width, height: chrome.height)
         scroll.frame = NSRect(x: 0, y: 0,
                               width: logWidth, height: max(0, bounds.height - chrome.height))
+        columnBackground.isHidden = !isTranscriptPaneVisible
+        columnBackground.frame = NSRect(x: logWidth, y: 0, width: bounds.width - logWidth,
+                                        height: bounds.height)
         transcriptPane.isHidden = !isTranscriptPaneVisible || isCollapsed
         transcriptPane.frame = NSRect(x: logWidth, y: 0, width: bounds.width - logWidth,
                                       height: max(0, bounds.height - chrome.height))
@@ -548,7 +557,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     public func setOpacity(_ opacity: Double) {
-        historyBackground.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: CGFloat(opacity)).cgColor
+        let fill = NSColor(white: Self.boxWhite, alpha: CGFloat(opacity)).cgColor
+        historyBackground.layer?.backgroundColor = fill
+        columnBackground.layer?.backgroundColor = fill
     }
 
     public func setFontSize(_ points: Double) {
@@ -706,6 +717,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
 
     func endLiveResize() { box.viewDidEndLiveResize() }
 
+    var transcriptColumnFillFrame: NSRect { columnBackground.frame }
+    var transcriptColumnFillOpacity: CGFloat { columnBackground.layer?.backgroundColor?.alpha ?? 0 }
     var isTranscriptColumnShown: Bool { !transcriptPane.isHidden && transcriptPane.frame.width > 0 }
     var currentLogWidth: CGFloat { scroll.frame.width }
     var currentTranscript: NSAttributedString { transcriptPane.attributedText }

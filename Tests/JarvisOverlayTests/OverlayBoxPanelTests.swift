@@ -414,6 +414,25 @@ import JarvisCore
     }
 
     @MainActor @Test
+    func theColumnAndTheHeaderAboveItShareTheBoxFill() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        panel.setTranscriptPaneVisible(true)
+        panel.setOpacity(0.7)
+        #expect(panel.transcriptColumnFillFrame == NSRect(x: 520, y: 0, width: OverlayBoxPanel.transcriptPaneWidth,
+                                                         height: 440),
+                "the fill must reach under the header, or the strip above the column shows the desktop")
+        #expect(panel.transcriptColumnFillOpacity == panel.currentBoxOpacity)
+
+        panel.toggleCollapse()
+        #expect(panel.transcriptColumnFillFrame.height == panel.currentHeaderHeight,
+                "a collapsed box keeps its widened header strip filled")
+        panel.toggleCollapse()
+        panel.setTranscriptPaneVisible(false)
+        #expect(panel.transcriptColumnFillFrame.width == 0)
+    }
+
+    @MainActor @Test
     func theSavedWidthLeavesTheTranscriptColumnOut() {
         let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
         var saved: (Double, Double)?
