@@ -1,10 +1,12 @@
 # Test command ownership
 
-Local test commands share one fixed virtual-display identity per physical Mac. Each command owns
-its live display until its exact apps and helpers exit and display teardown succeeds. Its ICC
-profile and ColorSync registration are deliberately retained for reuse. The acceptance target is
-exactly one approved Jarvis profile and one registration with the same persistent identity.
-The runner does not install, rename, delete, or unregister either resource.
+Local test commands share one live virtual display per physical Mac. Each command validates and
+reuses `Jarvis Tests`, creating it only when absent. The display stays available after success,
+assertion failure, cancellation, or setup failure. The runner never destroys it, including during
+recovery. Exact test apps and helpers must still exit before the next command is admitted.
+The ICC profile and ColorSync registration are also retained; the runner does not install, rename,
+delete, or unregister either resource. The identity target is exactly one Jarvis profile and one
+registration with the same persistent UUID.
 
 This subsystem covers cooperating updated runners under one designated development account.
 It serializes complete commands across worktrees, including builds and teardown. Private preference
@@ -17,17 +19,29 @@ their settings and processes.
 [`descriptor.json`](../scripts/test-display/descriptor.json) pins the descriptor, including its name
 `Jarvis Tests` and serial `0x4a560001`. The stable diagnostic label is **`jarvis-test-4a560001`**.
 It adds no suffix or registration and does not rename an ICC file. macOS supplies the persistent UUID
-and profile filename. The supervisor records the observed UUID and the reviewed profile identity
-when known. The worker's constructed `expected_profile` pathname is an expectation, never evidence
-that a profile exists or matches its metadata. An approved baseline and an existing journal must
-agree before desktop work; unknown identity may be initialized from the reviewed baseline.
-First provisioning on a Mac with no Jarvis profiles or registrations uses the reviewed
-[empty-baseline campaign A](#acceptance-and-recovery).
+and profile filename. The first ordinary display command records the worker's observed UUID and
+expected profile path in the journal; subsequent commands require the same identity. A previously
+recorded profile identity also remains binding. The worker's constructed `expected_profile`
+pathname is an expectation, never evidence that a profile exists or matches its metadata.
+Developers run the supported test entrypoints directly: no per-machine approval file or A/B
+campaign is required. [Framework acceptance](#acceptance-and-recovery) belongs to changes to the
+display framework, while every ordinary run still verifies ownership, isolation, and command cleanup.
 
 The selected serial belongs to the known legacy inventory. There is no alternate identity,
 random/PID serial, pool, or fallback. Descriptor/protocol changes require explicit reconciliation.
-An unexpectedly occupied identity stops the command. Stable descriptor inputs alone cannot promise
+An existing display must match the fixed identity, geometry, and isolation checks; an invalid or
+duplicate display stops the command without replacing it. Stable descriptor inputs alone cannot promise
 that macOS never creates extra state or hangs.
+
+[`TestDisplayLayout.swift`](../scripts/test-display/TestDisplayLayout.swift) distinguishes a
+headless GUI session from a desktop with real displays. No online screens, or only WindowServer's
+`virt` placeholder, permits the test display to become the main screen and remain there between
+commands. With physical displays present, creation must preserve their identities, bounds,
+mirroring, and main-screen selection. Both created and reused test displays must have the expected
+logical and Retina pixel size, be visible to AppKit, and be disjoint from every other screen.
+The complete admitted layout must remain unchanged through command completion. A connected display
+appearing during that command fails validation; an existing valid Jarvis display is reusable on
+both headless and physical desktops.
 
 [`supervisor.py`](../scripts/test-display/supervisor.py) is an ordinary-user external supervisor.
 It acquires a permanent file lock in the fixed `/Users/Shared/JarvisTestDisplay` namespace. The
@@ -37,8 +51,8 @@ links, missing existing state, and malformed state stop admission. Another accou
 ownership error before desktop access. A waiter uses only lock operations, has a bounded deadline,
 and can cancel without disturbing the owner. There is no FIFO or fairness promise.
 
-Exclusive bootstrap creates the initial journal; bootstrap is not permission to start a live
-campaign. Under the lock, the supervisor persists unfinished intent before OS-facing preflight.
+Exclusive bootstrap creates the initial journal automatically. Under the lock, the supervisor
+persists unfinished intent before OS-facing preflight.
 The journal holds descriptor, persistent identity, boot and process birth identities, run token,
 command/worktree, separate test and lifecycle status, and exact owned-process/pending-launch receipts.
 An independently flushed unfinished marker precedes journal replacement. Completion requires
@@ -61,7 +75,7 @@ changes the separate process title. Missing kernel metadata, unknown candidate p
 candidate birth identity stop admission. Inspection runs in a bounded isolated Python worker and
 makes no display queries. A proven existing-app conflict before GUI work records `not-started`
 completion and refuses without signalling that app; quitting it permits another attempt. Inspection
-errors remain uncertain. Campaign consumption starts only after this clean conflict check.
+errors remain uncertain.
 
 ## Whole commands and process roles
 
@@ -85,7 +99,16 @@ does not select tracking: a standalone release development build runs the native
 Independent edits/builds are safe only when they cannot replace an active command's binaries,
 bundle, or artifacts. Direct legacy binaries do not cooperate with this lock.
 
-The external supervisor alone owns the lease and journal. It launches the admitted root shell in
+The external supervisor alone owns the lease and journal. A newly created display's native object
+is retained by its worker, which stays alive in the AppKit event loop after the command finishes.
+This owner starts on demand, has no polling loop, and is not a launch agent or login service. Its
+process birth identity is recorded separately from test clients. Later commands use short-lived
+validation workers and do not create another owner. The owner does not retain the lease or admit
+commands; the supervisor never terminates it. Logout, reboot, or an external process termination can
+remove the display; a later command creates it again only if absent. An unexpected owner death
+during a command fails that command.
+
+The supervisor launches the admitted root shell in
 its own process group and verifies the exact process birth on re-entry. One validated live-to-REF
 wrapper transition is allowed. Sibling or arbitrary nested test entrypoints are rejected, including
 ones inheriting the same environment. The supervisor owns `caffeinate` directly, so keep-awake
@@ -162,20 +185,24 @@ The Swift worker contains AppKit and private display interfaces, adapted from th
 MIT-licensed [DeskPad implementation](../scripts/test-display/DeskPad/README.md). The Python owner
 does not import AppKit or ColorSync. It records intent before compiling/starting the worker and
 enforces monotonic deadlines from outside the process making synchronous OS calls. Worker, lease,
-command, and exit budgets live in `supervisor.py`; changing a campaign's budgets requires source and
-manifest review. There are no automatic create retries or alternate descriptors.
+command, and exit budgets live in `supervisor.py`. There are no automatic create retries or alternate
+descriptors.
 
-The worker takes one bounded online-display snapshot before creation and one after release. It
-creates once, verifies original physical-screen layout/main screen and nonoverlap, and releases
-once after owned clients exit. A successful teardown reply requires the original online set/layout
-and worker exit. The profile and registration remain. Capture privacy explicitly selects the
-admitted screen instead of assuming the main screen is isolated.
+The worker takes bounded online-display snapshots at admission, after creation when needed, and
+after test clients exit. It retains a newly created native object before configuring it, so a later
+setup failure cannot release it. Completion requires a validated unchanged layout. A worker that
+only inspected an existing display exits; a worker that created it remains idle as its owner.
+Supervisor pipe loss also preserves the owner. The worker's diagnostics go to the owner-only machine
+log. Capture privacy explicitly selects the admitted screen instead of assuming the main screen is
+isolated.
 
 Timeout, unknown launch, worker crash, admitted-root signal death, inspection error, or persistence
 failure leaves unfinished state. Lifecycle uncertainty is sticky: an ignored RPC error, late reply,
 eventual child death, or zero test exit cannot clear it. Error cleanup can signal exact known clients
-and stop the worker, but that is not verified teardown and does not reopen admission. An ordinary
-assertion exit can complete verified teardown and admit the next command while preserving its test
+and stop a worker only when it has explicitly reported that it owns no display. A creator or worker
+with unknown creation status remains alive; cleanup never destroys the display. Such cleanup does
+not reopen admission. An ordinary assertion exit can complete verified command cleanup and admit
+the next command while preserving its test
 status. Zero exit requires successful tests and lifecycle completion.
 Failure diagnostics report at most sixteen pending owner PIDs, parent PIDs, scopes and phases,
 plus an omitted count, to stderr and `.build/test-ownership.json` for hosted failure artifacts.
@@ -187,7 +214,8 @@ Hosted workflows explicitly invoke [`run-ci-tests.sh`](../scripts/run-ci-tests.s
 runner account still takes the same lease and runs ownership checks, with no virtual display.
 An inherited `GITHUB_ACTIONS` value or display ID cannot select that policy. Local hosted-mode
 requests and nested supervisors are rejected. Hosted CI proves neither display reuse nor ColorSync
-persistence and preserves the workflow's ordinary draft-PR behavior.
+persistence. The local Gate remains required before opening a ready-for-review PR, as specified in
+[`CONTRIBUTING.md`](../CONTRIBUTING.md#before-opening-a-pull-request).
 
 [`check-process-launching.py`](../scripts/check-process-launching.py) enforces the production source
 and transitive target dependency boundary; its negative fixtures reject ownership context, test
@@ -211,6 +239,12 @@ that the child is absent; it never invokes real screen capture.
 The script/workflow and cancellation fixtures also use non-GUI stand-ins. Coverage includes
 outer-supervisor signals during an outstanding app wait, slow evidence drain, bounded
 TERM-ignoring fallback, late registration, teardown interruption and process-disappearance races.
+The display-free Swift layout fixture covers headless main-screen adoption, placeholder transitions,
+physical-screen preservation, mirroring, and refusal of display disappearance at completion.
+Supervisor fixtures cover automatic first use without approval, retained creator survival after
+assertion failure, reuse by later commands, and preservation on setup failure or timeout.
+The launch fixture links either Swift Build's combined target objects or the native backend's
+per-source objects, with the module paths for both layouts.
 Fixture environments strip all inherited `JARVIS_TEST_*` context before adding deliberate inputs, including when Gate
 itself runs them under a real supervisor. No fixture can contact the outer owner.
 
@@ -220,63 +254,55 @@ The accepted independent design reviews cover three sets of requirements:
 | --- | --- |
 | Ownership | Durable preflight intent; exclusive bootstrap and fail-closed writes; one validated command chain; separate test/lifecycle results. |
 | Isolation | All six entrypoints; explicit CI policy; exact app/helper exit between phases; environment context never grants admission. |
-| Validation | Finite passive health checks; exactly-one complete evidence; update/pause old runners; serialize whole commands without a daemon, queue, or concurrent GUI clients. |
+| Validation | Framework acceptance includes finite passive health checks and exactly-one complete evidence; ordinary commands serialize under one lease while an idle owner retains the shared display. |
 
 These are design dispositions. Source review and display-free fixtures cannot establish live reuse,
 cancellation/restart/reboot safety, or the cause of an Apple subsystem stall.
 
 ## Acceptance and recovery
 
-Before any live rollout, inventory every worktree used for testing and its runner version. Update
-or pause every old entrypoint and account for directly invoked legacy binaries. Finish the
-display-free admission checks and review the concrete source and finite campaign manifest. The
-machine's owner-only `approval.json` records that review and baseline reconciliation; it is never
-generated from inherited environment or an automatic repair. See `approval()` in `supervisor.py`
-for ticket fields. Baseline profile/registry references and pass receipts represent reviewed,
-complete evidence; a pathname expectation or a partial snapshot cannot supply them.
+Framework acceptance is maintainer validation for changes to display identity, creation, reuse, or
+command cleanup. It is not developer onboarding or an admission ticket for each Mac. Ordinary
+developers adopt the framework through the existing test commands;
+the runner initializes machine state and records the fixed identity automatically. It never writes
+an acceptance receipt or silently repairs uncertain state.
 
-A fresh Mac may use campaign A to provision the fixed identity when complete baseline evidence
-proves there are no Jarvis profiles or registrations. Its explicit empty-baseline receipt permits
-both approved identity fields to be null; see `approval()` for the required fields. The journal
-must also contain no persistent identity, and the approved command must create a display. This
-uses the same single-use campaign ticket, one creation/release, and terminal-failure rules.
-The worker's observed UUID is recorded, while its expected profile path remains unapproved.
-Complete post-A evidence pins the actual UUID and profile before campaign B; B and accepted
-operation require the known identity and omit the empty-baseline receipt. Ordinary test commands
-cannot automatically provision a fresh Mac or convert a failed first run into another attempt.
+For framework validation, inventory the worktrees and runner versions, update or pause old
+entrypoints, and account for directly invoked legacy binaries. Finish display-free checks and
+review the source and a finite validation plan before desktop work. Fix the worktree/commit/source
+hashes, exact commands, deadlines, observation schedule, settling interval, health thresholds, and
+abort criteria. Successive commands must reuse the same live display without creation or destruction.
+A creation check belongs on a Mac where the display is already absent; never destroy an existing
+display to manufacture that condition. A new-Mac baseline documents absence of Jarvis profiles and registrations;
+a reuse baseline records the existing identity. Validation evidence belongs with the framework PR.
 
-The manifest fixes worktree/commit/source hashes, exact supported commands, per-stage call limits,
-deadlines, passive observation schedule, settling interval, health thresholds, and abort criteria
-before execution. It permits one A and one successive B in a second updated worktree, with one
-create/release each. Each `(manifest hash, campaign stage)` ticket is durably consumed before GUI
-preflight independently of the latest command; artifact or accepted runs cannot enable its reuse.
-The supervisor offers no campaign runner, retry, or repair command.
-
-The finite observation sequence is baseline → A → settling and complete post-A checks → B →
-settling and complete post-B checks. B requires a reviewed A pass receipt. At baseline and after
+Use a finite baseline → command → settling and complete checks sequence. At baseline and after
 each run, obtain complete profile and registration snapshots and inspect finite passive log/CPU/file
 activity and desktop responsiveness. Prefer planned direct read-only registry copies parsed
 offline. A single-device lookup, profile count, or current display ID cannot establish absence of
 other registrations. No concurrent creation, stress loop, repeated registry enumeration, daemon
 restart, or parked privileged-helper experiment belongs in this campaign.
 
-Pass requires exactly one approved Jarvis ICC and registration with the same persistent UUID and
-validated profile metadata, no surviving live display/owned processes, unchanged physical-display
-configuration and unrelated records, and healthy passive observations. macOS may replace an ICC
-file during display creation or release with an updated creation date. Accept that replacement only
+Pass requires exactly one Jarvis ICC and registration with the same persistent UUID and
+validated profile metadata, the shared live display still available, no surviving test apps or
+helpers, unchanged physical-display configuration and unrelated records, and healthy passive
+observations. macOS may replace an ICC file during display creation with an updated creation date. Accept that replacement only
 when complete byte comparison or exact hash reconstruction proves that only the ICC creation-date
 field changed; profile paths, counts, identity and all other bytes must match. Preserve the raw
 hashes and file metadata in the evidence. The replacement must fall within the bounded display
 operation and stop before the complete settling observation. Persistent profile requests
 or rewrites, an unresponsive app, timeout, unexpected state growth, missing evidence, or any anomaly
-stops the campaign immediately. Non-growth with legacy extras is partial. Missing complete registry
-evidence is partial. Neither result authorizes the updated Gate. Only the complete accepted A/B
-campaign permits the updated wrappers and full Gate through normal admission. Cancellation,
-process restart, and reboot need separate evidence; two successful reuse runs are no lifetime
-guarantee.
+stops validation immediately. Non-growth with legacy extras or missing complete registry evidence
+is partial and cannot establish framework acceptance. Cancellation, process restart, and reboot
+need separate evidence; two successful reuse runs are no lifetime guarantee. Developers do not
+repeat these framework experiments to run the Gate.
 
 Recovery is explicit inspection and reconciliation. Deleting the journal/marker/lock and retrying
-does not prove safety. Legacy extra records/profiles require separate exact maintenance, with
+does not prove safety, and recovery never destroys the test display. Preserve the unfinished receipt,
+prove exact prior test clients and commands have exited, and validate the existing display before
+recording a reconciled lifecycle. A healthy retained display is expected and does not require a
+logout or restart. Reconciliation does not turn an unrun or failed test into a pass. Legacy extra
+records/profiles require separate exact maintenance, with
 backups and complete identity evidence. Any such maintenance snapshots online displays once,
 builds its entire plan before applying changes, and preserves receipts for each successful action
 and partial failure. Routine runners provide no profile or registration removal operation. Ordinary

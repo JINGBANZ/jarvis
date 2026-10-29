@@ -47,13 +47,20 @@ flowchart TD
 
 ## Developer quick start
 
-Requires Swift 6 and the macOS [Command Line Tools](./wiki/build-and-run.md#toolchain).
+Use an Apple silicon Mac with macOS 14.2+, Swift 6, Python 3, and the macOS
+[Command Line Tools](./wiki/build-and-run.md#toolchain), with a logged-in macOS GUI session.
+A physical monitor is optional; the test display serves as the main screen on headless Macs.
 
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
 cd jarvis
+swift build && ./scripts/run-tests.sh
 ./scripts/build-app.sh --run
 ```
+
+The test display initializes automatically. Complete [developer setup](./CONTRIBUTING.md#developer-setup)
+and run the full local Gate before every PR, including its passing output. Quit `Jarvis Dev` before
+subsequent test runs. No API keys or capture permissions are needed for the offline Gate.
 
 See [Build and run](./wiki/build-and-run.md) for signing, permissions, and troubleshooting.
 

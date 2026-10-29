@@ -42,8 +42,8 @@ class SupervisorTests(unittest.TestCase):
         text = text.replace('            protect_apps()', '            pass  # fixture checkout: no desktop preflight')
         self.source.write_text(text)
         (self.source.parent / 'fake-worker.py').write_text('''import json, sys
-print(json.dumps({'display': 77, 'uuid': 'fixture-uuid', 'expected_profile': 'fixture.icc'}), flush=True)
-if sys.stdin.readline() == 'stop\\n': print('{"stopped": true}', flush=True)
+print(json.dumps({'display': 77, 'uuid': 'fixture-uuid', 'expected_profile': 'fixture.icc', 'retained': False}), flush=True)
+if sys.stdin.readline() == 'finish\\n': print('{"finished": true}', flush=True)
 ''')
         spec = importlib.util.spec_from_file_location('fixture_supervisor', self.source)
         self.module = importlib.util.module_from_spec(spec)
@@ -66,13 +66,10 @@ if sys.stdin.readline() == 'stop\\n': print('{"stopped": true}', flush=True)
 
     def prepare(self, **values):
         lease = self.module.Lease()
-        os.close(lease.fd)
-        approval = {'label': self.module.LABEL, 'descriptor_sha256': self.module.digest(),
-                    'stage': 'accepted', 'worktrees_paused': ['fixture'], 'baseline_profiles': 'fixture',
-                    'baseline_registry': 'fixture', 'campaign_pass_receipt': 'fixture',
-                    'approved_uuid': 'fixture-uuid', 'approved_profile': 'fixture.icc'}
-        approval.update(values)
-        self.module.durable(self.root / 'lease/approval.json', approval)
+        try:
+            self.module.durable(lease.path, {**lease.state, **values})
+        finally:
+            os.close(lease.fd)
 
     def start(self, *args, environment=None):
         process = subprocess.Popen([sys.executable, str(self.source), *(args or ('run', 'run-tests.sh'))],
@@ -249,29 +246,20 @@ if JARVIS_TEST_RUN_TOKEN=forged python3 "$JARVIS_TEST_SUPERVISOR" admit; then ex
             os.close(lease.fd)
         self.assertEqual(self.result(self.start())[0], 70)
 
-    def test_existing_journal_and_approval_disagreement_stops_before_worker(self):
-        self.prepare(approved_uuid='reviewed-uuid', approved_profile='reviewed.icc')
-        journal = self.state()
-        journal.update(persistent_uuid='previous-uuid', profile='previous.icc')
-        self.module.durable(self.root / 'lease/journal.json', journal)
+    def test_recorded_profile_mismatch_stops_before_command(self):
+        self.prepare(persistent_uuid='fixture-uuid', profile='previous.icc')
+        marker = self.root / 'command-started'
+        self.script(f'touch "{marker}"\n')
         result = self.result(self.start())
         self.assertEqual(result[0], 70, result)
-        self.assertEqual(self.state()['persistent_uuid'], 'previous-uuid')
-        self.assertEqual(self.state()['phase'], 'completed')
+        self.assertIn('profile path differs', result[1])
+        self.assertFalse(marker.exists())
+        self.assertEqual(self.state()['profile'], 'previous.icc')
+        self.assertNotEqual(self.state()['phase'], 'completed')
+        self.assertEqual(self.result(self.start())[0], 70)
 
-    def test_missing_reviewed_profile_evidence_cannot_authorize_preflight(self):
-        self.prepare(approved_profile=None)
-        result=self.result(self.start())
-        self.assertEqual(result[0],70,result)
-        self.assertIn('observed profile identity',result[1])
-        self.assertEqual(self.state()['phase'],'completed')
-        self.assertIsNone(self.state()['persistent_uuid'])
-
-    def test_empty_baseline_campaign_records_identity_once_and_requires_post_A_review(self):
-        campaign = dict(stage='campaign-A', manifest_sha256='initial-fixture-manifest',
-                        worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60,
-                        command_seconds=2, approved_uuid=None, approved_profile=None)
-        self.prepare(**campaign, empty_baseline_receipt='reviewed-empty-baseline')
+    def test_first_run_bootstraps_and_reuses_identity_without_approval(self):
+        self.assertFalse((self.root / 'lease').exists())
         worker = self.source.parent / 'fake-worker.py'
         marker = self.root / 'worker-starts'
         worker.write_text(f"with open({str(marker)!r}, 'a') as stream: stream.write('start\\n')\n" + worker.read_text())
@@ -282,67 +270,75 @@ if JARVIS_TEST_RUN_TOKEN=forged python3 "$JARVIS_TEST_SUPERVISOR" admit; then ex
         self.assertEqual(self.state()['expected_profile'], 'fixture.icc')
         self.assertEqual(self.state()['phase'], 'completed')
         result = self.result(self.start())
-        self.assertEqual(result[0], 70, result)
-        self.assertIn('already consumed', result[1])
-        self.assertEqual(marker.read_text(), 'start\n')
+        self.assertEqual(result[0], 0, result)
+        self.assertEqual(self.state()['persistent_uuid'], 'fixture-uuid')
+        self.assertEqual(self.state()['expected_profile'], 'fixture.icc')
+        self.assertEqual(marker.read_text(), 'start\nstart\n')
+        self.assertFalse((self.root / 'lease/approval.json').exists())
 
-        campaign['stage'] = 'campaign-B'
-        self.prepare(**campaign, A_pass_receipt='reviewed-post-A')
+    def test_expected_profile_mismatch_preserves_first_run_identity(self):
+        self.assertEqual(self.result(self.start())[0], 0)
+        worker = self.source.parent / 'fake-worker.py'
+        worker.write_text(worker.read_text().replace('fixture.icc', 'changed.icc'))
         result = self.result(self.start())
         self.assertEqual(result[0], 70, result)
-        self.assertIn('observed profile identity', result[1])
-        self.assertEqual(marker.read_text(), 'start\n')
-        campaign.update(approved_uuid='fixture-uuid', approved_profile='fixture.icc')
-        self.prepare(**campaign)
+        self.assertIn('profile path differs', result[1])
+        self.assertEqual(self.state()['expected_profile'], 'fixture.icc')
+        self.assertNotEqual(self.state()['phase'], 'completed')
+        self.assertEqual(self.result(self.start())[0], 70)
+
+    def stop_fake_worker(self, identity):
+        if self.module.same(identity):
+            os.killpg(identity['pid'], signal.SIGKILL)
+
+    def test_shared_creator_survives_failed_test_and_is_reused(self):
+        worker = self.source.parent / 'fake-worker.py'
+        worker.write_text('''import json, sys, time
+from pathlib import Path
+marker = Path(__file__).with_name('shared-display')
+retained = not marker.exists()
+marker.touch()
+print(json.dumps({'display': 77, 'uuid': 'fixture-uuid', 'expected_profile': 'fixture.icc', 'retained': retained}), flush=True)
+if sys.stdin.readline() == 'finish\\n': print('{"finished": true}', flush=True)
+if retained:
+    while True: time.sleep(1)
+''')
+        self.script('python3 "$JARVIS_TEST_SUPERVISOR" admit\nexit 23\n')
         result = self.result(self.start())
-        self.assertEqual(result[0], 70, result)
-        self.assertIn('A pass receipt', result[1])
-        self.prepare(**campaign, A_pass_receipt='reviewed-post-A')
+        self.assertEqual(result[0], 23, result)
+        creator = self.state()['display_owner']
+        self.addCleanup(self.stop_fake_worker, creator)
+        self.assertTrue(self.module.same(creator))
+        self.assertEqual(self.state()['phase'], 'completed')
+        self.script('python3 "$JARVIS_TEST_SUPERVISOR" admit\n')
         result = self.result(self.start())
         self.assertEqual(result[0], 0, result)
-        self.assertEqual(self.state()['profile'], 'fixture.icc')
-        self.assertEqual(marker.read_text(), 'start\nstart\n')
+        self.assertEqual(self.state()['display_owner'], creator)
+        self.assertTrue(self.module.same(creator))
+        self.assertFalse(self.module.same(self.state()['worker_owner']))
 
-    def test_empty_baseline_exception_requires_complete_explicit_campaign_A_approval(self):
-        campaign = dict(stage='campaign-A', manifest_sha256='initial-fixture-manifest',
-                        worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60,
-                        command_seconds=2, approved_uuid=None, approved_profile=None,
-                        empty_baseline_receipt='reviewed-empty-baseline')
-        cases = [
-            {key: value for key, value in campaign.items() if key != 'empty_baseline_receipt'},
-            *({**campaign, **change} for change in (
-                {'empty_baseline_receipt': ''}, {'empty_baseline_receipt': True},
-                {'stage': 'campaign-B'}, {'stage': 'accepted'},
-                {'approved_uuid': 'fixture-uuid'}, {'approved_profile': 'fixture.icc'},
-                {'baseline_profiles': None}, {'baseline_registry': None},
-                {'command': ['transcription-benchmark.sh']},
-            )),
-        ]
-        for values in cases:
-            with self.subTest(values=values):
-                self.prepare(**values)
-                result = self.result(self.start('run', values['command'][0]))
-                self.assertEqual(result[0], 70, result)
-                self.assertEqual(self.state()['phase'], 'completed')
-                self.assertNotIn('worker_owner', self.state())
-                self.assertFalse(self.state().get('consumed_campaigns'))
+    def test_failed_display_setup_preserves_creator_and_blocks_commands(self):
+        (self.source.parent / 'fake-worker.py').write_text('''import json, time
+print(json.dumps({'error': 'fixture display configuration failed', 'retained': True}), flush=True)
+while True: time.sleep(1)
+''')
+        result = self.result(self.start())
+        creator = self.state()['display_owner']
+        self.addCleanup(self.stop_fake_worker, creator)
+        self.assertEqual(result[0], 70, result)
+        self.assertTrue(self.module.same(creator))
+        self.assertNotEqual(self.state()['phase'], 'completed')
+        self.assertEqual(self.result(self.start())[0], 70)
 
-    def test_empty_baseline_receipt_cannot_replace_recorded_journal_identity(self):
-        self.prepare(stage='campaign-A', manifest_sha256='initial-fixture-manifest',
-                     worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60,
-                     command_seconds=2, approved_uuid=None, approved_profile=None,
-                     empty_baseline_receipt='reviewed-empty-baseline')
-        original = self.state()
-        for field, value in (('persistent_uuid', 'previous-uuid'), ('profile', 'previous.icc')):
-            with self.subTest(field=field):
-                self.module.durable(self.root / 'lease/journal.json', {**original, field: value})
-                result = self.result(self.start())
-                self.assertEqual(result[0], 70, result)
-                self.assertIn('recorded persistent identity', result[1])
-                self.assertEqual(self.state()[field], value)
-                self.assertEqual(self.state()['phase'], 'completed')
-                self.assertNotIn('worker_owner', self.state())
-                self.assertFalse(self.state().get('consumed_campaigns'))
+    def test_unknown_display_setup_timeout_does_not_kill_creator(self):
+        (self.source.parent / 'fake-worker.py').write_text('import time\nwhile True: time.sleep(1)\n')
+        result = self.result(self.start())
+        creator = self.state()['worker_owner']
+        self.addCleanup(self.stop_fake_worker, creator)
+        self.assertEqual(result[0], 70, result)
+        self.assertIn('Display worker deadline', result[1])
+        self.assertTrue(self.module.same(creator))
+        self.assertEqual(self.result(self.start())[0], 70)
 
     def test_exact_process_identity_and_inspection_error(self):
         identity = self.module.birth(os.getpid())
@@ -409,10 +405,10 @@ CHILD
         self.assertEqual(self.result(self.start())[0], 0)
 
     def test_prior_persistent_uuid_is_not_overwritten(self):
-        self.prepare(approved_uuid='approved-other-uuid', approved_profile='approved.icc')
+        self.prepare(persistent_uuid='previous-uuid', profile='previous.icc')
         self.assertEqual(self.result(self.start())[0], 70)
-        self.assertEqual(self.state()['persistent_uuid'], 'approved-other-uuid')
-        self.assertEqual(self.state()['profile'], 'approved.icc')
+        self.assertEqual(self.state()['persistent_uuid'], 'previous-uuid')
+        self.assertEqual(self.state()['profile'], 'previous.icc')
 
     def test_detached_registered_app_and_helper_exit_preserve_unrelated_app(self):
         self.prepare()
@@ -630,14 +626,14 @@ wait $!
         self.source.write_text(text)
         (self.source.parent / 'fake-worker.py').write_text("""import json, sys, time
 from pathlib import Path
-print(json.dumps({'display': 77, 'uuid': 'fixture-uuid', 'expected_profile': 'fixture.icc'}), flush=True)
-assert sys.stdin.readline() == 'stop\\n'
+print(json.dumps({'display': 77, 'uuid': 'fixture-uuid', 'expected_profile': 'fixture.icc', 'retained': False}), flush=True)
+assert sys.stdin.readline() == 'finish\\n'
 Path('fixture-teardown-entered').touch()
 deadline = time.monotonic() + 5
 while not Path('fixture-release-teardown').exists():
     if time.monotonic() >= deadline: raise RuntimeError('fixture teardown was not released')
     time.sleep(.01)
-print('{"stopped": true}', flush=True)
+print('{"finished": true}', flush=True)
 """)
         owner = self.start()
         deadline = time.monotonic() + 4
@@ -815,25 +811,15 @@ CHILD
         self.assertEqual(self.state()['worktree'], str(second))
         self.assertEqual(self.state()['phase'], 'completed')
 
-    def test_artifact_and_accepted_commands_do_not_reset_campaign_consumption(self):
-        campaign = dict(stage='campaign-A', manifest_sha256='reviewed-fixture-manifest',
-                        worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60, command_seconds=2)
-        self.prepare(**campaign)
+    def test_artifact_command_preserves_identity_for_subsequent_tests(self):
         self.assertEqual(self.result(self.start())[0], 0)
         self.script('python3 "$JARVIS_TEST_SUPERVISOR" build-guard\n', name='build-app.sh')
         self.assertEqual(self.result(self.start('run', 'build-app.sh'))[0], 0)
-        self.assertEqual(self.state()['campaign'], 'artifact')
-        result = self.result(self.start())
-        self.assertEqual(result[0], 70, result)
-        self.assertIn('already consumed', result[1])
-        self.prepare()
+        self.assertEqual(self.state()['persistent_uuid'], 'fixture-uuid')
+        self.assertEqual(self.state()['expected_profile'], 'fixture.icc')
         self.assertEqual(self.result(self.start())[0], 0)
-        self.prepare(**campaign)
-        result = self.result(self.start())
-        self.assertEqual(result[0], 70, result)
-        self.assertIn('already consumed', result[1])
-        self.assertEqual(self.state()['consumed_campaigns'],
-                         [{'manifest': 'reviewed-fixture-manifest', 'stage': 'campaign-A'}])
+        self.assertEqual(self.state()['persistent_uuid'], 'fixture-uuid')
+        self.assertEqual(self.state()['phase'], 'completed')
 
     def test_ownership_reporter_uses_isolated_absolute_interpreter(self):
         pollution = self.root / 'pollution'
@@ -939,8 +925,6 @@ CHILD
         pids.write_text(str(mentioned.pid))
         result=self.result(self.start())
         self.assertEqual(result[0],0,result)
-        self.prepare(stage='campaign-A', manifest_sha256='conflict-fixture-manifest',
-                     worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60, command_seconds=2)
         app_path.parent.mkdir(parents=True)
         fixture_source=self.root / 'non-gui.c'
         fixture_source.write_text('#include <stdio.h>\n#include <unistd.h>\nint main(void) { puts("ready"); fflush(stdout); for (;;) pause(); }\n')
@@ -956,7 +940,6 @@ CHILD
         self.assertIn('separately launched',result[1])
         self.assertEqual(self.state()['phase'],'completed')
         self.assertEqual(self.state()['lifecycle_status'],'not-started')
-        self.assertFalse(self.state()['consumed_campaigns'])
         self.assertIsNone(conflict.poll())
         conflict.terminate(); conflict.wait(timeout=3)
         pids.write_text(str(mentioned.pid))
@@ -1033,15 +1016,14 @@ CHILD
             full.assert_not_called()
             path.assert_not_called()
 
-    def test_reviewed_campaign_command_deadline_is_enforced(self):
-        self.prepare(stage='campaign-A', manifest_sha256='deadline-fixture-manifest',
-                     worktree=str(self.repo), command=['run-tests.sh'], not_after=time.time()+60, command_seconds=1)
+    def test_complete_command_deadline_is_enforced(self):
+        self.source.write_text(self.source.read_text().replace('COMMAND_SECONDS = 15', 'COMMAND_SECONDS = 1'))
         self.script('python3 "$JARVIS_TEST_SUPERVISOR" admit\nsleep 3\n')
         result=self.result(self.start())
         self.assertEqual(result[0],70,result)
         self.assertIn('command deadline',result[1])
         self.assertNotEqual(self.state()['phase'],'completed')
-        self.assertEqual(len(self.state()['consumed_campaigns']),1)
+        self.assertEqual(self.result(self.start())[0], 70)
 
 
 if __name__ == '__main__':

@@ -48,10 +48,6 @@ def descriptor():
     return json.loads((HERE / 'descriptor.json').read_text())
 
 
-def digest():
-    return hashlib.sha256(json.dumps(descriptor(), sort_keys=True).encode()).hexdigest()
-
-
 def executable_basename(pid):
     class ShortBSDInfo(ctypes.Structure):
         _fields_ = [('words', ctypes.c_uint32 * 4), ('comm', ctypes.c_char * 16),
@@ -256,40 +252,6 @@ def hosted():
     return user.pw_name == 'runner' and user.pw_dir == '/Users/runner' and Path(user.pw_dir).stat().st_uid == os.getuid()
 
 
-def approval(entry, arguments):
-    path = LEASE_ROOT / 'approval.json'
-    private(path)
-    value = json.loads(path.read_text())
-    if value.get('descriptor_sha256') != digest() or value.get('label') != LABEL:
-        raise Refused('Machine approval descriptor mismatch')
-    if value.get('stage') not in ('campaign-A', 'campaign-B', 'accepted'):
-        raise Refused('Machine reconciliation and reviewed campaign are required')
-    if not value.get('worktrees_paused') or not value.get('baseline_profiles') or not value.get('baseline_registry'):
-        raise Refused('Complete baseline evidence and old-runner pause inventory are required')
-    if 'empty_baseline_receipt' in value:
-        if (value['stage'] != 'campaign-A'
-            or not isinstance(value['empty_baseline_receipt'], str) or not value['empty_baseline_receipt']
-            or any(field not in value or value[field] is not None for field in ('approved_uuid', 'approved_profile'))):
-            raise Refused('Empty baseline provisioning requires campaign A, its reviewed receipt, and null identity')
-        if entry in ('transcription-benchmark.sh', 'build-app.sh'):
-            raise Refused('Empty baseline provisioning requires a display command')
-    elif any(not isinstance(value.get(field), str) or not value[field] for field in ('approved_uuid', 'approved_profile')):
-        raise Refused('Reviewed persistent UUID and observed profile identity are required')
-    if value['stage'] != 'accepted':
-        if value.get('worktree') != str(HERE.parent.parent) or value.get('command') != [entry, *arguments]:
-            raise Refused('Command is outside the reviewed campaign manifest')
-        if time.time() >= value.get('not_after', 0) or not value.get('manifest_sha256'):
-            raise Refused('Campaign manifest expired or missing')
-        seconds = value.get('command_seconds')
-        if type(seconds) is not int or not 1 <= seconds <= COMMAND_SECONDS:
-            raise Refused('Campaign requires a bounded reviewed command deadline')
-        if value['stage'] == 'campaign-B' and not value.get('A_pass_receipt'):
-            raise Refused('B requires a reviewed complete A pass receipt')
-    elif not value.get('campaign_pass_receipt'):
-        raise Refused('Updated Gate requires complete A/B evidence')
-    return value
-
-
 def peer_pid(connection):
     if sys.platform == 'darwin':
         return struct.unpack('i', connection.getsockopt(0, 2, 4))[0]  # LOCAL_PEERPID
@@ -388,6 +350,7 @@ class Supervisor:
         os.chmod(self.address, 0o600)
         self.socket.listen(8)
         self.worker = None
+        self.retains_display = None
         self.awake = None
         self.interruption = None
         self.cancel_forced = False
@@ -694,6 +657,12 @@ class Supervisor:
                 data += part
                 if b'\n' in data:
                     result = json.loads(data.split(b'\n', 1)[0])
+                    if 'retained' in result:
+                        if type(result['retained']) is not bool:
+                            raise Refused('Invalid display ownership reply')
+                        self.retains_display = result['retained']
+                        if self.retains_display:
+                            self.lease.write(self.lease.state['phase'], display_owner=birth(self.worker.pid))
                     if 'error' in result:
                         raise Refused(result['error'])
                     return result
@@ -701,33 +670,8 @@ class Supervisor:
 
     def run(self, entry, arguments, ci=False):
         self.entry = entry
-        decision = ({'stage': 'hosted-ci'} if ci else {'stage': 'artifact'} if entry == 'build-app.sh' else approval(entry, arguments))
-        consumed = self.lease.state.get('consumed_campaigns', [])
-        if not isinstance(consumed, list) or any(
-            not isinstance(ticket, dict) or set(ticket) != {'manifest', 'stage'} or
-            not isinstance(ticket['manifest'], str) or ticket['stage'] not in ('campaign-A', 'campaign-B')
-            for ticket in consumed
-        ):
-            raise Refused('Malformed campaign consumption history; explicit recovery required')
-        next_consumed = consumed
-        if decision['stage'].startswith('campaign-'):
-            ticket = {'manifest': decision['manifest_sha256'], 'stage': decision['stage']}
-            if ticket in consumed:
-                raise Refused('Campaign run already consumed; no retry')
-            next_consumed = [*consumed, ticket]
-        if 'empty_baseline_receipt' in decision and any(
-            self.lease.state.get(field) is not None for field in ('persistent_uuid', 'profile')
-        ):
-            raise Refused('Empty baseline provisioning conflicts with a recorded persistent identity')
-        for field, approved in (('persistent_uuid', 'approved_uuid'), ('profile', 'approved_profile')):
-            previous, reviewed = self.lease.state.get(field), decision.get(approved)
-            if previous and reviewed and previous != reviewed:
-                raise Refused('Journal and reviewed baseline identity disagree; no desktop work permitted')
-            if previous is None and reviewed is not None:
-                self.lease.state[field] = reviewed
         self.lease.write('intent', boot=boot_id(), owner=birth(os.getpid()), token=self.token,
-                         command=[entry, *arguments], worktree=str(HERE.parent.parent), campaign=decision['stage'],
-                         consumed_campaigns=consumed,
+                         command=[entry, *arguments], worktree=str(HERE.parent.parent),
                          test_status=None, lifecycle_status='unfinished')
         handlers = {}
         try:
@@ -736,17 +680,33 @@ class Supervisor:
             except AppConflict as error:
                 self.lease.write('completed', lifecycle_status='not-started', refusal=str(error))
                 raise
-            self.lease.write('preflight', consumed_campaigns=next_consumed)
+            self.lease.write('preflight')
             if not ci and entry not in ('transcription-benchmark.sh', 'build-app.sh'):
-                self.worker = subprocess.Popen(worker_command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE, start_new_session=True)
+                log_path = LEASE_ROOT / 'display-worker.log'
+                log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
+                try:
+                    private(log_path)
+                    self.worker = subprocess.Popen(worker_command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                                   stderr=log_fd, start_new_session=True)
+                finally:
+                    os.close(log_fd)
                 self.lease.write('preflight', worker_owner=birth(self.worker.pid))
                 reply = self.worker_reply()
-                previous = self.lease.state.get('persistent_uuid') or decision.get('approved_uuid')
+                if self.retains_display is None:
+                    raise Refused('Display ownership reply missing; owner preserved')
+                previous = self.lease.state.get('persistent_uuid')
                 if previous and reply['uuid'] != previous:
                     raise Refused('Persistent UUID changed; no repair or fallback')
-                if decision.get('approved_profile') and reply['expected_profile'] != decision['approved_profile']:
-                    raise Refused('Expected profile path differs from approved identity')
+                profile = self.lease.state.get('profile') or self.lease.state.get('expected_profile')
+                if profile and reply['expected_profile'] != profile:
+                    raise Refused('Expected profile path differs from recorded identity')
+                display_owner = self.lease.state.get('display_owner')
+                if self.retains_display:
+                    display_owner = birth(self.worker.pid)
+                elif display_owner and not same(display_owner):
+                    display_owner = None
                 self.lease.write('display-ready', display=reply['display'], persistent_uuid=reply['uuid'],
+                                 display_owner=display_owner,
                                  expected_profile=reply['expected_profile'])
             else:
                 self.lease.write('command-ready', display='')
@@ -762,7 +722,7 @@ class Supervisor:
             command = subprocess.Popen(['/bin/bash', str(HERE.parent / entry), *arguments], env=environment, start_new_session=True)
             self.root = birth(command.pid)
             self.lease.write('command-running', command_owner=self.root)
-            deadline = time.monotonic() + decision.get('command_seconds', COMMAND_SECONDS)
+            deadline = time.monotonic() + COMMAND_SECONDS
             while True:
                 if self.interruption:
                     self.cancel_command(command)
@@ -773,6 +733,9 @@ class Supervisor:
                     raise Refused('Complete command deadline expired')
                 if self.worker and self.worker.poll() is not None:
                     raise Refused('Display worker died during command')
+                display_owner = self.lease.state.get('display_owner')
+                if self.worker and display_owner and not same(display_owner):
+                    raise Refused('Shared display owner died during command')
                 self.service()
             for number, handler in handlers.items():
                 signal.signal(number, handler)
@@ -797,11 +760,13 @@ class Supervisor:
                 self.awake.wait(timeout=EXIT_SECONDS)
             if self.worker:
                 self.lease.write('teardown')
-                self.worker.stdin.write(b'stop\n')
+                self.worker.stdin.write(b'finish\n')
                 self.worker.stdin.flush()
-                if self.worker_reply() != {'stopped': True}:
-                    raise Refused('Invalid display teardown reply')
-                if self.worker.wait(timeout=WORKER_SECONDS) != 0:
+                if self.worker_reply() != {'finished': True}:
+                    raise Refused('Invalid display completion reply')
+                if self.retains_display and self.worker.poll() is not None:
+                    raise Refused('Shared display owner exited')
+                if not self.retains_display and self.worker.wait(timeout=WORKER_SECONDS) != 0:
                     raise Refused('Display worker exit failed')
             if self.failure:
                 raise Refused(self.failure)
@@ -817,7 +782,7 @@ class Supervisor:
                 signal_owned(identity, signal.SIGTERM)
             if self.awake and self.awake.poll() is None:
                 self.awake.terminate()
-            if self.worker and self.worker.poll() is None:
+            if self.worker and self.retains_display is False and self.worker.poll() is None:
                 self.worker.kill()
                 try:
                     self.worker.wait(timeout=2)
