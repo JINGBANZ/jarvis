@@ -120,6 +120,7 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
   tests (`wiki/live-e2e-tests.md`) because it depends on TCC permissions and real capture devices.
 - Work in an isolated git worktree. PRs squash-merge with the PR number in the subject.
 - Read `wiki/AGENTS.md` before wiki edits; the wiki is the design source of truth.
+- Read [`website/AGENTS.md`](website/AGENTS.md) before editing anything under `website/`.
 - Treat provider context layout as a cost-sensitive contract. Preserve session-stable instructions
   and tools and ordered reusable history. Every context source declares its lifetime and cache
   boundary; deliberate rewrites are explicit. Context, serializer, and provider/model changes pass

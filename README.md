@@ -13,7 +13,7 @@
 
 **Your voice-only AI agent. Like Jarvis for Tony Stark.** Think out loud, ask a question, or just
 keep the conversation going. Jarvis listens to both sides, checks your screen when helpful, and
-offers a quiet nudge in a private on-screen overlay so you can stay focused on the conversation.
+offers a quiet nudge in an on-screen overlay so you can stay focused on the conversation.
 Today, it helps you work through behavioral interviews, system-design discussions, and coding
 questions. No typing, no prompt box—just talk naturally.
 
@@ -40,7 +40,7 @@ flowchart TD
   to add, Jarvis stays quiet.
 - **Context from your screen:** Jarvis checks the screen when needed. Want a hint right away?
   Press **⌥⌘J** during a session.
-- **Tips close at hand:** read short suggestions in a private overlay without leaving the
+- **Tips close at hand:** read short suggestions in an on-screen overlay without leaving the
   conversation.
 - **Support as you think:** work through behavioral, system-design, and coding questions with
   a little guidance along the way.
@@ -74,6 +74,10 @@ question, or tell us how Jarvis fits into your day. We'd love to hear from you.
 - Jarvis keeps bounded, owner-only session records of finalized speech, coaching actions,
   diagnostics, provider traffic, and screenshots it viewed.
 - Selected remote providers receive the audio, text, or screenshots their configured role needs.
-  OpenAI coaching requests currently enable server-side storage for debugging.
+- Optional provider conversation storage is off by default. Direct OpenAI coaching requests follow
+  the **Save conversations with AI providers** setting in **Settings → General → Privacy**;
+  other provider retention policies still apply.
+- Overlay capture exclusion is best-effort; some recording or screen-sharing paths may show it.
+  See the [capture guidance](./wiki/overlay-invisibility.md).
 
 See [Privacy and security](./wiki/sandbox.md) for the complete egress and retention model.
