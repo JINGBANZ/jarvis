@@ -1,26 +1,28 @@
-# Jarvis
+<h1 align="center">Jarvis</h1>
 
-[English](./README.md) · [简体中文](./README.zh-CN.md)
+<p align="center">
+  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
 
-**Your voice-only AI agent. Like Jarvis for Tony Stark.**
+<p align="center">
+  <a href="https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg"><img src="https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="Download the macOS version"></a>
+  <a href="https://t.me/+-FDYU99oXTBlZmQx"><img src="https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&amp;logo=telegram&amp;logoColor=white" alt="Join us on Telegram"></a>
+</p>
 
-[![Download the macOS version](https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
-[![Join us on Telegram](https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+-FDYU99oXTBlZmQx)
-
-Jarvis is an experimental, open-source AI agent built around [spoken
-interaction](./wiki/architecture.md#1-vision). Think out loud or ask a question: it listens to both
-sides of the conversation, checks your screen when useful, and offers timely help in a private
-on-screen overlay. Its current focus is coaching technical conversations, including behavioral,
-system-design, and coding questions. **No text input. No prompt box.**
+**Your voice-only AI agent. Like Jarvis for Tony Stark.** Think out loud, ask a question, or just
+keep the conversation going. Jarvis listens to both sides, checks your screen when helpful, and
+offers a quiet nudge in a private on-screen overlay so you can stay focused on the conversation.
+Today, it helps you work through behavioral interviews, system-design discussions, and coding
+questions. No typing, no prompt box—just talk naturally.
 
 ## Install Jarvis
 
-Currently available for macOS only. Requires an Apple silicon Mac running macOS 14.2 or later.
+Jarvis runs on Apple silicon Macs with macOS 14.2 or later.
 
 [**Download the macOS version**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
 
-Open Jarvis from **Applications**, configure its providers in **Settings**, then select **Start
-Jarvis**. macOS will request the permissions Jarvis needs.
+Open Jarvis from **Applications**, set up your providers in **Settings**, then select **Start
+Jarvis**. macOS will guide you through the permissions Jarvis needs.
 
 ## How it works
 
@@ -37,16 +39,18 @@ flowchart TD
 
 ### Features
 
-- **Voice-only interaction:** talk naturally without typing prompts.
-- **Two-sided listening:** follow both your microphone and system audio to keep the conversation
-  in context.
-- **Proactive coaching:** get help when there is something useful to add; otherwise, Jarvis stays
-  quiet.
-- **Screen-aware hints:** use visual context when needed, or press **⌥⌘J** during a session for
-  an immediate hint.
-- **Private overlay:** read concise tips without leaving the conversation.
-- **Technical-conversation support:** get coaching for behavioral, system-design, and coding
-  questions.
+- **Just talk:** [voice-only interaction](./wiki/architecture.md#1-vision) keeps your attention on
+  the conversation, with no prompts to type.
+- **Both sides of the story:** Jarvis listens through your microphone and system audio to follow
+  the discussion.
+- **Help at the right moment:** get a useful suggestion when you need it. When there is nothing
+  to add, Jarvis stays quiet.
+- **Context from your screen:** Jarvis checks the screen when needed. Want a hint right away?
+  Press **⌥⌘J** during a session.
+- **Tips close at hand:** read short suggestions in a private overlay without leaving the
+  conversation.
+- **Support as you think:** work through behavioral, system-design, and coding questions with
+  a little guidance along the way.
 
 ## Developer quick start
 
@@ -62,8 +66,8 @@ See [Build and run](./wiki/build-and-run.md) for signing, permissions, and troub
 
 ## Community
 
-Join our [Telegram community](https://t.me/+-FDYU99oXTBlZmQx) to share your thoughts, ask questions,
-and help shape Jarvis. Everyone is welcome!
+Come say hello in our [Telegram community](https://t.me/+-FDYU99oXTBlZmQx). Share an idea, ask a
+question, or tell us how Jarvis fits into your day. We'd love to hear from you.
 
 ## Project links
 

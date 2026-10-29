@@ -1,21 +1,23 @@
-# Jarvis
+<h1 align="center">Jarvis</h1>
 
-[English](./README.md) · [简体中文](./README.zh-CN.md)
+<p align="center">
+  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
 
-**你的纯语音 AI 助手，就像托尼·斯塔克的贾维斯。**
+<p align="center">
+  <a href="https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg"><img src="https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="下载 macOS 版本"></a>
+  <a href="https://t.me/+-FDYU99oXTBlZmQx"><img src="https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&amp;logo=telegram&amp;logoColor=white" alt="加入 Telegram 社区"></a>
+</p>
 
-[![下载 macOS 版本](https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
-[![加入 Telegram 社区](https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+-FDYU99oXTBlZmQx)
-
-Jarvis 是一款以[语音交互](./wiki/architecture.md#1-vision)为核心的实验性开源 AI 助手。说出你的想法，或直接提问：它会聆听对话双方的内容，在需要时查看屏幕，并通过私密的屏幕浮层及时提供帮助。目前，Jarvis 专注于技术交流辅导，涵盖行为面试、系统设计和编程问题。**无需打字，没有提示词输入框。**
+**你的纯语音 AI 助手，就像托尼·斯塔克的贾维斯。** 说出你的想法，随口问个问题，或是继续眼前的对话。Jarvis 会聆听双方的交流，在有帮助时查看屏幕，通过私密的屏幕浮层轻轻提醒，让你专注于对话本身。目前，它可以陪你梳理行为面试、系统设计和编程问题。无需打字，也没有提示词输入框，自然地说话就好。
 
 ## 安装 Jarvis
 
-目前仅支持 macOS，需要搭载 Apple 芯片、运行 macOS 14.2 或更高版本的 Mac。
+准备一台搭载 Apple 芯片、运行 macOS 14.2 或更高版本的 Mac，即可开始使用。
 
 [**下载 macOS 版本**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
 
-从 **Applications（应用程序）** 打开 Jarvis，在 **Settings（设置）** 中配置服务提供商，然后选择 **Start Jarvis（启动 Jarvis）**。macOS 会请求 Jarvis 所需的权限。
+从 **Applications（应用程序）** 打开 Jarvis，在 **Settings（设置）** 中配置服务提供商，然后选择 **Start Jarvis（启动 Jarvis）**。macOS 会引导你授予 Jarvis 所需的权限。
 
 ## 工作原理
 
@@ -32,12 +34,12 @@ flowchart TD
 
 ### 功能
 
-- **纯语音交互：** 自然地说话，无需输入提示词。
-- **聆听对话双方：** 同时接收麦克风和系统音频，理解完整的对话上下文。
-- **主动辅导：** 在能提供有用建议时主动帮助，其余时间保持安静。
-- **结合屏幕的提示：** 按需获取视觉上下文，也可以在会话中按 **⌥⌘J** 立即获取提示。
-- **私密浮层：** 在不离开当前对话的情况下查看简短建议。
-- **技术交流辅导：** 支持行为面试、系统设计和编程问题。
+- **自然开口就好：** [纯语音交互](./wiki/architecture.md#1-vision)，无需输入提示词，把注意力留给对话。
+- **听懂双方的交流：** 通过麦克风和系统音频，跟上对话的来龙去脉。
+- **恰到好处的帮助：** 在需要时给出有用的建议，没有要补充的内容时就安静陪伴。
+- **结合屏幕理解问题：** 按需查看屏幕。想马上获得提示？在会话中按 **⌥⌘J** 即可。
+- **随手可见的建议：** 在私密浮层中查看简短提示，无需离开当前对话。
+- **陪你梳理思路：** 从行为面试到系统设计和编程问题，在思考的过程中提供一点指引。
 
 ## 开发者快速开始
 
@@ -53,7 +55,7 @@ cd jarvis
 
 ## 社区
 
-欢迎加入我们的 [Telegram 社区](https://t.me/+-FDYU99oXTBlZmQx)，分享想法、提出问题，一起完善 Jarvis。
+欢迎来 [Telegram 社区](https://t.me/+-FDYU99oXTBlZmQx)打个招呼。分享一个想法，问个问题，或聊聊你平时如何使用 Jarvis。我们很期待听到你的声音。
 
 ## 项目链接
 
