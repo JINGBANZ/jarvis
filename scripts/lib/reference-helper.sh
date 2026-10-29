@@ -7,7 +7,9 @@ bundle_reference_helper() {
   artifacts="$(swift build -c "$configuration" --show-bin-path)"
   binary="$artifacts/JarvisReferenceHelper"
   privacy="$artifacts/ZIPFoundation_ZIPFoundation.bundle"
-  [[ -x "$binary" && -f "$privacy/PrivacyInfo.xcprivacy" ]] || return 1
+  # The Swift Build backend (Swift 6.4+) emits a macOS-layout bundle; the legacy backend a flat one.
+  [[ -x "$binary" && ( -f "$privacy/PrivacyInfo.xcprivacy" \
+      || -f "$privacy/Contents/Resources/PrivacyInfo.xcprivacy" ) ]] || return 1
   rm -rf "$destination"
   mkdir -p "$destination"
   cp "$binary" "$destination/JarvisReferenceHelper"

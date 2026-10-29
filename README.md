@@ -1,29 +1,21 @@
-# Jarvis
+<h1 align="center">Jarvis</h1>
 
-**Your voice-only AI agent. Like Jarvis for Tony Stark.**
+<p align="center">
+  <a href="./README.md">English</a> · <a href="./README.zh-CN.md">简体中文</a>
+</p>
 
-[![Download the macOS version](https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
-[![Join us on Telegram](https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/+-FDYU99oXTBlZmQx)
+<p align="center">
+  <a href="https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg"><img src="https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="Download the macOS version"></a>
+  <a href="https://t.me/+-FDYU99oXTBlZmQx"><img src="https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&amp;logo=telegram&amp;logoColor=white" alt="Join us on Telegram"></a>
+  <br>
+  <sub>Apple silicon · macOS 14.2 or later</sub>
+</p>
 
-Think out loud. Ask Jarvis a question. It listens to both sides of the conversation, checks your
-screen when useful, and offers help at the right moment. **No text input. No prompt box.**
-
-Jarvis is experimental and open source. Its current focus is coaching technical conversations:
-behavioral, system-design, and coding questions. Replies appear in an on-screen overlay.
-Jarvis helps proactively and stays quiet when it has nothing useful to add. You can also press
-**⌥⌘J** during a session for an immediate, screen-aware hint.
-
-Every feature is built around spoken interaction: accurate listening, conversation context, and
-timely help. See the [voice-only product direction](./wiki/architecture.md#1-vision).
-
-## Install Jarvis
-
-Currently available for macOS only. Requires an Apple silicon Mac running macOS 14.2 or later.
-
-[**Download the macOS version**](https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg)
-
-Open Jarvis from **Applications**, configure its providers in **Settings**, then select **Start
-Jarvis**. macOS will request the permissions Jarvis needs.
+**Your voice-only AI agent. Like Jarvis for Tony Stark.** Think out loud, ask a question, or just
+keep the conversation going. Jarvis listens to both sides, checks your screen when helpful, and
+offers a quiet nudge in an on-screen overlay so you can stay focused on the conversation.
+Today, it helps you work through behavioral interviews, system-design discussions, and coding
+questions. No typing, no prompt box—just talk naturally.
 
 ## How it works
 
@@ -38,9 +30,25 @@ flowchart TD
     G["⌥⌘J<br/>Optional hint shortcut"] --> F
 ```
 
+### Features
+
+- **Just talk:** [voice-only interaction](./wiki/architecture.md#1-vision) keeps your attention on
+  the conversation, with no prompts to type.
+- **Both sides of the story:** Jarvis listens through your microphone and system audio to follow
+  the discussion.
+- **Help at the right moment:** get a useful suggestion when you need it. When there is nothing
+  to add, Jarvis stays quiet.
+- **Context from your screen:** Jarvis checks the screen when needed. Want a hint right away?
+  Press **⌥⌘J** during a session.
+- **Tips close at hand:** read short suggestions in an on-screen overlay without leaving the
+  conversation.
+- **Support as you think:** work through behavioral, system-design, and coding questions with
+  a little guidance along the way.
+
 ## Developer quick start
 
-Requires Swift 6 and the macOS [Command Line Tools](./wiki/build-and-run.md#toolchain).
+Use an Apple silicon Mac with macOS 14.2+, Swift 6, Python 3, and the macOS
+[Command Line Tools](./wiki/build-and-run.md#toolchain), with a logged-in macOS GUI session.
 
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
@@ -52,8 +60,8 @@ See [Build and run](./wiki/build-and-run.md) for signing, permissions, and troub
 
 ## Community
 
-Join our [Telegram community](https://t.me/+-FDYU99oXTBlZmQx) to share your thoughts, ask questions,
-and help shape Jarvis. Everyone is welcome!
+Come say hello in our [Telegram community](https://t.me/+-FDYU99oXTBlZmQx). Share an idea, ask a
+question, or tell us how Jarvis fits into your day. We'd love to hear from you.
 
 ## Project links
 

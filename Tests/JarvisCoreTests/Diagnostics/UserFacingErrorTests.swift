@@ -22,6 +22,16 @@ import Testing
         #expect(!UserFacingError.Severity.degraded.stopsSession)
     }
 
+    @Test func preflightRefusalKeepsTheNoticeWithoutStoppingTheSession() {
+        let fatal = UserFacingError.noAPIKey(missing: [.openAIAPIKey])
+        let refusal = fatal.asPreflightRefusal
+        #expect(refusal.title == fatal.title)
+        #expect(refusal.message == fatal.message)
+        #expect(refusal.severity == .warning)
+        #expect(refusal.sessionEndReason == nil)
+        #expect(!refusal.severity.stopsSession)
+    }
+
     @Test func runtimeNeverAlertsForAnySeverity() {
         let severities: [UserFacingError.Severity] = [.fatal, .terminal, .warning, .degraded]
         for severity in severities {

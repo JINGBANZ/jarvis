@@ -12,6 +12,7 @@ public final class HotkeyPreferences: @unchecked Sendable {
         case .previousDetail: Defaults.Hotkey.previousDetailKeyCodeKey
         case .nextDetail: Defaults.Hotkey.nextDetailKeyCodeKey
         case .collapseOverlay: Defaults.Hotkey.collapseOverlayKeyCodeKey
+        case .newSession: Defaults.Hotkey.newSessionKeyCodeKey
         }
     }
     private var modifiersKey: String {
@@ -22,6 +23,7 @@ public final class HotkeyPreferences: @unchecked Sendable {
         case .previousDetail: Defaults.Hotkey.previousDetailModifiersKey
         case .nextDetail: Defaults.Hotkey.nextDetailModifiersKey
         case .collapseOverlay: Defaults.Hotkey.collapseOverlayModifiersKey
+        case .newSession: Defaults.Hotkey.newSessionModifiersKey
         }
     }
     private var defaultCombination: HotkeyCombination {
@@ -32,6 +34,7 @@ public final class HotkeyPreferences: @unchecked Sendable {
         case .previousDetail: Defaults.Hotkey.previousDetailCombination
         case .nextDetail: Defaults.Hotkey.nextDetailCombination
         case .collapseOverlay: Defaults.Hotkey.collapseOverlayCombination
+        case .newSession: Defaults.Hotkey.newSessionCombination
         }
     }
 

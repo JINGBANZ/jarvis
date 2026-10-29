@@ -47,8 +47,8 @@ Start with [README.md](README.md) for the file map, local preview, deployment, a
 - Validate deployment configuration with the README's dry-run command when changing deployment
   inputs. For instruction-only edits, check links and consistency with the actual files and scripts;
   a browser rerun is unnecessary when the rendered site is unchanged.
-- The root repository Gate still applies. It requires macOS; on other hosts, use the PR's existing
-  macOS CI and report the result for the current commit. Website checks do not replace that Gate.
+- Follow the root repository Gate and [validation requirements](../CONTRIBUTING.md#before-opening-a-pull-request).
+  Website checks do not replace the Gate.
 - Keep deployment and hosting on Cloudflare Workers Static Assets, using its Git integration.
   Keep the README aligned with the Worker configuration and published directory. Do not assume
   account integration or a custom domain exists just because the configuration is committed;

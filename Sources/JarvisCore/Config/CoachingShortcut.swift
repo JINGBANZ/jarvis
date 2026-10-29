@@ -8,6 +8,7 @@ public enum CoachingShortcut: UInt32, CaseIterable, Sendable {
     case previousDetail = 4
     case nextDetail = 5
     case collapseOverlay = 6
+    case newSession = 7
 
     public var title: String {
         switch self {
@@ -17,6 +18,7 @@ public enum CoachingShortcut: UInt32, CaseIterable, Sendable {
         case .previousDetail: "Previous detail"
         case .nextDetail: "Next detail"
         case .collapseOverlay: "Collapse overlay"
+        case .newSession: "Start new session"
         }
     }
 
@@ -25,7 +27,7 @@ public enum CoachingShortcut: UInt32, CaseIterable, Sendable {
         case .hint: .manualHint
         case .explainMore: .manualExplanation
         case .showCode: .manualCode
-        case .previousDetail, .nextDetail, .collapseOverlay: nil
+        case .previousDetail, .nextDetail, .collapseOverlay, .newSession: nil
         }
     }
 }
