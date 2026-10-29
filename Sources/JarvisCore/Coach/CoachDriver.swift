@@ -39,6 +39,7 @@ public final class CoachDriver: @unchecked Sendable {
     private var exhaustionDeliveryGeneration: UInt = 0
     private var pendingExhaustionDeliveryGeneration: UInt?
     private var isHandling = false
+    private var mode: CoachingMode = .automatic
     private var pendingTrigger: PendingTrigger?
     /// Lets the retry pause see a trigger that lands before its async waiter is installed.
     private var pendingTriggerGeneration: UInt = 0
@@ -240,6 +241,19 @@ public final class CoachDriver: @unchecked Sendable {
         return true
     }
 
+    /// Manual mode admits only coaching shortcuts. An attempt already running finishes; queued
+    /// automatic work and automatic follow-ups stop at the next attempt boundary.
+    public func setMode(_ mode: CoachingMode) {
+        stateLock.lock()
+        let changed = self.mode != mode
+        self.mode = mode
+        if mode == .manual, pendingTrigger?.reason.isManual == false {
+            pendingTrigger = nil
+        }
+        stateLock.unlock()
+        if changed { activity?.record(.coachingModeChanged(mode: mode)) }
+    }
+
     /// Returns the cancelled compaction task so teardown can drain it before sealing the audit.
     @discardableResult
     public func cancelBackgroundWork() -> Task<Void, Never>? {
@@ -290,12 +304,14 @@ public final class CoachDriver: @unchecked Sendable {
         case pending
         case covered
         case exhausted
+        case paused
     }
 
     private func claimOrPend(_ trigger: PendingTrigger) -> TriggerClaim {
         let waiters: [CheckedContinuation<Void, Never>]
         stateLock.lock()
         if sessionTerminated { stateLock.unlock(); return .exhausted }
+        if mode == .manual && !trigger.reason.isManual { stateLock.unlock(); return .paused }
         if routeIsExhausted && !isHandling &&
             !trigger.reason.isManual && transcript.count <= (failedTranscriptBoundary ?? transcript.count) {
             stateLock.unlock()
@@ -452,6 +468,19 @@ public final class CoachDriver: @unchecked Sendable {
         }
         isHandling = false
         return nil
+    }
+
+    /// Take-or-release, like `finishOrTakeNextTrigger`: a press queued meanwhile keeps the slot, and
+    /// settlement coalesces it into this work.
+    private func releaseIfAutomaticWorkPaused(_ reason: TriggerReason) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard mode == .manual, !reason.isManual, pendingTrigger?.reason.isManual != true else {
+            return false
+        }
+        pendingTrigger = nil
+        isHandling = false
+        return true
     }
 
     private func releaseHandlingSlot() {
@@ -801,6 +830,8 @@ public final class CoachDriver: @unchecked Sendable {
         case .exhausted:
             jlog("… cycle failed; waiting for new input")
             return .brainError
+        case .paused:
+            return .paused
         }
 
         var work = CoachAttemptRunner.PendingCoachingWork(reason: reason)
@@ -809,12 +840,14 @@ public final class CoachDriver: @unchecked Sendable {
         var latestOutcome: TurnOutcome = .silentByModel
 
         while !Task.isCancelled {
+            if releaseIfAutomaticWorkPaused(work.reason) { return .paused }
             guard await waitForCycleCooldown() else { releaseHandlingSlot(); return .cancelled }
             work = await waitForTranscriptionSettlement(before: work)
             if Task.isCancelled {
                 releaseHandlingSlot()
                 return .cancelled
             }
+            if releaseIfAutomaticWorkPaused(work.reason) { return .paused }
             guard let attempt = await selectBrainForAttempt() else {
                 if let next = finishFailedCycle(unattemptedManualReason: unattemptedManualReason) {
                     unattemptedManualReason = nil
@@ -954,4 +987,6 @@ public enum TurnOutcome: Sendable, Equatable {
     case cancelled
     case brainError
     case exhausted
+    /// Manual mode stopped automatic work before it reached the brain.
+    case paused
 }
