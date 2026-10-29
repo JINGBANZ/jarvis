@@ -116,7 +116,8 @@ moments the model judges worthwhile.
    intent or infer sentence completeness from punctuation.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
    a delayed transcript-batch callback arriving after another attempt committed that same line is
-   consumed instead of buying a duplicate request. Any explicit coaching shortcut bypasses this wait.
+   consumed instead of buying a duplicate request. Any explicit coaching shortcut bypasses this wait;
+   in [manual mode](#manual-mode) it first gives speech already in progress a bounded moment.
    The CoachDriver then calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
@@ -622,6 +623,10 @@ when the mode switches, and stops automatic follow-ups (queued work, the
 attempt already running finishes, and a shortcut pressed during a stopped retry still gets its tip.
 Because the committed transcript boundary advances only when an attempt commits, a press carries
 every line finalized since the last committed attempt; manual mode keeps no buffer of its own.
+A press there usually comes right after the speech it is about, so unlike an automatic-mode press it
+first waits, at most two seconds, for speech that started before the press to finalize; speech that
+starts after the press never holds it back. Without the wait the tail of a question the user pressed
+on would ride with the next press instead.
 Returning to automatic sends nothing by itself: the next turn-end carries the speech heard meanwhile.
 The gate lives in the driver rather than in `SessionComposition`'s transcriber callbacks, which would
 miss the driver's own automatic follow-ups.

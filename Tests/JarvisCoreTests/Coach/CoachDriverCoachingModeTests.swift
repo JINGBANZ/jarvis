@@ -5,7 +5,9 @@ import Testing
 @Suite(.serialized) struct CoachDriverCoachingModeTests {
     private func makeDriver(
         brain: BrainClient,
-        activity: (any ActivityEventRecording)? = nil
+        activity: (any ActivityEventRecording)? = nil,
+        clock: ManualClock = ManualClock(),
+        manualSettlementGrace: @escaping CoachDriver.ManualSettlementGrace = {}
     ) -> (CoachDriver, RollingTranscript) {
         let transcript = RollingTranscript()
         let target = BrainTarget(
@@ -16,8 +18,9 @@ import Testing
             route: ConfiguredBrainRoute(targets: [
                 ConfiguredBrainTarget(target: target, brain: brain),
             ]),
-            screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(),
+            screen: FakeScreen(), overlay: FakeOverlay(), clock: clock,
             automaticAttemptDelay: { _ in },
+            manualSettlementGrace: manualSettlementGrace,
             activity: activity)
         return (driver, transcript)
     }
@@ -143,8 +146,71 @@ import Testing
         #expect(messages.allSatisfy { ActivityLog.isHumanFacing(message: $0, imageFile: nil, kind: .coachingModeChanged) })
     }
 
+    @Test func aManualModePressWaitsForSpeechAlreadyInProgress() async throws {
+        let clock = ManualClock(now: 100)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Ask about read volume.")])])
+        let (driver, transcript) = makeDriver(
+            brain: brain, clock: clock, manualSettlementGrace: { try await Task.sleep(for: .seconds(60)) })
+        driver.setMode(.manual)
+        transcript.append(.init(speaker: .them, text: "Design a URL shortener.", at: 1))
+        driver.updateTranscriptionWork(.pending(since: 2), for: .them)
+        clock.advance(by: 3)
+
+        let press = Task { await driver.handleTrigger(.manualHint) }
+        #expect(!(await eventually { brain.calls.count == 1 }), "the press must wait for the utterance in progress")
+        transcript.append(.init(speaker: .them, text: "It should handle a billion links.", at: 2))
+        driver.updateTranscriptionWork(.settled, for: .them)
+
+        #expect(await press.value == .spoke)
+        #expect(Self.userText(try #require(brain.calls.first)).contains("It should handle a billion links."))
+    }
+
+    @Test func aManualModePressStopsWaitingAfterTheGrace() async {
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Start with the API.")])])
+        let (driver, _) = makeDriver(brain: brain, clock: ManualClock(now: 100))
+        driver.setMode(.manual)
+        driver.updateTranscriptionWork(.pending(since: nil), for: .them)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        #expect(brain.calls.count == 1)
+    }
+
+    @Test func speechStartedAfterAManualModePressDoesNotHoldItBack() async {
+        let clock = ManualClock(now: 100)
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Start with the API.")])])
+        let (driver, _) = makeDriver(
+            brain: brain, clock: clock, manualSettlementGrace: { try await Task.sleep(for: .seconds(60)) })
+        driver.setMode(.manual)
+        clock.advance(by: 3)
+        driver.updateTranscriptionWork(.pending(since: 5), for: .me)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+    }
+
+    @Test func anAutomaticModePressStillSendsAtOnce() async {
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Start with the API.")])])
+        let (driver, _) = makeDriver(
+            brain: brain, clock: ManualClock(now: 100),
+            manualSettlementGrace: { try await Task.sleep(for: .seconds(60)) })
+        driver.updateTranscriptionWork(.pending(since: nil), for: .them)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+    }
+
     @Test func toggledFlipsBetweenTheTwoModes() {
         #expect(CoachingMode.automatic.toggled == .manual)
         #expect(CoachingMode.manual.toggled == .automatic)
     }
+}
+
+private func eventually(
+    timeoutNanoseconds: UInt64 = 200_000_000,
+    _ condition: @escaping @Sendable () -> Bool
+) async -> Bool {
+    let startedAt = DispatchTime.now().uptimeNanoseconds
+    while DispatchTime.now().uptimeNanoseconds - startedAt < timeoutNanoseconds {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 1_000_000)
+    }
+    return condition()
 }

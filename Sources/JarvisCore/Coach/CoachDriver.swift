@@ -6,9 +6,11 @@ import Foundation
 public final class CoachDriver: @unchecked Sendable {
     public typealias AutomaticAttemptDelay =
         @Sendable (_ consecutiveAutomaticAttempt: Int) async throws -> Void
+    public typealias ManualSettlementGrace = @Sendable () async throws -> Void
 
     private let transcriptionSettlement = TranscriptionSettlementGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
+    private let manualSettlementGrace: ManualSettlementGrace
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let documents: (any DocumentSession)?
     private let ledger = CoachTranscriptLedger()
@@ -19,6 +21,7 @@ public final class CoachDriver: @unchecked Sendable {
     private let stateLock = NSLock()
     private let recoveryDelay: @Sendable (TimeInterval) async throws -> Void
     private let clock: Clock
+    private let sessionStart: TimeInterval
     private var recovery = BrainCycleRecovery()
     private var recoveryDeadlineTask: Task<Void, Never>?
     private var sessionTerminated = false
@@ -115,6 +118,7 @@ public final class CoachDriver: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)? = nil,
         plan: SessionPlan = .default,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
+        manualSettlementGrace: ManualSettlementGrace? = nil,
         recoveryDelay: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
         activity: (any ActivityEventRecording)? = nil,
         capabilities: CoachCapabilities = .default,
@@ -123,6 +127,8 @@ public final class CoachDriver: @unchecked Sendable {
     ) {
         self.recoveryDelay = recoveryDelay
         self.clock = clock
+        let sessionStart = sessionStart ?? clock.now()
+        self.sessionStart = sessionStart
         self.plan = plan
         self.activity = activity
         self.documents = documents
@@ -131,13 +137,14 @@ public final class CoachDriver: @unchecked Sendable {
         self.routeSession = BrainRouteSession(targetCount: route.targets.count)
         self.coachingAttempts = coachingAttempts
         self.automaticAttemptDelay = automaticAttemptDelay ?? Self.defaultAutomaticAttemptDelay
+        self.manualSettlementGrace = manualSettlementGrace ?? Self.defaultManualSettlementGrace
         self.runner = CoachAttemptRunner(
             config: config,
             transcript: transcript,
             screen: screen,
             overlay: overlay,
             clock: clock,
-            sessionStart: sessionStart ?? clock.now(),
+            sessionStart: sessionStart,
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
@@ -146,6 +153,11 @@ public final class CoachDriver: @unchecked Sendable {
 
     private static let defaultAutomaticAttemptDelay: AutomaticAttemptDelay = { _ in
         try await Task.sleep(for: .milliseconds(500))
+    }
+
+    /// Long enough for a typical endpoint (see `Config.vadSilenceDurationMs`) plus finalization.
+    private static let defaultManualSettlementGrace: ManualSettlementGrace = {
+        try await Task.sleep(for: .seconds(2))
     }
 
     /// Takes effect at the next attempt; an attempt in flight keeps the plan it snapshotted.
@@ -264,6 +276,25 @@ public final class CoachDriver: @unchecked Sendable {
     /// Provider work state describes unresolved speech, not merely non-silent audio.
     public func updateTranscriptionWork(_ state: TranscriptionWorkState, for speaker: Speaker) {
         transcriptionSettlement.update(state, for: speaker)
+    }
+
+    /// Manual mode only. A press there usually comes right after the speech it is about, which may
+    /// still be finalizing; sending at once would leave its tail for the next press. Speech that
+    /// starts after the press never holds it back, and the grace bounds the wait.
+    private func waitBrieflyForSpeechInProgress() async {
+        guard stateLock.withLock({ mode == .manual }) else { return }
+        let pressedAt = clock.now() - sessionStart
+        let generation = transcriptionSettlement.interruptGenerationSnapshot()
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await self.transcriptionSettlement.waitUntilSettled(
+                    through: pressedAt, unlessInterruptedAfter: generation)
+            }
+            let grace = manualSettlementGrace
+            group.addTask { try? await grace() }
+            _ = await group.next()
+            group.cancelAll()
+        }
     }
 
     private func waitForTranscriptionSettlement(
@@ -834,6 +865,7 @@ public final class CoachDriver: @unchecked Sendable {
             return .paused
         }
 
+        if reason.isManual { await waitBrieflyForSpeechInProgress() }
         var work = CoachAttemptRunner.PendingCoachingWork(reason: reason)
         var automaticSequence = 0
         var unattemptedManualReason: TriggerReason?
