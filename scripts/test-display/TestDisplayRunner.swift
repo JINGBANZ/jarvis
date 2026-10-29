@@ -3,7 +3,11 @@ import AppKit
 @main
 @MainActor
 final class TestDisplayRunner {
+    private static var retainedDisplay: TestDisplay?
+
     static func main() {
+        // Losing the controller's pipe must not terminate the shared display owner.
+        signal(SIGPIPE, SIG_IGN)
         NSApplication.shared.setActivationPolicy(.prohibited)
         Task { await run() }
         NSApplication.shared.run()
@@ -11,47 +15,73 @@ final class TestDisplayRunner {
 
     private static func run() async {
         do {
-            guard CommandLine.arguments.count == 2 else { throw TestDisplay.Failure("Supervisor worker only") }
+            let option = CommandLine.arguments.count == 3 ? CommandLine.arguments[2] : nil
+            let inspect = option == "--inspect"
+            let allowCreate = option == "--allow-create"
+            guard CommandLine.arguments.count == 2 || inspect || allowCreate else {
+                throw TestDisplay.Failure("Supervisor worker only")
+            }
             let descriptor = try JSONDecoder().decode(TestDisplayDescriptor.self,
                 from: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))
-            let original = NSScreen.screens.map { (id: id($0), frame: $0.frame) }
-            let main = CGMainDisplayID()
-            let before = try onlineDisplays()
-            guard !original.isEmpty, before.allSatisfy({
-                CGDisplayVendorNumber($0) != descriptor.vendor || CGDisplayModelNumber($0) != descriptor.product
-            }) else { throw TestDisplay.Failure("Desktop unavailable or an unowned Jarvis display is online") }
-            let display = try TestDisplay(descriptor)
-            // AppKit needs to process the display-change notification. All calls are bounded
-            // by the external supervisor; a same-thread timeout cannot interrupt WindowServer.
-            try await Task.sleep(for: .seconds(1))
-            let created = NSScreen.screens
-            guard let screen = created.first(where: { id($0) == display.id }),
-                  CGMainDisplayID() == main, CGDisplayIsInMirrorSet(display.id) == 0,
-                  original.allSatisfy({ old in
-                      created.first(where: { id($0) == old.id })?.frame == old.frame
-                          && !old.frame.intersects(screen.frame)
-                  }),
-                  created.filter({ id($0) != display.id }).allSatisfy({ !$0.frame.intersects(screen.frame) }),
-                  let uuid = CGDisplayCreateUUIDFromDisplayID(display.id)?.takeRetainedValue()
-            else { throw TestDisplay.Failure("Display isolation changed the desktop; command not started") }
+            let original = try layout()
+            let existing = original.screens.filter {
+                CGDisplayVendorNumber($0.id) == descriptor.vendor && $0.model == descriptor.product
+            }
+            guard existing.count <= 1 else { throw TestDisplay.Failure("Multiple Jarvis displays are online; explicit recovery required") }
+            let target: CGDirectDisplayID
+            let admitted: TestDisplayLayout
+            if let screen = existing.first {
+                target = screen.id
+                admitted = original
+            } else {
+                guard allowCreate else {
+                    throw TestDisplay.Failure("Shared test display not found; automatic creation is unavailable for this boot; explicit recovery required")
+                }
+                let display = try TestDisplay(descriptor)
+                retainedDisplay = display
+                try display.configure(descriptor)
+                // AppKit must process the display-change notification before clients can use it.
+                // The external supervisor bounds synchronous WindowServer calls.
+                try await Task.sleep(for: .seconds(1))
+                admitted = try layout()
+                target = display.id
+                guard original.accepts(admitted, display: target) else {
+                    let mode = original.isHeadless ? "headless" : "physical-desktop"
+                    throw TestDisplay.Failure("Test display violated \(mode) layout; main display \(original.main) -> \(admitted.main); command not started")
+                }
+            }
+            try validate(target, descriptor: descriptor, layout: admitted)
+            guard let uuid = CGDisplayCreateUUIDFromDisplayID(target)?.takeRetainedValue() else {
+                throw TestDisplay.Failure("Test display has no persistent identity; command not started")
+            }
             let persistent = CFUUIDCreateString(nil, uuid) as String
-            reply(["display": display.id, "uuid": persistent,
+            reply(["display": target, "uuid": persistent, "retained": retainedDisplay != nil,
                    "expected_profile": "/Library/ColorSync/Profiles/Displays/Jarvis Tests-\(persistent).icc"])
+            if inspect { exit(0) }
             let input = await Task.detached { readLine() }.value
-            guard input == "stop" else { throw TestDisplay.Failure("Supervisor disappeared; unfinished run") }
-            let removed = display.id
-            display.close()
-            try await Task.sleep(for: .seconds(1))
-            let after = try onlineDisplays()
-            let restored = NSScreen.screens
-            guard !after.contains(removed), Set(after) == Set(before), CGMainDisplayID() == main,
-                  original.allSatisfy({ old in restored.first(where: { id($0) == old.id })?.frame == old.frame })
-            else { throw TestDisplay.Failure("Display teardown/layout could not be verified") }
-            reply(["stopped": true])
-            exit(0)
+            if input == nil, retainedDisplay != nil { return }
+            guard input == "finish" else { throw TestDisplay.Failure("Supervisor disappeared; unfinished run") }
+            let after = try layout()
+            try validate(target, descriptor: descriptor, layout: after)
+            guard admitted.matches(after) else { throw TestDisplay.Failure("Display layout changed during tests") }
+            reply(["finished": true])
+            if retainedDisplay == nil { exit(0) }
         } catch {
-            reply(["error": String(describing: error)])
-            exit(70)
+            reply(["error": String(describing: error), "retained": retainedDisplay != nil])
+            if retainedDisplay == nil { exit(70) }
+        }
+    }
+
+    private static func validate(_ target: CGDirectDisplayID, descriptor: TestDisplayDescriptor,
+                                 layout: TestDisplayLayout) throws {
+        let scale: UInt32 = descriptor.hiDPI == 0 ? 1 : 2
+        guard CGDisplaySerialNumber(target) == descriptor.serial,
+              let mode = CGDisplayCopyDisplayMode(target),
+              mode.pixelWidth == Int(descriptor.width * scale),
+              mode.pixelHeight == Int(descriptor.height * scale),
+              layout.usable(display: target, width: descriptor.width, height: descriptor.height),
+              NSScreen.screens.contains(where: { id($0) == target }) else {
+            throw TestDisplay.Failure("Existing test display identity, size, or isolation is invalid; command not started")
         }
     }
 
@@ -59,17 +89,26 @@ final class TestDisplayRunner {
         screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
     }
 
-    private static func onlineDisplays() throws -> [CGDirectDisplayID] {
+    private static func layout() throws -> TestDisplayLayout {
         // One bounded-capacity snapshot per phase, never one query per profile/candidate.
         var values = [CGDirectDisplayID](repeating: 0, count: 128)
         var count: UInt32 = 0
         guard CGGetOnlineDisplayList(UInt32(values.count), &values, &count) == .success,
-              count > 0, count < values.count else { throw TestDisplay.Failure("Online-display snapshot failed") }
-        return Array(values.prefix(Int(count)))
+              count < values.count else { throw TestDisplay.Failure("Online-display snapshot failed") }
+        let screens = values.prefix(Int(count)).map { id in
+            TestDisplayLayout.Screen(id: id, model: CGDisplayModelNumber(id), frame: CGDisplayBounds(id),
+                                     mirrored: CGDisplayIsInMirrorSet(id) != 0)
+        }
+        return TestDisplayLayout(screens: screens, main: CGMainDisplayID())
     }
 
     private static func reply(_ value: [String: Any]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]) else { exit(70) }
-        FileHandle.standardOutput.write(data + Data([10]))
+        do {
+            let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+            try FileHandle.standardOutput.write(contentsOf: data + Data([10]))
+        } catch {
+            FileHandle.standardError.write(Data("Display controller reply failed: \(error)\n".utf8))
+            if retainedDisplay == nil { exit(70) }
+        }
     }
 }
