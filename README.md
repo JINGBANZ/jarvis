@@ -47,7 +47,8 @@ flowchart TD
 
 ## Developer quick start
 
-Requires Swift 6 and the macOS [Command Line Tools](./wiki/build-and-run.md#toolchain).
+Use an Apple silicon or Intel Mac with macOS 14.2+, Swift 6, Python 3, and the macOS
+[Command Line Tools](./wiki/build-and-run.md#toolchain), with a logged-in macOS GUI session.
 
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git

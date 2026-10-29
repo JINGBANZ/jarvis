@@ -88,6 +88,43 @@ jobs:
           assemble_app .build/Jarvis.app "$ARTIFACTS" release
           ./scripts/check-universal-app.sh .build/Jarvis.app
           ./scripts/check-release-sdk.sh .build/Jarvis.app/Contents/MacOS/JarvisApp
+      - name: Compare universal and native download sizes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import tempfile
+
+          source = Path('.build/Jarvis.app')
+          binaries = []
+          for path in source.rglob('*'):
+              if path.is_file() and not path.is_symlink():
+                  with path.open('rb') as stream:
+                      if stream.read(4) in (b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'):
+                          binaries.append(path.relative_to(source))
+          print('Unsigned size comparison; identical resources and UDZO/HFS+ compression.')
+          print('variant,app_bytes,dmg_bytes')
+          with tempfile.TemporaryDirectory(prefix='app-size-', dir='.build') as temporary:
+              root = Path(temporary)
+              for variant in ('universal', 'arm64', 'x86_64'):
+                  staging = root / variant
+                  app = staging / 'Jarvis.app'
+                  shutil.copytree(source, app, symlinks=True)
+                  if variant != 'universal':
+                      for binary in binaries:
+                          path = app / binary
+                          subprocess.run(['lipo', str(path), '-thin', variant,
+                                          '-output', str(path)], check=True)
+                  (staging / 'Applications').symlink_to('/Applications')
+                  image = root / (variant + '.dmg')
+                  subprocess.run(['hdiutil', 'create', '-quiet', '-fs', 'HFS+',
+                                  '-format', 'UDZO', '-volname', 'Jarvis',
+                                  '-srcfolder', str(staging), str(image)], check=True)
+                  app_bytes = sum(path.stat().st_size for path in app.rglob('*')
+                                  if path.is_file() and not path.is_symlink())
+                  print(f'{variant},{app_bytes},{image.stat().st_size}', flush=True)
+          PY
 
   proxy-privacy:
     strategy:

@@ -37,7 +37,8 @@ flowchart TD
 
 ## 开发者快速开始
 
-需要 Swift 6 和 macOS [命令行工具](./wiki/build-and-run.md#toolchain)。
+需要 Apple 芯片或 Intel Mac、macOS 14.2 或更高版本、Swift 6、Python 3 和 macOS
+[命令行工具](./wiki/build-and-run.md#toolchain)，并保持 macOS 图形会话登录。
 
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git

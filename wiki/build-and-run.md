@@ -445,20 +445,26 @@ allows an empty match set but rejects scan errors.
 
 The local test commands share one fixed descriptor named `Jarvis Tests`, with the diagnostic label
 `jarvis-test-4a560001`. One ordinary-user external supervisor owns the complete command across
-worktrees. It creates a short-lived live display, observes exact app/helper exit, verifies display
-teardown, and retains the approved ICC profile and ColorSync registration. There is no routine
-profile deletion or unregister operation.
+worktrees. It reuses the live display or creates it when absent within the
+[per-boot creation bound](./test-command-ownership.md#identity-and-admission), observes exact app/helper exit, and
+verifies that the admitted display layout remains intact. The live display, ICC profile, and ColorSync
+registration stay available between commands. Test cleanup never destroys the display.
 
 [Test command ownership](./test-command-ownership.md) defines the machine-visible lease, durable
 unfinished state, process roles, six entrypoints, explicit hosted CI policy, and failure behavior.
-The same page defines the required worktree inventory, reviewed finite A/B campaign, complete
-profile/registration snapshots, and passive health checks before local rollout or Gate. Missing
-evidence and legacy extras remain partial and cannot authorize Gate. Display-free fixture checks
-do not call the native worker; hosted CI does not establish local persistence.
+The runner initializes machine state on first use and records the fixed display identity for reuse.
+Developers need no approval file or A/B campaign; [developer setup](../CONTRIBUTING.md#developer-setup)
+leads directly to the local Gate. The ownership page also defines maintainer acceptance checks for
+changes to the display framework. Display-free fixtures do not call the native worker; hosted CI
+does not establish local persistence.
 
-Normal admitted commands require no display app, privileged helper, or administrator prompt.
-Virtual displays use private macOS interfaces confined to the bounded worker and require a
-responsive logged-in desktop. Failure stops the run and leaves uncertain state blocked for explicit
+Normal admitted commands require no display app, physical monitor, privileged helper, or administrator prompt.
+Virtual displays use private macOS interfaces confined to the display worker and require a
+responsive logged-in macOS GUI session. Creation starts an idle background owner to retain the native
+display object; it has no polling loop or login installation. Commands that reuse the display use a
+short-lived validation worker. On headless Macs the test display serves as the main screen;
+physical-display layouts remain protected when present. Failure stops the run and
+leaves uncertain state blocked for explicit
 recovery. The contract preserves physical-display configuration and unrelated applications, without
 promising that macOS can never create extra state or stall.
 

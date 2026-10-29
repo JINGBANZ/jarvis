@@ -18,6 +18,17 @@ lifecycle = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(lifecycle)
 
 
+class DisplayLayoutTests(unittest.TestCase):
+    def test_headless_and_physical_display_contracts(self):
+        with tempfile.TemporaryDirectory(prefix='jarvis-layout-') as directory:
+            binary = Path(directory) / 'layout-fixture'
+            subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '6',
+                            str(ROOT / 'scripts/test-display/TestDisplayLayout.swift'),
+                            str(ROOT / 'scripts/test-command-ownership/TestDisplayLayoutFixture.swift'),
+                            '-o', str(binary)], cwd=ROOT, env=BASE_ENV, check=True, timeout=60)
+            subprocess.run([str(binary)], env=BASE_ENV, check=True, timeout=5)
+
+
 class LaunchTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -32,10 +43,12 @@ class LaunchTests(unittest.TestCase):
         cls.temporary = tempfile.TemporaryDirectory(prefix='jarvis-launch-')
         cls.addClassCleanup(cls.temporary.cleanup)
         cls.binary = Path(cls.temporary.name) / 'launch-fixture'
-        command = ['swiftc', '-parse-as-library', '-swift-version', '6', '-I', str(build / 'Modules'),
+        command = ['swiftc', '-parse-as-library', '-swift-version', '6',
+                   '-I', str(build / 'Modules'), '-I', str(build),
                    str(ROOT / 'scripts/test-command-ownership/LaunchFixture.swift'), '-o', str(cls.binary)]
         for target in ('JarvisCore', 'JarvisProcess', 'JarvisBrainProviders', 'JarvisScreenCapture', 'JarvisTestSupport'):
-            objects = sorted((build / (target + '.build')).glob('*.o'))
+            product = build / (target + '.o')
+            objects = [product] if product.is_file() else sorted((build / (target + '.build')).glob('*.o'))
             if not objects:
                 raise RuntimeError('Missing compiled launch fixture dependency: ' + target)
             command.extend(map(str, objects))
