@@ -518,18 +518,17 @@ private func checkDropsEmptyTips() async {
     panel.coachingModeNoticeDuration = .milliseconds(20)
     panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
     #expect(panel.currentTitle == "Manual — press ⌥⌘J to send")
-    try? await Task.sleep(for: .milliseconds(200))
-    #expect(panel.currentTitle == "Jarvis · Manual")
+    #expect(await waitUntil { panel.currentTitle == "Jarvis · Manual" })
 }
 
 @MainActor private func checkNewerNoticeOutlivesEarlierTimer() async {
     let panel = liveBox()
-    panel.coachingModeNoticeDuration = .milliseconds(100)
+    // Each notice reads the duration when it is shown: the first expires long before the second.
+    panel.coachingModeNoticeDuration = .milliseconds(20)
     panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
-    try? await Task.sleep(for: .milliseconds(60))
+    panel.coachingModeNoticeDuration = .seconds(1)
     panel.showCoachingMode(.automatic, notice: "Automatic")
-    try? await Task.sleep(for: .milliseconds(60))
-    #expect(panel.currentTitle == "Automatic", "the first notice's timer must not end the second")
     try? await Task.sleep(for: .milliseconds(200))
-    #expect(panel.currentTitle == "Jarvis")
+    #expect(panel.currentTitle == "Automatic", "the first notice's timer must not end the second")
+    #expect(await waitUntil { panel.currentTitle == "Jarvis" })
 }
