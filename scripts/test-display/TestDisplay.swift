@@ -17,8 +17,8 @@ struct TestDisplayDescriptor: Decodable {
 
 @MainActor
 final class TestDisplay {
-    private var display: CGVirtualDisplay?
-    var id: CGDirectDisplayID { display?.displayID ?? 0 }
+    private let display: CGVirtualDisplay
+    var id: CGDirectDisplayID { display.displayID }
 
     // Adapted from DeskPad; see DeskPad/README.md and LICENSE.md.
     init(_ value: TestDisplayDescriptor) throws {
@@ -39,13 +39,14 @@ final class TestDisplay {
             throw Failure("Fixed display creation failed; no alternate identity")
         }
         self.display = display
+    }
+
+    func configure(_ value: TestDisplayDescriptor) throws {
         let settings = CGVirtualDisplaySettings()
         settings.hiDPI = value.hiDPI
         settings.modes = [CGVirtualDisplayMode(width: UInt(value.width), height: UInt(value.height), refreshRate: value.refreshRate)]
         guard display.apply(settings) else { throw Failure("Fixed display configuration failed") }
     }
-
-    func close() { display = nil }
 
     struct Failure: Error, CustomStringConvertible {
         let description: String

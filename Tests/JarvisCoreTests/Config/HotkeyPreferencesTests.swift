@@ -40,6 +40,29 @@ import Foundation
         #expect(CoachingShortcut.collapseOverlay.triggerReason == nil)
     }
 
+    @Test func newSessionBindingDefaultsToControlShiftCommandZeroAndPersistsIndependently() {
+        let defaults = freshDefaults()
+        let newSession = HotkeyPreferences(defaults: defaults, shortcut: .newSession)
+        // kVK_ANSI_0.
+        #expect(newSession.combination
+            == HotkeyCombination(keyCode: 29, modifiers: [.control, .shift, .command]))
+        newSession.combination = HotkeyCombination(keyCode: 8, modifiers: [.command, .shift])
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .newSession).combination
+            == HotkeyCombination(keyCode: 8, modifiers: [.command, .shift]))
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .collapseOverlay).combination
+            == Defaults.Hotkey.collapseOverlayCombination)
+        #expect(CoachingShortcut.newSession.triggerReason == nil)
+    }
+
+    @Test func shippedDefaultsAreDistinct() {
+        let combinations = CoachingShortcut.allCases.map {
+            HotkeyPreferences(defaults: freshDefaults(), shortcut: $0).combination
+        }
+        for (index, combination) in combinations.enumerated() {
+            #expect(!combinations[(index + 1)...].contains(combination))
+        }
+    }
+
     @Test func coachingModeToggleDefaultsToOptionCommandPeriodAndPersistsIndependently() {
         let defaults = freshDefaults()
         let toggle = HotkeyPreferences(defaults: defaults, shortcut: .toggleCoachingMode)
@@ -53,9 +76,9 @@ import Foundation
         #expect(CoachingShortcut.toggleCoachingMode.triggerReason == nil)
     }
 
-    @Test func onlyCoachingShortcutsAndTheModeToggleBeepWhileStopped() {
+    @Test func shortcutsThatAskJarvisToActBeepWhileStopped() {
         let beeping = Set(CoachingShortcut.allCases.filter(\.beepsWhileStopped))
-        #expect(beeping == [.hint, .explainMore, .showCode, .toggleCoachingMode])
+        #expect(beeping == [.hint, .explainMore, .showCode, .newSession, .toggleCoachingMode])
     }
 
     @Test func defaultsToShippedCombinationWhenUnset() {
