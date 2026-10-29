@@ -294,7 +294,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         pendingStartTask?.cancel()
         pendingStartTask = nil
         cancelPendingReferenceAdmission()
-        let readinessStart = readiness.begin(configuration: readinessConfiguration)
+        // A replacement prepares as a candidate so a refusal leaves the live session's readiness intact.
+        let readinessStart = wasRunning
+            ? readiness.beginReplacement(configuration: readinessConfiguration)
+            : readiness.begin(configuration: readinessConfiguration)
         let readinessSession = readinessStart.session
         composition.applyReadinessEffects(readinessStart.effects)
 
@@ -323,9 +326,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             if wasRunning {
                 artifacts.sessionAudit?.record(.settingsChangeNotApplied)
             }
+            let error = UserFacingError.permissionsMissing(missingPermissions)
             errorReporter.reportImmediately(
-                .permissionsMissing(missingPermissions),
-                context: reportContext)
+                wasRunning ? error.asPreflightRefusal : error, context: reportContext)
             return false
         }
 
@@ -341,9 +344,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             if wasRunning {
                 artifacts.sessionAudit?.record(.settingsChangeNotApplied)
             }
+            let error = UserFacingError.noAPIKey(missing: missingCredentials)
             errorReporter.reportImmediately(
-                .noAPIKey(missing: missingCredentials),
-                context: reportContext)
+                wasRunning ? error.asPreflightRefusal : error, context: reportContext)
             return false
         }
 
@@ -368,7 +371,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 .systemAudio, remembering: self.permissionPreferences)
             guard !Task.isCancelled,
                   self.pendingStartRevision == revision,
-                  self.readiness.activeSession == readinessSession else { return }
+                  self.readiness.isCurrent(readinessSession) else { return }
             guard systemAudioGranted else {
                 self.rejectStartWithoutSystemAudio(
                     revision: revision,
@@ -421,14 +424,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 }
                 guard !Task.isCancelled,
                       self.pendingStartRevision == revision,
-                      self.readiness.activeSession == readinessSession else { return }
+                      self.readiness.isCurrent(readinessSession) else { return }
                 self.composition.observeReadiness(
                     .transcriptionPreparation(.ready), for: readinessSession)
             }
             let proxy = await self.brain.proxyReadiness(for: brainRoute, preparingStart: true)
             guard !Task.isCancelled,
                   self.pendingStartRevision == revision,
-                  self.readiness.activeSession == readinessSession else {
+                  self.readiness.isCurrent(readinessSession) else {
                 return
             }
             // A key saved while Start was preparing makes the prepared keys stale.
@@ -447,7 +450,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             let referenceAdmission: ReferenceAdmissionResult
             do { referenceAdmission = try await referenceTask.result() } catch { return }
             guard !Task.isCancelled, self.pendingStartRevision == revision,
-                  self.readiness.activeSession == readinessSession else { return }
+                  self.readiness.isCurrent(readinessSession) else { return }
             guard self.brain.savedKeys(for: brainRoute) == brainKeys,
                   transcriptionProvider.ownCredential.map({ (self.secrets.apiKey(for: $0) ?? "") == transcriptionKey }) ?? true,
                   self.transcriptionPreferences.configuration == transcriptionConfiguration,
@@ -484,7 +487,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         blocker: JarvisReadiness.TranscriptionBlocker
     ) {
         guard pendingStartRevision == revision,
-              readiness.activeSession == readinessSession else { return }
+              readiness.isCurrent(readinessSession) else { return }
         pendingStartTask = nil
         composition.observeReadiness(
             .transcriptionPreparation(.blocked(blocker)), for: readinessSession)
@@ -502,7 +505,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         readinessSession: JarvisReadiness.Session
     ) {
         guard pendingStartRevision == revision,
-              readiness.activeSession == readinessSession else { return }
+              readiness.isCurrent(readinessSession) else { return }
         pendingStartTask = nil
         composition.observeReadiness(
             .permissions(granted: Permissions.grantedReadinessPermissions()),
@@ -513,7 +516,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         }
         let error: UserFacingError = Permissions.systemAudioProof == nil
             ? .systemAudioCheckFailed : .permissionsMissing([.systemAudio])
-        errorReporter.reportImmediately(error, context: context)
+        errorReporter.reportImmediately(
+            wasRunning ? error.asPreflightRefusal : error, context: context)
     }
 
     /// Refuses a route with no usable target before stopping the running pipeline.
@@ -530,7 +534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         reportContext: UserFacingError.PresentationContext,
         readinessSession: JarvisReadiness.Session
     ) -> Bool {
-        guard readiness.activeSession == readinessSession else { return false }
+        guard readiness.isCurrent(readinessSession) else { return false }
         let availability = brain.availability(for: brainRoute, proxy: proxy, keys: brainKeys)
         if let failure = availability.blockingFailure {
             jlog("Jarvis: can't start — no target in the route can coach: "
@@ -543,6 +547,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 for: readinessSession)
             return false
         }
+        // Commit before teardown so the outgoing pipeline's late callbacks carry a retired token.
+        composition.applyReadinessEffects(readiness.commitReplacement(readinessSession))
         stop(reason: .replacedByNewSession, preserving: readinessSession, preservingReferenceStart: references.startID)
         showActiveBrainTarget(
             availability.failure(for: brainRoute.primary) == nil ? brainRoute.primary : nil)
@@ -635,13 +641,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         cancelPendingReferenceAdmission()
         pendingStartTask?.cancel()
         pendingStartTask = nil
-        if let session = readiness.activeSession {
+        // A pending replacement is the attempt; the live session it would replace keeps running.
+        if let session = readiness.replacementSession ?? readiness.activeSession {
             cancelReadinessAttempt(session)
         }
     }
 
     private func cancelReadinessAttempt(_ session: JarvisReadiness.Session) {
-        guard readiness.activeSession == session else { return }
+        guard readiness.isCurrent(session) else { return }
         composition.applyReadinessEffects(readiness.stop(session: session))
     }
 
