@@ -189,36 +189,36 @@ import Testing
         #expect(TranscriptionProvider.deepgram.requiredCredentials(for: nil) == [.deepgramAPIKey])
     }
 
-    @Test func deepgramPreferencesDefaultToNova3InEnglishAndRoundTrip() {
+    @Test func deepgramPreferencesDefaultToNova3WithAutomaticLanguagesAndRoundTrip() {
         let defaults = freshDefaults()
         let preferences = TranscriptionPreferences(defaults: defaults)
         #expect(preferences.deepgramModel == .nova3)
-        #expect(preferences.deepgramLanguage == .english)
+        #expect(preferences.deepgramExpectedLanguages.isEmpty)
 
         preferences.provider = .deepgram
-        preferences.deepgramLanguage = .mandarinChinese
+        preferences.deepgramExpectedLanguages = [.mandarinChinese, .english, .english]
         let reloaded = TranscriptionPreferences(defaults: defaults)
-        #expect(reloaded.deepgramLanguage == .mandarinChinese)
+        #expect(reloaded.deepgramExpectedLanguages == [.english, .mandarinChinese])
 
         let configuration = reloaded.configuration
         #expect(configuration.target == .deepgram(.nova3))
-        #expect(configuration.languageExpectation == .languages([.mandarinChinese]))
+        #expect(configuration.languageExpectation == .languages([.english, .mandarinChinese]))
         #expect(configuration.provider.audioFormat == .pcm16Mono16k)
     }
 
     @Test func deepgramFallsBackOnUnrecognizedStoredValues() {
         let defaults = freshDefaults()
         defaults.set("nova-9", forKey: Defaults.Transcription.deepgramModelKey)
-        defaults.set("klingon", forKey: Defaults.Transcription.deepgramLanguageKey)
+        defaults.set(["klingon"], forKey: Defaults.Transcription.deepgramExpectedLanguagesKey)
         let preferences = TranscriptionPreferences(defaults: defaults)
         #expect(preferences.deepgramModel == .nova3)
-        #expect(preferences.deepgramLanguage == .english)
+        #expect(preferences.deepgramExpectedLanguages.isEmpty)
     }
 
-    @Test func deepgramTargetKeepsOneLanguageAndDefaultsToEnglish() {
+    @Test func deepgramTargetCarriesTheExpectedLanguages() {
         let target = TranscriptionTarget.deepgram(.nova3)
-        #expect(target.configuration(expectedLanguages: [.mandarinChinese]).deepgramLanguage == .mandarinChinese)
-        #expect(target.configuration(expectedLanguages: []).deepgramLanguage == .english)
+        #expect(target.configuration(expectedLanguages: [.mandarinChinese]).deepgramExpectedLanguages == [.mandarinChinese])
+        #expect(target.configuration(expectedLanguages: []).languageExpectation == .automatic)
         #expect(target.modelID == "nova-3")
         #expect(target.provider == .deepgram)
     }

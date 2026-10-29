@@ -613,10 +613,11 @@ better but is no longer exactly what was said). Gemini's turn detection, wire fo
 provider-derived wire sample rate are covered in
 [architecture.md](./architecture.md#models-and-apis).
 
-With Deepgram selected, the card shows one **Language** row (`deepgramLanguage`): English or
-Mandarin, for the whole session. Deepgram's Nova-3 model (`DeepgramTranscriptionModel`) transcribes
-one language per stream, so there is no automatic or multi-language choice, and no vocabulary row.
-Its wire format and turn detection are covered in
+With Deepgram selected, the card shows one **Expected languages** row (`deepgramExpectedLanguages`),
+a multi-select that behaves like the OpenAI one: none means automatic. Picking a single language
+gives the most accurate recognition. Picking none or several uses Nova-3's multilingual mode
+(`DeepgramTranscriptionModel`), which follows a speaker who switches languages. There is no
+vocabulary row. Its wire format and turn detection are covered in
 [architecture.md](./architecture.md#models-and-apis).
 
 With Apple Speech selected, **Conversation locale** is populated from

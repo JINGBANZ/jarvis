@@ -125,8 +125,8 @@ import Testing
                 #expect(target.languageSupport == .languageList)
                 #expect(acceptance.confirmation == .setupAcknowledged)
             case .deepgram:
-                #expect(target.languageSupport == .singularHintAndContext)
-                #expect(acceptance.expectation == .languages([.english]))
+                #expect(target.languageSupport == .languageList)
+                #expect(acceptance.expectation == .automatic)
                 #expect(acceptance.confirmation == .connectionOpened)
             case .appleSpeech:
                 #expect(target.languageSupport == .singleLocale)
@@ -150,12 +150,12 @@ import Testing
             preferences.openAIExpectedLanguages = [.mandarinChinese, .english, .english]
             preferences.geminiExpectedLanguages = [.english, .mandarinChinese]
             preferences.appleSpeechLocaleIdentifier = "zh_CN"
-            preferences.deepgramLanguage = .mandarinChinese
+            preferences.deepgramExpectedLanguages = [.mandarinChinese]
             let snapshot = preferences.configuration
             preferences.openAIExpectedLanguages = []
             preferences.geminiExpectedLanguages = []
             preferences.appleSpeechLocaleIdentifier = "en_US"
-            preferences.deepgramLanguage = .english
+            preferences.deepgramExpectedLanguages = []
             #expect(snapshot.provider == provider)
             switch provider {
             case .appleSpeech:
@@ -163,7 +163,7 @@ import Testing
                 #expect(preferences.configuration.languageExpectation == .locale("en_US"))
             case .deepgram:
                 #expect(snapshot.languageExpectation == .languages([.mandarinChinese]))
-                #expect(preferences.configuration.languageExpectation == .languages([.english]))
+                #expect(preferences.configuration.languageExpectation == .automatic)
             case .openAI, .gemini:
                 #expect(snapshot.languageExpectation == .languages([.english, .mandarinChinese]))
                 #expect(preferences.configuration.languageExpectation == .automatic)

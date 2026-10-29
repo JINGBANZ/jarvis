@@ -73,8 +73,9 @@ public enum Defaults {
         public static let deepgramModelKey = "transcription.deepgram.model"
         public static let deepgramModel: DeepgramTranscriptionModel = .nova3
 
-        public static let deepgramLanguageKey = "transcription.deepgram.language"
-        public static let deepgramLanguage: TranscriptionLanguage = .english
+        public static let deepgramExpectedLanguagesKey = "transcription.deepgram.expected-languages"
+        /// Empty means automatic detection.
+        public static let deepgramExpectedLanguages: [TranscriptionLanguage] = []
     }
 
     // MARK: - Screen capture

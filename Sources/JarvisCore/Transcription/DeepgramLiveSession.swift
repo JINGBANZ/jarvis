@@ -20,13 +20,16 @@ public enum DeepgramLiveSession {
     /// Deepgram's documented minimum for `utterance_end_ms`.
     static let utteranceEndMilliseconds = 1_000
 
+    /// One expected language selects it outright. Zero or several select Nova-3's multilingual mode,
+    /// with the expected languages as soft hints.
     public static func connectURL(
-        model: DeepgramTranscriptionModel, language: TranscriptionLanguage, sampleRate: Int
+        model: DeepgramTranscriptionModel, languages: [TranscriptionLanguage], sampleRate: Int
     ) -> URL {
+        let languages = TranscriptionLanguage.canonicalizing(languages)
         var components = URLComponents(string: endpoint)!
         components.queryItems = [
             URLQueryItem(name: "model", value: model.rawValue),
-            URLQueryItem(name: "language", value: language.deepgramHint),
+            URLQueryItem(name: "language", value: languages.count == 1 ? languages[0].deepgramHint : "multi"),
             URLQueryItem(name: "encoding", value: "linear16"),
             URLQueryItem(name: "sample_rate", value: String(sampleRate)),
             URLQueryItem(name: "channels", value: "1"),
@@ -37,6 +40,9 @@ public enum DeepgramLiveSession {
             URLQueryItem(name: "utterance_end_ms", value: String(utteranceEndMilliseconds)),
             URLQueryItem(name: "vad_events", value: "true"),
         ]
+        if languages.count > 1 {
+            components.queryItems! += languages.map { URLQueryItem(name: "language_hint", value: $0.deepgramHint) }
+        }
         return components.url!
     }
 
@@ -66,20 +72,16 @@ public enum DeepgramLiveSession {
         }
     }
 
-    /// Joins the settled segments of one utterance. Deepgram spaces Mandarin words, which reads
-    /// as broken text, so the gaps between CJK characters close.
-    public static func joinedTranscript(
-        _ segments: [String], language: TranscriptionLanguage, speaker: Speaker
-    ) -> String? {
-        var text = segments
+    /// Joins the settled segments of one utterance. Deepgram can space Mandarin words, which reads
+    /// as broken text, so the gaps between CJK characters close. Latin words keep their spaces.
+    public static func joinedTranscript(_ segments: [String], speaker: Speaker) -> String? {
+        let text = segments
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
             .joined(separator: " ")
-        if language == .mandarinChinese {
-            text = text.replacingOccurrences(
+            .replacingOccurrences(
                 of: #"(?<=[⺀-鿿＀-￯，。？！、：；])\s+(?=[⺀-鿿＀-￯，。？！、：；])"#,
                 with: "", options: .regularExpression)
-        }
         return TranscriptFiltering.meaningfulTranscript(text, speaker: speaker)
     }
 }

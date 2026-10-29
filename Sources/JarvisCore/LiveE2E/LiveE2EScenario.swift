@@ -123,9 +123,6 @@ extension LiveE2EScenario {
             target = .gemini(try Self.parse(GeminiTranscriptionModel.self,
                 raw.transcription.model ?? "", "transcription.model"))
         case .deepgram:
-            guard languages.count == 1 else {
-                throw Failure.invalid("Deepgram requires exactly one transcription language")
-            }
             target = .deepgram(try Self.parse(DeepgramTranscriptionModel.self,
                 raw.transcription.model ?? "", "transcription.model"))
         case .appleSpeech:

@@ -157,17 +157,21 @@ public final class TranscriptionPreferences {
         }
     }
 
-    /// Nova-3 transcribes one language per stream, so there is no automatic or multi-language choice.
-    public var deepgramLanguage: TranscriptionLanguage {
+    /// Empty means automatic detection.
+    public var deepgramExpectedLanguages: [TranscriptionLanguage] {
         get {
-            guard let raw = defaults.string(forKey: Defaults.Transcription.deepgramLanguageKey),
-                  let language = TranscriptionLanguage(rawValue: raw) else {
-                return Defaults.Transcription.deepgramLanguage
+            guard let stored = defaults.stringArray(
+                forKey: Defaults.Transcription.deepgramExpectedLanguagesKey) else {
+                return Defaults.Transcription.deepgramExpectedLanguages
             }
-            return language
+            return TranscriptionLanguage.canonicalizing(
+                stored.compactMap(TranscriptionLanguage.init(rawValue:)))
         }
         set {
-            defaults.set(newValue.rawValue, forKey: Defaults.Transcription.deepgramLanguageKey)
+            let languages = TranscriptionLanguage.canonicalizing(newValue)
+            defaults.set(
+                languages.map(\.rawValue),
+                forKey: Defaults.Transcription.deepgramExpectedLanguagesKey)
         }
     }
 
@@ -183,6 +187,6 @@ public final class TranscriptionPreferences {
             geminiVocabularyKeywords: geminiVocabularyKeywords,
             geminiMode: geminiMode,
             deepgramModel: deepgramModel,
-            deepgramLanguage: deepgramLanguage)
+            deepgramExpectedLanguages: deepgramExpectedLanguages)
     }
 }

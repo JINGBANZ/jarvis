@@ -13,8 +13,7 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
     public let geminiVocabularyKeywords: [String]
     public let geminiMode: GeminiTranscriptionMode
     public let deepgramModel: DeepgramTranscriptionModel
-    /// Nova-3 transcribes one language per stream.
-    public let deepgramLanguage: TranscriptionLanguage
+    public let deepgramExpectedLanguages: [TranscriptionLanguage]
 
     public init(
         provider: TranscriptionProvider,
@@ -27,7 +26,7 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
         geminiVocabularyKeywords: [String] = [],
         geminiMode: GeminiTranscriptionMode = .verbatim,
         deepgramModel: DeepgramTranscriptionModel = .nova3,
-        deepgramLanguage: TranscriptionLanguage = .english
+        deepgramExpectedLanguages: [TranscriptionLanguage] = []
     ) {
         self.provider = provider
         self.openAIModel = openAIModel
@@ -40,7 +39,8 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
         self.geminiVocabularyKeywords = geminiVocabularyKeywords
         self.geminiMode = geminiMode
         self.deepgramModel = deepgramModel
-        self.deepgramLanguage = deepgramLanguage
+        self.deepgramExpectedLanguages = TranscriptionLanguage.canonicalizing(
+            deepgramExpectedLanguages)
     }
 
     /// Nil for providers that segment turns themselves.
@@ -61,7 +61,7 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
         switch provider {
         case .openAI: .init(languages: openAIExpectedLanguages)
         case .gemini: .init(languages: geminiExpectedLanguages)
-        case .deepgram: .init(languages: [deepgramLanguage])
+        case .deepgram: .init(languages: deepgramExpectedLanguages)
         case .appleSpeech: .locale(appleSpeechLocaleIdentifier)
         }
     }

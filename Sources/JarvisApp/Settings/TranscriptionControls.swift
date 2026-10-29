@@ -20,7 +20,7 @@ final class TranscriptionControls: NSObject {
     private var geminiVocabularyRow: SettingsRowView?
     var geminiVocabularyField: NSTextField?
     private var geminiModeRow: SettingsRowView?
-    private var deepgramLanguageRow: SettingsRowView?
+    private var deepgramLanguagesRow: SettingsRowView?
     private var localeRow: SettingsRowView?
     private var localePopup: NSPopUpButton?
     private var localeLoadTask: Task<Void, Never>?
@@ -34,7 +34,7 @@ final class TranscriptionControls: NSObject {
             [providerRow, geminiModelRow, geminiLanguagesRow,
              geminiVocabularyRow, geminiModeRow].compactMap { $0 }
         case .deepgram:
-            [providerRow, deepgramLanguageRow].compactMap { $0 }
+            [providerRow, deepgramLanguagesRow].compactMap { $0 }
         case .appleSpeech:
             [providerRow, localeRow].compactMap { $0 }
         }
@@ -206,26 +206,18 @@ final class TranscriptionControls: NSObject {
         content.addSubview(geminiModeRow)
         self.geminiModeRow = geminiModeRow
 
-        let deepgramLanguage = NSPopUpButton()
-        for choice in TranscriptionLanguage.allCases {
-            deepgramLanguage.addItem(withTitle: choice.displayName)
-            deepgramLanguage.lastItem?.representedObject = choice.rawValue
-        }
-        if let selected = deepgramLanguage.itemArray.firstIndex(where: {
-            $0.representedObject as? String == preferences.deepgramLanguage.rawValue
-        }) {
-            deepgramLanguage.selectItem(at: selected)
-        }
-        deepgramLanguage.target = self
-        deepgramLanguage.action = #selector(deepgramLanguageChanged)
-        deepgramLanguage.setAccessibilityLabel("Deepgram transcription language")
-        deepgramLanguage.identifier = NSUserInterfaceItemIdentifier("transcription-deepgram-language")
-        let deepgramLanguageRow = SettingsRowView(
-            title: "Language",
-            detail: "\(preferences.deepgramModel.displayName) listens in one language for the whole session.",
-            controlView: deepgramLanguage)
-        content.addSubview(deepgramLanguageRow)
-        self.deepgramLanguageRow = deepgramLanguageRow
+        let deepgramLanguagePicker = ExpectedLanguagePicker(
+            selectedLanguages: preferences.deepgramExpectedLanguages,
+            onChange: { [weak self] languages in self?.deepgramLanguagesChanged(languages) })
+        deepgramLanguagePicker.identifier =
+            NSUserInterfaceItemIdentifier("transcription-deepgram-languages")
+        let deepgramLanguagesRow = SettingsRowView(
+            title: "Expected languages",
+            detail: "Selected languages guide recognition. Pick none for automatic detection.",
+            controlView: deepgramLanguagePicker,
+            controlSize: NSSize(width: 340, height: 32))
+        content.addSubview(deepgramLanguagesRow)
+        self.deepgramLanguagesRow = deepgramLanguagesRow
 
         let locale = NSPopUpButton()
         locale.addItem(withTitle: "Loading locales…")
@@ -253,7 +245,7 @@ final class TranscriptionControls: NSObject {
         let visible = Set(visibleRows.map(ObjectIdentifier.init))
         for row in [modelRow, languagesRow, vocabularyRow,
                     geminiModelRow, geminiLanguagesRow, geminiVocabularyRow, geminiModeRow,
-                    deepgramLanguageRow, localeRow] {
+                    deepgramLanguagesRow, localeRow] {
             row?.isHidden = row.map { !visible.contains(ObjectIdentifier($0)) } ?? true
         }
         card?.setHeader(title: "Transcription", detail: Self.headerDetail(for: preferences.provider))
@@ -375,13 +367,12 @@ final class TranscriptionControls: NSObject {
         jlog("Jarvis: \(mode.displayName) selected for the next Start.")
     }
 
-    @objc private func deepgramLanguageChanged(_ sender: NSPopUpButton) {
-        guard let raw = sender.selectedItem?.representedObject as? String,
-              let language = TranscriptionLanguage(rawValue: raw) else {
-            return
-        }
-        preferences.deepgramLanguage = language
-        jlog("Jarvis: Deepgram \(language.displayName) language selected for the next Start.")
+    private func deepgramLanguagesChanged(_ languages: [TranscriptionLanguage]) {
+        preferences.deepgramExpectedLanguages = languages
+        let selection = languages.isEmpty
+            ? "automatic"
+            : languages.map(\.displayName).joined(separator: ", ")
+        jlog("Jarvis: \(selection) transcription languages selected for the next Start.")
     }
 
     @objc private func localeChanged(_ sender: NSPopUpButton) {

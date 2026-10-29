@@ -5,11 +5,12 @@ import Foundation
 @Suite struct DeepgramLiveSessionTests {
     private func items(_ url: URL) -> [String: String] {
         let pairs = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        return Dictionary(uniqueKeysWithValues: pairs.map { ($0.name, $0.value ?? "") })
+        // `language_hint` repeats; the first value is enough for single-valued assertions.
+        return Dictionary(pairs.map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { first, _ in first })
     }
 
     @Test func connectURLSelectsModelLanguageAndRawPCM() {
-        let url = DeepgramLiveSession.connectURL(model: .nova3, language: .mandarinChinese, sampleRate: 16_000)
+        let url = DeepgramLiveSession.connectURL(model: .nova3, languages: [.mandarinChinese], sampleRate: 16_000)
         #expect(url.scheme == "wss")
         #expect(url.host == "api.deepgram.com")
         #expect(url.path == "/v1/listen")
@@ -23,12 +24,27 @@ import Foundation
     }
 
     @Test func englishUsesTheEnglishCode() {
-        let url = DeepgramLiveSession.connectURL(model: .nova3, language: .english, sampleRate: 16_000)
+        let url = DeepgramLiveSession.connectURL(model: .nova3, languages: [.english], sampleRate: 16_000)
         #expect(items(url)["language"] == "en")
     }
 
+    @Test func severalLanguagesSelectMultilingualModeWithEachAsAHint() {
+        let url = DeepgramLiveSession.connectURL(
+            model: .nova3, languages: [.mandarinChinese, .english], sampleRate: 16_000)
+        #expect(items(url)["language"] == "multi")
+        let hints = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?
+            .filter { $0.name == "language_hint" }.compactMap(\.value)
+        #expect(hints == ["en", "zh"])
+    }
+
+    @Test func noLanguageSelectionIsMultilingualWithoutHints() {
+        let url = DeepgramLiveSession.connectURL(model: .nova3, languages: [], sampleRate: 16_000)
+        #expect(items(url)["language"] == "multi")
+        #expect(items(url)["language_hint"] == nil)
+    }
+
     @Test func theKeyNeverEntersTheURL() {
-        let url = DeepgramLiveSession.connectURL(model: .nova3, language: .english, sampleRate: 16_000)
+        let url = DeepgramLiveSession.connectURL(model: .nova3, languages: [.english], sampleRate: 16_000)
         #expect(!url.absoluteString.contains("secret"))
         #expect(DeepgramLiveSession.authorizationValue(apiKey: "secret") == "Token secret")
     }
@@ -62,18 +78,18 @@ import Foundation
 
     @Test func joinsSegmentsWithSpacesInEnglish() {
         #expect(DeepgramLiveSession.joinedTranscript(
-            ["Tell me about", "your last project."], language: .english, speaker: .me)
+            ["Tell me about", "your last project."], speaker: .me)
             == "Tell me about your last project.")
     }
 
     @Test func closesGapsBetweenMandarinCharactersButKeepsEnglishWords() {
         #expect(DeepgramLiveSession.joinedTranscript(
-            ["我 想 用 Kubernetes 部署 服务"], language: .mandarinChinese, speaker: .me)
+            ["我 想 用 Kubernetes 部署 服务"], speaker: .me)
             == "我想用 Kubernetes 部署服务")
     }
 
     @Test func filtersSilenceHallucinationsForTheUser() {
-        #expect(DeepgramLiveSession.joinedTranscript(["Thank you."], language: .english, speaker: .me) == nil)
-        #expect(DeepgramLiveSession.joinedTranscript([" ", ""], language: .english, speaker: .them) == nil)
+        #expect(DeepgramLiveSession.joinedTranscript(["Thank you."], speaker: .me) == nil)
+        #expect(DeepgramLiveSession.joinedTranscript([" ", ""], speaker: .them) == nil)
     }
 }

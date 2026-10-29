@@ -95,7 +95,7 @@ enum TranscriptionSessionFactory {
             DeepgramLiveTranscriber(
                 apiKey: apiKey,
                 model: configuration.deepgramModel,
-                language: configuration.deepgramLanguage,
+                expectedLanguages: configuration.deepgramExpectedLanguages,
                 audioFormat: configuration.provider.audioFormat,
                 speaker: speaker,
                 transcript: transcript,

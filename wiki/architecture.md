@@ -1140,11 +1140,11 @@ rather than a per-turn screenshot.
   what the adapters keep to themselves, which is what separates them.
 - **Deepgram transcription is the fourth opt-in provider, over Deepgram's live WebSocket
   (`DeepgramLiveSession`, `DeepgramLiveTranscriber`).** It runs Nova-3, the newest Deepgram streaming
-  model that transcribes Mandarin; Flux, the newer turn-detecting model, has no Mandarin. Nova-3
-  transcribes one language per stream and does not document mixing Mandarin into a stream, so the
-  Ear page offers English or Mandarin for the whole session, and `TranscriptionConfiguration`
-  carries that single `deepgramLanguage` rather than an expected-language list. The key travels in
-  an `Authorization` header, so the connect URL carries no secret. Deepgram has no setup reply:
+  model that transcribes Mandarin; Flux, the newer turn-detecting model, has no Mandarin. One expected
+  language selects that language outright. No selection or several select Nova-3's multilingual
+  mode (`language=multi`), with each expected language sent as a `language_hint`; that mode follows
+  speakers who switch languages, though a single-language stream recognizes more accurately. The
+  key travels in an `Authorization` header, so the connect URL carries no secret. Deepgram has no setup reply:
   the model, language, raw 16 kHz PCM16 format, interim results, endpointing, and utterance-end
   settings are query parameters on the upgrade, and the socket is ready once a first control frame
   is delivered, since a refused upgrade fails that send. That is connection acknowledgement, not

@@ -18,7 +18,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
     var onCaptureHeartbeat: (@Sendable (CaptureHeartbeat) -> Void)?
 
     private let model: DeepgramTranscriptionModel
-    private let language: TranscriptionLanguage
+    private let expectedLanguages: [TranscriptionLanguage]
     private let audioFormat: TranscriptionAudioFormat
     private let speaker: Speaker
     private let clock: Clock
@@ -49,7 +49,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
     init(
         apiKey: String,
         model: DeepgramTranscriptionModel,
-        language: TranscriptionLanguage,
+        expectedLanguages: [TranscriptionLanguage],
         audioFormat: TranscriptionAudioFormat,
         speaker: Speaker = .me,
         transcript: RollingTranscript,
@@ -67,7 +67,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         activity: (any ActivityEventRecording)? = nil
     ) {
         self.model = model
-        self.language = language
+        self.expectedLanguages = TranscriptionLanguage.canonicalizing(expectedLanguages)
         self.audioFormat = audioFormat
         self.speaker = speaker
         self.clock = clock
@@ -85,7 +85,10 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
             adapter: self,
             logPrefix: "Jarvis Deepgram [\(speaker.rawValue)]",
             source: .transcription(.deepgram),
-            openDetail: "model=\(model.rawValue) language=\(language.deepgramHint)",
+            openDetail: "model=\(model.rawValue) expected-languages="
+                + (self.expectedLanguages.isEmpty
+                    ? "automatic"
+                    : self.expectedLanguages.map(\.rawValue).joined(separator: ",")),
             apiKey: apiKey,
             policy: SocketLifecyclePolicy(
                 source: .transcription(.deepgram),
@@ -160,7 +163,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
 
     func makeRequest(apiKey: String) -> URLRequest {
         var request = URLRequest(url: DeepgramLiveSession.connectURL(
-            model: model, language: language, sampleRate: audioFormat.sampleRate))
+            model: model, languages: expectedLanguages, sampleRate: audioFormat.sampleRate))
         request.setValue(DeepgramLiveSession.authorizationValue(apiKey: apiKey),
                          forHTTPHeaderField: "Authorization")
         return request
@@ -389,7 +392,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         lock.unlock()
         guard !segments.isEmpty,
               let text = DeepgramLiveSession.joinedTranscript(
-                segments, language: language, speaker: speaker) else { return }
+                segments, speaker: speaker) else { return }
         coachingCoordinator.recordFinalizedTranscript(
             text, spokenAt: spokenAt, source: "deepgram-live (\(reason))")
     }

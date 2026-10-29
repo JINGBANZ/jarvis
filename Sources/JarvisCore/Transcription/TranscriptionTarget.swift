@@ -39,7 +39,7 @@ public enum TranscriptionTarget: Codable, Equatable, Sendable {
         switch self {
         case .openAI(.gpt4oTranscribe): .singularHintAndContext
         case .openAI(.gptTranscribe), .openAI(.gptLiveTranscribe), .gemini(.geminiTranscribeLive): .languageList
-        case .deepgram: .singularHintAndContext
+        case .deepgram: .languageList
         case .appleSpeech: .singleLocale
         }
     }
@@ -58,7 +58,7 @@ public enum TranscriptionTarget: Codable, Equatable, Sendable {
             switch provider {
             case .openAI: OpenAITranscriptionModel.allCases.map(Self.openAI)
             case .gemini: GeminiTranscriptionModel.allCases.map(Self.gemini)
-            // One language per stream sits outside the language contract and the benchmark arms.
+            // Deepgram has no benchmark arm yet.
             case .deepgram: []
             case .appleSpeech: []
             }
@@ -95,7 +95,7 @@ public enum TranscriptionTarget: Codable, Equatable, Sendable {
         case .deepgram(let model):
             return TranscriptionConfiguration(provider: .deepgram, openAIModel: .gpt4oTranscribe,
                 openAIExpectedLanguages: [], appleSpeechLocaleIdentifier: "en_US",
-                deepgramModel: model, deepgramLanguage: expectedLanguages.first ?? .english)
+                deepgramModel: model, deepgramExpectedLanguages: expectedLanguages)
         case .appleSpeech(let locale):
             precondition(expectedLanguages.isEmpty, "Apple Speech uses its selected locale")
             return TranscriptionConfiguration(provider: .appleSpeech, openAIModel: .gpt4oTranscribe,
