@@ -13,6 +13,11 @@ if [ "$(xcode-select -p 2>/dev/null)" = "/Library/Developer/CommandLineTools" ];
     -Xlinker -rpath -Xlinker "$FW"
     -Xlinker -rpath -Xlinker "$IOP"
   )
+  # Swift 6.4's Swift Build backend no longer finds the CLT's swift-testing macro plugin on its own.
+  PLUGINS=/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing
+  if [ -d "$PLUGINS" ]; then
+    SWIFT_TEST_FLAGS+=(-Xswiftc -plugin-path -Xswiftc "$PLUGINS")
+  fi
 fi
 
 run_swift_tests() {

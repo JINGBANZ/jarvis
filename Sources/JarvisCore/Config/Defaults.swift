@@ -108,6 +108,12 @@ public enum Defaults {
         /// kVK_ANSI_Comma. Not ⌥⌘M: AppKit treats Option-⌘M as Minimize All in every app.
         public static let collapseOverlayCombination = HotkeyCombination(
             keyCode: 43, modifiers: [.command, .option])
+        public static let newSessionKeyCodeKey = "hotkey.newSession.keyCode"
+        public static let newSessionModifiersKey = "hotkey.newSession.modifiers"
+        /// kVK_ANSI_0. Kept off the ⌥⌘ family every other shortcut uses, so reaching for a coaching
+        /// shortcut can't end the session by accident.
+        public static let newSessionCombination = HotkeyCombination(
+            keyCode: 29, modifiers: [.control, .shift, .command])
         public static let codeKeyCodeKey = "hotkey.code.keyCode"
         public static let codeModifiersKey = "hotkey.code.modifiers"
         /// kVK_ANSI_K.
