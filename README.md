@@ -9,7 +9,7 @@ Think out loud. Ask Jarvis a question. It listens to both sides of the conversat
 screen when useful, and offers help at the right moment. **No text input. No prompt box.**
 
 Jarvis is experimental and open source. Its current focus is coaching technical conversations:
-behavioral, system-design, and coding questions. Replies appear in a private on-screen overlay.
+behavioral, system-design, and coding questions. Replies appear in an on-screen overlay.
 Jarvis helps proactively and stays quiet when it has nothing useful to add. You can also press
 **⌥⌘J** during a session for an immediate, screen-aware hint.
 
@@ -66,6 +66,10 @@ and help shape Jarvis. Everyone is welcome!
 - Jarvis keeps bounded, owner-only session records of finalized speech, coaching actions,
   diagnostics, provider traffic, and screenshots it viewed.
 - Selected remote providers receive the audio, text, or screenshots their configured role needs.
-  OpenAI coaching requests currently enable server-side storage for debugging.
+- Optional provider conversation storage is off by default. Direct OpenAI coaching requests follow
+  the **Save conversations with AI providers** setting in **Settings → General → Privacy**;
+  other provider retention policies still apply.
+- Overlay capture exclusion is best-effort; some recording or screen-sharing paths may show it.
+  See the [capture guidance](./wiki/overlay-invisibility.md).
 
 See [Privacy and security](./wiki/sandbox.md) for the complete egress and retention model.
