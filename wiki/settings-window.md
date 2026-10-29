@@ -578,7 +578,7 @@ source persistence keeps its existing identities.
 
 The Ear page (`TranscriptionSection`) owns the speech-to-text role without conflating it with the
 brain route. Its one card is `TranscriptionControls`, whose header detail says which key it uses or
-that it runs on this Mac. The provider picker contains **OpenAI** (the default), **Gemini**, and
+that it runs on this Mac. The provider picker contains **OpenAI** (the default), **Gemini**, **Deepgram**, and
 **Apple Speech (macOS 26+)**. Apple is enabled only when the running Mac and OS expose
 `SpeechTranscriber`; selecting any provider persists through `TranscriptionPreferences` and applies
 on the next Start, never halfway through a live session. `TranscriptionControls` shows one fixed row
@@ -613,6 +613,12 @@ better but is no longer exactly what was said). Gemini's turn detection, wire fo
 provider-derived wire sample rate are covered in
 [architecture.md](./architecture.md#models-and-apis).
 
+With Deepgram selected, the card shows one **Language** row (`deepgramLanguage`): English or
+Mandarin, for the whole session. Deepgram's Nova-3 model (`DeepgramTranscriptionModel`) transcribes
+one language per stream, so there is no automatic or multi-language choice, and no vocabulary row.
+Its wire format and turn detection are covered in
+[architecture.md](./architecture.md#models-and-apis).
+
 With Apple Speech selected, **Conversation locale** is populated from
 `SpeechTranscriber.supportedLocales`; the initial suggestion is the supported equivalent of the
 current macOS locale. Start downloads or reuses that selected model before replacing a running
@@ -631,8 +637,8 @@ defaults come from [`Defaults`](../Sources/JarvisCore/Config/Defaults.swift).
 
 ## Connections
 
-The Connections page owns authentication shared across Brain and Ear. Its three stacked
-cards are **OpenAI API**, **Gemini API**, and **Subscriptions**. The OpenAI and Gemini
+The Connections page owns authentication shared across Brain and Ear. Its four stacked
+cards are **OpenAI API**, **Gemini API**, **Deepgram API**, and **Subscriptions**. The API-key
 cards each report and edit only their own Jarvis-managed owner-only file through `APIKeyControls`
 (one instance per `Credential`, keyed by `credential.rawValue` so their accessibility labels,
 identifiers, and saved-key state never collide); each card's header says the key serves the brain
@@ -640,7 +646,7 @@ and transcription, and its action is **Add API key** or **Edit**. The row reads 
 The `OPENAI_API_KEY` fallback remains usable by Start but is deliberately not presented as a
 Jarvis-managed saved key; Gemini has the same headless fallback in `GEMINI_API_KEY`
 (`Credential.geminiAPIKey.environmentVariable`, read by `EnvSecretStore`), also not presented as a
-saved key.
+saved key. Deepgram's card serves transcription only, with the same fallback in `DEEPGRAM_API_KEY`.
 
 Saving a key checks it. One models-list request goes out with the key in a header, and the card shows
 what the vendor said under the row: **accepted**, **refused** with the provider's status, error code,
@@ -829,7 +835,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SkillCardView.swift` | One skill's card |
 | `Sources/JarvisApp/Settings/SkillCardGridView.swift` | Responsive skill card grid |
 | `Sources/JarvisCore/Config/Skill+DisplayTitle.swift` | A skill's card title from its folder name |
-| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini) + the Subscriptions card |
+| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini, Deepgram) + the Subscriptions card |
 | `Sources/JarvisApp/Settings/SubscriptionControls.swift` | Renders the Subscriptions card's shared state and dispatches explicit actions |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySupervisor.swift` | Starts, probes, and restarts the bundled helper; owns its credential directory |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySignIn.swift` | Runs one browser sign-in through the helper and reports its URL and outcome |

@@ -181,6 +181,48 @@ import Testing
             == [.openAIAPIKey])
     }
 
+    @Test func deepgramTranscriptionNeedsItsOwnKeyAndTheBrainsKey() {
+        let openAIRoute = BrainRoute(
+            primary: BrainTarget(provider: .openAI, modelID: "gpt-6-luna"), fallbackTargets: [])
+        #expect(TranscriptionProvider.deepgram.requiredCredentials(for: openAIRoute)
+            == [.deepgramAPIKey, .openAIAPIKey])
+        #expect(TranscriptionProvider.deepgram.requiredCredentials(for: nil) == [.deepgramAPIKey])
+    }
+
+    @Test func deepgramPreferencesDefaultToNova3InEnglishAndRoundTrip() {
+        let defaults = freshDefaults()
+        let preferences = TranscriptionPreferences(defaults: defaults)
+        #expect(preferences.deepgramModel == .nova3)
+        #expect(preferences.deepgramLanguage == .english)
+
+        preferences.provider = .deepgram
+        preferences.deepgramLanguage = .mandarinChinese
+        let reloaded = TranscriptionPreferences(defaults: defaults)
+        #expect(reloaded.deepgramLanguage == .mandarinChinese)
+
+        let configuration = reloaded.configuration
+        #expect(configuration.target == .deepgram(.nova3))
+        #expect(configuration.languageExpectation == .languages([.mandarinChinese]))
+        #expect(configuration.provider.audioFormat == .pcm16Mono16k)
+    }
+
+    @Test func deepgramFallsBackOnUnrecognizedStoredValues() {
+        let defaults = freshDefaults()
+        defaults.set("nova-9", forKey: Defaults.Transcription.deepgramModelKey)
+        defaults.set("klingon", forKey: Defaults.Transcription.deepgramLanguageKey)
+        let preferences = TranscriptionPreferences(defaults: defaults)
+        #expect(preferences.deepgramModel == .nova3)
+        #expect(preferences.deepgramLanguage == .english)
+    }
+
+    @Test func deepgramTargetKeepsOneLanguageAndDefaultsToEnglish() {
+        let target = TranscriptionTarget.deepgram(.nova3)
+        #expect(target.configuration(expectedLanguages: [.mandarinChinese]).deepgramLanguage == .mandarinChinese)
+        #expect(target.configuration(expectedLanguages: []).deepgramLanguage == .english)
+        #expect(target.modelID == "nova-3")
+        #expect(target.provider == .deepgram)
+    }
+
     @Test func geminiModelExposesItsWireNameWithTheModelsPrefix() {
         #expect(GeminiTranscriptionModel.geminiTranscribeLive.rawValue == "gemini-3.5-transcribe-live")
         #expect(GeminiTranscriptionModel.geminiTranscribeLive.wireModelName

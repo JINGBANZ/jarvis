@@ -136,6 +136,11 @@ final class SessionComposition {
                     + "locale=\(appleSpeechLocale?.identifier ?? "unprepared")")
         case .gemini:
             jlog("Jarvis transcription: provider=Gemini")
+        case .deepgram:
+            jlog(
+                "Jarvis transcription: provider=Deepgram "
+                    + "model=\(transcriptionConfiguration.deepgramModel.rawValue) "
+                    + "language=\(transcriptionConfiguration.deepgramLanguage.rawValue)")
         }
 
         let sessionDirectory = artifacts.currentSessionDir!

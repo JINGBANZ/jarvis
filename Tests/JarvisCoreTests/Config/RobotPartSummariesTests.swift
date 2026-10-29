@@ -52,6 +52,17 @@ import Testing
             == RobotPartSummary(value: "Gemini 3.5 Live", detail: "HEARS ANY LANGUAGE"))
     }
 
+    @Test func deepgramNamesItsModelAndTheOneLanguageItHears() {
+        let configuration = TranscriptionConfiguration(
+            provider: .deepgram,
+            openAIModel: .gpt4oTranscribe,
+            openAIExpectedLanguages: [],
+            appleSpeechLocaleIdentifier: "en_US",
+            deepgramLanguage: .mandarinChinese)
+        #expect(RobotPartSummaries.ear(configuration)
+            == RobotPartSummary(value: "Deepgram Nova-3", detail: "HEARS 中文"))
+    }
+
     @Test func appleSpeechShowsItsLocale() {
         let configuration = TranscriptionConfiguration(
             provider: .appleSpeech,

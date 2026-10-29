@@ -8,6 +8,7 @@ final class RealtimeContinuityReporter: @unchecked Sendable {
         case openAIRealtime = "OpenAI Realtime"
         case appleSpeech = "Apple Speech"
         case gemini = "Gemini Live"
+        case deepgram = "Deepgram Live"
     }
 
     private let speaker: Speaker

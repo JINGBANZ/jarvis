@@ -144,6 +144,33 @@ public final class TranscriptionPreferences {
         }
     }
 
+    public var deepgramModel: DeepgramTranscriptionModel {
+        get {
+            guard let raw = defaults.string(forKey: Defaults.Transcription.deepgramModelKey),
+                  let model = DeepgramTranscriptionModel(rawValue: raw) else {
+                return Defaults.Transcription.deepgramModel
+            }
+            return model
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Defaults.Transcription.deepgramModelKey)
+        }
+    }
+
+    /// Nova-3 transcribes one language per stream, so there is no automatic or multi-language choice.
+    public var deepgramLanguage: TranscriptionLanguage {
+        get {
+            guard let raw = defaults.string(forKey: Defaults.Transcription.deepgramLanguageKey),
+                  let language = TranscriptionLanguage(rawValue: raw) else {
+                return Defaults.Transcription.deepgramLanguage
+            }
+            return language
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Defaults.Transcription.deepgramLanguageKey)
+        }
+    }
+
     public var configuration: TranscriptionConfiguration {
         TranscriptionConfiguration(
             provider: provider,
@@ -154,6 +181,8 @@ public final class TranscriptionPreferences {
             geminiModel: geminiModel,
             geminiExpectedLanguages: geminiExpectedLanguages,
             geminiVocabularyKeywords: geminiVocabularyKeywords,
-            geminiMode: geminiMode)
+            geminiMode: geminiMode,
+            deepgramModel: deepgramModel,
+            deepgramLanguage: deepgramLanguage)
     }
 }

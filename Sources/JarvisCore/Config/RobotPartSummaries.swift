@@ -20,6 +20,10 @@ public enum RobotPartSummaries {
             return RobotPartSummary(
                 value: slotName(provider: provider, model: configuration.geminiModel.displayName),
                 detail: hears(configuration.languageExpectation.languages))
+        case .deepgram:
+            return RobotPartSummary(
+                value: slotName(provider: provider, model: configuration.deepgramModel.displayName),
+                detail: hears([configuration.deepgramLanguage]))
         case .appleSpeech:
             let locale = configuration.appleSpeechLocaleIdentifier
                 .replacingOccurrences(of: "_", with: "-").uppercased()

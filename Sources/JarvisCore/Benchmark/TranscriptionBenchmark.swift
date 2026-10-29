@@ -129,9 +129,9 @@ public enum TranscriptionBenchmark {
                     target = .openAI(try values.decode(OpenAITranscriptionModel.self, forKey: .model))
                 case .appleSpeech:
                     target = .appleSpeech(localeIdentifier: try values.decode(String.self, forKey: .localeIdentifier))
-                case .gemini:
+                case .gemini, .deepgram:
                     throw DecodingError.keyNotFound(CodingKeys.target,
-                        .init(codingPath: decoder.codingPath, debugDescription: "Gemini arm requires a target"))
+                        .init(codingPath: decoder.codingPath, debugDescription: "Gemini and Deepgram arms require a target"))
                 }
             }
         }

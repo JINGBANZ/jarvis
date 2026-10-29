@@ -48,6 +48,9 @@ public enum CredentialCheck {
         case .geminiAPIKey:
             GeminiFailureClassifier.classify(
                 httpStatus: httpStatus, body: body, source: .transcription(.gemini), stage: .request)
+        case .deepgramAPIKey:
+            DeepgramFailureClassifier.classify(
+                httpStatus: httpStatus, body: body, source: .transcription(.deepgram), stage: .request)
         }
     }
 
@@ -55,6 +58,7 @@ public enum CredentialCheck {
         switch credential {
         case .openAIAPIKey: .brain(.openAI)
         case .geminiAPIKey: .transcription(.gemini)
+        case .deepgramAPIKey: .transcription(.deepgram)
         }
     }
 }

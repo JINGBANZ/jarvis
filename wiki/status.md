@@ -26,7 +26,7 @@ Each entry is one top-level area; its design lives on the linked page. The offli
 target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifies.
 
 - `Sources/JarvisCore/Audio/`: PCM buffering, speech activity detection, and echo-reference alignment for both capture streams.
-- `Sources/JarvisCore/Transcription/`: provider-neutral transcription contracts, the OpenAI Realtime and Gemini Live wire contracts, reconnect recovery, and the spoken-time conversation chronology ([architecture.md → Models and APIs](./architecture.md#models-and-apis)).
+- `Sources/JarvisCore/Transcription/`: provider-neutral transcription contracts, the OpenAI Realtime, Gemini Live, and Deepgram Live wire contracts, reconnect recovery, and the spoken-time conversation chronology ([architecture.md → Models and APIs](./architecture.md#models-and-apis)).
 - `Sources/JarvisCore/Benchmark/` + `Sources/JarvisApp/Benchmark/`: the transcription benchmark matrix, scoring, and signed-app runner ([transcription-benchmark.md](./transcription-benchmark.md)).
 - `Sources/JarvisCore/LiveE2E/` + `Sources/JarvisApp/LiveE2E/`: the debug-only live e2e scenario model and signed-app mode ([live-e2e-tests.md](./live-e2e-tests.md)).
 - `Tests/JarvisLiveTests/` + `scripts/run-live-tests.sh`: the live e2e checker, scenarios, fixtures, and command; the Gate compiles the target but never runs it.

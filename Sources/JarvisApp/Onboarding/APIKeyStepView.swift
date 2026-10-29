@@ -29,10 +29,12 @@ final class APIKeyStepView: NSView, NSTextFieldDelegate {
         self.transcriptionPreferences = transcriptionPreferences
         super.init(frame: NSRect(origin: .zero, size: OnboardingStepView.size))
 
-        tiles = Credential.allCases.map { credential in
-            ProviderTileView(
+        // Deepgram only transcribes, so it has no tile; its key is saved in Settings.
+        tiles = Credential.allCases.compactMap { credential in
+            guard let brainModel = Onboarding.brainModel(for: credential) else { return nil }
+            return ProviderTileView(
                 credential: credential,
-                thinks: Onboarding.brainModel(for: credential).displayName,
+                thinks: brainModel.displayName,
                 listens: Onboarding.transcriptionModelName(for: credential, in: transcriptionPreferences),
                 onChoose: { [weak self] chosen in
                     self?.step.select(chosen)

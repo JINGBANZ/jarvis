@@ -113,9 +113,10 @@ agent as that user. Any required administrator setup remains a separate, explici
 
 ### 3. Secrets
 
-The OpenAI and Gemini API keys live in **owner-only files**
-(`~/Library/Application Support/Jarvis/openai-api-key` and `gemini-api-key`, mode `0600` in a `0700`
-directory), entered through Settings → Connections, with `OPENAI_API_KEY` and `GEMINI_API_KEY` as
+The OpenAI, Gemini, and Deepgram API keys live in **owner-only files**
+(`~/Library/Application Support/Jarvis/openai-api-key`, `gemini-api-key`, and `deepgram-api-key`, mode
+`0600` in a `0700` directory), entered through Settings → Connections, with `OPENAI_API_KEY`,
+`GEMINI_API_KEY`, and `DEEPGRAM_API_KEY` as
 headless fallbacks. They are never committed, never logged.
 
 We deliberately **don't** use the macOS Keychain. macOS keys Keychain access to a per-build code
@@ -185,6 +186,9 @@ Narrow and explicit. Data leaves the machine only via:
   path the helper forces `store: false`; on the Claude path it presents the traffic as Anthropic's own
   Claude Code client, so Jarvis's system prompt reaches Anthropic behind that client's identity block. Anthropic's terms
   prohibit intermediating Claude session tokens; the owner accepts that risk on his own account.
+- **With Deepgram selected**, transcription audio goes to the Deepgram live socket at
+  `api.deepgram.com`, authenticated by an `Authorization` header. Coaching is unaffected: Deepgram
+  only transcribes, so the brain route keeps its own provider's key.
 - **With Gemini selected**, transcription audio goes to the Gemini Live socket at
   `generativelanguage.googleapis.com`, which takes the key in its URL as Google requires for that
   socket; Jarvis never logs that URL. Coaching sends the brain payload to
