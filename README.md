@@ -8,7 +8,7 @@
   <a href="https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg"><img src="https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="Download the macOS version"></a>
   <a href="https://t.me/+-FDYU99oXTBlZmQx"><img src="https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&amp;logo=telegram&amp;logoColor=white" alt="Join us on Telegram"></a>
   <br>
-  <sub>Apple silicon · macOS 14.2 or later</sub>
+  <sub>Apple silicon and Intel · macOS 14.2 or later</sub>
 </p>
 
 **Your voice-only AI agent. Like Jarvis for Tony Stark.** Think out loud, ask a question, or just
@@ -52,6 +52,7 @@ Requires Swift 6 and the macOS [Command Line Tools](./wiki/build-and-run.md#tool
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
 cd jarvis
+# Intel Macs: install meson, ninja, and pkgconf, then run ./scripts/build-aec.sh first.
 ./scripts/build-app.sh --run
 ```
 

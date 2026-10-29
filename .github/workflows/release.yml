@@ -49,6 +49,9 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Install universal audio build tools
+        run: brew install meson ninja pkgconf
+
       - name: Run repository gate
         run: swift build && ./scripts/run-ci-tests.sh
 
@@ -127,7 +130,7 @@ jobs:
           ASSETS=("$APP_ASSET" "$APPCAST_ASSET")
           asset_label() {
             case "$1" in
-              "$APP_ASSET") echo "Jarvis for Apple silicon (macOS 14.2+)" ;;
+              "$APP_ASSET") echo "Jarvis for Apple silicon and Intel (macOS 14.2+)" ;;
               "$APPCAST_ASSET") echo "Sparkle update feed" ;;
               *) echo "error: no label for release asset $1" >&2; return 1 ;;
             esac

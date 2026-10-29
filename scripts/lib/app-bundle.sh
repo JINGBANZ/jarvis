@@ -18,5 +18,5 @@ assemble_app() {
   rm -rf "$app/Contents/Frameworks/Sparkle.framework/Versions/Current/XPCServices" \
          "$app/Contents/Frameworks/Sparkle.framework/XPCServices"
   bundle_cliproxyapi "$app"
-  bundle_reference_helper "$app" "$configuration"
+  bundle_reference_helper "$app" "$configuration" "$artifacts"
 }

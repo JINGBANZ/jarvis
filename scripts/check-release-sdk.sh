@@ -8,24 +8,27 @@ if [[ $# -ne 1 || -z "$BINARY" || ! -f "$BINARY" || -L "$BINARY" ]]; then
 fi
 
 readonly MINIMUM_SDK_MAJOR=26
-SDK_VERSION="$(
-  /usr/bin/otool -l "$BINARY" \
-    | /usr/bin/awk '
-        $1 == "cmd" { in_build_version = ($2 == "LC_BUILD_VERSION"); next }
-        in_build_version && $1 == "platform" { platform = $2; next }
-        in_build_version && platform == "1" && $1 == "sdk" && sdk == "" { sdk = $2 }
-        END { if (sdk != "") print sdk }
-      '
-)"
+ARCHITECTURES="$(/usr/bin/lipo -archs "$BINARY")"
+for architecture in $ARCHITECTURES; do
+  SDK_VERSION="$(
+    /usr/bin/otool -arch "$architecture" -l "$BINARY" \
+      | /usr/bin/awk '
+          $1 == "cmd" { in_build_version = ($2 == "LC_BUILD_VERSION"); next }
+          in_build_version && $1 == "platform" { platform = $2; next }
+          in_build_version && platform == "1" && $1 == "sdk" && sdk == "" { sdk = $2 }
+          END { if (sdk != "") print sdk }
+        '
+  )"
 
-if [[ ! "$SDK_VERSION" =~ ^([0-9]+)(\.[0-9]+){1,2}$ ]]; then
-  echo "error: couldn't read a macOS SDK version from $BINARY" >&2
-  exit 1
-fi
-SDK_MAJOR="${BASH_REMATCH[1]}"
-if (( SDK_MAJOR < MINIMUM_SDK_MAJOR )); then
-  echo "error: $BINARY was built with macOS SDK $SDK_VERSION; SDK $MINIMUM_SDK_MAJOR or newer is required" >&2
-  exit 1
-fi
+  if [[ ! "$SDK_VERSION" =~ ^([0-9]+)(\.[0-9]+){1,2}$ ]]; then
+    echo "error: couldn't read a macOS SDK version from $BINARY" >&2
+    exit 1
+  fi
+  SDK_MAJOR="${BASH_REMATCH[1]}"
+  if (( SDK_MAJOR < MINIMUM_SDK_MAJOR )); then
+    echo "error: $BINARY was built with macOS SDK $SDK_VERSION; SDK $MINIMUM_SDK_MAJOR or newer is required" >&2
+    exit 1
+  fi
 
-echo "Release SDK guard passed: macOS SDK $SDK_VERSION"
+  echo "Release SDK guard passed: $architecture macOS SDK $SDK_VERSION"
+done

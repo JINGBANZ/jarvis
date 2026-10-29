@@ -18,10 +18,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-26]
+        os: [macos-15, macos-26, macos-26-intel]
     runs-on: ${{ matrix.os }}
     # Backstop: a hung run at the 6-hour default would burn about twice the monthly free tier.
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -31,6 +31,12 @@ jobs:
           xcode-select -p
           swift --version
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$(xcode-select -p)/../Info.plist"
+
+      - name: Build Intel audio dependency
+        if: runner.arch == 'X64'
+        run: |
+          brew install meson ninja pkgconf
+          ./scripts/build-aec.sh
 
       - name: Compile all targets
         run: swift build
@@ -52,7 +58,7 @@ jobs:
 
   # Keep the existing required check name while requiring all validation jobs to pass.
   test:
-    needs: [gate, proxy-privacy]
+    needs: [gate, proxy-privacy, universal-app]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 1
@@ -61,12 +67,34 @@ jobs:
         env:
           GATE_RESULT: ${{ needs.gate.result }}
           PROXY_PRIVACY_RESULT: ${{ needs.proxy-privacy.result }}
+          UNIVERSAL_APP_RESULT: ${{ needs.universal-app.result }}
         run: |
           test "$GATE_RESULT" = success
           test "$PROXY_PRIVACY_RESULT" = success
+          test "$UNIVERSAL_APP_RESULT" = success
+
+  universal-app:
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build and verify universal app without signing
+        run: |
+          brew install meson ninja pkgconf
+          ./scripts/build-aec.sh
+          swift build -c release --arch arm64 --arch x86_64
+          ARTIFACTS="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+          source scripts/lib/app-bundle.sh
+          assemble_app .build/Jarvis.app "$ARTIFACTS" release
+          ./scripts/check-universal-app.sh .build/Jarvis.app
+          ./scripts/check-release-sdk.sh .build/Jarvis.app/Contents/MacOS/JarvisApp
 
   proxy-privacy:
-    runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

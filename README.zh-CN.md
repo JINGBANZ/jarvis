@@ -8,7 +8,7 @@
   <a href="https://github.com/JINGBANZ/jarvis/releases/latest/download/Jarvis.dmg"><img src="https://img.shields.io/badge/Download-macOS-111827?style=for-the-badge&amp;logo=apple&amp;logoColor=white" alt="下载 macOS 版本"></a>
   <a href="https://t.me/+-FDYU99oXTBlZmQx"><img src="https://img.shields.io/badge/Join-Telegram-26A5E4?style=for-the-badge&amp;logo=telegram&amp;logoColor=white" alt="加入 Telegram 社区"></a>
   <br>
-  <sub>Apple 芯片 · macOS 14.2 或更高版本</sub>
+  <sub>Apple 芯片和 Intel · macOS 14.2 或更高版本</sub>
 </p>
 
 **你的纯语音 AI 助手，就像托尼·斯塔克的贾维斯。** 说出你的想法，随口问个问题，或是继续眼前的对话。Jarvis 会聆听双方的交流，在有帮助时查看屏幕，通过私密的屏幕浮层轻轻提醒，让你专注于对话本身。目前，它可以陪你梳理行为面试、系统设计和编程问题。无需打字，也没有提示词输入框，自然地说话就好。
@@ -42,6 +42,7 @@ flowchart TD
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
 cd jarvis
+# Intel Mac：先安装 meson、ninja 和 pkgconf，再运行 ./scripts/build-aec.sh。
 ./scripts/build-app.sh --run
 ```
 
