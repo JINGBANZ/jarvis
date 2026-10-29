@@ -8,10 +8,11 @@ import JarvisCore
 ///
 /// `@unchecked Sendable`: stream state is guarded by `lock`, except `drainTimer`, which is confined
 /// to the main queue. Lock order is documented on `WebSocketConnection`.
-final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdapter,
+final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublishing, WebSocketConnectionAdapter,
     @unchecked Sendable {
     var onTurnEnd: (@Sendable (_ transcriptBoundary: Int) -> Void)?
     var onSilence: (@Sendable (TimeInterval) -> Void)?
+    var onInterimTranscript: (@Sendable (String?) -> Void)?
     var onTranscriptionWorkChanged: (@Sendable (TranscriptionWorkState) -> Void)?
     var onConnectionStateChange: (@Sendable (TranscriptionConnectionState) -> Void)?
     var onTerminalFailure: (@Sendable (ProviderFailure) -> Void)?
@@ -444,6 +445,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
             let spokenAt = pendingSpeech.recordFinalized()
             let isDraining = draining
             lock.unlock()
+            onInterimTranscript?(nil)
             if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
                 continuityReporter.recordServerSpeech(
                     .transcriptionCompleted, audioTimeMilliseconds: nil,
@@ -467,8 +469,9 @@ final class GeminiLiveTranscriber: TranscriptionSession, WebSocketConnectionAdap
             return
         }
         if GeminiLiveSession.hasInterimTranscription(message) {
-            // Read only the flag. Interim text is speculative and must never reach Activity or the
-            // transcript.
+            // Interim text is speculative: it may reach the overlay's transcript column, but never
+            // Activity or the transcript.
+            onInterimTranscript?(GeminiLiveSession.interimTranscript(from: message))
             noteRecognitionInFlight()
             updateWorkFlag()
             return
