@@ -436,6 +436,10 @@ class AECBuildTests(ScriptTests):
         (work / "wap").mkdir(parents=True)
         self.environment["AEC_WORK"] = str(work)
         self.executable(self.bin / "git", """#!/bin/bash
+if [[ "$1" == -C ]]; then
+  echo 846fe90a289f58b7c9303a635142aa2c7caa93e5
+  exit 0
+fi
 for destination; do :; done
 mkdir -p "$destination"
 """)
@@ -444,6 +448,16 @@ mkdir -p "$destination"
         result = self.run_script("build-aec.sh")
         self.assertEqual(result.returncode, 17, result.stderr)
         self.assertTrue((work / "wap-v2.1").is_dir(), "source cache must include the pinned tag")
+
+    def test_source_commit_mismatch_stops_before_build(self):
+        work = self.root / "aec-cache"
+        (work / "wap-v2.1").mkdir(parents=True)
+        self.environment["AEC_WORK"] = str(work)
+        self.executable(self.bin / "git", "#!/bin/bash\necho wrong-commit\n")
+        self.executable(self.bin / "meson", "#!/bin/bash\nexit 99\n")
+        result = self.run_script("build-aec.sh")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("pinned commit", result.stderr)
 
 
 if __name__ == "__main__":

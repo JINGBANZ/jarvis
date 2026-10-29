@@ -7,6 +7,7 @@
 set -euo pipefail
 
 WEBRTC_TAG="v2.1"
+WEBRTC_COMMIT="846fe90a289f58b7c9303a635142aa2c7caa93e5"
 export MACOSX_DEPLOYMENT_TARGET="14.0"
 unset PKG_CONFIG_PATH                     # keep Homebrew's incompatible abseil out
 
@@ -25,6 +26,10 @@ if [[ ! -d "$SOURCE" ]]; then
   git clone --depth 1 --branch "$WEBRTC_TAG" \
     https://gitlab.freedesktop.org/pulseaudio/webrtc-audio-processing.git "$SOURCE.partial"
   mv "$SOURCE.partial" "$SOURCE"
+fi
+if [[ "$(git -C "$SOURCE" rev-parse HEAD)" != "$WEBRTC_COMMIT" ]]; then
+  echo "error: WebRTC source does not match the pinned commit" >&2
+  exit 1
 fi
 cd "$SOURCE"
 for architecture in arm64 x86_64; do
