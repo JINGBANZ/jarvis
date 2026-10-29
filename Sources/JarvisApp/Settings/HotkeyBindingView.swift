@@ -97,6 +97,7 @@ final class HotkeyBindingView: NSObject {
         case .previousDetail: "I show my previous detail in the Overlay Box."
         case .nextDetail: "I show my next detail in the Overlay Box."
         case .collapseOverlay: "I collapse or expand the Overlay Box."
+        case .newSession: "I end this session and start a fresh one with no earlier context."
         }
     }
 }
