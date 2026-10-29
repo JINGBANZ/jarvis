@@ -23,8 +23,10 @@ swift build && ./scripts/run-tests.sh
 The runner initializes and reuses the fixed `Jarvis Tests` display automatically. Developers need no
 display app, approval file, or A/B acceptance campaign. All worktrees on a Mac share its ownership
 state, so use the same development account and current runner. The display stays available between
-runs. If it is absent, the runner creates it and keeps a small idle owner process alive; no login
-service is installed. Test cleanup never destroys the display. Quit any separately launched
+runs. On the first display check after a Mac boot, the runner can create it if absent and keep a small
+idle owner process alive; no login service is installed. Later disappearance stops the Gate for
+inspection, preventing repeated creation if detection is wrong. Test cleanup never destroys the
+display. Quit any separately launched
 `Jarvis Dev` app before testing. The framework's acceptance evidence belongs to framework development.
 
 If admission reports unfinished cleanup, a changed identity, or unsafe ownership, stop and resolve

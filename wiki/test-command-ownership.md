@@ -33,6 +33,20 @@ An existing display must match the fixed identity, geometry, and isolation check
 duplicate display stops the command without replacing it. Stable descriptor inputs alone cannot promise
 that macOS never creates extra state or hangs.
 
+Automatic creation is limited to the first display check in each Mac boot, across all worktrees.
+Under the machine lock, the supervisor durably records `display_boot` before starting the native
+worker. Only that first check can receive creation permission; the worker otherwise only reuses a
+display. Finding an existing display also consumes the opportunity, so its later disappearance
+cannot trigger a replacement. A completed journal's previously recorded identity and boot count as
+a prior observation when adopting existing state.
+
+This bounds creation independently of display enumeration: repeated false "absent" results cannot
+produce repeated displays in one boot, even if an earlier command completed successfully. Query
+errors, duplicate or invalid displays, and unfinished intent stop admission. A new OS boot permits
+one new opportunity after a completed run; it does not repair an unfinished run. Logout or owner death
+within the same boot requires inspection if the display disappears. The bound covers cooperating
+updated entrypoints; it is not a claim that macOS can never retain extra profiles or registrations.
+
 [`TestDisplayLayout.swift`](../scripts/test-display/TestDisplayLayout.swift) distinguishes a
 headless GUI session from a desktop with real displays. No online screens, or only WindowServer's
 `virt` placeholder, permits the test display to become the main screen and remain there between
@@ -105,7 +119,7 @@ This owner starts on demand, has no polling loop, and is not a launch agent or l
 process birth identity is recorded separately from test clients. Later commands use short-lived
 validation workers and do not create another owner. The owner does not retain the lease or admit
 commands; the supervisor never terminates it. Logout, reboot, or an external process termination can
-remove the display; a later command creates it again only if absent. An unexpected owner death
+remove the display; subsequent creation follows the per-boot bound above. An unexpected owner death
 during a command fails that command.
 
 The supervisor launches the admitted root shell in
@@ -242,7 +256,9 @@ TERM-ignoring fallback, late registration, teardown interruption and process-dis
 The display-free Swift layout fixture covers headless main-screen adoption, placeholder transitions,
 physical-screen preservation, mirroring, and refusal of display disappearance at completion.
 Supervisor fixtures cover automatic first use without approval, retained creator survival after
-assertion failure, reuse by later commands, and preservation on setup failure or timeout.
+assertion failure, reuse by later commands, and preservation on setup failure or timeout. False
+absence across copied worktrees cannot repeat creation; boot changes permit one new opportunity,
+artifact builds preserve it, and malformed boot records block admission.
 The launch fixture links either Swift Build's combined target objects or the native backend's
 per-source objects, with the module paths for both layouts.
 Fixture environments strip all inherited `JARVIS_TEST_*` context before adding deliberate inputs, including when Gate

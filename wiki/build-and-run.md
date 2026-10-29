@@ -418,7 +418,8 @@ allows an empty match set but rejects scan errors.
 
 The local test commands share one fixed descriptor named `Jarvis Tests`, with the diagnostic label
 `jarvis-test-4a560001`. One ordinary-user external supervisor owns the complete command across
-worktrees. It reuses the live display or creates it when absent, observes exact app/helper exit, and
+worktrees. It reuses the live display or creates it when absent within the
+[per-boot creation bound](./test-command-ownership.md#identity-and-admission), observes exact app/helper exit, and
 verifies that the admitted display layout remains intact. The live display, ICC profile, and ColorSync
 registration stay available between commands. Test cleanup never destroys the display.
 

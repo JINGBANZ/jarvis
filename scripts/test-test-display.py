@@ -287,6 +287,75 @@ if JARVIS_TEST_RUN_TOKEN=forged python3 "$JARVIS_TEST_SUPERVISOR" admit; then ex
         self.assertNotEqual(self.state()['phase'], 'completed')
         self.assertEqual(self.result(self.start())[0], 70)
 
+    def missing_display_worker(self):
+        (self.source.parent / 'fake-worker.py').write_text(f'''import json, sys
+from pathlib import Path
+root = Path({str(self.root)!r})
+state = json.loads((root / 'lease/journal.json').read_text())
+assert state['display_boot'] == state['boot'], 'creation decision was not durable before worker startup'
+if '--allow-create' not in sys.argv:
+    print(json.dumps({{'error': 'fixture display absent; creation refused', 'retained': False}}), flush=True)
+    sys.exit(70)
+with (root / 'creations').open('a') as stream: stream.write('create\\n')
+print(json.dumps({{'display': 77, 'uuid': 'fixture-uuid', 'expected_profile': 'fixture.icc', 'retained': False}}), flush=True)
+if sys.stdin.readline() == 'finish\\n': print('{{"finished": true}}', flush=True)
+''')
+
+    def test_false_absence_cannot_repeat_creation_across_worktrees(self):
+        self.missing_display_worker()
+        self.assertEqual(self.result(self.start())[0], 0)
+        second = self.root / 'B'
+        shutil.copytree(self.repo, second)
+        runner = subprocess.Popen([sys.executable, str(second / 'scripts/test-display/supervisor.py'), 'run', 'run-tests.sh'],
+            env=BASE_ENV, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+        self.processes.append(runner)
+        result = self.result(runner)
+        self.assertEqual(result[0], 70, result)
+        self.assertIn('creation refused', result[1])
+        self.assertEqual((self.root / 'creations').read_text(), 'create\n')
+        self.assertEqual(self.result(self.start())[0], 70)
+        self.assertEqual((self.root / 'creations').read_text(), 'create\n')
+
+    def test_reused_display_disappearance_does_not_allow_creation(self):
+        self.assertEqual(self.result(self.start())[0], 0)
+        self.missing_display_worker()
+        result = self.result(self.start())
+        self.assertEqual(result[0], 70, result)
+        self.assertIn('creation refused', result[1])
+        self.assertFalse((self.root / 'creations').exists())
+
+    def test_recorded_identity_without_display_boot_cannot_recreate_in_same_boot(self):
+        self.prepare(boot=self.module.boot_id(), persistent_uuid='fixture-uuid')
+        self.missing_display_worker()
+        result = self.result(self.start())
+        self.assertEqual(result[0], 70, result)
+        self.assertIn('creation refused', result[1])
+        self.assertFalse((self.root / 'creations').exists())
+
+    def test_new_boot_permits_one_creation_even_after_artifact_build(self):
+        self.source.write_text(self.source.read_text().replace('current_boot = boot_id()', "current_boot = 'fixture-boot-A'"))
+        self.missing_display_worker()
+        self.assertEqual(self.result(self.start())[0], 0)
+        self.source.write_text(self.source.read_text().replace('fixture-boot-A', 'fixture-boot-B'))
+        self.script('python3 "$JARVIS_TEST_SUPERVISOR" build-guard\n', name='build-app.sh')
+        self.assertEqual(self.result(self.start('run', 'build-app.sh'))[0], 0)
+        self.assertEqual(self.state()['display_boot'], 'fixture-boot-A')
+        self.assertEqual(self.result(self.start())[0], 0)
+        self.assertEqual(self.state()['display_boot'], 'fixture-boot-B')
+        self.assertEqual(self.result(self.start())[0], 70)
+        self.assertEqual((self.root / 'creations').read_text(), 'create\ncreate\n')
+
+    def test_invalid_display_boot_record_cannot_authorize_creation(self):
+        self.prepare()
+        state = self.state()
+        for invalid in ('', False, 123, []):
+            with self.subTest(invalid=invalid):
+                self.module.durable(self.root / 'lease/journal.json', {**state, 'display_boot': invalid})
+                result = self.result(self.start())
+                self.assertEqual(result[0], 70, result)
+                self.assertIn('Invalid display boot record', result[1])
+                self.assertNotIn('worker_owner', self.state())
+
     def stop_fake_worker(self, identity):
         if self.module.same(identity):
             os.killpg(identity['pid'], signal.SIGKILL)

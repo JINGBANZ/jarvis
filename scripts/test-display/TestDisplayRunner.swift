@@ -15,8 +15,12 @@ final class TestDisplayRunner {
 
     private static func run() async {
         do {
-            let inspect = CommandLine.arguments.count == 3 && CommandLine.arguments[2] == "--inspect"
-            guard CommandLine.arguments.count == 2 || inspect else { throw TestDisplay.Failure("Supervisor worker only") }
+            let option = CommandLine.arguments.count == 3 ? CommandLine.arguments[2] : nil
+            let inspect = option == "--inspect"
+            let allowCreate = option == "--allow-create"
+            guard CommandLine.arguments.count == 2 || inspect || allowCreate else {
+                throw TestDisplay.Failure("Supervisor worker only")
+            }
             let descriptor = try JSONDecoder().decode(TestDisplayDescriptor.self,
                 from: Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))
             let original = try layout()
@@ -30,7 +34,9 @@ final class TestDisplayRunner {
                 target = screen.id
                 admitted = original
             } else {
-                guard !inspect else { throw TestDisplay.Failure("Test display is absent") }
+                guard allowCreate else {
+                    throw TestDisplay.Failure("Shared test display not found; automatic creation is unavailable for this boot; explicit recovery required")
+                }
                 let display = try TestDisplay(descriptor)
                 retainedDisplay = display
                 try display.configure(descriptor)

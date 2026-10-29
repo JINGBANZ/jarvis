@@ -214,6 +214,9 @@ class Lease:
             raise Refused('Descriptor/protocol mismatch; explicit recovery required')
         if self.state.get('phase') != 'completed':
             raise Refused('Unfinished run; explicit recovery required even after a reboot')
+        display_boot = self.state.get('display_boot')
+        if display_boot is not None and (not isinstance(display_boot, str) or not display_boot):
+            raise Refused('Invalid display boot record; explicit recovery required')
 
     def write(self, phase, **values):
         marker = LEASE_ROOT / 'unfinished.json'
@@ -670,7 +673,11 @@ class Supervisor:
 
     def run(self, entry, arguments, ci=False):
         self.entry = entry
-        self.lease.write('intent', boot=boot_id(), owner=birth(os.getpid()), token=self.token,
+        current_boot = boot_id()
+        display_boot = self.lease.state.get('display_boot',
+            self.lease.state.get('boot') if self.lease.state.get('persistent_uuid') else None)
+        self.lease.write('intent', boot=current_boot, display_boot=display_boot,
+                         owner=birth(os.getpid()), token=self.token,
                          command=[entry, *arguments], worktree=str(HERE.parent.parent),
                          test_status=None, lifecycle_status='unfinished')
         handlers = {}
@@ -682,11 +689,17 @@ class Supervisor:
                 raise
             self.lease.write('preflight')
             if not ci and entry not in ('transcription-benchmark.sh', 'build-app.sh'):
+                allow_create = display_boot != current_boot
+                # Consume the boot's creation opportunity before any OS-facing worker starts.
+                self.lease.write('preflight', display_boot=current_boot)
+                worker = worker_command()
+                if allow_create:
+                    worker.append('--allow-create')
                 log_path = LEASE_ROOT / 'display-worker.log'
                 log_fd = os.open(log_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)
                 try:
                     private(log_path)
-                    self.worker = subprocess.Popen(worker_command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                    self.worker = subprocess.Popen(worker, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                                    stderr=log_fd, start_new_session=True)
                 finally:
                     os.close(log_fd)
