@@ -596,6 +596,14 @@ or writes a manual-hint Activity entry. They use the same session detail availab
 other detail shortcuts; unavailable navigation is silent. Their bindings and boundary behavior
 are defined in [General → Shortcuts](./settings-window.md#shortcuts).
 
+**Start new session** discards all session context without quitting: during a live session it
+issues the same Start that the menu bar's Start sends. That replacement path prepares the new
+session while the old one keeps coaching, then ends the old one as `.replacedByNewSession` (an
+ordinary finished session in Activity) and starts a fresh transcript, brain history, and Overlay
+Box. Reusing the replacement Start, rather than a separate in-place reset of the transcript and
+coach state, keeps one session boundary that every component already honors. It carries no
+`TriggerReason`; while stopped it beeps like the coaching shortcuts and starts nothing.
+
 Keyboard shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
 `HotkeyController` dispatches only matching Jarvis events. Each binding persists independently through

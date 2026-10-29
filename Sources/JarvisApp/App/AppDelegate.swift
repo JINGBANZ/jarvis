@@ -228,7 +228,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         hotkeys?.onRequest = { [weak self] shortcut in
             guard let self else { return }
             guard self.composition.isLive else {
-                if shortcut.triggerReason != nil {
+                if shortcut.triggerReason != nil || shortcut == .newSession {
                     NSSound.beep() // ghost-mode-allowed: explicit user coaching hotkey while stopped
                 }
                 return
@@ -237,6 +237,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             case .previousDetail: self.overlayBox.showPreviousDetail()
             case .nextDetail: self.overlayBox.showNextDetail()
             case .collapseOverlay: self.overlayBox.toggleCollapse()
+            // A Start while live is the existing replacement path: the old session keeps coaching
+            // until the new one is prepared, then ends as `.replacedByNewSession`.
+            case .newSession: self.start()
             case .hint, .explainMore, .showCode: self.composition.requestShortcut(shortcut)
             }
         }
