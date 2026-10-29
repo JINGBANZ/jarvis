@@ -117,6 +117,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             appearance.boxWidth = width
             appearance.boxHeight = height
         }
+        overlayBox.setTranscriptPaneVisible(appearance.transcriptPaneVisible)
+        overlayBox.onTranscriptPaneToggled = { [appearance] in appearance.transcriptPaneVisible = $0 }
 
         composition = SessionComposition(
             brain: brain,
