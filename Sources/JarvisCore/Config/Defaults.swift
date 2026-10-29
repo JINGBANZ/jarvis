@@ -88,6 +88,12 @@ public enum Defaults {
         public static let browserTextEnabled = false
     }
 
+    // MARK: - Coaching
+
+    public enum Coaching {
+        public static let modeKey = "coaching.mode"
+    }
+
     // MARK: - Hotkey
 
     public enum Hotkey {
@@ -108,6 +114,11 @@ public enum Defaults {
         /// kVK_ANSI_Comma. Not ⌥⌘M: AppKit treats Option-⌘M as Minimize All in every app.
         public static let collapseOverlayCombination = HotkeyCombination(
             keyCode: 43, modifiers: [.command, .option])
+        public static let toggleCoachingModeKeyCodeKey = "hotkey.toggleCoachingMode.keyCode"
+        public static let toggleCoachingModeModifiersKey = "hotkey.toggleCoachingMode.modifiers"
+        /// kVK_ANSI_Period, beside the collapse shortcut's comma.
+        public static let toggleCoachingModeCombination = HotkeyCombination(
+            keyCode: 47, modifiers: [.command, .option])
         public static let codeKeyCodeKey = "hotkey.code.keyCode"
         public static let codeModifiersKey = "hotkey.code.modifiers"
         /// kVK_ANSI_K.

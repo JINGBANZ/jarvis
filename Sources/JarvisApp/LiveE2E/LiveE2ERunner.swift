@@ -287,7 +287,8 @@ final class LiveE2ERunner: BrainCompositionHost {
             saveConversations: saveConversations,
             appleSpeechLocale: appleLocale,
             screen: SessionPlan.default.screen,
-            references: referenceAdmission)
+            references: referenceAdmission,
+            coachingMode: .automatic)
         guard composition.start(
             inputs, proxy: proxy, readinessSession: readinessSession,
             reportContext: .runtime)

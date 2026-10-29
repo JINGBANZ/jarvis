@@ -17,7 +17,7 @@ final class SessionComposition {
         let appleSpeechLocale: Locale?
         let screen: ScreenCaptureSelection
         let references: ReferenceAdmissionResult
-
+        let coachingMode: CoachingMode
     }
 
     var onReadinessStatusChanged: ((JarvisReadiness.Status) -> Void)?
@@ -100,6 +100,13 @@ final class SessionComposition {
     /// Ignored when no session is live.
     func requestShortcut(_ shortcut: CoachingShortcut) {
         requestManualHint?(shortcut)
+    }
+
+    /// Ignored when no session is live; the next Start reads the saved mode itself.
+    func applyCoachingMode(_ mode: CoachingMode, notice: String) {
+        guard isLive else { return }
+        coachDriver?.setMode(mode)
+        overlayBox.showCoachingMode(mode, notice: notice)
     }
 
     /// The caller must already have stopped any previous session. Returns false, after reporting
@@ -189,6 +196,8 @@ final class SessionComposition {
             capabilities: capabilities,
             documents: admitted?.session,
             sessionContext: admitted?.context)
+        // Before any transcriber connects, so no automatic trigger reaches a manual session.
+        driver.setMode(inputs.coachingMode)
 
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // CoachDriver coalesces triggers, so a new one doesn't cancel the running turn.
@@ -399,6 +408,7 @@ final class SessionComposition {
         sessionIsLive = true
         // Only after every early return, so a failed Start leaves the desktop untouched.
         overlayBox.setSessionLive(true)
+        overlayBox.showCoachingMode(inputs.coachingMode, notice: nil)
         jlog("Jarvis: coaching starting — verifying transcription endpoints.")
         jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
         onCoachingStateChanged?()

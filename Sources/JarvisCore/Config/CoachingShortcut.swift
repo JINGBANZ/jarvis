@@ -8,6 +8,7 @@ public enum CoachingShortcut: UInt32, CaseIterable, Sendable {
     case previousDetail = 4
     case nextDetail = 5
     case collapseOverlay = 6
+    case toggleCoachingMode = 7
 
     public var title: String {
         switch self {
@@ -17,6 +18,7 @@ public enum CoachingShortcut: UInt32, CaseIterable, Sendable {
         case .previousDetail: "Previous detail"
         case .nextDetail: "Next detail"
         case .collapseOverlay: "Collapse overlay"
+        case .toggleCoachingMode: "Toggle manual mode"
         }
     }
 
@@ -25,7 +27,13 @@ public enum CoachingShortcut: UInt32, CaseIterable, Sendable {
         case .hint: .manualHint
         case .explainMore: .manualExplanation
         case .showCode: .manualCode
-        case .previousDetail, .nextDetail, .collapseOverlay: nil
+        case .previousDetail, .nextDetail, .collapseOverlay, .toggleCoachingMode: nil
         }
+    }
+
+    /// A press that asks Jarvis to act gets audible feedback while stopped; overlay navigation
+    /// declines silently.
+    public var beepsWhileStopped: Bool {
+        triggerReason != nil || self == .toggleCoachingMode
     }
 }
