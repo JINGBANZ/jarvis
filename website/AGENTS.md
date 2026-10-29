@@ -8,6 +8,8 @@ Start with [README.md](README.md) for the file map, local preview, deployment, a
 - Maintain one static landing page in plain HTML, CSS, and SVG. Preserve the working experience
   without runtime JavaScript or a frontend build. Add dependencies or services only when the
   requested behavior needs them.
+- Keep the page compact: the robot, one clear description, one primary download action, and small
+  supporting links. Detailed setup and privacy information belong in the linked project guides.
 - `public/` is the entire published directory. Keep agent instructions, documentation, package
   files, credentials, and development output outside it. Unknown URLs return 404.
 - Use the existing npm scripts and pinned Wrangler dependency. Keep `package.json` and
@@ -17,14 +19,14 @@ Start with [README.md](README.md) for the file map, local preview, deployment, a
 
 - Use the app's [Settings theme](../Sources/JarvisApp/Settings/SettingsTheme.swift) and
   [spacing and shape tokens](../Sources/JarvisApp/Settings/SettingsStyle.swift) as the visual
-  reference: purple structure, teal accents, a soft radial backdrop, and rounded panels.
+  reference: purple structure, teal accents, a soft radial backdrop, and rounded controls.
 - Keep colors in the existing CSS variables, with system light and dark appearances. Preserve
   the deeper light-mode `--purple-ink` for readable small text; check contrast across the gradient,
   not just against white. The robot SVG has its own appearance-aware palette.
 - Adapt the existing [robot geometry](../Sources/JarvisApp/Settings/Home/RobotHeadView+Geometry.swift)
   when changing the illustration. Favor the existing system fonts, CSS, and local SVG assets.
-- Preserve responsive layouts, semantic HTML, keyboard focus, the skip link, and native FAQ
-  disclosures. Any added motion must respect reduced-motion preferences.
+- Preserve responsive layouts, semantic HTML, keyboard focus, and the skip link. Any added motion
+  must respect reduced-motion preferences.
 
 ## Keep product claims accurate
 
@@ -39,7 +41,7 @@ Start with [README.md](README.md) for the file map, local preview, deployment, a
 ## Validate and deploy
 
 - Follow the [README checks](README.md#edit-and-preview) for rendered changes: desktop and narrow
-  mobile layouts, both color schemes, keyboard navigation, FAQ operation, and working links.
+  mobile layouts, both color schemes, keyboard navigation, and working links.
   Check browser errors and contrast, including text over gradients. Verify asset responses and
   404s through Wrangler when changing routing, headers, or the published directory.
 - Validate deployment configuration with the README's dry-run command when changing deployment

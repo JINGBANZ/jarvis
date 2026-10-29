@@ -1,7 +1,9 @@
 # Jarvis landing page
 
-One static page, hosted directly on Cloudflare Workers Static Assets. `public/` is the
-entire deployed site. There is no frontend build, runtime JavaScript, or backend.
+One compact introduction with the Settings robot, a short description, one download button,
+and links to setup, source, community, and privacy details. Hosted directly on Cloudflare Workers
+Static Assets; `public/` is the entire deployed site. There is no frontend build, runtime JavaScript,
+or backend.
 Wrangler is the only development dependency, pinned in `package.json` and `package-lock.json`.
 
 ## Edit and preview
@@ -15,18 +17,18 @@ npm run dev
 
 Open the localhost URL printed by Wrangler. This also exercises Cloudflare's asset routing
 and `_headers`. Check desktop and narrow mobile widths, both system color schemes, keyboard
-navigation, and the FAQ disclosures before shipping. Missing URLs must return 404.
+navigation, and the download and footer links before shipping. Missing URLs must return 404.
 
 | File | Edit here for |
 | --- | --- |
-| `public/index.html` | Copy, download links, FAQ, and search/social metadata |
+| `public/index.html` | Copy, links, and search/social metadata |
 | `public/styles.css` | Layout and the light/dark CSS color variables |
 | `public/assets/robot.svg` | The static Settings robot illustration and favicon |
 | `public/_headers` | Response headers |
 | `wrangler.jsonc` | Cloudflare Worker name, asset directory, and routing |
 
 The colors come from [`SettingsTheme.swift`](../Sources/JarvisApp/Settings/SettingsTheme.swift),
-the 12px card radius from [`SettingsStyle.swift`](../Sources/JarvisApp/Settings/SettingsStyle.swift),
+the 12px button radius from [`SettingsStyle.swift`](../Sources/JarvisApp/Settings/SettingsStyle.swift),
 and the robot paths from
 [`RobotHeadView+Geometry.swift`](../Sources/JarvisApp/Settings/Home/RobotHeadView+Geometry.swift).
 Keep those relationships when updating the design. The SVG carries its own small light/dark
@@ -36,7 +38,8 @@ against the lavender background; outlines and the large hero headline keep the a
 
 Download buttons use GitHub's `releases/latest/download/Jarvis.dmg` URL, so ordinary app releases
 need no website edit. Keep platform requirements, provider setup, and privacy copy consistent
-with the repository README and wiki. The overlay example is illustrative, not a live session.
+with the repository README and wiki. Link to the existing guides for detailed setup and privacy
+information rather than growing the landing page into a manual.
 
 ## Connect Cloudflare once
 
