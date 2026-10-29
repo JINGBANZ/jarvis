@@ -394,6 +394,34 @@ import JarvisCore
     func responsesDuringPreviewAreRevealedAfterClose() async {
         await checkAppendDuringPreview()
     }
+
+    @MainActor @Test
+    func theHeaderNamesManualModeForTheWholeSession() {
+        let panel = liveBox()
+        #expect(panel.currentTitle == "Jarvis")
+        panel.showCoachingMode(.manual, notice: nil)
+        #expect(panel.currentTitle == "Jarvis · Manual")
+        panel.showCoachingMode(.automatic, notice: nil)
+        #expect(panel.currentTitle == "Jarvis")
+    }
+
+    @MainActor @Test
+    func stoppingResetsTheHeaderTitle() {
+        let panel = liveBox()
+        panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
+        panel.setSessionLive(false)
+        #expect(panel.currentTitle == "Jarvis")
+    }
+
+    @Test
+    func aSwitchNoticeGivesWayToTheModeTitle() async {
+        await checkSwitchNoticeExpires()
+    }
+
+    @Test
+    func anEarlierNoticeTimerCannotCutANewerNoticeShort() async {
+        await checkNewerNoticeOutlivesEarlierTimer()
+    }
 }
 
 // MARK: - Main-actor checks (awaited from nonisolated tests so render's main-actor hop can run)
@@ -483,4 +511,25 @@ private func checkDropsEmptyTips() async {
     panel.render("     \n\t")
     try? await Task.sleep(nanoseconds: 200_000_000)   // lets an erroneous append run
     #expect(panel.entryCount == 0, "empty/whitespace-only tips must not be logged")
+}
+
+@MainActor private func checkSwitchNoticeExpires() async {
+    let panel = liveBox()
+    panel.coachingModeNoticeDuration = .milliseconds(20)
+    panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
+    #expect(panel.currentTitle == "Manual — press ⌥⌘J to send")
+    try? await Task.sleep(for: .milliseconds(200))
+    #expect(panel.currentTitle == "Jarvis · Manual")
+}
+
+@MainActor private func checkNewerNoticeOutlivesEarlierTimer() async {
+    let panel = liveBox()
+    panel.coachingModeNoticeDuration = .milliseconds(100)
+    panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
+    try? await Task.sleep(for: .milliseconds(60))
+    panel.showCoachingMode(.automatic, notice: "Automatic")
+    try? await Task.sleep(for: .milliseconds(60))
+    #expect(panel.currentTitle == "Automatic", "the first notice's timer must not end the second")
+    try? await Task.sleep(for: .milliseconds(200))
+    #expect(panel.currentTitle == "Jarvis")
 }

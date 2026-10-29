@@ -39,6 +39,10 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private var isPreviewRequested = false
     private var wasCollapsedBeforePreview = false
     private var isSessionLive = false
+    private var coachingMode: CoachingMode = .automatic
+    /// Lets a newer switch's notice outlive an earlier notice's timer.
+    private var coachingModeNoticeGeneration = 0
+    var coachingModeNoticeDuration: Duration = .seconds(2)
     /// Called with the content width and height once a resize drag finishes.
     public var onSizeChanged: ((Double, Double) -> Void)?
     private static let sampleEntries: [(stamp: String, text: String, hasDetail: Bool)] = [
@@ -503,11 +507,37 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             details.removeAll()
             slot.reset()
             liveDetail = nil
+            showCoachingMode(.automatic, notice: nil)
         }
         applyDisplay()
         if live { setCollapsed(false) }
         refreshDetails()
         applyVisibility()
+    }
+
+    // MARK: - Coaching mode
+
+    /// The header names manual mode for the whole session; `notice` stands in for it briefly after
+    /// a switch.
+    public func showCoachingMode(_ mode: CoachingMode, notice: String?) {
+        coachingMode = mode
+        coachingModeNoticeGeneration &+= 1
+        guard let notice else { return header.setTitle(Self.title(for: mode)) }
+        header.setTitle(notice)
+        let generation = coachingModeNoticeGeneration
+        let duration = coachingModeNoticeDuration
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: duration)
+            guard let self, self.coachingModeNoticeGeneration == generation else { return }
+            self.header.setTitle(Self.title(for: self.coachingMode))
+        }
+    }
+
+    private static func title(for mode: CoachingMode) -> String {
+        switch mode {
+        case .automatic: "Jarvis"
+        case .manual: "Jarvis · Manual"
+        }
     }
 
     // MARK: - OverlayBoxApplying
@@ -587,6 +617,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     var detailTitlePointSize: CGFloat { detailView.titlePointSize }
     var headerIconPointSize: CGFloat { header.iconPointSize }
     var headerTitlePointSize: CGFloat { header.titlePointSize }
+    var currentTitle: String { header.title }
     var isDetailHeld: Bool { slot.isHeld }
     var detailCount: Int { details.count }
 

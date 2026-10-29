@@ -55,6 +55,13 @@ final class OverlayBoxHeaderView: NSView {
         clearButton.isHidden = !hasContent
     }
 
+    var title: String { titleLabel.stringValue }
+
+    func setTitle(_ title: String) {
+        titleLabel.stringValue = title
+        layoutControls()
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layoutControls()
