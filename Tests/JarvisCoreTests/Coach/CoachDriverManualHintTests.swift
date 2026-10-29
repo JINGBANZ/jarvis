@@ -35,6 +35,18 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         return (driver, transcript)
     }
 
+    @Test func handledTranscriptCountAdvancesWhenAnAttemptCommits() async {
+        let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Clarify the scale.")])])
+        let (driver, transcript) = makeDriver(
+            brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock())
+        transcript.append(.init(speaker: .them, text: "Design a cache.", at: 1))
+        #expect(driver.handledTranscriptCount == 0)
+
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+
+        #expect(driver.handledTranscriptCount == 1)
+    }
+
     @Test func manualHintInjectsScreenshotAndForcesSpeakInOneTrip() async {
         let clock = ManualClock(now: 100)
         let brain = ScriptedBrain(script: [

@@ -104,6 +104,18 @@ import Foundation
         #expect(GeminiLiveSession.finalTranscript(from: event, speaker: .me) == nil)
     }
 
+    @Test func interimTranscriptReadsOnlyTheInterimFrame() {
+        let interim: [String: Any] = ["serverContent": [
+            "interimInputTranscription": ["text": "let's talk about ind"],
+        ]]
+        let final: [String: Any] = ["serverContent": [
+            "inputTranscription": ["text": "let's talk about indexes"],
+        ]]
+        #expect(GeminiLiveSession.interimTranscript(from: interim) == "let's talk about ind")
+        #expect(GeminiLiveSession.interimTranscript(from: final) == nil)
+        #expect(GeminiLiveSession.interimTranscript(from: [:]) == nil)
+    }
+
     @Test func hasInterimTranscriptionIsTrueOnlyForAnInterimFrame() {
         let event: [String: Any] = ["serverContent": [
             "interimInputTranscription": ["text": "let's talk about ind"],

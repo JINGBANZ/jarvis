@@ -240,6 +240,9 @@ public final class CoachDriver: @unchecked Sendable {
         return true
     }
 
+    /// Transcript lines before this insertion index have been consumed by a completed attempt.
+    public var handledTranscriptCount: Int { ledger.committedCount }
+
     /// Returns the cancelled compaction task so teardown can drain it before sealing the audit.
     @discardableResult
     public func cancelBackgroundWork() -> Task<Void, Never>? {
