@@ -9,6 +9,7 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
     private let output: URL
     private let relaunch: Bool
     private var task: Task<Void, Never>?
+    private var shortcutHarness: ShortcutReplacementHarness?
     var liveCoachDriver: CoachDriver?
     var liveSessionDirectory: URL? { output }
     var liveSessionEvidence: FileSessionAudit? { nil }
@@ -211,6 +212,9 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
             tab.highlight(false)
         }
         if relaunch { return }
+        let shortcutHarness = ShortcutReplacementHarness(defaults: defaults)
+        self.shortcutHarness = shortcutHarness
+        try await shortcutHarness.run()
         let traffic = SettingsHarnessTraffic()
         let brain = BrainComposition(secrets: FileSecretStore(), host: self,
             supervisor: LocalProxySupervisor(executable: nil, home: output.appendingPathComponent("proxy"),

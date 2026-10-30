@@ -2504,7 +2504,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await gate.release()
         #expect(await request.value == .brainError)
         #expect(brain.callCount == 6)
-        #expect(recorder.failures.count == 2)
+        #expect(recorder.failures.count == (reason.isManual ? 1 : 2),
+                "a shortcut cancels the old cycle; new speech lets that cycle finish")
         #expect(await driver.handleTrigger(.silence(secondsQuiet: 60)) == .brainError)
         #expect(brain.callCount == 6)
     }

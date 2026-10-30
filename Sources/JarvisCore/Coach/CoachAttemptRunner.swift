@@ -82,7 +82,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
     struct PendingCoachingWork {
         var reason: TriggerReason
-        /// A retry of a failed press is automatic, so it clears this unless another press joins.
+        /// Only a fresh press bypasses automatic settlement; retries wait for settlement.
         var bypassesTranscriptionSettlement: Bool
         var wake: CoachingAttemptAuditEvent.Wake = .trigger
         /// Retry context excludes reasoning and tool-call linkage. Searches replace stale hits;
@@ -275,6 +275,11 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 result: .failed(outcome: .brainError, failure: failure, work: work))
         }
 
+        if Task.isCancelled {
+            await conversation.finish()
+            return AttemptExecution(id: attemptID, result: .cancelled)
+        }
+
         // Failure and cancellation discard these, so "already loaded" never cites unsent history.
         var loadedThisAttempt: Set<String> = []
         var refusedProse = false
@@ -355,6 +360,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
             }
 
             while iterations < maxToolIterations {
+                if Task.isCancelled {
+                    await withdraw()
+                    return .cancelled
+                }
                 iterations += 1
                 let loaded = alreadyLoaded.union(loadedThisAttempt)
                 let tools = attemptContext.tools
@@ -385,13 +394,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         sequence: requestSequence,
                         contextRevision: attemptContext.contextRevision,
                         contextRewriteReason: attemptContext.rewriteReason)
-                    response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
-                        try await conversation.respond(
-                            messages: attemptContext.messages(
-                                for: turnMessages, finalResponse: iterations == maxToolIterations,
-                                allowsSilence: !reason.isManual),
-                            tools: tools,
-                            toolChoice: toolChoice)
+                    response = try await withTaskCancellationHandler {
+                        try await CoachingRequestAttribution.$current.withValue(requestContext) {
+                            try await conversation.respond(
+                                messages: attemptContext.messages(
+                                    for: turnMessages, finalResponse: iterations == maxToolIterations,
+                                    allowsSilence: !reason.isManual),
+                                tools: tools,
+                                toolChoice: toolChoice)
+                        }
+                    } onCancel: {
+                        relay.cancel()
                     }
                 } catch {
                     let streamed = await relay.endRequest()

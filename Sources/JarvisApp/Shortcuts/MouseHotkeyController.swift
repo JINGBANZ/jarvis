@@ -113,4 +113,10 @@ final class MouseHotkeyController {
             return nil
         }
     }
+
+    #if JARVIS_LIVE_E2E
+    func dispatchHarnessEvent(_ type: CGEventType, event: CGEvent) -> Bool {
+        handle(type, event: event) == nil
+    }
+    #endif
 }

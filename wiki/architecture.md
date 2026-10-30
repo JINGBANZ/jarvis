@@ -596,9 +596,19 @@ The attempt audit and committed transcript boundary use that same snapshot; a de
 covered by it does not produce another hint. All three always end in a tip: a press may load a skill or
 tool and search References first, but never stays silent or captures again (see [Capabilities](#capabilities)). If capture
 fails, the request identifies the missing screen and uses available context without inventing visible
-details. They share the ordinary single-flight coach loop and provider route. Natural wakes preserve
-pending manual intent; the latest explicit shortcut chooses its kind. A fresh manual press may bypass
-unsettled transcription, while an automatic retry waits for settlement. Stop cancels any request;
+details. They share the ordinary single-flight coach loop and provider route. Every press cancels and
+replaces active coaching work and its pending retries, in either mode and through either keyboard or
+mouse bindings, including repeated presses of the same action. Rapid presses retain only the latest
+intent; natural wakes preserve it. The replacement starts with fresh screen evidence and all speech
+since the last committed attempt. It keeps the configured fallback policy and a fresh attempt budget
+on the current route target; cancellation itself records no provider failure. Completed tips remain,
+but the superseded attempt's unfinished stream is withdrawn and none of its answer or transcript
+boundary commits. The driver drains cancellation cleanup before admitting the replacement, keeping
+capture cleanup, history commits, and overlay withdrawal ordered before the new answer. Late stream
+deltas are rejected by the cancelled attempt's relay.
+
+A fresh press bypasses automatic transcription settlement, with the bounded wait described in
+[manual mode](#manual-mode); an automatic retry waits for settlement. Stop cancels active and pending work;
 while stopped, an explicit keyboard shortcut only beeps and mouse clicks pass through. Activity records
 which coaching shortcut was pressed.
 
@@ -640,6 +650,11 @@ session and consumes the matched click through release. See
 [General → Shortcuts](./settings-window.md#shortcuts) for binding behavior and
 [Sandbox → Data Egress](./sandbox.md#data-egress) for privacy scope.
 
+`scripts/run-settings-tests.sh` exercises replacement in the signed development app with synthetic
+provider replies, Carbon application events, the mouse-event handler, and the real Overlay Box.
+It covers both coaching modes and all three actions. Global event delivery and Accessibility grants
+remain part of the [manual shortcut checks](./live-e2e-tests.md#what-stays-outside-the-command).
+
 ### Manual mode
 
 Proactive coaching is the default. **Manual mode** is the user's way to defer it: Jarvis keeps
@@ -664,7 +679,7 @@ starts after the press never holds it back. Without the wait the tail of a quest
 on would ride with the next press instead. Each press records its moment and carries it on whichever
 path reaches an attempt: pressed while another answer runs, while a failed request waits to retry, or
 while an earlier press is still waiting. One settlement step applies the bound to all of them; a
-newer press joins the waiting work, moves the moment forward, and restarts the bound.
+newer press replaces the waiting work, moves the moment forward, and restarts the bound.
 
 Returning to automatic sends nothing by itself: the next turn-end carries the speech heard meanwhile.
 The gate lives in the driver rather than in `SessionComposition`'s transcriber callbacks, which would
@@ -928,14 +943,14 @@ and text evidence collapses to neutral stubs; raw reasoning, tool-call identifie
 pairing from failed attempts never cross that boundary.
 
 Failed conversation work remains pending within the cycle's retry budget and schedules another
-coaching attempt after a short fixed delay, unless [manual mode](#manual-mode) stops it. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
-manual coaching trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
+coaching attempt after a short fixed delay, unless [manual mode](#manual-mode) stops it. This internal wake-up does not depend on a new natural trigger. If a turn-end or silence
+trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
 failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
 attempt uses the same pending conversation. Every automatic attempt applies the
 [transcript admission rule](#the-turn) to a fresh snapshot, so later pending speech cannot starve
 completed context and earlier or unknown work still preserves chronology. Natural triggers wake the
-wait to reconsider its reason and context. An explicit coaching shortcut bypasses that wait and
-upgrades the same pending-work attempt to a shortcut attempt, which always ends in a hint. `TriggerReason` remains the model-facing
+wait to reconsider its reason and context. An explicit coaching shortcut replaces that work under the
+[shortcut scheduling contract](#on-demand-coaching-shortcuts). `TriggerReason` remains the model-facing
 reason that made coaching useful (`turnEnd`, `silence`, `manualHint`, `manualExplanation`, or `manualCode`); pending work is scheduler
 state, not a fourth instruction to the model. An automatic attempt with no newer trigger reuses the
 pending work's reason; when another natural trigger arrives, its newer reason describes the fresh
@@ -1561,7 +1576,7 @@ after a newer one; the runner drains that channel before it delivers or withdraw
 orders the final state after the last paint. `deliver` finalizes the live entry
 instead of adding a second one, and the committed history holds the same rebuilt call whatever
 streamed. A request that ends without delivering, a failure or truncation before the hint's closing
-quote, a call the press did not permit, arguments the parser rejected, or Stop, withdraws the live reply,
+quote, a call the press did not permit, arguments the parser rejected, Stop, or a replacement shortcut, withdraws the live reply,
 even a hint still half written, and takes the path it always took; a failure or truncation after
 the hint closes keeps the hint; see [Ordered provider route](#ordered-provider-route).
 The runner logs `💬 first text +Xms` when
