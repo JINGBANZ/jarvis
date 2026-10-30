@@ -6,7 +6,9 @@ import JarvisCore
 /// The API key travels in the `Authorization` header, never the URL, so the connect URL is safe to
 /// log. Never log the request itself or a frame: frames carry user speech.
 ///
-/// `@unchecked Sendable`: stream state is guarded by `lock`. Lock order is documented on
+/// `@unchecked Sendable`: stream state is guarded by `lock`. `workReportLock` precedes `lock` and
+/// the coaching lock, and is held from reading the work state through reporting it, so a stale
+/// state can never overtake a newer one. The rest of the lock order is documented on
 /// `WebSocketConnection`.
 final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAdapter,
     @unchecked Sendable {
@@ -34,12 +36,8 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
     private var bufferedAudio: [(token: UInt64, data: Data, capturedAt: TimeInterval)] = []
     private var nextChunkToken: UInt64 = 0
     private var bufferedByteCount = 0
-    /// Settled segments of the utterance Deepgram has not closed yet.
-    private var utteranceSegments: [String] = []
-    /// Keeps the turn open while Deepgram may still be recognizing sent audio. Set by speech start
-    /// and interim results, cleared when an utterance closes, on socket open and retry, and on stop,
-    /// so a lost close cannot wedge it.
-    private var recognitionInFlight = false
+    private let workReportLock = NSLock()
+    private var assembler = DeepgramUtteranceAssembler()
     /// Deepgram times no utterance, so the pending start comes from content-free local activity.
     private var activityTracker = PCM16SpeechActivityTracker()
     private var pendingSpeech = PendingSpeechWindow()
@@ -125,8 +123,8 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
 
     func connect() {
         lock.lock()
-        stopped = false; isSending = false; recognitionInFlight = false
-        utteranceSegments.removeAll()
+        stopped = false; isSending = false
+        assembler = DeepgramUtteranceAssembler()
         _ = activityTracker.reset()
         pendingSpeech.reset()
         lock.unlock()
@@ -147,8 +145,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         lock.lock()
         stopped = true
         isSending = false
-        recognitionInFlight = false
-        utteranceSegments.removeAll()
+        assembler = DeepgramUtteranceAssembler()
         // No further audio arrives to release the detector, so close the window here too.
         _ = activityTracker.reset()
         pendingSpeech.reset()
@@ -193,8 +190,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         isSending = false
-        recognitionInFlight = false
-        utteranceSegments.removeAll()
+        assembler.reset()
         lock.unlock()
     }
 
@@ -208,7 +204,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
     }
 
     func connectionWillRetry(_ lease: WebSocketConnection.Lease, attempt: Int) {
-        closeUtterance(reason: "socket retry")
+        salvageUtterance(reason: "socket retry")
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         isSending = false
@@ -218,7 +214,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
 
     /// Guarded on `stopped`: a failure racing Stop must not show an error for a user-ended session.
     func connectionDidTerminate(_ failure: ProviderFailure) {
-        closeUtterance(reason: "terminal failure")
+        salvageUtterance(reason: "terminal failure")
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         isSending = false
@@ -312,19 +308,13 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         }
     }
 
-    private func noteRecognitionInFlight() {
-        let observedAt = clock.now() - sessionStart
-        lock.lock()
-        recognitionInFlight = true
-        pendingSpeech.recordRecognitionObserved(at: observedAt)
-        lock.unlock()
-    }
-
     private func updateWorkFlag() {
+        workReportLock.lock()
+        defer { workReportLock.unlock() }
         lock.lock()
         let state = pendingSpeech.state(
             queuedSince: bufferedAudio.first?.capturedAt,
-            isRecognizing: recognitionInFlight)
+            isRecognizing: assembler.hasUnresolvedSpeech)
         lock.unlock()
         coachingCoordinator.updateTranscriptionWork(state)
     }
@@ -354,47 +344,55 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         // replaced. `isCurrent` also covers `stopped`, plus task identity and generation.
         lock.lock(); let isStopped = stopped; lock.unlock()
         guard !isStopped, connection.isCurrent(lease) else { return }
+        let heardSpeech: Bool
+        let reason: String
         switch event {
-        case let .results(transcript, isFinal, speechFinal):
-            if isFinal {
-                let text = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty {
-                    lock.lock(); utteranceSegments.append(text); lock.unlock()
-                }
-                if speechFinal { closeUtterance(reason: "endpointing") }
-            } else if !transcript.isEmpty {
-                // Interim text is speculative and must never reach Activity or the transcript.
-                noteRecognitionInFlight()
-            }
-            updateWorkFlag()
+        case .results(let result):
+            heardSpeech = !result.isFinal && !result.transcript.isEmpty
+            reason = "endpointing"
         case .speechStarted:
-            noteRecognitionInFlight()
-            updateWorkFlag()
+            heardSpeech = true
+            reason = "speech started"
         case .utteranceEnd:
-            closeUtterance(reason: "utterance end")
-            updateWorkFlag()
+            heardSpeech = false
+            reason = "utterance end"
         case .error:
             // The description can echo request details, so only the kind is logged.
             jlog("Jarvis Deepgram [\(speaker.rawValue)]: server reported an error frame")
+            return
         case .other:
-            break
+            return
         }
+        let observedAt = clock.now() - sessionStart
+        lock.lock()
+        if heardSpeech { pendingSpeech.recordRecognitionObserved(at: observedAt) }
+        let segments = assembler.receive(event)
+        lock.unlock()
+        publish(segments, reason: reason)
+        updateWorkFlag()
     }
 
-    /// Publishes the settled segments as one utterance. Settles on any close, even one
-    /// `TranscriptFiltering` rejects, because the server is done with the audio.
-    private func closeUtterance(reason: String) {
+    private func salvageUtterance(reason: String) {
         lock.lock()
-        let segments = utteranceSegments
-        utteranceSegments.removeAll()
-        recognitionInFlight = false
+        let segments = assembler.closeAll()
+        lock.unlock()
+        publish(segments, reason: reason)
+    }
+
+    /// Settles even an utterance `TranscriptFiltering` rejects, because the server is done with
+    /// the audio. The assembler holds the speech unresolved until the line is in the transcript.
+    private func publish(_ segments: [String], reason: String) {
+        guard !segments.isEmpty else { return }
+        lock.lock()
         let spokenAt = pendingSpeech.recordFinalized()
         lock.unlock()
-        guard !segments.isEmpty,
-              let text = DeepgramLiveSession.joinedTranscript(
-                segments, speaker: speaker) else { return }
-        coachingCoordinator.recordFinalizedTranscript(
-            text, spokenAt: spokenAt, source: "deepgram-live (\(reason))")
+        if let text = DeepgramLiveSession.joinedTranscript(segments, speaker: speaker) {
+            coachingCoordinator.recordFinalizedTranscript(
+                text, spokenAt: spokenAt, source: "deepgram-live (\(reason))")
+        }
+        lock.lock()
+        assembler.finishPublishing()
+        lock.unlock()
     }
 
     private var source: ProviderFailure.Source { .transcription(.deepgram) }

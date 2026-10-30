@@ -3,12 +3,36 @@ import Foundation
 /// The Deepgram live-transcription wire format. The API key travels in an `Authorization` header,
 /// never the URL.
 public enum DeepgramLiveSession {
+    /// Times are seconds of audio since the socket opened; each socket restarts them at zero.
+    public struct Result: Equatable, Sendable {
+        public let transcript: String
+        /// The words are settled.
+        public let isFinal: Bool
+        /// Deepgram's endpointing heard the utterance end.
+        public let speechFinal: Bool
+        public let start: TimeInterval
+        public let end: TimeInterval
+        public let lastWordEnd: TimeInterval?
+
+        public init(
+            transcript: String, isFinal: Bool, speechFinal: Bool,
+            start: TimeInterval, end: TimeInterval, lastWordEnd: TimeInterval? = nil
+        ) {
+            self.transcript = transcript
+            self.isFinal = isFinal
+            self.speechFinal = speechFinal
+            self.start = start
+            self.end = end
+            self.lastWordEnd = lastWordEnd
+        }
+    }
+
     public enum Event: Equatable, Sendable {
-        /// `isFinal`: the words are settled. `speechFinal`: Deepgram's endpointing closed the utterance.
-        case results(transcript: String, isFinal: Bool, speechFinal: Bool)
-        /// The utterance gap `utterance_end_ms` asked for, sent when endpointing never fired.
-        case utteranceEnd
-        case speechStarted
+        case results(Result)
+        /// A gap of `utterance_end_ms` followed the finalized word ending at `lastWordEnd`. It can
+        /// arrive after newer speech has begun, so it closes only words up to that boundary.
+        case utteranceEnd(lastWordEnd: TimeInterval)
+        case speechStarted(at: TimeInterval)
         case error(description: String)
         case other
     }
@@ -49,7 +73,6 @@ public enum DeepgramLiveSession {
     public static func authorizationValue(apiKey: String) -> String { "Token \(apiKey)" }
 
     public static let keepAliveMessage = #"{"type":"KeepAlive"}"#
-    public static let finalizeMessage = #"{"type":"Finalize"}"#
     public static let closeStreamMessage = #"{"type":"CloseStream"}"#
 
     /// Nil means drop the frame, not a transport failure.
@@ -59,17 +82,30 @@ public enum DeepgramLiveSession {
         switch type {
         case "Results":
             let channel = object["channel"] as? [String: Any]
-            let alternatives = channel?["alternatives"] as? [[String: Any]]
-            let transcript = alternatives?.first?["transcript"] as? String ?? ""
-            return .results(
-                transcript: transcript,
+            let alternative = (channel?["alternatives"] as? [[String: Any]])?.first
+            let words = alternative?["words"] as? [[String: Any]] ?? []
+            let start = number(object["start"]) ?? 0
+            return .results(Result(
+                transcript: alternative?["transcript"] as? String ?? "",
                 isFinal: object["is_final"] as? Bool ?? false,
-                speechFinal: object["speech_final"] as? Bool ?? false)
-        case "UtteranceEnd": return .utteranceEnd
-        case "SpeechStarted": return .speechStarted
+                speechFinal: object["speech_final"] as? Bool ?? false,
+                start: start,
+                end: start + (number(object["duration"]) ?? 0),
+                lastWordEnd: words.last.flatMap { number($0["end"]) }))
+        case "UtteranceEnd":
+            // Deepgram sends -1 when the words were finalized before the gap elapsed.
+            guard let end = number(object["last_word_end"]), end >= 0 else { return .other }
+            return .utteranceEnd(lastWordEnd: end)
+        case "SpeechStarted":
+            guard let timestamp = number(object["timestamp"]) else { return .other }
+            return .speechStarted(at: timestamp)
         case "Error": return .error(description: object["description"] as? String ?? "")
         default: return .other
         }
+    }
+
+    private static func number(_ value: Any?) -> TimeInterval? {
+        (value as? NSNumber)?.doubleValue
     }
 
     /// Joins the settled segments of one utterance. Deepgram can space Mandarin words, which reads

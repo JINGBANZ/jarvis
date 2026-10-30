@@ -39,6 +39,14 @@ public enum Credential: String, Sendable, Hashable, CaseIterable {
         }
     }
 
+    /// What the key powers, for its Connections card.
+    public var roles: String {
+        switch self {
+        case .openAIAPIKey, .geminiAPIKey: "Brain and transcription"
+        case .deepgramAPIKey: "Transcription"
+        }
+    }
+
     public var placeholderHint: String {
         switch self {
         case .openAIAPIKey: "sk-…"

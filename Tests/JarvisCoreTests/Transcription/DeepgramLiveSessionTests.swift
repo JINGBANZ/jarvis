@@ -49,26 +49,36 @@ import Foundation
         #expect(DeepgramLiveSession.authorizationValue(apiKey: "secret") == "Token secret")
     }
 
-    @Test func parsesAFinalResultWithEndpointing() {
+    @Test func parsesAFinalResultWithItsAudioTimes() {
         let json = """
-        {"type":"Results","is_final":true,"speech_final":true,
-         "channel":{"alternatives":[{"transcript":"hello world","confidence":0.9}]}}
+        {"type":"Results","is_final":true,"speech_final":true,"start":1.5,"duration":2.25,
+         "channel":{"alternatives":[{"transcript":"hello world","confidence":0.9,
+           "words":[{"word":"hello","start":1.6,"end":2.0},{"word":"world","start":2.1,"end":3.4}]}]}}
         """
-        #expect(DeepgramLiveSession.parseEvent(Data(json.utf8))
-            == .results(transcript: "hello world", isFinal: true, speechFinal: true))
+        #expect(DeepgramLiveSession.parseEvent(Data(json.utf8)) == .results(.init(
+            transcript: "hello world", isFinal: true, speechFinal: true,
+            start: 1.5, end: 3.75, lastWordEnd: 3.4)))
     }
 
     @Test func parsesAnInterimResult() {
-        let json = #"{"type":"Results","is_final":false,"channel":{"alternatives":[{"transcript":"hel"}]}}"#
-        #expect(DeepgramLiveSession.parseEvent(Data(json.utf8))
-            == .results(transcript: "hel", isFinal: false, speechFinal: false))
+        let json = #"{"type":"Results","is_final":false,"start":0,"duration":1,"channel":{"alternatives":[{"transcript":"hel"}]}}"#
+        #expect(DeepgramLiveSession.parseEvent(Data(json.utf8)) == .results(.init(
+            transcript: "hel", isFinal: false, speechFinal: false, start: 0, end: 1)))
     }
 
-    @Test func parsesControlEvents() {
-        #expect(DeepgramLiveSession.parseEvent(Data(#"{"type":"UtteranceEnd","last_word_end":2.5}"#.utf8)) == .utteranceEnd)
-        #expect(DeepgramLiveSession.parseEvent(Data(#"{"type":"SpeechStarted","timestamp":1.3}"#.utf8)) == .speechStarted)
+    @Test func parsesControlEventsWithTheirBoundaries() {
+        #expect(DeepgramLiveSession.parseEvent(Data(#"{"type":"UtteranceEnd","last_word_end":2.5}"#.utf8))
+            == .utteranceEnd(lastWordEnd: 2.5))
+        #expect(DeepgramLiveSession.parseEvent(Data(#"{"type":"SpeechStarted","timestamp":1.3}"#.utf8))
+            == .speechStarted(at: 1.3))
         #expect(DeepgramLiveSession.parseEvent(Data(#"{"type":"Metadata","request_id":"x"}"#.utf8)) == .other)
         #expect(DeepgramLiveSession.parseEvent(Data(#"{"type":"Error","description":"bad"}"#.utf8)) == .error(description: "bad"))
+    }
+
+    /// Deepgram documents -1 for words finalized before the gap elapsed: there is no boundary to close.
+    @Test func ignoresAnUtteranceEndWithoutABoundary() {
+        #expect(DeepgramLiveSession.parseEvent(Data(#"{"type":"UtteranceEnd","last_word_end":-1}"#.utf8)) == .other)
+        #expect(DeepgramLiveSession.parseEvent(Data(#"{"type":"UtteranceEnd"}"#.utf8)) == .other)
     }
 
     @Test func dropsFramesThatAreNotJSONObjectsWithAType() {

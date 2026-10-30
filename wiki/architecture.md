@@ -1148,11 +1148,16 @@ rather than a per-turn screenshot.
   the model, language, raw 16 kHz PCM16 format, interim results, endpointing, and utterance-end
   settings are query parameters on the upgrade, and the socket is ready once a first control frame
   is delivered, since a refused upgrade fails that send. That is connection acknowledgement, not
-  verification of effective settings. The server owns turn detection like Gemini: settled
-  (`is_final`) segments accumulate until endpointing (`speech_final`) or an `UtteranceEnd` frame closes
-  the utterance, which then becomes one accepted line. Interim text only keeps the turn open; it
-  never reaches Activity or the transcript. Mandarin output has the gaps between its characters
-  closed. `PendingSpeechWindow` times the spoken start, as for Gemini. The adapter joins the shared
+  verification of effective settings. The server owns turn detection like Gemini, and the
+  Foundation-only `DeepgramUtteranceAssembler` turns its frames into lines. Settled (`is_final`)
+  segments accumulate until endpointing (`speech_final`) closes them all, or until an `UtteranceEnd`
+  closes those ending by its `last_word_end`. Deepgram can send `UtteranceEnd` for an earlier gap
+  after the speaker has resumed, so it never closes later words. Speech stays unresolved while settled
+  words wait, while a closed utterance is being published, and while speech heard by an interim
+  result or `SpeechStarted` began after everything finalized so far. The adapter reports work state
+  under one lock from reading through reporting, so a final is always in the transcript before its
+  speech reads as settled. Interim text never reaches Activity or the transcript. Mandarin output
+  has the gaps between its characters closed. `PendingSpeechWindow` times the spoken start, as for Gemini. The adapter joins the shared
   socket lifecycle (ready-timeout, ping/pong, reconnect with bounded offline buffering) and salvages
   an open utterance when a socket retires. Deepgram has no custom vocabulary or benchmark arm yet.
 - **The wire sample rate is a per-provider requirement, not a quality knob
