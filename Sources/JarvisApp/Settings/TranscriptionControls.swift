@@ -213,7 +213,7 @@ final class TranscriptionControls: NSObject {
             NSUserInterfaceItemIdentifier("transcription-deepgram-languages")
         let deepgramLanguagesRow = SettingsRowView(
             title: "Expected languages",
-            detail: "Selected languages guide recognition. Pick none for automatic detection.",
+            detail: "One language listens for only that language. Pick none or several for mixed speech.",
             controlView: deepgramLanguagePicker,
             controlSize: NSSize(width: 340, height: 32))
         content.addSubview(deepgramLanguagesRow)

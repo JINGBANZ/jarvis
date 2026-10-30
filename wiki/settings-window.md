@@ -642,14 +642,15 @@ The Connections page owns authentication shared across Brain and Ear. Its four s
 cards are **OpenAI API**, **Gemini API**, **Deepgram API**, and **Subscriptions**. The API-key
 cards each report and edit only their own Jarvis-managed owner-only file through `APIKeyControls`
 (one instance per `Credential`, keyed by `credential.rawValue` so their accessibility labels,
-identifiers, and saved-key state never collide); each card's header says the key serves the brain
-and transcription, and its action is **Add API key** or **Edit**. The row reads **Saved** in teal once a key is saved.
+identifiers, and saved-key state never collide); each card's header says what the key powers
+(`Credential.roles`), and its action is **Add API key** or **Edit**. The row reads **Saved** in teal once a key is saved.
 The `OPENAI_API_KEY` fallback remains usable by Start but is deliberately not presented as a
 Jarvis-managed saved key; Gemini has the same headless fallback in `GEMINI_API_KEY`
 (`Credential.geminiAPIKey.environmentVariable`, read by `EnvSecretStore`), also not presented as a
 saved key. Deepgram's card serves transcription only, with the same fallback in `DEEPGRAM_API_KEY`.
 
-Saving a key checks it. One models-list request goes out with the key in a header, and the card shows
+Saving a key checks it. One request goes out with the key in a header: a models-list request for
+OpenAI and Gemini, or a token-description request for Deepgram (`CredentialVerifier.check`). The card shows
 what the vendor said under the row: **accepted**, **refused** with the provider's status, error code,
 and redacted message, or **couldn't check the key** carrying the same evidence. The check answers one
 question, whether the provider refused the key, so only an authentication failure is a refusal. An

@@ -677,7 +677,7 @@ Each step shows only when what it collects is missing
 transcription provider whose key isn't saved, or when no brain target has a key or subscription
 target to check at Start: a new install, which calls
 OpenAI by default, always sees it, and a setup of a subscription brain with Apple Speech never does.
-A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` counts, and an install
+A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` / `DEEPGRAM_API_KEY` counts, and an install
 that already has what it needs completes onboarding without a window. Closing the window before the
 end quits, so an unfinished onboarding runs again on the next launch and skips the steps already
 done.

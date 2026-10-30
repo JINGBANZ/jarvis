@@ -83,8 +83,11 @@ import Testing
     @Test func everyCredentialPowersAnEarAndEveryBrainCredentialAlsoAMind() {
         for credential in Credential.allCases {
             #expect(Onboarding.transcriptionProvider(for: credential).ownCredential == credential)
-            if let brain = Onboarding.brainProvider(for: credential) {
-                #expect(brain.credential == credential)
+            switch credential {
+            case .openAIAPIKey, .geminiAPIKey:
+                #expect(Onboarding.brainProvider(for: credential)?.credential == credential)
+            case .deepgramAPIKey:
+                #expect(Onboarding.brainProvider(for: credential) == nil)
             }
         }
     }
