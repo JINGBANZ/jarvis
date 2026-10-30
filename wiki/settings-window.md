@@ -841,7 +841,7 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SubscriptionControls.swift` | Renders the Subscriptions card's shared state and dispatches explicit actions |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySupervisor.swift` | Starts, probes, and restarts the bundled helper; owns its credential directory |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySignIn.swift` | Runs one browser sign-in through the helper and reports its URL and outcome |
-| `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The one models-list request behind a saved key's verdict |
+| `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The provider-specific request behind a saved key's verdict: models-list for OpenAI and Gemini, token description for Deepgram |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified route card and its persistence mutations, including reorder |
 | `Sources/JarvisCore/Brain/BrainRoute.swift` | The ordered route, its normalization, and `movingTarget(at:by:)` |
