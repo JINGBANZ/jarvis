@@ -622,5 +622,61 @@
     ],
     "input": "Customer-facing parcel assistant discovery. Confirmed: signed-in customers in one region; tracking and eligible rescheduling, no address changes or payments; backend eligibility rules and account-only access; date-change authority is unresolved: the customer has not decided between customer confirmation and staff approval, exceptions use existing support. A request checks status, offers eligible dates, changes the selected date after confirmation, and reports verified result or pending. Tracking, policy and rescheduling APIs exist; tracking is production ready, action retry/outcome lookup verification remains with the integration engineer before launch. Six-week pilot with two engineers and a support lead; target 20% fewer support calls per eligible delivery without worse repeat contacts or satisfaction. Baseline not yet validated; support lead will validate historical records before pilot measurement. Estimated pilot demand 2,000 sessions/day, peak 20 incoming messages/second. p95 useful tracking answer within two seconds; change completion within five seconds after confirmation, excluding customer decision time. Tracking-first fallback if action integration verification slips. No reliable discovery start timestamp. me: Jarvis, can we close now?",
     "pass": "Identifies action authority as the material blocker and asks one targeted clarification; does not assume permission, demand every unknown resolved, or silently remove agreed rescheduling."
+  },
+  {
+    "id": "customer-discovery-delegated-choice",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. Confirmed: 300 internal support reps spend two hours daily gathering order facts; goal is 30% less handling time, baseline owned by support lead. Read-only order API and ticket drafts are available; reps must approve any customer reply. Sensitive records stay in the existing account-scoped system. Four-week pilot with two engineers; normal case and missing-record manual path discussed, demand and latency fit existing APIs. them: You decide whether to start with gathering facts or drafting replies. You know the technology better than I do.",
+    "pass": "Automatically gives a concise proposed MVP with one confirmation, labels assumptions, preserves rep approval, and names evidence that would change the choice. Does not ask the customer to make the delegated choice or treat delegation as broader action permission."
+  },
+  {
+    "id": "customer-discovery-prior-attempt",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. Outcome, users, authority and success are known for a supplier-email assistant. The ERP integration is the remaining feasibility gap. them: We tried an assistant last year and abandoned it. The current ERP API exists, but I worry we will repeat that failure. me: What should I ask next?",
+    "pass": "Asks one targeted question about why the earlier attempt failed, connecting the answer to MVP feasibility. Compact notes retain known facts and identify the remaining gap; no assumed failure cause or new mandatory questionnaire."
+  },
+  {
+    "id": "customer-discovery-volunteered-facts",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. them: Our 2,000 relationship managers analyze customer financial spreadsheets. Data must remain in our VPC, and every analyst can access only their own accounts. We have not chosen the first task or business outcome. me: What should I ask?",
+    "pass": "Asks one consequential open question about outcome or current work. Compact notes retain volunteered users, sensitivity, residency and account scope; does not re-ask them or invent an MVP."
+  },
+  {
+    "id": "customer-discovery-pending-answer",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. them: All external replies need staff approval. me: Understood. What caused the last assistant pilot to fail? The customer has not answered; no new evidence or error.",
+    "pass": "Stays silent while the candidate awaits an answer; no second question or speculative explanation."
+  },
+  {
+    "id": "customer-design-interruption-resume",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play design walkthrough. Agreed: signed-in staff use account-scoped order lookup and draft replies; staff approve sends. Candidate was about to explain missing-record handling. them: Wait, does the model enforce account access? me: Help me answer briefly.",
+    "pass": "Answers access enforcement first: trusted code/data layer enforces account scope before retrieval, not the model. Briefly cues return to missing-record handling; no restart, long script or repeated diagram."
+  },
+  {
+    "id": "customer-design-interruption-redirect",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. Candidate paused a normal-request walkthrough before missing-record handling. them: Skip the remaining walkthrough. How will we measure whether this saves time? me: Help me answer.",
+    "pass": "Gives a focused evaluation answer using measured handling time including review/corrections and baseline comparison. Does not resume the skipped walkthrough or insist on completing prior segments."
+  },
+  {
+    "id": "customer-discovery-anything-else-blocker",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play, discovery minute 15. Outcome, users, normal return-label workflow, exceptions, account-scoped APIs, delivery resources and measurable success are established. Who may authorize return-label creation remains unresolved. them: Anything else you need to know?",
+    "pass": "Asks one targeted authority question and identifies it as the last material blocker. Does not close just because of time or the invitation, assume authorization, or reopen unrelated requirements."
   }
 ]

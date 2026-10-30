@@ -297,3 +297,34 @@ A final fresh-context agent checked the explicit known-facts adjustment using th
 adapter: five last-gap samples retained confirmed facts beside the authority question and indicated
 closure after that decision; one closing sample supplied the automatic MVP with its journey and
 fallback. These samples shared one conversation and are not independent reliability measurements.
+
+## Selective RRK coaching additions
+
+Seven synthetic cases cover delegated scope choice, a prior failed attempt, volunteered facts,
+pending answers, interruption/resumption, explicit redirection and an authority blocker at minute 15.
+They adapt ideas from [ericode01's RRK branch at dce68a5](https://github.com/ericode01/jarvis/blob/dce68a53ca5b89fea32d83b72ff59ce28c074138/Sources/JarvisCore/Resources/Skills/rrk/SKILL.md)
+to the existing customer skill; they do not import its separate routing, long scripts or clock-based
+closure. Existing recap-precision coverage checks corrected quantities.
+
+Separate fresh-context host agents read the same extracted production coach/speak guidance used
+above, the baseline (`c2ec1cf`) or revised skill, and seven inputs without pass criteria. Each agent
+answered its cases as a group. The initial delegated-choice input explicitly requested evidence that
+would change the recommendation, and the baseline supplied it. That input was then revised to remove
+this leading request: the baseline was probed again in its existing conversation; the revised agent
+received only the final input. This asymmetry limits comparison.
+
+| Behavior | Baseline observation | Revised observation |
+| --- | --- | --- |
+| Delegated choice, final input | Recommended fact gathering and preserved approval, but omitted evidence that would change the choice. | Recommended fact gathering, labeled API coverage as an assumption and named sample evidence that would favor drafting. |
+| Earlier failed pilot | Asked why it failed and linked the answer to ERP feasibility. | Preserved that targeted question and compact facts/gap notes. |
+| Volunteered facts | Retained users, residency and access constraints. | Preserved them. Both replies combined a workflow question and desired-outcome question, so strict single-question adherence remains imperfect. |
+| Pending answer | Silent. | Silent. |
+| Interruption and redirect | Answered access enforcement before resuming; followed the evaluation redirect. | Preserved both behaviors without restarting the walkthrough. |
+| Minute-15 authority gap | Asked about authority rather than closing. | Preserved the blocker and compact readiness notes. |
+
+These single grouped samples show one omitted element becoming explicit, not a general measured
+quality improvement. They are host-model simulations, not production-provider, prompt-loader or
+renderer executions; the exact provider snapshot was not exposed. No live interview material was
+used. Gate checks packaging/code separately; use the production-context protocol above for repeated
+behavioral evaluation. The skill remains within the unchanged 15,000-byte body limit; scope/MVP,
+design and evaluation sections are unchanged by this follow-up.
