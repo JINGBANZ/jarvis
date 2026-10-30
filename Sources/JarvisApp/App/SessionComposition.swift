@@ -54,6 +54,7 @@ final class SessionComposition {
     private var audioSource: (any AudioSource)?
     private var turns: TurnTaskBox?
     private(set) var coachDriver: CoachDriver?
+    private var transcriptFeed: LiveTranscriptFeed?
     private let referenceLibrary: ReferenceLibrary
     private var referenceSessionID: UUID?
     private var requestManualHint: ((CoachingShortcut) -> Void)?
@@ -190,6 +191,11 @@ final class SessionComposition {
             documents: admitted?.session,
             sessionContext: admitted?.context)
 
+        let transcriptFeed = LiveTranscriptFeed(
+            transcript: transcript, driver: driver, overlay: overlayBox,
+            clock: clock, sessionStart: conversationStart)
+        let liveSpeech = transcriptFeed.liveSpeech
+
         // CoachDriver is @unchecked Sendable; capture it (not @MainActor self) in the callbacks.
         // CoachDriver coalesces triggers, so a new one doesn't cancel the running turn.
         let turns = TurnTaskBox()
@@ -214,6 +220,10 @@ final class SessionComposition {
         transcriber.onSilence = { secs in turns.run { await driver.handleTrigger(.silence(secondsQuiet: secs)) } }
         transcriber.onTranscriptionWorkChanged = {
             driver.updateTranscriptionWork($0, for: .me)
+            liveSpeech.update($0, for: .me)
+        }
+        (transcriber as? any InterimTranscriptPublishing)?.onInterimTranscript = {
+            liveSpeech.updateInterim($0, for: .me)
         }
 
         // No onSilence here: the "are you stuck?" check is about the user, so only the mic drives
@@ -238,6 +248,10 @@ final class SessionComposition {
         }
         themTranscriber.onTranscriptionWorkChanged = {
             driver.updateTranscriptionWork($0, for: .them)
+            liveSpeech.update($0, for: .them)
+        }
+        (themTranscriber as? any InterimTranscriptPublishing)?.onInterimTranscript = {
+            liveSpeech.updateInterim($0, for: .them)
         }
         // The identity checks keep a callback queued across Stop and Start away from the
         // replacement session.
@@ -399,6 +413,8 @@ final class SessionComposition {
         sessionIsLive = true
         // Only after every early return, so a failed Start leaves the desktop untouched.
         overlayBox.setSessionLive(true)
+        transcriptFeed.start()
+        self.transcriptFeed = transcriptFeed
         jlog("Jarvis: coaching starting — verifying transcription endpoints.")
         jlog("Jarvis network path at start: \(networkDiagnostics.currentSummary)")
         onCoachingStateChanged?()
@@ -414,6 +430,7 @@ final class SessionComposition {
         let hadAllocatedPipeline = hasAllocatedPipeline
         let endedLiveSession = sessionIsLive
         sessionIsLive = false
+        transcriptFeed?.stop(); transcriptFeed = nil
         overlayBox.setSessionLive(false)
         requestManualHint = nil
         // Take the handle before a quick Start can install another; cancelled turns still write to

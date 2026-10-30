@@ -221,7 +221,9 @@ is not recorded or sent to a provider; only the chosen bindings persist alongsid
 There is **no rolling screen/audio archive and no "recall" database** — Jarvis keeps no continuous
 recording of what it sees or hears. The **raw captured streams stay transient**: audio is either
 streamed to the selected transcription provider and dropped or analyzed on-device by Apple Speech, the live transcript lives in
-memory, and the transient file `screencapture` writes a frame into is created inside the owner-only
+memory (shown only in the capture-excluded Overlay Box's optional
+[transcript column](./architecture.md#the-transcript-column), together with Gemini's interim
+hypotheses, which appear nowhere else), and the transient file `screencapture` writes a frame into is created inside the owner-only
 session directory (never `/tmp`) and deleted —
 with its absence verified — before the capture returns. Session-derived data persists *on this
 machine* in one place, the **per-session log directory** — owner-only and bounded; see below. The

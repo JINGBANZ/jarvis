@@ -193,6 +193,8 @@ public enum Defaults {
             public static let heightKey = "overlayBox.height"
             public static let height: Double = 440
             public static let heightRange: ClosedRange<Double> = 140...4096
+
+            public static let transcriptPaneVisibleKey = "overlayBox.transcriptPaneVisible"
         }
     }
 }
