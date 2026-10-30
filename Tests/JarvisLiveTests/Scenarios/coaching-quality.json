@@ -558,5 +558,125 @@
     ],
     "input": "Synthetic supplier-email pilot agreed: intake, extract, check identity/evidence/rules, draft routine response or hand off manually, mandatory human verification/approval before send, record/audit. them: Now sketch just the normal approved reply flow. me: Help me keep it clear.",
     "pass": "Connected focused flow with 3–6 short logical boxes, shared boxes once, explicit checks and required approval before sending. Keeps ordinary returned fields/records in brief supporting text rather than reciprocal arrows. Does not reproduce every exception branch or separate each connection into duplicated component rows; current operation labels and explicit highlight remain."
+  },
+  {
+    "id": "customer-discovery-ready-auto",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-facing parcel assistant discovery. Confirmed: signed-in customers in one region; tracking and eligible rescheduling, no address changes or payments; backend eligibility rules and account-only access; customer confirms date changes, routine eligible changes need no staff approval, exceptions use existing support. A request checks status, offers eligible dates, changes the selected date after confirmation, and reports verified result or pending. Tracking, policy and rescheduling APIs exist; tracking is production ready, action retry/outcome lookup verification remains with the integration engineer before launch. Six-week pilot with two engineers and a support lead; target 20% fewer support calls per eligible delivery without worse repeat contacts or satisfaction. Baseline not yet validated; support lead will validate historical records before pilot measurement. Estimated pilot demand 2,000 sessions/day, peak 20 incoming messages/second. p95 useful tracking answer within two seconds; change completion within five seconds after confirmation, excluding customer decision time. Tracking-first fallback if action integration verification slips. No reliable discovery start timestamp. them: That covers our constraints. me: I am not sure what else I should ask.",
+    "pass": "Signals discovery is sufficient and automatically supplies a concise MVP recommendation in detail without requesting permission or a script request. Includes audience, workflows/journey, customer-confirmed action authority, exclusions, success, open baseline/action dependencies, tracking-first fallback and one confirmation. No fabricated time, staff-approval requirement, architecture or further questionnaire."
+  },
+  {
+    "id": "customer-discovery-last-gap",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Structured shopper assistant prompt supplies signed-in shoppers, order status and eligible return-label creation, account-scoped APIs, six-week deadline, available team, expected demand/latency, and a measurable support-reduction goal with baseline. One typical return and exception have been described. The only unresolved scope-changing issue is who authorizes label creation; optional future languages are also unknown. me: Jarvis, what should I ask next?",
+    "pass": "Asks one question about action authority, identifies it as the remaining blocker to an MVP recommendation, and supplies compact confirmed/open/readiness notes. Does not reopen users, APIs, or future languages; no premature MVP recommendation."
+  },
+  {
+    "id": "customer-discovery-open-work",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "An internal operations manager says supplier email is slow. No user workflow, representative case, decision rules or error costs have been established. me: Jarvis, what next?",
+    "pass": "Asks one open question about a recent case. No invented scope, read-only MVP, architecture, full checklist or elapsed time."
+  },
+  {
+    "id": "customer-discovery-recap-precision",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Discovery recap. Customer confirmed 2,000 chat sessions/day, peak 20 incoming messages/second, five million registered users, and p95 action completion within five seconds after confirmation. No first-response target or cancellation workflow was agreed. me: Jarvis, check my recap: two thousand messages per second, five million concurrent users, every first response under five seconds, and automatic cancellation.",
+    "pass": "Corrects units/population and percentile/latency endpoints; flags cancellation as unagreed. Separates facts from proposals/unknowns without inventing conversions or requirements. Compact correction notes, not a new discovery checklist."
+  },
+  {
+    "id": "customer-discovery-closing-progress",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-facing parcel assistant discovery. Confirmed: signed-in customers in one region; tracking and eligible rescheduling, no address changes or payments; backend eligibility rules and account-only access; customer confirms date changes, routine eligible changes need no staff approval, exceptions use existing support. A request checks status, offers eligible dates, changes the selected date after confirmation, and reports verified result or pending. Tracking, policy and rescheduling APIs exist; tracking is production ready, action retry/outcome lookup verification remains with the integration engineer before launch. Six-week pilot with two engineers and a support lead; target 20% fewer support calls per eligible delivery without worse repeat contacts or satisfaction. Baseline not yet validated; support lead will validate historical records before pilot measurement. Estimated pilot demand 2,000 sessions/day, peak 20 incoming messages/second. p95 useful tracking answer within two seconds; change completion within five seconds after confirmation, excluding customer decision time. Tracking-first fallback if action integration verification slips. No reliable discovery start timestamp. me: I propose a six-week pilot in one region with tracking and confirmed eligible date changes. Customers check status, choose an eligible date and confirm it; exceptions stay with support. Address changes and payments stay out. We target 20% fewer calls without worse repeat contacts or satisfaction. The support lead validates the baseline; the engineer verifies action retries and outcome lookup. If that slips, tracking launches first. Does that fit? them: Yes, let us move to design.",
+    "pass": "Does not duplicate the sound candidate-led MVP recommendation or invent further discovery. Silence is acceptable; after the explicit interviewer request to move to design, one useful design cue is also acceptable. Do not penalize following that stage transition."
+  },
+  {
+    "id": "customer-discovery-design-redirect",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play minute four. Requirements largely known; staffing and peak load remain unknown. them: Move to architecture now and state assumptions as needed. me: Jarvis, help me start. Agreed flow: signed-in customer checks parcel status, selects an eligible date, confirms the change; exceptions go to support.",
+    "pass": "Follows explicit design redirect with one useful sketch/walkthrough cue preserving authority; no forced discovery completion, automatic closing script, or delay until a time checkpoint."
+  },
+  {
+    "id": "customer-discovery-no-repeat",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-facing parcel assistant discovery. Confirmed: signed-in customers in one region; tracking and eligible rescheduling, no address changes or payments; backend eligibility rules and account-only access; customer confirms date changes, routine eligible changes need no staff approval, exceptions use existing support. A request checks status, offers eligible dates, changes the selected date after confirmation, and reports verified result or pending. Tracking, policy and rescheduling APIs exist; tracking is production ready, action retry/outcome lookup verification remains with the integration engineer before launch. Six-week pilot with two engineers and a support lead; target 20% fewer support calls per eligible delivery without worse repeat contacts or satisfaction. Baseline not yet validated; support lead will validate historical records before pilot measurement. Estimated pilot demand 2,000 sessions/day, peak 20 incoming messages/second. p95 useful tracking answer within two seconds; change completion within five seconds after confirmation, excluding customer decision time. Tracking-first fallback if action integration verification slips. No reliable discovery start timestamp. Earlier Jarvis already delivered an MVP recommendation covering these facts; candidate relayed it and customer accepted. me: Now I will sketch one request from sign-in through confirmation and the verified update.",
+    "pass": "Stays silent; does not repeat MVP recommendation or reopen settled questions."
+  },
+  {
+    "id": "customer-discovery-authority-blocked",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer-facing parcel assistant discovery. Confirmed: signed-in customers in one region; tracking and eligible rescheduling, no address changes or payments; backend eligibility rules and account-only access; date-change authority is unresolved: the customer has not decided between customer confirmation and staff approval, exceptions use existing support. A request checks status, offers eligible dates, changes the selected date after confirmation, and reports verified result or pending. Tracking, policy and rescheduling APIs exist; tracking is production ready, action retry/outcome lookup verification remains with the integration engineer before launch. Six-week pilot with two engineers and a support lead; target 20% fewer support calls per eligible delivery without worse repeat contacts or satisfaction. Baseline not yet validated; support lead will validate historical records before pilot measurement. Estimated pilot demand 2,000 sessions/day, peak 20 incoming messages/second. p95 useful tracking answer within two seconds; change completion within five seconds after confirmation, excluding customer decision time. Tracking-first fallback if action integration verification slips. No reliable discovery start timestamp. me: Jarvis, can we close now?",
+    "pass": "Identifies action authority as the material blocker and asks one targeted clarification; does not assume permission, demand every unknown resolved, or silently remove agreed rescheduling."
+  },
+  {
+    "id": "customer-discovery-delegated-choice",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. Confirmed: 300 internal support reps spend two hours daily gathering order facts; goal is 30% less handling time, baseline owned by support lead. Read-only order API and ticket drafts are available; reps must approve any customer reply. Sensitive records stay in the existing account-scoped system. Four-week pilot with two engineers; normal case and missing-record manual path discussed, demand and latency fit existing APIs. them: You decide whether to start with gathering facts or drafting replies. You know the technology better than I do.",
+    "pass": "Automatically gives a concise proposed MVP with one confirmation, labels assumptions, preserves rep approval, and names evidence that would change the choice. Does not ask the customer to make the delegated choice or treat delegation as broader action permission."
+  },
+  {
+    "id": "customer-discovery-prior-attempt",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. Outcome, users, authority and success are known for a supplier-email assistant. The ERP integration is the remaining feasibility gap. them: We tried an assistant last year and abandoned it. The current ERP API exists, but I worry we will repeat that failure. me: What should I ask next?",
+    "pass": "Asks one targeted question about why the earlier attempt failed, connecting the answer to MVP feasibility. Compact notes retain known facts and identify the remaining gap; no assumed failure cause or new mandatory questionnaire."
+  },
+  {
+    "id": "customer-discovery-volunteered-facts",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. them: Our 2,000 relationship managers analyze customer financial spreadsheets. Data must remain in our VPC, and every analyst can access only their own accounts. We have not chosen the first task or business outcome. me: What should I ask?",
+    "pass": "Asks one consequential open question about outcome or current work. Compact notes retain volunteered users, sensitivity, residency and account scope; does not re-ask them or invent an MVP."
+  },
+  {
+    "id": "customer-discovery-pending-answer",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. them: All external replies need staff approval. me: Understood. What caused the last assistant pilot to fail? The customer has not answered; no new evidence or error.",
+    "pass": "Stays silent while the candidate awaits an answer; no second question or speculative explanation."
+  },
+  {
+    "id": "customer-design-interruption-resume",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play design walkthrough. Agreed: signed-in staff use account-scoped order lookup and draft replies; staff approve sends. Candidate was about to explain missing-record handling. them: Wait, does the model enforce account access? me: Help me answer briefly.",
+    "pass": "Answers access enforcement first: trusted code/data layer enforces account scope before retrieval, not the model. Briefly cues return to missing-record handling; no restart, long script or repeated diagram."
+  },
+  {
+    "id": "customer-design-interruption-redirect",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. Candidate paused a normal-request walkthrough before missing-record handling. them: Skip the remaining walkthrough. How will we measure whether this saves time? me: Help me answer.",
+    "pass": "Gives a focused evaluation answer using measured handling time including review/corrections and baseline comparison. Does not resume the skipped walkthrough or insist on completing prior segments."
+  },
+  {
+    "id": "customer-discovery-anything-else-blocker",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play, discovery minute 15. Outcome, users, normal return-label workflow, exceptions, account-scoped APIs, delivery resources and measurable success are established. Who may authorize return-label creation remains unresolved. them: Anything else you need to know?",
+    "pass": "Asks one targeted authority question and identifies it as the last material blocker. Does not close just because of time or the invitation, assume authorization, or reopen unrelated requirements."
   }
 ]
