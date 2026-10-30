@@ -135,6 +135,11 @@ public final class OverlayAppearance {
 
     /// Non-finite input (a corrupt plist value) returns `fallback`, not a bound: clamping it to an
     /// opacity floor of 0 would make the backdrop invisible.
+    public var transcriptPaneVisible: Bool {
+        get { defaults.bool(forKey: Defaults.Overlay.Box.transcriptPaneVisibleKey) }
+        set { defaults.set(newValue, forKey: Defaults.Overlay.Box.transcriptPaneVisibleKey) }
+    }
+
     private static func clamp(
         _ v: Double,
         to r: ClosedRange<Double>,

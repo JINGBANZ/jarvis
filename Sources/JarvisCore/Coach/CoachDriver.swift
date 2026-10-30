@@ -249,6 +249,9 @@ public final class CoachDriver: @unchecked Sendable {
         return true
     }
 
+    /// Transcript lines before this insertion index have been consumed by a completed attempt.
+    public var handledTranscriptCount: Int { ledger.committedCount }
+
     /// Manual mode admits only coaching shortcuts. An attempt already running finishes; queued
     /// automatic work and automatic follow-ups stop at the next attempt boundary.
     public func setMode(_ mode: CoachingMode) {
