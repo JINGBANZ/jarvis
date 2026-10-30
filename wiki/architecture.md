@@ -1176,8 +1176,11 @@ rather than a per-turn screenshot.
   segments accumulate until endpointing (`speech_final`) closes them all, or until an `UtteranceEnd`
   closes those ending by its `last_word_end`. Deepgram can send `UtteranceEnd` for an earlier gap
   after the speaker has resumed, so it never closes later words. Speech stays unresolved while settled
-  words wait, while a closed utterance is being published, and while speech heard by an interim
-  result or `SpeechStarted` began after everything finalized so far. The adapter reports work state
+  words wait, while a closed utterance is being published, while an interim result heard words
+  ending after everything finalized so far (a final can cover less than the interim before it), and
+  while `SpeechStarted` reported speech beginning after it. Word timing, not the interim's window,
+  marks heard speech, so trailing silence never counts. Times are per socket, and the assembler
+  ignores a retired socket's late events so two audio clocks never mix. The adapter reports work state
   under one lock from reading through reporting, so a final is always in the transcript before its
   speech reads as settled. Interim text never reaches Activity or the transcript. Mandarin output
   has the gaps between its characters closed. `PendingSpeechWindow` times the spoken start, as for Gemini. The adapter joins the shared

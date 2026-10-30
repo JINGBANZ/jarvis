@@ -190,7 +190,7 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         lock.lock()
         guard !stopped else { lock.unlock(); return }
         isSending = false
-        assembler.reset()
+        assembler.reset(socket: lease.generation)
         lock.unlock()
     }
 
@@ -366,7 +366,8 @@ final class DeepgramLiveTranscriber: TranscriptionSession, WebSocketConnectionAd
         let observedAt = clock.now() - sessionStart
         lock.lock()
         if heardSpeech { pendingSpeech.recordRecognitionObserved(at: observedAt) }
-        let segments = assembler.receive(event)
+        // The assembler drops a retired socket's events: its audio clock is not the replacement's.
+        let segments = assembler.receive(event, socket: lease.generation)
         lock.unlock()
         publish(segments, reason: reason)
         updateWorkFlag()
