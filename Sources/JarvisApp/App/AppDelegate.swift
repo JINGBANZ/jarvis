@@ -31,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
     private var onboarding: OnboardingGate!
     private var didStartApp = false
     private let hotkeyPreferences = CoachingShortcut.allCases.map { HotkeyPreferences(shortcut: $0) }
+    private let coachingModePreferences = CoachingModePreferences()
     private var activityViewer: ActivityViewer!
     private let readiness = JarvisReadiness()
     private var pendingStartTask: Task<Void, Never>?
@@ -230,7 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
         hotkeys?.onRequest = { [weak self] shortcut in
             guard let self else { return }
             guard self.composition.isLive else {
-                if shortcut.triggerReason != nil || shortcut == .newSession {
+                if shortcut.beepsWhileStopped {
                     NSSound.beep() // ghost-mode-allowed: explicit user coaching hotkey while stopped
                 }
                 return
@@ -242,6 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
             // A Start while live is the existing replacement path: the old session keeps coaching
             // until the new one is prepared, then ends as `.replacedByNewSession`.
             case .newSession: self.start()
+            case .toggleCoachingMode: self.toggleCoachingMode()
             case .hint, .explainMore, .showCode: self.composition.requestShortcut(shortcut)
             }
         }
@@ -563,10 +565,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, BrainCompositionHost {
                 saveConversations: saveConversations,
                 appleSpeechLocale: appleSpeechLocale,
                 screen: screenPreferences.selection,
-                references: references),
+                references: references,
+                coachingMode: coachingModePreferences.mode),
             proxy: proxy,
             readinessSession: readinessSession,
             reportContext: reportContext)
+    }
+
+    private func toggleCoachingMode() {
+        let mode = coachingModePreferences.mode.toggled
+        coachingModePreferences.mode = mode
+        composition.applyCoachingMode(mode, notice: coachingModeNotice(for: mode))
+    }
+
+    private func coachingModeNotice(for mode: CoachingMode) -> String {
+        switch mode {
+        case .automatic:
+            return "Automatic"
+        case .manual:
+            let hint = hotkeyPreferences.first { $0.shortcut == .hint }?.combination
+                ?? Defaults.Hotkey.combination
+            return "Manual — press \(HotkeyKeyNames.displayString(for: hint)) to send"
+        }
     }
 
     /// Safe to call when already stopped.

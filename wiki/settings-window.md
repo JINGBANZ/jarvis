@@ -330,9 +330,14 @@ the [live cache scenario](./live-e2e-tests.md#cache-regression-window) separatel
 ## Shortcuts
 
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
-They work during a session. All three are fallbacks for proactive coaching;
-[architecture.md](./architecture.md#on-demand-coaching-shortcuts) defines their context, output, and
-scheduling behavior.
+They work during a session. All three are fallbacks for proactive coaching, and the only way to
+request it in manual mode; [architecture.md](./architecture.md#on-demand-coaching-shortcuts) defines
+their context, output, and scheduling behavior.
+
+**Toggle manual mode** defaults to **⌥⌘.** and switches between automatic and
+[manual](./architecture.md#manual-mode) coaching mid-session. The choice persists through
+`CoachingModePreferences` and applies to the next Start too. While stopped it beeps, like the
+coaching shortcuts, and changes nothing.
 
 **Previous detail** and **Next detail** navigate the existing detail history with **⌥⌘←** and
 **⌥⌘→**. They mirror the arrow buttons without activating Jarvis or requesting coaching. At either end

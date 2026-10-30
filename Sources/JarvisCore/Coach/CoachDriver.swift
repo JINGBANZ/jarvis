@@ -9,6 +9,7 @@ public final class CoachDriver: @unchecked Sendable {
 
     private let transcriptionSettlement = TranscriptionSettlementGate()
     private let automaticAttemptDelay: AutomaticAttemptDelay
+    private let manualSettlementGrace: Duration
     private let coachingAttempts: (any CoachingAttemptAuditing)?
     private let documents: (any DocumentSession)?
     private let ledger = CoachTranscriptLedger()
@@ -19,6 +20,7 @@ public final class CoachDriver: @unchecked Sendable {
     private let stateLock = NSLock()
     private let recoveryDelay: @Sendable (TimeInterval) async throws -> Void
     private let clock: Clock
+    private let sessionStart: TimeInterval
     private var recovery = BrainCycleRecovery()
     private var recoveryDeadlineTask: Task<Void, Never>?
     private var sessionTerminated = false
@@ -39,6 +41,7 @@ public final class CoachDriver: @unchecked Sendable {
     private var exhaustionDeliveryGeneration: UInt = 0
     private var pendingExhaustionDeliveryGeneration: UInt?
     private var isHandling = false
+    private var mode: CoachingMode = .automatic
     private var pendingTrigger: PendingTrigger?
     /// Lets the retry pause see a trigger that lands before its async waiter is installed.
     private var pendingTriggerGeneration: UInt = 0
@@ -49,6 +52,8 @@ public final class CoachDriver: @unchecked Sendable {
     private struct PendingTrigger {
         let reason: TriggerReason
         let transcriptBoundary: Int?
+        /// Session-relative moment of a shortcut press; nil for automatic triggers.
+        var pressedAt: TimeInterval? = nil
     }
 
     struct AttemptBrain {
@@ -114,6 +119,7 @@ public final class CoachDriver: @unchecked Sendable {
         coachingAttempts: (any CoachingAttemptAuditing)? = nil,
         plan: SessionPlan = .default,
         automaticAttemptDelay: AutomaticAttemptDelay? = nil,
+        manualSettlementGrace: Duration = .seconds(2),
         recoveryDelay: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(nanoseconds: UInt64($0 * 1_000_000_000)) },
         activity: (any ActivityEventRecording)? = nil,
         capabilities: CoachCapabilities = .default,
@@ -122,6 +128,8 @@ public final class CoachDriver: @unchecked Sendable {
     ) {
         self.recoveryDelay = recoveryDelay
         self.clock = clock
+        let sessionStart = sessionStart ?? clock.now()
+        self.sessionStart = sessionStart
         self.plan = plan
         self.activity = activity
         self.documents = documents
@@ -130,13 +138,14 @@ public final class CoachDriver: @unchecked Sendable {
         self.routeSession = BrainRouteSession(targetCount: route.targets.count)
         self.coachingAttempts = coachingAttempts
         self.automaticAttemptDelay = automaticAttemptDelay ?? Self.defaultAutomaticAttemptDelay
+        self.manualSettlementGrace = manualSettlementGrace
         self.runner = CoachAttemptRunner(
             config: config,
             transcript: transcript,
             screen: screen,
             overlay: overlay,
             clock: clock,
-            sessionStart: sessionStart ?? clock.now(),
+            sessionStart: sessionStart,
             coachingAttempts: coachingAttempts,
             activity: activity,
             ledger: ledger,
@@ -243,6 +252,19 @@ public final class CoachDriver: @unchecked Sendable {
     /// Transcript lines before this insertion index have been consumed by a completed attempt.
     public var handledTranscriptCount: Int { ledger.committedCount }
 
+    /// Manual mode admits only coaching shortcuts. An attempt already running finishes; queued
+    /// automatic work and automatic follow-ups stop at the next attempt boundary.
+    public func setMode(_ mode: CoachingMode) {
+        stateLock.lock()
+        let changed = self.mode != mode
+        self.mode = mode
+        if mode == .manual, pendingTrigger?.reason.isManual == false {
+            pendingTrigger = nil
+        }
+        stateLock.unlock()
+        if changed { activity?.record(.coachingModeChanged(mode: mode)) }
+    }
+
     /// Returns the cancelled compaction task so teardown can drain it before sealing the audit.
     @discardableResult
     public func cancelBackgroundWork() -> Task<Void, Never>? {
@@ -260,16 +282,34 @@ public final class CoachDriver: @unchecked Sendable {
     ) async -> CoachAttemptRunner.PendingCoachingWork {
         var settledWork = work
         settledWork.admittedTranscript = nil
+        var pressDeadline: ContinuousClock.Instant?
         while !Task.isCancelled {
             let interruptGeneration = transcriptionSettlement.interruptGenerationSnapshot()
             let wake = takePendingTriggerSnapshot()
-            if let pending = wake.trigger?.reason {
-                settledWork.reason = Self.coalescing(settledWork.reason, with: pending)
+            if let pending = wake.trigger {
+                Self.absorb(pending, into: &settledWork)
                 settledWork.bypassesTranscriptionSettlement =
-                    settledWork.bypassesTranscriptionSettlement || pending.isManual
+                    settledWork.bypassesTranscriptionSettlement || pending.reason.isManual
+                if pending.pressedAt != nil { pressDeadline = nil }
                 settledWork.wake = .trigger
             }
-            if settledWork.bypassesTranscriptionSettlement { return settledWork }
+            if settledWork.bypassesTranscriptionSettlement {
+                guard let pressedAt = settledWork.manualPressedAt,
+                      stateLock.withLock({ mode == .manual }),
+                      !transcriptionSettlement.permitsCoaching(through: pressedAt) else {
+                    settledWork.manualPressedAt = nil
+                    return settledWork
+                }
+                let deadline = pressDeadline ?? .now + manualSettlementGrace
+                pressDeadline = deadline
+                guard ContinuousClock.now < deadline else {
+                    settledWork.manualPressedAt = nil
+                    return settledWork
+                }
+                await waitUntilSettled(
+                    through: pressedAt, unlessInterruptedAfter: interruptGeneration, until: deadline)
+                continue
+            }
 
             let snapshot = transcript.renderFrom(index: ledger.committedCount)
             let through: TimeInterval?
@@ -288,17 +328,39 @@ public final class CoachDriver: @unchecked Sendable {
         return settledWork
     }
 
+    /// Manual mode only. A press there usually comes right after the speech it is about, which may
+    /// still be finalizing; sending at once would leave its tail for the next press. Each press, on
+    /// whichever path it reaches an attempt, waits for speech that started before it, never for
+    /// speech that starts after, and a newer press restarts the bound.
+    private func waitUntilSettled(
+        through pressedAt: TimeInterval,
+        unlessInterruptedAfter generation: UInt,
+        until deadline: ContinuousClock.Instant
+    ) async {
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                await self.transcriptionSettlement.waitUntilSettled(
+                    through: pressedAt, unlessInterruptedAfter: generation)
+            }
+            group.addTask { try? await Task.sleep(until: deadline, clock: .continuous) }
+            _ = await group.next()
+            group.cancelAll()
+        }
+    }
+
     private enum TriggerClaim {
         case claimed
         case pending
         case covered
         case exhausted
+        case paused
     }
 
     private func claimOrPend(_ trigger: PendingTrigger) -> TriggerClaim {
         let waiters: [CheckedContinuation<Void, Never>]
         stateLock.lock()
         if sessionTerminated { stateLock.unlock(); return .exhausted }
+        if mode == .manual && !trigger.reason.isManual { stateLock.unlock(); return .paused }
         if routeIsExhausted && !isHandling &&
             !trigger.reason.isManual && transcript.count <= (failedTranscriptBoundary ?? transcript.count) {
             stateLock.unlock()
@@ -361,7 +423,8 @@ public final class CoachDriver: @unchecked Sendable {
         } else {
             boundary = nil
         }
-        return PendingTrigger(reason: reason, transcriptBoundary: boundary)
+        let presses = [existing.pressedAt, incoming.pressedAt].compactMap { $0 }
+        return PendingTrigger(reason: reason, transcriptBoundary: boundary, pressedAt: presses.max())
     }
 
     /// Must be called while `stateLock` is held. The ledger is a leaf: it never takes this lock.
@@ -438,23 +501,36 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     /// Only input the failed attempt did not include may start another cycle immediately.
-    private func finishFailedCycle(unattemptedManualReason: TriggerReason? = nil) -> TriggerReason? {
+    private func finishFailedCycle(unattemptedPress: PendingTrigger? = nil) -> PendingTrigger? {
         stateLock.lock()
         defer { stateLock.unlock() }
         let next = pendingTrigger
         pendingTrigger = nil
-        if !Task.isCancelled && !sessionTerminated && (unattemptedManualReason != nil || next?.reason.isManual == true ||
+        if !Task.isCancelled && !sessionTerminated && (unattemptedPress != nil || next?.reason.isManual == true ||
             transcript.count > (failedTranscriptBoundary ?? transcript.count)) {
             routeSession = BrainRouteSession(targetCount: configuredRoute.targets.count)
             routeIsExhausted = false
             pendingTransitionOrigin = nil
             pendingExhaustionDeliveryGeneration = nil
             failedTranscriptBoundary = nil
-            if let next { return Self.coalescing(unattemptedManualReason, with: next.reason) }
-            return unattemptedManualReason ?? .turnEnd
+            if let next { return Self.coalescing(unattemptedPress, with: next) }
+            return unattemptedPress ?? PendingTrigger(reason: .turnEnd, transcriptBoundary: nil)
         }
         isHandling = false
         return nil
+    }
+
+    /// Take-or-release, like `finishOrTakeNextTrigger`: a press queued meanwhile keeps the slot, and
+    /// settlement coalesces it into this work.
+    private func releaseIfAutomaticWorkPaused(_ reason: TriggerReason) -> Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard mode == .manual, !reason.isManual, pendingTrigger?.reason.isManual != true else {
+            return false
+        }
+        pendingTrigger = nil
+        isHandling = false
+        return true
     }
 
     private func releaseHandlingSlot() {
@@ -784,6 +860,19 @@ public final class CoachDriver: @unchecked Sendable {
         }
     }
 
+    private static func work(for trigger: PendingTrigger) -> CoachAttemptRunner.PendingCoachingWork {
+        var work = CoachAttemptRunner.PendingCoachingWork(reason: trigger.reason)
+        work.manualPressedAt = trigger.pressedAt
+        return work
+    }
+
+    private static func absorb(_ trigger: PendingTrigger, into work: inout CoachAttemptRunner.PendingCoachingWork) {
+        work.reason = coalescing(work.reason, with: trigger.reason)
+        if let pressedAt = trigger.pressedAt {
+            work.manualPressedAt = max(work.manualPressedAt ?? pressedAt, pressedAt)
+        }
+    }
+
     @discardableResult
     public func handleTrigger(
         _ reason: TriggerReason,
@@ -791,7 +880,8 @@ public final class CoachDriver: @unchecked Sendable {
     ) async -> TurnOutcome {
         let trigger = PendingTrigger(
             reason: reason,
-            transcriptBoundary: reason == .turnEnd ? transcriptBoundary : nil)
+            transcriptBoundary: reason == .turnEnd ? transcriptBoundary : nil,
+            pressedAt: reason.isManual ? clock.now() - sessionStart : nil)
         switch claimOrPend(trigger) {
         case .claimed:
             break
@@ -804,31 +894,35 @@ public final class CoachDriver: @unchecked Sendable {
         case .exhausted:
             jlog("… cycle failed; waiting for new input")
             return .brainError
+        case .paused:
+            return .paused
         }
 
-        var work = CoachAttemptRunner.PendingCoachingWork(reason: reason)
+        var work = Self.work(for: trigger)
         var automaticSequence = 0
-        var unattemptedManualReason: TriggerReason?
+        var unattemptedPress: PendingTrigger?
         var latestOutcome: TurnOutcome = .silentByModel
 
         while !Task.isCancelled {
+            if releaseIfAutomaticWorkPaused(work.reason) { return .paused }
             guard await waitForCycleCooldown() else { releaseHandlingSlot(); return .cancelled }
             work = await waitForTranscriptionSettlement(before: work)
             if Task.isCancelled {
                 releaseHandlingSlot()
                 return .cancelled
             }
+            if releaseIfAutomaticWorkPaused(work.reason) { return .paused }
             guard let attempt = await selectBrainForAttempt() else {
-                if let next = finishFailedCycle(unattemptedManualReason: unattemptedManualReason) {
-                    unattemptedManualReason = nil
-                    work = CoachAttemptRunner.PendingCoachingWork(reason: next)
+                if let next = finishFailedCycle(unattemptedPress: unattemptedPress) {
+                    unattemptedPress = nil
+                    work = Self.work(for: next)
                     automaticSequence = 0
                     continue
                 }
                 return .brainError
             }
 
-            unattemptedManualReason = nil
+            unattemptedPress = nil
             let execution = await runner.runAttempt(work, using: attempt)
             switch execution.result {
             case .completed(let outcome):
@@ -846,7 +940,7 @@ public final class CoachDriver: @unchecked Sendable {
                 guard let next = finishOrTakeNextTrigger() else {
                     return latestOutcome
                 }
-                work = CoachAttemptRunner.PendingCoachingWork(reason: next.reason)
+                work = Self.work(for: next)
 
             case .skipped(let outcome):
                 latestOutcome = outcome
@@ -857,7 +951,7 @@ public final class CoachDriver: @unchecked Sendable {
                 guard let next = finishOrTakeNextTrigger() else {
                     return latestOutcome
                 }
-                work = CoachAttemptRunner.PendingCoachingWork(reason: next.reason)
+                work = Self.work(for: next)
 
             case .cancelled:
                 if let id = execution.id {
@@ -888,7 +982,7 @@ public final class CoachDriver: @unchecked Sendable {
                 switch action {
                 case .exhausted:
                     if let next = finishFailedCycle() {
-                        work = CoachAttemptRunner.PendingCoachingWork(reason: next)
+                        work = Self.work(for: next)
                         automaticSequence = 0
                         continue
                     }
@@ -911,8 +1005,8 @@ public final class CoachDriver: @unchecked Sendable {
                 var wake = takePendingTriggerSnapshot()
                 var receivedTrigger = wake.trigger != nil
                 var explicitManualWake = wake.trigger?.reason.isManual == true
-                if let reason = wake.trigger?.reason {
-                    failedWork.reason = Self.coalescing(failedWork.reason, with: reason)
+                if let trigger = wake.trigger {
+                    Self.absorb(trigger, into: &failedWork)
                 }
                 work = failedWork
                 automaticSequence += 1
@@ -931,13 +1025,15 @@ public final class CoachDriver: @unchecked Sendable {
                 // Consume a trigger that arrived during the delay here, so a shortcut keeps its
                 // manual semantics (no settlement wait) at the admission boundary.
                 wake = takePendingTriggerSnapshot()
-                if let reason = wake.trigger?.reason {
+                if let trigger = wake.trigger {
                     receivedTrigger = true
-                    explicitManualWake = explicitManualWake || reason.isManual
-                    work.reason = Self.coalescing(work.reason, with: reason)
+                    explicitManualWake = explicitManualWake || trigger.reason.isManual
+                    Self.absorb(trigger, into: &work)
                 }
                 work.bypassesTranscriptionSettlement = explicitManualWake
-                unattemptedManualReason = explicitManualWake ? work.reason : nil
+                unattemptedPress = explicitManualWake
+                    ? PendingTrigger(reason: work.reason, transcriptBoundary: nil, pressedAt: work.manualPressedAt)
+                    : nil
                 work.wake = receivedTrigger ? .trigger : .pendingWork
             }
         }
@@ -957,4 +1053,6 @@ public enum TurnOutcome: Sendable, Equatable {
     case cancelled
     case brainError
     case exhausted
+    /// Manual mode stopped automatic work before it reached the brain.
+    case paused
 }

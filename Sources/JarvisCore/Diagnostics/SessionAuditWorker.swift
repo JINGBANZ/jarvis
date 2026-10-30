@@ -672,6 +672,7 @@ final class SessionAuditWorker: @unchecked Sendable {
         case .cancelled: "cancelled"
         case .brainError: "brain_error"
         case .exhausted: "tool_loop_exhausted"
+        case .paused: "paused"
         }
     }
 }

@@ -88,6 +88,12 @@ public enum Defaults {
         public static let browserTextEnabled = false
     }
 
+    // MARK: - Coaching
+
+    public enum Coaching {
+        public static let modeKey = "coaching.mode"
+    }
+
     // MARK: - Hotkey
 
     public enum Hotkey {
@@ -114,6 +120,11 @@ public enum Defaults {
         /// shortcut can't end the session by accident.
         public static let newSessionCombination = HotkeyCombination(
             keyCode: 29, modifiers: [.control, .shift, .command])
+        public static let toggleCoachingModeKeyCodeKey = "hotkey.toggleCoachingMode.keyCode"
+        public static let toggleCoachingModeModifiersKey = "hotkey.toggleCoachingMode.modifiers"
+        /// kVK_ANSI_Period, beside the collapse shortcut's comma.
+        public static let toggleCoachingModeCombination = HotkeyCombination(
+            keyCode: 47, modifiers: [.command, .option])
         public static let codeKeyCodeKey = "hotkey.code.keyCode"
         public static let codeModifiersKey = "hotkey.code.modifiers"
         /// kVK_ANSI_K.

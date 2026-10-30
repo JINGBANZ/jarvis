@@ -396,6 +396,34 @@ import JarvisCore
     }
 
     @MainActor @Test
+    func theHeaderNamesManualModeForTheWholeSession() {
+        let panel = liveBox()
+        #expect(panel.currentTitle == "Jarvis")
+        panel.showCoachingMode(.manual, notice: nil)
+        #expect(panel.currentTitle == "Jarvis · Manual")
+        panel.showCoachingMode(.automatic, notice: nil)
+        #expect(panel.currentTitle == "Jarvis")
+    }
+
+    @MainActor @Test
+    func stoppingResetsTheHeaderTitle() {
+        let panel = liveBox()
+        panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
+        panel.setSessionLive(false)
+        #expect(panel.currentTitle == "Jarvis")
+    }
+
+    @Test
+    func aSwitchNoticeGivesWayToTheModeTitle() async {
+        await checkSwitchNoticeExpires()
+    }
+
+    @Test
+    func anEarlierNoticeTimerCannotCutANewerNoticeShort() async {
+        await checkNewerNoticeOutlivesEarlierTimer()
+    }
+
+    @MainActor @Test
     func theTranscriptColumnWidensTheBoxToTheRightAndBack() {
         let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
         panel.setSessionLive(true)
@@ -618,6 +646,26 @@ private func checkDropsEmptyTips() async {
     panel.render("     \n\t")
     try? await Task.sleep(nanoseconds: 200_000_000)   // lets an erroneous append run
     #expect(panel.entryCount == 0, "empty/whitespace-only tips must not be logged")
+}
+
+@MainActor private func checkSwitchNoticeExpires() async {
+    let panel = liveBox()
+    panel.coachingModeNoticeDuration = .milliseconds(20)
+    panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
+    #expect(panel.currentTitle == "Manual — press ⌥⌘J to send")
+    #expect(await waitUntil { panel.currentTitle == "Jarvis · Manual" })
+}
+
+@MainActor private func checkNewerNoticeOutlivesEarlierTimer() async {
+    let panel = liveBox()
+    // Each notice reads the duration when it is shown: the first expires long before the second.
+    panel.coachingModeNoticeDuration = .milliseconds(20)
+    panel.showCoachingMode(.manual, notice: "Manual — press ⌥⌘J to send")
+    panel.coachingModeNoticeDuration = .seconds(1)
+    panel.showCoachingMode(.automatic, notice: "Automatic")
+    try? await Task.sleep(for: .milliseconds(200))
+    #expect(panel.currentTitle == "Automatic", "the first notice's timer must not end the second")
+    #expect(await waitUntil { panel.currentTitle == "Jarvis" })
 }
 
 private func transcriptLines(_ count: Int) -> TranscriptPaneContent {

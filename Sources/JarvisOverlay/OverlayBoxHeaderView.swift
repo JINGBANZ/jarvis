@@ -64,6 +64,13 @@ final class OverlayBoxHeaderView: NSView {
                                    label: shown ? "Hide transcript" : "Show transcript")
     }
 
+    var title: String { titleLabel.stringValue }
+
+    func setTitle(_ title: String) {
+        titleLabel.stringValue = title
+        layoutControls()
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layoutControls()

@@ -63,6 +63,24 @@ import Foundation
         }
     }
 
+    @Test func coachingModeToggleDefaultsToOptionCommandPeriodAndPersistsIndependently() {
+        let defaults = freshDefaults()
+        let toggle = HotkeyPreferences(defaults: defaults, shortcut: .toggleCoachingMode)
+        // kVK_ANSI_Period.
+        #expect(toggle.combination == HotkeyCombination(keyCode: 47, modifiers: [.command, .option]))
+        toggle.combination = HotkeyCombination(keyCode: 8, modifiers: [.command, .shift])
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .toggleCoachingMode).combination
+            == HotkeyCombination(keyCode: 8, modifiers: [.command, .shift]))
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .collapseOverlay).combination
+            == Defaults.Hotkey.collapseOverlayCombination)
+        #expect(CoachingShortcut.toggleCoachingMode.triggerReason == nil)
+    }
+
+    @Test func shortcutsThatAskJarvisToActBeepWhileStopped() {
+        let beeping = Set(CoachingShortcut.allCases.filter(\.beepsWhileStopped))
+        #expect(beeping == [.hint, .explainMore, .showCode, .newSession, .toggleCoachingMode])
+    }
+
     @Test func defaultsToShippedCombinationWhenUnset() {
         #expect(HotkeyPreferences(defaults: freshDefaults()).combination == Defaults.Hotkey.combination)
     }
