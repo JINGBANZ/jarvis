@@ -607,6 +607,9 @@ boundary commits. The driver drains cancellation cleanup before admitting the re
 capture cleanup, history commits, and overlay withdrawal ordered before the new answer. Late stream
 deltas are rejected by the cancelled attempt's relay.
 
+Shortcut callbacks admit the intent synchronously before scheduling execution, so keyboard and mouse
+presses keep their event order and speech-wait timestamp even when the executor is busy.
+
 A fresh press bypasses automatic transcription settlement, with the bounded wait described in
 [manual mode](#manual-mode); an automatic retry waits for settlement. Stop cancels active and pending work;
 while stopped, an explicit keyboard shortcut only beeps and mouse clicks pass through. Activity records

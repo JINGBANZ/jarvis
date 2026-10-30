@@ -913,11 +913,26 @@ public final class CoachDriver: @unchecked Sendable {
         _ reason: TriggerReason,
         transcriptBoundary: Int? = nil
     ) async -> TurnOutcome {
+        await admitTrigger(reason, transcriptBoundary: transcriptBoundary)()
+    }
+
+    /// Admit at the event boundary, before task scheduling can reorder presses or move their time.
+    /// The caller must run the returned operation once, including when its task is cancelled.
+    public func admitTrigger(
+        _ reason: TriggerReason,
+        transcriptBoundary: Int? = nil
+    ) -> @Sendable () async -> TurnOutcome {
         let trigger = PendingTrigger(
             reason: reason,
             transcriptBoundary: reason == .turnEnd ? transcriptBoundary : nil,
             pressedAt: reason.isManual ? clock.now() - sessionStart : nil)
-        switch claimOrPend(trigger) {
+        let claim = claimOrPend(trigger)
+        return { await self.handleAdmittedTrigger(trigger, claim: claim) }
+    }
+
+    private func handleAdmittedTrigger(_ trigger: PendingTrigger, claim: TriggerClaim) async -> TurnOutcome {
+        let reason = trigger.reason
+        switch claim {
         case .claimed:
             break
         case .pending:

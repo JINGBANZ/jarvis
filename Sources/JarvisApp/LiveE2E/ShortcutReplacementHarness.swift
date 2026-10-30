@@ -27,8 +27,9 @@ final class ShortcutReplacementHarness: OverlayRendering {
         mouse = MouseHotkeyController(preferences: preferences)
         keyboard.onRequest = { [weak self] shortcut in
             guard let self, let driver = self.driver, let reason = shortcut.triggerReason else { return }
+            let operation = driver.admitTrigger(reason)
             self.turns.run {
-                let outcome = await driver.handleTrigger(reason)
+                let outcome = await operation()
                 if outcome == .spoke { await MainActor.run { self.completed = true } }
             }
         }
@@ -76,8 +77,33 @@ final class ShortcutReplacementHarness: OverlayRendering {
                     panel.setSessionLive(false)
                 }
             }
+            for mouseFirst in [false, true] {
+                try await checkRapidPresses(mode: mode, mouseFirst: mouseFirst)
+            }
         }
         jlog("Signed shortcut replacement checks passed: keyboard/mouse dispatch, all coaching actions, automatic/manual")
+    }
+
+    private func checkRapidPresses(mode: CoachingMode, mouseFirst: Bool) async throws {
+        let brain = ShortcutReplacementBrain(holdFirstReply: false)
+        let driver = CoachDriver(config: .default, transcript: RollingTranscript(),
+            route: .init(targets: [.init(target: .init(provider: .openAI, modelID: "synthetic"), brain: brain)]),
+            screen: ShortcutReplacementScreen(), overlay: self, clock: SystemClock())
+        driver.setMode(mode)
+        self.driver = driver
+        delivered = []
+        progress = nil
+        completed = false
+        panel.setSessionLive(true)
+        try dispatch(.hint, mouse: mouseFirst)
+        try dispatch(.showCode, mouse: !mouseFirst)
+        try await wait { self.completed }
+        let calls = await brain.calls
+        try require(calls.count == 1 && calls[0].compactMap(\.text).joined().contains("Show code")
+                    && delivered == ["replacement"], "mixed bindings preserve physical press order")
+        for task in turns.cancelAll() { await task.value }
+        await driver.cancelBackgroundWork()?.value
+        panel.setSessionLive(false)
     }
 
     private func dispatch(_ shortcut: CoachingShortcut, mouse useMouse: Bool) throws {
@@ -130,6 +156,8 @@ final class ShortcutReplacementHarness: OverlayRendering {
 
 private actor ShortcutReplacementBrain: BrainClient {
     private(set) var calls: [[ChatMessage]] = []
+    private let holdFirstReply: Bool
+    init(holdFirstReply: Bool = true) { self.holdFirstReply = holdFirstReply }
     func makeConversation(progress: ToolCallProgressSink?) async throws -> any BrainConversation {
         Conversation(brain: self, progress: progress)
     }
@@ -138,7 +166,7 @@ private actor ShortcutReplacementBrain: BrainClient {
     }
     private func respond(_ messages: [ChatMessage], progress: ToolCallProgressSink?) async throws -> BrainResponse {
         calls.append(messages)
-        if calls.count == 1 {
+        if holdFirstReply && calls.count == 1 {
             _ = progress?(.init(index: 0, name: "speak", arguments: #"{"hint":"unfinished"#))
             do { try await Task.sleep(for: .seconds(30)) }
             catch is CancellationError {}

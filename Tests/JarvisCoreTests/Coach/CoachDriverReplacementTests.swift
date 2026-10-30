@@ -78,6 +78,29 @@ import Testing
         #expect(overlay.rendered == ["code"])
     }
 
+    @Test func admissionPreservesPressOrderAndTimeBeforeExecutionStarts() async {
+        let clock = ManualClock(now: 100)
+        let brain = ReplacementBrain { _, _ in replacementReply("latest") }
+        let screen = FakeScreen()
+        let driver = driver(brain: brain, screen: screen, clock: clock)
+        driver.setMode(.manual)
+        clock.advance(by: 1)
+        let first = driver.admitTrigger(.manualHint)
+        clock.advance(by: 1)
+        let second = driver.admitTrigger(.manualExplanation)
+        clock.advance(by: 1)
+        let latest = driver.admitTrigger(.manualCode)
+        clock.advance(by: 10)
+        driver.updateTranscriptionWork(.pending(since: 5), for: .them)
+
+        #expect(await latest() == .busy)
+        #expect(await second() == .busy)
+        #expect(await first() == .spoke, "speech that began after the press must not delay execution")
+        #expect(await brain.calls.count == 1)
+        #expect(await brain.calls[0].compactMap(\.text).joined().contains("Show code"))
+        #expect(screen.captureCount == 1)
+    }
+
     @Test func replacementDuringSettlementUsesTheNewPressBoundary() async throws {
         let clock = ManualClock(now: 100)
         let brain = ReplacementBrain { _, _ in replacementReply("latest") }
