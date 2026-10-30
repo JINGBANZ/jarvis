@@ -722,6 +722,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     var isTranscriptColumnShown: Bool { !transcriptPane.isHidden && transcriptPane.frame.width > 0 }
     var currentLogWidth: CGFloat { scroll.frame.width }
     var currentTranscript: NSAttributedString { transcriptPane.attributedText }
+    var isTranscriptAtLatest: Bool { transcriptPane.isAtLatest }
+    func scrollTranscriptToTop() { transcriptPane.scrollToTop() }
     func clickTranscriptButton() { press(header.transcriptButton) }
 }
 

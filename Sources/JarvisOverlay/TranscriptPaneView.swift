@@ -13,6 +13,9 @@ final class TranscriptPaneView: NSView {
     private let scroll = NSScrollView(frame: .zero)
     private let textView = PaneTextView(frame: .zero)
     private var shown: TranscriptPaneContent?
+    /// Kept as state rather than read from scroll geometry, which a collapsed (zero-height) or
+    /// hidden column cannot report: only the user's own scrolling in a visible column changes it.
+    private var followsLatest = true
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -40,16 +43,23 @@ final class TranscriptPaneView: NSView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         scroll.frame = bounds
+        if followsLatest && hasViewport { textView.scrollToEndOfDocument(nil) }
     }
 
     var attributedText: NSAttributedString { textView.attributedString() }
+    var isAtLatest: Bool { isScrolledToBottom }
+    func scrollToTop() { textView.scrollToBeginningOfDocument(nil) }
 
     func show(_ content: TranscriptPaneContent) {
         guard content != shown else { return }
         shown = content
-        let followsLatest = isScrolledToBottom
+        if hasViewport { followsLatest = isScrolledToBottom }
         textView.textStorage?.setAttributedString(Self.render(content))
-        if followsLatest { textView.scrollToEndOfDocument(nil) }
+        if followsLatest && hasViewport { textView.scrollToEndOfDocument(nil) }
+    }
+
+    private var hasViewport: Bool {
+        !isHiddenOrHasHiddenAncestor && scroll.contentView.bounds.height > 0
     }
 
     private var isScrolledToBottom: Bool {

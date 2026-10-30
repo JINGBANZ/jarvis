@@ -475,6 +475,39 @@ import JarvisCore
     }
 
     @MainActor @Test
+    func theTranscriptKeepsFollowingSpeechAcrossCollapseAndExpand() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        panel.setTranscriptPaneVisible(true)
+        panel.showTranscript(transcriptLines(60))
+        #expect(panel.isTranscriptAtLatest)
+
+        panel.toggleCollapse()
+        panel.showTranscript(transcriptLines(80))
+        panel.toggleCollapse()
+        #expect(panel.isTranscriptAtLatest, "speech that arrived while collapsed must be in view")
+
+        panel.showTranscript(transcriptLines(100))
+        #expect(panel.isTranscriptAtLatest, "later speech must keep following")
+    }
+
+    @MainActor @Test
+    func scrollingBackStaysPutAcrossCollapseAndExpand() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        panel.setTranscriptPaneVisible(true)
+        panel.showTranscript(transcriptLines(60))
+        panel.scrollTranscriptToTop()
+
+        panel.showTranscript(transcriptLines(70))
+        #expect(!panel.isTranscriptAtLatest, "reading older lines must not be interrupted")
+        panel.toggleCollapse()
+        panel.showTranscript(transcriptLines(80))
+        panel.toggleCollapse()
+        #expect(!panel.isTranscriptAtLatest, "expanding must not undo an intentional scrollback")
+    }
+
+    @MainActor @Test
     func stoppingClearsTheTranscriptColumn() {
         let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
         panel.setSessionLive(true)
@@ -585,4 +618,11 @@ private func checkDropsEmptyTips() async {
     panel.render("     \n\t")
     try? await Task.sleep(nanoseconds: 200_000_000)   // lets an erroneous append run
     #expect(panel.entryCount == 0, "empty/whitespace-only tips must not be logged")
+}
+
+private func transcriptLines(_ count: Int) -> TranscriptPaneContent {
+    TranscriptPaneContent(rows: (0..<count).map {
+        .init(speaker: $0.isMultiple(of: 2) ? .them : .me, text: "Line \($0) of the conversation.",
+              state: .unhandled)
+    })
 }
