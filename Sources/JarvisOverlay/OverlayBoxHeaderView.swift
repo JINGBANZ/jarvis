@@ -6,6 +6,7 @@ import JarvisCore
 final class OverlayBoxHeaderView: NSView {
     let collapseButton = OverlayBoxHeaderButton(symbol: "chevron.down", label: "Collapse")
     let clearButton = OverlayBoxHeaderButton(symbol: "eraser", label: "Clear history")
+    let transcriptButton = OverlayBoxHeaderButton(symbol: "captions.bubble", label: "Show transcript")
     private let titleLabel = MovableLabel(labelWithString: "Jarvis")
     private var chrome: OverlayBoxChrome
     private var showsSeparator = true
@@ -22,6 +23,7 @@ final class OverlayBoxHeaderView: NSView {
         addSubview(titleLabel)
         addSubview(collapseButton)
         addSubview(clearButton)
+        addSubview(transcriptButton)
         applyChrome()
     }
 
@@ -40,6 +42,7 @@ final class OverlayBoxHeaderView: NSView {
         let radius = (chrome.button * 0.22).rounded()
         collapseButton.apply(iconPointSize: chrome.iconPointSize, cornerRadius: radius)
         clearButton.apply(iconPointSize: chrome.iconPointSize, cornerRadius: radius)
+        transcriptButton.apply(iconPointSize: chrome.iconPointSize, cornerRadius: radius)
         layoutControls()
     }
 
@@ -55,6 +58,12 @@ final class OverlayBoxHeaderView: NSView {
         clearButton.isHidden = !hasContent
     }
 
+    /// Like the chevron, the icon shows the current state.
+    func setTranscriptShown(_ shown: Bool) {
+        transcriptButton.setSymbol(shown ? "captions.bubble.fill" : "captions.bubble",
+                                   label: shown ? "Hide transcript" : "Show transcript")
+    }
+
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layoutControls()
@@ -64,11 +73,14 @@ final class OverlayBoxHeaderView: NSView {
         let buttonY = ((bounds.height - chrome.button) / 2).rounded()
         collapseButton.frame = NSRect(x: chrome.inset, y: buttonY,
                                       width: chrome.button, height: chrome.button)
-        clearButton.frame = NSRect(x: bounds.width - chrome.inset - chrome.button, y: buttonY,
-                                   width: chrome.button, height: chrome.button)
+        transcriptButton.frame = NSRect(x: bounds.width - chrome.inset - chrome.button, y: buttonY,
+                                        width: chrome.button, height: chrome.button)
+        clearButton.frame = NSRect(x: transcriptButton.frame.minX - chrome.inset - chrome.button,
+                                   y: buttonY, width: chrome.button, height: chrome.button)
         let titleHeight = titleLabel.intrinsicContentSize.height.rounded(.up)
-        // Reserve both buttons' space even when clear is hidden, so the title never shifts.
-        let titleInset = chrome.inset * 2 + chrome.button
+        // Reserve the right side's two buttons on both sides even when clear is hidden, so the
+        // title stays centered and never shifts.
+        let titleInset = chrome.inset * 3 + chrome.button * 2
         titleLabel.frame = NSRect(x: titleInset, y: ((bounds.height - titleHeight) / 2).rounded(),
                                   width: max(0, bounds.width - titleInset * 2), height: titleHeight)
     }

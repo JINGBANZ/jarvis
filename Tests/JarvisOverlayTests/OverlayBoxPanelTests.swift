@@ -394,6 +394,141 @@ import JarvisCore
     func responsesDuringPreviewAreRevealedAfterClose() async {
         await checkAppendDuringPreview()
     }
+
+    @MainActor @Test
+    func theTranscriptColumnWidensTheBoxToTheRightAndBack() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        let before = panel.currentFrame
+        #expect(!panel.isTranscriptColumnShown)
+
+        panel.setTranscriptPaneVisible(true)
+        #expect(panel.isTranscriptColumnShown)
+        #expect(panel.currentFrame.minX == before.minX, "the box widens to the right")
+        #expect(panel.currentContentSize.width == 520 + OverlayBoxPanel.transcriptPaneWidth)
+        #expect(panel.currentLogWidth == 520, "the tips keep their width")
+
+        panel.setTranscriptPaneVisible(false)
+        #expect(!panel.isTranscriptColumnShown)
+        #expect(panel.currentContentSize.width == 520)
+    }
+
+    @MainActor @Test
+    func theColumnAndTheHeaderAboveItShareTheBoxFill() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        panel.setTranscriptPaneVisible(true)
+        panel.setOpacity(0.7)
+        #expect(panel.transcriptColumnFillFrame == NSRect(x: 520, y: 0, width: OverlayBoxPanel.transcriptPaneWidth,
+                                                         height: 440),
+                "the fill must reach under the header, or the strip above the column shows the desktop")
+        #expect(panel.transcriptColumnFillOpacity == panel.currentBoxOpacity)
+
+        panel.toggleCollapse()
+        #expect(panel.transcriptColumnFillFrame.height == panel.currentHeaderHeight,
+                "a collapsed box keeps its widened header strip filled")
+        panel.toggleCollapse()
+        panel.setTranscriptPaneVisible(false)
+        #expect(panel.transcriptColumnFillFrame.width == 0)
+    }
+
+    @MainActor @Test
+    func theSavedWidthLeavesTheTranscriptColumnOut() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        var saved: (Double, Double)?
+        panel.onSizeChanged = { saved = ($0, $1) }
+        panel.setTranscriptPaneVisible(true)
+        panel.endLiveResize()
+        #expect(saved?.0 == 520, "a restored box must not widen twice")
+    }
+
+    @MainActor @Test
+    func theHeaderButtonTogglesTheColumnAndReportsIt() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        var reported: [Bool] = []
+        panel.onTranscriptPaneToggled = { reported.append($0) }
+        panel.clickTranscriptButton()
+        panel.clickTranscriptButton()
+        #expect(reported == [true, false])
+        #expect(!panel.isTranscriptColumnShown)
+    }
+
+    @MainActor @Test
+    func transcriptRowsNameTheSpeakerAndDimHandledLines() throws {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        panel.setTranscriptPaneVisible(true)
+        panel.showTranscript(TranscriptPaneContent(rows: [
+            .init(speaker: .them, text: "Design a cache.", state: .handled),
+            .init(speaker: .me, text: "What size?", state: .unhandled),
+            .init(speaker: .them, text: "speaking… 3s", state: .inProgress),
+        ]))
+
+        let text = panel.currentTranscript
+        #expect(text.string == "Them: Design a cache.\nYou: What size?\nThem: speaking… 3s")
+        let handled = try #require(text.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor)
+        let youAt = (text.string as NSString).range(of: "You:").location
+        let unhandled = try #require(text.attribute(.foregroundColor, at: youAt, effectiveRange: nil) as? NSColor)
+        #expect(handled.alphaComponent < unhandled.alphaComponent, "handled lines are dimmed")
+        #expect(unhandled != NSColor.white, "your own lines carry their own color")
+    }
+
+    @MainActor @Test
+    func theTranscriptKeepsFollowingSpeechAcrossCollapseAndExpand() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        panel.setTranscriptPaneVisible(true)
+        panel.showTranscript(transcriptLines(60))
+        #expect(panel.isTranscriptAtLatest)
+
+        panel.toggleCollapse()
+        panel.showTranscript(transcriptLines(80))
+        panel.toggleCollapse()
+        #expect(panel.isTranscriptAtLatest, "speech that arrived while collapsed must be in view")
+
+        panel.showTranscript(transcriptLines(100))
+        #expect(panel.isTranscriptAtLatest, "later speech must keep following")
+    }
+
+    @MainActor @Test
+    func scrollingBackStaysPutAcrossCollapseAndExpand() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        panel.setTranscriptPaneVisible(true)
+        panel.showTranscript(transcriptLines(60))
+        panel.scrollTranscriptToTop()
+
+        panel.showTranscript(transcriptLines(70))
+        #expect(!panel.isTranscriptAtLatest, "reading older lines must not be interrupted")
+        panel.toggleCollapse()
+        panel.showTranscript(transcriptLines(80))
+        panel.toggleCollapse()
+        #expect(!panel.isTranscriptAtLatest, "expanding must not undo an intentional scrollback")
+    }
+
+    @MainActor @Test
+    func stoppingClearsTheTranscriptColumn() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        panel.setTranscriptPaneVisible(true)
+        panel.showTranscript(TranscriptPaneContent(rows: [
+            .init(speaker: .me, text: "Hello.", state: .unhandled),
+        ]))
+        panel.setSessionLive(false)
+        #expect(panel.currentTranscript.string.isEmpty)
+    }
+
+    @MainActor @Test
+    func aCollapsedBoxHidesTheTranscriptColumn() {
+        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        panel.setSessionLive(true)
+        panel.setTranscriptPaneVisible(true)
+        panel.toggleCollapse()
+        #expect(!panel.isTranscriptColumnShown)
+        panel.toggleCollapse()
+        #expect(panel.isTranscriptColumnShown)
+    }
 }
 
 // MARK: - Main-actor checks (awaited from nonisolated tests so render's main-actor hop can run)
@@ -483,4 +618,11 @@ private func checkDropsEmptyTips() async {
     panel.render("     \n\t")
     try? await Task.sleep(nanoseconds: 200_000_000)   // lets an erroneous append run
     #expect(panel.entryCount == 0, "empty/whitespace-only tips must not be logged")
+}
+
+private func transcriptLines(_ count: Int) -> TranscriptPaneContent {
+    TranscriptPaneContent(rows: (0..<count).map {
+        .init(speaker: $0.isMultiple(of: 2) ? .them : .me, text: "Line \($0) of the conversation.",
+              state: .unhandled)
+    })
 }

@@ -8,6 +8,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private let box: ResizeReportingView
     private let textView: NSTextView
     private let historyBackground = NSView(frame: .zero)
+    /// The box fill under the transcript column and the header strip above it; the history fill
+    /// covers only the tips' width.
+    private let columnBackground = NSView(frame: .zero)
     private var detailFontSize = CGFloat(Defaults.Overlay.Detail.fontSize)
     private let detailView: DetailView
     private let detailDivider = OverlayDetailDividerView(frame: .zero)
@@ -39,8 +42,15 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     private var isPreviewRequested = false
     private var wasCollapsedBeforePreview = false
     private var isSessionLive = false
-    /// Called with the content width and height once a resize drag finishes.
+    /// Called with the content width and height once a resize drag finishes. The width leaves the
+    /// transcript column out, so a restored box never widens twice.
     public var onSizeChanged: ((Double, Double) -> Void)?
+    private let transcriptPane = TranscriptPaneView(frame: .zero)
+    /// The column extends the box to the right, so the tips keep their width.
+    static let transcriptPaneWidth: CGFloat = 260
+    public private(set) var isTranscriptPaneVisible = false
+    /// Called after the header button shows or hides the column, for persistence.
+    public var onTranscriptPaneToggled: ((Bool) -> Void)?
     private static let sampleEntries: [(stamp: String, text: String, hasDetail: Bool)] = [
         ("10:30:00", "Ask about the time complexity of that loop.", false),
         ("10:30:08", "Check the empty list before reading its first item.", true),
@@ -97,6 +107,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             white: Self.boxWhite,
             alpha: CGFloat(Defaults.Overlay.Box.opacity)).cgColor
         box.addSubview(historyBackground)
+        columnBackground.wantsLayer = true
+        columnBackground.layer?.backgroundColor = historyBackground.layer?.backgroundColor
+        box.addSubview(columnBackground)
         box.layer?.cornerRadius = OverlayBoxChrome.cornerRadius
         box.layer?.masksToBounds = true
         self.box = box
@@ -139,6 +152,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         box.addSubview(detailView)
         box.addSubview(detailDivider)
         detailView.isHidden = true
+        transcriptPane.isHidden = true
+        box.addSubview(transcriptPane)
         box.addSubview(header)
         box.addSubview(affordance)   // topmost, so its tracking area sees the whole box
         panel.contentView = box
@@ -171,6 +186,8 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         header.collapseButton.action = #selector(toggleCollapsed)
         header.clearButton.target = self
         header.clearButton.action = #selector(clearLog)
+        header.transcriptButton.target = self
+        header.transcriptButton.action = #selector(toggleTranscriptPane)
         box.onEndLiveResize = { [weak self] in self?.reportContentSize() }
         box.onFrameSizeChanged = { [weak self] in self?.layoutContent() }
         // The affordance drives edge drags itself, so AppKit's live-resize hook never fires for them.
@@ -188,12 +205,28 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         header.frame = NSRect(x: 0, y: bounds.height - chrome.height,
                               width: bounds.width, height: chrome.height)
         scroll.frame = NSRect(x: 0, y: 0,
-                              width: bounds.width, height: max(0, bounds.height - chrome.height))
+                              width: logWidth, height: max(0, bounds.height - chrome.height))
+        columnBackground.isHidden = !isTranscriptPaneVisible
+        columnBackground.frame = NSRect(x: logWidth, y: 0, width: bounds.width - logWidth,
+                                        height: bounds.height)
+        transcriptPane.isHidden = !isTranscriptPaneVisible || isCollapsed
+        transcriptPane.frame = NSRect(x: logWidth, y: 0, width: bounds.width - logWidth,
+                                      height: max(0, bounds.height - chrome.height))
         resizeAffordance.frame = bounds
         renderDisplay()
     }
 
+    /// The width left for the tips and the detail box.
+    private var logWidth: CGFloat {
+        max(0, box.bounds.width - (isTranscriptPaneVisible ? Self.transcriptPaneWidth : 0))
+    }
+
     // MARK: - Header actions
+
+    @objc private func toggleTranscriptPane() {
+        setTranscriptPaneVisible(!isTranscriptPaneVisible)
+        onTranscriptPaneToggled?(isTranscriptPaneVisible)
+    }
 
     @objc private func toggleCollapsed() { setCollapsed(!isCollapsed) }
 
@@ -315,22 +348,22 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             } else {
                 let ceiling = box.bounds.height * 0.45
                 automatic = min(ceiling, detailView.preferredHeight(
-                    viewportWidth: box.bounds.width,
+                    viewportWidth: logWidth,
                     viewportHeight: max(1, ceiling - detailView.stripHeight)))
             }
             let preferred = detailHeightFraction.map { $0 * available } ?? automatic
             height = boundedDetailHeight(preferred, available: available)
         }
-        historyBackground.frame = NSRect(x: 0, y: height, width: box.bounds.width,
+        historyBackground.frame = NSRect(x: 0, y: height, width: logWidth,
                                          height: max(0, box.bounds.height - height))
-        detailView.frame = NSRect(x: 0, y: 0, width: box.bounds.width, height: height)
+        detailView.frame = NSRect(x: 0, y: 0, width: logWidth, height: height)
         detailView.needsLayout = true
         detailView.layoutSubtreeIfNeeded()
         // Straddle the boundary so the grab target does not eat into a small panel's content.
         let dividerHeight = OverlayDetailDividerView.thickness
         detailDivider.frame = NSRect(x: 0, y: height - dividerHeight / 2,
-                                     width: box.bounds.width, height: dividerHeight)
-        scroll.frame = NSRect(x: 0, y: height, width: box.bounds.width,
+                                     width: logWidth, height: dividerHeight)
+        scroll.frame = NSRect(x: 0, y: height, width: logWidth,
                               height: max(0, available - height))
     }
 
@@ -503,6 +536,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             details.removeAll()
             slot.reset()
             liveDetail = nil
+            transcriptPane.show(TranscriptPaneContent(rows: []))
         }
         applyDisplay()
         if live { setCollapsed(false) }
@@ -523,7 +557,9 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     public func setOpacity(_ opacity: Double) {
-        historyBackground.layer?.backgroundColor = NSColor(white: Self.boxWhite, alpha: CGFloat(opacity)).cgColor
+        let fill = NSColor(white: Self.boxWhite, alpha: CGFloat(opacity)).cgColor
+        historyBackground.layer?.backgroundColor = fill
+        columnBackground.layer?.backgroundColor = fill
     }
 
     public func setFontSize(_ points: Double) {
@@ -534,7 +570,29 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     /// Once per finished drag, never per frame, so the preference isn't rewritten mid-gesture.
     private func reportContentSize() {
         let size = panel.contentRect(forFrameRect: panel.frame).size
-        onSizeChanged?(Double(size.width), Double(isCollapsed ? expandedContentHeight : size.height))
+        let paneWidth = isTranscriptPaneVisible ? Self.transcriptPaneWidth : 0
+        onSizeChanged?(Double(size.width - paneWidth),
+                       Double(isCollapsed ? expandedContentHeight : size.height))
+    }
+
+    // MARK: - Transcript column
+
+    /// Widens or narrows the box by the column, keeping its left edge where the user put it.
+    public func setTranscriptPaneVisible(_ visible: Bool) {
+        guard visible != isTranscriptPaneVisible else { return }
+        isTranscriptPaneVisible = visible
+        header.setTranscriptShown(visible)
+        let delta = visible ? Self.transcriptPaneWidth : -Self.transcriptPaneWidth
+        panel.minSize = NSSize(width: panel.minSize.width + delta, height: panel.minSize.height)
+        let frame = panel.frame
+        panel.setFrame(NSRect(x: frame.minX, y: frame.minY,
+                              width: frame.width + delta, height: frame.height),
+                       display: true)
+        layoutContent()
+    }
+
+    public func showTranscript(_ content: TranscriptPaneContent) {
+        transcriptPane.show(content)
     }
 
     /// Recorded rather than applied, so a request made during a session takes effect when it stops.
@@ -658,6 +716,15 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     }
 
     func endLiveResize() { box.viewDidEndLiveResize() }
+
+    var transcriptColumnFillFrame: NSRect { columnBackground.frame }
+    var transcriptColumnFillOpacity: CGFloat { columnBackground.layer?.backgroundColor?.alpha ?? 0 }
+    var isTranscriptColumnShown: Bool { !transcriptPane.isHidden && transcriptPane.frame.width > 0 }
+    var currentLogWidth: CGFloat { scroll.frame.width }
+    var currentTranscript: NSAttributedString { transcriptPane.attributedText }
+    var isTranscriptAtLatest: Bool { transcriptPane.isAtLatest }
+    func scrollTranscriptToTop() { transcriptPane.scrollToTop() }
+    func clickTranscriptButton() { press(header.transcriptButton) }
 }
 
 /// Overrides `viewDidEndLiveResize` instead of setting `NSWindow.delegate`: a delegate assignment

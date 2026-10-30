@@ -79,6 +79,14 @@ public enum GeminiLiveSession {
         return transcription["text"] is String
     }
 
+    /// The revised hypothesis for the utterance in progress. Display-only: it must never reach
+    /// Activity, the transcript, or a model request.
+    public static func interimTranscript(from event: [String: Any]) -> String? {
+        guard let content = event["serverContent"] as? [String: Any],
+              let interim = content["interimInputTranscription"] as? [String: Any] else { return nil }
+        return interim["text"] as? String
+    }
+
     /// Presence only. Interim text must never reach Activity or the transcript.
     public static func hasInterimTranscription(_ event: [String: Any]) -> Bool {
         guard let content = event["serverContent"] as? [String: Any],
