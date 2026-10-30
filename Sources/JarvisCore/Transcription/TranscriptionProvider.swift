@@ -4,6 +4,7 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
     case openAI = "openai"
     case appleSpeech = "apple-speech"
     case gemini = "gemini"
+    case deepgram = "deepgram"
 
     public var displayName: String {
         switch self {
@@ -13,6 +14,8 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
             "Apple Speech"
         case .gemini:
             "Gemini"
+        case .deepgram:
+            "Deepgram"
         }
     }
 
@@ -20,6 +23,7 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
         switch self {
         case .openAI: .openAIAPIKey
         case .gemini: .geminiAPIKey
+        case .deepgram: .deepgramAPIKey
         case .appleSpeech: nil
         }
     }
@@ -33,7 +37,7 @@ public enum TranscriptionProvider: String, CaseIterable, Codable, Sendable {
     public var audioFormat: TranscriptionAudioFormat {
         switch self {
         case .openAI, .appleSpeech: .pcm16Mono24k
-        case .gemini: .pcm16Mono16k
+        case .gemini, .deepgram: .pcm16Mono16k
         }
     }
 }

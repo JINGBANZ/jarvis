@@ -20,6 +20,7 @@ final class TranscriptionControls: NSObject {
     private var geminiVocabularyRow: SettingsRowView?
     var geminiVocabularyField: NSTextField?
     private var geminiModeRow: SettingsRowView?
+    private var deepgramLanguagesRow: SettingsRowView?
     private var localeRow: SettingsRowView?
     private var localePopup: NSPopUpButton?
     private var localeLoadTask: Task<Void, Never>?
@@ -32,6 +33,8 @@ final class TranscriptionControls: NSObject {
         case .gemini:
             [providerRow, geminiModelRow, geminiLanguagesRow,
              geminiVocabularyRow, geminiModeRow].compactMap { $0 }
+        case .deepgram:
+            [providerRow, deepgramLanguagesRow].compactMap { $0 }
         case .appleSpeech:
             [providerRow, localeRow].compactMap { $0 }
         }
@@ -203,6 +206,20 @@ final class TranscriptionControls: NSObject {
         content.addSubview(geminiModeRow)
         self.geminiModeRow = geminiModeRow
 
+        let deepgramLanguagePicker = ExpectedLanguagePicker(
+            selectedLanguages: preferences.deepgramExpectedLanguages,
+            onChange: { [weak self] languages in self?.deepgramLanguagesChanged(languages) })
+        deepgramLanguagePicker.identifier =
+            NSUserInterfaceItemIdentifier("transcription-deepgram-languages")
+        let deepgramLanguagesRow = SettingsRowView(
+            title: "Expected languages",
+            // Kept short: a one-line row truncates past about 296 pt.
+            detail: "Pick one for that language only, or several to mix.",
+            controlView: deepgramLanguagePicker,
+            controlSize: NSSize(width: 340, height: 32))
+        content.addSubview(deepgramLanguagesRow)
+        self.deepgramLanguagesRow = deepgramLanguagesRow
+
         let locale = NSPopUpButton()
         locale.addItem(withTitle: "Loading locales…")
         locale.isEnabled = false
@@ -229,7 +246,7 @@ final class TranscriptionControls: NSObject {
         let visible = Set(visibleRows.map(ObjectIdentifier.init))
         for row in [modelRow, languagesRow, vocabularyRow,
                     geminiModelRow, geminiLanguagesRow, geminiVocabularyRow, geminiModeRow,
-                    localeRow] {
+                    deepgramLanguagesRow, localeRow] {
             row?.isHidden = row.map { !visible.contains(ObjectIdentifier($0)) } ?? true
         }
         card?.setHeader(title: "Transcription", detail: Self.headerDetail(for: preferences.provider))
@@ -255,6 +272,7 @@ final class TranscriptionControls: NSObject {
         switch provider {
         case .openAI: "Uses your OpenAI key"
         case .gemini: "Uses your Gemini key"
+        case .deepgram: "Uses your Deepgram key"
         case .appleSpeech: "Runs on this Mac"
         }
     }
@@ -348,6 +366,14 @@ final class TranscriptionControls: NSObject {
         }
         preferences.geminiMode = mode
         jlog("Jarvis: \(mode.displayName) selected for the next Start.")
+    }
+
+    private func deepgramLanguagesChanged(_ languages: [TranscriptionLanguage]) {
+        preferences.deepgramExpectedLanguages = languages
+        let selection = languages.isEmpty
+            ? "automatic"
+            : languages.map(\.displayName).joined(separator: ", ")
+        jlog("Jarvis: \(selection) transcription languages selected for the next Start.")
     }
 
     @objc private func localeChanged(_ sender: NSPopUpButton) {

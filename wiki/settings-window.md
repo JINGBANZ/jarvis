@@ -583,7 +583,7 @@ source persistence keeps its existing identities.
 
 The Ear page (`TranscriptionSection`) owns the speech-to-text role without conflating it with the
 brain route. Its one card is `TranscriptionControls`, whose header detail says which key it uses or
-that it runs on this Mac. The provider picker contains **OpenAI** (the default), **Gemini**, and
+that it runs on this Mac. The provider picker contains **OpenAI** (the default), **Gemini**, **Deepgram**, and
 **Apple Speech (macOS 26+)**. Apple is enabled only when the running Mac and OS expose
 `SpeechTranscriber`; selecting any provider persists through `TranscriptionPreferences` and applies
 on the next Start, never halfway through a live session. `TranscriptionControls` shows one fixed row
@@ -618,6 +618,13 @@ better but is no longer exactly what was said). Gemini's turn detection, wire fo
 provider-derived wire sample rate are covered in
 [architecture.md](./architecture.md#models-and-apis).
 
+With Deepgram selected, the card shows one **Expected languages** row (`deepgramExpectedLanguages`),
+a multi-select that behaves like the OpenAI one: none means automatic. Picking a single language
+gives the most accurate recognition. Picking none or several uses Nova-3's multilingual mode
+(`DeepgramTranscriptionModel`), which follows a speaker who switches languages. There is no
+vocabulary row. Its wire format and turn detection are covered in
+[architecture.md](./architecture.md#models-and-apis).
+
 With Apple Speech selected, **Conversation locale** is populated from
 `SpeechTranscriber.supportedLocales`; the initial suggestion is the supported equivalent of the
 current macOS locale. Start downloads or reuses that selected model before replacing a running
@@ -636,18 +643,19 @@ defaults come from [`Defaults`](../Sources/JarvisCore/Config/Defaults.swift).
 
 ## Connections
 
-The Connections page owns authentication shared across Brain and Ear. Its three stacked
-cards are **OpenAI API**, **Gemini API**, and **Subscriptions**. The OpenAI and Gemini
+The Connections page owns authentication shared across Brain and Ear. Its four stacked
+cards are **OpenAI API**, **Gemini API**, **Deepgram API**, and **Subscriptions**. The API-key
 cards each report and edit only their own Jarvis-managed owner-only file through `APIKeyControls`
 (one instance per `Credential`, keyed by `credential.rawValue` so their accessibility labels,
-identifiers, and saved-key state never collide); each card's header says the key serves the brain
-and transcription, and its action is **Add API key** or **Edit**. The row reads **Saved** in teal once a key is saved.
+identifiers, and saved-key state never collide); each card's header says what the key powers
+(`Credential.roles`), and its action is **Add API key** or **Edit**. The row reads **Saved** in teal once a key is saved.
 The `OPENAI_API_KEY` fallback remains usable by Start but is deliberately not presented as a
 Jarvis-managed saved key; Gemini has the same headless fallback in `GEMINI_API_KEY`
 (`Credential.geminiAPIKey.environmentVariable`, read by `EnvSecretStore`), also not presented as a
-saved key.
+saved key. Deepgram's card serves transcription only, with the same fallback in `DEEPGRAM_API_KEY`.
 
-Saving a key checks it. One models-list request goes out with the key in a header, and the card shows
+Saving a key checks it. One request goes out with the key in a header: a models-list request for
+OpenAI and Gemini, or a token-description request for Deepgram (`CredentialVerifier.check`). The card shows
 what the vendor said under the row: **accepted**, **refused** with the provider's status, error code,
 and redacted message, or **couldn't check the key** carrying the same evidence. The check answers one
 question, whether the provider refused the key, so only an authentication failure is a refusal. An
@@ -834,11 +842,11 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SkillCardView.swift` | One skill's card |
 | `Sources/JarvisApp/Settings/SkillCardGridView.swift` | Responsive skill card grid |
 | `Sources/JarvisCore/Config/Skill+DisplayTitle.swift` | A skill's card title from its folder name |
-| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini) + the Subscriptions card |
+| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini, Deepgram) + the Subscriptions card |
 | `Sources/JarvisApp/Settings/SubscriptionControls.swift` | Renders the Subscriptions card's shared state and dispatches explicit actions |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySupervisor.swift` | Starts, probes, and restarts the bundled helper; owns its credential directory |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySignIn.swift` | Runs one browser sign-in through the helper and reports its URL and outcome |
-| `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The one models-list request behind a saved key's verdict |
+| `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The provider-specific request behind a saved key's verdict: models-list for OpenAI and Gemini, token description for Deepgram |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified route card and its persistence mutations, including reorder |
 | `Sources/JarvisCore/Brain/BrainRoute.swift` | The ordered route, its normalization, and `movingTarget(at:by:)` |

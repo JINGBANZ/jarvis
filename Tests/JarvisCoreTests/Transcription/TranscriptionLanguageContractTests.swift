@@ -51,8 +51,8 @@ import Testing
                         #expect(settings["languageCodes"] as? [String] == languages.map(\.geminiHint))
                         #expect(settings["customVocabulary"] as? [String] == ["Swift", "gRPC"])
                         #expect(settings["prompt"] == nil)
-                    case .appleSpeech:
-                        Issue.record("remote target list contains Apple Speech")
+                    case .deepgram, .appleSpeech:
+                        Issue.record("remote target list contains \(target.provider.displayName)")
                     }
                 }
             }
@@ -108,9 +108,10 @@ import Testing
     }
 
     @Test func capabilityAndConfirmationAreExplicitForEveryProvider() {
-        #expect(Set(TranscriptionTarget.remoteTargets.map(\.provider)).union([.appleSpeech])
+        #expect(Set(TranscriptionTarget.remoteTargets.map(\.provider)).union([.appleSpeech, .deepgram])
             == Set(TranscriptionProvider.allCases))
-        for target in TranscriptionTarget.remoteTargets + [.appleSpeech(localeIdentifier: "zh_CN")] {
+        let singleLanguageTargets: [TranscriptionTarget] = [.deepgram(.nova3), .appleSpeech(localeIdentifier: "zh_CN")]
+        for target in TranscriptionTarget.remoteTargets + singleLanguageTargets {
             let acceptance = TranscriptionSetupAcceptance(target: target,
                 expectation: target.configuration(expectedLanguages: []).languageExpectation)
             switch target {
@@ -123,6 +124,10 @@ import Testing
             case .gemini:
                 #expect(target.languageSupport == .languageList)
                 #expect(acceptance.confirmation == .setupAcknowledged)
+            case .deepgram:
+                #expect(target.languageSupport == .languageList)
+                #expect(acceptance.expectation == .automatic)
+                #expect(acceptance.confirmation == .connectionOpened)
             case .appleSpeech:
                 #expect(target.languageSupport == .singleLocale)
                 #expect(acceptance.expectation == .locale("zh_CN"))
@@ -145,15 +150,24 @@ import Testing
             preferences.openAIExpectedLanguages = [.mandarinChinese, .english, .english]
             preferences.geminiExpectedLanguages = [.english, .mandarinChinese]
             preferences.appleSpeechLocaleIdentifier = "zh_CN"
+            preferences.deepgramExpectedLanguages = [.mandarinChinese]
             let snapshot = preferences.configuration
             preferences.openAIExpectedLanguages = []
             preferences.geminiExpectedLanguages = []
             preferences.appleSpeechLocaleIdentifier = "en_US"
+            preferences.deepgramExpectedLanguages = []
             #expect(snapshot.provider == provider)
-            #expect(snapshot.languageExpectation == (provider == .appleSpeech
-                ? .locale("zh_CN") : .languages([.english, .mandarinChinese])))
-            #expect(preferences.configuration.languageExpectation == (provider == .appleSpeech
-                ? .locale("en_US") : .automatic))
+            switch provider {
+            case .appleSpeech:
+                #expect(snapshot.languageExpectation == .locale("zh_CN"))
+                #expect(preferences.configuration.languageExpectation == .locale("en_US"))
+            case .deepgram:
+                #expect(snapshot.languageExpectation == .languages([.mandarinChinese]))
+                #expect(preferences.configuration.languageExpectation == .automatic)
+            case .openAI, .gemini:
+                #expect(snapshot.languageExpectation == .languages([.english, .mandarinChinese]))
+                #expect(preferences.configuration.languageExpectation == .automatic)
+            }
         }
     }
 

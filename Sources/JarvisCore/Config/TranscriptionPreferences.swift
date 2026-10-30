@@ -144,6 +144,37 @@ public final class TranscriptionPreferences {
         }
     }
 
+    public var deepgramModel: DeepgramTranscriptionModel {
+        get {
+            guard let raw = defaults.string(forKey: Defaults.Transcription.deepgramModelKey),
+                  let model = DeepgramTranscriptionModel(rawValue: raw) else {
+                return Defaults.Transcription.deepgramModel
+            }
+            return model
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Defaults.Transcription.deepgramModelKey)
+        }
+    }
+
+    /// Empty means automatic detection.
+    public var deepgramExpectedLanguages: [TranscriptionLanguage] {
+        get {
+            guard let stored = defaults.stringArray(
+                forKey: Defaults.Transcription.deepgramExpectedLanguagesKey) else {
+                return Defaults.Transcription.deepgramExpectedLanguages
+            }
+            return TranscriptionLanguage.canonicalizing(
+                stored.compactMap(TranscriptionLanguage.init(rawValue:)))
+        }
+        set {
+            let languages = TranscriptionLanguage.canonicalizing(newValue)
+            defaults.set(
+                languages.map(\.rawValue),
+                forKey: Defaults.Transcription.deepgramExpectedLanguagesKey)
+        }
+    }
+
     public var configuration: TranscriptionConfiguration {
         TranscriptionConfiguration(
             provider: provider,
@@ -154,6 +185,8 @@ public final class TranscriptionPreferences {
             geminiModel: geminiModel,
             geminiExpectedLanguages: geminiExpectedLanguages,
             geminiVocabularyKeywords: geminiVocabularyKeywords,
-            geminiMode: geminiMode)
+            geminiMode: geminiMode,
+            deepgramModel: deepgramModel,
+            deepgramExpectedLanguages: deepgramExpectedLanguages)
     }
 }

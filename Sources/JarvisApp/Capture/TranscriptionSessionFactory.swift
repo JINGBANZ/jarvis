@@ -91,6 +91,28 @@ enum TranscriptionSessionFactory {
                 networkStatus: networkStatus,
                 activity: activity,
                 benchmark: benchmark)
+        case .deepgram:
+            DeepgramLiveTranscriber(
+                apiKey: apiKey,
+                model: configuration.deepgramModel,
+                expectedLanguages: configuration.deepgramExpectedLanguages,
+                audioFormat: configuration.provider.audioFormat,
+                speaker: speaker,
+                transcript: transcript,
+                clock: clock,
+                sessionStart: sessionStart,
+                silenceTimeout: config.silenceTimeoutSeconds,
+                silenceMaxInterval: config.silenceMaxIntervalSeconds,
+                silenceIdleCutoff: speaker == .me
+                    ? config.silenceIdleCutoffSeconds
+                    : .infinity,
+                transcriptBatchingWindow: config.transcriptBatchingWindowSeconds,
+                maxBufferedAudioSeconds: config.maxBufferedAudioSeconds,
+                readyTimeout: config.realtimeReadyTimeoutSeconds,
+                pingInterval: config.realtimePingIntervalSeconds,
+                pongTimeout: config.realtimePongTimeoutSeconds,
+                networkStatus: networkStatus,
+                activity: activity)
         }
     }
 }

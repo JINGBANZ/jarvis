@@ -63,7 +63,7 @@ final class APIKeyControls: NSObject {
 
         let card = SettingsCardView(
             frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
-        card.setHeader(title: credential.displayName, detail: "Brain and transcription")
+        card.setHeader(title: credential.displayName, detail: credential.roles)
         card.onLayout = { [weak self] in self?.layout() }
         self.card = card
         guard let content = card.contentView else { return card }

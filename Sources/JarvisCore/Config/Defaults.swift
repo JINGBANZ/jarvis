@@ -69,6 +69,13 @@ public enum Defaults {
         public static let geminiModeKey = "transcription.gemini.mode"
         /// Verbatim, because coaching reasons about what was actually said.
         public static let geminiMode: GeminiTranscriptionMode = .verbatim
+
+        public static let deepgramModelKey = "transcription.deepgram.model"
+        public static let deepgramModel: DeepgramTranscriptionModel = .nova3
+
+        public static let deepgramExpectedLanguagesKey = "transcription.deepgram.expected-languages"
+        /// Empty means automatic detection.
+        public static let deepgramExpectedLanguages: [TranscriptionLanguage] = []
     }
 
     // MARK: - Screen capture

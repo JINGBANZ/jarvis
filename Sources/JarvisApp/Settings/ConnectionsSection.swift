@@ -6,7 +6,7 @@ import JarvisBrainProviders
 final class ConnectionsSection: NSObject, SettingsSection {
     let destination = SettingsDestination.connections
 
-    private static let credentialOrder: [Credential] = [.openAIAPIKey, .geminiAPIKey]
+    private static let credentialOrder: [Credential] = [.openAIAPIKey, .geminiAPIKey, .deepgramAPIKey]
 
     private let apiKeyControls: [Credential: APIKeyControls]
     private let subscriptions: SubscriptionControls
