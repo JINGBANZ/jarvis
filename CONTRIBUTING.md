@@ -8,11 +8,13 @@ local-process boundaries. Small, testable changes are preferred.
 The coding agent performs this setup and runs the tests. Human contributors are not expected to run
 tests manually.
 
-Use an Apple silicon Mac with macOS 14.2+, Swift 6, Python 3, and the
+Use an Apple silicon or Intel Mac with macOS 14.2+, Swift 6, Python 3, and the
 [Command Line Tools](./wiki/build-and-run.md#toolchain). Keep a responsive logged-in macOS GUI session
 and run tests as your ordinary development account. A physical monitor and full Xcode are optional.
 On a headless Mac, `Jarvis Tests` serves as the main display. The offline Gate needs no API
-keys or capture permissions; SwiftPM downloads dependencies on the first build.
+keys or capture permissions; SwiftPM downloads dependencies on the first build. Intel builds also
+need the [audio build prerequisites](./wiki/build-and-run.md#architectures-and-audio-dependency):
+install Meson, Ninja, and pkgconf, then run `./scripts/build-aec.sh` before the first Swift build.
 
 Verify the tools, then run the Gate from the checkout:
 

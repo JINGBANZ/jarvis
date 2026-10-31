@@ -62,14 +62,16 @@ notarize_artifact() {
   fi
 }
 
-echo "▶ swift build -c release"
-swift build -c release
-BIN_PATH="$(swift build -c release --show-bin-path)/$BIN_NAME"
+./scripts/build-aec.sh
+echo "▶ swift build -c release --arch arm64 --arch x86_64"
+swift build -c release --arch arm64 --arch x86_64
+BIN_PATH="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/$BIN_NAME"
 ./scripts/check-release-sdk.sh "$BIN_PATH"
 
 echo "▶ assembling $APP"
 source scripts/lib/app-bundle.sh
 assemble_app "$APP" "$(dirname "$BIN_PATH")" release
+./scripts/check-universal-app.sh "$APP"
 cp LICENSE THIRD_PARTY_NOTICES.md "$APP/Contents/Resources/"
 SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
 
@@ -163,4 +165,4 @@ if [[ -n "${EXPECTED_RELEASE_TAG:-}" ]]; then
   verify_args+=("$EXPECTED_RELEASE_TAG")
 fi
 ./scripts/verify-release.sh "${verify_args[@]}"
-echo "✅ $DMG is notarized and ready to distribute (Apple silicon, macOS 14.2+)"
+echo "✅ $DMG is notarized and ready to distribute (Apple silicon and Intel, macOS 14.2+)"

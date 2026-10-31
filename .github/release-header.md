@@ -1,9 +1,9 @@
 <!-- jarvis-release-install -->
 ## Install Jarvis
 
-**Requires an Apple silicon Mac running macOS 14.2 or later.**
+**Requires an Apple silicon or Intel Mac running macOS 14.2 or later.**
 
-[**Download Jarvis for Apple silicon (macOS 14.2+)**](@JARVIS_DOWNLOAD_URL@)
+[**Download Jarvis for Apple silicon and Intel (macOS 14.2+)**](@JARVIS_DOWNLOAD_URL@)
 
 1. Open `Jarvis.dmg`.
 2. In the Finder window, drag `Jarvis.app` onto the **Applications** shortcut.

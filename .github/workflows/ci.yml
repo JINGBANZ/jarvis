@@ -1,9 +1,16 @@
 name: CI
 
-# PR-only on purpose: release.yml re-runs the Gate on a release merge, and a push-to-main trigger
-# would repeat this suite at the 10x macOS minute multiplier.
+# Main only warms the shared dependency cache; the full Gate remains PR-only.
 on:
   pull_request:
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/cache-aec/**
+      - .github/workflows/ci.yml
+      - scripts/build-aec.sh
+      - scripts/aec/**
+      - Sources/CJarvisAEC/include/**
 
 permissions:
   contents: read
@@ -13,30 +20,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  audio-cache:
+    if: github.event_name == 'push'
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/cache-aec
+
   gate:
+    if: github.event_name == 'pull_request'
     name: Gate (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-15, macos-26]
+        os: [macos-15, macos-26, macos-26-intel]
     runs-on: ${{ matrix.os }}
     # Backstop: a hung run at the 6-hour default would burn about twice the monthly free tier.
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Show toolchain
+        id: toolchain
         run: |
           sw_vers
           xcode-select -p
           swift --version
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$(xcode-select -p)/../Info.plist"
+          fingerprint="$( { xcodebuild -version; swift --version; } | shasum -a 256 | cut -d' ' -f1)"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare Intel audio dependency
+        if: runner.arch == 'X64'
+        uses: ./.github/actions/cache-aec
+
+      - name: Cache Swift build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+            .build/*-apple-macosx
+            .build/build.db
+            .build/debug.yaml
+            .build/ci-cache-inputs.json
+          key: swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**', 'Sources/CJarvisAEC/include/**', 'Sources/CJarvisAEC/lib/**', 'Sources/CJarvisAEC/*.c') }}-${{ github.sha }}
+          restore-keys: |
+            swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**', 'Sources/CJarvisAEC/include/**', 'Sources/CJarvisAEC/lib/**', 'Sources/CJarvisAEC/*.c') }}-
+
+      - name: Restore unchanged input timestamps
+        run: python3 scripts/ci-build-cache.py restore
 
       - name: Compile all targets
         run: swift build
 
       - name: Run tests and static guards
         run: ./scripts/run-ci-tests.sh
+
+      - name: Record successful build inputs
+        run: python3 scripts/ci-build-cache.py snapshot
 
       - name: Upload test failure evidence
         if: failure()
@@ -52,8 +97,8 @@ jobs:
 
   # Keep the existing required check name while requiring all validation jobs to pass.
   test:
-    needs: [gate, proxy-privacy]
-    if: always()
+    needs: [gate, proxy-privacy, universal-app]
+    if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
@@ -61,14 +106,90 @@ jobs:
         env:
           GATE_RESULT: ${{ needs.gate.result }}
           PROXY_PRIVACY_RESULT: ${{ needs.proxy-privacy.result }}
+          UNIVERSAL_APP_RESULT: ${{ needs.universal-app.result }}
         run: |
           test "$GATE_RESULT" = success
           test "$PROXY_PRIVACY_RESULT" = success
+          test "$UNIVERSAL_APP_RESULT" = success
+
+  universal-app:
+    if: github.event_name == 'pull_request'
+    runs-on: macos-26
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/cache-aec
+      - name: Cache bundled subscription helper
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .build/cliproxyapi/*/*/*/cliproxyapi
+            .build/cliproxyapi/*/*/*/binary.sha256
+            .build/cliproxyapi/*/*/*/LICENSE
+          key: helper-universal-v1-${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
+      - name: Build and verify universal app without signing
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          ARTIFACTS="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
+          source scripts/lib/app-bundle.sh
+          assemble_app .build/Jarvis.app "$ARTIFACTS" release
+          ./scripts/check-universal-app.sh .build/Jarvis.app
+          ./scripts/check-release-sdk.sh .build/Jarvis.app/Contents/MacOS/JarvisApp
+      - name: Compare universal and native download sizes
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import shutil
+          import subprocess
+          import tempfile
+
+          source = Path('.build/Jarvis.app')
+          binaries = []
+          for path in source.rglob('*'):
+              if path.is_file() and not path.is_symlink():
+                  with path.open('rb') as stream:
+                      if stream.read(4) in (b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'):
+                          binaries.append(path.relative_to(source))
+          print('Unsigned size comparison; identical resources and UDZO/HFS+ compression.')
+          print('variant,app_bytes,dmg_bytes')
+          with tempfile.TemporaryDirectory(prefix='app-size-', dir='.build') as temporary:
+              root = Path(temporary)
+              for variant in ('universal', 'arm64', 'x86_64'):
+                  staging = root / variant
+                  app = staging / 'Jarvis.app'
+                  shutil.copytree(source, app, symlinks=True)
+                  if variant != 'universal':
+                      for binary in binaries:
+                          path = app / binary
+                          subprocess.run(['lipo', str(path), '-thin', variant,
+                                          '-output', str(path)], check=True)
+                  (staging / 'Applications').symlink_to('/Applications')
+                  image = root / (variant + '.dmg')
+                  subprocess.run(['hdiutil', 'create', '-quiet', '-fs', 'HFS+',
+                                  '-format', 'UDZO', '-volname', 'Jarvis',
+                                  '-srcfolder', str(staging), str(image)], check=True)
+                  app_bytes = sum(path.stat().st_size for path in app.rglob('*')
+                                  if path.is_file() and not path.is_symlink())
+                  print(f'{variant},{app_bytes},{image.stat().st_size}', flush=True)
+          PY
 
   proxy-privacy:
-    runs-on: macos-26
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache native subscription helper
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .build/cliproxyapi/*/*/*/cliproxyapi
+            .build/cliproxyapi/*/*/*/binary.sha256
+            .build/cliproxyapi/*/*/*/LICENSE
+          key: helper-native-v1-${{ runner.arch }}-${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
       - name: Build and check bundled helper egress
         run: ./scripts/test-proxy-privacy.sh

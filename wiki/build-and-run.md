@@ -24,6 +24,22 @@ failure artifacts. Pixel assertions also need a consistent color space and scale
 offscreen images inherit the display's color profile. The normalization and diagnostic evidence live
 in [`coloredDashedArrowsRenderTheirStyle`](../Tests/JarvisOverlayTests/DiagramHintRenderingTests.swift).
 
+CI caches build work while running the complete tests and bundle guards on every pull request.
+Swift caches are separated by runner, toolchain, dependency pins, and build scripts; subsequent
+commits can reuse compatible intermediates. [`ci-build-cache.py`](../scripts/ci-build-cache.py)
+restores a tracked input's timestamp only when its contents match the successful cached build,
+because fresh checkout timestamps otherwise invalidate unchanged Swift sources. Changed inputs
+retain their new timestamps and go through the normal compiler dependency checks. Test results,
+session data, and credentials are outside the cache paths.
+
+The [audio cache action](../.github/actions/cache-aec/action.yml) keys the universal archive by its
+compiler, SDK, pinned source recipe, and shim, then verifies its checksum and both architectures.
+The subscription helper retains its recipe/architecture keys and digest verification. Cache misses
+build from source. Relevant pushes to `main` warm only the audio cache so new PRs can restore it;
+GitHub isolates Swift caches created by one PR from other PRs. Initial runs, evicted caches, and
+toolchain or dependency changes therefore take longer than subsequent runs of the same PR. Signed
+release packaging builds its dependencies independently of these PR caches.
+
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested
   with mocks on **any** machine — no Mac UI, key, or permissions needed.
@@ -61,6 +77,29 @@ in [`coloredDashedArrowsRenderTheirStyle`](../Tests/JarvisOverlayTests/DiagramHi
   once `$PPID`, the test process, is gone, so a run that dies mid-test leaves nothing running; see
   `proxyStubExecutable`.
 
+### Architectures and audio dependency
+
+Release bundles contain native `arm64` and `x86_64` slices in the app, subscription helper,
+References helper, and Sparkle executables. Development builds target the current Mac. Apple Speech
+still requires its existing OS, device, and locale availability checks; an unavailable device cannot
+start that transcription provider. OpenAI and Gemini remain the remote transcription options.
+Universal builds require a toolchain containing Swift compatibility libraries for both architectures,
+such as the release runner's Xcode 26 toolchain; an SDK with Intel interfaces alone is insufficient.
+
+The bundled WebRTC AEC3 archive supports Apple silicon. Intel development and universal release
+builds first run `scripts/build-aec.sh`, with Meson, Ninja, and pkgconf installed
+(`brew install meson ninja pkgconf`). It cross-compiles both architectures from the pinned upstream
+source and merges them into `.build/aec/libjarvis-aec.a`. `Package.swift` searches that directory before
+the bundled archive. This keeps ordinary Apple silicon development builds independent of the C++
+toolchain setup without committing another generated binary. Run the script again after removing
+`.build` or changing the AEC source or recipe. The script requires network access on its first run;
+the Gate remains offline after dependencies are prepared.
+
+CI runs the Gate and helper privacy checks on native Intel and Apple silicon runners. It also
+assembles an unsigned universal release bundle and checks every shipped executable's architectures.
+These checks establish compilation and test coverage; capture, permissions, and live transcription
+on physical Intel hardware use the same signed-app validation as Apple silicon.
+
 ## Packaging & signing — why permission grants persist
 
 `scripts/build-app.sh` assembles the executable into a hand-built `Jarvis Dev.app`. The production
@@ -82,19 +121,21 @@ network access for the source, toolchain, and checksum-verified Go modules. The 
 does not build the helper.
 
 Build inputs and outputs live under `.build/cliproxyapi/`; the source and toolchain archives are
-checksum-verified before use, and cached binaries are keyed by the build recipe and patch and checked
+checksum-verified before use, and cached binaries are keyed by target architecture, build recipe, and patch and checked
 against their recorded digest. A checksum mismatch, rejected patch, or compiler failure stops the
 build. There is no upstream-binary fallback. Both bundle scripts install the result at
 `Contents/MacOS/cliproxyapi` and the upstream MIT license under `Contents/Resources/Licenses/`.
 Bumping the helper requires reviewing the patch and passing `./scripts/test-proxy-privacy.sh`, which
 runs the real binary with empty credentials behind a recording loopback HTTP proxy. It checks
 startup and Codex/Claude no-browser OAuth initiation, without opening a browser or authenticating.
-CI and the release workflow run this check. Provider inference and token refresh still need the
+The host architecture selects the pinned Go compiler; the app's slices select the helper targets,
+which are merged before signing. CI and the release workflow run the privacy check. Provider inference and token refresh still need the
 appropriate [live e2e validation](./live-e2e-tests.md).
 
 ### References helper packaging and integration checks
 
-Both bundle scripts copy the SwiftPM `JarvisReferenceHelper` executable through
+Both bundle scripts copy the SwiftPM `JarvisReferenceHelper` executable from the same artifacts
+directory as the app through
 [`scripts/lib/reference-helper.sh`](../scripts/lib/reference-helper.sh) and sign it before the outer
 app. It links system SQLite FTS5 and PDFKit; DOCX uses the exact pinned ZIPFoundation dependency
 with Foundation XML parsing. ZIPFoundation's privacy resource is copied beside the app's other
@@ -305,8 +346,9 @@ ticket, mounts it read-only, and requires exactly the two visible install target
 Finder metadata and arrow background. `scripts/verify-dmg-layout.py` reads the final `.DS_Store` and
 checks the icon view, window size, chrome, icon size and positions, background link and digest, and
 Applications target position. Release verification also checks the Applications target, mounted app
-version, arm64 architecture, the arm64 subscription helper and its license, native References helper with debug fault mode excluded, linked macOS 26-or-newer
-SDK, notices, strict code signature, and
+version, universal architectures in every shipped executable, the subscription helper and its license,
+native References helper with debug fault mode excluded, linked macOS 26-or-newer
+SDK in both app slices, notices, strict code signature, and
 Gatekeeper policy result before detaching the image. The same SDK guard runs immediately after the
 release build, before signing or notarization; the pre-container app is not accepted as a proxy for
 the downloaded artifact.
@@ -318,7 +360,7 @@ CHANGELOG — config in `release-please-config.json`). Merging that PR is the ma
 it creates the GitHub Release **as a draft**, with no second deployment approval. `force-tag-creation`
 tags that draft immediately: GitHub otherwise defers tagging a draft until publish, and an untagged
 draft makes the next release-please run miss the previous release and garble the changelog. An Apple-silicon
-`macos-26` job then runs the test gate, installs only the hash-pinned pure-Python wheels in
+`macos-26` job then runs the test gate, installs the audio build tools and the hash-pinned pure-Python wheels in
 `scripts/requirements-release.txt` into an ephemeral environment, and signs/notarizes with secrets
 scoped to the main-only `release` environment (the base64 `.p12` certificate and an App Store Connect
 API key — names in the workflow). It attaches `Jarvis.dmg` and the `appcast.xml` update feed described
@@ -336,7 +378,8 @@ tags created with `GITHUB_TOKEN` never trigger other workflows.
 `scripts/requirements-release.txt` with `--require-hashes`, and pass its interpreter through
 `DMGBUILD_PYTHON`; notarization also needs the one-time
 `xcrun notarytool store-credentials jarvis-notary …` setup. Distributed builds require macOS 14.2 or
-later and run on Apple silicon only because `libjarvis-aec.a` is arm64-only. The README owns the user
+later and run natively on Apple silicon and Intel. Packaging builds the universal AEC archive before
+compiling both app architectures, then validates the assembled bundle before signing. The README owns the user
 installation steps; provider credentials remain user-supplied in Settings.
 
 ## In-app updates — Sparkle over the release feed

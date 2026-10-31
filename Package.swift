@@ -31,12 +31,15 @@ let package = Package(
         .target(name: "JarvisEvaluation", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"]),
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
         .target(name: "JarvisScreenCapture", dependencies: ["JarvisCore", "JarvisProcess"]),
-        // lib/libjarvis-aec.a is prebuilt by scripts/build-aec.sh; only the C facade compiles here.
+        // The locally built universal archive takes precedence over the bundled arm64 archive.
         .target(
             name: "CJarvisAEC",
             exclude: ["lib"],
             linkerSettings: [
-                .unsafeFlags(["\(packageRoot)/Sources/CJarvisAEC/lib/libjarvis-aec.a"]),
+                .unsafeFlags([
+                    "-L\(packageRoot)/.build/aec", "-L\(packageRoot)/Sources/CJarvisAEC/lib",
+                    "-ljarvis-aec",
+                ]),
                 .linkedFramework("CoreFoundation"),
                 .linkedLibrary("c++"),
             ]
