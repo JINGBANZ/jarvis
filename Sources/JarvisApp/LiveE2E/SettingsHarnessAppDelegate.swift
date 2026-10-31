@@ -46,16 +46,16 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
         }
     }
 
-    private func require(_ condition: Bool, _ message: String) throws {
+    func require(_ condition: Bool, _ message: String) throws {
         if !condition { throw NSError(domain: "SettingsHarness", code: 1,
                                       userInfo: [NSLocalizedDescriptionKey: message]) }
     }
 
-    private func descendants(_ view: NSView) -> [NSView] {
+    func descendants(_ view: NSView) -> [NSView] {
         [view] + view.subviews.flatMap(descendants)
     }
 
-    private func snapshot(_ view: NSView, name: String) throws {
+    func snapshot(_ view: NSView, name: String) throws {
         view.layoutSubtreeIfNeeded()
         guard let image = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
             throw CocoaError(.fileWriteUnknown)
@@ -68,6 +68,7 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
     }
 
     private func run() async throws {
+        if !relaunch { try checkConnections(output: output) }
         let domain = "jarvis.settings-harness.\(output.lastPathComponent)"
         let defaults = UserDefaults(suiteName: domain)!
         defer { if relaunch { defaults.removePersistentDomain(forName: domain) } }

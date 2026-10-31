@@ -34,7 +34,7 @@ final class SubscriptionControls: NSObject {
         self.onHeightChanged = onHeightChanged
         let card = SettingsCardView(frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
         self.card = card
-        card.setHeader(title: "Subscriptions", detail: "Use your ChatGPT or Claude plan as my brain")
+        card.setHeader(title: "Subscription", detail: "Use your ChatGPT or Claude plan as my brain")
         guard let content = card.contentView else { return card }
 
         for (index, provider) in Self.providers.enumerated() {
