@@ -57,7 +57,7 @@ import Testing
         work.referencesObservation = .user("a question is pending")
         let target = BrainTarget(
             provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
-        return await runner.runAttempt(work, using: .init(
+        return await runner.runTestAttempt(work, using: .init(
             plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
             target: target, brain: brain, summarizer: nil, onSelected: nil,
             documents: nil)).result

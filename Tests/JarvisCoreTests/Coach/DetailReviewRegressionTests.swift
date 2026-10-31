@@ -16,7 +16,7 @@ import Testing
         work.screenObservation = [.userImage("stale-image"), .user("stale-ocr")]
         work.referencesObservation = .user("retained-prep")
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
-        _ = await runner.runAttempt(work, using: .init(plan: .default, routeRevision: 0,
+        _ = await runner.runTestAttempt(work, using: .init(plan: .default, routeRevision: 0,
             routeTopologyRevision: 0, routeIndex: 0, target: target, brain: brain,
             summarizer: nil, onSelected: nil, documents: nil))
         let messages = try #require(brain.calls.first)
@@ -109,6 +109,7 @@ private struct ReviewScreen: ScreenCapturing {
             textEvidence: [ScreenTextEvidence(
                 text: "fresh-ocr", source: .onDeviceOCR, coverage: .currentViewport)]) : nil
     }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }
 

@@ -9,6 +9,7 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
     private let output: URL
     private let relaunch: Bool
     private var task: Task<Void, Never>?
+    private var shortcutHarness: ShortcutReplacementHarness?
     var liveCoachDriver: CoachDriver?
     var liveSessionDirectory: URL? { output }
     var liveSessionEvidence: FileSessionAudit? { nil }
@@ -114,9 +115,12 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
                     && group.frame.minX >= -1 && group.frame.maxX <= column.bounds.width + 1
             }
         }
-        try require(rows.count == CoachingShortcut.allCases.count && rows.allSatisfy {
-            descendants($0).compactMap { $0 as? NSTextField }.filter { !$0.stringValue.isEmpty }.count == 2
-        }, "all shortcuts retain their name and description")
+        // AppKit buttons contain their own text fields; only the row owns the action labels.
+        let rowLabels = rows.map { $0.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue) }
+        try require(rows.count == CoachingShortcut.allCases.count
+                    && zip(rowLabels, CoachingShortcut.allCases).allSatisfy { labels, shortcut in
+                        labels.count == 2 && labels[0] == shortcut.title && !labels[1].isEmpty
+                    }, "all shortcuts retain their name and description")
         try snapshot(background, name: "shortcuts")
         guard let recorder = views.compactMap({ $0 as? HotkeyRecorderButton }).first else {
             throw CocoaError(.coderValueNotFound)
@@ -211,6 +215,12 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
             tab.highlight(false)
         }
         if relaunch { return }
+        let replacementDomain = domain + ".replacement"
+        let replacementDefaults = UserDefaults(suiteName: replacementDomain)!
+        defer { replacementDefaults.removePersistentDomain(forName: replacementDomain) }
+        let shortcutHarness = ShortcutReplacementHarness(defaults: replacementDefaults)
+        self.shortcutHarness = shortcutHarness
+        try await shortcutHarness.run()
         let traffic = SettingsHarnessTraffic()
         let brain = BrainComposition(secrets: FileSecretStore(), host: self,
             supervisor: LocalProxySupervisor(executable: nil, home: output.appendingPathComponent("proxy"),
@@ -275,6 +285,7 @@ private actor SettingsHarnessTraffic {
 
 private struct SettingsHarnessScreen: ScreenCapturing {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }
 

@@ -82,7 +82,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
     struct PendingCoachingWork {
         var reason: TriggerReason
-        /// A retry of a failed press is automatic, so it clears this unless another press joins.
+        /// Only a fresh press bypasses automatic settlement; retries wait for settlement.
         var bypassesTranscriptionSettlement: Bool
         var wake: CoachingAttemptAuditEvent.Wake = .trigger
         /// Retry context excludes reasoning and tool-call linkage. Searches replace stale hits;
@@ -145,7 +145,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
     func runAttempt(
         _ pendingWork: PendingCoachingWork,
-        using attempt: CoachDriver.AttemptBrain
+        using attempt: CoachDriver.AttemptBrain,
+        scope: CoachAttemptScope
     ) async -> AttemptExecution {
         if Task.isCancelled {
             jlog("… attempt cancelled (stopped) before handling")
@@ -153,6 +154,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         }
 
         var work = pendingWork
+        let screen = screen.makeAttemptCapture()
         let reason = work.reason
         if case .silence(let seconds) = reason {
             jlog("🤫 quiet for \(Int(seconds))s")
@@ -171,8 +173,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 default: activity?.record(.manualHint(prompt: prompt))
                 }
             }
-            let screen = self.screen
-            let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
+            let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen, scope: scope)
             if Task.isCancelled {
                 jlog("… attempt cancelled (stopped) after capture")
                 return AttemptExecution(id: nil, result: .cancelled)
@@ -237,7 +238,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 ? "nothing new"
                 : String(delta.lines.map(\.text).joined(separator: " · ").prefix(80))
             jlog("… skipped as filler (\(preview)) — not calling the brain")
-            ledger.commit(through: delta.upTo)
+            guard scope.commit({ ledger.commit(through: delta.upTo) }) else {
+                return AttemptExecution(id: attemptID, result: .cancelled)
+            }
             return AttemptExecution(id: attemptID, result: .skipped(.skippedFillerOnly))
         }
         let attemptContext = self.context.beginAttempt()
@@ -247,7 +250,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         var requestSequence = 1
         // Owned by this attempt, like the conversation whose streamed deltas it turns into overlay
         // snapshots.
-        let relay = ReplyProgressRelay(overlay: overlay)
+        let relay = ReplyProgressRelay(overlay: overlay, scope: scope)
         let conversation: any BrainConversation
         do {
             let requestContext = CoachingRequestAttribution.context(
@@ -258,8 +261,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 sequence: requestSequence,
                 contextRevision: attemptContext.contextRevision,
                 contextRewriteReason: attemptContext.rewriteReason)
-            conversation = try await CoachingRequestAttribution.$current.withValue(requestContext) {
-                try await attempt.brain.makeConversation(progress: relay.sink)
+            conversation = try await scope.run {
+                try await CoachingRequestAttribution.$current.withValue(requestContext) {
+                    let conversation = try await attempt.brain.makeConversation(progress: relay.sink)
+                    scope.retain(conversation)
+                    return conversation
+                }
             }
         } catch {
             if Task.isCancelled || error is CancellationError {
@@ -273,6 +280,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
             return AttemptExecution(
                 id: attemptID,
                 result: .failed(outcome: .brainError, failure: failure, work: work))
+        }
+
+        if Task.isCancelled {
+            return AttemptExecution(id: attemptID, result: .cancelled)
         }
 
         // Failure and cancellation discard these, so "already loaded" never cites unsent history.
@@ -319,31 +330,35 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 }
                 jlog("💬 \(hint)")
                 for reason in parsedDetail?.dropped ?? [] { jlog("Detail: \(reason)") }
-                let delivery = await MainActor.run { () -> (accepted: Bool, detail: ReplyDetail?) in
-                    guard !Task.isCancelled else { return (false, nil) }
-                    return (true, self.overlay.deliver(hint, detail: parsedDetail))
+                let previousMessages = turnMessages
+                let loads = loadedThisAttempt
+                let accepted = await MainActor.run {
+                    guard !Task.isCancelled else { return false }
+                    return scope.commit {
+                        let delivered = self.overlay.deliver(hint, detail: parsedDetail)
+                        self.activity?.record(.tip(hint: hint, detail: delivered?.deliveredMarkdown))
+                        let arguments: [String: Any] = [
+                            "hint": hint, "detail": delivered?.deliveredMarkdown ?? NSNull(),
+                        ]
+                        let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+                        // Rebuilt, not copied, so a hint spoken from prose still commits a call.
+                        var committed = previousMessages
+                        committed.append(.assistantToolCalls([RawToolCall(
+                            id: callID, name: speakToolName,
+                            argumentsJSON: String(decoding: data, as: UTF8.self))]))
+                        committed.append(.init(
+                            role: .tool,
+                            text: JarvisPrompts.Coach.tipShown(dropped: parsedDetail?.dropped ?? []),
+                            toolCallId: callID))
+                        self.history.commit(committed)
+                        self.commitLoads(loads)
+                        self.ledger.commit(through: delta.upTo)
+                    }
                 }
-                guard delivery.accepted else {
+                guard accepted else {
                     await withdraw()
                     return .cancelled
                 }
-                let delivered = delivery.detail
-                activity?.record(.tip(hint: hint, detail: delivered?.deliveredMarkdown))
-                let arguments: [String: Any] = [
-                    "hint": hint, "detail": delivered?.deliveredMarkdown ?? NSNull(),
-                ]
-                let data = try! JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
-                // Rebuilt, not copied, so a hint spoken from prose still commits a call.
-                turnMessages.append(.assistantToolCalls([RawToolCall(
-                    id: callID, name: speakToolName,
-                    argumentsJSON: String(decoding: data, as: UTF8.self))]))
-                turnMessages.append(.init(
-                    role: .tool,
-                    text: JarvisPrompts.Coach.tipShown(dropped: parsedDetail?.dropped ?? []),
-                    toolCallId: callID))
-                history.commit(turnMessages)
-                commitLoads(loadedThisAttempt)
-                ledger.commit(through: delta.upTo)
                 return .completed(.spoke)
             }
 
@@ -355,6 +370,10 @@ final class CoachAttemptRunner: @unchecked Sendable {
             }
 
             while iterations < maxToolIterations {
+                if Task.isCancelled {
+                    await withdraw()
+                    return .cancelled
+                }
                 iterations += 1
                 let loaded = alreadyLoaded.union(loadedThisAttempt)
                 let tools = attemptContext.tools
@@ -385,13 +404,17 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         sequence: requestSequence,
                         contextRevision: attemptContext.contextRevision,
                         contextRewriteReason: attemptContext.rewriteReason)
-                    response = try await CoachingRequestAttribution.$current.withValue(requestContext) {
-                        try await conversation.respond(
-                            messages: attemptContext.messages(
-                                for: turnMessages, finalResponse: iterations == maxToolIterations,
-                                allowsSilence: !reason.isManual),
-                            tools: tools,
-                            toolChoice: toolChoice)
+                    let messages = attemptContext.messages(
+                        for: turnMessages, finalResponse: iterations == maxToolIterations,
+                        allowsSilence: !reason.isManual)
+                    response = try await withTaskCancellationHandler {
+                        try await scope.run {
+                            try await CoachingRequestAttribution.$current.withValue(requestContext) {
+                                try await conversation.respond(messages: messages, tools: tools, toolChoice: toolChoice)
+                            }
+                        }
+                    } onCancel: {
+                        relay.cancel()
                     }
                 } catch {
                     let streamed = await relay.endRequest()
@@ -581,8 +604,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
                 switch call {
                 case .captureScreen(let callID):
-                    let screen = self.screen
-                    let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen)
+                    let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen, scope: scope)
                     if Task.isCancelled {
                         jlog("… attempt cancelled (stopped) after capture")
                         return .cancelled
@@ -631,16 +653,18 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         return .cancelled
                     }
                     jlog("… nothing useful to add, staying silent")
-                    activity?.record(.stayedSilent)
-                    commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
-                    commitLoads(loadedThisAttempt)
-                    ledger.commit(through: delta.upTo)
+                    guard scope.commit({
+                        activity?.record(.stayedSilent)
+                        commitIfWorthKeeping(turnMessages, deltaText: substantiveDeltaText)
+                        commitLoads(loadedThisAttempt)
+                        ledger.commit(through: delta.upTo)
+                    }) else { return .cancelled }
                     return .completed(.silentByModel)
 
                 case .listReferences(let callID, let query, let cursor):
                     do {
                         guard let documents = attempt.documents else { throw ReferenceAccessFailure(reason: .unavailable) }
-                        let result = try await documents.list(query: query, cursor: cursor)
+                        let result = try await scope.run { try await documents.list(query: query, cursor: cursor) }
                         try Task.checkCancellation()
                         activity?.record(.referencesListed(count: result.entries.count))
                         appendToolContinuation(toolCallId: callID, resultText: try ReferenceToolEvidence.render(result),
@@ -655,7 +679,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 case .searchReferences(let callID, let query, let documentIDs):
                     do {
                         guard let documents = attempt.documents else { throw ReferenceAccessFailure(reason: .unavailable) }
-                        let result = try await documents.search(query: query, documentIDs: documentIDs)
+                        let result = try await scope.run { try await documents.search(query: query, documentIDs: documentIDs) }
                         try Task.checkCancellation()
                         let text = try ReferenceToolEvidence.render(result)
                         activity?.record(.referencesSearched(query: query, matchCount: result.hits.count, complete: result.complete))
@@ -671,7 +695,9 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 case .readReference(let callID, let documentID, let offset, let revisionID):
                     do {
                         guard let documents = attempt.documents else { throw ReferenceAccessFailure(reason: .unavailable) }
-                        let result = try await documents.read(documentID: documentID, offset: offset, revisionID: revisionID)
+                        let result = try await scope.run {
+                            try await documents.read(documentID: documentID, offset: offset, revisionID: revisionID)
+                        }
                         try Task.checkCancellation()
                         let text = try ReferenceToolEvidence.render(result)
                         if !work.referencePages.contains(text) { work.referencePages.append(text) }
@@ -740,7 +766,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 work: work)
         }()
 
-        await conversation.finish()
         if case .completed = result {
             startCompactionIfIdle(using: attempt.summarizer ?? attempt.brain)
         }
@@ -761,18 +786,20 @@ final class CoachAttemptRunner: @unchecked Sendable {
     /// Runs the blocking capture off the cooperative executor.
     private static func captureScreen(
         using screen: ScreenCapturing,
-        selecting selection: ScreenCaptureSelection
+        selecting selection: ScreenCaptureSelection,
+        scope: CoachAttemptScope
     ) async -> ScreenSnapshot? {
-        let capture = Task.detached(priority: .userInitiated) { () -> ScreenSnapshot? in
-            guard !Task.isCancelled else { return nil }
-            return screen.capture(selection)
-        }
-        return await withTaskCancellationHandler {
-            // Await the producer itself so cancellation can't outrun helper exit and JPEG cleanup.
-            await capture.value
-        } onCancel: {
-            capture.cancel()
-            screen.cancelCapture()
+        try? await scope.run {
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    // Blocking OS capture must not occupy the cooperative executor while retiring.
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        continuation.resume(returning: screen.capture(selection))
+                    }
+                }
+            } onCancel: {
+                screen.cancelCapture()
+            }
         }
     }
 

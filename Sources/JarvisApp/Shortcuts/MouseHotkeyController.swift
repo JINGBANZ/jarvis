@@ -105,7 +105,12 @@ final class MouseHotkeyController {
         case .passThrough: return Unmanaged.passUnretained(event)
         case .consume: return nil
         case .trigger(let shortcut):
-            // Keep the event-tap callback short; coaching and overlay work runs after it returns.
+            if shortcut.triggerReason != nil {
+                // Admission must precede a later Carbon event in the same run-loop batch.
+                onRequest?(shortcut)
+                return nil
+            }
+            // Keep other actions out of the event-tap callback.
             Task { @MainActor [weak self] in
                 guard let self, !self.isRecording, self.isEnabled(shortcut) else { return }
                 self.onRequest?(shortcut)
@@ -113,4 +118,10 @@ final class MouseHotkeyController {
             return nil
         }
     }
+
+    #if JARVIS_LIVE_E2E
+    func dispatchHarnessEvent(_ type: CGEventType, event: CGEvent) -> Bool {
+        handle(type, event: event) == nil
+    }
+    #endif
 }

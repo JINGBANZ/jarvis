@@ -7,10 +7,10 @@ import Darwin
 import Glibc
 #endif
 
-/// Cleanup must be proven before a capture returns. An unprovable cleanup latches this runner, so
-/// no later capture starts while a screen-derived file is unaccounted for.
+/// Cleanup must be proven before a capture returns. An unprovable cleanup latches the session,
+/// including replacement attempts with independent cancellation handles.
 ///
-/// `@unchecked Sendable`: `lock` guards `activeCommand` and `cleanupFailed`.
+/// `@unchecked Sendable`: `lock` guards `activeCommand` and `cancelled`; cleanup synchronizes itself.
 public final class ScreenCaptureRunner: @unchecked Sendable {
     public enum Outcome: Sendable {
         case captured(Data)
@@ -192,21 +192,32 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
     private let captureDirectory: URL
     private let executable: URL
     private let launcher: any ProcessLaunching
+    private let cleanup: ScreenCaptureCleanupState
     private let lock = NSLock()
     private var activeCommand: Command?
-    private var cleanupFailed = false
+    private var cancelled = false
 
     public init(captureDirectory: URL, launcher: any ProcessLaunching = NativeProcessLauncher()) {
         self.launcher = launcher
         self.captureDirectory = captureDirectory
         self.executable = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        self.cleanup = ScreenCaptureCleanupState()
     }
 
-    init(captureDirectory: URL, executable: URL, launcher: any ProcessLaunching = NativeProcessLauncher()) {
+    init(captureDirectory: URL, executable: URL, launcher: any ProcessLaunching = NativeProcessLauncher(),
+         cleanup: ScreenCaptureCleanupState = ScreenCaptureCleanupState()) {
         self.launcher = launcher
         self.captureDirectory = captureDirectory
         self.executable = executable
+        self.cleanup = cleanup
     }
+
+    public func makeAttemptRunner() -> ScreenCaptureRunner {
+        ScreenCaptureRunner(captureDirectory: captureDirectory, executable: executable,
+                            launcher: launcher, cleanup: cleanup)
+    }
+
+    public var isCancelled: Bool { lock.withLock { cancelled } }
 
     public func capture(arguments: [String]) -> Outcome {
         let output = captureDirectory
@@ -215,9 +226,13 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
             launcher: launcher)
 
         lock.lock()
-        guard !cleanupFailed else {
+        guard !cleanup.hasFailed else {
             lock.unlock()
             return .cleanupFailed
+        }
+        guard !cancelled else {
+            lock.unlock()
+            return .cancelled
         }
         guard activeCommand == nil else {
             lock.unlock()
@@ -242,26 +257,23 @@ public final class ScreenCaptureRunner: @unchecked Sendable {
 
         let removedOutput = removeTransientOutput(output)
         lock.lock()
-        // One lock hold, so a concurrent `cancelCapture()` either lands first and is reported here,
-        // or finds no active command. It can never leak into a later capture.
         if activeCommand === command {
             activeCommand = nil
         }
         let wasCancelled = command.wasCancelled
         if !removedOutput {
             // Stay poisoned even if permissions later change.
-            cleanupFailed = true
+            cleanup.recordFailure()
         }
         lock.unlock()
-        guard removedOutput else { return .cleanupFailed }
+        guard removedOutput, !cleanup.hasFailed else { return .cleanupFailed }
         // A cancel after the helper exited still counts, so no fallback shot starts after a Stop.
         return wasCancelled ? .cancelled : outcome
     }
 
-    /// A no-op with nothing in flight. There is deliberately no pending-request latch, which would
-    /// cancel a later, unrelated capture.
     public func cancelCapture() {
         lock.lock()
+        cancelled = true
         activeCommand?.cancel()
         lock.unlock()
     }

@@ -29,6 +29,7 @@ private final class ReferenceHarnessSink: ActivityEventRecording, OverlayRenderi
 
 private struct ReferenceHarnessScreen: ScreenCapturing {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }
 

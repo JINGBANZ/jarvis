@@ -10,6 +10,10 @@ public struct ScreenCaptureCLI: ScreenCapturing {
         self.runner = runner
     }
 
+    public func makeAttemptCapture() -> any ScreenCapturing {
+        ScreenCaptureCLI(runner: runner.makeAttemptRunner())
+    }
+
     public func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
         if let display = selection.explicitDisplay {
             switch runner.capture(arguments: ["-x", "-t", "jpg", "-D", "\(display)"]) {

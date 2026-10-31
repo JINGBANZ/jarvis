@@ -41,6 +41,11 @@ public final class CoachDriver: @unchecked Sendable {
     private var exhaustionDeliveryGeneration: UInt = 0
     private var pendingExhaustionDeliveryGeneration: UInt?
     private var isHandling = false
+    private struct ActiveAttempt {
+        let task: Task<CoachAttemptRunner.AttemptExecution, Never>
+        let scope: CoachAttemptScope
+    }
+    private var activeAttempt: ActiveAttempt?
     private var mode: CoachingMode = .automatic
     private var pendingTrigger: PendingTrigger?
     /// Lets the retry pause see a trigger that lands before its async waiter is installed.
@@ -252,6 +257,8 @@ public final class CoachDriver: @unchecked Sendable {
     /// Transcript lines before this insertion index have been consumed by a completed attempt.
     public var handledTranscriptCount: Int { ledger.committedCount }
 
+    var isWaitingForTranscription: Bool { transcriptionSettlement.hasWaiters }
+
     /// Manual mode admits only coaching shortcuts. An attempt already running finishes; queued
     /// automatic work and automatic follow-ups stop at the next attempt boundary.
     public func setMode(_ mode: CoachingMode) {
@@ -372,10 +379,13 @@ public final class CoachDriver: @unchecked Sendable {
         }
         if isHandling {
             pendingTrigger = Self.coalescing(pendingTrigger, with: trigger)
+            let superseded = trigger.reason.isManual && activeAttempt?.scope.replace() == true
+                ? activeAttempt?.task : nil
             pendingTriggerGeneration &+= 1
             waiters = Array(pendingTriggerWaiters.values)
             pendingTriggerWaiters.removeAll()
             stateLock.unlock()
+            superseded?.cancel()
             waiters.forEach { $0.resume() }
             // A completed turn can replace a silence wait even while later speech remains active.
             transcriptionSettlement.interruptWaiters()
@@ -442,6 +452,10 @@ public final class CoachDriver: @unchecked Sendable {
             isCoveredByCommittedTranscript($0) ? nil : $0
         }
         pendingTrigger = nil
+        if pending?.reason.isManual == true, !routeIsExhausted {
+            routeSession.recordSuccess()
+            failedTranscriptBoundary = nil
+        }
         return (pending, pendingTriggerGeneration)
     }
 
@@ -536,7 +550,7 @@ public final class CoachDriver: @unchecked Sendable {
     private func releaseHandlingSlot() {
         stateLock.lock()
         isHandling = false
-        if routeIsExhausted {
+        if routeIsExhausted || Task.isCancelled {
             pendingTrigger = nil
         }
         stateLock.unlock()
@@ -647,6 +661,7 @@ public final class CoachDriver: @unchecked Sendable {
         case retry(failureCount: Int, advanced: Bool)
         case staleRevision
         case exhausted
+        case superseded
     }
 
     private func recordAttemptFailure(
@@ -673,6 +688,9 @@ public final class CoachDriver: @unchecked Sendable {
     ) {
         stateLock.lock()
         defer { stateLock.unlock() }
+        if Task.isCancelled {
+            return (.superseded, nil)
+        }
         if routeRevision != attempt.routeRevision
             || routeSession.activeIndex != attempt.routeIndex {
             return (.staleRevision, nil)
@@ -867,10 +885,37 @@ public final class CoachDriver: @unchecked Sendable {
     }
 
     private static func absorb(_ trigger: PendingTrigger, into work: inout CoachAttemptRunner.PendingCoachingWork) {
-        work.reason = coalescing(work.reason, with: trigger.reason)
-        if let pressedAt = trigger.pressedAt {
-            work.manualPressedAt = max(work.manualPressedAt ?? pressedAt, pressedAt)
+        if trigger.reason.isManual {
+            work = Self.work(for: trigger)
+            return
         }
+        work.reason = coalescing(work.reason, with: trigger.reason)
+    }
+
+    private func runAttempt(
+        _ work: CoachAttemptRunner.PendingCoachingWork,
+        using attempt: AttemptBrain,
+        cleanups: inout [Task<Void, Never>]
+    ) async -> CoachAttemptRunner.AttemptExecution {
+        let active = stateLock.withLock { () -> ActiveAttempt? in
+            // A press during target selection owns the next attempt, including a fresh capture.
+            guard pendingTrigger?.reason.isManual != true, !Task.isCancelled else { return nil }
+            let scope = CoachAttemptScope()
+            let task = Task { await runner.runAttempt(work, using: attempt, scope: scope) }
+            let active = ActiveAttempt(task: task, scope: scope)
+            activeAttempt = active
+            return active
+        }
+        guard let active else { return .init(id: nil, result: .cancelled) }
+        let execution = await withTaskCancellationHandler {
+            await active.task.value
+        } onCancel: {
+            active.scope.cancel()
+            active.task.cancel()
+        }
+        stateLock.withLock { activeAttempt = nil }
+        cleanups.append(active.scope.finish())
+        return active.scope.isCancelled ? .init(id: execution.id, result: .cancelled) : execution
     }
 
     @discardableResult
@@ -878,15 +923,32 @@ public final class CoachDriver: @unchecked Sendable {
         _ reason: TriggerReason,
         transcriptBoundary: Int? = nil
     ) async -> TurnOutcome {
+        await admitTrigger(reason, transcriptBoundary: transcriptBoundary)()
+    }
+
+    /// Admit at the event boundary, before task scheduling can reorder presses or move their time.
+    /// The caller must run the returned operation once, including when its task is cancelled.
+    public func admitTrigger(
+        _ reason: TriggerReason,
+        transcriptBoundary: Int? = nil
+    ) -> @Sendable () async -> TurnOutcome {
         let trigger = PendingTrigger(
             reason: reason,
             transcriptBoundary: reason == .turnEnd ? transcriptBoundary : nil,
             pressedAt: reason.isManual ? clock.now() - sessionStart : nil)
-        switch claimOrPend(trigger) {
+        let claim = claimOrPend(trigger)
+        return { await self.handleAdmittedTrigger(trigger, claim: claim) }
+    }
+
+    private func handleAdmittedTrigger(_ trigger: PendingTrigger, claim: TriggerClaim) async -> TurnOutcome {
+        let reason = trigger.reason
+        switch claim {
         case .claimed:
             break
         case .pending:
-            jlog("… busy; batching this \(reason) into the pending conversation")
+            jlog(reason.isManual
+                 ? "… keeping latest coaching shortcut \(reason)"
+                 : "… busy; batching this \(reason) into the pending conversation")
             return .busy
         case .covered:
             jlog("… coalesced deferred turn for already-committed transcript")
@@ -898,6 +960,22 @@ public final class CoachDriver: @unchecked Sendable {
             return .paused
         }
 
+        var cleanups: [Task<Void, Never>] = []
+        let outcome = await handleOwnedTrigger(trigger, cleanups: &cleanups)
+        // TurnTaskBox retains this owner through cleanup, including after Stop, so session evidence
+        // cannot close while abandoned operations still own a provider request or capture file.
+        let pendingCleanup = cleanups
+        await withTaskCancellationHandler {
+            for cleanup in pendingCleanup { await cleanup.value }
+        } onCancel: {
+            pendingCleanup.forEach { $0.cancel() }
+        }
+        return outcome
+    }
+
+    private func handleOwnedTrigger(
+        _ trigger: PendingTrigger, cleanups: inout [Task<Void, Never>]
+    ) async -> TurnOutcome {
         var work = Self.work(for: trigger)
         var automaticSequence = 0
         var unattemptedPress: PendingTrigger?
@@ -923,7 +1001,7 @@ public final class CoachDriver: @unchecked Sendable {
             }
 
             unattemptedPress = nil
-            let execution = await runner.runAttempt(work, using: attempt)
+            let execution = await runAttempt(work, using: attempt, cleanups: &cleanups)
             switch execution.result {
             case .completed(let outcome):
                 latestOutcome = outcome
@@ -958,7 +1036,15 @@ public final class CoachDriver: @unchecked Sendable {
                     coachingAttempts?.recordFinished(
                         attemptID: id, terminal: .cancelled, outcome: .cancelled)
                 }
-                releaseHandlingSlot()
+                if Task.isCancelled {
+                    releaseHandlingSlot()
+                    return .cancelled
+                }
+                if let next = finishOrTakeNextTrigger() {
+                    work = Self.work(for: next)
+                    automaticSequence = 0
+                    continue
+                }
                 return .cancelled
 
             case .failed(let outcome, let failure, var failedWork):
@@ -968,6 +1054,8 @@ public final class CoachDriver: @unchecked Sendable {
                 if let id = execution.id {
                     let terminal: CoachingAttemptAuditEvent.TerminalAction
                     switch action {
+                    case .superseded:
+                        terminal = .cancelled
                     case .exhausted:
                         terminal = .exhaustion
                     case .retry, .staleRevision:
@@ -976,10 +1064,19 @@ public final class CoachDriver: @unchecked Sendable {
                     coachingAttempts?.recordFinished(
                         attemptID: id,
                         terminal: terminal,
-                        outcome: outcome)
+                        outcome: terminal == .cancelled ? .cancelled : outcome)
                 }
                 let routeChanged: Bool
                 switch action {
+                case .superseded:
+                    if Task.isCancelled {
+                        releaseHandlingSlot()
+                        return .cancelled
+                    }
+                    guard let next = finishOrTakeNextTrigger() else { return .cancelled }
+                    work = Self.work(for: next)
+                    automaticSequence = 0
+                    continue
                 case .exhausted:
                     if let next = finishFailedCycle() {
                         work = Self.work(for: next)
@@ -1022,8 +1119,7 @@ public final class CoachDriver: @unchecked Sendable {
                     return .cancelled
                 }
 
-                // Consume a trigger that arrived during the delay here, so a shortcut keeps its
-                // manual semantics (no settlement wait) at the admission boundary.
+                // A new press owns fresh evidence and its own manual-mode settlement boundary.
                 wake = takePendingTriggerSnapshot()
                 if let trigger = wake.trigger {
                     receivedTrigger = true

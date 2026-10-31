@@ -397,7 +397,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
     public func showReplyProgress(_ progress: BrainReplyProgress?) {
         guard let progress else { return removeLiveReply() }
         let text = progress.hint.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || progress.detailMarkdown?.isEmpty == false else { return }
+        guard progress.hasText else { return }
         let shown = text.isEmpty ? Self.liveDetailPlaceholder : text
         let entry: Int
         if let index = liveEntryIndex {

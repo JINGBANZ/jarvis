@@ -403,7 +403,8 @@ final class SessionComposition {
         }
         self.requestManualHint = { shortcut in
             guard let reason = shortcut.triggerReason else { return }
-            turns.run { await driver.handleTrigger(reason) }
+            let operation = driver.admitTrigger(reason)
+            turns.run { _ = await operation() }
         }
         transcriber.connect()
         themTranscriber.connect()
