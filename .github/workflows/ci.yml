@@ -1,9 +1,16 @@
 name: CI
 
-# PR-only on purpose: release.yml re-runs the Gate on a release merge, and a push-to-main trigger
-# would repeat this suite at the 10x macOS minute multiplier.
+# Main only warms the shared dependency cache; the full Gate remains PR-only.
 on:
   pull_request:
+  push:
+    branches: [main]
+    paths:
+      - .github/actions/cache-aec/**
+      - .github/workflows/ci.yml
+      - scripts/build-aec.sh
+      - scripts/aec/**
+      - Sources/CJarvisAEC/include/**
 
 permissions:
   contents: read
@@ -13,7 +20,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  audio-cache:
+    if: github.event_name == 'push'
+    runs-on: macos-26
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/cache-aec
+
   gate:
+    if: github.event_name == 'pull_request'
     name: Gate (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -26,23 +42,46 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Show toolchain
+        id: toolchain
         run: |
           sw_vers
           xcode-select -p
           swift --version
           /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$(xcode-select -p)/../Info.plist"
+          fingerprint="$( { xcodebuild -version; swift --version; } | shasum -a 256 | cut -d' ' -f1)"
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
 
-      - name: Build Intel audio dependency
+      - name: Prepare Intel audio dependency
         if: runner.arch == 'X64'
-        run: |
-          brew install meson ninja pkgconf
-          ./scripts/build-aec.sh
+        uses: ./.github/actions/cache-aec
+
+      - name: Cache Swift build
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .build/artifacts
+            .build/checkouts
+            .build/repositories
+            .build/workspace-state.json
+            .build/*-apple-macosx
+            .build/build.db
+            .build/debug.yaml
+            .build/ci-cache-inputs.json
+          key: swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**', 'Sources/CJarvisAEC/include/**', 'Sources/CJarvisAEC/lib/**', 'Sources/CJarvisAEC/*.c') }}-${{ github.sha }}
+          restore-keys: |
+            swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**', 'Sources/CJarvisAEC/include/**', 'Sources/CJarvisAEC/lib/**', 'Sources/CJarvisAEC/*.c') }}-
+
+      - name: Restore unchanged input timestamps
+        run: python3 scripts/ci-build-cache.py restore
 
       - name: Compile all targets
         run: swift build
 
       - name: Run tests and static guards
         run: ./scripts/run-ci-tests.sh
+
+      - name: Record successful build inputs
+        run: python3 scripts/ci-build-cache.py snapshot
 
       - name: Upload test failure evidence
         if: failure()
@@ -59,7 +98,7 @@ jobs:
   # Keep the existing required check name while requiring all validation jobs to pass.
   test:
     needs: [gate, proxy-privacy, universal-app]
-    if: always()
+    if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
@@ -74,14 +113,22 @@ jobs:
           test "$UNIVERSAL_APP_RESULT" = success
 
   universal-app:
+    if: github.event_name == 'pull_request'
     runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/cache-aec
+      - name: Cache bundled subscription helper
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .build/cliproxyapi/*/*/*/cliproxyapi
+            .build/cliproxyapi/*/*/*/binary.sha256
+            .build/cliproxyapi/*/*/*/LICENSE
+          key: helper-universal-v1-${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
       - name: Build and verify universal app without signing
         run: |
-          brew install meson ninja pkgconf
-          ./scripts/build-aec.sh
           swift build -c release --arch arm64 --arch x86_64
           ARTIFACTS="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)"
           source scripts/lib/app-bundle.sh
@@ -127,6 +174,7 @@ jobs:
           PY
 
   proxy-privacy:
+    if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:
@@ -135,5 +183,13 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Cache native subscription helper
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .build/cliproxyapi/*/*/*/cliproxyapi
+            .build/cliproxyapi/*/*/*/binary.sha256
+            .build/cliproxyapi/*/*/*/LICENSE
+          key: helper-native-v1-${{ runner.arch }}-${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
       - name: Build and check bundled helper egress
         run: ./scripts/test-proxy-privacy.sh

@@ -24,6 +24,22 @@ failure artifacts. Pixel assertions also need a consistent color space and scale
 offscreen images inherit the display's color profile. The normalization and diagnostic evidence live
 in [`coloredDashedArrowsRenderTheirStyle`](../Tests/JarvisOverlayTests/DiagramHintRenderingTests.swift).
 
+CI caches build work while running the complete tests and bundle guards on every pull request.
+Swift caches are separated by runner, toolchain, dependency pins, and build scripts; subsequent
+commits can reuse compatible intermediates. [`ci-build-cache.py`](../scripts/ci-build-cache.py)
+restores a tracked input's timestamp only when its contents match the successful cached build,
+because fresh checkout timestamps otherwise invalidate unchanged Swift sources. Changed inputs
+retain their new timestamps and go through the normal compiler dependency checks. Test results,
+session data, and credentials are outside the cache paths.
+
+The [audio cache action](../.github/actions/cache-aec/action.yml) keys the universal archive by its
+compiler, SDK, pinned source recipe, and shim, then verifies its checksum and both architectures.
+The subscription helper retains its recipe/architecture keys and digest verification. Cache misses
+build from source. Relevant pushes to `main` warm only the audio cache so new PRs can restore it;
+GitHub isolates Swift caches created by one PR from other PRs. Initial runs, evicted caches, and
+toolchain or dependency changes therefore take longer than subsequent runs of the same PR. Signed
+release packaging builds its dependencies independently of these PR caches.
+
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested
   with mocks on **any** machine — no Mac UI, key, or permissions needed.

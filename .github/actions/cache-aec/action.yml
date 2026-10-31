@@ -1,0 +1,33 @@
+name: Universal audio dependency
+description: Reuse the pinned audio archive for an identical compiler and build recipe.
+runs:
+  using: composite
+  steps:
+    - name: Identify audio toolchain
+      id: toolchain
+      shell: bash
+      run: |
+        fingerprint="$( { xcodebuild -version; xcrun clang --version | sed -n '1p'; xcrun --show-sdk-version; } | shasum -a 256 | cut -d' ' -f1)"
+        echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+    - name: Cache universal audio archive
+      id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          .build/aec/libjarvis-aec.a
+          .build/aec/archive.sha256
+        key: aec-v1-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('scripts/build-aec.sh', 'scripts/aec/**', 'Sources/CJarvisAEC/include/**') }}
+    - name: Build universal audio archive
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: |
+        brew install meson ninja pkgconf
+        ./scripts/build-aec.sh
+        (cd .build/aec && shasum -a 256 libjarvis-aec.a > archive.sha256)
+    - name: Verify cached audio archive
+      shell: bash
+      run: |
+        (cd .build/aec && shasum -a 256 -c archive.sha256)
+        for architecture in arm64 x86_64; do
+          lipo .build/aec/libjarvis-aec.a -verify_arch "$architecture"
+        done

@@ -45,6 +45,53 @@ stop_test_app() { :; }
                               capture_output=True, timeout=15)
 
 
+class BuildCacheTests(ScriptTests):
+    def setUp(self):
+        super().setUp()
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        self.module = runpy.run_path(str(self.root / 'scripts/ci-build-cache.py'))
+        self.manifest = self.root / '.build/ci-cache-inputs.json'
+        self.source = self.root / 'Source.swift'
+        self.source.write_text('let value = 1\n')
+        subprocess.run(['git', 'add', 'Source.swift'], cwd=self.root, check=True)
+
+    def test_fresh_checkout_reuses_only_unchanged_input_timestamps(self):
+        original = self.source.stat().st_mtime_ns
+        self.module['snapshot'](self.root, self.manifest)
+        os.utime(self.source, ns=(original + 10_000_000_000,) * 2)
+        self.module['restore'](self.root, self.manifest)
+        self.assertEqual(self.source.stat().st_mtime_ns, original)
+        self.source.write_text('let value = 2\n')
+        modified = self.source.stat().st_mtime_ns
+        self.module['restore'](self.root, self.manifest)
+        self.assertEqual(self.source.stat().st_mtime_ns, modified)
+        self.assertEqual(self.source.read_text(), 'let value = 2\n')
+
+    def test_cache_miss_and_deleted_or_untracked_inputs_are_untouched(self):
+        self.module['restore'](self.root, self.manifest)
+        self.module['snapshot'](self.root, self.manifest)
+        self.source.unlink()
+        untracked = self.root / 'untracked'
+        untracked.write_text('private fixture')
+        original = untracked.stat().st_mtime_ns
+        entries = json.loads(self.manifest.read_text())
+        entries['untracked'] = entries['Source.swift']
+        self.manifest.write_text(json.dumps(entries))
+        self.module['restore'](self.root, self.manifest)
+        self.assertFalse(self.source.exists())
+        self.assertEqual(untracked.stat().st_mtime_ns, original)
+
+    def test_symlink_does_not_change_its_target(self):
+        self.module['snapshot'](self.root, self.manifest)
+        self.source.unlink()
+        target = self.root / 'target'
+        target.write_text('let value = 1\n')
+        self.source.symlink_to(target)
+        original = target.stat().st_mtime_ns
+        self.module['restore'](self.root, self.manifest)
+        self.assertEqual(target.stat().st_mtime_ns, original)
+
+
 class GuardTests(ScriptTests):
     def test_process_boundary_guard_rejects_context_import_and_transitive_dependency(self):
         guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
