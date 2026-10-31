@@ -14,12 +14,20 @@ struct WindowScopedScreenCapture: ScreenCapturing {
         ocr: ScreenTextRecognizer())
 
     init(captureDirectory: URL, launcher: any ProcessLaunching = NativeProcessLauncher()) {
-        let runner = ScreenCaptureRunner(captureDirectory: captureDirectory, launcher: launcher)
+        self.init(runner: ScreenCaptureRunner(captureDirectory: captureDirectory, launcher: launcher))
+    }
+
+    private init(runner: ScreenCaptureRunner) {
         self.runner = runner
         self.fallback = ScreenCaptureCLI(runner: runner)
     }
 
+    func makeAttemptCapture() -> any ScreenCapturing {
+        WindowScopedScreenCapture(runner: runner.makeAttemptRunner())
+    }
+
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
+        guard !runner.isCancelled else { return nil }
         if selection.scope == .activeWindow,
            let window = Self.frontWindow() {
             // Read the page identity before capturing: browser text is accepted only while this
@@ -27,11 +35,12 @@ struct WindowScopedScreenCapture: ScreenCapturing {
             let browserDocumentIdentity = selection.browserTextEnabled
                 ? textResolver.browserDocumentIdentity(for: window)
                 : nil
-            guard !Task.isCancelled else { return nil }
+            guard !runner.isCancelled else { return nil }
             let outcome = runner.capture(
                 arguments: ["-x", "-o", "-t", "jpg", "-l", "\(window.windowID)"])
             switch outcome {
             case let .captured(jpeg):
+                guard !runner.isCancelled else { return nil }
                 return ScreenSnapshot(
                     imageBase64: jpeg.base64EncodedString(),
                     textEvidence: textResolver.resolve(

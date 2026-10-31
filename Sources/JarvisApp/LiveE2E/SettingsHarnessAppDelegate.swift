@@ -282,6 +282,7 @@ private actor SettingsHarnessTraffic {
 
 private struct SettingsHarnessScreen: ScreenCapturing {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }
 

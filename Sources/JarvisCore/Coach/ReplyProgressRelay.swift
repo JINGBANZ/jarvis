@@ -19,12 +19,14 @@ final class ReplyProgressRelay: @unchecked Sendable {
     }
 
     private let overlay: OverlayRendering
+    private let scope: CoachAttemptScope
     private let lock = NSLock()
     private var request: Request?
     private var cancelled = false
 
-    init(overlay: OverlayRendering) {
+    init(overlay: OverlayRendering, scope: CoachAttemptScope) {
         self.overlay = overlay
+        self.scope = scope
     }
 
     /// The conversation's sink for the whole attempt; it feeds whichever request is open.
@@ -90,6 +92,7 @@ final class ReplyProgressRelay: @unchecked Sendable {
 
     private func consume(_ stream: AsyncStream<BrainReplyProgress>) -> Task<Void, Never> {
         let overlay = overlay
+        let scope = scope
         return Task { @MainActor in
             defer {
                 if Task.isCancelled { overlay.showReplyProgress(nil) }
@@ -99,7 +102,7 @@ final class ReplyProgressRelay: @unchecked Sendable {
                 if let lastPaint, lastPaint.duration(to: .now) < Self.frame {
                     try? await Task.sleep(for: Self.frame - lastPaint.duration(to: .now))
                 }
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, scope.acceptOutput() else { return }
                 overlay.showReplyProgress(snapshot)
                 lastPaint = .now
             }

@@ -48,33 +48,11 @@ final class ShortcutReplacementHarness: OverlayRendering {
         for mode: CoachingMode in [.automatic, .manual] {
             for (index, action) in Self.actions.enumerated() {
                 for mouseFirst in [false, true] {
-                    let brain = ShortcutReplacementBrain()
-                    let transcript = RollingTranscript()
-                    transcript.append(.init(speaker: .them, text: "Explain the binary search invariant.", at: 0))
-                    let driver = CoachDriver(config: .default, transcript: transcript,
-                        route: .init(targets: [.init(target: .init(provider: .openAI, modelID: "synthetic"), brain: brain)]),
-                        screen: ShortcutReplacementScreen(), overlay: self, clock: SystemClock())
-                    driver.setMode(mode)
-                    self.driver = driver
-                    delivered = []
-                    progress = nil
-                    completed = false
-                    panel.setSessionLive(true)
-                    try dispatch(action, mouse: mouseFirst)
-                    try await wait { self.progress != nil }
-                    let replacement = Self.actions[(index + 1) % Self.actions.count]
-                    try dispatch(replacement, mouse: !mouseFirst)
-                    try await wait { self.completed }
-                    let calls = await brain.calls
-                    try require(calls.count == 2 && delivered == ["replacement"] && progress == nil,
-                                "only replacement delivers through keyboard and mouse in \(mode)")
-                    let expected = replacement == .hint ? "hint shortcut" : replacement.title
-                    try require(calls[1].compactMap(\.text).joined().contains(expected), "latest shortcut intent")
-                    try require(driver.handledTranscriptCount == 1, "replacement commits unconsumed speech")
-                    let pending = turns.cancelAll()
-                    for task in pending { await task.value }
-                    await driver.cancelBackgroundWork()?.value
-                    panel.setSessionLive(false)
+                    for streaming in [false, true] {
+                        try await checkReplacement(mode: mode, action: action,
+                            replacement: Self.actions[(index + 1) % Self.actions.count],
+                            mouseFirst: mouseFirst, streaming: streaming)
+                    }
                 }
             }
             for mouseFirst in [false, true] {
@@ -82,6 +60,58 @@ final class ShortcutReplacementHarness: OverlayRendering {
             }
         }
         jlog("Signed shortcut replacement checks passed: keyboard/mouse dispatch, all coaching actions, automatic/manual")
+    }
+
+    private func checkReplacement(mode: CoachingMode, action: CoachingShortcut,
+                                  replacement: CoachingShortcut, mouseFirst: Bool, streaming: Bool) async throws {
+        let brain = ShortcutReplacementBrain(streamFirstReply: streaming)
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .them, text: "Explain the binary search invariant.", at: 0))
+        let driver = CoachDriver(config: .default, transcript: transcript,
+            route: .init(targets: [.init(target: .init(provider: .openAI, modelID: "synthetic"), brain: brain)]),
+            screen: ShortcutReplacementScreen(), overlay: self, clock: SystemClock())
+        driver.setMode(mode)
+        self.driver = driver
+        delivered = []
+        progress = nil
+        completed = false
+        panel.setSessionLive(true)
+        do {
+            try dispatch(action, mouse: mouseFirst)
+            try await wait { await brain.calls.count == 1 }
+            if streaming { try await wait { self.progress != nil } }
+            try dispatch(.hint, mouse: !mouseFirst)
+            try dispatch(.showCode, mouse: mouseFirst)
+            try dispatch(replacement, mouse: !mouseFirst)
+            if streaming {
+                try require(await brain.calls.count == 1 && progress != nil, "visible reply stays active")
+                await brain.releaseFirstReply()
+            } else {
+                try await wait { self.delivered == ["replacement"] }
+                await brain.releaseFirstReply()
+            }
+            try await wait { self.completed }
+            let calls = await brain.calls
+            let expectedReplies = streaming ? ["first reply", "replacement"] : ["replacement"]
+            try require(calls.count == 2 && delivered == expectedReplies && progress == nil,
+                        "replacement and protected streaming through keyboard and mouse in \(mode)")
+            let expected = replacement == .hint ? "hint shortcut" : replacement.title
+            try require(calls[1].compactMap(\.text).joined().contains(expected), "latest shortcut intent")
+            if streaming {
+                try require(calls[1].flatMap { $0.toolCalls ?? [] }.contains {
+                    $0.argumentsJSON.contains("first reply")
+                }, "queued shortcut sees the completed reply")
+            }
+            try require(driver.handledTranscriptCount == 1, "unconsumed speech commits once")
+        } catch {
+            await brain.releaseFirstReply()
+            for task in turns.cancelAll() { await task.value }
+            await driver.cancelBackgroundWork()?.value
+            throw error
+        }
+        for task in turns.cancelAll() { await task.value }
+        await driver.cancelBackgroundWork()?.value
+        panel.setSessionLive(false)
     }
 
     private func checkRapidPresses(mode: CoachingMode, mouseFirst: Bool) async throws {
@@ -129,9 +159,9 @@ final class ShortcutReplacementHarness: OverlayRendering {
         }
     }
 
-    private func wait(_ condition: () -> Bool) async throws {
+    private func wait(_ condition: () async -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(3)
-        while !condition() {
+        while !(await condition()) {
             try require(ContinuousClock.now < deadline, "shortcut replacement deadline")
             try await Task.sleep(for: .milliseconds(5))
         }
@@ -157,7 +187,16 @@ final class ShortcutReplacementHarness: OverlayRendering {
 private actor ShortcutReplacementBrain: BrainClient {
     private(set) var calls: [[ChatMessage]] = []
     private let holdFirstReply: Bool
-    init(holdFirstReply: Bool = true) { self.holdFirstReply = holdFirstReply }
+    private let streamFirstReply: Bool
+    private var firstReply: CheckedContinuation<Void, Never>?
+    init(holdFirstReply: Bool = true, streamFirstReply: Bool = false) {
+        self.holdFirstReply = holdFirstReply
+        self.streamFirstReply = streamFirstReply
+    }
+    func releaseFirstReply() {
+        firstReply?.resume()
+        firstReply = nil
+    }
     func makeConversation(progress: ToolCallProgressSink?) async throws -> any BrainConversation {
         Conversation(brain: self, progress: progress)
     }
@@ -167,10 +206,11 @@ private actor ShortcutReplacementBrain: BrainClient {
     private func respond(_ messages: [ChatMessage], progress: ToolCallProgressSink?) async throws -> BrainResponse {
         calls.append(messages)
         if holdFirstReply && calls.count == 1 {
-            _ = progress?(.init(index: 0, name: "speak", arguments: #"{"hint":"unfinished"#))
-            do { try await Task.sleep(for: .seconds(30)) }
-            catch is CancellationError {}
-            return .init(toolCalls: [.speak(callId: "old", hint: "superseded")])
+            if streamFirstReply {
+                _ = progress?(.init(index: 0, name: "speak", arguments: #"{"hint":"first reply","detail":"streaming"#))
+            }
+            await withCheckedContinuation { firstReply = $0 }
+            return .init(toolCalls: [.speak(callId: "old", hint: "first reply")])
         }
         return .init(toolCalls: [.speak(callId: "new", hint: "replacement")])
     }
@@ -186,6 +226,7 @@ private actor ShortcutReplacementBrain: BrainClient {
 
 private struct ShortcutReplacementScreen: ScreenCapturing {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }
 #endif

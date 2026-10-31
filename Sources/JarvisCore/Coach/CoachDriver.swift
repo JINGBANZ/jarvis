@@ -41,7 +41,11 @@ public final class CoachDriver: @unchecked Sendable {
     private var exhaustionDeliveryGeneration: UInt = 0
     private var pendingExhaustionDeliveryGeneration: UInt?
     private var isHandling = false
-    private var activeAttempt: Task<CoachAttemptRunner.AttemptExecution, Never>?
+    private struct ActiveAttempt {
+        let task: Task<CoachAttemptRunner.AttemptExecution, Never>
+        let scope: CoachAttemptScope
+    }
+    private var activeAttempt: ActiveAttempt?
     private var mode: CoachingMode = .automatic
     private var pendingTrigger: PendingTrigger?
     /// Lets the retry pause see a trigger that lands before its async waiter is installed.
@@ -375,7 +379,8 @@ public final class CoachDriver: @unchecked Sendable {
         }
         if isHandling {
             pendingTrigger = Self.coalescing(pendingTrigger, with: trigger)
-            let superseded = trigger.reason.isManual ? activeAttempt : nil
+            let superseded = trigger.reason.isManual && activeAttempt?.scope.replace() == true
+                ? activeAttempt?.task : nil
             pendingTriggerGeneration &+= 1
             waiters = Array(pendingTriggerWaiters.values)
             pendingTriggerWaiters.removeAll()
@@ -683,7 +688,7 @@ public final class CoachDriver: @unchecked Sendable {
     ) {
         stateLock.lock()
         defer { stateLock.unlock() }
-        if Task.isCancelled || pendingTrigger?.reason.isManual == true {
+        if Task.isCancelled {
             return (.superseded, nil)
         }
         if routeRevision != attempt.routeRevision
@@ -889,23 +894,28 @@ public final class CoachDriver: @unchecked Sendable {
 
     private func runAttempt(
         _ work: CoachAttemptRunner.PendingCoachingWork,
-        using attempt: AttemptBrain
+        using attempt: AttemptBrain,
+        cleanups: inout [Task<Void, Never>]
     ) async -> CoachAttemptRunner.AttemptExecution {
-        let task = stateLock.withLock { () -> Task<CoachAttemptRunner.AttemptExecution, Never>? in
+        let active = stateLock.withLock { () -> ActiveAttempt? in
             // A press during target selection owns the next attempt, including a fresh capture.
             guard pendingTrigger?.reason.isManual != true, !Task.isCancelled else { return nil }
-            let task = Task { await runner.runAttempt(work, using: attempt) }
-            activeAttempt = task
-            return task
+            let scope = CoachAttemptScope()
+            let task = Task { await runner.runAttempt(work, using: attempt, scope: scope) }
+            let active = ActiveAttempt(task: task, scope: scope)
+            activeAttempt = active
+            return active
         }
-        guard let task else { return .init(id: nil, result: .cancelled) }
+        guard let active else { return .init(id: nil, result: .cancelled) }
         let execution = await withTaskCancellationHandler {
-            await task.value
+            await active.task.value
         } onCancel: {
-            task.cancel()
+            active.scope.cancel()
+            active.task.cancel()
         }
         stateLock.withLock { activeAttempt = nil }
-        return execution
+        cleanups.append(active.scope.finish())
+        return active.scope.isCancelled ? .init(id: execution.id, result: .cancelled) : execution
     }
 
     @discardableResult
@@ -937,7 +947,7 @@ public final class CoachDriver: @unchecked Sendable {
             break
         case .pending:
             jlog(reason.isManual
-                 ? "… replacing coaching work with \(reason)"
+                 ? "… keeping latest coaching shortcut \(reason)"
                  : "… busy; batching this \(reason) into the pending conversation")
             return .busy
         case .covered:
@@ -950,6 +960,22 @@ public final class CoachDriver: @unchecked Sendable {
             return .paused
         }
 
+        var cleanups: [Task<Void, Never>] = []
+        let outcome = await handleOwnedTrigger(trigger, cleanups: &cleanups)
+        // TurnTaskBox retains this owner through cleanup, including after Stop, so session evidence
+        // cannot close while abandoned operations still own a provider request or capture file.
+        let pendingCleanup = cleanups
+        await withTaskCancellationHandler {
+            for cleanup in pendingCleanup { await cleanup.value }
+        } onCancel: {
+            pendingCleanup.forEach { $0.cancel() }
+        }
+        return outcome
+    }
+
+    private func handleOwnedTrigger(
+        _ trigger: PendingTrigger, cleanups: inout [Task<Void, Never>]
+    ) async -> TurnOutcome {
         var work = Self.work(for: trigger)
         var automaticSequence = 0
         var unattemptedPress: PendingTrigger?
@@ -975,7 +1001,7 @@ public final class CoachDriver: @unchecked Sendable {
             }
 
             unattemptedPress = nil
-            let execution = await runAttempt(work, using: attempt)
+            let execution = await runAttempt(work, using: attempt, cleanups: &cleanups)
             switch execution.result {
             case .completed(let outcome):
                 latestOutcome = outcome

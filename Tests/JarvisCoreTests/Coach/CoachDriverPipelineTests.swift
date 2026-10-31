@@ -90,12 +90,14 @@ final class FakeScreen: ScreenCapturing, @unchecked Sendable {
                 ScreenTextEvidence(text: $0, source: .onDeviceOCR, coverage: .currentViewport)
             }.map { [$0] } ?? [])
     }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }
 
 /// @unchecked: no stored state.
 final class UnavailableScreen: ScreenCapturing, @unchecked Sendable {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }
 
@@ -116,6 +118,7 @@ final class GatedScreen: ScreenCapturing, @unchecked Sendable {
         release.wait()
         return ScreenSnapshot(imageBase64: payload)
     }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {
         lock.withLock { storedCancelCount += 1 }
         release.signal()
@@ -146,6 +149,7 @@ final class HeldCleanupScreen: ScreenCapturing, @unchecked Sendable {
         return nil
     }
 
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {
         lock.withLock { storedCancelCount += 1 }
         cancellationRequested.signal()
@@ -3218,6 +3222,7 @@ actor AsyncGate {
     private var releaseWaiters: [CheckedContinuation<Void, Never>] = []
 
     var hasEntered: Bool { entered }
+    var hasBeenReleased: Bool { released }
 
     func enter() async {
         entered = true

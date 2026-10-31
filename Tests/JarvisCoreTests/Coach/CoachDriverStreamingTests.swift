@@ -145,7 +145,7 @@ private final class StreamingBrain: BrainClient, @unchecked Sendable {
             coachingAttempts: nil, activity: nil, ledger: CoachTranscriptLedger(),
             capabilities: capabilities)
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
-        return await runner.runAttempt(.init(reason: reason), using: .init(
+        return await runner.runTestAttempt(.init(reason: reason), using: .init(
             plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
             target: target, brain: brain, summarizer: nil, onSelected: nil, documents: nil)).result
     }

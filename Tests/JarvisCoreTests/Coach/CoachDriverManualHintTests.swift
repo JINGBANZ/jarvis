@@ -6,6 +6,7 @@ import Testing
 private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
     private(set) var captureCount = 0
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { captureCount += 1; return nil }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }
 

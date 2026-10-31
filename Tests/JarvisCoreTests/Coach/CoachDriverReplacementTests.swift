@@ -25,8 +25,10 @@ import Testing
           [TriggerReason.manualHint, .manualExplanation, .manualCode])
     func everyShortcutReplacesEvenAnIdenticalPress(mode: CoachingMode, reason: TriggerReason) async {
         let pause = ReplacementPause()
+        let replacement = AsyncGate()
         let brain = ReplacementBrain { index, _ in
             if index == 0 { await pause.wait(); return replacementReply("superseded") }
+            await replacement.enter()
             return replacementReply("replacement")
         }
         let screen = FakeScreen()
@@ -40,7 +42,11 @@ import Testing
         transcript.append(.init(speaker: .them, text: "Include the loop invariant.", at: 1))
         #expect(await driver.handleTrigger(reason) == .busy)
         await pause.cancelled.enter()
+        #expect(await waitFor { await brain.calls.count == 2 }, "replacement starts before old cleanup finishes")
         #expect(driver.handledTranscriptCount == 0)
+        await replacement.release()
+        #expect(await waitFor { overlay.rendered == ["replacement"] && driver.handledTranscriptCount == 2 })
+        #expect(driver.handledTranscriptCount == 2)
         await pause.cleanup.release()
         #expect(await running.value == .spoke)
         #expect(screen.captureCount == 2)
@@ -52,7 +58,7 @@ import Testing
         #expect(!calls[1].compactMap(\.text).joined().contains("superseded"))
     }
 
-    @Test func rapidDifferentPressesReplaceAutomaticWorkWithOnlyTheLatestIntent() async {
+    @Test @MainActor func rapidDifferentPressesReplaceAutomaticWorkWithOnlyTheLatestIntent() async {
         let pause = ReplacementPause()
         let brain = ReplacementBrain { index, _ in
             if index == 0 { await pause.wait(); return replacementReply("superseded") }
@@ -65,10 +71,11 @@ import Testing
         let driver = driver(brain: brain, transcript: transcript, screen: screen, overlay: overlay)
         let running = Task { await driver.handleTrigger(.turnEnd) }
         await pause.entered.waitUntilEntered()
-        for reason: TriggerReason in [.manualHint, .manualExplanation, .manualCode, .manualCode] {
-            #expect(await driver.handleTrigger(reason) == .busy)
-        }
+        let operations = [TriggerReason.manualHint, .manualExplanation, .manualCode, .manualCode]
+            .map { driver.admitTrigger($0) }
+        for operation in operations { #expect(await operation() == .busy) }
         await pause.cancelled.enter()
+        #expect(await waitFor { overlay.rendered == ["code"] })
         await pause.cleanup.release()
         #expect(await running.value == .spoke)
         let calls = await brain.calls
@@ -138,6 +145,15 @@ import Testing
         }
     }
 
+    private func waitFor(_ condition: @Sendable () async -> Bool) async -> Bool {
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !(await condition()) {
+            if ContinuousClock.now >= deadline { return false }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        return true
+    }
+
     @Test func replacingARetryDiscardsItsCaptureAndKeepsTheFullFallbackBudget() async {
         let waiting = AsyncGate()
         let brain = ReplacementBrain { _, _ in throw URLError(.timedOut) }
@@ -180,7 +196,45 @@ import Testing
         #expect(fallback.calls.count == 1)
     }
 
-    @Test func partialOutputIsWithdrawnAndLateDeltasCannotTouchTheReplacement() async {
+    @Test(arguments: [CoachingMode.automatic, .manual])
+    func streamingFinishesBeforeTheLatestQueuedShortcutAndCommitsItsContext(mode: CoachingMode) async {
+        let finishStream = AsyncGate()
+        let overlay = await ReplacementOverlay()
+        let brain = ReplacementBrain { index, progress in
+            if index == 1 {
+                _ = progress?(.init(index: 0, name: "speak", arguments: #"{"hint":"streamed tip","detail":"more"#))
+                await finishStream.enter()
+                #expect(!Task.isCancelled)
+                return replacementReply("streamed tip")
+            }
+            return replacementReply(index == 0 ? "completed tip" : "explanation")
+        }
+        let transcript = RollingTranscript()
+        let screen = FakeScreen()
+        let driver = driver(brain: brain, transcript: transcript, screen: screen, overlay: overlay)
+        driver.setMode(mode)
+        #expect(await driver.handleTrigger(.manualHint) == .spoke)
+        transcript.append(.init(speaker: .them, text: "Explain the invariant.", at: 1))
+        let running = Task { await driver.handleTrigger(.manualHint) }
+        await overlay.painted.enter()
+        for reason: TriggerReason in [.manualHint, .manualCode, .manualExplanation, .manualExplanation] {
+            #expect(await driver.handleTrigger(reason) == .busy)
+        }
+        #expect(await brain.calls.count == 2)
+        #expect(await MainActor.run { overlay.current?.hint } == "streamed tip")
+        #expect(driver.handledTranscriptCount == 0)
+        await finishStream.release()
+        #expect(await running.value == .spoke)
+        #expect(await MainActor.run { overlay.rendered } == ["completed tip", "streamed tip", "explanation"])
+        #expect(screen.captureCount == 3)
+        #expect(driver.handledTranscriptCount == 1)
+        let calls = await brain.calls
+        #expect(calls.count == 3)
+        #expect(calls.last!.compactMap(\.text).joined().contains("Explain more"))
+        #expect(calls.last!.flatMap { $0.toolCalls ?? [] }.contains { $0.argumentsJSON.contains("streamed tip") })
+    }
+
+    @Test func stopWithdrawsPartialOutputAndIgnoresLateDeltas() async {
         let pause = ReplacementPause()
         let overlay = await ReplacementOverlay()
         let brain = ReplacementBrain { index, progress in
@@ -199,19 +253,20 @@ import Testing
         await pause.entered.waitUntilEntered()
         await overlay.painted.enter()
         #expect(await driver.handleTrigger(.manualCode) == .busy)
+        running.cancel()
         await pause.cancelled.enter()
         await overlay.withdrawn.enter()
         #expect(await MainActor.run { overlay.rendered } == ["completed tip"])
         #expect(driver.handledTranscriptCount == 0)
         await pause.cleanup.release()
-        #expect(await running.value == .spoke)
+        #expect(await running.value == .cancelled)
         await brain.emitLateProgress()
-        #expect(await MainActor.run { overlay.rendered } == ["completed tip", "replacement"])
+        #expect(await MainActor.run { overlay.rendered } == ["completed tip"])
         #expect(await MainActor.run { overlay.current } == nil)
-        #expect(driver.handledTranscriptCount == 1)
+        #expect(driver.handledTranscriptCount == 0)
         let calls = await brain.calls
+        #expect(calls.count == 2)
         #expect(calls.last!.flatMap { $0.toolCalls ?? [] }.contains { $0.argumentsJSON.contains("completed tip") })
-        #expect(!calls.last!.flatMap { $0.toolCalls ?? [] }.contains { $0.argumentsJSON.contains("unfinished") })
     }
 
     @Test func aShortcutCancelsAnInFlightReferenceRead() async {
@@ -228,26 +283,179 @@ import Testing
         await documents.pause.entered.waitUntilEntered()
         #expect(await driver.handleTrigger(.manualCode) == .busy)
         await documents.pause.cancelled.enter()
+        #expect(await waitFor { overlay.rendered == ["replacement"] })
         await documents.pause.cleanup.release()
         #expect(await running.value == .spoke)
         #expect(await brain.calls.count == 2)
         #expect(overlay.rendered == ["replacement"])
     }
 
-    @Test func stopCancelsTheActiveAttemptAndDropsTheReplacement() async {
+    @Test @MainActor func stopCancelsTheActiveAttemptAndDropsTheReplacement() async {
         let pause = ReplacementPause()
         let brain = ReplacementBrain { _, _ in await pause.wait(); return replacementReply("late") }
         let overlay = FakeOverlay()
         let driver = driver(brain: brain, overlay: overlay)
         let running = Task { await driver.handleTrigger(.manualHint) }
         await pause.entered.waitUntilEntered()
-        #expect(await driver.handleTrigger(.manualCode) == .busy)
+        let pending = driver.admitTrigger(.manualCode)
         running.cancel()
+        #expect(await pending() == .busy)
         await pause.cancelled.enter()
         await pause.cleanup.release()
         #expect(await running.value == .cancelled)
         #expect(await brain.calls.count == 1)
         #expect(overlay.rendered.isEmpty)
+    }
+
+    @Test @MainActor func aReplacementBeforeTheFirstPaintRejectsBufferedText() async {
+        let overlay = ReplacementOverlay()
+        let scope = CoachAttemptScope()
+        let relay = ReplyProgressRelay(overlay: overlay, scope: scope)
+        relay.beginRequest()
+        _ = relay.sink(.init(index: 0, name: "speak", arguments: #"{"hint":"buffered"#))
+        #expect(scope.replace())
+        _ = await relay.endRequest()
+        #expect(overlay.current == nil)
+        #expect(overlay.paints == 0)
+    }
+
+    @Test @MainActor func whitespaceThatCannotOpenAnOverlayEntryDoesNotProtectTheAttempt() async {
+        let overlay = ReplacementOverlay()
+        let scope = CoachAttemptScope()
+        let relay = ReplyProgressRelay(overlay: overlay, scope: scope)
+        relay.beginRequest()
+        _ = relay.sink(.init(index: 0, name: "speak", arguments: #"{"hint":" \n\t"#))
+        _ = await relay.endRequest()
+        #expect(overlay.paints == 0)
+        #expect(scope.replace())
+    }
+
+    @Test func aProtectedStreamStillAccountsForARealPermanentFailure() async {
+        let failStream = AsyncGate()
+        let overlay = await ReplacementOverlay()
+        let brain = ReplacementBrain { index, progress in
+            if index == 0 {
+                _ = progress?(.init(index: 0, name: "speak", arguments: #"{"hint":"partial"#))
+                await failStream.enter()
+                throw ProviderFailure(source: .brain(.openAI), stage: .request, category: .authentication,
+                    disposition: .permanent, identity: .init(), message: "rejected")
+            }
+            return replacementReply("incorrectly retried excluded provider")
+        }
+        let fallback = ScriptedBrain(script: [replacementReply("fallback")])
+        let driver = driver(brain: brain, overlay: overlay, fallback: fallback)
+        let running = Task { await driver.handleTrigger(.manualHint) }
+        await overlay.painted.enter()
+        #expect(await driver.handleTrigger(.manualCode) == .busy)
+        await failStream.release()
+        #expect(await running.value == .spoke)
+        #expect(await brain.calls.count == 1)
+        #expect(fallback.calls.count == 1)
+        #expect(await MainActor.run { overlay.rendered } == ["fallback"])
+    }
+
+    @Test(arguments: RetiringConversationBrain.Hold.allCases)
+    private func delayedCreationResponseAndFinishCannotBlockTheReplacement(hold: RetiringConversationBrain.Hold) async {
+        let brain = RetiringConversationBrain(hold: hold)
+        let overlay = FakeOverlay()
+        let driver = driver(brain: brain, overlay: overlay)
+        let running = Task { await driver.handleTrigger(.manualHint) }
+        await brain.pause.entered.waitUntilEntered()
+        let replacement = Task { await driver.handleTrigger(.manualCode) }
+        #expect(await waitFor { overlay.rendered.contains("replacement") })
+        #expect(await brain.finished.filter { $0 == 0 }.isEmpty,
+                "late conversation creation and in-flight responses retain their own cleanup")
+        await brain.pause.entered.release()
+        await brain.pause.cleanup.release()
+        #expect(await running.value == .spoke)
+        let replacementOutcome = await replacement.value
+        if hold == .finish {
+            // Cleanup can start before or after the original loop releases its scheduling slot.
+            #expect(replacementOutcome == .spoke || replacementOutcome == .busy)
+        } else {
+            #expect(replacementOutcome == .busy)
+        }
+        #expect(await brain.finished.sorted() == [0, 1], "every conversation finishes exactly once")
+        #expect(overlay.rendered == (hold == .finish ? ["first", "replacement"] : ["replacement"]))
+    }
+
+    @Test func stopForwardsCancellationWhileTheOwnerDrainsConversationFinish() async {
+        let brain = RetiringConversationBrain(hold: .finish)
+        let driver = driver(brain: brain)
+        let owner = ReplacementOwnerProbe()
+        let running = Task {
+            let outcome = await driver.handleTrigger(.manualHint)
+            await owner.finish()
+            return outcome
+        }
+        await brain.pause.entered.waitUntilEntered()
+        running.cancel()
+        #expect(await waitFor { await brain.pause.cancelled.hasBeenReleased })
+        #expect(await owner.finished == false)
+        await brain.pause.entered.release()
+        await brain.pause.cleanup.release()
+        #expect(await running.value == .spoke, "a completed tip stays committed during cleanup")
+        #expect(await brain.finished == [0])
+    }
+
+    @Test func replacementCapturesAndDeliversWhileOldCaptureCleanupIsBlocked() async {
+        let screen = ReplacementCaptureFactory()
+        let overlay = FakeOverlay()
+        let brain = ScriptedBrain(script: [replacementReply("replacement")])
+        let driver = driver(brain: brain, screen: screen, overlay: overlay)
+        let owner = ReplacementOwnerProbe()
+        let running = Task {
+            let outcome = await driver.handleTrigger(.manualHint)
+            await owner.finish()
+            return outcome
+        }
+        #expect(await waitFor { screen.started == [0] })
+        #expect(await driver.handleTrigger(.manualCode) == .busy)
+        #expect(await waitFor { overlay.rendered == ["replacement"] })
+        #expect(screen.started == [0, 1])
+        #expect(screen.cancelled == [0])
+        #expect(await owner.finished == false, "the owning task retains the old helper until cleanup")
+        screen.release.signal()
+        #expect(await running.value == .spoke)
+        #expect(screen.cancelled == [0], "old cancellation never reaches the new capture handle")
+    }
+
+    @Test func stopDrainsAllRetiringOperationsAndCancelsTheProtectedStream() async {
+        let pauses = [ReplacementPause(), ReplacementPause(), ReplacementPause()]
+        let overlay = await ReplacementOverlay()
+        let brain = ReplacementBrain { index, progress in
+            guard index < pauses.count else { return replacementReply("unexpected queued request") }
+            if index == 2 { _ = progress?(.init(index: 0, name: "speak", arguments: #"{"hint":"live"#)) }
+            await pauses[index].wait()
+            return replacementReply("late")
+        }
+        let driver = driver(brain: brain, overlay: overlay)
+        let owner = ReplacementOwnerProbe()
+        let running = Task {
+            let outcome = await driver.handleTrigger(.manualHint)
+            await owner.finish()
+            return outcome
+        }
+        await pauses[0].entered.waitUntilEntered()
+        #expect(await driver.handleTrigger(.manualCode) == .busy)
+        #expect(await waitFor { await brain.calls.count == 2 })
+        #expect(await driver.handleTrigger(.manualExplanation) == .busy)
+        #expect(await waitFor { await brain.calls.count == 3 })
+        await overlay.painted.enter()
+        #expect(await driver.handleTrigger(.manualHint) == .busy)
+        running.cancel()
+        for pause in pauses { await pause.cancelled.enter() }
+        await overlay.withdrawn.enter()
+        await pauses[2].cleanup.release()
+        await pauses[1].cleanup.release()
+        #expect(await owner.finished == false)
+        #expect(await brain.calls.count == 3)
+        #expect(await MainActor.run { overlay.rendered.isEmpty })
+        await pauses[0].cleanup.release()
+        #expect(await running.value == .cancelled)
+        #expect(await owner.finished)
+        await brain.emitLateProgress()
+        #expect(await MainActor.run { overlay.current == nil && overlay.rendered.isEmpty })
     }
 }
 
@@ -312,6 +520,7 @@ private actor ReplacementBrain: BrainClient {
 @MainActor private final class ReplacementOverlay: OverlayRendering {
     private(set) var rendered: [String] = []
     private(set) var current: BrainReplyProgress?
+    private(set) var paints = 0
     let painted = AsyncGate()
     let withdrawn = AsyncGate()
     nonisolated func render(_ hint: String) {}
@@ -322,7 +531,86 @@ private actor ReplacementBrain: BrainClient {
     }
     func showReplyProgress(_ progress: BrainReplyProgress?) {
         current = progress
+        if progress != nil { paints += 1 }
         Task { if progress != nil { await painted.release() } else { await withdrawn.release() } }
+    }
+}
+
+private actor ReplacementOwnerProbe {
+    private(set) var finished = false
+    func finish() { finished = true }
+}
+
+private actor RetiringConversationBrain: BrainClient {
+    enum Hold: CaseIterable, Sendable { case creation, response, finish }
+    let hold: Hold
+    let pause = ReplacementPause()
+    private var count = 0
+    private(set) var finished: [Int] = []
+    init(hold: Hold) { self.hold = hold }
+
+    func makeConversation(progress: ToolCallProgressSink?) async throws -> any BrainConversation {
+        let index = count
+        count += 1
+        if index == 0, hold == .creation { await pause.wait() }
+        return Conversation(brain: self, index: index)
+    }
+
+    func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
+        preconditionFailure("the test uses attempt-owned conversations")
+    }
+
+    private func respond(index: Int) async -> BrainResponse {
+        if index == 0, hold == .response { await pause.wait() }
+        return replacementReply(index == 0 ? "first" : "replacement")
+    }
+
+    private func finish(index: Int) async {
+        if index == 0, hold == .finish { await pause.wait() }
+        finished.append(index)
+    }
+
+    private struct Conversation: BrainConversation {
+        let brain: RetiringConversationBrain
+        let index: Int
+        func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
+            await brain.respond(index: index)
+        }
+        func finish() async { await brain.finish(index: index) }
+    }
+}
+
+/// `@unchecked Sendable`: the lock guards observations; the semaphore holds only the old capture.
+private final class ReplacementCaptureFactory: ScreenCapturing, @unchecked Sendable {
+    let release = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var count = 0
+    private var captured: [Int] = []
+    private var cancellations: [Int] = []
+    var started: [Int] { lock.withLock { captured } }
+    var cancelled: [Int] { lock.withLock { cancellations } }
+
+    func makeAttemptCapture() -> any ScreenCapturing {
+        lock.withLock {
+            defer { count += 1 }
+            return Capture(owner: self, index: count)
+        }
+    }
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
+        makeAttemptCapture().capture(selection)
+    }
+    func cancelCapture() {}
+
+    private struct Capture: ScreenCapturing {
+        let owner: ReplacementCaptureFactory
+        let index: Int
+        func makeAttemptCapture() -> any ScreenCapturing { self }
+        func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
+            owner.lock.withLock { owner.captured.append(index) }
+            if index == 0 { owner.release.wait() }
+            return .init(imageBase64: "ZmFrZS1qcGVn")
+        }
+        func cancelCapture() { owner.lock.withLock { owner.cancellations.append(index) } }
     }
 }
 
