@@ -212,7 +212,10 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
             tab.highlight(false)
         }
         if relaunch { return }
-        let shortcutHarness = ShortcutReplacementHarness(defaults: defaults)
+        let replacementDomain = domain + ".replacement"
+        let replacementDefaults = UserDefaults(suiteName: replacementDomain)!
+        defer { replacementDefaults.removePersistentDomain(forName: replacementDomain) }
+        let shortcutHarness = ShortcutReplacementHarness(defaults: replacementDefaults)
         self.shortcutHarness = shortcutHarness
         try await shortcutHarness.run()
         let traffic = SettingsHarnessTraffic()
