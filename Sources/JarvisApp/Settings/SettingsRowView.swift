@@ -77,6 +77,13 @@ final class SettingsRowView: NSView {
         titleLabel.textColor = color
     }
 
+    func setDetail(_ detail: NSAttributedString) {
+        detailLabel.attributedStringValue = detail
+        detailLabel.setAccessibilityHelp(detail.string)
+        detailLabel.isHidden = false
+        needsLayout = true
+    }
+
     func height(for width: CGFloat) -> CGFloat {
         guard wrapsDetail, !detailLabel.isHidden else { return preferredHeight }
         let textHeight = detailLabel.cell?.cellSize(forBounds: NSRect(
