@@ -115,9 +115,12 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
                     && group.frame.minX >= -1 && group.frame.maxX <= column.bounds.width + 1
             }
         }
-        try require(rows.count == CoachingShortcut.allCases.count && rows.allSatisfy {
-            descendants($0).compactMap { $0 as? NSTextField }.filter { !$0.stringValue.isEmpty }.count == 2
-        }, "all shortcuts retain their name and description")
+        // AppKit buttons contain their own text fields; only the row owns the action labels.
+        let rowLabels = rows.map { $0.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue) }
+        try require(rows.count == CoachingShortcut.allCases.count
+                    && zip(rowLabels, CoachingShortcut.allCases).allSatisfy { labels, shortcut in
+                        labels.count == 2 && labels[0] == shortcut.title && !labels[1].isEmpty
+                    }, "all shortcuts retain their name and description")
         try snapshot(background, name: "shortcuts")
         guard let recorder = views.compactMap({ $0 as? HotkeyRecorderButton }).first else {
             throw CocoaError(.coderValueNotFound)
