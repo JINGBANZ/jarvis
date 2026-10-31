@@ -115,8 +115,9 @@ final class SettingsHarnessAppDelegate: NSObject, NSApplicationDelegate, BrainCo
                     && group.frame.minX >= -1 && group.frame.maxX <= column.bounds.width + 1
             }
         }
-        try require(rows.count == CoachingShortcut.allCases.count && rows.allSatisfy {
-            descendants($0).compactMap { $0 as? NSTextField }.filter { !$0.stringValue.isEmpty }.count == 2
+        try require(rows.count == CoachingShortcut.allCases.count && zip(rows, CoachingShortcut.allCases).allSatisfy { row, shortcut in
+            let labels = row.subviews.compactMap { $0 as? NSTextField }.map(\.stringValue)
+            return labels.count == 2 && labels.contains(shortcut.title) && labels.allSatisfy { !$0.isEmpty }
         }, "all shortcuts retain their name and description")
         try snapshot(background, name: "shortcuts")
         guard let recorder = views.compactMap({ $0 as? HotkeyRecorderButton }).first else {
