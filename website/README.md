@@ -60,11 +60,10 @@ Enable builds for non-production branches to get previews. Cloudflare installs t
 dependencies from the lockfile. Source stays on GitHub; Cloudflare runs deployment and serves
 the page. No GitHub Actions deployment workflow or repository deployment token is needed.
 
-The default `workers.dev` URL works before a custom domain is attached. Under **Settings →
-Domains & Routes → Add → Custom domain**, attach the chosen hostname from an active zone in the
-same Cloudflare account. Cloudflare manages its DNS record and TLS certificate. If both the apex
-and `www` should work, choose a canonical hostname and configure Cloudflare's redirect rule for
-the other. Once chosen, add that URL as the canonical URL and `og:url` in `index.html`.
+The production domain is [hijarvis.xyz](https://hijarvis.xyz/), declared as a Custom Domain in
+`wrangler.jsonc`. Cloudflare manages its DNS record and TLS certificate. The
+[workers.dev URL](https://jarvis-website.forrestzjb.workers.dev/) remains enabled as an alternate
+address. Keep the canonical URL and `og:url` in `public/index.html` aligned with the production domain.
 
 Cloudflare setup is account state: committing these files does not create the Worker or connect
 GitHub. For a manual deployment after authenticating locally:

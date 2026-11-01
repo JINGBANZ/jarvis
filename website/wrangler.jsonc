@@ -2,6 +2,13 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "jarvis-website",
   "compatibility_date": "2026-10-29",
+  "workers_dev": true,
+  "routes": [
+    {
+      "pattern": "hijarvis.xyz",
+      "custom_domain": true
+    }
+  ],
   "assets": {
     "directory": "./public",
     "not_found_handling": "404-page"
