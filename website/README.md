@@ -59,6 +59,7 @@ access to `JINGBANZ/jarvis`. Configure these values:
 Enable builds for non-production branches to get previews. Cloudflare installs the pinned npm
 dependencies from the lockfile. Source stays on GitHub; Cloudflare runs deployment and serves
 the page. No GitHub Actions deployment workflow or repository deployment token is needed.
+Keep the `previews` block in `wrangler.jsonc`; the preview command requires it even when empty.
 
 The production domain is [hijarvis.xyz](https://hijarvis.xyz/), declared as a Custom Domain in
 `wrangler.jsonc`. Cloudflare manages its DNS record and TLS certificate. The
