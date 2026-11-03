@@ -40,6 +40,47 @@ import Foundation
         #expect(CoachingShortcut.collapseOverlay.triggerReason == nil)
     }
 
+    @Test func newSessionBindingDefaultsToControlShiftCommandZeroAndPersistsIndependently() {
+        let defaults = freshDefaults()
+        let newSession = HotkeyPreferences(defaults: defaults, shortcut: .newSession)
+        // kVK_ANSI_0.
+        #expect(newSession.combination
+            == HotkeyCombination(keyCode: 29, modifiers: [.control, .shift, .command]))
+        newSession.combination = HotkeyCombination(keyCode: 8, modifiers: [.command, .shift])
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .newSession).combination
+            == HotkeyCombination(keyCode: 8, modifiers: [.command, .shift]))
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .collapseOverlay).combination
+            == Defaults.Hotkey.collapseOverlayCombination)
+        #expect(CoachingShortcut.newSession.triggerReason == nil)
+    }
+
+    @Test func shippedDefaultsAreDistinct() {
+        let combinations = CoachingShortcut.allCases.map {
+            HotkeyPreferences(defaults: freshDefaults(), shortcut: $0).combination
+        }
+        for (index, combination) in combinations.enumerated() {
+            #expect(!combinations[(index + 1)...].contains(combination))
+        }
+    }
+
+    @Test func coachingModeToggleDefaultsToOptionCommandPeriodAndPersistsIndependently() {
+        let defaults = freshDefaults()
+        let toggle = HotkeyPreferences(defaults: defaults, shortcut: .toggleCoachingMode)
+        // kVK_ANSI_Period.
+        #expect(toggle.combination == HotkeyCombination(keyCode: 47, modifiers: [.command, .option]))
+        toggle.combination = HotkeyCombination(keyCode: 8, modifiers: [.command, .shift])
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .toggleCoachingMode).combination
+            == HotkeyCombination(keyCode: 8, modifiers: [.command, .shift]))
+        #expect(HotkeyPreferences(defaults: defaults, shortcut: .collapseOverlay).combination
+            == Defaults.Hotkey.collapseOverlayCombination)
+        #expect(CoachingShortcut.toggleCoachingMode.triggerReason == nil)
+    }
+
+    @Test func shortcutsThatAskJarvisToActBeepWhileStopped() {
+        let beeping = Set(CoachingShortcut.allCases.filter(\.beepsWhileStopped))
+        #expect(beeping == [.hint, .explainMore, .showCode, .newSession, .toggleCoachingMode])
+    }
+
     @Test func defaultsToShippedCombinationWhenUnset() {
         #expect(HotkeyPreferences(defaults: freshDefaults()).combination == Defaults.Hotkey.combination)
     }

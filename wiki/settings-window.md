@@ -210,7 +210,7 @@ pages it moves.
 | `TranscriptionSection` | **Ear**: "How I turn the conversation into text." | The transcription provider and its model, language, vocabulary, mode, or locale rows ([Ear](#ear)). Applies on the next Start. |
 | `DisplaySection` | **Eye**: "What I look at when I check your screen." | One **Screen capture** card with the capture-scope dropdown — **Active window** (default) or one **Entire display** entry per connected display — and the optional Chrome text switch, followed by a short fallback/privacy callout. Persists via `ScreenCapturePreferences` and applies to the next coaching attempt ([Capture Scope](#capture-scope)). |
 | `OverlaySection` | **Mouth**: "How my hints show up on your screen." | One **Overlay Box** card (the persistent response history) with an icon, description, text size and opacity rows, and the detail box's own rows. It has no On/Off switch: the box shows for every session. Its live sample appears only while the Mouth page is visible (`didBecomeActive`/`didResignActive`). The header's live chip says the sliders act on screen. Persists via `OverlayAppearance` ([Overlay Appearance](#overlay-appearance)). |
-| `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in three stacked cards — **OpenAI API**, **Gemini API**, **Subscriptions** ([Connections](#connections)). The header chip counts saved managed API keys. |
+| `ConnectionsSection` | **Connections**: "The accounts and keys I use." | Shared authentication and provider readiness in two stacked cards — **BYOK** and **Subscription** ([Connections](#connections)). The header chip counts saved managed API keys. |
 | `ToolsSection` | **Tools**: "Extra things I can reach for while coaching." | References, with its switch and its list of local files and folders ([Tools](#tools)). Applies on the next Start. |
 | `SkillsSection` | **Skills**: "Coaching know-how I load when a matching question comes up." | One card per bundled coaching skill, each with its own switch ([Skills](#skills)). Applies on the next Start. |
 | `GeneralSection` | **General** | Left-side **Shortcuts** and **Privacy** tabs. Shortcuts retain immediate keyboard/mouse binding edits; Privacy owns optional provider conversation storage, applied next session ([General](#general)). |
@@ -319,8 +319,10 @@ during a running session keep that value. The provider storage and retention
 boundaries are defined in [sandbox.md](./sandbox.md#provider-conversation-storage).
 
 `./scripts/run-settings-tests.sh` builds and launches the signed development app twice with a
-dedicated preference domain. It renders the real General page off screen at default/minimum sizes
-and in dark mode, checks stable tab labels, centered mouse controls, accessible keyboard bindings,
+dedicated preference domain. It renders the real Connections and General pages off screen at
+default/minimum sizes and in light/dark mode. Connections checks cover the two groups, saved and
+empty key actions, and inline editing, cancellation, and empty-key feedback with isolated example
+credentials. General checks stable tab labels, centered mouse controls, accessible keyboard bindings,
 shortcut feedback and recording cancellation, changes the Privacy switch, and verifies persistence
 after relaunch. Synthetic provider traffic exercises storage flags across preparation, session changes,
 and client rebuilds. Screenshots and results stay inside the owner-only
@@ -330,9 +332,14 @@ the [live cache scenario](./live-e2e-tests.md#cache-regression-window) separatel
 ## Shortcuts
 
 **Give me a hint** defaults to **⌥⌘J**, **Explain more** to **⌥⌘E**, and **Show code** to **⌥⌘K**.
-They work during a session. All three are fallbacks for proactive coaching;
-[architecture.md](./architecture.md#on-demand-coaching-shortcuts) defines their context, output, and
-scheduling behavior.
+They work during a session. All three are fallbacks for proactive coaching, and the only way to
+request it in manual mode; [architecture.md](./architecture.md#on-demand-coaching-shortcuts) defines
+their context, output, and scheduling behavior.
+
+**Toggle manual mode** defaults to **⌥⌘.** and switches between automatic and
+[manual](./architecture.md#manual-mode) coaching mid-session. The choice persists through
+`CoachingModePreferences` and applies to the next Start too. While stopped it beeps, like the
+coaching shortcuts, and changes nothing.
 
 **Previous detail** and **Next detail** navigate the existing detail history with **⌥⌘←** and
 **⌥⌘→**. They mirror the arrow buttons without activating Jarvis or requesting coaching. At either end
@@ -342,6 +349,11 @@ back holds the chosen detail; reaching the newest resumes following incoming det
 **Collapse overlay** defaults to **⌥⌘,** and toggles the Overlay Box exactly like its header's
 collapse button, without activating Jarvis. While stopped, including while the Overlay tab's preview
 shows, it silently does nothing. The default avoids ⌥⌘M, which macOS reserves for Minimize All in every app.
+
+**Start new session** defaults to **⌃⇧⌘0** and fires with no confirmation; its session behavior is
+defined in [architecture.md](./architecture.md#on-demand-coaching-shortcuts). The default stays
+outside the ⌥⌘ family the other shortcuts share, so a near-miss on a coaching shortcut cannot end
+the session.
 
 General's Shortcuts tab is one scrolling card with a row for each action. Each row retains the
 action's name and brief purpose, with keyboard and optional mouse binding buttons alongside.
@@ -573,7 +585,7 @@ source persistence keeps its existing identities.
 
 The Ear page (`TranscriptionSection`) owns the speech-to-text role without conflating it with the
 brain route. Its one card is `TranscriptionControls`, whose header detail says which key it uses or
-that it runs on this Mac. The provider picker contains **OpenAI** (the default), **Gemini**, and
+that it runs on this Mac. The provider picker contains **OpenAI** (the default), **Gemini**, **Deepgram**, and
 **Apple Speech (macOS 26+)**. Apple is enabled only when the running Mac and OS expose
 `SpeechTranscriber`; selecting any provider persists through `TranscriptionPreferences` and applies
 on the next Start, never halfway through a live session. `TranscriptionControls` shows one fixed row
@@ -608,6 +620,13 @@ better but is no longer exactly what was said). Gemini's turn detection, wire fo
 provider-derived wire sample rate are covered in
 [architecture.md](./architecture.md#models-and-apis).
 
+With Deepgram selected, the card shows one **Expected languages** row (`deepgramExpectedLanguages`),
+a multi-select that behaves like the OpenAI one: none means automatic. Picking a single language
+gives the most accurate recognition. Picking none or several uses Nova-3's multilingual mode
+(`DeepgramTranscriptionModel`), which follows a speaker who switches languages. There is no
+vocabulary row. Its wire format and turn detection are covered in
+[architecture.md](./architecture.md#models-and-apis).
+
 With Apple Speech selected, **Conversation locale** is populated from
 `SpeechTranscriber.supportedLocales`; the initial suggestion is the supported equivalent of the
 current macOS locale. Start downloads or reuses that selected model before replacing a running
@@ -626,18 +645,22 @@ defaults come from [`Defaults`](../Sources/JarvisCore/Config/Defaults.swift).
 
 ## Connections
 
-The Connections page owns authentication shared across Brain and Ear. Its three stacked
-cards are **OpenAI API**, **Gemini API**, and **Subscriptions**. The OpenAI and Gemini
-cards each report and edit only their own Jarvis-managed owner-only file through `APIKeyControls`
+The Connections page owns authentication shared across Brain and Ear. Its two stacked cards are
+**BYOK**, introduced as **Bring your own API keys**, and **Subscription**. BYOK groups **OpenAI**,
+**Gemini**, and **Deepgram** into provider rows. The API-key rows each report and edit only their
+own Jarvis-managed owner-only file through `APIKeyControls`
 (one instance per `Credential`, keyed by `credential.rawValue` so their accessibility labels,
-identifiers, and saved-key state never collide); each card's header says the key serves the brain
-and transcription, and its action is **Add API key** or **Edit**. The row reads **Saved** in teal once a key is saved.
+identifiers, and saved-key state never collide). Each row shows the key's saved state and what it
+powers (`Credential.roles`) below the vendor name, with **Add API key** or **Edit** on the right.
+The saved state reads **Saved** in teal once a key is saved; the role remains muted. Editors and
+check results expand beneath their own provider, growing the BYOK card and the outer scrolling page.
 The `OPENAI_API_KEY` fallback remains usable by Start but is deliberately not presented as a
 Jarvis-managed saved key; Gemini has the same headless fallback in `GEMINI_API_KEY`
 (`Credential.geminiAPIKey.environmentVariable`, read by `EnvSecretStore`), also not presented as a
-saved key.
+saved key. Deepgram's row serves transcription only, with the same fallback in `DEEPGRAM_API_KEY`.
 
-Saving a key checks it. One models-list request goes out with the key in a header, and the card shows
+Saving a key checks it. One request goes out with the key in a header: a models-list request for
+OpenAI and Gemini, or a token-description request for Deepgram (`CredentialVerifier.check`). The provider shows
 what the vendor said under the row: **accepted**, **refused** with the provider's status, error code,
 and redacted message, or **couldn't check the key** carrying the same evidence. The check answers one
 question, whether the provider refused the key, so only an authentication failure is a refusal. An
@@ -649,7 +672,7 @@ it in Activity. The verdict comes from the same
 [architecture.md → Failure surfacing](./architecture.md#failure-surfacing--startup-loud-runtime-ghost)),
 so Settings and a session that dies on the same key cannot disagree. The check never gates the save:
 the key is written first, and a check that fails or times out lands in the inconclusive case with its
-cause rather than blocking anything. While the request is in flight the card reads **Checking the key
+cause rather than blocking anything. While the request is in flight the provider reads **Checking the key
 with …**; closing the window cancels the check and clears that state, so the next open shows no
 answer rather than a check that is no longer running. An answered verdict belongs to the key that was
 checked, so it survives a reopen and is cleared by editing the key. The request is a models list
@@ -658,7 +681,7 @@ costs nothing and still proves the key, the network path, and the region; it doe
 which OpenAI only reports on a real request, which is why the wording is "accepted" rather than a
 claim that the account is healthy.
 
-The **Subscriptions** card (`SubscriptionControls`) has one row each for **Codex**
+The **Subscription** card (`SubscriptionControls`) has one row each for **Codex**
 and **Claude Code**. Opening Connections probes the bundled helper, starting it if it is
 not running, through `SubscriptionSignIns`. The card renders account health from that shared owner's
 answer; [model eligibility](#status) also informs the hub, Brain page, and Start. The state
@@ -824,11 +847,11 @@ Both values, their keys, and the main-display floor are declared in
 | `Sources/JarvisApp/Settings/SkillCardView.swift` | One skill's card |
 | `Sources/JarvisApp/Settings/SkillCardGridView.swift` | Responsive skill card grid |
 | `Sources/JarvisCore/Config/Skill+DisplayTitle.swift` | A skill's card title from its folder name |
-| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | Per-credential API-key editors (OpenAI, Gemini) + the Subscriptions card |
-| `Sources/JarvisApp/Settings/SubscriptionControls.swift` | Renders the Subscriptions card's shared state and dispatches explicit actions |
+| `Sources/JarvisApp/Settings/ConnectionsSection.swift` | BYOK card with per-credential API-key rows (OpenAI, Gemini, Deepgram) + the Subscription card |
+| `Sources/JarvisApp/Settings/SubscriptionControls.swift` | Renders the Subscription card's shared state and dispatches explicit actions |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySupervisor.swift` | Starts, probes, and restarts the bundled helper; owns its credential directory |
 | `Sources/JarvisBrainProviders/Proxy/LocalProxySignIn.swift` | Runs one browser sign-in through the helper and reports its URL and outcome |
-| `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The one models-list request behind a saved key's verdict |
+| `Sources/JarvisApp/Settings/CredentialVerifier.swift` | The provider-specific request behind a saved key's verdict: models-list for OpenAI and Gemini, token description for Deepgram |
 | `Sources/JarvisApp/Settings/BrainTargetRowView.swift` | Shared inline provider/model row for primary and fallback targets |
 | `Sources/JarvisApp/Settings/ProviderRouteEditor.swift` | Unified route card and its persistence mutations, including reorder |
 | `Sources/JarvisCore/Brain/BrainRoute.swift` | The ordered route, its normalization, and `movingTarget(at:by:)` |

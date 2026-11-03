@@ -4,6 +4,8 @@ public struct TranscriptionSetupAcceptance: Codable, Equatable, Sendable {
     public enum Confirmation: String, Codable, Sendable {
         case effectiveConfiguration
         case setupAcknowledged
+        /// Deepgram sends no setup reply; its settings are query parameters on the accepted upgrade.
+        case connectionOpened
         case localPreparation
     }
 

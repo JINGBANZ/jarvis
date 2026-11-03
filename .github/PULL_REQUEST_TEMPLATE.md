@@ -23,12 +23,14 @@ coaching-attempt and provider-route boundaries.
 
 ## Validation
 
-- [ ] `swift build && ./scripts/run-tests.sh` passes — output pasted below
+- [ ] The complete local `swift build && ./scripts/run-tests.sh` passed on the submitted revision before opening this PR — tested commit and output pasted below
 - [ ] Behavior changes are covered by swift-testing cases
 - [ ] Context/serializer/provider changes declare lifetimes and rewrites, pass completed-attempt wire-prefix regressions, and include focused live cache evidence with read/write/uncached/output accounting (or explain why not applicable)
 - [ ] Commits follow Conventional Commits (`type(scope): summary`, lowercase imperative)
 
-<!-- Paste the gate result below, including the test count. -->
+<!-- Paste the tested commit and passing gate output, including the test count.
+A blocked, failed, partial, or CI-only run does not satisfy the local Gate requirement.
+Resolve setup failures before opening the PR; see CONTRIBUTING.md#developer-setup. -->
 
 ```text
 

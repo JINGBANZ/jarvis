@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # The native helper links system SQLite; no runtime downloads or package installation.
 bundle_reference_helper() {
-  local app="$1" configuration="$2"
+  local app="$1" configuration="$2" artifacts="$3"
   local destination="$app/Contents/Resources/ReferenceHelper"
-  local binary artifacts privacy
-  artifacts="$(swift build -c "$configuration" --show-bin-path)"
+  local binary privacy
   binary="$artifacts/JarvisReferenceHelper"
   privacy="$artifacts/ZIPFoundation_ZIPFoundation.bundle"
-  [[ -x "$binary" && -f "$privacy/PrivacyInfo.xcprivacy" ]] || return 1
+  # The Swift Build backend (Swift 6.4+) emits a macOS-layout bundle; the legacy backend a flat one.
+  [[ -x "$binary" && ( -f "$privacy/PrivacyInfo.xcprivacy" \
+      || -f "$privacy/Contents/Resources/PrivacyInfo.xcprivacy" ) ]] || return 1
   rm -rf "$destination"
   mkdir -p "$destination"
   cp "$binary" "$destination/JarvisReferenceHelper"

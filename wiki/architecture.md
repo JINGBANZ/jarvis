@@ -116,11 +116,12 @@ moments the model judges worthwhile.
    intent or infer sentence completeness from punctuation.
    Natural triggers coalesce while waiting. Each finalized turn carries its transcript boundary, so
    a delayed transcript-batch callback arriving after another attempt committed that same line is
-   consumed instead of buying a duplicate request. Any explicit coaching shortcut bypasses this wait.
+   consumed instead of buying a duplicate request. Any explicit coaching shortcut bypasses this wait;
+   in [manual mode](#manual-mode) it first gives speech already in progress a bounded moment.
    The CoachDriver then calls the brain on every trigger that carries **substance** — there is no
    cooldown, rate cap, or wake-word gate. Whether to speak (and whether the user just addressed
    Jarvis) is the model's call, governed by the system prompt; the only hard gates are the user's
-   Start/Stop and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
+   Start/Stop, the user's [manual mode](#manual-mode), and the **substance gate** (`TurnSubstance`): a turn-end whose delta is pure
    clear hesitation sounds ("Hmm", "嗯", or a sequence such as "Uh. Hmm. Oh.") or empty is skipped
    without a request. Those sounds are also removed from a mixed brain-facing delta, while Activity
    keeps the complete finalized transcription. Context-dependent short replies such as "Yes", "No",
@@ -551,6 +552,29 @@ with a fixed interruption notice and a suggestion to press Show code again; comp
 An open diagram contributes no diagram, as in the live parse. Activity and committed history receive
 only this finalized detail, so unfinished code cannot masquerade as a usable saved patch.
 
+### The transcript column
+
+The Overlay Box can show what Jarvis is hearing in a column on its right, toggled by a header button.
+It exists so the user can see which speech is waiting for coaching, most of all in
+[manual mode](#manual-mode), while waiting to press a coaching shortcut. The column widens the box rather than splitting it, so tips keep their width,
+and the saved box width leaves the column out; whether it is shown persists in `OverlayAppearance`.
+Collapse hides it with the log, and Stop clears it.
+
+Rows come from [`TranscriptPaneContent`](../Sources/JarvisCore/Overlay/TranscriptPaneContent.swift):
+the newest 200 finalized lines in spoken order (`ConversationChronology`), then one in-progress row
+per speaker. The user's lines are teal and the other side's white. A line before the coach's
+committed transcript boundary is dimmed, because a completed attempt has consumed it, whether sent
+to the brain or skipped as filler; brighter lines are what the next attempt will carry. Speech in
+progress shows what the provider can say about it. Gemini Live's interim hypothesis appears as grey
+italic text. OpenAI and Apple expose no text before a final, so the row reads `speaking… Ns` from the
+speaker's pending [transcription work](#the-turn). On the default GPT-4o path a long run of speech
+without a one-second pause therefore shows only that counter until it finalizes.
+
+`LiveTranscriptFeed` polls four times a second while the column is shown, rather than adding
+callbacks to the transcription or coaching path, so the column can never delay or change a coaching
+outcome. Interim text is display-only: `LiveSpeechTracker` drops it once the speaker's work settles,
+and it never reaches the transcript, Activity, or a model request.
+
 ### On-demand coaching shortcuts
 
 Hints, explanations, code, and diagrams are all proactive. The shared coach prompt distinguishes
@@ -560,7 +584,8 @@ explanation; silence or unchanged code alone does not. Repeated confusion calls 
 a smaller example, while productive progress calls for silence. This policy applies to every kind of
 question without a separate classifier, timer, or model request.
 
-Three configurable global shortcuts are fallbacks for a missed need: **Give me a hint** (default
+Three configurable global shortcuts are fallbacks for a missed need, and in
+[manual mode](#manual-mode) the only way to request coaching: **Give me a hint** (default
 **⌥⌘J**) requests the next useful hint; **Explain more** (default **⌥⌘E**) explicitly requests
 clarification of the relevant gap, which may span several earlier hints; **Show code** (default
 **⌥⌘K**) requests the next small code block. Each trigger says what the user wants in one line and
@@ -596,6 +621,14 @@ or writes a manual-hint Activity entry. They use the same session detail availab
 other detail shortcuts; unavailable navigation is silent. Their bindings and boundary behavior
 are defined in [General → Shortcuts](./settings-window.md#shortcuts).
 
+**Start new session** discards all session context without quitting: during a live session it
+issues the same Start that the menu bar's Start sends. That replacement path prepares the new
+session while the old one keeps coaching, then ends the old one as `.replacedByNewSession` (an
+ordinary finished session in Activity) and starts a fresh transcript, brain history, and Overlay
+Box. Reusing the replacement Start, rather than a separate in-place reset of the transcript and
+coach state, keeps one session boundary that every component already honors. It carries no
+`TriggerReason`; while stopped it beeps like the coaching shortcuts and starts nothing.
+
 Keyboard shortcuts use **Carbon `RegisterEventHotKey`**, which needs no Accessibility/TCC permission.
 [`CoachingShortcut`](../Sources/JarvisCore/Config/CoachingShortcut.swift) provides stable event identities;
 `HotkeyController` dispatches only matching Jarvis events. Each binding persists independently through
@@ -607,24 +640,61 @@ session and consumes the matched click through release. See
 [General → Shortcuts](./settings-window.md#shortcuts) for binding behavior and
 [Sandbox → Data Egress](./sandbox.md#data-egress) for privacy scope.
 
+### Manual mode
+
+Proactive coaching is the default. **Manual mode** is the user's way to defer it: Jarvis keeps
+listening, transcribing, and recording Activity, but reaches the brain only when a coaching shortcut
+is pressed. It suits practice sessions and conversations where hints should come only on request.
+It is an admission rule, not a second coaching loop: every question type, prompt, tool, and the
+transcript ledger stay the same.
+
+In manual mode `CoachDriver` refuses turn-end and silence triggers, drops a queued automatic trigger
+when the mode switches, and stops automatic work's follow-ups (queued work, the
+[failure retry](#resilience), and the fresh cycle after a failure) at the next attempt boundary. An
+attempt already running finishes. A shortcut press is the user's own request, not unsolicited
+coaching, so it keeps the whole retry budget: a temporary failure retries it and the route advances
+to a configured fallback exactly as in automatic mode, without another press. A press that arrives
+while automatic work is being stopped takes that work's place and still gets its tip.
+Because the committed transcript boundary advances only when an attempt commits, a press carries
+every line finalized since the last committed attempt; manual mode keeps no buffer of its own.
+
+A press there usually comes right after the speech it is about, so unlike an automatic-mode press it
+first waits, at most two seconds, for speech that started before the press to finalize; speech that
+starts after the press never holds it back. Without the wait the tail of a question the user pressed
+on would ride with the next press instead. Each press records its moment and carries it on whichever
+path reaches an attempt: pressed while another answer runs, while a failed request waits to retry, or
+while an earlier press is still waiting. One settlement step applies the bound to all of them; a
+newer press joins the waiting work, moves the moment forward, and restarts the bound.
+
+Returning to automatic sends nothing by itself: the next turn-end carries the speech heard meanwhile.
+The gate lives in the driver rather than in `SessionComposition`'s transcriber callbacks, which would
+miss the driver's own automatic follow-ups.
+
+The mode persists through `CoachingModePreferences` and reaches the driver before either transcriber
+connects, so a manual session never sends an automatic request. **Toggle manual mode** (default
+**⌥⌘.**, see [General → Shortcuts](./settings-window.md#shortcuts)) switches it mid-session. The
+Overlay Box header reads `Jarvis · Manual` while manual and shows a two-second notice on each switch,
+and Activity records each change. The [live e2e scenarios](./live-e2e-tests.md) always run in
+automatic mode.
+
 ## 3. Components
 
 | Component | Responsibility | Built on (borrowed) |
 |---|---|---|
-| **SessionComposition** | Own one session from an accepted Start to coaching ready, capture-heartbeat handling, and Stop, over an `AudioSource` (`Sources/JarvisApp/Capture/AudioSource.swift`) the caller supplies. Production passes `AggregateEchoCapture` and keeps the default screen capture, `WindowScopedScreenCapture`; the [live e2e mode](./live-e2e-tests.md) passes `FixtureAudioSource` and `FixtureScreenCapture`. One composition lets the live e2e run exercise the production Start path with supplied audio and screen ports. The focused cache scenario also supplies configuration, a synthetic skill catalog, and a bounded provider sender through defaulted constructor ports; the normal app uses their production defaults. `AppDelegate` keeps Start validation and preflight, readiness rendering, the global shortcuts, the menu, Settings, and Activity; `JarvisReadiness.activeSession` is the one readiness token both check callbacks against. | Composition over the components below. |
+| **SessionComposition** | Own one session from an accepted Start to coaching ready, capture-heartbeat handling, and Stop, over an `AudioSource` (`Sources/JarvisApp/Capture/AudioSource.swift`) the caller supplies. Production passes `AggregateEchoCapture` and keeps the default screen capture, `WindowScopedScreenCapture`; the [live e2e mode](./live-e2e-tests.md) passes `FixtureAudioSource` and `FixtureScreenCapture`. One composition lets the live e2e run exercise the production Start path with supplied audio and screen ports. The focused cache scenario also supplies configuration, a synthetic skill catalog, and a bounded provider sender through defaulted constructor ports; the normal app uses their production defaults. `AppDelegate` keeps Start validation and preflight, readiness rendering, the global shortcuts, the menu, Settings, and Activity; `JarvisReadiness.activeSession` is the one live readiness token both check callbacks against, and a pending replacement Start's guards also accept its candidate token (`isCurrent`). | Composition over the components below. |
 | **AggregateEchoCapture** | The whole capture path: one **private Core Audio aggregate device** = the built-in mic (`me`, clock master) + a system-output **process tap** (`them`, drift-compensated onto the mic's clock). A single IOProc delivers both sample-synced at the device's **native rate** — the one-clock case AEC3 needs; the capture **reads that rate and resamples mic+tap up to 48 kHz** for AEC3 (a no-op when the device is already 48 kHz). So **any input device works** — built-in, USB, 44.1 kHz gear, or AirPods (Bluetooth HFP at 16/24 kHz) — instead of the old hard 48 kHz pin that silently failed to start on Bluetooth mics. Inside the callback it runs AEC3 (tap = far reference, mic = near), removing the other side's speaker bleed from the mic *before* transcription — no headphones, and double-talk works (measured 30–50 dB cancellation). The untouched resampled tap remains the `them` source while a separate padded/truncated copy aligns AEC; wire delivery is serialized off the realtime IOProc. When a client-commit model is selected, separate Silero VAD instances score these post-AEC streams (resampled to 16 kHz) on the delivery queue rather than the IOProc, and emit content-free turn edges. Both sides then downsample to 24 kHz. Replaces the old separate `AVAudioEngine` mic + `SCStream`. | Core Audio (`AudioHardwareCreateProcessTap`, private aggregate device, drift compensation) + `AVAudioConverter` resampling + WebRTC **AEC3** + **Silero VAD** via Core ML. |
 | **WebRTCEchoCanceller** | AEC3 echo canceller driven at 48 kHz on 10 ms frames inside the capture IOProc; far reference first, then the mic cleaned in place. | WebRTC **AEC3** (`webrtc-audio-processing`), vendored static + zero-dylib via `scripts/build-aec.sh`. |
 | **ErrorReporter** | The single funnel for user-facing failures. Severity on a Foundation-only `UserFacingError` decides the lifecycle consequence; an explicit startup/runtime context decides presentation. Startup failures may alert, but runtime failures never activate Jarvis or present UI even when they stop the session. `ProviderFailure` feeds attempt outcomes into the finite provider route; cycle exhaustion uses the session recovery policy. Fixed, typed Activity outcomes carry stable on-disk identities while raw detail stays in `JarvisLog`. | AppKit (`NSAlert`) for startup only. |
-| **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
-| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM, and carries the pending start described in [The turn](#the-turn). The opt-in Gemini Live adapter times its pending start and its finals with `PendingSpeechWindow`, also described there. Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection), Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device), or the Gemini Live WebSocket. |
+| **JarvisReadiness** | Compose the selected session's permission, credential, brain preparation, transcription preparation, endpoint, and capture-health snapshots into one typed status: checking, blocked, recovering, fully ready, microphone-only ready, cycle failed, or stopped. An opaque Start generation rejects stale callbacks. A Start while live prepares as a replacement candidate whose preflight checks never touch the live status or token; only committing it, immediately before the old pipeline's teardown, hands readiness over. A refused or cancelled replacement therefore leaves the live session's capture and endpoint monitoring working, and its fatal preflight notices (missing key or permission) are reported as warnings so they cannot stop that session. Focused subsystems keep owning their own mechanics; this Foundation-only component emits effects that the app renders in both the menu and Activity. | Foundation-only state reduction over `CaptureReadinessMonitor` and typed app observations. |
+| **Transcriber** | Maintain a rolling, speaker-labeled, **spoken-time timestamped** transcript; emit transcription-work state, transcript-bound turn-end, and backing-off silence events (with quiet duration). Two instances run in parallel — one per side — tagging lines `me`/`them` into one shared transcript through the provider-neutral `TranscriptionSession` port. The default OpenAI adapter keeps its per-`item_id` reconciliation, delta salvage, acknowledged readiness, ping/pong health, and transactional reconnect path; PCM captured while its socket is unavailable is itself pending recovery until replacement replay reaches a terminal boundary. GPT-4o Transcribe remains its default model and uses tuned server VAD. GPT Transcribe and GPT Live Transcribe remain opt-in with a local Silero VAD: a bounded pre-roll opens at confirmed speech onset, active speech and trailing silence enter the ordered audio FIFO, and indefinite idle silence stays off the wire. Endpoints commit only after that FIFO reaches their boundary, and the server's commit acknowledgement binds each boundary to its `item_id`. GPT Transcribe also reports detected completion languages to debug diagnostics. Both new models receive fixed context for the captured speaker role, and GPT Live additionally requests low transcription delay. The opt-in macOS 26+ Apple adapter prepares one selected-locale asset before capture, converts the existing 24 kHz PCM to `SpeechAnalyzer`'s preferred format, and commits final results only. Its content-free local activity tracker requests analyzer finalization after speech; `TranscriptionFinalizationState` keeps work unsettled until the analyzer completes and matching module-result progress is consumed, including speech or setup races, without gating transcription or retaining PCM, and carries the pending start described in [The turn](#the-turn). The opt-in Gemini Live adapter times its pending start and its finals with `PendingSpeechWindow`, also described there, and publishes its interim hypothesis only to the [transcript column](#the-transcript-column). The opt-in Deepgram Live adapter times its pending start and finals the same way and does not publish interim text to the [transcript column](#the-transcript-column). Every path keeps unusable words diagnostic-only and records content-free boundary evidence. | OpenAI Realtime transcription (model-compatible server or local turn detection), Apple `SpeechAnalyzer` / `SpeechTranscriber` (on-device), the Gemini Live WebSocket, or the Deepgram Live WebSocket. |
 | **ConversationChronology** | Own the ordering rule for conversation-derived data in Foundation-only Core: both speaker streams use one session time origin, event occurrence time comes first, and stable insertion order breaks ties. It preserves append-index provenance while producing chronological views for the model, live Activity, and reopened sessions. | `TranscriptLine.at` and Activity event timestamps. |
-| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit automatic attempts only when both transcription streams are settled through the selected context, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
+| **CoachDriver** | Coordinate one single-flighted coaching attempt from a natural trigger or pending-work wake-up: admit automatic attempts only when both transcription streams are settled through the selected context, consume a deferred turn whose transcript boundary is already committed, snapshot one route target plus the latest chronological conversation, route its tool calls, commit only a complete terminal action, and report one outcome to the scheduler. In [manual mode](#manual-mode) it admits only coaching shortcuts. No speaking cooldown/rate cap — restraint is the model's; `TurnSubstance` removes only clear hesitation sounds from mixed deltas and skips a turn-end when no substantive text or saved observation remains. | The selected route target: the OpenAI API or Codex on the OpenAI Responses wire shape, Claude Code on Anthropic's Messages API, both subscriptions through the bundled helper, or the Gemini API on Google's Interactions API; one transport serves them all, with one wire format per API family. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy) and [§4 Gemini API target](#gemini-api-target). Provider-specific summary tiers are defined in `BrainModelCatalog`. |
 | **[Session evidence](./session-audit.md)** | Carry every optional record a live session produces — the human Activity story, attempt provenance, provider traffic, and agent-facing diagnostics — through one bounded worker, per-session handle, and close lifecycle, without coupling any of it to coaching behavior or latency. One uniform best-effort loss contract, and a versioned health marker that keeps incomplete evidence honest to both the evaluator and the reader. | Foundation-only owner-only session artifacts. |
 | **LocalProxySupervisor** | Keep the bundled CLIProxyAPI helper serving the subscription targets for the app's whole run: start it on demand, read passive credential health and refresh an expired renewable credential at Start, restart a crashed helper on the same endpoint, and run a browser sign-in only on the user's click. It never routes: a subscription it cannot serve becomes an unavailable route target. See [§4 Subscription targets through the bundled proxy](#subscription-targets-through-the-bundled-proxy). | CLIProxyAPI child process on loopback HTTP; `Process`. |
 | **ScreenTool** | Fulfill `capture_screen`: silently shoot the **active window** (default scope) — the window-server frontmost, on whichever display, clean even when partially covered — and attach current-viewport OCR. If the user enabled Chrome text and granted Accessibility, a read-only adapter also extracts bounded semantic text from that exact window's active tab. The screenshot remains the authority for diagrams, layout, and visible exact-token claims. Falls back to a full-display capture (no text evidence) — the Settings-chosen display in Entire-display scope, the main display when no window is eligible; the overlay window is excluded either way. See [settings-window.md](./settings-window.md#capture-scope). | macOS `screencapture` CLI + Accessibility + Apple Vision (`VNRecognizeTextRequest`). |
-| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped, as the session's scrollable history. Movable, resizable, translucent, excluded from capture, and with no off switch. Its own header carries the box's controls: **collapse** on the left (also bound to a [shortcut](./settings-window.md#shortcuts)), which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle, and **clear** on the right, which appears only when there is something to erase. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. It is the `OverlayRendering` sink `CoachDriver` speaks to. On a streamed reply ([Latency](#latency)) the box opens a live entry on the reply's first character, stamped with that moment, and when the model writes the detail first the entry shows `Writing…` until the hint starts; each snapshot rewrites its hint text and grows its detail in the section below, `deliver` replaces both with the delivered hint and detail, and a `nil` progress removes both. A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
+| **Overlay Box** | A persistent window logging every `speak` tip in full, timestamped, as the session's scrollable history. Movable, resizable, translucent, excluded from capture, and with no off switch. Its own header carries the box's controls: **collapse** on the left (also bound to a [shortcut](./settings-window.md#shortcuts)), which rolls the panel down to the header strip and back without losing the size the user dragged to, the name in the middle (`Jarvis · Manual` in [manual mode](#manual-mode)), and on the right **clear**, which appears only when there is something to erase, and the [transcript column](#the-transcript-column) toggle. The header's proportions are derived from the box's height (`OverlayBoxChrome`) rather than fixed, so the strip stays aimable at the floor of `Defaults.Overlay.Box.heightRange` and stays chrome on a box dragged to fill a display. A borderless window advertises no resize affordance, and macOS refuses to let an inactive app set the cursor, so the box draws its own (`OverlayBoxResizeAffordanceView`): the edge or corner under the pointer lights up, on an `.activeAlways` tracking area, which is what reaches a background app. That view also owns the drag, so the region that lights is the region that resizes. Its thin edge grips are the only thing that refuses a window drag, because AppKit applies `mouseDownCanMoveWindow == false` to a view's whole frame: a full-size view refusing it freezes the box in place. It follows the session: shown on Start (cleared and rolled open, for the new conversation) and hidden on Stop. Its size persists across launches; its position does not, so it opens centered. It is the `OverlayRendering` sink `CoachDriver` speaks to. On a streamed reply ([Latency](#latency)) the box opens a live entry on the reply's first character, stamped with that moment, and when the model writes the detail first the entry shows `Writing…` until the hint starts; each snapshot rewrites its hint text and grows its detail in the section below, `deliver` replaces both with the delivered hint and detail, and a `nil` progress removes both. A reply's `detail`, its code block or diagram or paragraphs, is drawn in a second section below the scrolling history in this same box. See [The detail box](#the-detail-box). | AppKit NSPanel; `OverlayBoxPanel`. |
 | **MenuBar** | Manual **Start/Stop** of the pipeline (no auto-start), the same authoritative readiness status shown by Activity, and one-time API-key entry when OpenAI is in use. Stopped and active use a boxless monochrome eye: closed on the Listening Lens's diagonal axis while stopped and open while active, with the active icon following the system menu-bar foreground instead of a brand color. The attention states retain the lit Listening Lens tile — amber while checking or recovering and red when a Start is blocked before any session begins — and the menu and tooltip name the requirement behind those attention states; stopped is simply labeled `Jarvis is stopped`. A failed system stream may degrade to microphone-only, while a failed microphone stream stops the session. The Overlay Box is cleared from its own header, not from the menu. A centered, disabled caption at the bottom of the menu names the running build, so a user can report it without opening Settings: a release shows a muted `v<version>` from `CFBundleShortVersionString`, and a local build shows a red `Dev`, keyed off the development marker `scripts/build-app.sh` stamps into the assembled bundle (see `MenuBarController.buildCaptionItem()`). | AppKit menu-bar item; owner-only file for the key. |
-| **HotkeyController / MouseHotkeyController** | Handle the coaching and detail-navigation bindings; AppDelegate routes coaching to the session and navigation to the overlay. See [General → Shortcuts](./settings-window.md#shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC) for keyboard; Core Graphics event tap with Accessibility permission for mouse. |
+| **HotkeyController / MouseHotkeyController** | Handle the coaching, mode-toggle, and overlay bindings; AppDelegate routes coaching and the [manual-mode](#manual-mode) toggle to the session and navigation to the overlay. See [General → Shortcuts](./settings-window.md#shortcuts). | Carbon HIToolbox (`RegisterEventHotKey`, no TCC) for keyboard; Core Graphics event tap with Accessibility permission for mouse. |
 | **OnboardingGate** | Run first-run onboarding once per install, before the rest of the app is built: one OpenAI or Gemini API key, then the three TCC grants, each step shown only when what it collects is missing. Closing the window before the end quits; completing it sets the one onboarding flag, so later launches go straight to the menu bar. `SystemAudioPermissionProbe` proves the silently enforced system-audio grant by playing a muted tone into a tap of Jarvis's own process and listening for it. See [§3 Onboarding](#onboarding) and [§3 Permissions](#permissions). | AppKit window, `CredentialVerifier`, AVFoundation, `CGRequestScreenCaptureAccess`, Core Audio process taps. |
 
 Each component has one job and a narrow interface. The CoachDriver is the only place the
@@ -669,13 +739,13 @@ Each step shows only when what it collects is missing
 transcription provider whose key isn't saved, or when no brain target has a key or subscription
 target to check at Start: a new install, which calls
 OpenAI by default, always sees it, and a setup of a subscription brain with Apple Speech never does.
-A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` counts, and an install
+A key in the owner-only key file or in `OPENAI_API_KEY` / `GEMINI_API_KEY` / `DEEPGRAM_API_KEY` counts, and an install
 that already has what it needs completes onboarding without a window. Closing the window before the
 end quits, so an unfinished onboarding runs again on the next launch and skips the steps already
 done.
 
 **The key step** offers OpenAI and Gemini, because either key covers both the brain and
-transcription. Each tile names the brain model and the transcription model that key would use.
+transcription. Deepgram only transcribes, so it has no tile; its key is saved in Connections. Each tile names the brain model and the transcription model that key would use.
 Continue checks the key with the provider before saving it (`OnboardingAPIKeyStep`): a refused key
 is never written, so a bad key can't make a later launch skip the step. A check the provider
 couldn't answer turns the button into **Continue Anyway**, which saves the key, because a rate limit
@@ -858,7 +928,7 @@ and text evidence collapses to neutral stubs; raw reasoning, tool-call identifie
 pairing from failed attempts never cross that boundary.
 
 Failed conversation work remains pending within the cycle's retry budget and schedules another
-coaching attempt after a short fixed delay. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
+coaching attempt after a short fixed delay, unless [manual mode](#manual-mode) stops it. This internal wake-up does not depend on a new natural trigger. If a turn-end, silence, or
 manual coaching trigger arrives first, it coalesces with the pending wake-up; the next attempt contains the
 failed conversation plus every newer finalized transcript item. If nothing new arrives, the new
 attempt uses the same pending conversation. Every automatic attempt applies the
@@ -1130,9 +1200,34 @@ rather than a per-turn screenshot.
   maintained twice by hand is a rule the two adapters can disagree about without either looking
   wrong: see [Resilience](#resilience). The per-item ledger, the commit path, and turn detection are
   what the adapters keep to themselves, which is what separates them.
+- **Deepgram transcription is the fourth opt-in provider, over Deepgram's live WebSocket
+  (`DeepgramLiveSession`, `DeepgramLiveTranscriber`).** It runs Nova-3, the newest Deepgram streaming
+  model that transcribes Mandarin; Flux, the newer turn-detecting model, has no Mandarin. One expected
+  language selects that language outright. No selection or several select Nova-3's multilingual
+  mode (`language=multi`), with each expected language sent as a `language_hint`; that mode follows
+  speakers who switch languages, though a single-language stream recognizes more accurately. The
+  key travels in an `Authorization` header, so the connect URL carries no secret. Deepgram has no setup reply:
+  the model, language, raw 16 kHz PCM16 format, interim results, endpointing, and utterance-end
+  settings are query parameters on the upgrade, and the socket is ready once a first control frame
+  is delivered, since a refused upgrade fails that send. That is connection acknowledgement, not
+  verification of effective settings. The server owns turn detection like Gemini, and the
+  Foundation-only `DeepgramUtteranceAssembler` turns its frames into lines. Settled (`is_final`)
+  segments accumulate until endpointing (`speech_final`) closes them all, or until an `UtteranceEnd`
+  closes those ending by its `last_word_end`. Deepgram can send `UtteranceEnd` for an earlier gap
+  after the speaker has resumed, so it never closes later words. Speech stays unresolved while settled
+  words wait, while a closed utterance is being published, while an interim result heard words
+  ending after everything finalized so far (a final can cover less than the interim before it), and
+  while `SpeechStarted` reported speech beginning after it. Word timing, not the interim's window,
+  marks heard speech, so trailing silence never counts. Times are per socket, and the assembler
+  ignores a retired socket's late events so two audio clocks never mix. The adapter reports work state
+  under one lock from reading through reporting, so a final is always in the transcript before its
+  speech reads as settled. Interim text never reaches Activity or the transcript. Mandarin output
+  has the gaps between its characters closed. `PendingSpeechWindow` times the spoken start, as for Gemini. The adapter joins the shared
+  socket lifecycle (ready-timeout, ping/pong, reconnect with bounded offline buffering) and salvages
+  an open utterance when a socket retires. Deepgram has no custom vocabulary or benchmark arm yet.
 - **The wire sample rate is a per-provider requirement, not a quality knob
   (`TranscriptionProvider.audioFormat`, `TranscriptionAudioFormat`).** OpenAI Realtime and Apple
-  Speech take 24 kHz PCM16 mono; Gemini Live requires 16 kHz PCM16 mono
+  Speech take 24 kHz PCM16 mono; Gemini Live and Deepgram take 16 kHz PCM16 mono
   (`audio/pcm;rate=16000`, sent in the chunk's `mimeType`, which must match the PCM actually sent).
   Speech carries nothing above 8 kHz that a recognizer uses, so 16 kHz is already sufficient for
   recognition — Gemini's lower rate is what its API accepts, not a deliberate quality tradeoff Jarvis
@@ -1668,10 +1763,11 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 
 ## 6. Non-Goals
 
-- A tiered sensitivity dial, or code-level coaching modes with separate trigger gates or
+- A tiered sensitivity dial, or per-question-type coaching modes with separate trigger gates or
   runtime state. One harness spans behavioral, system-design, and coding questions; the model loads
   the matching skill inside that shared loop — see [§ Capabilities](#capabilities) — and the
-  scheduling stays the same whichever it loads.
+  scheduling stays the same whichever it loads. [Manual mode](#manual-mode) is not one of these: it
+  only decides whether automatic triggers are admitted, the same way for every question type.
 - Continuous OCR or recording the screen/audio to disk ("recall").
 - A dedicated wake-word engine. Direct address is just the word "Jarvis" (or a question) appearing
   in the transcript, which the brain reads and answers — there is no wake-word detector. (A global
@@ -1685,7 +1781,7 @@ Enforcement-first, not convention. See [sandbox.md](./sandbox.md) for the full m
 1. **Build the harness, not the intelligence.** If a model or an OS framework can do it, we don't write it.
 2. **Least code wins.** Prefer a borrowed tool (`screencapture`, an Apple framework, an OpenAI API) over custom code, every time.
 3. **The model is the cost governor.** Expensive actions (vision, speaking) happen only when the model opts in.
-4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; the model's own restraint (a tuned system prompt) keeps it from being annoying.
+4. **Proactive, but disciplined.** Speaking up unprompted is the whole point; the model's own restraint (a tuned system prompt) keeps it from being annoying. [Manual mode](#manual-mode) is the user's opt-out, not a change of default.
 5. **Make sensitive capabilities explicit.** TCC, owner-only files, provider selection, and narrow
    egress are enforced today; do not claim filesystem isolation until App Sandbox is implemented.
 6. **Self-verifying.** Every build ships with tests and the [live e2e tests](./live-e2e-tests.md) the agent can run to prove it works.

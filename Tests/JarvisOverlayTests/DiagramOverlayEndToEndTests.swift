@@ -99,7 +99,10 @@ import Testing
     }
 
     private func assertPaintedGraph(_ image: NSImage, graph: DiagramHint, viewport: NSSize) throws {
-        let bitmap = try #require(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:)))
+        // The image adopts the main display's color space, and `colorAt` tags samples as Generic RGB
+        // whatever the bitmap's profile, so compare raw components only after converting to sRGB.
+        let bitmap = try #require(image.tiffRepresentation.flatMap(NSBitmapImageRep.init(data:))?
+            .converting(to: .sRGB, renderingIntent: .default))
         let drawing = DiagramHintImage.fittedDrawing(graph, fitting:
             NSSize(width: viewport.width - 28, height: max(1, viewport.height - 14)))
         #expect(drawing.nodeFontSize >= 13)
@@ -110,13 +113,15 @@ import Testing
         func color(_ point: CGPoint) -> NSColor? {
             let x = Int(point.x * scale), y = Int(point.y * scale)
             guard x >= 0, y >= 0, x < bitmap.pixelsWide, y < bitmap.pixelsHigh else { return nil }
-            return bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB)
+            return bitmap.colorAt(x: x, y: y)
         }
-        func glyphPixels(in rect: CGRect, yellow: Bool = false) -> Int {
+        func glyphPixels(in rect: CGRect, yellow: Bool = false, excluding: [CGRect] = []) -> Int {
             var count = 0
             for y in stride(from: rect.minY, to: rect.maxY, by: 1 / scale) {
                 for x in stride(from: rect.minX, to: rect.maxX, by: 1 / scale) {
-                    guard let pixel = color(CGPoint(x: x, y: y)), pixel.alphaComponent > 0.9 else { continue }
+                    let point = CGPoint(x: x, y: y)
+                    guard !excluding.contains(where: { $0.contains(point) }),
+                          let pixel = color(point), pixel.alphaComponent > 0.9 else { continue }
                     if yellow {
                         if pixel.redComponent > 0.7 && pixel.greenComponent > 0.4 && pixel.blueComponent < 0.2 {
                             count += 1
@@ -137,7 +142,13 @@ import Testing
             let label = CGRect(x: route.labelCenter.x - drawing.edgeLabel.width / 2,
                                y: route.labelCenter.y - drawing.edgeLabel.height / 2,
                                width: drawing.edgeLabel.width, height: drawing.edgeLabel.height)
-            #expect(glyphPixels(in: label, yellow: edge.stroke != nil) > 10,
+            // A styled stroke shares its label's color, so pixels on the route never count as text.
+            let stroke = zip(route.points, route.points.dropFirst()).map { start, end in
+                CGRect(x: min(start.x, end.x), y: min(start.y, end.y),
+                       width: abs(end.x - start.x), height: abs(end.y - start.y))
+                    .insetBy(dx: -edge.strokeWidth / 2 - 1, dy: -edge.strokeWidth / 2 - 1)
+            }
+            #expect(glyphPixels(in: label, yellow: edge.stroke != nil, excluding: stroke) > 10,
                     "edge labels retain text and color in the actual panel image")
             var painted = 0, samples = 0
             for (start, end) in zip(route.points, route.points.dropFirst()) {

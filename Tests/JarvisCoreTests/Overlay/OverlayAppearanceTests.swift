@@ -10,6 +10,13 @@ import Foundation
         return d
     }
 
+    @Test func theTranscriptColumnStartsHiddenAndRemembersItsState() {
+        let defaults = freshDefaults()
+        #expect(!OverlayAppearance(defaults: defaults).transcriptPaneVisible)
+        OverlayAppearance(defaults: defaults).transcriptPaneVisible = true
+        #expect(OverlayAppearance(defaults: defaults).transcriptPaneVisible)
+    }
+
     @Test func detailAppearancePersistsIndependentlyAndRejectsNonfiniteValues() {
         let defaults = freshDefaults()
         let appearance = OverlayAppearance(defaults: defaults)

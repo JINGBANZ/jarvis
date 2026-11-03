@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="296 110 234 282" fill="none">
+  <style>
+    :root { color-scheme: light dark; --purple: #7c4dff; --shell: #fbfaff; --circuit: #7c4dff; --teal: #0e9f87; --dome: .09; }
+    @media (prefers-color-scheme: dark) {
+      :root { --purple: #b18cff; --shell: #1a1433; --circuit: #d9c6ff; --teal: #36e2c5; --dome: .14; }
+    }
+    .shell { fill: var(--shell); stroke: var(--purple); }
+  </style>
+  <rect class="shell" x="385" y="370" width="50" height="16" rx="3"/>
+  <path class="shell" stroke-width="2" d="M320 200C320 140 360 118 410 118S500 140 500 200V300C500 346 462 372 410 372S320 346 320 300Z"/>
+  <path fill="var(--purple)" fill-opacity="var(--dome)" stroke="var(--purple)" stroke-opacity=".7" d="M336 194C338 152 366 134 410 134S482 152 484 194Z"/>
+  <g stroke="var(--circuit)" stroke-width="1.3" stroke-opacity=".8">
+    <path d="M352 184V170H372V156M392 184V164H410V146M430 184V172H452V158M470 184V174"/>
+  </g>
+  <g fill="var(--circuit)">
+    <circle cx="372" cy="156" r="2.5"/>
+    <circle cx="410" cy="146" r="2.5" opacity=".3"/>
+    <circle cx="452" cy="158" r="2.5"/>
+    <circle cx="470" cy="174" r="2.5" opacity=".3"/>
+  </g>
+  <g class="shell" stroke-width="1.6">
+    <rect x="302" y="216" width="20" height="56" rx="10"/>
+    <rect x="498" y="216" width="20" height="56" rx="10"/>
+    <path d="M512 216L524 196"/>
+  </g>
+  <path stroke="var(--teal)" stroke-width="2" stroke-linecap="round" d="M308 232V256M514 232V256"/>
+  <circle cx="525" cy="194" r="3.5" fill="var(--teal)"/>
+  <rect x="340" y="212" width="140" height="42" rx="21" fill="#0a0716" stroke="var(--purple)" stroke-opacity=".6"/>
+  <g fill="#36e2c5">
+    <ellipse cx="382" cy="233" rx="15" ry="7"/>
+    <ellipse cx="438" cy="233" rx="15" ry="7"/>
+  </g>
+  <g fill="var(--teal)">
+    <rect x="386" y="310" width="5" height="12" rx="2"/>
+    <rect x="397" y="304" width="5" height="24" rx="2"/>
+    <rect x="408" y="300" width="5" height="32" rx="2"/>
+    <rect x="419" y="306" width="5" height="20" rx="2"/>
+    <rect x="430" y="311" width="5" height="10" rx="2"/>
+  </g>
+</svg>

@@ -45,4 +45,12 @@ public enum TranscriptionLanguage: String, CaseIterable, Codable, Sendable {
         case .mandarinChinese: "cmn-Hans-CN"
         }
     }
+
+    /// Deepgram Nova-3 takes one BCP-47 `language`; `zh` is its Simplified Mandarin code.
+    public var deepgramHint: String {
+        switch self {
+        case .english: "en"
+        case .mandarinChinese: "zh"
+        }
+    }
 }

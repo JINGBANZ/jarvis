@@ -94,6 +94,8 @@ final class CoachAttemptRunner: @unchecked Sendable {
             screenObservation + (referencesObservation.map { [$0] } ?? []) + referencePages.map(ChatMessage.user)
         }
         var preparedManualReason: TriggerReason?
+        /// Session-relative moment of the latest shortcut press this work has not yet waited on.
+        var manualPressedAt: TimeInterval?
         /// Speech finalized during inference lies past this boundary, so a failure cannot discard
         /// it.
         var attemptedTranscriptBoundary = 0

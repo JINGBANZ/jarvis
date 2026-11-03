@@ -80,11 +80,24 @@ import Testing
         #expect(Onboarding.needsAPIKey(secrets: SavedKeys(keys: [:]), brain: brain, transcription: transcription))
     }
 
-    @Test func everyCredentialPowersABrainAndAnEar() {
+    @Test func everyCredentialPowersAnEarAndEveryBrainCredentialAlsoAMind() {
         for credential in Credential.allCases {
-            #expect(Onboarding.brainProvider(for: credential).credential == credential)
             #expect(Onboarding.transcriptionProvider(for: credential).ownCredential == credential)
+            switch credential {
+            case .openAIAPIKey, .geminiAPIKey:
+                #expect(Onboarding.brainProvider(for: credential)?.credential == credential)
+            case .deepgramAPIKey:
+                #expect(Onboarding.brainProvider(for: credential) == nil)
+            }
         }
+    }
+
+    @Test func deepgramOnlyTranscribes() {
+        #expect(Onboarding.brainProvider(for: .deepgramAPIKey) == nil)
+        #expect(Onboarding.brainModel(for: .deepgramAPIKey) == nil)
+        let transcription = TranscriptionPreferences(defaults: freshDefaults())
+        #expect(Onboarding.transcriptionModelName(for: .deepgramAPIKey, in: transcription)
+            == Defaults.Transcription.deepgramModel.displayName)
     }
 
     @Test func tilesNameTheModelsAdoptionWouldUse() {

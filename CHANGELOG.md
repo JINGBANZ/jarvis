@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.5.11](https://github.com/JINGBANZ/jarvis/compare/v0.5.10...v0.5.11) (2026-10-30)
+
+
+### Features
+
+* **coach:** add a manual coaching mode that waits for shortcuts ([#478](https://github.com/JINGBANZ/jarvis/issues/478)) ([f35fda7](https://github.com/JINGBANZ/jarvis/commit/f35fda749917a64214ace38510f6b95fa921fd77))
+* **overlay:** add a live transcript column to the overlay box ([#480](https://github.com/JINGBANZ/jarvis/issues/480)) ([729aefd](https://github.com/JINGBANZ/jarvis/commit/729aefd9d25a22b30141840dc54914b593e6ae72))
+* **transcription:** add Deepgram Nova-3 as an opt-in provider ([#485](https://github.com/JINGBANZ/jarvis/issues/485)) ([ca049cc](https://github.com/JINGBANZ/jarvis/commit/ca049ccd3713b8d94b4daeae3942e09e58ab3f89))
+
+
+### Bug Fixes
+
+* **test:** sample diagram label colors in srgb ([#486](https://github.com/JINGBANZ/jarvis/issues/486)) ([03ab4f0](https://github.com/JINGBANZ/jarvis/commit/03ab4f0afca34d75c193854ddff29539c20078fb))
+
+## [0.5.10](https://github.com/JINGBANZ/jarvis/compare/v0.5.9...v0.5.10) (2026-10-29)
+
+
+### Features
+
+* **shortcuts:** add a start-new-session hotkey ([#475](https://github.com/JINGBANZ/jarvis/issues/475)) ([a88fa1e](https://github.com/JINGBANZ/jarvis/commit/a88fa1e16d1e0fd81ef7efd49f9fe94cbaf10b31))
+* **website:** add a simple settings-themed landing page ([#481](https://github.com/JINGBANZ/jarvis/issues/481)) ([5b902e7](https://github.com/JINGBANZ/jarvis/commit/5b902e74bf61a66b3980ac86226574ccaf013acf))
+
+
+### Bug Fixes
+
+* **build:** support the swift 6.4 build backend in app and test scripts ([#477](https://github.com/JINGBANZ/jarvis/issues/477)) ([73cda08](https://github.com/JINGBANZ/jarvis/commit/73cda086782896a40a0383ca8d3bf18e73c74512))
+* **test:** retain the shared display and require the local gate ([#482](https://github.com/JINGBANZ/jarvis/issues/482)) ([adcea81](https://github.com/JINGBANZ/jarvis/commit/adcea815edf00ba12615ffeb1c47246db54489d5))
+
 ## [0.5.9](https://github.com/JINGBANZ/jarvis/compare/v0.5.8...v0.5.9) (2026-10-25)
 
 

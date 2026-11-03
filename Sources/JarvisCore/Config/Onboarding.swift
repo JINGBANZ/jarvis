@@ -28,10 +28,12 @@ public enum Onboarding {
         }
     }
 
-    public static func brainProvider(for credential: Credential) -> BrainProvider {
+    /// Nil for a credential that only transcribes.
+    public static func brainProvider(for credential: Credential) -> BrainProvider? {
         switch credential {
         case .openAIAPIKey: .openAI
         case .geminiAPIKey: .gemini
+        case .deepgramAPIKey: nil
         }
     }
 
@@ -39,12 +41,13 @@ public enum Onboarding {
         switch credential {
         case .openAIAPIKey: .openAI
         case .geminiAPIKey: .gemini
+        case .deepgramAPIKey: .deepgram
         }
     }
 
     /// The model `adopt` makes the primary, which the key step's tile names.
-    public static func brainModel(for credential: Credential) -> BrainModel {
-        BrainModelCatalog.defaultModel(for: brainProvider(for: credential))
+    public static func brainModel(for credential: Credential) -> BrainModel? {
+        brainProvider(for: credential).map(BrainModelCatalog.defaultModel(for:))
     }
 
     public static func transcriptionModelName(
@@ -53,6 +56,7 @@ public enum Onboarding {
         switch credential {
         case .openAIAPIKey: preferences.openAIModel.displayName
         case .geminiAPIKey: preferences.geminiModel.displayName
+        case .deepgramAPIKey: preferences.deepgramModel.displayName
         }
     }
 
@@ -61,12 +65,13 @@ public enum Onboarding {
     public static func adopt(
         _ credential: Credential, brain: BrainPreferences, transcription: TranscriptionPreferences
     ) {
-        brain.route = BrainRoute(
-            primary: BrainTarget(
-                provider: brainProvider(for: credential), modelID: brainModel(for: credential).id),
-            fallbackTargets: brain.route.fallbackTargets.filter {
-                $0.provider.credential == nil || $0.provider.credential == credential
-            })
+        if let provider = brainProvider(for: credential), let model = brainModel(for: credential) {
+            brain.route = BrainRoute(
+                primary: BrainTarget(provider: provider, modelID: model.id),
+                fallbackTargets: brain.route.fallbackTargets.filter {
+                    $0.provider.credential == nil || $0.provider.credential == credential
+                })
+        }
         transcription.provider = transcriptionProvider(for: credential)
     }
 }

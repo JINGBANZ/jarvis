@@ -36,4 +36,10 @@ public struct UserFacingError: Error, Sendable, Equatable {
         self.severity = severity
         self.sessionEndReason = sessionEndReason
     }
+
+    /// The same notice as a preflight refusal: a refused replacement Start must leave the live
+    /// session running, so a fatal preflight error loses its power to stop it.
+    public var asPreflightRefusal: UserFacingError {
+        .init(title: title, message: message, severity: .warning)
+    }
 }

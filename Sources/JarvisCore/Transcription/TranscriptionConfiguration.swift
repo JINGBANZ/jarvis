@@ -12,6 +12,8 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
     public let geminiExpectedLanguages: [TranscriptionLanguage]
     public let geminiVocabularyKeywords: [String]
     public let geminiMode: GeminiTranscriptionMode
+    public let deepgramModel: DeepgramTranscriptionModel
+    public let deepgramExpectedLanguages: [TranscriptionLanguage]
 
     public init(
         provider: TranscriptionProvider,
@@ -22,7 +24,9 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
         geminiModel: GeminiTranscriptionModel = .geminiTranscribeLive,
         geminiExpectedLanguages: [TranscriptionLanguage] = [],
         geminiVocabularyKeywords: [String] = [],
-        geminiMode: GeminiTranscriptionMode = .verbatim
+        geminiMode: GeminiTranscriptionMode = .verbatim,
+        deepgramModel: DeepgramTranscriptionModel = .nova3,
+        deepgramExpectedLanguages: [TranscriptionLanguage] = []
     ) {
         self.provider = provider
         self.openAIModel = openAIModel
@@ -34,6 +38,9 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
         self.geminiExpectedLanguages = TranscriptionLanguage.canonicalizing(geminiExpectedLanguages)
         self.geminiVocabularyKeywords = geminiVocabularyKeywords
         self.geminiMode = geminiMode
+        self.deepgramModel = deepgramModel
+        self.deepgramExpectedLanguages = TranscriptionLanguage.canonicalizing(
+            deepgramExpectedLanguages)
     }
 
     /// Nil for providers that segment turns themselves.
@@ -45,6 +52,7 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
         switch provider {
         case .openAI: .openAI(openAIModel)
         case .gemini: .gemini(geminiModel)
+        case .deepgram: .deepgram(deepgramModel)
         case .appleSpeech: .appleSpeech(localeIdentifier: appleSpeechLocaleIdentifier)
         }
     }
@@ -53,6 +61,7 @@ public struct TranscriptionConfiguration: Equatable, Sendable {
         switch provider {
         case .openAI: .init(languages: openAIExpectedLanguages)
         case .gemini: .init(languages: geminiExpectedLanguages)
+        case .deepgram: .init(languages: deepgramExpectedLanguages)
         case .appleSpeech: .locale(appleSpeechLocaleIdentifier)
         }
     }

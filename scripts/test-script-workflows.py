@@ -45,6 +45,53 @@ stop_test_app() { :; }
                               capture_output=True, timeout=15)
 
 
+class BuildCacheTests(ScriptTests):
+    def setUp(self):
+        super().setUp()
+        subprocess.run(['git', 'init', '-q', str(self.root)], check=True)
+        self.module = runpy.run_path(str(self.root / 'scripts/ci-build-cache.py'))
+        self.manifest = self.root / '.build/ci-cache-inputs.json'
+        self.source = self.root / 'Source.swift'
+        self.source.write_text('let value = 1\n')
+        subprocess.run(['git', 'add', 'Source.swift'], cwd=self.root, check=True)
+
+    def test_fresh_checkout_reuses_only_unchanged_input_timestamps(self):
+        original = self.source.stat().st_mtime_ns
+        self.module['snapshot'](self.root, self.manifest)
+        os.utime(self.source, ns=(original + 10_000_000_000,) * 2)
+        self.module['restore'](self.root, self.manifest)
+        self.assertEqual(self.source.stat().st_mtime_ns, original)
+        self.source.write_text('let value = 2\n')
+        modified = self.source.stat().st_mtime_ns
+        self.module['restore'](self.root, self.manifest)
+        self.assertEqual(self.source.stat().st_mtime_ns, modified)
+        self.assertEqual(self.source.read_text(), 'let value = 2\n')
+
+    def test_cache_miss_and_deleted_or_untracked_inputs_are_untouched(self):
+        self.module['restore'](self.root, self.manifest)
+        self.module['snapshot'](self.root, self.manifest)
+        self.source.unlink()
+        untracked = self.root / 'untracked'
+        untracked.write_text('private fixture')
+        original = untracked.stat().st_mtime_ns
+        entries = json.loads(self.manifest.read_text())
+        entries['untracked'] = entries['Source.swift']
+        self.manifest.write_text(json.dumps(entries))
+        self.module['restore'](self.root, self.manifest)
+        self.assertFalse(self.source.exists())
+        self.assertEqual(untracked.stat().st_mtime_ns, original)
+
+    def test_symlink_does_not_change_its_target(self):
+        self.module['snapshot'](self.root, self.manifest)
+        self.source.unlink()
+        target = self.root / 'target'
+        target.write_text('let value = 1\n')
+        self.source.symlink_to(target)
+        original = target.stat().st_mtime_ns
+        self.module['restore'](self.root, self.manifest)
+        self.assertEqual(target.stat().st_mtime_ns, original)
+
+
 class GuardTests(ScriptTests):
     def test_process_boundary_guard_rejects_context_import_and_transitive_dependency(self):
         guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
@@ -227,6 +274,87 @@ class AppBundleTests(ScriptTests):
             self.assertFalse(os.path.lexists(bundle / "Contents/Frameworks/Sparkle.framework" / name))
 
 
+class UniversalAppTests(ScriptTests):
+    def setUp(self):
+        super().setUp()
+        source = self.root / "main.c"
+        source.write_text("int main(void) { return 0; }\n")
+        self.slices = {}
+        for architecture in ("arm64", "x86_64"):
+            binary = self.root / architecture
+            subprocess.run(["xcrun", "clang", "-arch", architecture,
+                            "-mmacosx-version-min=14.2", str(source), "-o", str(binary)],
+                           check=True, capture_output=True)
+            self.slices[architecture] = binary
+        self.universal = self.root / "universal"
+        subprocess.run(["lipo", "-create", *map(str, self.slices.values()),
+                        "-output", str(self.universal)], check=True, capture_output=True)
+
+    def test_every_bundled_executable_requires_both_architectures(self):
+        app = self.root / "Jarvis.app"
+        binaries = (
+            "Contents/MacOS/JarvisApp", "Contents/MacOS/cliproxyapi",
+            "Contents/Resources/ReferenceHelper/JarvisReferenceHelper",
+            "Contents/Frameworks/Sparkle.framework/Versions/Current/Sparkle",
+            "Contents/Frameworks/Sparkle.framework/Versions/Current/Autoupdate",
+            "Contents/Frameworks/Sparkle.framework/Versions/Current/Updater.app/Contents/MacOS/Updater",
+        )
+        for name in binaries:
+            destination = app / name
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.universal, destination)
+        passed = self.run_script("check-universal-app.sh", str(app))
+        self.assertEqual(passed.returncode, 0, passed.stderr)
+        for name in binaries:
+            for architecture, thin in self.slices.items():
+                with self.subTest(binary=name, architecture=architecture):
+                    shutil.copy2(thin, app / name)
+                    refused = self.run_script("check-universal-app.sh", str(app))
+                    self.assertNotEqual(refused.returncode, 0)
+                    self.assertIn(name, refused.stderr)
+            shutil.copy2(self.universal, app / name)
+
+    def test_sdk_guard_checks_both_slices_and_rejects_non_binaries(self):
+        for architecture in self.slices:
+            subprocess.run(["xcrun", "vtool", "-set-build-version", "macos", "14.2", "26.0",
+                            "-replace", "-output", str(self.slices[architecture]),
+                            str(self.slices[architecture])], check=True, capture_output=True)
+        subprocess.run(["lipo", "-create", *map(str, self.slices.values()),
+                        "-output", str(self.universal)], check=True, capture_output=True)
+        passed = self.run_script("check-release-sdk.sh", str(self.universal))
+        self.assertEqual(passed.returncode, 0, passed.stderr)
+        for architecture in self.slices:
+            old = self.root / "old"
+            subprocess.run(["xcrun", "vtool", "-set-build-version", "macos", "14.2", "25.0",
+                            "-replace", "-output", str(old), str(self.slices[architecture])],
+                           check=True, capture_output=True)
+            other = next(path for arch, path in self.slices.items() if arch != architecture)
+            subprocess.run(["lipo", "-create", str(old), str(other),
+                            "-output", str(self.universal)], check=True, capture_output=True)
+            refused = self.run_script("check-release-sdk.sh", str(self.universal))
+            self.assertNotEqual(refused.returncode, 0)
+            self.assertIn("SDK 25.0", refused.stderr)
+        invalid = self.root / "not-a-binary"
+        invalid.write_text("invalid")
+        self.assertNotEqual(self.run_script("check-release-sdk.sh", str(invalid)).returncode, 0)
+
+    def test_reference_helper_uses_the_supplied_universal_build(self):
+        artifacts = self.root / "universal-build"
+        privacy = artifacts / "ZIPFoundation_ZIPFoundation.bundle"
+        privacy.mkdir(parents=True)
+        (privacy / "PrivacyInfo.xcprivacy").write_text("privacy fixture")
+        shutil.copy2(self.universal, artifacts / "JarvisReferenceHelper")
+        self.executable(self.bin / "swift", "#!/bin/bash\nexit 99\n")
+        result = subprocess.run(
+            ["/bin/bash", "-euo", "pipefail", "-c",
+             'source scripts/lib/reference-helper.sh; bundle_reference_helper app debug "$1"',
+             "test", str(artifacts)], cwd=self.root, env=self.environment,
+            text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        bundled = self.root / "app/Contents/Resources/ReferenceHelper/JarvisReferenceHelper"
+        self.assertEqual(bundled.read_bytes(), self.universal.read_bytes())
+
+
 class HarnessDirectoryTests(ScriptTests):
     def test_private_directory_and_symlink_refusal(self):
         command = ["/bin/bash", "-euo", "pipefail", "-c",
@@ -355,6 +483,10 @@ class AECBuildTests(ScriptTests):
         (work / "wap").mkdir(parents=True)
         self.environment["AEC_WORK"] = str(work)
         self.executable(self.bin / "git", """#!/bin/bash
+if [[ "$1" == -C ]]; then
+  echo 846fe90a289f58b7c9303a635142aa2c7caa93e5
+  exit 0
+fi
 for destination; do :; done
 mkdir -p "$destination"
 """)
@@ -363,6 +495,16 @@ mkdir -p "$destination"
         result = self.run_script("build-aec.sh")
         self.assertEqual(result.returncode, 17, result.stderr)
         self.assertTrue((work / "wap-v2.1").is_dir(), "source cache must include the pinned tag")
+
+    def test_source_commit_mismatch_stops_before_build(self):
+        work = self.root / "aec-cache"
+        (work / "wap-v2.1").mkdir(parents=True)
+        self.environment["AEC_WORK"] = str(work)
+        self.executable(self.bin / "git", "#!/bin/bash\necho wrong-commit\n")
+        self.executable(self.bin / "meson", "#!/bin/bash\nexit 99\n")
+        result = self.run_script("build-aec.sh")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("pinned commit", result.stderr)
 
 
 if __name__ == "__main__":

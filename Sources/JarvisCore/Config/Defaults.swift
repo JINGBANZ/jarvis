@@ -69,6 +69,13 @@ public enum Defaults {
         public static let geminiModeKey = "transcription.gemini.mode"
         /// Verbatim, because coaching reasons about what was actually said.
         public static let geminiMode: GeminiTranscriptionMode = .verbatim
+
+        public static let deepgramModelKey = "transcription.deepgram.model"
+        public static let deepgramModel: DeepgramTranscriptionModel = .nova3
+
+        public static let deepgramExpectedLanguagesKey = "transcription.deepgram.expected-languages"
+        /// Empty means automatic detection.
+        public static let deepgramExpectedLanguages: [TranscriptionLanguage] = []
     }
 
     // MARK: - Screen capture
@@ -86,6 +93,12 @@ public enum Defaults {
         public static let browserTextEnabledKey = "screen.browserTextEnabled"
         /// Accessibility is a broad optional grant, so it starts disabled.
         public static let browserTextEnabled = false
+    }
+
+    // MARK: - Coaching
+
+    public enum Coaching {
+        public static let modeKey = "coaching.mode"
     }
 
     // MARK: - Hotkey
@@ -108,6 +121,17 @@ public enum Defaults {
         /// kVK_ANSI_Comma. Not ⌥⌘M: AppKit treats Option-⌘M as Minimize All in every app.
         public static let collapseOverlayCombination = HotkeyCombination(
             keyCode: 43, modifiers: [.command, .option])
+        public static let newSessionKeyCodeKey = "hotkey.newSession.keyCode"
+        public static let newSessionModifiersKey = "hotkey.newSession.modifiers"
+        /// kVK_ANSI_0. Kept off the ⌥⌘ family every other shortcut uses, so reaching for a coaching
+        /// shortcut can't end the session by accident.
+        public static let newSessionCombination = HotkeyCombination(
+            keyCode: 29, modifiers: [.control, .shift, .command])
+        public static let toggleCoachingModeKeyCodeKey = "hotkey.toggleCoachingMode.keyCode"
+        public static let toggleCoachingModeModifiersKey = "hotkey.toggleCoachingMode.modifiers"
+        /// kVK_ANSI_Period, beside the collapse shortcut's comma.
+        public static let toggleCoachingModeCombination = HotkeyCombination(
+            keyCode: 47, modifiers: [.command, .option])
         public static let codeKeyCodeKey = "hotkey.code.keyCode"
         public static let codeModifiersKey = "hotkey.code.modifiers"
         /// kVK_ANSI_K.
@@ -187,6 +211,8 @@ public enum Defaults {
             public static let heightKey = "overlayBox.height"
             public static let height: Double = 440
             public static let heightRange: ClosedRange<Double> = 140...4096
+
+            public static let transcriptPaneVisibleKey = "overlayBox.transcriptPaneVisible"
         }
     }
 }

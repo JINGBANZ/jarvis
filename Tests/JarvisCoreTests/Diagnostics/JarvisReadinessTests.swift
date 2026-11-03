@@ -326,6 +326,65 @@ import Testing
         #expect(readiness.status == .blocked(.endpoint(.microphone)))
     }
 
+    @Test func refusedReplacementLeavesLiveSessionMonitored() {
+        let (readiness, live) = fullReadyReadiness()
+        let replacement = readiness.beginReplacement(configuration: .init())
+        #expect(replacement.effects.isEmpty)
+        #expect(readiness.activeSession == live)
+        #expect(readiness.isCurrent(replacement.session))
+
+        let blocked = readiness.observe(
+            .brainPreparation(.blocked(.providerUnavailable(ProviderFailure(
+                source: .brain(.codexSubscription), stage: .process, category: .authentication,
+                disposition: .permanent, identity: .init(errorCode: "refresh_token_invalidated"),
+                message: "Your session has ended. Please log in again.")))),
+            for: replacement.session)
+        #expect(blocked.isEmpty)
+        #expect(readiness.status == .ready(.full))
+
+        _ = readiness.observe(.transcriptionEndpoint(stream: .microphone, state: .failed), for: live)
+        #expect(readiness.status == .blocked(.endpoint(.microphone)))
+    }
+
+    @Test func committedReplacementCarriesItsPreflightAndRetiresTheOldToken() {
+        let (readiness, live) = fullReadyReadiness()
+        let replacement = readiness.beginReplacement(configuration: .init())
+        _ = readiness.observe([
+            .permissions(granted: [.microphone, .systemAudio, .screenRecording]),
+            .brainPreparation(.ready),
+        ], for: replacement.session)
+        #expect(readiness.status == .ready(.full))
+
+        let effects = readiness.commitReplacement(replacement.session)
+        #expect(effects == [.statusChanged(.checking(.transcriptionEndpoints))])
+        #expect(readiness.activeSession == replacement.session)
+        #expect(readiness.replacementSession == nil)
+        #expect(readiness.observe(.capture(.stopped), for: live).isEmpty)
+        #expect(readiness.commitReplacement(replacement.session).isEmpty)
+    }
+
+    @Test func cancellingReplacementKeepsLiveAndStoppingLiveDropsReplacement() {
+        let (readiness, live) = fullReadyReadiness()
+        let cancelled = readiness.beginReplacement(configuration: .init())
+        #expect(readiness.stop(session: cancelled.session).isEmpty)
+        #expect(readiness.activeSession == live)
+        #expect(readiness.status == .ready(.full))
+
+        let orphaned = readiness.beginReplacement(configuration: .init())
+        #expect(readiness.stop(session: live) == [.statusChanged(.stopped)])
+        #expect(!readiness.isCurrent(orphaned.session))
+        #expect(readiness.commitReplacement(orphaned.session).isEmpty)
+        #expect(readiness.status == .stopped)
+    }
+
+    @Test func replacementWithoutLiveSessionBegins() {
+        let readiness = JarvisReadiness()
+        let start = readiness.beginReplacement(configuration: .init())
+        #expect(readiness.activeSession == start.session)
+        #expect(readiness.replacementSession == nil)
+        #expect(start.effects == [.statusChanged(.checking(.permissions))])
+    }
+
     private func fullReadyReadiness() -> (JarvisReadiness, JarvisReadiness.Session) {
         let readiness = JarvisReadiness()
         let start = readiness.begin(configuration: .init())

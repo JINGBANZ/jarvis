@@ -17,6 +17,14 @@ import Foundation
         #expect(Credential.geminiAPIKey.displayName == "Gemini API")
     }
 
+    @Test func theDeepgramKeyHasItsOwnFileAndOnlyPowersTranscription() {
+        #expect(Credential.deepgramAPIKey.fileName == "deepgram-api-key")
+        #expect(Credential.deepgramAPIKey.environmentVariable == "DEEPGRAM_API_KEY")
+        #expect(Credential.deepgramAPIKey.roles == "Transcription")
+        #expect(Credential.openAIAPIKey.roles == "Brain and transcription")
+        #expect(Credential.geminiAPIKey.roles == "Brain and transcription")
+    }
+
     @Test func eachCredentialLinksToItsVendorsKeyPage() {
         #expect(Credential.openAIAPIKey.keyPageURL.absoluteString == "https://platform.openai.com/api-keys")
         #expect(Credential.geminiAPIKey.keyPageURL.absoluteString == "https://aistudio.google.com/apikey")

@@ -25,6 +25,7 @@ public enum ActivityEvent: Sendable {
         case capabilityLoaded
         case prepNotesUnavailable
         case referencesOmitted, referencesListed, referencesSearched, referenceRead, referencesUnavailable
+        case coachingModeChanged
     }
 
     /// Persisted inside the event, so part of the on-disk vocabulary.
@@ -65,6 +66,7 @@ public enum ActivityEvent: Sendable {
     case referencesListed(count: Int)
     case referencesSearched(query: String, matchCount: Int, complete: Bool)
     case referenceRead(documentID: UUID)
+    case coachingModeChanged(mode: CoachingMode)
 
     var response: ActivityResponse? {
         guard case .tip(let hint, let detail) = self else { return nil }
@@ -160,6 +162,12 @@ public enum ActivityEvent: Sendable {
             return (.capabilityLoaded, "📎 loaded the \(name) \(kind.rawValue)", nil)
         case .prepNotesUnavailable:
             return (.prepNotesUnavailable, "📎 couldn't check your prep notes — coaching without them", nil)
+        case .coachingModeChanged(let mode):
+            let message = switch mode {
+            case .automatic: "⌨️ automatic mode — coaching when there's something useful to add"
+            case .manual: "⌨️ manual mode — listening; coaching only on a shortcut"
+            }
+            return (.coachingModeChanged, message, nil)
         }
     }
 }

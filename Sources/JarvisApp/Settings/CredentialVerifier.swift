@@ -1,7 +1,7 @@
 import Foundation
 import JarvisCore
 
-/// Lists models because both vendors answer that without spending inference. Gemini's key goes in
+/// Lists models (Deepgram: describes the token) because each vendor answers that without spending inference. Gemini's key goes in
 /// the `x-goog-api-key` header, not the `key` query parameter, so the secret never enters a URL.
 struct CredentialVerifier: Sendable {
     private static let timeout: TimeInterval = 10
@@ -15,6 +15,9 @@ struct CredentialVerifier: Sendable {
         case .geminiAPIKey:
             request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models")!)
             request.setValue(key, forHTTPHeaderField: "x-goog-api-key")
+        case .deepgramAPIKey:
+            request = URLRequest(url: URL(string: "https://api.deepgram.com/v1/auth/token")!)
+            request.setValue(DeepgramLiveSession.authorizationValue(apiKey: key), forHTTPHeaderField: "Authorization")
         }
         request.timeoutInterval = Self.timeout
         let configuration = URLSessionConfiguration.ephemeral

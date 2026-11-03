@@ -97,6 +97,12 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 
 ## Development rules
 
+- Before opening any PR, run the complete unfiltered Gate locally on the submitted revision and
+  include the passing output and test count. A blocked, failed, partial, or CI-only run does not
+  satisfy this rule; resolve the blocker before creating the PR. Open PRs ready for review.
+  Follow [developer setup](CONTRIBUTING.md#developer-setup); the test display initializes automatically.
+- Reuse the shared test display, creating it only when absent. Never destroy it during command
+  completion, failure cleanup, or recovery; clean up test apps and helpers while retaining the display.
 - Build every capability around the [voice-only interaction contract](wiki/architecture.md#1-vision).
 - Build the harness, not model or OS intelligence. Add a target only for an isolated test boundary, a
   compiler-enforced boundary, or code shared by another executable.
@@ -114,6 +120,7 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
   tests (`wiki/live-e2e-tests.md`) because it depends on TCC permissions and real capture devices.
 - Work in an isolated git worktree. PRs squash-merge with the PR number in the subject.
 - Read `wiki/AGENTS.md` before wiki edits; the wiki is the design source of truth.
+- Read [`website/AGENTS.md`](website/AGENTS.md) before editing anything under `website/`.
 - Treat provider context layout as a cost-sensitive contract. Preserve session-stable instructions
   and tools and ordered reusable history. Every context source declares its lifetime and cache
   boundary; deliberate rewrites are explicit. Context, serializer, and provider/model changes pass
@@ -139,7 +146,7 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 
 - The Gate and the live e2e tests need only the Command Line Tools; no Xcode project exists.
   Developer desktops also have full Xcode and the Xcode MCP; see `wiki/build-and-run.md#toolchain`.
-  The committed AEC archive is arm64-only.
+  Intel builds need `./scripts/build-aec.sh` first; see the audio build prerequisites in that page.
 - Launch the signed app through `./scripts/build-app.sh --run` / `open`, never the bare executable.
 
 ## Agent skills

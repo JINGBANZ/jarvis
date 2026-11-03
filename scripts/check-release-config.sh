@@ -125,11 +125,18 @@ fi
 cliproxyapi_lib="scripts/lib/cliproxyapi.sh"
 if ! /usr/bin/grep -Eq '^CLIPROXYAPI_SOURCE_SHA256="[0-9a-f]{64}"$' "$cliproxyapi_lib" \
     || ! /usr/bin/grep -Eq '^CLIPROXYAPI_GO_SHA256="[0-9a-f]{64}"$' "$cliproxyapi_lib" \
+    || ! /usr/bin/grep -Eq '^CLIPROXYAPI_GO_AMD64_SHA256="[0-9a-f]{64}"$' "$cliproxyapi_lib" \
     || ! /usr/bin/grep -Fq '"$archive" "$CLIPROXYAPI_SOURCE_SHA256"' "$cliproxyapi_lib" \
-    || ! /usr/bin/grep -Fq '"$go_archive" "$CLIPROXYAPI_GO_SHA256"' "$cliproxyapi_lib" \
+    || ! /usr/bin/grep -Fq '"$go_archive" "$go_sha256"' "$cliproxyapi_lib" \
     || ! /usr/bin/grep -Fq 'patch --batch --fuzz=0 -d "$source" -p1 < scripts/cliproxyapi/local-only.patch' "$cliproxyapi_lib" \
     || ! /usr/bin/grep -Fq 'EXTRACTED_HELPER="$EXTRACTED_APP/Contents/MacOS/cliproxyapi"' "$verify_script"; then
   echo "Release packaging must bundle the checksum-pinned subscription helper and verify it in the image." >&2
+  exit 1
+fi
+if ! /usr/bin/grep -Fq './scripts/check-universal-app.sh "$APP"' "$package_script" \
+    || ! /usr/bin/grep -Fq './scripts/check-universal-app.sh "$EXTRACTED_APP"' "$verify_script" \
+    || ! /usr/bin/grep -Fq 'swift build -c release --arch arm64 --arch x86_64' "$package_script"; then
+  echo "Release packaging and final verification must require a universal app and helpers." >&2
   exit 1
 fi
 package_flow=(
