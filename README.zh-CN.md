@@ -43,7 +43,6 @@ flowchart TD
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
 cd jarvis
-# Intel Mac：先安装 meson、ninja 和 pkgconf，再运行 ./scripts/build-aec.sh。
 ./scripts/build-app.sh --run
 ```
 

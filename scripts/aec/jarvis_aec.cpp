@@ -1,7 +1,7 @@
 // C++ implementation of the pure-C jarvis_aec.h facade, wrapping WebRTC AEC3.
 // Compiled and merged into libjarvis-aec.a by scripts/build-aec.sh — it is NOT
 // part of any SwiftPM target (it needs the webrtc/abseil headers, which we don't
-// vendor). Keep it in lockstep with Sources/CJarvisAEC/include/jarvis_aec.h.
+// vendor). Keep it in lockstep with scripts/aec/include/jarvis_aec.h.
 //
 // Config rationale: we enable ONLY the echo canceller (AEC3, desktop mode) plus
 // the high-pass filter that aids it. Noise suppression and automatic gain
