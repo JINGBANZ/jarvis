@@ -90,11 +90,7 @@ if [[ -n "$EXPECTED_RELEASE_TAG" && "$EXPECTED_RELEASE_TAG" != "v$VERSION" ]]; t
   exit 1
 fi
 EXTRACTED_BIN="$EXTRACTED_APP/Contents/MacOS/$BIN_NAME"
-ARCHITECTURES="$(lipo -archs "$EXTRACTED_BIN")"
-if [[ "$ARCHITECTURES" != "arm64" ]]; then
-  echo "error: disk-image app has unexpected architectures: $ARCHITECTURES" >&2
-  exit 1
-fi
+./scripts/check-universal-app.sh "$EXTRACTED_APP"
 ./scripts/check-release-sdk.sh "$EXTRACTED_BIN"
 if [[ ! -f "$EXTRACTED_APP/Contents/Resources/LICENSE" \
       || ! -f "$EXTRACTED_APP/Contents/Resources/THIRD_PARTY_NOTICES.md" ]]; then
@@ -114,18 +110,16 @@ fi
 
 EXTRACTED_HELPER="$EXTRACTED_APP/Contents/MacOS/cliproxyapi"
 if [[ ! -f "$EXTRACTED_HELPER" || -L "$EXTRACTED_HELPER" || ! -x "$EXTRACTED_HELPER" \
-      || "$(lipo -archs "$EXTRACTED_HELPER")" != "arm64" \
       || ! -f "$EXTRACTED_APP/Contents/Resources/Licenses/CLIProxyAPI-LICENSE.txt" ]]; then
-  echo "error: disk-image app is missing the arm64 subscription helper or its license" >&2
+  echo "error: disk-image app is missing the subscription helper or its license" >&2
   exit 1
 fi
 
 EXTRACTED_REFERENCES="$EXTRACTED_APP/Contents/Resources/ReferenceHelper"
 if [[ -L "$EXTRACTED_REFERENCES" || -L "$EXTRACTED_REFERENCES/JarvisReferenceHelper" \
       || ! -f "$EXTRACTED_REFERENCES/JarvisReferenceHelper" || ! -x "$EXTRACTED_REFERENCES/JarvisReferenceHelper" \
-      || "$(lipo -archs "$EXTRACTED_REFERENCES/JarvisReferenceHelper")" != arm64 \
       || "$(find "$EXTRACTED_REFERENCES" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" != 1 ]]; then
-  echo "error: disk-image app must contain only the native arm64 References helper" >&2
+  echo "error: disk-image app must contain only the native References helper" >&2
   exit 1
 fi
 REFERENCE_PRIVACY="$EXTRACTED_APP/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle/PrivacyInfo.xcprivacy"

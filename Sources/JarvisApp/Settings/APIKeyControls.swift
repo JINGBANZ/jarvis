@@ -7,7 +7,7 @@ final class APIKeyControls: NSObject {
     private let store: FileSecretStore
     private let onKeySaved: (Credential, String) -> Void
 
-    private var card: SettingsCardView?
+    private var view: NSView?
     private var keyRow: SettingsRowView?
     private var onHeightChanged: ((CGFloat) -> Void)?
     private var editing = false
@@ -41,11 +41,10 @@ final class APIKeyControls: NSObject {
         }
     }
 
-    private static let collapsedHeight = SettingsStyle.cardHeaderHeight + SettingsStyle.rowHeight
     private static let editorHeight: CGFloat = 64
 
     var preferredHeight: CGFloat {
-        Self.collapsedHeight + (editing ? Self.editorHeight : 0)
+        SettingsStyle.rowHeight + (editing ? Self.editorHeight : 0)
             + (verdict != nil ? SettingsStyle.rowHeight : 0)
     }
 
@@ -57,16 +56,13 @@ final class APIKeyControls: NSObject {
         self.onKeySaved = onKeySaved
     }
 
-    func makeView(onHeightChanged: @escaping (CGFloat) -> Void) -> NSView {
+    func makeView(showsSeparator: Bool, onHeightChanged: @escaping (CGFloat) -> Void) -> NSView {
         editing = false
         self.onHeightChanged = onHeightChanged
 
-        let card = SettingsCardView(
-            frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
-        card.setHeader(title: credential.displayName, detail: credential.roles)
-        card.onLayout = { [weak self] in self?.layout() }
-        self.card = card
-        guard let content = card.contentView else { return card }
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 712, height: preferredHeight))
+        content.identifier = NSUserInterfaceItemIdentifier("\(credential.rawValue)-row")
+        view = content
 
         let action = NSButton(
             title: hasSavedKey ? "Edit" : "Add API key",
@@ -85,11 +81,11 @@ final class APIKeyControls: NSObject {
             action.centerYAnchor.constraint(equalTo: controls.centerYAnchor),
         ])
         let row = SettingsRowView(
-            title: "API key",
+            title: credential.vendorName,
             detail: "",
             controlView: controls,
             controlSize: NSSize(width: 220, height: 32),
-            showsSeparator: false)
+            showsSeparator: showsSeparator)
         content.addSubview(row)
         keyRow = row
 
@@ -126,7 +122,7 @@ final class APIKeyControls: NSObject {
         self.verdictLabel = verdictLabel
 
         applyState()
-        return card
+        return content
     }
 
     func windowWillClose() {
@@ -137,8 +133,9 @@ final class APIKeyControls: NSObject {
         if case .checking = verdict { verdict = nil }
     }
 
-    private func layout() {
-        guard let card, let content = card.contentView else { return }
+    func layout(in frame: NSRect) {
+        guard let content = view else { return }
+        content.frame = frame
         let verdictOffset = verdict != nil ? SettingsStyle.rowHeight : 0
         let editorOffset = (editing ? Self.editorHeight : 0) + verdictOffset
         keyRow?.frame = NSRect(
@@ -182,8 +179,16 @@ final class APIKeyControls: NSObject {
     }
 
     private func applyState() {
-        keyRow?.setDetail(
-            hasSavedKey ? "Saved" : "Not saved", color: hasSavedKey ? SettingsTheme.teal : nil)
+        let detail = NSMutableAttributedString(
+            string: hasSavedKey ? "Saved" : "Not saved",
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11.5),
+                .foregroundColor: hasSavedKey ? SettingsTheme.teal : SettingsTheme.mutedText,
+            ])
+        detail.append(NSAttributedString(string: " · \(credential.roles)", attributes: [
+            .font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: SettingsTheme.mutedText,
+        ]))
+        keyRow?.setDetail(detail)
         actionButton?.isHidden = editing
         actionButton?.title = hasSavedKey ? "Edit" : "Add API key"
         field?.isHidden = !editing
@@ -193,9 +198,11 @@ final class APIKeyControls: NSObject {
         verdictLabel?.isHidden = verdict == nil
         verdictLabel?.stringValue = verdict?.text ?? ""
         verdictLabel?.textColor = verdict?.color ?? SettingsTheme.mutedText
-        card?.frame.size.height = preferredHeight
-        card?.needsLayout = true
-        layout()
+        if let view {
+            var frame = view.frame
+            frame.size.height = preferredHeight
+            layout(in: frame)
+        }
         onHeightChanged?(preferredHeight)
     }
 

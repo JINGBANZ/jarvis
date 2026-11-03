@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.11](https://github.com/JINGBANZ/jarvis/compare/v0.5.10...v0.5.11) (2026-10-30)
+
+
+### Features
+
+* **coach:** add a manual coaching mode that waits for shortcuts ([#478](https://github.com/JINGBANZ/jarvis/issues/478)) ([f35fda7](https://github.com/JINGBANZ/jarvis/commit/f35fda749917a64214ace38510f6b95fa921fd77))
+* **overlay:** add a live transcript column to the overlay box ([#480](https://github.com/JINGBANZ/jarvis/issues/480)) ([729aefd](https://github.com/JINGBANZ/jarvis/commit/729aefd9d25a22b30141840dc54914b593e6ae72))
+* **transcription:** add Deepgram Nova-3 as an opt-in provider ([#485](https://github.com/JINGBANZ/jarvis/issues/485)) ([ca049cc](https://github.com/JINGBANZ/jarvis/commit/ca049ccd3713b8d94b4daeae3942e09e58ab3f89))
+
+
+### Bug Fixes
+
+* **test:** sample diagram label colors in srgb ([#486](https://github.com/JINGBANZ/jarvis/issues/486)) ([03ab4f0](https://github.com/JINGBANZ/jarvis/commit/03ab4f0afca34d75c193854ddff29539c20078fb))
+
 ## [0.5.10](https://github.com/JINGBANZ/jarvis/compare/v0.5.9...v0.5.10) (2026-10-29)
 
 
