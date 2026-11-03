@@ -10,7 +10,7 @@
 
 **Released and hardening.** Jarvis coaches live technical interviews end to end, from two-speaker
 transcription through an ordered brain route with on-demand skills and tools to a private
-capture-excluded Overlay Box, and ships as a signed, notarized Apple silicon release.
+capture-excluded Overlay Box, with universal Apple silicon and Intel release packaging.
 
 ## Next action
 
@@ -56,7 +56,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisApp/Updates/UpdateController.swift`: the **Check for Updates** menu item ([build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed)).
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift`: the Activity window and its **Evaluate** flow ([build-and-run.md → The live activity viewer](./build-and-run.md#the-live-activity-viewer)).
 - `Sources/EvalPrep/main.swift` + `scripts/eval-session.sh`: the terminal entry point for the same evaluator.
-- `Sources/CJarvisAEC/lib/libjarvis-aec.a`: the prebuilt WebRTC AEC3 archive, rebuilt by `scripts/build-aec.sh`.
+- `Sources/CJarvisAEC/lib/libjarvis-aec.a` + `scripts/build-aec.sh`: the bundled Apple silicon WebRTC AEC3 archive and the universal source build ([build-and-run.md](./build-and-run.md#architectures-and-audio-dependency)).
 - `Sources/JarvisApp/Resources/SileroVAD.mlmodelc`: the Silero VAD model, rebuilt by `scripts/build-vad.sh`.
 - `scripts/run-capture-privacy-tests.sh`: the signed-app capture check ([overlay-invisibility.md](./overlay-invisibility.md)).
 - `scripts/run-settings-tests.sh`: signed-app General page, preference persistence, and session storage checks with synthetic traffic ([settings-window.md](./settings-window.md#general)).
@@ -67,7 +67,6 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 
 ## Not yet built
 
-- **Universal binary** — `Sources/CJarvisAEC/lib/libjarvis-aec.a` is arm64-only; `lipo` in an x86_64 slice if Intel is ever needed.
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
 - **Gemini Live session resumption** (`sessionResumptionUpdate`) — `GeminiLiveTranscriber` drains and
   rotates ahead of the ~10-minute `goAway` close ([architecture.md → Resilience](./architecture.md#resilience)),

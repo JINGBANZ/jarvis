@@ -146,7 +146,7 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 
 - The Gate and the live e2e tests need only the Command Line Tools; no Xcode project exists.
   Developer desktops also have full Xcode and the Xcode MCP; see `wiki/build-and-run.md#toolchain`.
-  The committed AEC archive is arm64-only.
+  Intel builds need `./scripts/build-aec.sh` first; see the audio build prerequisites in that page.
 - Launch the signed app through `./scripts/build-app.sh --run` / `open`, never the bare executable.
 
 ## Agent skills
