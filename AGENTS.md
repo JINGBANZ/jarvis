@@ -146,7 +146,7 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 
 - The Gate and the live e2e tests need only the Command Line Tools; no Xcode project exists.
   Developer desktops also have full Xcode and the Xcode MCP; see `wiki/build-and-run.md#toolchain`.
-  Intel builds need `./scripts/build-aec.sh` first; see the audio build prerequisites in that page.
+  SwiftPM downloads the checksum-pinned universal AEC library on both Intel and Apple silicon.
 - Launch the signed app through `./scripts/build-app.sh --run` / `open`, never the bare executable.
 
 ## Agent skills

@@ -56,7 +56,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `Sources/JarvisApp/Updates/UpdateController.swift`: the **Check for Updates** menu item ([build-and-run.md → In-app updates](./build-and-run.md#in-app-updates--sparkle-over-the-release-feed)).
 - `Sources/JarvisApp/Viewer/ActivityViewer.swift`: the Activity window and its **Evaluate** flow ([build-and-run.md → The live activity viewer](./build-and-run.md#the-live-activity-viewer)).
 - `Sources/EvalPrep/main.swift` + `scripts/eval-session.sh`: the terminal entry point for the same evaluator.
-- `Sources/CJarvisAEC/lib/libjarvis-aec.a` + `scripts/build-aec.sh`: the bundled Apple silicon WebRTC AEC3 archive and the universal source build ([build-and-run.md](./build-and-run.md#architectures-and-audio-dependency)).
+- `Package.swift` + `scripts/aec/` + `scripts/build-aec.sh`: the hosted universal WebRTC AEC3 dependency and its maintainer build recipe ([build-and-run.md](./build-and-run.md#architectures-and-audio-dependency)).
 - `Sources/JarvisApp/Resources/SileroVAD.mlmodelc`: the Silero VAD model, rebuilt by `scripts/build-vad.sh`.
 - `scripts/run-capture-privacy-tests.sh`: the signed-app capture check ([overlay-invisibility.md](./overlay-invisibility.md)).
 - `scripts/run-settings-tests.sh`: signed-app General page, preference persistence, and session storage checks with synthetic traffic ([settings-window.md](./settings-window.md#general)).

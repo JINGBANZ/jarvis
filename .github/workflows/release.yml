@@ -49,9 +49,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Install universal audio build tools
-        run: brew install meson ninja pkgconf
-
       - name: Run repository gate
         run: swift build && ./scripts/run-ci-tests.sh
 

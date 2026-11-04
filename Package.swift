@@ -2,8 +2,6 @@
 import PackageDescription
 import Foundation
 
-let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
-
 // Keeps the pre-macOS 26 Apple Speech fallback buildable on a macOS 26 SDK. SwiftPM ignores
 // environment-only manifest changes, so use a clean scratch path when toggling it.
 let forceAppleSpeechFallback =
@@ -31,19 +29,12 @@ let package = Package(
         .target(name: "JarvisEvaluation", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"]),
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
         .target(name: "JarvisScreenCapture", dependencies: ["JarvisCore", "JarvisProcess"]),
-        // The locally built universal archive takes precedence over the bundled arm64 archive.
-        .target(
+        .binaryTarget(
             name: "CJarvisAEC",
-            exclude: ["lib"],
-            linkerSettings: [
-                .unsafeFlags([
-                    "-L\(packageRoot)/.build/aec", "-L\(packageRoot)/Sources/CJarvisAEC/lib",
-                    "-ljarvis-aec",
-                ]),
-                .linkedFramework("CoreFoundation"),
-                .linkedLibrary("c++"),
-            ]
+            url: "https://github.com/JINGBANZ/jarvis/releases/download/aec-v2.1.0/CJarvisAEC.xcframework.zip",
+            checksum: "9ec3fde5773ac8e7204a62b3bf2d4fa1d5c41b496f37361ab07b0c8a0120e83c"
         ),
+        .testTarget(name: "JarvisAECTests", dependencies: ["CJarvisAEC"]),
         .executableTarget(
             name: "JarvisApp",
             dependencies: [

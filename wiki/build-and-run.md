@@ -32,13 +32,11 @@ because fresh checkout timestamps otherwise invalidate unchanged Swift sources. 
 retain their new timestamps and go through the normal compiler dependency checks. Test results,
 session data, and credentials are outside the cache paths.
 
-The [audio cache action](../.github/actions/cache-aec/action.yml) keys the universal archive by its
-compiler, SDK, pinned source recipe, and shim, then verifies its checksum and both architectures.
-The subscription helper retains its recipe/architecture keys and digest verification. Cache misses
-build from source. Relevant pushes to `main` warm only the audio cache so new PRs can restore it;
+SwiftPM downloads and verifies the hosted AEC artifact on a cache miss. The subscription helper
+retains its recipe/architecture keys and digest verification, building from source on a cache miss.
 GitHub isolates Swift caches created by one PR from other PRs. Initial runs, evicted caches, and
 toolchain or dependency changes therefore take longer than subsequent runs of the same PR. Signed
-release packaging builds its dependencies independently of these PR caches.
+release packaging resolves the same pinned dependencies independently of these PR caches.
 
 - **Library/executable split (load-bearing for testability):** `JarvisCore` holds the pure,
   deterministic logic behind protocols (config, transcript, the coach loop, …) and is unit-tested
@@ -86,16 +84,33 @@ start that transcription provider. OpenAI and Gemini remain the remote transcrip
 Universal builds require a toolchain containing Swift compatibility libraries for both architectures,
 such as the release runner's Xcode 26 toolchain; an SDK with Intel interfaces alone is insufficient.
 
-The bundled WebRTC AEC3 archive supports Apple silicon. Intel development and universal release
-builds first run `scripts/build-aec.sh`, with Meson, Ninja, and pkgconf installed
-(`brew install meson ninja pkgconf`). It cross-compiles both architectures from the pinned upstream
-source and merges them into `.build/aec/libjarvis-aec.a`. `Package.swift` searches that directory before
-the bundled archive. This keeps ordinary Apple silicon development builds independent of the C++
-toolchain setup without committing another generated binary. Run the script again after removing
-`.build` or changing the AEC source or recipe. The script requires network access on its first run;
-the Gate remains offline after dependencies are prepared.
+`Package.swift` pins one hosted `CJarvisAEC.xcframework.zip` by versioned URL and SHA-256 checksum.
+Its static library contains both architectures, the C importer module, and its C++/CoreFoundation
+link requirements. Plain `swift build` downloads and verifies it on either Mac; ordinary development
+needs no Meson, Ninja, pkgconf, or audio source build. The Gate works offline once SwiftPM dependencies
+are present. Missing downloads or checksum mismatches fail dependency resolution. AEC is linked into
+the app at build time, with no runtime download or change to capture or provider selection.
 
-CI runs the Gate and helper privacy checks on native Intel and Apple silicon runners. It also
+Maintainers rebuild the dependency with `brew install meson ninja pkgconf` followed by
+`./scripts/build-aec.sh`. The recipe pins WebRTC and its checksum-pinned Abseil wrap, cross-compiles
+both slices, checks architectures, exported C symbols, and deployment targets, then packages the
+static XCFramework with `scripts/aec/package.py`. Command Line Tools suffice for this C-only bundle.
+The archive in `.build/aec/` includes exact upstream licenses and `provenance.json` with source pins,
+recipe/header hashes, compiler/SDK versions, and the library digest. Rebuilding is reproducible from
+these inputs; a changed compiler or recipe can produce different bytes and requires a new version.
+The public header and module map live beside the maintainer shim in `scripts/aec/`.
+
+Publish dependency assets under a dedicated `aec-v…` tag as a GitHub prerelease with
+`--latest=false`, using `gh release create` and its `--notes-file` option. The dependency release is
+kept outside the app's stable release channel so `/releases/latest/download/Jarvis.dmg` and
+`appcast.xml` continue to name the app release. Include the archive and its `.sha256` file, identify
+the recipe commit in the release notes, then pin the published URL and `swift package compute-checksum`
+result in `Package.swift`. Never replace assets or delete old dependency tags: historical checkouts
+must retain their exact bytes. Verify a clean SwiftPM download and native AEC smoke tests on Intel
+and Apple silicon before accepting a dependency update.
+
+CI runs the Gate, including the resolved AEC module's create/process/destroy smoke tests, and helper
+privacy checks on native Intel and Apple silicon runners. It also
 assembles an unsigned universal release bundle and checks every shipped executable's architectures.
 These checks establish compilation and test coverage; capture, permissions, and live transcription
 on physical Intel hardware use the same signed-app validation as Apple silicon.
@@ -360,7 +375,7 @@ CHANGELOG — config in `release-please-config.json`). Merging that PR is the ma
 it creates the GitHub Release **as a draft**, with no second deployment approval. `force-tag-creation`
 tags that draft immediately: GitHub otherwise defers tagging a draft until publish, and an untagged
 draft makes the next release-please run miss the previous release and garble the changelog. An Apple-silicon
-`macos-26` job then runs the test gate, installs the audio build tools and the hash-pinned pure-Python wheels in
+`macos-26` job then runs the test gate and installs the hash-pinned pure-Python wheels in
 `scripts/requirements-release.txt` into an ephemeral environment, and signs/notarizes with secrets
 scoped to the main-only `release` environment (the base64 `.p12` certificate and an App Store Connect
 API key — names in the workflow). It attaches `Jarvis.dmg` and the `appcast.xml` update feed described
@@ -378,8 +393,8 @@ tags created with `GITHUB_TOKEN` never trigger other workflows.
 `scripts/requirements-release.txt` with `--require-hashes`, and pass its interpreter through
 `DMGBUILD_PYTHON`; notarization also needs the one-time
 `xcrun notarytool store-credentials jarvis-notary …` setup. Distributed builds require macOS 14.2 or
-later and run natively on Apple silicon and Intel. Packaging builds the universal AEC archive before
-compiling both app architectures, then validates the assembled bundle before signing. The README owns the user
+later and run natively on Apple silicon and Intel. Packaging resolves the pinned universal AEC
+dependency, compiles both app architectures, then validates the assembled bundle before signing. The README owns the user
 installation steps; provider credentials remain user-supplied in Settings.
 
 ## In-app updates — Sparkle over the release feed

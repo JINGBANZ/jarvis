@@ -62,7 +62,6 @@ notarize_artifact() {
   fi
 }
 
-./scripts/build-aec.sh
 echo "▶ swift build -c release --arch arm64 --arch x86_64"
 swift build -c release --arch arm64 --arch x86_64
 BIN_PATH="$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/$BIN_NAME"
