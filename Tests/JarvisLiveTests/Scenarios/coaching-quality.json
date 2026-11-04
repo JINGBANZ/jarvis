@@ -686,5 +686,37 @@
     ],
     "input": "Customer role-play. Agreed: signed-in staff look up account-scoped orders and draft replies; staff approve sends. them: Does the model decide which accounts a rep can access? me: Jarvis, help me answer.",
     "pass": "Hint leads with a short plain-English answer (normally at most 12 words), not coaching instructions or a preamble. Code enforces access before retrieval, not the model. Optional detail is at most three short supporting fragments; no repeated question, recap, long script, or unnecessary jargon."
+  },
+  {
+    "id": "customer-discovery-scenario-clock",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Transcript timestamps are session-relative. [00:00] them: Welcome, let us introduce ourselves. [06:00] them: Here is the scenario: our support reps need an assistant for order inquiries. [07:00] me: What outcome matters? [08:00] them: Reduce handling time. [09:00] me: Walk me through a normal inquiry. [10:00] them: Reps verify account access, look up an order, draft a reply and approve sending. Data readiness and delivery constraints are still unknown. me: Jarvis, what next?",
+    "pass": "Infers discovery started around 06:00, roughly four minutes elapsed, not ten. Asks one critical uncovered question, not a rushed closing or exact countdown. Does not require a user start command or treat greetings as discovery."
+  },
+  {
+    "id": "customer-discovery-depth-budget",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "[02:00] them: Here is the scenario: help staff handle supplier email. By [08:00], goal, users and normal workflow are known. Conversation has spent six minutes on email subtypes, including rare wording variants. Authority, data access, integration readiness and deadline remain unknown. them: There are also more unusual phrasings we could discuss. me: Jarvis, what should I ask next?",
+    "pass": "Redirects to one design-critical uncovered area such as action authority or data/access. Does not drill into rare phrasings, stack questions, reopen known facts or propose design before critical coverage."
+  },
+  {
+    "id": "customer-discovery-clock-uncertain",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Available history begins mid-discussion at [18:00]. them: We started the interview about twenty minutes ago, including introductions and a past-project discussion. The actual scenario start is missing. Goal, users and workflow are known; access and authority remain open. me: What next?",
+    "pass": "Uses coverage to ask one critical missing question. Does not subtract interview start as discovery start, invent elapsed discovery minutes or a countdown, demand a start command, or close because the interview has lasted twenty minutes."
+  },
+  {
+    "id": "customer-discovery-budget-authority",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "[04:00] them: Here is the scenario: automate eligible return-label creation for signed-in shoppers. [15:30] Known: goal, users, normal workflow/exceptions, account-scoped APIs, delivery resources, expected load and success criteria. Label-creation authority remains undecided. them: Anything else?",
+    "pass": "Recognizes discovery is near its roughly twelve-minute budget. Gives one concise authority question or clearly proposed narrower feasible scope; never assumes authorization or calls the unresolved label-creation scope ready. No lengthy checklist or exact timer promise."
   }
 ]

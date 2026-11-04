@@ -350,3 +350,26 @@ These are grouped host-model observations, not independent trials, provider-leve
 measured reading/response latency. They support a shorter output shape; they do not prove users can
 read every detail in two seconds. No private interview material was used. Earlier probe sections
 record prior revisions, including the superseded automatic-script behavior.
+
+## Inferred discovery start and twelve-minute budget
+
+Four synthetic timing cases cover introductions before the scenario, excessive depth in one area,
+unknown discovery start despite known interview elapsed time, and unresolved authority near the
+budget. The skill infers discovery start from scenario/requirements evidence, uses adaptive 3/6/9/12
+minute coverage checkpoints, and treats time as a reason to prioritize blockers or propose narrower
+scope—not as permission to assume authority or declare unresolved scope ready. No start command or
+runtime timer was added; when start evidence is missing, coverage governs.
+
+Two fresh-context host agents independently read baseline/revised skill text, current Coach/Speak
+source guidance and the four inputs without pass criteria. Each answered all cases in one grouped
+conversation and reported inferred elapsed time separately for evaluation. Both excluded six minutes
+of introductions, redirected from rare wording variants to authority, left discovery elapsed unknown
+when only interview elapsed was known, and preserved the late authority blocker. The revised
+near-budget response also included an approximate time cue in its readiness notes. Baseline already
+handled these examples; this run does not establish improved reliability. The first revised response
+asked about exceptions rather than APIs, which is another uncovered design-critical area.
+
+The examples are instruction-level simulations, not production-provider runs or measured timer
+accuracy. The checkpoints are coaching guidance, not scheduled alerts or a forced twelve-minute
+transition. As in earlier probes, related authority questions can still be combined. A separate
+review checks that wording compression for the unchanged 15,000-byte budget preserves the contract.

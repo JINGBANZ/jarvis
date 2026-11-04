@@ -4,19 +4,18 @@ description: Use when an enterprise customer role-play asks about workflow autom
 ---
 # Customer-scenario workflow automation
 
-Spoken transitions govern stages, not time/old notes. Own customer staging even with system-design
-loaded. Use cloud-neutral tradeoffs; invent no rules.
+Speech governs stages, not time/old notes. Own customer staging over system-design.
+Use cloud-neutral tradeoffs; invent no rules.
 
 ## Delivery
 
-Write for a 1–2 second glance: one usable question/answer in `hint`, normally ≤12 words.
-Use plain English and the candidate's words. No preambles ("Explain that"), repeated context or
-unneeded jargon. Keep essential authority, uncertainty and safety limits.
-- Discovery detail: ≤4 short fragments—Confirmed; Open; Next gap; Ready to close. Keep key volunteered
-  facts; omit empty fields. Refresh with useful hints.
+For a 1–2 second glance: one usable `hint`, normally ≤12 words. Plain English/candidate vocabulary;
+no preamble, repetition or jargon. Keep authority, uncertainty and safety limits.
+- Discovery detail: ≤4 fragments—Confirmed; Open; Next gap; Ready to close. Keep key volunteered facts;
+  omit empty fields. Refresh with useful hints.
 - Playback: problem/goal/boundaries and one confirmation.
-- Answers/design/evals: answer first; detail null or ≤3 short fragments. Required diagrams follow
-  Design below; keep text brief. Expand explanations only when asked or confused.
+- Answers/design/evals: answer first; detail null or ≤3 fragments. Keep required diagrams; brief text.
+  Expand only when asked or confused.
 - Overload: one plain sentence/next move; detail null; keep gates.
 - Scripts: explicit request only; plain English, about one minute unless asked otherwise.
 - Practice: step, next move, ≤2 corrections; repetition isn't readiness. Only candidate requests
@@ -24,42 +23,46 @@ unneeded jargon. Keep essential authority, uncertainty and safety limits.
 
 ## Proactive consulting
 
-After a complete prompt/answer, cue the next move unprompted. Stay silent during productive responses,
-incomplete answers, acknowledgments or while a usable question awaits an answer.
-Cue new evidence, not quiet. Ask the customer. Ground later stages in facts; corrections replace old
-facts. Search prep notes; keep caveats. History may be unknown; personal scores/mistakes go in notes.
-Answer interruptions first; cue a relevant paused point. Follow redirects; skip abandoned material.
+Cue the next move after complete prompts/answers. Silence during productive responses, fragments,
+acknowledgments or pending questions. New evidence warrants cues; quiet doesn't. Ask the customer.
+Use discovered facts; corrections replace old facts. Search prep notes; keep caveats/unknown history;
+record personal scores/mistakes. Answer interruptions, resume relevant points; honor redirects.
 
 ## Discovery
 
-Aim for a defensible MVP in ~10–15 minutes; explore open workflows before narrowing.
-Five buckets:
+Infer discovery start from the scenario/first requirements question timestamp. Exclude introductions/
+background; interview start alone is insufficient. Spoken references help; require no start command.
+Target ~12 minutes; if start is unclear, use coverage, not invented time. Cover critical areas before
+deepening one; explore work before narrowing.
+Buckets:
 - Work: recent normal/messy case, steps/systems/tails, queue/handling and gathering/deciding time.
   Assembly may be the win; queue delay may not need AI.
-- Decision: outcomes, authoritative rules versus practice, hard cases and authority: automatic,
-  customer-confirmed, staff-approved or excluded. Preserve dollar/seniority limits; challenge
-  exploitable tolerances. Can the first message reveal its type?
-- Cost: priority/why now, measurable success and baseline availability; mistaken approvals/rejections,
-  detection delay and metric owners. Learn asymmetric costs before gates.
-- Data: inputs, outcomes, labels/audits, locations, bad tails, existing APIs/readiness and access.
-  Separate per-item records from tallies; validate "clean" with a definition and end-to-end sample.
-- People: users, operators/experience, experts, approval/outcome owners; deadline, staffing, dependencies.
-  Check demand/peaks and latency endpoints. Propose technology; ask business facts.
+- Decision: outcomes, rules versus practice, hard cases; automatic/customer-confirmed/staff-approved/
+  excluded actions. Keep dollar/seniority limits; challenge exploitable tolerances. Can the first
+  message reveal type?
+- Cost: priority/why now, success/baseline/owner; wrong approvals/rejections and detection delay.
+  Learn asymmetric costs before gates.
+- Data: inputs/outcomes/labels/audits, locations, bad tails, APIs/readiness/access. Separate records
+  from tallies; validate "clean" with a definition and end-to-end sample.
+- People: users/operators/experience, experts, approval/outcome owners; deadline/staff/dependencies.
+  Demand/peaks and latency endpoints. Propose technology; ask business facts.
 
-Ask one open question most likely to change scope, authority, success or feasibility; closed ones
-confirm. Never stack or re-ask settled facts. If a prior attempt threatens feasibility, ask why it
+Ask one open question; follow up only if it could change scope, authority, success or feasibility.
+Closed questions confirm. Never stack or re-ask settled facts. If a prior attempt threatens feasibility, ask why it
 failed. Near closure, name the blocker; carry other unknowns with validation steps.
 On "you decide", propose scope with labeled assumptions and evidence that would change it;
 delegated choice grants no new action authority.
-Preserve units/populations/percentiles/endpoints: sessions/messages, registered/concurrent users,
-first response/action completion. Distinguish facts, proposals and unknowns; correct material recaps.
+Keep units/populations/percentiles/endpoints: sessions≠messages, registered≠concurrent, response≠action.
+Separate facts/proposals/unknowns; fix recap errors.
 
-Close when outcome, users/workflows, request/exceptions, authority, data/access and operating/delivery
-constraints support feasible scope. "Anything else?" doesn't resolve blockers. Measure unknown metrics.
-2/7/10-minute guides: priority, workflow, blockers; use coverage without a reliable phase clock.
-Never invent facts/time or force transitions. Explicit design requests win. Playback reframes the
-bottleneck. Narrow scope openly under deadlines; non-AI may fit. Inspect real work; compare humans
-on the same set.
+Close on feasible outcome/users/workflows/exceptions/authority/data/access/operating/delivery scope.
+"Anything else?" resolves no blockers. Measure unknown metrics.
+Checkpoints: 3m goal/users/work; 6m case/exceptions/authority; 9m data/access/feasibility/success/delivery;
+12m blockers/MVP/confirmation. Adapt; skip settled areas. Near budget, cue one blocker: ask or propose
+narrower feasible scope. Time grants no authority/readiness. Time cues must be supported, useful and
+approximate, not timer promises.
+Design requests win. Recap the bottleneck; non-AI may fit. Inspect real work;
+compare humans on the same set.
 
 ## Scope and transition
 
