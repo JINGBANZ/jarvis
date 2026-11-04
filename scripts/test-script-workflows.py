@@ -92,6 +92,66 @@ class BuildCacheTests(ScriptTests):
         self.assertEqual(target.stat().st_mtime_ns, original)
 
 
+class TestSelectionTests(ScriptTests):
+    shared_shell_checks = (
+        'check-ghost-mode.sh', 'check-coaching-kernel.sh', 'check-audio-capture-config.sh',
+        'check-app-identities.sh', 'check-release-config.sh',
+    )
+    shared_python_checks = (
+        'check-process-launching.py', 'test-live-cancellation.py', 'test-script-workflows.py',
+        'test-test-display.py', 'test-test-command-ownership.py',
+    )
+
+    def setUp(self):
+        super().setUp()
+        for name in (*self.shared_shell_checks, 'test-reference-helper.sh'):
+            self.executable(self.root / 'scripts' / name,
+                            f'#!/bin/bash\necho {name} >> checks.log\n')
+        self.executable(self.bin / 'python3', f'''#!{sys.executable}
+from pathlib import Path
+import sys
+with open('checks.log', 'a') as stream:
+    stream.write(Path(sys.argv[1]).name + '\\n')
+''')
+        self.executable(self.bin / 'xcode-select', '#!/bin/bash\necho /fixture/Xcode/Contents/Developer\n')
+        self.executable(self.bin / 'swift', f'''#!{sys.executable}
+import json, sys
+from pathlib import Path
+Path('swift-arguments.json').write_text(json.dumps(sys.argv[1:]))
+print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
+''')
+
+    def test_default_runs_every_shared_check_and_native_helper(self):
+        result = self.run_script('run-tests.sh')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / 'checks.log').read_text().splitlines(),
+                         [*self.shared_shell_checks, *self.shared_python_checks,
+                          'test-reference-helper.sh'])
+        self.assertEqual(json.loads((self.root / 'swift-arguments.json').read_text()),
+                         ['test', '--no-parallel', '--skip', 'JarvisLiveTests'])
+
+    def test_secondary_runner_keeps_native_helper_and_forwards_swift_selection(self):
+        selected = ['--filter', 'Jarvis(Overlay|Viewer|ScreenCapture|AEC)Tests']
+        result = self.run_script('run-tests.sh', '--skip-shared-checks', *selected)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.root / 'checks.log').read_text().splitlines(),
+                         ['test-reference-helper.sh'])
+        self.assertEqual(json.loads((self.root / 'swift-arguments.json').read_text()),
+                         ['test', '--no-parallel', '--skip', 'JarvisLiveTests', *selected])
+
+    def test_shared_check_and_native_helper_failures_stop_before_swift_tests(self):
+        for name, arguments in ((self.shared_shell_checks[0], []),
+                                ('test-reference-helper.sh', ['--skip-shared-checks'])):
+            with self.subTest(script=name):
+                script = self.root / 'scripts' / name
+                original = script.read_text()
+                script.write_text('#!/bin/bash\nexit 17\n')
+                result = self.run_script('run-tests.sh', *arguments)
+                self.assertEqual(result.returncode, 17, result.stdout + result.stderr)
+                self.assertFalse((self.root / 'swift-arguments.json').exists())
+                script.write_text(original)
+
+
 class GuardTests(ScriptTests):
     def test_process_boundary_guard_rejects_context_import_and_transitive_dependency(self):
         guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
@@ -181,6 +241,25 @@ echo '["build"]' >> admission.jsonl
 exit 99
 ''')
         self.environment['EVAL_AGENT'] = 'codex'
+
+    def test_secondary_runner_selection_survives_supervisor_reentry(self):
+        self.executable(self.root / 'scripts/test-reference-helper.sh',
+                        '#!/bin/bash\necho \'["helper"]\' >> admission.jsonl\n')
+        self.executable(self.bin / 'swift', f'''#!{sys.executable}
+import json, sys
+from pathlib import Path
+Path('swift-arguments.json').write_text(json.dumps(sys.argv[1:]))
+print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
+''')
+        arguments = ['--skip-shared-checks', '--filter', 'JarvisOverlayTests']
+        result = self.run_script('run-tests.sh', *arguments)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual([json.loads(row) for row in
+                          (self.root / 'admission.jsonl').read_text().splitlines()],
+                         [['run', 'run-tests.sh', *arguments], ['admit'], ['helper']])
+        swift_arguments = json.loads((self.root / 'swift-arguments.json').read_text())
+        self.assertNotIn('--skip-shared-checks', swift_arguments)
+        self.assertEqual(swift_arguments[-2:], arguments[-2:])
 
     def test_help_and_invalid_arguments_do_not_enter_supervisor(self):
         cases = (

@@ -18,13 +18,18 @@ whose macOS workflow builds, launches, stops, and reads logs, so an agent may dr
 the scripts use `open`. The [live-test prerequisites](./live-e2e-tests.md#prerequisites-and-standing-conditions) depend on
 the selected scenarios and coaching provider.
 
-Pull-request CI covers multiple macOS environments because AppKit and toolchain behavior can differ
-across them; see [`ci.yml`](../.github/workflows/ci.yml) for the matrix, required-check wiring, and
-failure artifacts. Pixel assertions also need a consistent color space and scale because AppKit's
+Pull-request CI runs the full offline Swift suite on native Apple silicon and Intel macOS 26 runners.
+The macOS 15 compatibility job compiles every target and runs Overlay, Viewer, ScreenCapture, AEC,
+and native References helper tests, covering older frameworks and the pre-macOS-26 Apple Speech
+compilation path. Shared static guards and harness self-tests run once, on macOS 26 Apple silicon.
+Secondary jobs use `run-ci-tests.sh --skip-shared-checks`; the unfiltered local Gate runs everything.
+This focuses older-OS coverage on framework and native behavior rather than repeating the complete
+Foundation suite. See [`ci.yml`](../.github/workflows/ci.yml) for the matrix, required-check wiring,
+and failure artifacts. Pixel assertions also need a consistent color space and scale because AppKit's
 offscreen images inherit the display's color profile. The normalization and diagnostic evidence live
 in [`coloredDashedArrowsRenderTheirStyle`](../Tests/JarvisOverlayTests/DiagramHintRenderingTests.swift).
 
-CI caches build work while running the complete tests and bundle guards on every pull request.
+CI caches build work while running the tests and bundle guards on every pull request.
 Swift caches are separated by runner, toolchain, dependency pins, and build scripts; subsequent
 commits can reuse compatible intermediates. [`ci-build-cache.py`](../scripts/ci-build-cache.py)
 restores a tracked input's timestamp only when its contents match the successful cached build,
@@ -109,9 +114,10 @@ result in `Package.swift`. Never replace assets or delete old dependency tags: h
 must retain their exact bytes. Verify a clean SwiftPM download and native AEC smoke tests on Intel
 and Apple silicon before accepting a dependency update.
 
-CI runs the Gate, including the resolved AEC module's create/process/destroy smoke tests, and helper
-privacy checks on native Intel and Apple silicon runners. It also
-assembles an unsigned universal release bundle and checks every shipped executable's architectures.
+CI runs the resolved AEC module's create/process/destroy smoke tests on each native test runner.
+The Intel Gate runs subscription-helper privacy checks natively; the unsigned universal release
+build runs them against its bundled helper on Apple silicon, reusing that build's executable.
+The universal build also checks every shipped executable's architectures and linked SDK.
 These checks establish compilation and test coverage; capture, permissions, and live transcription
 on physical Intel hardware use the same signed-app validation as Apple silicon.
 

@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   gate:
-    name: Gate (${{ matrix.os }})
+    name: ${{ matrix.os == 'macos-15' && 'Compatibility' || 'Gate' }} (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -55,8 +55,34 @@ jobs:
       - name: Compile all targets
         run: swift build
 
-      - name: Run tests and static guards
-        run: ./scripts/run-ci-tests.sh
+      - name: Run tests
+        run: |
+          case "${{ matrix.os }}" in
+            macos-15)
+              ./scripts/run-ci-tests.sh --skip-shared-checks \
+                --filter 'Jarvis(Overlay|Viewer|ScreenCapture|AEC)Tests'
+              ;;
+            macos-26-intel)
+              ./scripts/run-ci-tests.sh --skip-shared-checks
+              ;;
+            *)
+              ./scripts/run-ci-tests.sh
+              ;;
+          esac
+
+      - name: Cache Intel subscription helper
+        if: matrix.os == 'macos-26-intel'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            .build/cliproxyapi/*/*/*/cliproxyapi
+            .build/cliproxyapi/*/*/*/binary.sha256
+            .build/cliproxyapi/*/*/*/LICENSE
+          key: helper-native-v1-${{ runner.arch }}-${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
+
+      - name: Check Intel helper egress
+        if: matrix.os == 'macos-26-intel'
+        run: ./scripts/test-proxy-privacy.sh
 
       - name: Record successful build inputs
         run: python3 scripts/ci-build-cache.py snapshot
@@ -75,19 +101,17 @@ jobs:
 
   # Keep the existing required check name while requiring all validation jobs to pass.
   test:
-    needs: [gate, proxy-privacy, universal-app]
+    needs: [gate, universal-app]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
-      - name: Require macOS Gates and helper privacy
+      - name: Require all validation jobs
         env:
           GATE_RESULT: ${{ needs.gate.result }}
-          PROXY_PRIVACY_RESULT: ${{ needs.proxy-privacy.result }}
           UNIVERSAL_APP_RESULT: ${{ needs.universal-app.result }}
         run: |
           test "$GATE_RESULT" = success
-          test "$PROXY_PRIVACY_RESULT" = success
           test "$UNIVERSAL_APP_RESULT" = success
 
   universal-app:
@@ -111,60 +135,5 @@ jobs:
           assemble_app .build/Jarvis.app "$ARTIFACTS" release
           ./scripts/check-universal-app.sh .build/Jarvis.app
           ./scripts/check-release-sdk.sh .build/Jarvis.app/Contents/MacOS/JarvisApp
-      - name: Compare universal and native download sizes
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-          import shutil
-          import subprocess
-          import tempfile
-
-          source = Path('.build/Jarvis.app')
-          binaries = []
-          for path in source.rglob('*'):
-              if path.is_file() and not path.is_symlink():
-                  with path.open('rb') as stream:
-                      if stream.read(4) in (b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'):
-                          binaries.append(path.relative_to(source))
-          print('Unsigned size comparison; identical resources and UDZO/HFS+ compression.')
-          print('variant,app_bytes,dmg_bytes')
-          with tempfile.TemporaryDirectory(prefix='app-size-', dir='.build') as temporary:
-              root = Path(temporary)
-              for variant in ('universal', 'arm64', 'x86_64'):
-                  staging = root / variant
-                  app = staging / 'Jarvis.app'
-                  shutil.copytree(source, app, symlinks=True)
-                  if variant != 'universal':
-                      for binary in binaries:
-                          path = app / binary
-                          subprocess.run(['lipo', str(path), '-thin', variant,
-                                          '-output', str(path)], check=True)
-                  (staging / 'Applications').symlink_to('/Applications')
-                  image = root / (variant + '.dmg')
-                  subprocess.run(['hdiutil', 'create', '-quiet', '-fs', 'HFS+',
-                                  '-format', 'UDZO', '-volname', 'Jarvis',
-                                  '-srcfolder', str(staging), str(image)], check=True)
-                  app_bytes = sum(path.stat().st_size for path in app.rglob('*')
-                                  if path.is_file() and not path.is_symlink())
-                  print(f'{variant},{app_bytes},{image.stat().st_size}', flush=True)
-          PY
-
-  proxy-privacy:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-26, macos-26-intel]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Cache native subscription helper
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: |
-            .build/cliproxyapi/*/*/*/cliproxyapi
-            .build/cliproxyapi/*/*/*/binary.sha256
-            .build/cliproxyapi/*/*/*/LICENSE
-          key: helper-native-v1-${{ runner.arch }}-${{ hashFiles('scripts/lib/cliproxyapi.sh', 'scripts/cliproxyapi/local-only.patch') }}
-      - name: Build and check bundled helper egress
-        run: ./scripts/test-proxy-privacy.sh
+      - name: Check bundled Apple silicon helper egress
+        run: ./scripts/test-proxy-privacy.sh .build/Jarvis.app/Contents/MacOS/cliproxyapi
