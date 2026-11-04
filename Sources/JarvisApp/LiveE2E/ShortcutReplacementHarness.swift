@@ -125,12 +125,18 @@ final class ShortcutReplacementHarness: OverlayRendering {
         progress = nil
         completed = false
         panel.setSessionLive(true)
-        try dispatch(.hint, mouse: mouseFirst)
-        try dispatch(.showCode, mouse: !mouseFirst)
-        try await wait { self.completed }
-        let calls = await brain.calls
-        try require(calls.count == 1 && calls[0].compactMap(\.text).joined().contains("Show code")
-                    && delivered == ["replacement"], "mixed bindings preserve physical press order")
+        do {
+            try dispatch(.hint, mouse: mouseFirst)
+            try dispatch(.showCode, mouse: !mouseFirst)
+            try await wait { self.completed }
+            let calls = await brain.calls
+            try require(calls.count == 1 && calls[0].compactMap(\.text).joined().contains("Show code")
+                        && delivered == ["replacement"], "mixed bindings preserve physical press order")
+        } catch {
+            for task in turns.cancelAll() { await task.value }
+            await driver.cancelBackgroundWork()?.value
+            throw error
+        }
         for task in turns.cancelAll() { await task.value }
         await driver.cancelBackgroundWork()?.value
         panel.setSessionLive(false)
