@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build a universal static WebRTC AEC3 library in .build/aec for Intel and release builds.
+# Maintainer-only build of the hosted universal CJarvisAEC XCFramework in .build/aec.
 # Prereqs: brew install meson ninja pkgconf
 #
 # forcefallback statically links webrtc's wrap-pinned abseil 20240722.0, which still has the
@@ -13,7 +13,7 @@ unset PKG_CONFIG_PATH                     # keep Homebrew's incompatible abseil 
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SHIM_CPP="$REPO_ROOT/scripts/aec/jarvis_aec.cpp"
-SHIM_HDR="$REPO_ROOT/Sources/CJarvisAEC/include"
+SHIM_HDR="$REPO_ROOT/scripts/aec/include"
 OUT_LIB="$REPO_ROOT/.build/aec/libjarvis-aec.a"
 
 WORK="${AEC_WORK:-$REPO_ROOT/.build/aec}"
@@ -29,6 +29,10 @@ if [[ ! -d "$SOURCE" ]]; then
 fi
 if [[ "$(git -C "$SOURCE" rev-parse HEAD)" != "$WEBRTC_COMMIT" ]]; then
   echo "error: WebRTC source does not match the pinned commit" >&2
+  exit 1
+fi
+if ! git -C "$SOURCE" diff --quiet HEAD --; then
+  echo "error: WebRTC source has modified tracked files" >&2
   exit 1
 fi
 cd "$SOURCE"
@@ -75,12 +79,6 @@ for architecture in arm64 x86_64; do
   lipo "$OUT_LIB.partial" -verify_arch "$architecture"
 done
 
-# Git-ignored license copies for cross-checking THIRD_PARTY_NOTICES.md, which is authoritative.
-TP="$REPO_ROOT/Sources/CJarvisAEC/third_party"
-mkdir -p "$TP/webrtc-audio-processing" "$TP/abseil-cpp"
-cp "$SOURCE/COPYING" "$SOURCE/AUTHORS" "$TP/webrtc-audio-processing/" 2>/dev/null || true
-cp "$ABSL_INC/LICENSE" "$ABSL_INC/AUTHORS" "$TP/abseil-cpp/" 2>/dev/null || true
-
 # WebRTC's classic VAD symbols stay in the archive: upstream's audio-processing objects depend on them.
 nm "$OUT_LIB.partial" > "$WORK/symbols.txt"
 if ! grep -q 'T _jarvis_aec_create' "$WORK/symbols.txt"; then
@@ -93,3 +91,4 @@ fi
 mv "$OUT_LIB.partial" "$OUT_LIB"
 echo "Built $OUT_LIB ($(du -h "$OUT_LIB" | cut -f1)); shim present, all objects minos 14.0."
 echo "sha256: $(shasum -a 256 "$OUT_LIB" | cut -d' ' -f1)"
+python3 "$REPO_ROOT/scripts/aec/package.py" "$SOURCE" "$OUT_LIB"

@@ -1,16 +1,7 @@
 name: CI
 
-# Main only warms the shared dependency cache; the full Gate remains PR-only.
 on:
   pull_request:
-  push:
-    branches: [main]
-    paths:
-      - .github/actions/cache-aec/**
-      - .github/workflows/ci.yml
-      - scripts/build-aec.sh
-      - scripts/aec/**
-      - Sources/CJarvisAEC/include/**
 
 permissions:
   contents: read
@@ -20,16 +11,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  audio-cache:
-    if: github.event_name == 'push'
-    runs-on: macos-26
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/cache-aec
-
   gate:
-    if: github.event_name == 'pull_request'
     name: Gate (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -51,10 +33,6 @@ jobs:
           fingerprint="$( { xcodebuild -version; swift --version; } | shasum -a 256 | cut -d' ' -f1)"
           echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare Intel audio dependency
-        if: runner.arch == 'X64'
-        uses: ./.github/actions/cache-aec
-
       - name: Cache Swift build
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -67,9 +45,9 @@ jobs:
             .build/build.db
             .build/debug.yaml
             .build/ci-cache-inputs.json
-          key: swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**', 'Sources/CJarvisAEC/include/**', 'Sources/CJarvisAEC/lib/**', 'Sources/CJarvisAEC/*.c') }}-${{ github.sha }}
+          key: swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**') }}-${{ github.sha }}
           restore-keys: |
-            swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**', 'Sources/CJarvisAEC/include/**', 'Sources/CJarvisAEC/lib/**', 'Sources/CJarvisAEC/*.c') }}-
+            swift-v1-${{ matrix.os }}-${{ steps.toolchain.outputs.fingerprint }}-${{ hashFiles('Package.swift', 'Package.resolved', 'scripts/**') }}-
 
       - name: Restore unchanged input timestamps
         run: python3 scripts/ci-build-cache.py restore
@@ -98,7 +76,7 @@ jobs:
   # Keep the existing required check name while requiring all validation jobs to pass.
   test:
     needs: [gate, proxy-privacy, universal-app]
-    if: always() && github.event_name == 'pull_request'
+    if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 1
     steps:
@@ -113,12 +91,10 @@ jobs:
           test "$UNIVERSAL_APP_RESULT" = success
 
   universal-app:
-    if: github.event_name == 'pull_request'
     runs-on: macos-26
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: ./.github/actions/cache-aec
       - name: Cache bundled subscription helper
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
@@ -174,7 +150,6 @@ jobs:
           PY
 
   proxy-privacy:
-    if: github.event_name == 'pull_request'
     strategy:
       fail-fast: false
       matrix:

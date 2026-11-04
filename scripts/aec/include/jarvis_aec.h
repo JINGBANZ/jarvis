@@ -5,8 +5,8 @@
 
 // Pure-C facade over the WebRTC audio-processing archive. The C++ AEC3 implementation
 // (scripts/aec/jarvis_aec.cpp) is compiled and merged into libjarvis-aec.a by
-// scripts/build-aec.sh, so this header pulls in NO webrtc/abseil headers and
-// `swift build` compiles no C++ — it just links the prebuilt archive. This is
+// scripts/build-aec.sh for the hosted XCFramework. This header pulls in no
+// webrtc/abseil headers; SwiftPM links the prebuilt archive. This is
 // the OS/native-bound edge for acoustic echo cancellation. The capture
 // (AggregateEchoCapture) delivers mic + reference already at 48 kHz from one
 // aggregate-device IOProc; the Swift wrapper (WebRTCEchoCanceller) only frames

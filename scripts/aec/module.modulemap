@@ -1,0 +1,6 @@
+module CJarvisAEC {
+    header "jarvis_aec.h"
+    link "c++"
+    link framework "CoreFoundation"
+    export *
+}

@@ -53,7 +53,6 @@ Use an Apple silicon or Intel Mac with macOS 14.2+, Swift 6, Python 3, and the m
 ```bash
 git clone https://github.com/JINGBANZ/jarvis.git
 cd jarvis
-# Intel Macs: install meson, ninja, and pkgconf, then run ./scripts/build-aec.sh first.
 ./scripts/build-app.sh --run
 ```
 

@@ -506,6 +506,22 @@ mkdir -p "$destination"
         self.assertEqual(result.returncode, 1, result.stderr)
         self.assertIn("pinned commit", result.stderr)
 
+    def test_modified_pinned_source_stops_before_build(self):
+        work = self.root / "aec-cache"
+        (work / "wap-v2.1").mkdir(parents=True)
+        self.environment["AEC_WORK"] = str(work)
+        self.executable(self.bin / "git", """#!/bin/bash
+if [[ "$3" == rev-parse ]]; then
+  echo 846fe90a289f58b7c9303a635142aa2c7caa93e5
+  exit 0
+fi
+exit 1
+""")
+        self.executable(self.bin / "meson", "#!/bin/bash\nexit 99\n")
+        result = self.run_script("build-aec.sh")
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertIn("modified tracked files", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
