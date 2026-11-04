@@ -565,7 +565,7 @@
       "customer-scenario-design"
     ],
     "input": "Customer-facing parcel assistant discovery. Confirmed: signed-in customers in one region; tracking and eligible rescheduling, no address changes or payments; backend eligibility rules and account-only access; customer confirms date changes, routine eligible changes need no staff approval, exceptions use existing support. A request checks status, offers eligible dates, changes the selected date after confirmation, and reports verified result or pending. Tracking, policy and rescheduling APIs exist; tracking is production ready, action retry/outcome lookup verification remains with the integration engineer before launch. Six-week pilot with two engineers and a support lead; target 20% fewer support calls per eligible delivery without worse repeat contacts or satisfaction. Baseline not yet validated; support lead will validate historical records before pilot measurement. Estimated pilot demand 2,000 sessions/day, peak 20 incoming messages/second. p95 useful tracking answer within two seconds; change completion within five seconds after confirmation, excluding customer decision time. Tracking-first fallback if action integration verification slips. No reliable discovery start timestamp. them: That covers our constraints. me: I am not sure what else I should ask.",
-    "pass": "Signals discovery is sufficient and automatically supplies a concise MVP recommendation in detail without requesting permission or a script request. Includes audience, workflows/journey, customer-confirmed action authority, exclusions, success, open baseline/action dependencies, tracking-first fallback and one confirmation. No fabricated time, staff-approval requirement, architecture or further questionnaire."
+    "pass": "Signals closure with a brief cue and automatically supplies a compact speaking outline (up to four short bullets, about 60 words), not a paragraph script. Covers who/first task, journey, agreed authority/exclusions, success and material dependencies/fallback, ending with one short confirmation. No fabricated time, staff-approval requirement, architecture, permission to recommend, or further questionnaire."
   },
   {
     "id": "customer-discovery-last-gap",
@@ -678,5 +678,13 @@
     ],
     "input": "Customer role-play, discovery minute 15. Outcome, users, normal return-label workflow, exceptions, account-scoped APIs, delivery resources and measurable success are established. Who may authorize return-label creation remains unresolved. them: Anything else you need to know?",
     "pass": "Asks one targeted authority question and identifies it as the last material blocker. Does not close just because of time or the invitation, assume authorization, or reopen unrelated requirements."
+  },
+  {
+    "id": "customer-glanceable-answer",
+    "skills": [
+      "customer-scenario-design"
+    ],
+    "input": "Customer role-play. Agreed: signed-in staff look up account-scoped orders and draft replies; staff approve sends. them: Does the model decide which accounts a rep can access? me: Jarvis, help me answer.",
+    "pass": "Hint leads with a short plain-English answer (normally at most 12 words), not coaching instructions or a preamble. Code enforces access before retrieval, not the model. Optional detail is at most three short supporting fragments; no repeated question, recap, long script, or unnecessary jargon."
   }
 ]

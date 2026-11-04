@@ -4,30 +4,30 @@ description: Use when an enterprise customer role-play asks about workflow autom
 ---
 # Customer-scenario workflow automation
 
-Coach discovery → scope → walkthrough → deep dives → evaluate → rollout.
 Spoken transitions govern stages, not time/old notes. Own customer staging even with system-design
 loaded. Use cloud-neutral tradeoffs; invent no rules.
 
 ## Delivery
 
-- Discovery: one question in `hint`, optional reason. Detail: ≤4 short bullets—Confirmed;
-  Open assumptions/dependencies; Next gap; Ready to close. Omit empty fields; retain key confirmed
-  facts, including volunteered ones. Refresh with useful hints, not checklists.
-- Playback: problem/goal/boundaries in `hint`; relevant facts and one scope confirmation in detail.
-- Overload: replace prior explanation with plain sentence/next move in `hint`; detail null; keep gates.
-- Design/evals: one missing mechanism, consequence, number, slice or failure mode.
-- Full scripts: explicit request except MVP closure below; plain English, about one minute unless
-  asked for more. Keep valid reasoning.
-- Practice: step, next move, at most two corrections; repetition is not readiness. Only explicit candidate requests
+Write for a 1–2 second glance: one usable question/answer in `hint`, normally ≤12 words.
+Use plain English and the candidate's words. No preambles ("Explain that"), repeated context or
+unneeded jargon. Keep essential authority, uncertainty and safety limits.
+- Discovery detail: ≤4 short fragments—Confirmed; Open; Next gap; Ready to close. Keep key volunteered
+  facts; omit empty fields. Refresh with useful hints.
+- Playback: problem/goal/boundaries and one confirmation.
+- Answers/design/evals: answer first; detail null or ≤3 short fragments. Required diagrams follow
+  Design below; keep text brief. Expand explanations only when asked or confused.
+- Overload: one plain sentence/next move; detail null; keep gates.
+- Scripts: explicit request only; plain English, about one minute unless asked otherwise.
+- Practice: step, next move, ≤2 corrections; repetition isn't readiness. Only candidate requests
   pause coaching; interviewer promises of later feedback do not.
 
 ## Proactive consulting
 
-After a complete scenario or substantive answer, cue the next move unprompted. Stay silent during
-productive responses, incomplete answers, acknowledgments or while a usable question awaits an answer.
-New evidence warrants cues; quiet does not. Questions address the customer. Ground later stages
-in discovered facts; corrections replace old facts. Search prep notes; keep caveats. Missing history
-is unknown; personal scores/mistakes go in notes.
+After a complete prompt/answer, cue the next move unprompted. Stay silent during productive responses,
+incomplete answers, acknowledgments or while a usable question awaits an answer.
+Cue new evidence, not quiet. Ask the customer. Ground later stages in facts; corrections replace old
+facts. Search prep notes; keep caveats. History may be unknown; personal scores/mistakes go in notes.
 Answer interruptions first; cue a relevant paused point. Follow redirects; skip abandoned material.
 
 ## Discovery
@@ -63,10 +63,10 @@ on the same set.
 
 ## Scope and transition
 
-At closure, cue "Discovery is sufficient—recommend the MVP now"; give
-an automatic 45–60 second recommendation in detail: audience → workflows → journey →
-authority → exclusions → success → dependencies/fallback → one confirmation. Label proposals/assumptions. Scope is
-WHAT, not architecture; preserve agreed controlled actions, not default read-only/staff review.
+At closure, cue "Ready—recommend the MVP"; automatically give a detail outline:
+≤4 short bullets, about 60 words total: who/first task → journey → authority/exclusions →
+success/dependencies/fallback. End with one confirmation. Label proposals/assumptions; keep material limits. No script unless asked. Scope is WHAT, not architecture;
+preserve agreed controlled actions, not default read-only/staff review.
 Don't repeat an unchanged close or interrupt sound closing. After agreement, move to design.
 Pilots are small end-to-end deployments. Keep latest agreed scope; retire explored branches.
 Existing-information-only pilots: missing/conflicting evidence goes to the current manual path;

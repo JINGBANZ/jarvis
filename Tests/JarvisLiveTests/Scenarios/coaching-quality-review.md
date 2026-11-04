@@ -328,3 +328,25 @@ renderer executions; the exact provider snapshot was not exposed. No live interv
 used. Gate checks packaging/code separately; use the production-context protocol above for repeated
 behavioral evaluation. The skill remains within the unchanged 15,000-byte body limit; scope/MVP,
 design and evaluation sections are unchanged by this follow-up.
+
+## Glanceable live-interview delivery
+
+The delivery contract now favors a plain-English hint normally within 12 words and short supporting
+fragments. The automatic MVP remains, but its default is a four-bullet speaking outline of about
+60 words rather than the earlier 45–60 second paragraph script. Full scripts remain available on
+explicit request. The ready-auto fixture was updated for this approved behavior change; the new
+`customer-glanceable-answer` case checks answer-first wording and code-owned access enforcement.
+
+Two fresh-context host agents simulated four grouped inputs with current production Coach/Speak
+source guidance and baseline/revised skill text. Neither received pass criteria. Baseline gave a
+32-word access answer beginning “Explain that” and a full MVP paragraph. Revised gave an 11-word
+access answer with two supporting fragments, a four-bullet MVP outline, and compact last-gap notes.
+Both honored the explicit script request. The revised MVP retained customer confirmation, exceptions,
+exclusions, success and validation/fallback constraints; its approximately 70-word outline illustrates
+that the word target is guidance, not a runtime limit. Final wording was then shortened to preserve the
+existing 15,000-byte skill budget without changing the delivery contract.
+
+These are grouped host-model observations, not independent trials, provider-level validation or
+measured reading/response latency. They support a shorter output shape; they do not prove users can
+read every detail in two seconds. No private interview material was used. Earlier probe sections
+record prior revisions, including the superseded automatic-script behavior.
