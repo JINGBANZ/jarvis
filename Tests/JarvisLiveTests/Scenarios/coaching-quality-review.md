@@ -261,3 +261,115 @@ runs or a reliability estimate. They used full skill text but not the production
 loop. The probes establish an observed shape change, not guaranteed coaching quality; the fixture
 protocol above remains the production evaluation procedure. Gate checks catalog packaging and code,
 not these semantic outcomes. Rendering and visual checks are reported separately.
+
+## Discovery closure and automatic MVP checks
+
+The eight `customer-discovery-*` fixtures cover automatic closing, the last material gap, open-ended
+workflow exploration, recap precision, candidate-led closing, explicit design redirection, unchanged
+recommendation suppression and unresolved authority. Preserve normal interviewer clarification and
+steering: the closing-progress input ends with an explicit request for design, so a useful design cue
+or silence is acceptable; repeating the MVP or reopening discovery is not.
+
+Development probes on base `065f280` used two separate fresh-context subagents, each answering all
+eight inputs in one conversation. They read extracted production coach base text (loading omitted
+because the skill was preloaded), Speak tip/detail guidance, a JSON-action adapter using `hint`, and
+inputs without pass criteria. Both inherited the Codex host model; the exact provider snapshot was
+not exposed. Host instructions remained. These are single-pass development observations, not
+independent repeated trials, held-out transfer evidence, or production-provider/loader/rendering
+validation. Responses are recorded in the implementation chat.
+
+| Behavior | Baseline observation | Revised observation |
+| --- | --- | --- |
+| Automatic closing | Recognized sufficient coverage and gave a short proposed scope, but omitted the concrete journey. | “Discovery is sufficient—recommend the MVP now,” followed by the full journey, authority, exclusions, success, dependencies/fallback and confirmation. |
+| Last material gap | Asked who authorizes labels, detail null. | Asked the same question and supplied next-gap/readiness notes, but omitted known facts; this prompted the explicit instruction to retain key confirmed facts when available. |
+| Unresolved authority | Kept authority as the blocker. | Kept that blocker and separated it from assigned baseline/integration validation. |
+| Open workflow and recap accuracy | Asked about recent work and corrected units, population, percentile/endpoint and unagreed cancellation. | Preserved those behaviors without fabricated time or scope. |
+| Candidate close and design redirect | Followed the explicit design request without repeating the recommendation. | Preserved that transition; unchanged recommendation case stayed silent. |
+
+The closing-progress criterion was clarified after these observations to avoid treating the
+interviewer's explicit design request as a mandatory-silence case. No skill change was made to force
+that choice. Earlier exploratory probes used the older local checkout and the `lines` schema; they
+are not evidence for this final revision. The repository Gate checks packaging/code, not these
+semantic outcomes. Repeat the production-context protocol above for provider-level claims and test
+catalog selection separately. Fixtures contain only synthetic cases, not private session material.
+
+A final fresh-context agent checked the explicit known-facts adjustment using the same base and
+adapter: five last-gap samples retained confirmed facts beside the authority question and indicated
+closure after that decision; one closing sample supplied the automatic MVP with its journey and
+fallback. These samples shared one conversation and are not independent reliability measurements.
+
+## Selective RRK coaching additions
+
+Seven synthetic cases cover delegated scope choice, a prior failed attempt, volunteered facts,
+pending answers, interruption/resumption, explicit redirection and an authority blocker at minute 15.
+They adapt ideas from [ericode01's RRK branch at dce68a5](https://github.com/ericode01/jarvis/blob/dce68a53ca5b89fea32d83b72ff59ce28c074138/Sources/JarvisCore/Resources/Skills/rrk/SKILL.md)
+to the existing customer skill; they do not import its separate routing, long scripts or clock-based
+closure. Existing recap-precision coverage checks corrected quantities.
+
+Separate fresh-context host agents read the same extracted production coach/speak guidance used
+above, the baseline (`c2ec1cf`) or revised skill, and seven inputs without pass criteria. Each agent
+answered its cases as a group. The initial delegated-choice input explicitly requested evidence that
+would change the recommendation, and the baseline supplied it. That input was then revised to remove
+this leading request: the baseline was probed again in its existing conversation; the revised agent
+received only the final input. This asymmetry limits comparison.
+
+| Behavior | Baseline observation | Revised observation |
+| --- | --- | --- |
+| Delegated choice, final input | Recommended fact gathering and preserved approval, but omitted evidence that would change the choice. | Recommended fact gathering, labeled API coverage as an assumption and named sample evidence that would favor drafting. |
+| Earlier failed pilot | Asked why it failed and linked the answer to ERP feasibility. | Preserved that targeted question and compact facts/gap notes. |
+| Volunteered facts | Retained users, residency and access constraints. | Preserved them. Both replies combined a workflow question and desired-outcome question, so strict single-question adherence remains imperfect. |
+| Pending answer | Silent. | Silent. |
+| Interruption and redirect | Answered access enforcement before resuming; followed the evaluation redirect. | Preserved both behaviors without restarting the walkthrough. |
+| Minute-15 authority gap | Asked about authority rather than closing. | Preserved the blocker and compact readiness notes. |
+
+These single grouped samples show one omitted element becoming explicit, not a general measured
+quality improvement. They are host-model simulations, not production-provider, prompt-loader or
+renderer executions; the exact provider snapshot was not exposed. No live interview material was
+used. Gate checks packaging/code separately; use the production-context protocol above for repeated
+behavioral evaluation. The skill remains within the unchanged 15,000-byte body limit; scope/MVP,
+design and evaluation sections are unchanged by this follow-up.
+
+## Glanceable live-interview delivery
+
+The delivery contract now favors a plain-English hint normally within 12 words and short supporting
+fragments. The automatic MVP remains, but its default is a four-bullet speaking outline of about
+60 words rather than the earlier 45–60 second paragraph script. Full scripts remain available on
+explicit request. The ready-auto fixture was updated for this approved behavior change; the new
+`customer-glanceable-answer` case checks answer-first wording and code-owned access enforcement.
+
+Two fresh-context host agents simulated four grouped inputs with current production Coach/Speak
+source guidance and baseline/revised skill text. Neither received pass criteria. Baseline gave a
+32-word access answer beginning “Explain that” and a full MVP paragraph. Revised gave an 11-word
+access answer with two supporting fragments, a four-bullet MVP outline, and compact last-gap notes.
+Both honored the explicit script request. The revised MVP retained customer confirmation, exceptions,
+exclusions, success and validation/fallback constraints; its approximately 70-word outline illustrates
+that the word target is guidance, not a runtime limit. Final wording was then shortened to preserve the
+existing 15,000-byte skill budget without changing the delivery contract.
+
+These are grouped host-model observations, not independent trials, provider-level validation or
+measured reading/response latency. They support a shorter output shape; they do not prove users can
+read every detail in two seconds. No private interview material was used. Earlier probe sections
+record prior revisions, including the superseded automatic-script behavior.
+
+## Inferred discovery start and twelve-minute budget
+
+Four synthetic timing cases cover introductions before the scenario, excessive depth in one area,
+unknown discovery start despite known interview elapsed time, and unresolved authority near the
+budget. The skill infers discovery start from scenario/requirements evidence, uses adaptive 3/6/9/12
+minute coverage checkpoints, and treats time as a reason to prioritize blockers or propose narrower
+scope—not as permission to assume authority or declare unresolved scope ready. No start command or
+runtime timer was added; when start evidence is missing, coverage governs.
+
+Two fresh-context host agents independently read baseline/revised skill text, current Coach/Speak
+source guidance and the four inputs without pass criteria. Each answered all cases in one grouped
+conversation and reported inferred elapsed time separately for evaluation. Both excluded six minutes
+of introductions, redirected from rare wording variants to authority, left discovery elapsed unknown
+when only interview elapsed was known, and preserved the late authority blocker. The revised
+near-budget response also included an approximate time cue in its readiness notes. Baseline already
+handled these examples; this run does not establish improved reliability. The first revised response
+asked about exceptions rather than APIs, which is another uncovered design-critical area.
+
+The examples are instruction-level simulations, not production-provider runs or measured timer
+accuracy. The checkpoints are coaching guidance, not scheduled alerts or a forced twelve-minute
+transition. As in earlier probes, related authority questions can still be combined. A separate
+review checks that wording compression for the unchanged 15,000-byte budget preserves the contract.

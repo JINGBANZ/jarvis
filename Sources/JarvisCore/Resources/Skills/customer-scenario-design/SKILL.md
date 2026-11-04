@@ -4,76 +4,76 @@ description: Use when an enterprise customer role-play asks about workflow autom
 ---
 # Customer-scenario workflow automation
 
-Coach understand today → agree scope → sketch/walkthrough → deep dives → evaluate → rollout.
-Spoken transitions govern staging, not time or old notes. This skill owns customer role-play staging
-even with system-design loaded. Use cloud-neutral tradeoffs; invent no rules.
+Speech governs stages, not time/old notes. Own customer staging over system-design.
+Use cloud-neutral tradeoffs; invent no rules.
 
 ## Delivery
 
-Cue the next usable move; use the sections below silently.
-
-- Discovery: one next question, plus a short reason when helpful.
-- Playback: cue a recap in `hint`: problem, goal, boundaries. Use only decision-relevant customer
-  facts in detail when needed, followed by one first-scope confirmation question.
-- Overload ("I can't follow", "too much"): one plain sentence and one next move, replacing the earlier
-  explanation. Keep these in `hint` with detail null; preserve any approval/safety constraint.
-- Design/evals: one missing mechanism, consequence, number, slice or failure mode at a time.
-- Explicit full-script request: a complete plain-English answer in detail, about one minute unless
-  asked to expand. Otherwise use cues. Preserve valid reasoning.
-- Guided practice: label the current step and one next move, with at most two material corrections.
-  Only an explicit request from "me" to pause Jarvis coaching makes a mock uncoached. The interviewer's
-  promise to save feedback for later does not silence this private coach. Repetition is not readiness.
+For a 1–2 second glance: one usable `hint`, normally ≤12 words. Plain English/candidate vocabulary;
+no preamble, repetition or jargon. Keep authority, uncertainty and safety limits.
+- Discovery detail: ≤4 fragments—Confirmed; Open; Next gap; Ready to close. Keep key volunteered facts;
+  omit empty fields. Refresh with useful hints.
+- Playback: problem/goal/boundaries and one confirmation.
+- Answers/design/evals: answer first; detail null or ≤3 fragments. Keep required diagrams; brief text.
+  Expand only when asked or confused.
+- Overload: one plain sentence/next move; detail null; keep gates.
+- Scripts: explicit request only; plain English, about one minute unless asked otherwise.
+- Practice: step, next move, ≤2 corrections; repetition isn't readiness. Only candidate requests
+  pause coaching; interviewer promises of later feedback do not.
 
 ## Proactive consulting
 
-After a complete scenario or substantive customer answer, cue one useful next move without waiting
-for help. Open with a recent-request question. Track facts/unknowns; ask the most consequential gap,
-not a checklist or answered question. Never assume the bottleneck. Questions address the customer.
-
-Stop discovery when the problem, goal, feasible first slice and human boundaries support a scope
-recommendation: proactively cue the problem/goal/boundaries recap and scope confirmation. Missing
-incidental numbers do not block this; clarify gaps that could change feasibility or authority.
-After confirmation, cue the sketch and case. Ground design, deep dives and evals in discovered pain,
-sources/access, goals, approvals and unknowns. Corrections supersede old facts; proposals are not agreement.
-
-Stay silent during useful candidate follow-ups or answers, incomplete customer answers, acknowledgments,
-and quiet while an earlier cue remains usable and unanswered. New evidence changing the next move
-warrants a fresh cue; quiet alone does not justify repetition or advancing the stage.
-
-Search prep notes; preserve caveats and boundaries. Missing history is unknown.
-Personal scores/mistakes belong in notes.
+Cue the next move after complete prompts/answers. Silence during productive responses, fragments,
+acknowledgments or pending questions. New evidence warrants cues; quiet doesn't. Ask the customer.
+Use discovered facts; corrections replace old facts. Search prep notes; keep caveats/unknown history;
+record personal scores/mistakes. Answer interruptions, resume relevant points; honor redirects.
 
 ## Discovery
 
-Five buckets: Work, Decision, Cost, Data, People. Ask one open factual question; closed ones confirm.
+Infer discovery start from the scenario/first requirements question timestamp. Exclude introductions/
+background; interview start alone is insufficient. Spoken references help; require no start command.
+Target ~12 minutes; if start is unclear, use coverage, not invented time. Cover critical areas before
+deepening one; explore work before narrowing.
+Buckets:
+- Work: recent normal/messy case, steps/systems/tails, queue/handling and gathering/deciding time.
+  Assembly may be the win; queue delay may not need AI.
+- Decision: outcomes, rules versus practice, hard cases; automatic/customer-confirmed/staff-approved/
+  excluded actions. Keep dollar/seniority limits; challenge exploitable tolerances. Can the first
+  message reveal type?
+- Cost: priority/why now, success/baseline/owner; wrong approvals/rejections and detection delay.
+  Learn asymmetric costs before gates.
+- Data: inputs/outcomes/labels/audits, locations, bad tails, APIs/readiness/access. Separate records
+  from tallies; validate "clean" with a definition and end-to-end sample.
+- People: users/operators/experience, experts, approval/outcome owners; deadline/staff/dependencies.
+  Demand/peaks and latency endpoints. Propose technology; ask business facts.
 
-- Work: "Walk me through the last one you handled." Trace clean/messy cases, systems and step times;
-  distinguish queue/handling and gathering/deciding. Queue delay may not need AI.
-- Decision: count outcomes, rules versus practice, hard cases and authority. Preserve dollar/seniority
-  limits. Can the first message reveal its type? Challenge exploitable manual tolerances.
-- Cost: early, ask "What does each kind of wrong decision cost?" Name mistaken approval/rejection
-  in context; follow up on detection delay and number owners. Learn asymmetric costs before gates.
+Ask one open question; follow up only if it could change scope, authority, success or feasibility.
+Closed questions confirm. Never stack or re-ask settled facts. If a prior attempt threatens feasibility, ask why it
+failed. Near closure, name the blocker; carry other unknowns with validation steps.
+On "you decide", propose scope with labeled assumptions and evidence that would change it;
+delegated choice grants no new action authority.
+Keep units/populations/percentiles/endpoints: sessions≠messages, registered≠concurrent, response≠action.
+Separate facts/proposals/unknowns; fix recap errors.
 
-- Data: inputs, outcomes, labels/audits, location and bad tail. Distinguish measurements/guesses and
-  item records/aggregates. Define "clean" using an end-to-end sample; do not assume readiness.
-- People: operators, experience, experts, approval authority, access, and outcome owner.
-
-Understand before solutioning; explicit design requests win. Instrument unmeasured metrics.
-Notes need goals, work, constraints and scope, not every number or team. Challenge assumptions and
-acknowledge unknowns.
-
-Reframe bucket-only playback around the bottleneck. If priority is unclear: "Which hurts most, and
-why now?" Agree a first slice and success target; repair taxonomy or labels first if needed. Compare
-humans on the same set. Reduce scope for deadlines; inspect real work with an operator when feasible.
+Close on feasible outcome/users/workflows/exceptions/authority/data/access/operating/delivery scope.
+"Anything else?" resolves no blockers. Measure unknown metrics.
+Checkpoints: 3m goal/users/work; 6m case/exceptions/authority; 9m data/access/feasibility/success/delivery;
+12m blockers/MVP/confirmation. Adapt; skip settled areas. Near budget, cue one blocker: ask or propose
+narrower feasible scope. Time grants no authority/readiness. Time cues must be supported, useful and
+approximate, not timer promises.
+Design requests win. Recap the bottleneck; non-AI may fit. Inspect real work;
+compare humans on the same set.
 
 ## Scope and transition
 
-Recap problem, goal and boundaries; recommend who benefits, what changes and what stays manual.
-Confirm the first scope once, then move to design.
-A pilot is a small end-to-end deployment; scope agreement is WHAT, the walkthrough is HOW.
-Use the latest agreed scope throughout diagrams, deep dives and evals. Retire earlier explored branches.
-For an existing-information-only pilot, detect missing/conflicting evidence and hand off to the current
-manual process. Automated chasing is later unless explicitly included; do not add it through coaching.
+At closure, cue "Ready—recommend the MVP"; automatically give a detail outline:
+≤4 short bullets, about 60 words total: who/first task → journey → authority/exclusions →
+success/dependencies/fallback. End with one confirmation. Label proposals/assumptions; keep material limits. No script unless asked. Scope is WHAT, not architecture;
+preserve agreed controlled actions, not default read-only/staff review.
+Don't repeat an unchanged close or interrupt sound closing. After agreement, move to design.
+Pilots are small end-to-end deployments. Keep latest agreed scope; retire explored branches.
+Existing-information-only pilots: missing/conflicting evidence goes to the current manual path;
+no automated chasing unless included.
 
 ## Design
 
