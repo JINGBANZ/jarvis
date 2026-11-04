@@ -43,6 +43,15 @@ final class CoachAttemptScope: @unchecked Sendable {
         }
     }
 
+    /// Evidence publication must not race replacement or protect an attempt as visible output.
+    func publishIfActive(_ body: () -> Void) -> Bool {
+        lock.withLock {
+            guard phase == .replaceable || phase == .streaming else { return false }
+            body()
+            return true
+        }
+    }
+
     func retain(_ conversation: any BrainConversation) {
         lock.withLock { self.conversation = conversation }
     }

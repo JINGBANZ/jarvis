@@ -398,6 +398,38 @@ import Testing
         #expect(await brain.finished == [0])
     }
 
+    @Test(arguments: [TriggerReason.manualHint, .turnEnd], [true, false])
+    func scopeReplacementDuringCaptureDoesNotRecordScreenActivity(reason: TriggerReason, returnsImage: Bool) async {
+        let scope = CoachAttemptScope()
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .them, text: "Explain the binary search invariant.", at: 0))
+        let brain = ScriptedBrain(script: reason.isManual ? [replacementReply("stale")] : [
+            .init(toolCalls: [.captureScreen(callId: "capture")]), replacementReply("stale"),
+        ])
+        let activity = RecordingActivity()
+        let ledger = CoachTranscriptLedger()
+        let overlay = FakeOverlay()
+        let runner = CoachAttemptRunner(
+            config: .default, transcript: transcript,
+            screen: ScopeReplacingScreen(scope: scope, returnsImage: returnsImage),
+            overlay: overlay, clock: ManualClock(), sessionStart: 0,
+            coachingAttempts: nil, activity: activity, ledger: ledger, capabilities: .default)
+        let result = await runner.runAttempt(.init(reason: reason), using: .init(
+            plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
+            target: .init(provider: .openAI, modelID: "synthetic"), brain: brain,
+            summarizer: nil, onSelected: nil, documents: nil), scope: scope)
+        await scope.finish().value
+        await runner.cancelBackgroundWork()?.value
+
+        #expect(!Task.isCancelled, "scope replacement precedes task cancellation at admission")
+        if case .cancelled = result.result {} else { Issue.record("expected the replaced capture to cancel") }
+        #expect(!activity.kinds.contains(.screenViewed))
+        #expect(!activity.kinds.contains(.screenViewFailed))
+        #expect(ledger.committedCount == 0)
+        #expect(overlay.rendered.isEmpty)
+        #expect(brain.calls.count == (reason.isManual ? 0 : 1))
+    }
+
     @Test func replacementCapturesAndDeliversWhileOldCaptureCleanupIsBlocked() async {
         let screen = ReplacementCaptureFactory()
         let overlay = FakeOverlay()
@@ -612,6 +644,17 @@ private final class ReplacementCaptureFactory: ScreenCapturing, @unchecked Senda
         }
         func cancelCapture() { owner.lock.withLock { owner.cancellations.append(index) } }
     }
+}
+
+private struct ScopeReplacingScreen: ScreenCapturing {
+    let scope: CoachAttemptScope
+    let returnsImage: Bool
+    func makeAttemptCapture() -> any ScreenCapturing { self }
+    func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? {
+        #expect(scope.replace())
+        return returnsImage ? .init(imageBase64: "ZmFrZS1qcGVn") : nil
+    }
+    func cancelCapture() {}
 }
 
 private final class ReplacementDocuments: DocumentSession {

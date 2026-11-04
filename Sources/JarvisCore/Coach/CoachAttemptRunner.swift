@@ -174,13 +174,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 }
             }
             let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen, scope: scope)
-            if Task.isCancelled {
+            guard !Task.isCancelled, scope.publishIfActive({
+                activity?.record(shot.map { .screenViewed(imageBase64JPEG: $0.imageBase64) } ?? .screenViewFailed)
+            }) else {
                 jlog("… attempt cancelled (stopped) after capture")
                 return AttemptExecution(id: nil, result: .cancelled)
             }
             if let shot {
                 jlog("👁 looking at your screen")
-                activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                 var observations: [ChatMessage] = [.userImage(shot.imageBase64)]
                 if !shot.textEvidence.isEmpty {
                     let lines = shot.textEvidence.reduce(0) {
@@ -194,7 +195,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 work.screenObservation = observations
             } else {
                 jlog("👁 screenshot failed")
-                activity?.record(.screenViewFailed)
                 work.screenObservation = [
                     .user(JarvisPrompts.Coach.manualHintCaptureFailed),
                 ]
@@ -605,13 +605,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
                 switch call {
                 case .captureScreen(let callID):
                     let shot = await Self.captureScreen(using: screen, selecting: attempt.plan.screen, scope: scope)
-                    if Task.isCancelled {
+                    guard !Task.isCancelled, scope.publishIfActive({
+                        activity?.record(shot.map { .screenViewed(imageBase64JPEG: $0.imageBase64) } ?? .screenViewFailed)
+                    }) else {
                         jlog("… attempt cancelled (stopped) after capture")
                         return .cancelled
                     }
                     if let shot {
                         jlog("👁 looking at your screen")
-                        activity?.record(.screenViewed(imageBase64JPEG: shot.imageBase64))
                         if !shot.textEvidence.isEmpty {
                             let lines = shot.textEvidence.reduce(0) {
                                 $0 + $1.text.count(where: { $0 == "\n" }) + 1
@@ -632,7 +633,6 @@ final class CoachAttemptRunner: @unchecked Sendable {
                             newPhase: .captureScreenContinuation)
                     } else {
                         jlog("👁 screenshot failed")
-                        activity?.record(.screenViewFailed)
                         work.screenObservation = [
                             .user(JarvisPrompts.Coach.earlierCaptureFailed),
                         ]
