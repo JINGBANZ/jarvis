@@ -2,5 +2,8 @@
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
 
+https://:preview.hijarvis.xyz/*
+  X-Robots-Tag: noindex
+
 /
   Content-Security-Policy: default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
