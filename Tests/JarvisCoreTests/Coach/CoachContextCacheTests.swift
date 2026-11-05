@@ -243,7 +243,7 @@ import JarvisBrainProviders
     private func run(_ runner: CoachAttemptRunner, brain: BrainClient, provider: BrainProvider) async -> CoachAttemptRunner.AttemptResult {
         var work = CoachAttemptRunner.PendingCoachingWork(reason: .turnEnd)
         work.referencesObservation = .user("Pending ledger question.")
-        return await runner.runAttempt(work, using: .init(
+        return await runner.runTestAttempt(work, using: .init(
             plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
             target: target(provider), brain: brain, summarizer: nil, onSelected: nil, documents: nil)).result
     }

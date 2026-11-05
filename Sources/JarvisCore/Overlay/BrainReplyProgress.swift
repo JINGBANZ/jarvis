@@ -17,6 +17,7 @@ public struct BrainReplyProgress: Sendable, Equatable {
 
     /// Anything a panel could show.
     public var hasText: Bool {
-        !hint.isEmpty || detailMarkdown?.isEmpty == false
+        !hint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || detailMarkdown?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 }

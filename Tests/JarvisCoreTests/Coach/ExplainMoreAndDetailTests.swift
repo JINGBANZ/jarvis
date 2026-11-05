@@ -175,5 +175,6 @@ private final class DetailSink: OverlayRendering, @unchecked Sendable {
 }
 private final class MissingExplanationScreen: ScreenCapturing, Sendable {
     func capture(_ selection: ScreenCaptureSelection) -> ScreenSnapshot? { nil }
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }

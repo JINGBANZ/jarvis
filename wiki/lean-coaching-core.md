@@ -42,6 +42,7 @@ completeness, attribution, and Stop/Start/Quit rules belong to
 |---|---|
 | [`CoachDriver`](../Sources/JarvisCore/Coach/CoachDriver.swift) | Trigger coalescing, transcription settlement, the single-flight slot, route state, and cycle recovery. |
 | [`CoachAttemptRunner`](../Sources/JarvisCore/Coach/CoachAttemptRunner.swift) | One snapshotted target's bounded tool loop, overlay delivery, history commit, and cancellable background compaction. |
+| [`CoachAttemptScope`](../Sources/JarvisCore/Coach/CoachAttemptScope.swift) | Atomic output protection versus replacement, isolated external operations, and retained conversation cleanup. |
 | [`CoachTranscriptLedger`](../Sources/JarvisCore/Coach/CoachAttemptRunner.swift) | Monotonic committed transcript boundary shared by scheduler and runner, without either acquiring the other's lock. |
 | [`AppDelegate`](../Sources/JarvisApp/App/AppDelegate.swift) | Start validation and preflight, readiness presentation, menu, shortcuts, and Settings composition. |
 | [`SessionComposition`](../Sources/JarvisApp/App/SessionComposition.swift) | Capture/transcription composition, one live session's readiness effects, and teardown. |
@@ -53,6 +54,13 @@ lock; neither half holds the other's lock. Composition builds concrete clients o
 injects ports into the kernel. The [ordered route policy](./architecture.md#ordered-provider-route)
 defines fresh-attempt retries and cycle recovery; adapter reconnect is a separate transcription
 contract.
+
+Only the logical runner publishes or commits coaching state. Its cancelled external operations can
+finish separately, returning discarded values while the next attempt proceeds. The owning trigger
+task retains their cleanup until every operation exits and its conversation finishes, so the app's
+ordinary Stop drain still precedes References release and evidence closure. First visible output
+protects the current reply; subsequent shortcuts coalesce under the
+[shortcut scheduling contract](./architecture.md#on-demand-coaching-shortcuts).
 
 ## Immutable plan boundaries
 

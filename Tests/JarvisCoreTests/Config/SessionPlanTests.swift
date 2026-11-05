@@ -13,6 +13,7 @@ import Testing
             return ScreenSnapshot(imageBase64: "c2hvdA==")
         }
 
+        func makeAttemptCapture() -> any ScreenCapturing { self }
         func cancelCapture() {}
 
         var selections: [ScreenCaptureSelection] { lock.withLock { storage } }

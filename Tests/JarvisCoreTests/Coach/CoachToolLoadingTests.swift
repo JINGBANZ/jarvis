@@ -83,7 +83,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         work.referencesObservation = .user("a question is pending")
         let target = BrainTarget(
             provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
-        return await runner.runAttempt(work, using: .init(
+        return await runner.runTestAttempt(work, using: .init(
             plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
             target: target, brain: brain, summarizer: nil, onSelected: nil,
             documents: documents)).result
@@ -214,7 +214,7 @@ final class RecordingActivity: ActivityEventRecording, @unchecked Sendable {
         ])
         let target = BrainTarget(
             provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
-        _ = await runner.runAttempt(
+        _ = await runner.runTestAttempt(
             CoachAttemptRunner.PendingCoachingWork(reason: .silence(secondsQuiet: 30)),
             using: .init(plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
                          target: target, brain: brain, summarizer: nil, onSelected: nil,

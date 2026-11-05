@@ -21,7 +21,7 @@ import Testing
             executable: executable,
             launcher: TestCommandOwnership.makeLauncher())
 
-        switch runner.capture(arguments: []) {
+        switch runner.makeAttemptRunner().capture(arguments: []) {
         case .captured(let data):
             #expect(data == Data("jpeg".utf8))
         case .failed, .cleanupFailed, .cancelled:
@@ -92,7 +92,7 @@ import Testing
         try FileManager.default.setAttributes(
             [.posixPermissions: 0o700],
             ofItemAtPath: captureDirectory.path)
-        switch runner.capture(arguments: []) {
+        switch runner.makeAttemptRunner().capture(arguments: []) {
         case .cleanupFailed:
             break
         case .captured, .failed, .cancelled:
@@ -170,8 +170,7 @@ import Testing
 
         let capture = captureOffPool(runner)
         try await waitForFile(exitedFile, pollNanoseconds: 500_000)
-        // Repeating is safe: with no pending-request latch, a request after the call returns is a
-        // no-op.
+        // Repeated cancellation stays attached to the retired attempt.
         for _ in 0..<200 {
             runner.cancelCapture()
             try await Task.sleep(nanoseconds: 500_000)
@@ -184,7 +183,7 @@ import Testing
             Issue.record("the raced capture must not fail outright")
         }
 
-        switch runner.capture(arguments: []) {
+        switch runner.makeAttemptRunner().capture(arguments: []) {
         case .captured:
             break
         case .failed, .cleanupFailed, .cancelled:
@@ -209,7 +208,7 @@ import Testing
         #expect(command.wasCancelled)
     }
 
-    @Test func cancellingWithNothingInFlightDoesNotCancelALaterCapture() throws {
+    @Test func cancellationBeforeLaunchIsLatchedOnlyForItsOwnAttempt() throws {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let executable = try makeExecutable(
@@ -224,15 +223,66 @@ import Testing
             executable: executable,
             launcher: TestCommandOwnership.makeLauncher())
 
-        runner.cancelCapture()
+        let cancelled = runner.makeAttemptRunner()
+        cancelled.cancelCapture()
+        if case .cancelled = cancelled.capture(arguments: []) {} else {
+            Issue.record("a cancelled attempt must not launch its capture")
+        }
 
-        switch runner.capture(arguments: []) {
+        switch runner.makeAttemptRunner().capture(arguments: []) {
         case .captured(let data):
             #expect(data == Data("jpeg".utf8))
         case .failed, .cleanupFailed, .cancelled:
             Issue.record("a capture that was never cancelled must not report `.cancelled`")
         }
         #expect(try transientJPEGs(in: directory).isEmpty)
+    }
+
+    @Test func overlappingAttemptsKeepCancellationAndCleanupIndependent() async throws {
+        let directory = try makeDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let oldPID = directory.appendingPathComponent("old-pid")
+        let newPID = directory.appendingPathComponent("new-pid")
+        let release = directory.appendingPathComponent("release")
+        let executable = try makeExecutable(in: directory, script: """
+            #!/bin/sh
+            kind="$1"
+            for output in "$@"; do :; done
+            printf 'jpeg' > "$output"
+            if [ "$kind" = old ]; then
+                trap '' TERM
+                printf '%s\\n' "$$" > '\(shellQuoted(oldPID.path))'
+                while kill -0 "$PPID" 2>/dev/null; do sleep 0.05; done
+            else
+                printf '%s\\n' "$$" > '\(shellQuoted(newPID.path))'
+                while [ ! -f '\(shellQuoted(release.path))' ] && kill -0 "$PPID" 2>/dev/null; do sleep 0.05; done
+            fi
+            """)
+        let factory = ScreenCaptureRunner(captureDirectory: directory, executable: executable,
+            launcher: TestCommandOwnership.makeLauncher())
+        let old = factory.makeAttemptRunner()
+        let replacement = factory.makeAttemptRunner()
+        let first = captureOffPool(old, arguments: ["old"])
+        let second = captureOffPool(replacement, arguments: ["new"])
+        do {
+            try await waitForFile(oldPID)
+            try await waitForFile(newPID)
+            old.cancelCapture()
+            if case .cancelled = await first.value {} else { Issue.record("old capture must cancel") }
+            old.cancelCapture()
+            let pid = try #require(pid_t(String(contentsOf: newPID, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines)))
+            #expect(kill(pid, 0) == 0, "old cancellation cannot terminate the replacement helper")
+            try Data().write(to: release)
+            if case .captured(let data) = await second.value {
+                #expect(data == Data("jpeg".utf8))
+            } else { Issue.record("replacement capture must succeed") }
+            #expect(try transientJPEGs(in: directory).isEmpty)
+        } catch {
+            await cancelAndAwait(first, runner: old)
+            await cancelAndAwait(second, runner: replacement)
+            throw error
+        }
     }
 
     /// A crash mid-capture must not leave a readable screenshot behind.
@@ -271,34 +321,25 @@ import Testing
     /// `capture(arguments:)` blocks in `waitUntilExit`. Parked captures on the width-limited
     /// cooperative pool deadlock a small runner, so block a GCD thread instead.
     private func captureOffPool(
-        _ runner: ScreenCaptureRunner
+        _ runner: ScreenCaptureRunner, arguments: [String] = []
     ) -> Task<ScreenCaptureRunner.Outcome, Never> {
         Task {
             guard !Task.isCancelled else { return .cancelled }
             return await withCheckedContinuation { continuation in
                 DispatchQueue.global().async {
-                    continuation.resume(returning: runner.capture(arguments: []))
+                    continuation.resume(returning: runner.capture(arguments: arguments))
                 }
             }
         }
     }
 
-    /// Keeps requesting until joined: a task cancelled before the runner registers its command
-    /// still needs a request after registration, or the infinite fixture outlives the test.
     private func cancelAndAwait(
         _ capture: Task<ScreenCaptureRunner.Outcome, Never>,
         runner: ScreenCaptureRunner
     ) async {
         capture.cancel()
-        let cancellationPump = Task {
-            while !Task.isCancelled {
-                runner.cancelCapture()
-                try? await Task.sleep(nanoseconds: 20_000_000)
-            }
-        }
+        runner.cancelCapture()
         _ = await capture.value
-        cancellationPump.cancel()
-        _ = await cancellationPump.value
     }
 
     private func makeDirectory() throws -> URL {

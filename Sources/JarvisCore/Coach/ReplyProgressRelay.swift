@@ -19,11 +19,14 @@ final class ReplyProgressRelay: @unchecked Sendable {
     }
 
     private let overlay: OverlayRendering
+    private let scope: CoachAttemptScope
     private let lock = NSLock()
     private var request: Request?
+    private var cancelled = false
 
-    init(overlay: OverlayRendering) {
+    init(overlay: OverlayRendering, scope: CoachAttemptScope) {
         self.overlay = overlay
+        self.scope = scope
     }
 
     /// The conversation's sink for the whole attempt; it feeds whichever request is open.
@@ -36,6 +39,14 @@ final class ReplyProgressRelay: @unchecked Sendable {
             of: BrainReplyProgress.self, bufferingPolicy: .bufferingNewest(1))
         lock.withLock {
             request = Request(started: Date(), stream: stream, continuation: continuation)
+        }
+    }
+
+    func cancel() {
+        lock.withLock {
+            cancelled = true
+            request?.consumer?.cancel()
+            request?.continuation.finish()
         }
     }
 
@@ -57,7 +68,7 @@ final class ReplyProgressRelay: @unchecked Sendable {
         guard delta.index == 0, delta.name == speakToolName,
               let snapshot = SpeakArgumentsScanner.progress(in: delta.arguments) else { return [] }
         let (phases, firstTextMs) = lock.withLock { () -> ([String], Int?) in
-            guard var current = request, snapshot != current.last else { return ([], nil) }
+            guard !cancelled, var current = request, snapshot != current.last else { return ([], nil) }
             var phases: [String] = []
             var firstTextMs: Int?
             if snapshot.hasText, current.last?.hasText != true {
@@ -81,12 +92,17 @@ final class ReplyProgressRelay: @unchecked Sendable {
 
     private func consume(_ stream: AsyncStream<BrainReplyProgress>) -> Task<Void, Never> {
         let overlay = overlay
+        let scope = scope
         return Task { @MainActor in
+            defer {
+                if Task.isCancelled { overlay.showReplyProgress(nil) }
+            }
             var lastPaint: ContinuousClock.Instant?
             for await snapshot in stream {
                 if let lastPaint, lastPaint.duration(to: .now) < Self.frame {
                     try? await Task.sleep(for: Self.frame - lastPaint.duration(to: .now))
                 }
+                guard !Task.isCancelled, scope.acceptOutput() else { return }
                 overlay.showReplyProgress(snapshot)
                 lastPaint = .now
             }

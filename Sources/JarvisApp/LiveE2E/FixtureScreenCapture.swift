@@ -22,6 +22,7 @@ final class FixtureScreenCapture: ScreenCapturing {
             } ?? [])
     }
 
+    func makeAttemptCapture() -> any ScreenCapturing { self }
     func cancelCapture() {}
 }
 #endif

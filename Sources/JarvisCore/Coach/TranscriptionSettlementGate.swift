@@ -13,6 +13,8 @@ final class TranscriptionSettlementGate: @unchecked Sendable {
     private var waiters: [UUID: Waiter] = [:]
     private var interruptGeneration: UInt = 0
 
+    var hasWaiters: Bool { lock.withLock { !waiters.isEmpty } }
+
     func update(_ state: TranscriptionWorkState, for speaker: Speaker) {
         let continuations: [CheckedContinuation<Void, Never>]
         lock.lock()
