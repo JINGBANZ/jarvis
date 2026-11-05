@@ -430,6 +430,40 @@ import Testing
         #expect(brain.calls.count == (reason.isManual ? 0 : 1))
     }
 
+    @Test(arguments: [
+        ToolInvocation.listReferences(callId: "r", query: nil, cursor: nil),
+        .searchReferences(callId: "r", query: "invariant"),
+        .readReference(callId: "r", documentID: UUID(), offset: 0),
+    ])
+    func scopeReplacementDuringReferenceFailureDoesNotRecordActivity(call: ToolInvocation) async {
+        let scope = CoachAttemptScope()
+        let documents = ScopeReplacingDocuments(scope: scope)
+        let transcript = RollingTranscript()
+        transcript.append(.init(speaker: .them, text: "Find the binary search invariant in the reference.", at: 0))
+        let brain = ScriptedBrain(script: [.init(toolCalls: [call]), replacementReply("stale")])
+        let activity = RecordingActivity()
+        let ledger = CoachTranscriptLedger()
+        let overlay = FakeOverlay()
+        let runner = CoachAttemptRunner(
+            config: .default, transcript: transcript, screen: FakeScreen(),
+            overlay: overlay, clock: ManualClock(), sessionStart: 0,
+            coachingAttempts: nil, activity: activity, ledger: ledger,
+            capabilities: .compose(disabledTools: [], referencesAdmitted: true))
+        let result = await runner.runAttempt(.init(reason: .turnEnd), using: .init(
+            plan: .default, routeRevision: 0, routeTopologyRevision: 0, routeIndex: 0,
+            target: .init(provider: .openAI, modelID: "synthetic"), brain: brain,
+            summarizer: nil, onSelected: nil, documents: documents), scope: scope)
+        await scope.finish().value
+        await runner.cancelBackgroundWork()?.value
+
+        #expect(!Task.isCancelled, "scope replacement precedes task cancellation at admission")
+        if case .cancelled = result.result {} else { Issue.record("expected the replaced reference operation to cancel") }
+        #expect(activity.events.isEmpty)
+        #expect(ledger.committedCount == 0)
+        #expect(overlay.rendered.isEmpty)
+        #expect(brain.calls.count == 1)
+    }
+
     @Test func replacementCapturesAndDeliversWhileOldCaptureCleanupIsBlocked() async {
         let screen = ReplacementCaptureFactory()
         let overlay = FakeOverlay()
@@ -655,6 +689,24 @@ private struct ScopeReplacingScreen: ScreenCapturing {
         return returnsImage ? .init(imageBase64: "ZmFrZS1qcGVn") : nil
     }
     func cancelCapture() {}
+}
+
+private final class ScopeReplacingDocuments: DocumentSession {
+    let sessionID = UUID()
+    let scope: CoachAttemptScope
+    init(scope: CoachAttemptScope) { self.scope = scope }
+    func list(query: String?, cursor: Int?) async throws -> ReferenceListResult {
+        #expect(scope.replace())
+        throw ReferenceAccessFailure(reason: .unavailable)
+    }
+    func search(query: String, documentIDs: [UUID]?) async throws -> ReferenceSearchResult {
+        #expect(scope.replace())
+        throw ReferenceAccessFailure(reason: .unavailable)
+    }
+    func read(documentID: UUID, offset: Int, revisionID: String?) async throws -> ReferenceReadResult {
+        #expect(scope.replace())
+        throw ReferenceAccessFailure(reason: .unavailable)
+    }
 }
 
 private final class ReplacementDocuments: DocumentSession {

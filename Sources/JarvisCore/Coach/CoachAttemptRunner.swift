@@ -666,12 +666,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         guard let documents = attempt.documents else { throw ReferenceAccessFailure(reason: .unavailable) }
                         let result = try await scope.run { try await documents.list(query: query, cursor: cursor) }
                         try Task.checkCancellation()
-                        activity?.record(.referencesListed(count: result.entries.count))
+                        guard scope.publishIfActive({
+                            activity?.record(.referencesListed(count: result.entries.count))
+                        }) else { return .cancelled }
                         appendToolContinuation(toolCallId: callID, resultText: try ReferenceToolEvidence.render(result),
                                                newPhase: .listReferencesContinuation)
                     } catch {
                         if Task.isCancelled || error is CancellationError { return .cancelled }
-                        activity?.record(.referencesUnavailable)
+                        guard scope.publishIfActive({ activity?.record(.referencesUnavailable) }) else { return .cancelled }
                         appendToolContinuation(toolCallId: callID, resultText: ReferenceToolEvidence.failure(error),
                                                newPhase: .listReferencesContinuation)
                     }
@@ -682,12 +684,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         let result = try await scope.run { try await documents.search(query: query, documentIDs: documentIDs) }
                         try Task.checkCancellation()
                         let text = try ReferenceToolEvidence.render(result)
-                        activity?.record(.referencesSearched(query: query, matchCount: result.hits.count, complete: result.complete))
+                        guard scope.publishIfActive({
+                            activity?.record(.referencesSearched(query: query, matchCount: result.hits.count, complete: result.complete))
+                        }) else { return .cancelled }
                         work.referencesObservation = .user(text)
                         appendToolContinuation(toolCallId: callID, resultText: text, newPhase: .searchReferencesContinuation)
                     } catch {
                         if Task.isCancelled || error is CancellationError { return .cancelled }
-                        activity?.record(.referencesUnavailable)
+                        guard scope.publishIfActive({ activity?.record(.referencesUnavailable) }) else { return .cancelled }
                         appendToolContinuation(toolCallId: callID, resultText: ReferenceToolEvidence.failure(error),
                                                newPhase: .searchReferencesContinuation)
                     }
@@ -700,12 +704,14 @@ final class CoachAttemptRunner: @unchecked Sendable {
                         }
                         try Task.checkCancellation()
                         let text = try ReferenceToolEvidence.render(result)
+                        guard scope.publishIfActive({ activity?.record(.referenceRead(documentID: documentID)) }) else {
+                            return .cancelled
+                        }
                         if !work.referencePages.contains(text) { work.referencePages.append(text) }
-                        activity?.record(.referenceRead(documentID: documentID))
                         appendToolContinuation(toolCallId: callID, resultText: text, newPhase: .readReferenceContinuation)
                     } catch {
                         if Task.isCancelled || error is CancellationError { return .cancelled }
-                        activity?.record(.referencesUnavailable)
+                        guard scope.publishIfActive({ activity?.record(.referencesUnavailable) }) else { return .cancelled }
                         appendToolContinuation(toolCallId: callID, resultText: ReferenceToolEvidence.failure(error),
                                                newPhase: .readReferenceContinuation)
                     }
