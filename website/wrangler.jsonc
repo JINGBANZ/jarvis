@@ -3,10 +3,12 @@
   "name": "jarvis-website",
   "compatibility_date": "2026-10-29",
   "workers_dev": true,
+  "preview_urls": false,
   "routes": [
     {
       "pattern": "hijarvis.xyz",
-      "custom_domain": true
+      "custom_domain": true,
+      "previews_enabled": true
     }
   ],
   "previews": {},

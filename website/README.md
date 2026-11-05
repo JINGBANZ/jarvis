@@ -61,10 +61,27 @@ dependencies from the lockfile. Source stays on GitHub; Cloudflare runs deployme
 the page. No GitHub Actions deployment workflow or repository deployment token is needed.
 Keep the `previews` block in `wrangler.jsonc`; the preview command requires it even when empty.
 
+Build watch paths apply to the files in each push, rather than the final PR diff against `main`.
+Merging `main` into an app-only branch can therefore build a preview if the merge brings in
+website changes. A push with no matching files skips the build, except for Cloudflare's documented
+bypass cases (empty pushes, 3,000 or more changed files, or 20 or more commits).
+
 The production domain is [hijarvis.xyz](https://hijarvis.xyz/), declared as a Custom Domain in
 `wrangler.jsonc`. Cloudflare manages its DNS record and TLS certificate. The
 [workers.dev URL](https://jarvis-website.forrestzjb.workers.dev/) remains enabled as an alternate
 address. Keep the canonical URL and `og:url` in `public/index.html` aligned with the production domain.
+
+The same Custom Domain enables previews at `https://<preview-name>.hijarvis.xyz`, with an immutable
+deployment URL at `https://<deployment-id>-<preview-name>.hijarvis.xyz`. Cloudflare normalizes Git
+branch names for the preview name. `previews_enabled` enables these hostnames, while `preview_urls`
+disables the alternate `workers.dev` preview links. The production `workers.dev` address is
+controlled separately by `workers_dev`.
+
+The production deployment applies these domain settings; a branch preview alone does not activate
+them. Cloudflare creates the wildcard DNS record and certificate, which may take time to issue.
+Verify the custom preview URL after deployment before reporting it live. Custom-domain previews
+receive `X-Robots-Tag: noindex` through `public/_headers`, preserving the search-indexing behavior
+Cloudflare automatically provides on `workers.dev` previews.
 
 Cloudflare setup is account state: committing these files does not create the Worker or connect
 GitHub. For a manual deployment after authenticating locally:
@@ -100,4 +117,5 @@ Cloudflare references: [static assets](https://developers.cloudflare.com/workers
 [Git build settings](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/),
 [build watch paths](https://developers.cloudflare.com/workers/ci-cd/builds/build-watch-paths/),
 [custom domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/),
+[preview custom domains](https://developers.cloudflare.com/workers/previews/custom-domains/),
 [rollbacks](https://developers.cloudflare.com/workers/versions-and-deployments/rollbacks/).
