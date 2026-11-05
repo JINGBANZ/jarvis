@@ -83,6 +83,10 @@ import JarvisCore
     @MainActor @Test
     func aDetailFirstReplyShowsAPlaceholderUntilItsHintStarts() {
         let panel = liveBox()
+        panel.showReplyProgress(progress(detail: " \n\t"))
+        #expect(panel.entryCount == 0)
+        #expect(panel.detailCount == 0)
+        #expect(!panel.hasLiveEntry)
         panel.showReplyProgress(progress(detail: "```java\nint i = 0;\n"))
         #expect(panel.entryCount == 1)
         #expect(panel.currentText.contains("Writing…"))

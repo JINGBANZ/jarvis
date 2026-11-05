@@ -319,12 +319,17 @@ import Testing
         #expect(overlay.paints == 0)
     }
 
-    @Test @MainActor func whitespaceThatCannotOpenAnOverlayEntryDoesNotProtectTheAttempt() async {
+    @Test(arguments: [
+        #"{"hint":" \n\t"#,
+        #"{"detail":" \n\t"#,
+        #"{"hint":" \n\t","detail":" \n\t"#,
+    ])
+    @MainActor func whitespaceThatCannotOpenAnOverlayEntryDoesNotProtectTheAttempt(arguments: String) async {
         let overlay = ReplacementOverlay()
         let scope = CoachAttemptScope()
         let relay = ReplyProgressRelay(overlay: overlay, scope: scope)
         relay.beginRequest()
-        _ = relay.sink(.init(index: 0, name: "speak", arguments: #"{"hint":" \n\t"#))
+        _ = relay.sink(.init(index: 0, name: "speak", arguments: arguments))
         _ = await relay.endRequest()
         #expect(overlay.paints == 0)
         #expect(scope.replace())
