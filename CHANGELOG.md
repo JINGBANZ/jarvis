@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.5.12](https://github.com/JINGBANZ/jarvis/compare/v0.5.11...v0.5.12) (2026-11-05)
+
+
+### Features
+
+* **build:** support intel macs with universal releases ([#483](https://github.com/JINGBANZ/jarvis/issues/483)) ([c107813](https://github.com/JINGBANZ/jarvis/commit/c10781329e1cfc28e8be202785c717cba4b68a25))
+* **coach:** replace requests without interrupting streamed replies ([#488](https://github.com/JINGBANZ/jarvis/issues/488)) ([de897d4](https://github.com/JINGBANZ/jarvis/commit/de897d47617a6b10e6920d34aaa4b5e9c122b3b3))
+* **settings:** group connections into BYOK and Subscription ([#489](https://github.com/JINGBANZ/jarvis/issues/489)) ([675b7e5](https://github.com/JINGBANZ/jarvis/commit/675b7e5885b81b21c0149ca26903bfb13b5bba70))
+* **website:** use hijarvis.xyz as the production domain ([#490](https://github.com/JINGBANZ/jarvis/issues/490)) ([d443f51](https://github.com/JINGBANZ/jarvis/commit/d443f5126d73eceeca6db70ec4c2d25f396a3e41))
+
+
+### Bug Fixes
+
+* **coaching:** close discovery with concise interview cues ([#474](https://github.com/JINGBANZ/jarvis/issues/474)) ([a6a1b17](https://github.com/JINGBANZ/jarvis/commit/a6a1b1791631f094c3a3ac4b8e949901e8bde0e3))
+* **website:** serve previews on hijarvis.xyz ([#494](https://github.com/JINGBANZ/jarvis/issues/494)) ([ee2c820](https://github.com/JINGBANZ/jarvis/commit/ee2c8205467fb7c12ccd654167411f9334d18c60))
+
 ## [0.5.11](https://github.com/JINGBANZ/jarvis/compare/v0.5.10...v0.5.11) (2026-10-30)
 
 
