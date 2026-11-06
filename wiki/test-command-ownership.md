@@ -154,7 +154,7 @@ default runs a normal process and ignores test ownership context. Provider, capt
 and reference logic neither depend on the test runner nor parse its environment.
 
 Development executable composition and test hosts explicitly inject
-[`TrackedProcessLauncher`](../Sources/JarvisTestSupport/TrackedProcessLauncher.swift). It obtains a
+[`TrackedProcessLauncher`](../Tests/Support/ProcessOwnership/TrackedProcessLauncher.swift). It obtains a
 durable pending receipt **before** the native spawn, adds ownership context to sanitized child
 environments internally, then registers the observed child.
 Immediate spawn bookkeeping (timing, stdin, cancellation PID and watchdog setup) runs before the
@@ -167,7 +167,7 @@ cleanup never clears a failed registration receipt. Blocking cleanup is still bo
 external supervisor's command deadline. The native production launcher preserves Foundation's
 normal launch and error behavior without adding a blocking cleanup wait.
 
-The entire `JarvisTestSupport` implementation is compiled only with `DEBUG`, including its context
+The entire `JarvisTestProcesses` implementation is compiled only with `DEBUG`, including its context
 parser and Python reporter. Release app and native-helper artifacts exclude reporting code.
 App bootstrap, helper bootstrap, evaluator CLI, unit process tests and the live controller select
 their launcher explicitly; there is no mutable global fallback. App composition forwards the
@@ -241,7 +241,9 @@ persistence. The local Gate remains required before opening a ready-for-review P
 
 [`check-process-launching.py`](../scripts/check-process-launching.py) enforces the production source
 and transitive target dependency boundary; its negative fixtures reject ownership context, test
-imports and indirect dependencies. Compiled release artifacts are inspected for reporter symbols
+imports, indirect dependencies, and scenario machinery placed in product modules.
+[Test code ownership](./live-e2e-tests.md#code-ownership) defines the shared scenario harness and
+the narrow process module; the latter depends only on `JarvisProcess`. Compiled release artifacts are inspected for reporter symbols
 and context/protocol strings when validating changes to this boundary.
 
 Both ordinary and hosted unit-test wrappers reject non-debug Swift test configurations before

@@ -21,10 +21,11 @@ let package = Package(
     targets: [
         // `.copy`, not `.process`: SkillCatalog enumerates the `<name>/SKILL.md` folders.
         .target(
-            name: "JarvisCore", resources: [.copy("Resources/Skills")], swiftSettings: liveE2ESettings),
+            name: "JarvisCore", resources: [.copy("Resources/Skills")]),
         // The ordinary spawn seam is shared by production OS adapters and executable composition.
         .target(name: "JarvisProcess"),
-        .target(name: "JarvisTestSupport", dependencies: ["JarvisProcess"]),
+        .target(name: "JarvisTestProcesses", dependencies: ["JarvisProcess"], path: "Tests/Support/ProcessOwnership"),
+        .target(name: "JarvisScenarioHarness", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"], path: "Tests/Support/ScenarioHarness", swiftSettings: liveE2ESettings),
         .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore", "JarvisProcess"]),
         .target(name: "JarvisEvaluation", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"]),
         .target(name: "JarvisOverlay", dependencies: ["JarvisCore"]),
@@ -39,7 +40,7 @@ let package = Package(
             name: "JarvisApp",
             dependencies: [
                 "JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisOverlay",
-                "JarvisScreenCapture", "JarvisProcess", "JarvisTestSupport", "CJarvisAEC",
+                "JarvisScreenCapture", "JarvisProcess", "JarvisTestProcesses", "JarvisScenarioHarness", "CJarvisAEC",
                 .product(name: "Sparkle", package: "Sparkle"),
             ],
             // Prebuilt by scripts/build-vad.sh. `.process` would flatten the .mlmodelc directory.
@@ -52,13 +53,13 @@ let package = Package(
         ),
         .executableTarget(
             name: "JarvisReferenceHelper",
-            dependencies: ["JarvisCore", "JarvisProcess", "JarvisTestSupport", .product(name: "ZIPFoundation", package: "ZIPFoundation")],
+            dependencies: ["JarvisCore", "JarvisProcess", "JarvisTestProcesses", .product(name: "ZIPFoundation", package: "ZIPFoundation")],
             swiftSettings: liveE2ESettings,
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .executableTarget(
             name: "EvalPrep",
-            dependencies: ["JarvisEvaluation", "JarvisCore", "JarvisBrainProviders", "JarvisProcess", "JarvisTestSupport"]
+            dependencies: ["JarvisEvaluation", "JarvisCore", "JarvisBrainProviders", "JarvisProcess", "JarvisTestProcesses"]
         ),
         .testTarget(
             name: "JarvisCoreTests",
@@ -67,11 +68,11 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisBrainProvidersTests",
-            dependencies: ["JarvisBrainProviders", "JarvisCore", "JarvisProcess", "JarvisTestSupport"]
+            dependencies: ["JarvisBrainProviders", "JarvisCore", "JarvisProcess", "JarvisTestProcesses"]
         ),
         .testTarget(
             name: "JarvisEvaluationTests",
-            dependencies: ["JarvisEvaluation", "JarvisCore", "JarvisBrainProviders", "JarvisTestSupport", "JarvisProcess"]
+            dependencies: ["JarvisEvaluation", "JarvisCore", "JarvisBrainProviders", "JarvisTestProcesses", "JarvisProcess"]
         ),
         .testTarget(
             name: "JarvisOverlayTests",
@@ -79,12 +80,13 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisScreenCaptureTests",
-            dependencies: ["JarvisScreenCapture", "JarvisCore", "JarvisProcess", "JarvisTestSupport"]
+            dependencies: ["JarvisScreenCapture", "JarvisCore", "JarvisProcess", "JarvisTestProcesses"]
         ),
+        .testTarget(name: "JarvisScenarioHarnessTests", dependencies: ["JarvisScenarioHarness", "JarvisCore", "JarvisBrainProviders", "JarvisProcess"]),
         // The Gate compiles this target but never runs it; scripts/run-live-tests.sh does.
         .testTarget(
             name: "JarvisLiveTests",
-            dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisTestSupport", "JarvisProcess"],
+            dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisEvaluation", "JarvisScenarioHarness", "JarvisTestProcesses", "JarvisProcess"],
             exclude: ["Fixtures", "Scenarios"]
         ),
         // Separate from JarvisCoreTests so that target stays Foundation-only.

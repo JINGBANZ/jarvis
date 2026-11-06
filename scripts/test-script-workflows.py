@@ -166,7 +166,7 @@ class GuardTests(ScriptTests):
         check = guard['check_boundary']
         check(self.root, package)
         source = self.root / 'Sources/JarvisProcess/Fixture.swift'
-        for forbidden in ('import JarvisTestSupport',
+        for forbidden in ('import JarvisTestProcesses', 'import JarvisScenarioHarness',
                           'let context = environment["JARVIS_TEST_RUN_SOCKET"]',
                           'TestCommandOwnership.makeLauncher()'):
             source.write_text(forbidden)
@@ -174,8 +174,35 @@ class GuardTests(ScriptTests):
                 check(self.root, package)
         source.unlink()
         package['targets'][0]['dependencies'] = [{'byName': ['Intermediate', None]}]
-        package['targets'][-1]['dependencies'] = [{'target': ['JarvisTestSupport', None]}]
-        with self.assertRaisesRegex(ValueError, 'depends on JarvisTestSupport'):
+        package['targets'][-1]['dependencies'] = [{'target': ['JarvisTestProcesses', None]}]
+        with self.assertRaisesRegex(ValueError, 'depends on JarvisTestProcesses'):
+            check(self.root, package)
+
+    def test_scenario_harness_boundaries(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []}
+                              for name in (*guard['PRODUCTION_TARGETS'], 'JarvisTestProcesses', 'JarvisScenarioHarness')]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        check = guard['check_boundary']
+        check(self.root, package)
+        package['targets'][0]['dependencies'] = [{'byName': ['JarvisScenarioHarness', None]}]
+        with self.assertRaisesRegex(ValueError, 'depends on JarvisScenarioHarness'):
+            check(self.root, package)
+        package['targets'][0]['dependencies'] = []
+        package['targets'][-2]['dependencies'] = [{'byName': ['JarvisCore', None]}]
+        with self.assertRaisesRegex(ValueError, 'JarvisTestProcesses.*JarvisProcess'):
+            check(self.root, package)
+        package['targets'][-2]['dependencies'] = []
+        process_source = self.root / 'Tests/Support/ProcessOwnership/Fixture.swift'
+        process_source.parent.mkdir(parents=True)
+        process_source.write_text('import JarvisCore')
+        with self.assertRaisesRegex(ValueError, 'process ownership must remain independent'):
+            check(self.root, package)
+        process_source.unlink()
+        misplaced = self.root / 'Sources/JarvisEvaluation/CoachingReplayExecutor.swift'
+        misplaced.write_text('struct CoachingReplayExecutor {}')
+        with self.assertRaisesRegex(ValueError, 'scenario harness implementation'):
             check(self.root, package)
 
     def test_non_debug_tests_refused_before_admission_in_both_entrypoints(self):
@@ -203,7 +230,7 @@ class GuardTests(ScriptTests):
                     marker.unlink()
 
     def test_missing_source_cannot_pass_audio_guard(self):
-        for name in ("Sources", "Resources"):
+        for name in ("Sources", "Resources", "Tests/Support"):
             shutil.copytree(REPOSITORY / name, self.root / name)
         shutil.copy2(REPOSITORY / "Package.swift", self.root / "Package.swift")
         baseline = self.run_script("check-audio-capture-config.sh")

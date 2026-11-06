@@ -56,13 +56,17 @@ release packaging resolves the same pinned dependencies independently of these P
   the bundled subscription helper's supervisor and sign-in, and the agent CLI detector and runner
   the session evaluator uses), composed by the app at Start. `JarvisEvaluation` is the
   Foundation-only sealed-session evaluation library shared by the app and `EvalPrep`.
+  Scenario regression execution belongs to `JarvisScenarioHarness`, whose offline checks run in
+  `JarvisScenarioHarnessTests`. `JarvisTestProcesses` supplies the narrow tracked-launch adapter.
+  Both support libraries live under `Tests/Support/`; their ownership and dependency rules are in
+  [live-e2e-tests.md → Code ownership](./live-e2e-tests.md#code-ownership).
   `JarvisApp` is the thin executable that wires the libraries to the side-effectful macOS
   frameworks (mic, ScreenCaptureKit, the realtime websocket, the menu bar). `JarvisReferenceHelper`
   is the native document parsing and SQLite process boundary, composed through Core's
   `DocumentSession` port. That split is what
   lets most of the system be verified headless. `JarvisLiveTests` is the test target of the
-  [live e2e tests](./live-e2e-tests.md): it drives the signed app, and it is the only test target
-  that reaches real providers.
+  [live e2e tests](./live-e2e-tests.md): it selects transcript replay or signed-app scenarios,
+  and it is the only test target that reaches real providers.
 - **Tests use swift-testing, not XCTest.** `import XCTest` fails with "no such module" under
   CLT-only. Run the suite via **`./scripts/run-tests.sh`**, which adds the swift-testing framework
   search/rpath flags that plain `swift test` lacks CLT-only and passes `--skip JarvisLiveTests`, so
@@ -183,7 +187,7 @@ framed client and fixtures. Importing a test suite does not consume command-line
 Without an argument, the signed harness runs its complete suite, including REF01–REF07. A selector
 runs one References integration case plus app/helper Quit validation; `--quit-only` focuses on Quit.
 The case predicates live in
-[`ReferenceHarnessAppDelegate+PhaseFour.swift`](../Sources/JarvisApp/References/ReferenceHarnessAppDelegate+PhaseFour.swift).
+[`ReferenceHarnessAppDelegate+PhaseFour.swift`](../Sources/JarvisApp/Testing/ReferenceHarnessAppDelegate+PhaseFour.swift).
 These deterministic checks cover admission, frozen access across Settings changes, watcher events,
 source deletion, independent read/search readiness, compaction, and cancellation.
 The separate spoken [H, P, and CACHE scenarios](./live-e2e-tests.md#scenarios) exercise real provider
@@ -453,7 +457,8 @@ omits the item rather than offering an action that a self-signed build could nev
 | `./scripts/run-capture-privacy-tests.sh [hold-seconds]` | Check real signed-app windows in a continuous stream; see [capture validation](./overlay-invisibility.md#validation-layers). |
 | `./scripts/test-proxy-privacy.sh` | Build the bundled helper and check unrelated startup/sign-in HTTP requests with empty accounts. |
 | `./scripts/run-reference-tests.sh [REF01\|REF02\|REF03\|REF04\|REF05\|REF06\|REF07\|--quit-only]` | Build the debug app and run signed deterministic References integration checks; no provider calls or capture grants. |
-| `./scripts/run-live-tests.sh [scenario] [--evaluate] [--keep-going]` | Build the debug app and run spoken scenarios against real providers; explicit REF selectors delegate to the deterministic References harness ([live-e2e-tests.md](./live-e2e-tests.md)). |
+| `./scripts/run-live-tests.sh [scenario] [--evaluate] [--keep-going]` | Run signed-app spoken scenarios; explicit REF selectors delegate to the deterministic References harness ([live-e2e-tests.md](./live-e2e-tests.md)). |
+| `./scripts/run-live-tests.sh --list` / `--suite <id> --repeat N` | Discover and run shared evaluation suites using transcript replay or a signed-app adapter. |
 
 - **Always launch with `open "./Jarvis Dev.app"`**, never the bare binary — running it from a shell makes
   TCC attribute the grant to the *terminal*, so the app reports Microphone, System Audio Recording,
@@ -651,6 +656,7 @@ both current sources when available and keeps no separate historical screen-text
 ## Live e2e tests
 
 Behavior that needs real grants, capture devices, providers, and subscription sign-ins is verified by
-`./scripts/run-live-tests.sh`, which drives the development app through scripted interview scenarios
-and asserts on the session folders they leave. [live-e2e-tests.md](./live-e2e-tests.md) holds the
-prerequisites, the case index, and the manual checks that stay outside the command.
+`./scripts/run-live-tests.sh`. It drives the development app through scripted interview scenarios
+and also selects text-replay coaching evaluations without audio or ASR.
+[live-e2e-tests.md](./live-e2e-tests.md) owns the test code organization, shared suite interface,
+prerequisites, case index, and manual checks that stay outside the command.

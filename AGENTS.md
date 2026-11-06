@@ -82,7 +82,7 @@ Mark breaking changes with `!` (`feat!:`) or a `BREAKING CHANGE:` footer. One lo
 
 Jarvis is a voice-only macOS menu-bar agent, currently focused on technical-conversation coaching,
 built with Swift 6, SwiftPM, and macOS 14+ APIs. Keep
-Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS-bound code thin in
+Foundation-only product logic in `JarvisCore`; keep AppKit, audio, capture, and other OS-bound code thin in
 `JarvisOverlay` or `JarvisApp`. The event loop starts at `Sources/JarvisCore/Coach/CoachDriver.swift`.
 
 ## Commands
@@ -92,7 +92,8 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 | Compile | `swift build` |
 | Test | `./scripts/run-tests.sh` (never raw `swift test`, except from `run-live-tests.sh`, the one other caller, because `run-tests.sh` skips the live target by name) |
 | Build or run app | `./scripts/build-app.sh [release\|debug]` or `./scripts/build-app.sh --run` |
-| Live e2e tests | `./scripts/run-live-tests.sh [scenario] [--evaluate] [--keep-going]` |
+| Live e2e tests and evals | `./scripts/run-live-tests.sh [scenario] [--evaluate] [--keep-going]` |
+| Discover evaluation suites | `./scripts/run-live-tests.sh --list` |
 | **Gate** | `swift build && ./scripts/run-tests.sh` |
 
 ## Development rules
@@ -106,6 +107,12 @@ Foundation-only logic in `JarvisCore`; keep AppKit, audio, capture, and other OS
 - Build every capability around the [voice-only interaction contract](wiki/architecture.md#1-vision).
 - Build the harness, not model or OS intelligence. Add a target only for an isolated test boundary, a
   compiler-enforced boundary, or code shared by another executable.
+- Before adding or moving test infrastructure, follow [test code ownership](wiki/live-e2e-tests.md#code-ownership).
+  Regression orchestration belongs in the shared scenario harness; `JarvisEvaluation` owns the
+  product session-review feature. Keep product libraries independent of test modules and keep
+  process ownership independent of coaching. Extend the existing suite catalog and runner for
+  ordinary evals instead of adding another runner. Update the ownership docs and dependency
+  guards with any deliberate change to these rules.
 - Preserve one brain target for an entire coaching attempt: no in-attempt provider retry or switch.
   Temporary or unknown failures exhaust a target after three failed attempts; proven permanent
   provider-boundary failures exhaust it immediately and exclude it for the session. A failed cycle

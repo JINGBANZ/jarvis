@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Keep production process adapters independent of test ownership."""
+"""Keep product modules independent of scenario harnesses and test process ownership."""
 import json
 from pathlib import Path
 import re
@@ -10,6 +10,10 @@ PRODUCTION_TARGETS = ('JarvisCore', 'JarvisBrainProviders', 'JarvisScreenCapture
                       'JarvisEvaluation', 'JarvisProcess')
 SOURCE_AREAS = (*PRODUCTION_TARGETS, 'JarvisReferenceHelper',
                 'JarvisApp/Capture', 'JarvisApp/References')
+HARNESS_PREFIXES = ('LiveE2E', 'CoachingReplay', 'EvaluationSuite', 'Intervention',
+                    'VisibleEvaluation', 'SignedAppEvaluation')
+HARNESS_TYPES = {'AudioTimeline', 'ReplayAttemptAudit', 'ReplayClock',
+                 'ReplayMilestoneBrain', 'ReplayOverlay', 'ReplayScreen'}
 BOOTSTRAP = Path('Sources/JarvisReferenceHelper/ReferenceHelperProcessComposition.swift')
 
 
@@ -23,22 +27,35 @@ def check_boundary(root, package):
         pending, visited = [target], set()
         while pending:
             name = pending.pop()
-            if name == 'JarvisTestSupport':
-                raise ValueError(target + ' depends on JarvisTestSupport')
+            if name in ('JarvisTestProcesses', 'JarvisScenarioHarness'):
+                raise ValueError(target + ' depends on ' + name)
             if name not in visited:
                 visited.add(name)
                 pending.extend(dependencies.get(name, []))
-    forbidden = re.compile(r'\b(?:JarvisTestSupport|TestCommandOwnership|JARVIS_TEST_\w*)\b')
+    if any(name != 'JarvisProcess' for name in dependencies.get('JarvisTestProcesses', [])):
+        raise ValueError('JarvisTestProcesses may depend only on JarvisProcess')
+    forbidden = re.compile(r'\b(?:JarvisTestProcesses|JarvisScenarioHarness|TestCommandOwnership|JARVIS_TEST_\w*)\b')
     for area in SOURCE_AREAS:
         directory = root / 'Sources' / area
         if not directory.is_dir():
             raise ValueError('Missing production source area: ' + area)
         for path in directory.rglob('*.swift'):
+            harness_source = (path.name.startswith(HARNESS_PREFIXES)
+                              or path.stem in HARNESS_TYPES
+                              or any(part in ('Suites', 'LiveE2E')
+                                     for part in path.relative_to(directory).parts))
+            if area in PRODUCTION_TARGETS and harness_source:
+                raise ValueError(f'{path.relative_to(root)}: scenario harness implementation in product sources')
             if path.relative_to(root) == BOOTSTRAP:
                 continue
             for number, line in enumerate(path.read_text().splitlines(), 1):
                 if forbidden.search(line):
                     raise ValueError(f'{path.relative_to(root)}:{number}: test ownership in production logic')
+
+    process_root = root / 'Tests/Support/ProcessOwnership'
+    for path in process_root.rglob('*.swift'):
+        if re.search(r'\b(?:JarvisCore|JarvisBrainProviders|JarvisEvaluation|JarvisScenarioHarness)\b', path.read_text()):
+            raise ValueError(f'{path.relative_to(root)}: process ownership must remain independent of coaching and evaluation')
 
 
 if __name__ == '__main__':

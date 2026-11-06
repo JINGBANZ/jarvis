@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 import JarvisCore
-import JarvisTestSupport
+import JarvisTestProcesses
 import os
 @testable import JarvisBrainProviders
 @testable import JarvisScreenCapture

@@ -1,4 +1,4 @@
-# Live E2E Tests
+# Live E2E Tests and Evaluations
 
 > One command owns coaching replay evaluations and signed-app interview scenarios. Replay isolates
 > intervention quality from audio recognition; signed-app scenarios retain capture, transcription,
@@ -22,14 +22,15 @@ are separate from the spoken scenarios and excluded from `all`.
 
 The mode is a sibling of the [transcription benchmark](./transcription-benchmark.md) and follows its
 conventions: `--live-e2e` in `Sources/JarvisApp/App/main.swift` selects `LiveE2EAppDelegate`
-(`Sources/JarvisApp/LiveE2E/`), a hidden `.prohibited` process like the benchmark's. It is an app
-mode rather than a test process calling the libraries because the run has to exercise the signed
-app's TCC identity, capture edge, and composition, which only the bundle has. That is also why its
-code lives under `Sources/`, not `Tests/`: nothing in a test target is linked into the app.
+(`Sources/JarvisApp/Testing/`), a hidden `.prohibited` process like the benchmark's. It is an app
+mode because the run has to exercise the signed app's TCC identity, capture edge, and composition.
+The native adapters therefore live inside the app executable. Shared scenario definitions live in
+the ordinary `JarvisScenarioHarness` library under `Tests/Support/`; their directory does not make
+them a Swift test target. The debug app and both harness test targets import that library.
 
 The mode exists only in debug builds. `liveE2ESettings` in `Package.swift` defines `JARVIS_LIVE_E2E`
-for debug builds of `JarvisCore` and `JarvisApp`, both live e2e folders and the `main.swift` switch
-compile only under it, and `scripts/check-audio-capture-config.sh` enforces that. The run builds the
+for the scenario harness and app. The shared harness, native app adapters, and `main.swift`
+switch compile only under it; `scripts/check-audio-capture-config.sh` enforces that. The run builds the
 debug app, and the Gate's debug build keeps the code compiling, while the release app that
 `scripts/package-app.sh` builds contains none of it. The launch additionally requires the development
 bundle, so a debug build without that identity still refuses a scenario.
@@ -41,7 +42,7 @@ Two ports are substituted: the audio source, `FixtureAudioSource` in place of
 `WindowScopedScreenCapture`. The composition also takes an optional attempt-auditing factory;
 production records straight into the session evidence, and the runner wraps it to watch attempts
 start and finish. The Foundation-only scenario model, launch options, and audio timeline live in
-`Sources/JarvisCore/LiveE2E/`.
+`Tests/Support/ScenarioHarness/Scenarios/`.
 
 The opt-in cache scenario also supplies a synthetic skill catalog, a compaction threshold that keeps
 its measured window intact, and a budgeted provider sender through defaulted composition ports.
@@ -56,8 +57,9 @@ The run is not:
   subscriptions. The
   Gate compiles the `JarvisLiveTests` target but never runs it
   ([build-and-run.md → Toolchain](./build-and-run.md#toolchain)). Unit targets never reach a
-  provider; anything that does lives under `Tests/JarvisLiveTests/`, so there is one mechanism for
-  live verification rather than environment-gated tests hidden inside unit targets.
+  provider. Real-provider test entry points live only under `Tests/JarvisLiveTests/` and invoke
+  the shared harness; offline harness tests inject synthetic adapters. Live execution stays
+  explicit through the existing command.
 - **A timing test.** Press-to-tip and question-to-tip times are printed as `time` lines and never
   asserted, because provider latency varies between runs. Scenarios A and B also print a `tokens`
   line per provider with its coach calls and their input, cache-read, cache-write, and output
@@ -80,6 +82,48 @@ The run is not:
   with real transcription and summarizer output. Invalid, unfinished, stale, and cancelled summaries
   remain scripted-brain cases.
 
+## Code ownership
+
+Test code is placed by responsibility and by which executable must run it. A directory under
+`Tests/Support/` can be an ordinary Swift library: `Package.swift` declares its source path.
+Product modules expose the interfaces exercised by the harness and do not import the harness.
+
+| Owner | Responsibility |
+| --- | --- |
+| `Sources/JarvisEvaluation/` | Product analysis of recorded sessions, shared by Activity's Evaluate flow and `EvalPrep`. |
+| `Tests/Support/ScenarioHarness/` (`JarvisScenarioHarness`) | Shared scenario definitions and validation, transcript replay, grading, reports, and suite execution. |
+| `Tests/Support/ProcessOwnership/` (`JarvisTestProcesses`) | Debug-only tracked process launch and ownership reporting, depending only on `JarvisProcess`. |
+| `Sources/JarvisApp/Testing/` | Debug-only signed-app adapters and explicit native harness modes requiring app composition or macOS frameworks. |
+| `Tests/JarvisScenarioHarnessTests/` | Offline verification of the shared harness; included in the Gate with synthetic dependencies. |
+| `Tests/JarvisLiveTests/` | Real-provider and signed-app test entry points, the suite catalog, scenarios, and fixtures; excluded from Gate execution. |
+
+`EvaluationSuiteRunner` in
+[`Execution/`](../Tests/Support/ScenarioHarness/Execution/EvaluationSuiteRunner.swift) owns provider
+configuration, credentials, fixed repetitions, calibration, audit closure, and report publication.
+The caller injects a process launcher, a synthetic screen, and a signed-app adapter; it receives
+reports and applies test assertions. Native launch and legacy Scenario A checks stay in the live
+adapter. Shared execution code does not import the Testing framework.
+
+The scenario harness depends on product interfaces and receives its process launcher explicitly.
+Product Core, provider, capture, evaluation, and process libraries cannot depend directly or
+transitively on either test module. The process-ownership module remains independent of coaching
+so native helpers and other test executables can use it without importing model execution.
+[`check-process-launching.py`](../scripts/check-process-launching.py) enforces these dependency and
+source-placement rules; its negative fixtures run in the Gate. The debug compilation guard keeps
+scenario machinery and ownership reporting out of release execution.
+
+An ordinary new eval adds scenarios and a manifest entry under
+[`Scenarios/`](../Tests/JarvisLiveTests/Scenarios), using an existing executor and acceptance contract.
+A new execution mode or grading contract extends the shared harness with focused offline checks;
+it does not create a parallel script, provider lifecycle, or product-side test utility.
+Keep expectations and grading goals separate from model input. Changes to ownership update this
+page, the affected package declarations, and their guards together. Existing product unit tests
+remain beside the product target they verify.
+
+The transcription benchmark retains its own capture instrumentation and scoring contract described
+in [transcription-benchmark.md](./transcription-benchmark.md). It is not an alternate entry point for
+coaching regression suites.
+
 ## Evaluation suites
 
 `./scripts/run-live-tests.sh --list` discovers suites and cases from
@@ -100,7 +144,7 @@ provisional replies subsequently withdrawn. One streamed reply counts once. The 
 hints in production history. Candidate lines address the interviewer naturally and do not ask
 Jarvis about its hint. Hidden expectations and grading goals go only to the independent judge.
 
-The Foundation replay engine lives in `Sources/JarvisEvaluation/Suites/`; its screen port is
+The Foundation replay engine lives in `Tests/Support/ScenarioHarness/Suites/`; its screen port is
 injected. The live adapter supplies a neutral synthetic viewport and explicit synthetic screen text.
 Only successful normal `capture_screen` observations become judge evidence. A synchronized virtual
 session clock controls spoken/arrival chronology. A request-boundary milestone holds the first
@@ -295,7 +339,7 @@ and the Gate checks it with synthetic credentials for every selectable provider.
 
 - **Isolated preferences.** Brain route and capability switches go to the private defaults suite
   `com.jarvis.coach.dev.live-e2e`, cleared per scenario, so a run never reads or changes the
-  developer's own settings. [`LiveE2EScenario.target(for:modelID:)`](../Sources/JarvisCore/LiveE2E/LiveE2EScenario+Target.swift)
+  developer's own settings. [`LiveE2EScenario.target(for:modelID:)`](../Tests/Support/ScenarioHarness/Scenarios/LiveE2EScenario+Target.swift)
   owns the default model for each coaching provider, shared by scenario preferences, brain switches,
   and CACHE validation. Ordinary scenarios can select explicit model IDs; CACHE uses that provider's
   shared default. Transcription provider, model or locale, and expected languages come from the
@@ -313,7 +357,7 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   A quiet check can already include finalized speech when its later turn-end event is batched into
   that attempt; the runner accepts that automatic attempt too. A quiet check with only earlier
   speech or another speaker's speech cannot advance the step.
-  [`LiveE2EAttemptMatch`](../Sources/JarvisCore/LiveE2E/LiveE2EAttemptMatch.swift) owns this rule;
+  [`LiveE2EAttemptMatch`](../Tests/Support/ScenarioHarness/Scenarios/LiveE2EAttemptMatch.swift) owns this rule;
   its regressions run in the offline Gate.
   H's `waitForCompaction` step waits on the first compaction outcome in the normal session log and
   fails if that first outcome rejects or fails, even if a later request could succeed. Its optional
@@ -372,7 +416,7 @@ requests, missing usage, and truncated prefix evidence cannot pass. Skill, tool,
 search continuations must occur during warm-up, and the loaders must not run again. Each measured
 attempt commits one delivered hint that uses the retained reference's explicit term.
 
-[`LiveE2ECacheCheck.evaluate`](../Sources/JarvisCore/LiveE2E/LiveE2ECacheCheck.swift) owns the required
+[`LiveE2ECacheCheck.evaluate`](../Tests/Support/ScenarioHarness/Scenarios/LiveE2ECacheCheck.swift) owns the required
 history-hit count, token-weighted cache-read floor, and beyond-static guard. A history hit compares
 cache reads with the preceding initial request's input, allowing only the provider's checkpoint
 tolerance from `prefixTokenAllowance(for:)`. The Codex allowance is calibrated against observed
@@ -393,7 +437,7 @@ compaction intentionally reset a prefix, so they stay outside this measurement. 
 and replay behavior is covered by `CoachContextCacheTests` and the ordinary live scenarios. A
 declared reset starts a new window; its non-null reason alone does not imply another reset.
 
-[`LiveE2ECacheBudget`](../Sources/JarvisCore/LiveE2E/LiveE2ECacheBudget.swift) owns the request, duration,
+[`LiveE2ECacheBudget`](../Tests/Support/ScenarioHarness/Scenarios/LiveE2ECacheBudget.swift) owns the request, duration,
 and API reservation limits in its `maximumRequests`, `maximumDuration`, and
 `maximumReservedCoachCost` constants; `reserve(inputBytes:now:)` enforces the body-size bound.
 The sender accepts only the shared live-test target and `maximumOutputTokens` client output cap

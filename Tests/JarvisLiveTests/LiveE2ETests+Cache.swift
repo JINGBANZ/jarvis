@@ -1,3 +1,4 @@
+import JarvisScenarioHarness
 import Foundation
 import JarvisBrainProviders
 import JarvisCore

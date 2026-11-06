@@ -1,3 +1,6 @@
+#if JARVIS_LIVE_E2E
+import JarvisScenarioHarness
+#endif
 import AppKit
 import JarvisCore
 

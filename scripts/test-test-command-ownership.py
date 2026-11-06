@@ -36,7 +36,7 @@ class LaunchTests(unittest.TestCase):
                        env=BASE_ENV, check=True, timeout=120)
         subprocess.run(['swift', 'build', '-c', 'debug', '--target', 'JarvisBrainProviders'], cwd=ROOT,
                        env=BASE_ENV, check=True, timeout=120)
-        subprocess.run(['swift', 'build', '-c', 'debug', '--target', 'JarvisTestSupport'], cwd=ROOT,
+        subprocess.run(['swift', 'build', '-c', 'debug', '--target', 'JarvisTestProcesses'], cwd=ROOT,
                        env=BASE_ENV, check=True, timeout=120)
         build = Path(subprocess.check_output(['swift', 'build', '--show-bin-path'],
                      cwd=ROOT, env=BASE_ENV, text=True, timeout=30).strip())
@@ -46,7 +46,7 @@ class LaunchTests(unittest.TestCase):
         command = ['swiftc', '-parse-as-library', '-swift-version', '6',
                    '-I', str(build / 'Modules'), '-I', str(build),
                    str(ROOT / 'scripts/test-command-ownership/LaunchFixture.swift'), '-o', str(cls.binary)]
-        for target in ('JarvisCore', 'JarvisProcess', 'JarvisBrainProviders', 'JarvisScreenCapture', 'JarvisTestSupport'):
+        for target in ('JarvisCore', 'JarvisProcess', 'JarvisBrainProviders', 'JarvisScreenCapture', 'JarvisTestProcesses'):
             product = build / (target + '.o')
             objects = [product] if product.is_file() else sorted((build / (target + '.build')).glob('*.o'))
             if not objects:
