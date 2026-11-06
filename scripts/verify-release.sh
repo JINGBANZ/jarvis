@@ -123,6 +123,9 @@ if [[ -L "$EXTRACTED_REFERENCES" || -L "$EXTRACTED_REFERENCES/JarvisReferenceHel
   exit 1
 fi
 REFERENCE_PRIVACY="$EXTRACTED_APP/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle/PrivacyInfo.xcprivacy"
+if [[ ! -e "$REFERENCE_PRIVACY" && ! -L "$REFERENCE_PRIVACY" ]]; then
+  REFERENCE_PRIVACY="$EXTRACTED_APP/Contents/Resources/ZIPFoundation_ZIPFoundation.bundle/Contents/Resources/PrivacyInfo.xcprivacy"
+fi
 if [[ ! -f "$REFERENCE_PRIVACY" || -L "$REFERENCE_PRIVACY" ]]; then
   echo "error: disk-image app is missing the ZIPFoundation privacy manifest" >&2
   exit 1
