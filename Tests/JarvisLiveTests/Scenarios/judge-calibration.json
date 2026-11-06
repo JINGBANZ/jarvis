@@ -1,0 +1,60 @@
+{
+  "labelSource": "developer-authored semantic contract fixtures; pending independent human calibration",
+  "examples": [
+    {
+      "id": "helpful",
+      "evidence": "Interviewer: Binary search sorted [1,3] for 3 with inclusive low/high. Candidate: low=mid always shrinks. No prior hint. Visible reply: When low=0 and high=1, floor mid=0, so low=mid stalls. If nums[mid] < target, set low=mid+1. Goal: correct this bug.",
+      "expected": {
+        "confident": true,
+        "grounded": true,
+        "helpful": true,
+        "redundant": false,
+        "rationale": "The two-element counterexample and correction directly address the observed bug."
+      }
+    },
+    {
+      "id": "incorrect",
+      "evidence": "Interviewer: Binary search sorted [1,3] for 3 with inclusive low/high. Candidate: low=mid always shrinks. No prior hint. Visible reply: Correct, floor mid is always above low, so low=mid cannot stall. Goal: correct this bug.",
+      "expected": {
+        "confident": true,
+        "grounded": false,
+        "helpful": false,
+        "redundant": false,
+        "rationale": "The reply endorses the demonstrated error and asserts a false midpoint property."
+      }
+    },
+    {
+      "id": "redundant",
+      "evidence": "Interviewer asks inclusive binary search. Prior visible hint: Set low=mid+1 when nums[mid]<target to avoid stalling. Candidate: I have changed low to mid+1 and am testing the two-element case. New visible reply: Set low=mid+1 when nums[mid]<target to avoid stalling. Goal: no new gap; candidate is progressing.",
+      "expected": {
+        "confident": true,
+        "grounded": true,
+        "helpful": false,
+        "redundant": true,
+        "rationale": "The candidate has already adopted the sufficient hint; repeating it adds no value."
+      }
+    },
+    {
+      "id": "insufficient-evidence",
+      "evidence": "No transcript, question, prior hints, or task constraints are available. Visible reply: Increase the limit to 100. Goal: assess whether this is supported and useful.",
+      "expected": {
+        "confident": false,
+        "grounded": false,
+        "helpful": false,
+        "redundant": false,
+        "rationale": "No evidence supports a numeric limit or establishes a gap."
+      }
+    },
+    {
+      "id": "overwhelming",
+      "evidence": "Interviewer: Given an integer array and a target, return indices of any two distinct elements whose sum equals the target, or None if no pair exists. Candidate: I understand the one-pass hash-map approach. I will look up target minus the current value before storing its index, and I am choosing variable names before implementing it. No prior hint. No request for help or a complete solution.\nVisible reply:\nHere is the full implementation:\n```python\ndef two_sum(nums, target):\n    seen = {}\n    for index, value in enumerate(nums):\n        complement = target - value\n        if complement in seen:\n            return (seen[complement], index)\n        seen[value] = index\n    return None\n```\nProof: Before processing index i, every key in seen is a value at an index strictly less than i, and its stored index identifies an occurrence of that value. Thus finding the complement returns two distinct indices with the requested sum. Conversely, if a valid pair has indices j < i, nums[j] has been stored by the time i is processed, so the complement lookup finds a valid pair. The lookup precedes insertion so the current element cannot match itself. Replacing an earlier occurrence of the same value preserves an eligible earlier index for future lookups. Each iteration makes a constant number of expected-constant-time dictionary operations, giving expected O(n) time and O(n) space; worst-case dictionary behavior depends on the implementation.\nImplementation guidance: Name the dictionary seen, the loop variables index and value, and the difference complement. Use enumerate to avoid indexing the array twice. Return immediately on the first matching pair. Keep the explicit None return for the no-solution contract. Do not sort the input in place because that loses the original index mapping. If you instead sort value/index pairs, remember that it changes the expected time to O(n log n). A bounded integer universe could support a direct-address table, but first establish the range and compare its memory cost; the problem supplies no such bound. A streaming variant can retain earlier values, although its memory still grows without a suitable bound. If moving this solution to fixed-width arithmetic, check the subtraction range rather than assuming Python-style arbitrary precision.\nTesting guidance: Check nums=[2,7,11,15], target=9, expecting (0,1); nums=[3,3], target=6, expecting (0,1); nums=[-3,4,3,90], target=0, expecting (0,2); nums=[], target=0, expecting None; nums=[3], target=6, expecting None; nums=[1,2], target=8, expecting None; and nums=[0,4,3,0], target=0, expecting (0,3). For inputs with several valid pairs, assert distinct in-range indices and a matching sum rather than one exact pair. You can also compare random small arrays against a quadratic oracle, then benchmark larger inputs separately from correctness tests.\nInterview guidance: Explain the invariant before typing, narrate lookup-before-insert, mention expected rather than unconditional constant-time hash operations, state the no-pair behavior, discuss duplicates and negative numbers, and walk through a sample before presenting complexity. After implementation, revisit the sorting alternative, the streaming limitation, numeric overflow in other languages, and the distinction between returning indices and returning values.\nGoal: assess whether this unsolicited guidance is proportionate and useful at the candidate's current conversational moment.",
+      "expected": {
+        "confident": true,
+        "grounded": true,
+        "helpful": false,
+        "redundant": true,
+        "rationale": "A complete unsolicited solution dump interrupts healthy progress and supplies no new needed value."
+      }
+    }
+  ]
+}

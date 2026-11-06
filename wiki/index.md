@@ -14,7 +14,7 @@
 - **[build-and-run.md](./build-and-run.md)** — the operational *how*: toolchain (SwiftPM + Command Line Tools, Xcode optional), the library/executable boundaries, swift-testing, packaging/signing and why TCC grants persist, running, and the activity viewer.
 - **[test-command-ownership.md](./test-command-ownership.md)** — one retained test-display identity per Mac, whole-command admission across worktrees, exact process teardown, terminal uncertainty, and finite rollout evidence.
 - **[transcription-benchmark.md](./transcription-benchmark.md)** — the explicit signed-app transcription regression harness: fixed synthetic inputs, the standard, scoped-reconnect, and two-turn session modes, deterministic scoring, privacy boundaries, result interpretation, and when to run it.
-- **[live-e2e-tests.md](./live-e2e-tests.md)**: the one-command live run of the signed app through scripted interview scenarios, with its prerequisites, results vocabulary, evidence rules, case index, and the manual checks that stay outside it.
+- **[live-e2e-tests.md](./live-e2e-tests.md)** — test code ownership, the shared evaluation runner, transcript replay and signed-app scenarios, with prerequisites, evidence rules, and the case index.
 - **[sandbox.md](./sandbox.md)** — the security/isolation model (file-access restriction, entitlements, egress, server-side retention tradeoff).
 - **[overlay-invisibility.md](./overlay-invisibility.md)** — how the coaching overlay stays out of screen recordings and screen shares (the `sharingType = .none` mechanism), with validation layers and receiving-app evidence requirements.
 - **[landscape-survey.md](./landscape-survey.md)** — the proactive-assistant requirement and reference-selection criteria behind building Jarvis.

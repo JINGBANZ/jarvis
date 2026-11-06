@@ -1,0 +1,6 @@
+{
+  "suites": [
+    {"id":"coaching/intervention","executor":"coachingReplay","catalog":"coaching-intervention.json","acceptance":"intervention-v1"},
+    {"id":"app/coaching","executor":"signedApp","scenario":"A","acceptance":"signed-app-A-v1"}
+  ]
+}

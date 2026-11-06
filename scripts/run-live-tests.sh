@@ -8,9 +8,21 @@ source scripts/lib/harness.sh
 source scripts/lib/test-display.sh
 
 usage() {
-  echo "usage: $0 [A|B|C|D|H|L|P|R|F01|F02|CACHE|REF01|REF02|REF03|REF04|REF05|REF06|REF07|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going]" >&2
+  echo "usage: $0 [A|B|C|D|H|L|P|R|F01|F02|CACHE|REF01|REF02|REF03|REF04|REF05|REF06|REF07|all] [--provider codex-subscription|claude-subscription|openai|gemini|scenario] [--evaluate] [--keep-going] [--list] [--suite coaching/intervention|app/coaching] [--repeat N]" >&2
 }
 
+create_live_run_directory() {
+  local base="$PWD/.jarvis/live-e2e" directory
+  directory="$(create_run_directory live-e2e)" || return "$?"
+  # Keep the newest ten runs, the transcription benchmark's cap.
+  find "$base" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort -r | tail -n +11 \
+    | while IFS= read -r old_run; do rm -rf "$old_run"; done
+  printf '%s\n' "$directory"
+}
+
+SUITE=""
+REPEAT=1
+LIST=0
 SCENARIO="all"
 EVALUATE=0
 KEEP_GOING=0
@@ -26,6 +38,11 @@ while (( $# > 0 )); do
       shift
       ;;
     --provider=*) PROVIDER="${1#--provider=}" ;;
+    --suite) if (( $# < 2 )); then usage; exit 2; fi; SUITE="$2"; shift ;;
+    --suite=*) SUITE="${1#--suite=}" ;;
+    --repeat) if (( $# < 2 )); then usage; exit 2; fi; REPEAT="$2"; shift ;;
+    --repeat=*) REPEAT="${1#--repeat=}" ;;
+    --list) LIST=1 ;;
     --evaluate) EVALUATE=1 ;;
     --keep-going) KEEP_GOING=1 ;;
     --help|-h) usage; exit 0 ;;
@@ -33,6 +50,66 @@ while (( $# > 0 )); do
   esac
   shift
 done
+if [[ ! "$REPEAT" =~ ^[1-9][0-9]*$ ]] || (( REPEAT > 100 )); then
+  echo "--repeat must be an integer from 1 to 100" >&2; exit 2
+fi
+SUITE_EXECUTOR=""
+if [[ -n "$SUITE" ]]; then
+  SUITE_EXECUTOR="$(python3 - "$SUITE" <<'MANIFEST'
+import json, sys
+from pathlib import Path
+matches = [value for value in json.loads(Path('Tests/JarvisLiveTests/Scenarios/evaluation-suites.json').read_text())['suites'] if value['id'] == sys.argv[1]]
+if len(matches) != 1:
+    print('Unknown suite: ' + sys.argv[1], file=sys.stderr)
+    sys.exit(2)
+print(matches[0]['executor'])
+MANIFEST
+)" || exit 2
+fi
+if [[ "$LIST" == 1 ]]; then
+  python3 - <<'CATALOG'
+import json
+from pathlib import Path
+base = Path('Tests/JarvisLiveTests/Scenarios')
+for suite in json.loads((base / 'evaluation-suites.json').read_text())['suites']:
+    print(suite['id'] + ' (' + suite['acceptance'] + ')')
+    if 'catalog' in suite:
+        for episode in json.loads((base / suite['catalog']).read_text())['episodes']:
+            print('  ' + episode['id'] + ' (' + str(sum(1 + len(decision.get('automaticFollowups', [])) for decision in episode['decisions'])) + ' decisions)')
+    else:
+        print('  ' + suite['scenario'] + ' (signed app)')
+CATALOG
+  exit 0
+fi
+if [[ -n "$SUITE" ]]; then
+  if [[ "$SCENARIO" != all || "$EVALUATE" == 1 ]]; then
+    echo "--suite cannot be combined with a positional scenario or --evaluate" >&2; exit 2
+  fi
+  case "$PROVIDER" in codex-subscription|claude-subscription|openai|gemini) ;; *) echo "Suite needs one concrete provider" >&2; exit 2 ;; esac
+  isolate_test_display ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
+  RUN_DIR="$(create_live_run_directory)"
+  export JARVIS_LIVE_E2E_RUN_DIR="$RUN_DIR"
+  export JARVIS_LIVE_E2E_PROVIDER="$PROVIDER"
+  export JARVIS_EVALUATION_SUITE="$SUITE"
+  export JARVIS_EVALUATION_REPEAT="$REPEAT"
+  export JARVIS_EVALUATION_SOURCE_REVISION="$(git rev-parse HEAD)"
+  export JARVIS_EVALUATION_SOURCE_DIRTY="$(git status --porcelain | wc -l | tr -d ' ')"
+  if [[ "$SUITE_EXECUTOR" == signedApp ]]; then
+    ./scripts/build-app.sh debug
+    export JARVIS_LIVE_E2E_APP="$PWD/Jarvis Dev.app"
+    source scripts/lib/live-test-cancellation.sh
+  fi
+  if [[ "$SUITE_EXECUTOR" == coachingReplay && ( "$PROVIDER" == *-subscription || "${JARVIS_EVALUATION_JUDGE_PROVIDER:-$PROVIDER}" == *-subscription ) ]]; then
+    source scripts/lib/cliproxyapi.sh
+    build_cliproxyapi
+    export JARVIS_PROXY_EXECUTABLE="$CLIPROXYAPI_BUILT_DIRECTORY/cliproxyapi"
+  fi
+  source scripts/lib/swift-test-flags.sh
+  run_swift_tests "$RUN_DIR/swift-test.log" --filter 'JarvisLiveTests\.EvaluationSuiteTests/'
+  echo "Evaluation artifacts: $RUN_DIR"
+  exit 0
+fi
+if [[ "$REPEAT" != 1 ]]; then echo "--repeat requires --suite" >&2; exit 2; fi
 if [[ "$SCENARIO" =~ ^REF0[1-7]$ ]]; then
   isolate_test_display ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
   echo "$SCENARIO uses the deterministic signed References harness (synthetic tool traffic; no provider or capture)."
@@ -59,13 +136,7 @@ isolate_test_display ${RUN_ARGUMENTS[@]+"${RUN_ARGUMENTS[@]}"}
 echo "▶ building the signed development app"
 ./scripts/build-app.sh debug
 
-BASE="$PWD/.jarvis/live-e2e"
-RUN_DIR="$(create_run_directory live-e2e)"
-# Keep the newest ten runs, the transcription benchmark's cap.
-find "$BASE" -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort -r | tail -n +11 \
-  | while IFS= read -r old_run; do
-      rm -rf "$old_run"
-    done
+RUN_DIR="$(create_live_run_directory)"
 
 SKIP_CACHE=()
 case "$SCENARIO" in

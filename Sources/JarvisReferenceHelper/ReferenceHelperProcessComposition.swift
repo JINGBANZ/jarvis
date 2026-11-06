@@ -1,6 +1,6 @@
 import JarvisProcess
 #if DEBUG
-import JarvisTestSupport
+import JarvisTestProcesses
 #endif
 
 enum ReferenceHelperProcessComposition {
