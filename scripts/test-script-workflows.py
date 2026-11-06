@@ -513,6 +513,23 @@ fi
                         self.assertIn("missing the ZIPFoundation privacy manifest", result.stderr)
                     manifest.unlink()
 
+    def test_valid_nested_manifest_does_not_mask_an_invalid_flat_manifest(self):
+        nested = self.privacy / "Contents/Resources/PrivacyInfo.xcprivacy"
+        nested.parent.mkdir(parents=True)
+        with nested.open("wb") as stream:
+            plistlib.dump({"NSPrivacyTracking": False}, stream)
+        flat = self.privacy / "PrivacyInfo.xcprivacy"
+        for kind in ("invalid", "dangling-symlink"):
+            with self.subTest(kind=kind):
+                flat.unlink(missing_ok=True)
+                if kind == "invalid":
+                    flat.write_text("invalid plist")
+                else:
+                    flat.symlink_to(self.root / "absent-privacy-manifest")
+                result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                flat.unlink()
+
 
 class HarnessDirectoryTests(ScriptTests):
     def test_private_directory_and_symlink_refusal(self):
