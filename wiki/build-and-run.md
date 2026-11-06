@@ -235,6 +235,10 @@ as an update, whether caused by an editor's atomic save or an unobserved delete/
 sessions keep their original text; unpinned sessions use current content. Ambiguous cross-path
 identity matches never merge documents.
 
+Preparation coalesces only matching source states. When the source changes, the helper cancels and
+drains the older preparation before starting another writer for that document. Foreground replacement
+uses the original read deadline; pinned revisions remain independent of source preparation.
+
 TXT and Markdown decode directly on a bounded background lane. PDFKit and DOCX conversion run in
 killable workers with bounded concurrency, source/expanded-output sizes, wall time, and sampled RSS;
 the limits and processor version live in `ReferenceConversionPool`, `ReferenceSourceCapture`, and

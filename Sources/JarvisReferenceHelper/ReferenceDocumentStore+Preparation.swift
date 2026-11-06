@@ -37,13 +37,27 @@ extension ReferenceDocumentStore {
     }
 
     func prepare(document: String, session: String?, waiter: UUID, background: Bool) async throws -> String {
+        let deadline = ContinuousClock.now + .milliseconds(1500)
         let source = try sourceLocation(document: document, session: session)
         let stateTask = Task.detached(priority: background ? .utility : .userInitiated) {
             try ReferenceSourceCapture.statState(url: source.url, root: source.root)
         }
         let state = try await withTaskCancellationHandler { try await stateTask.value } onCancel: { stateTask.cancel() }
         try Task.checkCancellation()
+        if let existing = jobs[document], existing.sourceState != state {
+            #if JARVIS_LIVE_E2E
+            await ReferenceSearchIndex.barrier(home: home,
+                name: background ? "preparation-before-background-supersede" : "preparation-before-supersede",
+                deadline: background ? nil : deadline)
+            #endif
+            try Task.checkCancellation()
+            existing.task.cancel()
+            await existing.task.value
+            try Task.checkCancellation()
+        }
+        guard !closed else { throw ReferenceStoreError.unavailable }
         if let session, try db.scalar("SELECT state FROM sessions WHERE id=?", [session]) != "active" { throw ReferenceStoreError.unknown_session }
+        if !background, ContinuousClock.now >= deadline { throw ReferenceStoreError.preparing }
         if let existing = jobs[document] {
             guard existing.sourceState == state else { throw ReferenceStoreError.preparing }
         } else {
@@ -62,7 +76,7 @@ extension ReferenceDocumentStore {
                 if let session { waiterSessions[waiter] = session }
                 if !background {
                     waiterTimers[waiter] = Task {
-                        do { try await Task.sleep(for: .milliseconds(1500)) }
+                        do { try await Task.sleep(until: deadline) }
                         catch { return }
                         self.detachWaiter(waiter, error: ReferenceStoreError.preparing)
                     }
