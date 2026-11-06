@@ -135,7 +135,9 @@ Both `build-app.sh` and `package-app.sh` build the subscription helper,
 [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), from the same pinned upstream source and
 [`local-only.patch`](../scripts/cliproxyapi/local-only.patch). The patch omits unused public-IP/SSH
 instructions and the Antigravity and Grok version updaters; configuration switches do not disable
-those upstream paths. The version, source checksum, and Go toolchain checksum live in
+those upstream paths. It also classifies typed HTTP/2 protocol stream errors as connection failures,
+so a broken connection does not put the credential/model into cooldown. Actual HTTP statuses keep
+their existing cooldown behavior. The version, source checksum, and Go toolchain checksum live in
 [`scripts/lib/cliproxyapi.sh`](../scripts/lib/cliproxyapi.sh). The script downloads the pinned Go
 compiler automatically, so a global Go installation is unnecessary. First-time app builds need
 network access for the source, toolchain, and checksum-verified Go modules. The offline Swift Gate
@@ -143,8 +145,11 @@ does not build the helper.
 
 Build inputs and outputs live under `.build/cliproxyapi/`; the source and toolchain archives are
 checksum-verified before use, and cached binaries are keyed by target architecture, build recipe, and patch and checked
-against their recorded digest. A checksum mismatch, rejected patch, or compiler failure stops the
-build. There is no upstream-binary fallback. Both bundle scripts install the result at
+against their recorded digest. Before caching a new binary, the build runs the patch's regression
+test on the host architecture, covering fresh streaming and non-streaming requests after a transport
+failure and preserving actual HTTP-status cooldowns. A checksum mismatch, rejected patch, failed
+regression, or compiler failure stops the build. There is no upstream-binary fallback. Both bundle
+scripts install the result at
 `Contents/MacOS/cliproxyapi` and the upstream MIT license under `Contents/Resources/Licenses/`.
 Bumping the helper requires reviewing the patch and passing `./scripts/test-proxy-privacy.sh`, which
 runs the real binary with empty credentials behind a recording loopback HTTP proxy. It checks

@@ -154,3 +154,134 @@
 -	}
 -	executor.StartXAIVersionUpdater(ctx, proxyURL)
 +	}
+--- a/sdk/cliproxy/auth/conductor_cooldown.go
++++ b/sdk/cliproxy/auth/conductor_cooldown.go
+@@ -23,0 +24 @@
++	"golang.org/x/net/http2"
+@@ -1611,0 +1613,4 @@
++	var streamErr http2.StreamError
++	if errors.As(err, &streamErr) && streamErr.Code == http2.ErrCodeProtocol {
++		return true
++	}
+--- /dev/null
++++ b/sdk/cliproxy/auth/jarvis_http2_protocol_error_test.go
+@@ -0,0 +1,119 @@
++package auth
++
++import (
++	"context"
++	"errors"
++	"fmt"
++	"io"
++	"net/http"
++	"net/url"
++	"testing"
++	"time"
++
++	"github.com/router-for-me/CLIProxyAPI/v8/internal/registry"
++	cliproxyexecutor "github.com/router-for-me/CLIProxyAPI/v8/sdk/cliproxy/executor"
++	"golang.org/x/net/http2"
++)
++
++func TestJarvisHTTP2ProtocolErrorCooldown(t *testing.T) {
++	previousQuota := quotaCooldownDisabled.Load()
++	previousTransient := transientErrorCooldownSeconds.Load()
++	SetQuotaCooldownDisabled(false)
++	SetTransientErrorCooldownSeconds(60)
++	t.Cleanup(func() {
++		quotaCooldownDisabled.Store(previousQuota)
++		transientErrorCooldownSeconds.Store(previousTransient)
++	})
++
++	protocolError := http2.StreamError{StreamID: 1, Code: http2.ErrCodeProtocol, Cause: errors.New("received from peer")}
++	type testCase struct {
++		name        string
++		cause       error
++		wantCooling bool
++	}
++	cases := []testCase{
++		{"protocol_error", protocolError, false},
++		{"wrapped_protocol_error", fmt.Errorf("upstream: %w", protocolError), false},
++		{"tls_eof", fmt.Errorf("utls: TLS handshake: %w", io.EOF), false},
++		{"unexpected_eof", io.ErrUnexpectedEOF, false},
++		{"untyped_protocol_error", errors.New(protocolError.Error()), true},
++	}
++	for _, status := range []int{http.StatusUnauthorized, http.StatusTooManyRequests, http.StatusInternalServerError} {
++		cases = append(cases, testCase{
++			name:        fmt.Sprintf("http_%d", status),
++			cause:       errors.Join(&statusBearingError{status: status, msg: protocolError.Error()}, protocolError),
++			wantCooling: true,
++		})
++	}
++
++	for _, mode := range []string{"execute", "stream"} {
++		for _, tc := range cases {
++			t.Run(mode+"/"+tc.name, func(t *testing.T) {
++				manager := NewManager(nil, nil, nil)
++				manager.SetRetryConfig(0, 0, 0)
++				executor := &jarvisHTTP2Executor{transportThenSuccessExecutor{identifier: "codex", fail: &url.Error{
++					Op: "Post", URL: "https://example.invalid/responses", Err: tc.cause,
++				}}}
++				manager.RegisterExecutor(executor)
++				model := "jarvis-http2-" + mode + "-" + tc.name
++				authID := "auth-" + model
++				registry.GetGlobalRegistry().RegisterClient(authID, "codex", []*registry.ModelInfo{{ID: model}})
++				t.Cleanup(func() { registry.GetGlobalRegistry().UnregisterClient(authID) })
++				if _, err := manager.Register(context.Background(), &Auth{ID: authID, Provider: "codex"}); err != nil {
++					t.Fatal(err)
++				}
++				call := func() error {
++					request := cliproxyexecutor.Request{Model: model}
++					if mode == "execute" {
++						_, err := manager.Execute(context.Background(), []string{"codex"}, request, cliproxyexecutor.Options{})
++						return err
++					}
++					result, err := manager.ExecuteStream(context.Background(), []string{"codex"}, request, cliproxyexecutor.Options{})
++					if err != nil {
++						return err
++					}
++					for chunk := range result.Chunks {
++						if chunk.Err != nil {
++							return chunk.Err
++						}
++					}
++					return nil
++				}
++				if err := call(); err == nil {
++					t.Fatal("first request must report the injected upstream failure")
++				}
++				if calls := executor.callCount(); calls != 1 {
++					t.Fatalf("first request made %d upstream calls, want 1", calls)
++				}
++				updated, _ := manager.GetByID(authID)
++				state := updated.ModelStates[model]
++				cooling := state != nil && state.Unavailable && state.NextRetryAfter.After(time.Now())
++				if cooling != tc.wantCooling {
++					t.Errorf("model cooling = %t, want %t", cooling, tc.wantCooling)
++				}
++				err := call()
++				if tc.wantCooling {
++					if err == nil || executor.callCount() != 1 {
++						t.Fatalf("cooling model reached upstream: calls=%d error=%v", executor.callCount(), err)
++					}
++				} else if err != nil || executor.callCount() != 2 {
++					t.Fatalf("fresh request did not reach upstream: calls=%d error=%v", executor.callCount(), err)
++				}
++			})
++		}
++	}
++}
++
++type jarvisHTTP2Executor struct {
++	transportThenSuccessExecutor
++}
++
++func (e *jarvisHTTP2Executor) ExecuteStream(context.Context, *Auth, cliproxyexecutor.Request, cliproxyexecutor.Options) (*cliproxyexecutor.StreamResult, error) {
++	if e.recordCall() == 1 {
++		return nil, e.fail
++	}
++	chunks := make(chan cliproxyexecutor.StreamChunk, 1)
++	chunks <- cliproxyexecutor.StreamChunk{Payload: []byte("data: {\"type\":\"response.completed\"}\n\n")}
++	close(chunks)
++	return &cliproxyexecutor.StreamResult{Chunks: chunks}, nil
++}
