@@ -33,11 +33,13 @@ import Testing
         let attempt = context.beginAttempt()
         let opening = attempt.messages(for: [.user("current turn")])
         let prefix = try #require(context.history.compactionPrefix())
-        #expect(context.history.compact(prefixCount: prefix.count, summary: "Ledger ownership summary.", revision: prefix.revision))
+        guard case .accepted = context.history.compact(prefixCount: prefix.count, summary: "Ledger ownership summary.", revision: prefix.revision) else {
+            Issue.record("expected the summary to reduce history"); return
+        }
         let compacted = context.history.snapshotWithRevision()
         let next = context.beginAttempt()
         let resetBase = next.messages(for: [])
-        #expect(!context.history.compact(prefixCount: prefix.count, summary: "Obsolete concurrent summary.", revision: prefix.revision))
+        #expect(context.history.compact(prefixCount: prefix.count, summary: "Obsolete concurrent summary.", revision: prefix.revision) == .stale)
         let retained = context.history.snapshotWithRevision()
         #expect(sameMessages(retained.messages, compacted.messages))
         #expect(retained.revision == compacted.revision)
@@ -81,7 +83,9 @@ import Testing
         let block = try #require(opening.messages(for: [])[1].text)
         let prefix = try #require(context.history.compactionPrefix())
         #expect(!prefix.messages.compactMap(\.text).joined().contains("documentCatalog"))
-        #expect(context.history.compact(prefixCount: prefix.count, summary: "Summarized reference discussion", revision: prefix.revision))
+        guard case .accepted = context.history.compact(prefixCount: prefix.count, summary: "Summarized reference discussion", revision: prefix.revision) else {
+            Issue.record("expected the summary to reduce history"); return
+        }
         let next = context.beginAttempt()
         let messages = next.messages(for: [])
         #expect(messages[1].role == .user && messages[1].text == block)

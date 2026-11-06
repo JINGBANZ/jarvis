@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import JarvisCore
 
@@ -145,7 +146,7 @@ import Testing
         #expect(prefix!.count < h.snapshot().count)
     }
 
-    @Test func firstBoundedBriefingReplacesOlderTurnsAndShrinksHistory() throws {
+    @Test func briefingReplacesOlderTurnsAndShrinksHistory() throws {
         let history = CoachHistory()
         history.commit([
             .user("Use Kafka with an inclusive cutoff; tests have not run. "
@@ -160,13 +161,76 @@ import Testing
             + Array(repeating: "a", count: 260).joined(separator: " ") + "\"]}"
         let summary = try #require(JarvisPrompts.HistorySummary.validatedSummary(output))
 
-        #expect(history.compact(prefixCount: prefix.count, summary: summary, revision: prefix.revision))
+        guard case .accepted = history.compact(prefixCount: prefix.count, summary: summary, revision: prefix.revision) else {
+            Issue.record("expected the summary to reduce history"); return
+        }
         #expect(history.estimatedTokens < beforeTokens)
         let retained = history.snapshot().compactMap(\.text).joined(separator: "\n")
         #expect(!retained.contains("Resolved discussion about the old approach."))
         #expect(retained.contains("Kafka; inclusive cutoff"))
         #expect(retained.contains("Tests not run."))
         #expect(retained.contains("The current question is how to test the boundary."))
+    }
+
+    @Test func oversizedBriefingKeepsNewerDecisionsAndVerificationForTheNextSummary() throws {
+        let history = CoachHistory()
+        history.commit([
+            .user("Java version A tests were reported as passing; system design chose Kafka. "
+                  + String(repeating: "Resolved discussion. ", count: 1500)),
+            .user("Continue the review.")
+        ])
+        let selected = try #require(history.compactionPrefix())
+        let output = #"{"context":"Java coding and system design","decisions":["System design: Kafka"],"coaching":[],"openQuestions":[],"verification":["Java version A: user reported passing tests. \#(String(repeating: "Evidence details. ", count: 200))"]}"#
+        let summary = try #require(JarvisPrompts.HistorySummary.validatedSummary(output))
+        #expect(CoachHistory.estimatedTextTokens(summary) > 750)
+        let update = "System design now uses SQS. Java version B changes the boundary comparison; tests have not been rerun."
+        history.commit([.user(update)])
+        let before = history.estimatedTokens
+        guard case .accepted(let recordedBefore, let after) = history.compact(
+            prefixCount: selected.count, summary: summary, revision: selected.revision) else {
+            Issue.record("expected the oversized but smaller briefing to be accepted")
+            return
+        }
+        #expect(recordedBefore == before)
+        #expect(after == history.estimatedTokens && after < before)
+        #expect(history.snapshot().last?.text == update)
+
+        history.commit([.user(String(repeating: "Current question. ", count: 50))])
+        let next = try #require(history.compactionPrefix(fraction: 0.99))
+        let input = try JarvisPrompts.HistorySummary.input(next.messages)
+        #expect(input.contains("System design: Kafka"))
+        #expect(input.contains(update))
+        let records = try #require(JSONSerialization.jsonObject(with: Data(input.utf8)) as? [[String: Any]])
+        #expect(records.first?["text"] as? String == JarvisPrompts.Coach.condensedHistory(summary))
+        #expect(records.last?["text"] as? String == update)
+    }
+
+    @Test func replacementMustShrinkAfterIncludingItsEnvelopeAndRetainedLoads() throws {
+        let history = CoachHistory()
+        let load = RawToolCall(id: "load", name: "load_skill", argumentsJSON: #"{"name":"coding"}"#)
+        history.commit([
+            .user("Old fact."),
+            .assistantToolCalls([load]),
+            .init(role: .tool, text: String(repeating: "Skill guidance. ", count: 200), toolCallId: load.id),
+            .user("Recent question.")
+        ])
+        let before = history.snapshotWithRevision()
+        let original = try JarvisPrompts.HistorySummary.input(before.messages)
+        #expect(history.compact(prefixCount: 3, summary: "Fact.", revision: before.revision) == .notSmaller)
+        let after = history.snapshotWithRevision()
+        #expect(try JarvisPrompts.HistorySummary.input(after.messages) == original)
+        #expect(after.revision == before.revision)
+        #expect(after.rewriteReason == before.rewriteReason)
+    }
+
+    @Test func equallySizedBriefingLeavesHistoryUntouched() {
+        let history = CoachHistory()
+        let original = JarvisPrompts.Coach.condensedHistory("Old fact.")
+        history.commit([.user(original), .user("Recent question.")])
+        let before = history.snapshotWithRevision()
+        #expect(history.compact(prefixCount: 1, summary: "New fact.", revision: before.revision) == .notSmaller)
+        #expect(history.snapshot().first?.text == original)
+        #expect(history.snapshotWithRevision().revision == before.revision)
     }
 
     /// Sized so the greedy 60% budget fits the call at index 5 but not its result at index 6.
@@ -217,8 +281,10 @@ import Testing
         #expect(!prefix.messages.contains { $0.toolCallId == "l1" })
         #expect(!prefix.messages.contains { $0.toolCalls?.contains(load) == true })
 
-        #expect(h.compact(prefixCount: prefix.count, summary: "the gist",
-                          revision: prefix.revision))
+        guard case .accepted = h.compact(prefixCount: prefix.count, summary: "the gist",
+                          revision: prefix.revision) else {
+            Issue.record("expected the summary to reduce history"); return
+        }
 
         let kept = h.snapshot()
         #expect(kept[0].text?.contains("the gist") == true)
@@ -243,9 +309,12 @@ import Testing
 
     @Test func compactReplacesPrefixWithSummary() {
         let h = CoachHistory()
-        h.commit([.user("old one"), .user("old two"), .user("recent")])
+        h.commit([.user(String(repeating: "old one ", count: 50)),
+                  .user(String(repeating: "old two ", count: 50)), .user("recent")])
         let revision = h.compactionPrefix()!.revision
-        #expect(h.compact(prefixCount: 2, summary: "the gist", revision: revision))
+        guard case .accepted = h.compact(prefixCount: 2, summary: "the gist", revision: revision) else {
+            Issue.record("expected the summary to reduce history"); return
+        }
         let texts = h.snapshot().compactMap(\.text)
         #expect(texts.count == 2)
         #expect(texts[0].contains("the gist"))
@@ -268,13 +337,16 @@ import Testing
             capturedAt: "00:42"),
                         toolCallId: "c2")])
 
-        #expect(!h.compact(prefixCount: stale.count, summary: "old screen said hl", revision: stale.revision))
+        #expect(h.compact(prefixCount: stale.count, summary: "old screen said hl", revision: stale.revision) == .stale)
         let texts = h.snapshot().compactMap(\.text).joined(separator: "\n")
         #expect(!texts.contains("old screen said hl"))
         #expect(texts.contains(JarvisPrompts.Coach.supersededScreenTextStub))
 
+        h.commit([.user(String(repeating: "Resolved discussion. ", count: 100)), .user("current tail")])
         let fresh = h.compactionPrefix()!
-        #expect(h.compact(prefixCount: fresh.count, summary: "the gist", revision: fresh.revision))
+        guard case .accepted = h.compact(prefixCount: fresh.count, summary: "the gist", revision: fresh.revision) else {
+            Issue.record("expected the summary to reduce history"); return
+        }
         #expect(h.snapshot().compactMap(\.text).joined().contains("the gist"))
     }
 

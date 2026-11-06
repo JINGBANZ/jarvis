@@ -278,7 +278,7 @@ extension ReferenceHarnessAppDelegate {
             }
             let requests = await brain.requests
             try assertReferencePrefix(requests, context: admitted.context)
-            try require(requests.contains { $0.contains { $0.text?.hasPrefix("[session so far, condensed") == true } }, "actual driver compaction committed history")
+            try require(requests.contains { $0.contains { $0.text?.hasPrefix("[earlier conversation, condensed") == true } }, "actual driver compaction committed history")
             let summaries = await summarizer.requests
             try require(!summaries.isEmpty && summaries.allSatisfy { !$0.contains { $0.text?.contains("documentCatalog") == true } },
                         "catalog stays outside summarizer input")

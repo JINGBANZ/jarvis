@@ -203,7 +203,7 @@ an ambiguous "this" after a design discussion.
 | B | Claude Code, then Gemini API | Behavioral, system design, customer-scenario design, coding with AI, and References off. A fresh-session Show code press on the coding screen and an Explain more press on Claude Code, then a switch to the Gemini API for the behavioral question and a hint press. The cold Show code press is what proves the preload: the session has never loaded `coding`, so the runner writes the load itself. Gemini's first request replays that runner-written preload, a call Gemini never made, which proves Gemini accepts provider-neutral memory. |
 | C | Claude Code | A stated, viable merge-intervals approach on the coding fixture, then two ordinary hint presses. Each must deliver hint text and a usable code block together, without any Show code press. |
 | D | Claude Code | Code with AI permission changes, understanding and reviewing a reported proposal, a corrective prompt for a blocked delegation step, and explanation detail while reviewing valid AI-generated code without a confusion signal. C28/C29/C30 assert activation and delivery; the companion semantic rubric evaluates advice quality separately. |
-| H | Codex | An admitted reference is read on the first spoken turn, alongside a queue decision, inclusive boundary rule, and unrun tests planted before resolved discussions. A lower debug threshold triggers real-provider compaction; the first summary must be accepted before recall. C35/C36 check replacement, size reduction, replay, and delivery. REF06-H checks exact session-context preservation and reports provider usage; `Scenarios/H-review.md` covers factual quality. |
+| H | Codex | An admitted reference, Cedar's queue decision and inclusive cutoff, and a separate Java exercise's version-specific test report precede resolved discussions. A lower debug threshold triggers real-provider compaction; a later queue change must supersede the summary while Java's changed code stays unverified. C35/C36 check replacement, size reduction, replay, and delivery. REF06-H checks exact session-context preservation and reports provider usage; `Scenarios/H-review.md` covers factual quality. |
 | L | Codex | The same bilingual technical conversation on every remote transcription target, with both speaker streams retaining Mandarin and English technical terms in coach input, provider-specific setup confirmation, and a clean end. |
 | P | Codex | An explicit full-document request over the reference fixture admitted by the real helper; verifies direct `read_reference` from the frozen catalog → reply without search and complete extracted text in the brain request. Design follow-ups exercise source attribution, cache invalidation, and a conflicting draft reported in speech. |
 | CACHE | Shared live-test default: Codex by default or explicit `--provider openai` | Warm-up and measured spoken attempts over a long synthetic retained skill and fictional Harbor Ledger preparation notes. Verifies real loading continuations, committed hints, stable encoded prefixes, and history-cache reuse. |
@@ -262,7 +262,8 @@ and the Gate checks it with synthetic credentials for every selectable provider.
   and requires the provider's setup-confirmation marker separately for each speaker stream.
   CACHE additionally checks the synthetic reference's explicit phrase in delivered hints to prove
   retained guidance is used.
-  H also checks the size budget and reduction and the stable queue identifier in replayed memory.
+  H also checks actual size reduction, the earlier queue identifier before its replacement, and
+  the newer decision in recall input. The summary size target is soft, with no acceptance ceiling.
   Factual meaning and verification attribution require the separate content review below.
 - **Stored order is not spoken order.** Activity rows and attempt transcripts keep insertion order,
   and `ConversationChronology` orders them by speech time for the viewer and the model, so a
@@ -423,8 +424,8 @@ each case's predicate is in `Tests/JarvisLiveTests/LiveE2ETests.swift`, labeled 
 | C32 | Cold unrelated coding hints and small talk do not force prep retrieval | A: initial hint and logistics line |
 | C33 | Code hints retain a preceding placement header with an inline code anchor | C: both hint presses |
 | C34 | A named-document request reads directly from the catalog before replying; design follow-ups deliver answers | P; semantics use Tests/JarvisLiveTests/Scenarios/P-review.md |
-| C35 | The first real summary is accepted within budget and reduces history size | H |
-| C36 | Subsequent coaching replays condensed memory with the queue decision and delivers a reply | H; semantics use Tests/JarvisLiveTests/Scenarios/H-review.md |
+| C35 | The first complete real summary is accepted and reduces history size | H |
+| C36 | Subsequent coaching replays condensed memory, carries a newer decision, and delivers a reply | H; semantics use Tests/JarvisLiveTests/Scenarios/H-review.md |
 | REF06-H | A real reference read precedes compaction; exact SessionContext remains once before history and outside summarizer input | H; predicates in `LiveE2ETests+HistoryCompaction.swift` |
 
 C31 checks Scenario A's selective technical retrieval: the existing design question searches before

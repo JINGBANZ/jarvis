@@ -198,18 +198,28 @@ public final class CoachHistory: @unchecked Sendable {
         return kept
     }
 
-    /// The tail may have grown since `compactionPrefix`. Returns false, leaving history unchanged,
-    /// when `revision` is stale.
+    public enum CompactionResult: Sendable, Equatable {
+        case accepted(beforeTokens: Int, afterTokens: Int)
+        case stale
+        case notSmaller
+    }
+
+    /// The tail may grow during inference; compare the complete replacement under the same lock
+    /// as revision validation so a summary cannot grow history or overwrite a retired screen.
     @discardableResult
-    public func compact(prefixCount: Int, summary: String, revision: UInt) -> Bool {
+    public func compact(prefixCount: Int, summary: String, revision: UInt) -> CompactionResult {
         lock.lock(); defer { lock.unlock() }
-        guard prefixCount > 0, prefixCount <= messages.count else { return false }
-        guard revision == rewriteRevision else { return false }
+        guard prefixCount > 0, prefixCount <= messages.count,
+              revision == rewriteRevision else { return .stale }
+        let prefix = Array(messages.prefix(prefixCount))
         let head = ChatMessage.user(JarvisPrompts.Coach.condensedHistory(summary))
-        let retained = Self.retainedPairs(in: Array(messages.prefix(prefixCount)))
-        messages.replaceSubrange(0..<prefixCount, with: [head] + retained)
+        let replacement = [head] + Self.retainedPairs(in: prefix)
+        let before = Self.estimate(messages)
+        let after = before - Self.estimate(prefix) + Self.estimate(replacement)
+        guard after < before else { return .notSmaller }
+        messages.replaceSubrange(0..<prefixCount, with: replacement)
         rewriteRevision &+= 1
         rewriteReason = .compaction
-        return true
+        return .accepted(beforeTokens: before, afterTokens: after)
     }
 }

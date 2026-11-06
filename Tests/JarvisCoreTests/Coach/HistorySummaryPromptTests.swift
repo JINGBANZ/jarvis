@@ -92,32 +92,32 @@ import Testing
     }
 
     @Test(arguments: ["中", "あ", "한"], [749, 750, 751])
-    func briefingSizeBoundsUnspacedScripts(_ scalar: String, _ tokens: Int) throws {
+    func softTargetAcceptsUnspacedScripts(_ scalar: String, _ tokens: Int) throws {
         let context = String(repeating: scalar, count: tokens - 20)
         let json = "{\"context\":\"" + context
             + "\",\"decisions\":[],\"coaching\":[],\"openQuestions\":[],\"verification\":[]}"
-        #expect((JarvisPrompts.HistorySummary.validatedSummary(json) != nil) == (tokens < 750))
+        #expect(JarvisPrompts.HistorySummary.validatedSummary(json) != nil)
     }
 
     @Test(arguments: ["decisions", "coaching", "openQuestions", "verification"])
-    func briefingSizeIncludesEveryArray(_ field: String) throws {
+    func softTargetAcceptsLongArrays(_ field: String) throws {
         var fields: [String: Any] = [
             "context": "Review", "decisions": [], "coaching": [],
             "openQuestions": [], "verification": []
         ]
         fields[field] = [String(repeating: "中", count: 750)]
         let json = String(decoding: try JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
-        #expect(JarvisPrompts.HistorySummary.validatedSummary(json) == nil)
+        #expect(JarvisPrompts.HistorySummary.validatedSummary(json) != nil)
     }
 
     @Test(arguments: [[String(repeating: "x", count: 3000)], Array(repeating: "", count: 1000)])
-    func briefingSizeBoundsLongWordsAndJSONOverhead(_ values: [String]) throws {
+    func softTargetAcceptsLongWordsAndJSONOverhead(_ values: [String]) throws {
         let fields: [String: Any] = [
             "context": "Review", "decisions": values, "coaching": [],
             "openQuestions": [], "verification": []
         ]
         let json = String(decoding: try JSONSerialization.data(withJSONObject: fields), as: UTF8.self)
-        #expect(JarvisPrompts.HistorySummary.validatedSummary(json) == nil)
+        #expect(JarvisPrompts.HistorySummary.validatedSummary(json) != nil)
     }
 
     @Test func summaryIsFormatNeutralAndRetiresResolvedTopics() {
