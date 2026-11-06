@@ -434,6 +434,103 @@ class UniversalAppTests(ScriptTests):
         self.assertEqual(bundled.read_bytes(), self.universal.read_bytes())
 
 
+class ReleaseVerificationTests(ScriptTests):
+    def setUp(self):
+        super().setUp()
+        image = self.root / "image"
+        app = image / "Jarvis.app"
+        resources = app / "Contents/Resources"
+        resources.mkdir(parents=True)
+        self.privacy = resources / "ZIPFoundation_ZIPFoundation.bundle"
+        self.privacy.mkdir()
+        for name in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
+            (resources / name).touch()
+        (resources / "Licenses").mkdir()
+        (resources / "Licenses/CLIProxyAPI-LICENSE.txt").touch()
+        (app / "Contents/Frameworks/Sparkle.framework").mkdir(parents=True)
+        (app / "Contents/MacOS").mkdir()
+        self.executable(app / "Contents/MacOS/cliproxyapi", "#!/bin/bash\nexit 0\n")
+        references = resources / "ReferenceHelper"
+        references.mkdir()
+        self.executable(references / "JarvisReferenceHelper", "#!/bin/bash\nexit 64\n")
+        with (app / "Contents/Info.plist").open("wb") as stream:
+            plistlib.dump({"CFBundleShortVersionString": "0.5.12"}, stream)
+        for name in (".DS_Store", ".background.tiff"):
+            (image / name).touch()
+        (image / "Applications").symlink_to("/Applications")
+        (self.root / "Jarvis.dmg").touch()
+        self.environment["SYNTHETIC_IMAGE"] = str(image)
+        self.executable(self.bin / "hdiutil", '''#!/bin/bash
+set -euo pipefail
+if [[ "$1" == attach ]]; then
+  while [[ "$1" != -mountpoint ]]; do shift; done
+  /usr/bin/ditto "$SYNTHETIC_IMAGE" "$2"
+fi
+''')
+        for name in ("codesign", "xcrun", "spctl", "syspolicy_check", "layout-python"):
+            self.executable(self.bin / name, "#!/bin/bash\nexit 0\n")
+        self.environment["DMGBUILD_PYTHON"] = str(self.bin / "layout-python")
+        for name in ("check-universal-app.sh", "check-release-sdk.sh"):
+            self.executable(self.root / "scripts" / name, "#!/bin/bash\nexit 0\n")
+
+    def test_privacy_manifest_in_both_swiftpm_bundle_layouts(self):
+        for relative in ("PrivacyInfo.xcprivacy", "Contents/Resources/PrivacyInfo.xcprivacy"):
+            with self.subTest(layout=relative):
+                manifest = self.privacy / relative
+                manifest.parent.mkdir(parents=True, exist_ok=True)
+                with manifest.open("wb") as stream:
+                    plistlib.dump({"NSPrivacyTracking": False}, stream)
+                result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn("passed final release verification", result.stdout)
+                manifest.unlink()
+
+    def test_missing_privacy_manifest_is_rejected(self):
+        result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing the ZIPFoundation privacy manifest", result.stderr)
+
+    def test_invalid_or_symlinked_privacy_manifest_is_rejected_in_both_layouts(self):
+        target = self.root / "PrivacyInfo.xcprivacy"
+        with target.open("wb") as stream:
+            plistlib.dump({"NSPrivacyTracking": False}, stream)
+        for relative in ("PrivacyInfo.xcprivacy", "Contents/Resources/PrivacyInfo.xcprivacy"):
+            manifest = self.privacy / relative
+            manifest.parent.mkdir(parents=True, exist_ok=True)
+            for kind in ("invalid", "symlink"):
+                with self.subTest(layout=relative, kind=kind):
+                    manifest.unlink(missing_ok=True)
+                    if kind == "invalid":
+                        manifest.write_text("invalid plist")
+                    else:
+                        manifest.symlink_to(target)
+                    result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
+                    self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                    if kind == "invalid":
+                        self.assertIn("PrivacyInfo.xcprivacy", result.stdout + result.stderr)
+                        self.assertNotIn("missing the ZIPFoundation privacy manifest", result.stderr)
+                    else:
+                        self.assertIn("missing the ZIPFoundation privacy manifest", result.stderr)
+                    manifest.unlink()
+
+    def test_valid_nested_manifest_does_not_mask_an_invalid_flat_manifest(self):
+        nested = self.privacy / "Contents/Resources/PrivacyInfo.xcprivacy"
+        nested.parent.mkdir(parents=True)
+        with nested.open("wb") as stream:
+            plistlib.dump({"NSPrivacyTracking": False}, stream)
+        flat = self.privacy / "PrivacyInfo.xcprivacy"
+        for kind in ("invalid", "dangling-symlink"):
+            with self.subTest(kind=kind):
+                flat.unlink(missing_ok=True)
+                if kind == "invalid":
+                    flat.write_text("invalid plist")
+                else:
+                    flat.symlink_to(self.root / "absent-privacy-manifest")
+                result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                flat.unlink()
+
+
 class HarnessDirectoryTests(ScriptTests):
     def test_private_directory_and_symlink_refusal(self):
         command = ["/bin/bash", "-euo", "pipefail", "-c",

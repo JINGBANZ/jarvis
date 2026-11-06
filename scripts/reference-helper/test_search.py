@@ -427,6 +427,51 @@ class SearchContracts(HelperTestCase):
         self.assertEqual(len(result["hits"]), 1, result)
         completed_gate.unlink()
 
+    def test_first_read_replaces_preparation_from_before_atomic_save_and_rename(self):
+        preparation_gate = self.gate("preparation-after-reserve")
+        background_gate = self.gate("preparation-before-background-supersede")
+        key = self.prepare("initial bytes")
+        self.arrived("preparation-after-reserve")
+        replacement = self.sources / "replacement.txt"
+        replacement.write_text("updated exact source bytes")
+        replacement.replace(self.sources / "fixture.txt")
+        self.assertEqual(self.configure()["state"], "ready")
+        (self.sources / "fixture.txt").rename(self.sources / "renamed.txt")
+        self.assertEqual(self.configure()["state"], "ready")
+        supersede_gate = self.gate("preparation-before-supersede")
+        request = self.send("read", {"document_id": key, "offset": 0})
+        self.arrived("preparation-before-supersede")
+        preparation_gate.unlink()
+        supersede_gate.unlink()
+        background_gate.unlink()
+        reply = self.receive(timeout=4)
+        self.assertEqual(reply["id"], request)
+        self.assertEqual(reply["status"], "ok", reply)
+        result = reply["result"]
+        self.assertEqual(result["status"], "ok", result)
+        self.assertEqual(result["text"], "updated exact source bytes")
+        self.assertEqual(result["name"], "fixture.txt")
+        self.assertEqual(self.pins()[key], result["revision_id"])
+        self.assertEqual(self.result("diagnostics")["reserved_bytes"], 0)
+
+    def test_replacing_stale_preparation_does_not_reset_the_read_deadline(self):
+        self.gate("preparation-after-reserve")
+        self.gate("preparation-before-background-supersede")
+        key = self.prepare("initial bytes")
+        self.arrived("preparation-after-reserve")
+        (self.sources / "fixture.txt").write_text("updated bytes")
+        self.assertEqual(self.configure()["state"], "ready")
+        self.gate("preparation-before-supersede")
+        started = time.monotonic()
+        request = self.send("read", {"document_id": key, "offset": 0})
+        self.arrived("preparation-before-supersede")
+        reply = self.receive(timeout=4)
+        self.assertEqual(reply["id"], request)
+        self.assertEqual(reply["result"]["status"], "preparing", reply)
+        self.assertLess(time.monotonic() - started, 3)
+        self.assertIsNone(self.pins()[key])
+        self.assertEqual(self.result("diagnostics")["reserved_bytes"], 0)
+
     def test_exact_identifier_excerpt_does_not_anchor_on_loose_component(self):
         fixtures = {query: loose + " " + "unrelated " * 320 + query + " actual evidence"
                     for loose, query in [("C", "C++"), ("-42", "账单-42"), ("_42", "账单_42")]}

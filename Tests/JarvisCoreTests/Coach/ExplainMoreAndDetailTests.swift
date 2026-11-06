@@ -87,9 +87,10 @@ import Testing
         let task = Task { await driver.handleTrigger(.turnEnd) }
         await gate.waitUntilEntered()
         let first: TriggerReason = latest == .manualHint ? .manualExplanation : .manualHint
-        #expect(await driver.handleTrigger(first) == .busy)
-        #expect(await driver.handleTrigger(latest) == .busy)
-        #expect(await driver.handleTrigger(.silence(secondsQuiet: 30)) == .busy)
+        let operations = await MainActor.run {
+            [first, latest, .silence(secondsQuiet: 30)].map { driver.admitTrigger($0) }
+        }
+        for operation in operations { #expect(await operation() == .busy) }
         await gate.release()
         #expect(await task.value == .spoke)
         try #require(brain.calls.count == 2)
