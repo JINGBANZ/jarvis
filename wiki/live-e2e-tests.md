@@ -1,8 +1,8 @@
 # Live E2E Tests
 
-> One command drives the real signed app through scripted interview scenarios while the developer
-> keeps using the Mac, then asserts every case on the session folders the app leaves behind. This page holds the why
-> and the case index; the steps live in the scenario files and the predicates in the checker.
+> One command owns coaching replay evaluations and signed-app interview scenarios. Replay isolates
+> intervention quality from audio recognition; signed-app scenarios retain capture, transcription,
+> app composition, and session-evidence checks. This page holds the boundaries and case index.
 
 ## What the run is and is not
 
@@ -79,6 +79,82 @@ The run is not:
   Scenario H lowers only the debug scenario's history threshold to exercise ordinary compaction
   with real transcription and summarizer output. Invalid, unfinished, stale, and cancelled summaries
   remain scripted-brain cases.
+
+## Evaluation suites
+
+`./scripts/run-live-tests.sh --list` discovers suites and cases from
+`Tests/JarvisLiveTests/Scenarios/evaluation-suites.json`. The same manifest selects the executor,
+input catalog, and acceptance contract. Existing positional scenario selectors and their flags
+continue to select the signed-app checks below.
+
+```sh
+./scripts/run-live-tests.sh --suite coaching/intervention --provider openai --repeat 3
+./scripts/run-live-tests.sh --suite app/coaching --provider codex-subscription --repeat 2
+```
+
+The coaching replay adapter injects synthetic Mandarin and English transcript events at the
+transcriber-to-`CoachDriver` boundary. It uses the production context builder, tools, provider
+adapters, and model; a recording overlay retains every visible streamed snapshot, including
+provisional replies subsequently withdrawn. One streamed reply counts once. The catalog contains
+24 isolated decisions and four short sequential episodes. Later turns retain actual generated
+hints in production history. Candidate lines address the interviewer naturally and do not ask
+Jarvis about its hint. Hidden expectations and grading goals go only to the independent judge.
+
+The Foundation replay engine lives in `Sources/JarvisEvaluation/Suites/`; its screen port is
+injected. The live adapter supplies a neutral synthetic viewport and explicit synthetic screen text.
+Only successful normal `capture_screen` observations become judge evidence. A synchronized virtual
+session clock controls spoken/arrival chronology. A request-boundary milestone holds the first
+provider request while in-flight speech queues a real pending trigger; the follow-up has its own
+expectation and result. Provider wall time is recorded separately and is never a cooldown criterion.
+Each decision has a bounded wall deadline. Invalid chronology, speakers, duplicate IDs, or unresolved
+speech state are rejected before provider work.
+
+Replay uses the normal test-command admission and tracked process launcher, but its manifest executor
+classification does not create or require a test display, signed app, TCC grants, audio, or ASR.
+Subscription targets provision the same pinned, privacy-patched helper used by app builds and use
+saved sign-ins. API targets use the owner-only secret store with the normal environment fallback.
+`JARVIS_EVALUATION_MODEL` and `JARVIS_EVALUATION_EFFORT` select the replay coach;
+`JARVIS_EVALUATION_JUDGE_PROVIDER`, `JARVIS_EVALUATION_JUDGE_MODEL`, and
+`JARVIS_EVALUATION_JUDGE_EFFORT` select the independent judge. The default judge uses the selected
+provider's default model in a separate invocation with no coaching conversation state. Unknown
+provider/effort values fail before calls. Provider-native effort floors still apply.
+
+The versioned `intervention-v1` acceptance contract requires every decision to pass:
+required silence exposes no reply; required help supplies grounded, useful, proportionate,
+nonredundant guidance; either-acceptable permits silence or guidance meeting that same standard.
+A sequence succeeds only when all its decisions pass. Reports separate unwanted interventions,
+helpful fulfillment, redundancy, and sequence success. Unwanted and redundant intervention metrics
+count affected decisions; per-attempt evidence retains every exposed reply. Reply counts and elapsed times are diagnostics.
+There are no tuned aggregate percentages or fixed silence/cooldown thresholds. Provider failures,
+incomplete responses, uncertain/malformed judge verdicts, timeouts, calibration mismatches, and
+incomplete wire audits prevent a passing report. Production retries remain visible and do not erase
+a failed attempt.
+
+Each fixed repetition writes `evaluation.json` and `evaluation.md` under an owner-only
+`.jarvis/live-e2e/.../repeat-N/` directory. JSON includes explicit per-case status, metrics, run-level
+errors, model/provider/effort settings, source revision and content fingerprint, fixture fingerprint,
+and rubric version. `catalog.json` preserves inputs; separate `coach-wire/` and `judge-wire/` audit
+folders preserve exact requests, outputs, failures, and available usage. Episode identity and attempt
+wall bounds disambiguate repeated production attempt numbers when joining wire records. Partial
+reports remain unsealed until audit closure. No run is retried until green, and every requested
+repetition is retained.
+
+`JARVIS_EVALUATION_CALIBRATE_JUDGE=1` also evaluates the checked-in `judge-calibration.json` examples
+and records verdicts before the replay. These are developer-authored positive, incorrect, redundant,
+uncertain, and overwhelming-guidance contracts; independent human calibration remains outstanding.
+Deterministic Gate tests verify verdict handling, exported results, production-loop replay,
+pending-trigger/history behavior, rubric isolation, and streamed withdrawal accounting. Those tests
+establish framework correctness; they do not establish a real-model behavioral pass.
+
+`app/coaching` runs the existing Scenario A launcher and checks, with its existing audio, ASR,
+app, helper teardown, and evidence mechanics. Its `signed-app-A-v1` contract requires a finished
+scenario and nonempty passing assertions. The adapter publishes the same report format with the
+original per-check results. Each repetition keeps raw app evidence in the direct scenario child
+`<run>/A-repeat-N/` and its report in `<run>/repeat-N/`; the report links the evidence directory.
+This preserves the app's exactly-two-level output boundary. The launcher validates app options
+before spawning, and suite repetitions continue independently of the legacy stop-after-failure marker.
+Its prerequisites are the
+ones below. Structural app checks do not substitute for semantic intervention grading.
 
 ## Prerequisites and standing conditions
 
@@ -357,9 +433,10 @@ question ends in C16, C20, C24 on both scenarios, and C01 on Scenario B's press.
 checks on Scenario B, because the preload puts `coding` in the press's own request rather than leaving
 the load to the model. Failing a note would fail a correct app on a model's judgment call.
 
-An asserted case that fails because of a model choice gets one rerun of its scenario alone; a second
+For legacy positional scenarios, an asserted case that fails because of a model choice gets one rerun of its scenario alone; a second
 failure is real. No assertion is loosened to make a run pass. A provider stall is neither a model
 choice nor a failure: it is judged through its retry, as the evidence rules above describe.
+The evaluation suites use only their requested fixed repetitions and preserve each result; the legacy rerun rule does not apply.
 For CACHE, a stall or incomplete attempt fails that run: its cache threshold applies only to fresh,
 successful attempts. Any rerun is a separate reported result.
 

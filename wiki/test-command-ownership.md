@@ -98,11 +98,19 @@ All six entrypoints call [`test-display.sh`](../scripts/lib/test-display.sh) bef
 | Entrypoint | Ownership boundary |
 | --- | --- |
 | `scripts/run-tests.sh` | Entire guard/helper/test command; fixed display locally. |
-| `scripts/run-live-tests.sh` | Build, sequential scenarios, evaluation, app/helper exits; supervisor-owned keep-awake process. |
+| `scripts/run-live-tests.sh` | Entire selected suite or positional scenario command and app/helper exits; supervisor-owned keep-awake process. Replay executors retain admission without an unused display; signed-app executors build and validate the retained display. |
 | `scripts/run-settings-tests.sh` | Each app exits before the relaunch phase. |
 | `scripts/run-reference-tests.sh` | App and exact native helpers exit; hostile environment inputs remain intact. |
 | `scripts/run-capture-privacy-tests.sh` | Same lease and explicitly validated test-display capture target. |
 | `scripts/transcription-benchmark.sh` | Entire audio/app command under the same lease, without an unused display. |
+
+The live runner's suite manifest (`Tests/JarvisLiveTests/Scenarios/evaluation-suites.json`) declares
+its executor. The supervisor recognizes a single selected `coachingReplay` executor as display-free;
+missing, malformed, ambiguous, or signed-app selections retain the display requirement. This only
+skips display preflight: machine-lock admission, unfinished-state refusal, process-only app preflight,
+tracked helper receipts, cancellation, and final exact process cleanup still apply. `--list` reads
+the catalog without admission or provider work. The interface and evaluation boundaries are in
+[live-e2e-tests.md → Evaluation suites](./live-e2e-tests.md#evaluation-suites).
 
 `build-app.sh` also holds the lease to protect development bundles and artifacts. Its nested build
 guard validates command ancestry; a standalone build takes the same machine lock. A user-requested

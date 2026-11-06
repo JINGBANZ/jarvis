@@ -29,7 +29,7 @@ struct LiveE2ELauncher {
     /// Nil when the scenario must not launch; the issue or skipped line is already recorded.
     static func begin(
         scenario scenarioID: String, file: String? = nil,
-        transcriptionTarget: TranscriptionTarget? = nil
+        transcriptionTarget: TranscriptionTarget? = nil, keepGoing overrideKeepGoing: Bool? = nil
     ) async -> LiveE2ELauncher? {
         let environment = ProcessInfo.processInfo.environment
         guard let run = environment["JARVIS_LIVE_E2E_RUN_DIR"],
@@ -38,7 +38,7 @@ struct LiveE2ELauncher {
             return nil
         }
         let runDirectory = URL(fileURLWithPath: run, isDirectory: true)
-        let keepGoing = environment["JARVIS_LIVE_E2E_KEEP_GOING"] == "1"
+        let keepGoing = overrideKeepGoing ?? (environment["JARVIS_LIVE_E2E_KEEP_GOING"] == "1")
         if !keepGoing,
            FileManager.default.fileExists(atPath: runDirectory.appendingPathComponent(stopMarker).path) {
             var results = LiveE2EResults(scenario: scenarioID)
@@ -130,6 +130,7 @@ struct LiveE2ELauncher {
             "--live-e2e-fixtures-dir", Self.fixturesDirectory.path,
         ]
         if let secretsDirectory { arguments += ["--live-e2e-secrets-dir", secretsDirectory.path] }
+        _ = try LiveE2EOptions(arguments: arguments)
         let opener = Process()
         opener.executableURL = URL(fileURLWithPath: ProcessInfo.processInfo.environment["JARVIS_TEST_PYTHON"] ?? "/usr/bin/python3")
         opener.arguments = arguments

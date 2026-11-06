@@ -1,0 +1,916 @@
+{
+  "version": "intervention-v1",
+  "rubricVersion": "intervention-v1",
+  "episodes": [
+    {
+      "id": "progress-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate is making correct progress; no intervention is needed.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "How would you find two numbers whose sum is the target?"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "I will scan once, checking target minus the current value in a map of earlier indices, then insert this value."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "explaining-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate correctly explains the complexity; do not restate it.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "What is the complexity?"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "Each lookup is expected constant time, so total expected time and auxiliary space are linear."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "testing-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate is already selecting relevant edge tests.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "How will you validate your interval merge?"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "I will test empty input, nested intervals, disjoint intervals and touching closed endpoints before coding further."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "new-error-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the newly stated binary-search boundary error: advancing low to mid can stall; low should move beyond mid in this inclusive design.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "Use inclusive low and high bounds to binary search a sorted array."
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "When the midpoint is smaller than the target, I set low to mid. That always shrinks the interval."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "dp-error-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct confusion between number of ways and minimum coins; state the minimum recurrence with unreachable states handled.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "Find the minimum number of coins to make an amount, with unlimited coins."
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "I will sum dp[amount minus coin] over the coins because we want the minimum number of coins."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "new-gap-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "helpRequired",
+          "gradingGoal": "Give a grounded explanation of why memoized DFS is needed and what to memoize for longest increasing path; do not invent constraints.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "Find the longest strictly increasing path in a grid."
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "I understand DFS but I am stuck on how to avoid solving the same suffix path repeatedly from different starts."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "uncertain-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "eitherAcceptable",
+          "gradingGoal": "Context is insufficient for a concrete technical recommendation; any help must acknowledge uncertainty rather than invent requirements.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "Tell me more about that design."
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "I am considering the alternatives; we have not yet agreed on the consistency requirement."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "logistics-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Ordinary interviewer logistics requires no coaching.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "I will take a minute to read my notes."
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "Sure, take your time."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "self-corrected-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate already notices and fixes the bug; repeating the correction is unwanted.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "Check your loop bounds."
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "I see it: using low equals mid could stall. I am changing it to mid plus one so it makes progress."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "invariant-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate articulates the correct sorted-interval invariant and progresses independently.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "Why does the merge work?"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "After sorting by start, the output covers the processed prefix and its last interval is the only one the next interval can overlap."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "overflow-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the explicit overflow misconception without assuming unprovided numeric bounds.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "The two input values are signed 32-bit integers and the sum must be exact."
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "I will add them in a signed 32-bit variable; adding two 32-bit integers cannot overflow that type."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "tradeoff-en",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "eitherAcceptable",
+          "gradingGoal": "Both proposed tradeoffs are plausible; only useful grounded clarification is acceptable, not invented scale or a forced architecture.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "How would you choose between polling and push updates?"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "I would first clarify freshness needs, expected update rate and connection limits before choosing."
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "progress-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate is making correct progress; no intervention is needed.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "如何找到和为目标值的两个数？"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "我扫一遍，先在之前下标的哈希表里找目标减当前值，再把当前值放进去。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "explaining-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate correctly explains the complexity; do not restate it.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "复杂度是多少？"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "每次查找期望常数时间，所以总期望时间和额外空间都是线性。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "testing-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate is already selecting relevant edge tests.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "如何验证合并区间？"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "我先测试空输入、包含区间、不相交区间和闭区间端点相接，再继续写。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "new-error-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the newly stated binary-search boundary error: advancing low to mid can stall; low should move beyond mid in this inclusive design.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "用左右闭区间二分查找有序数组。"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "中点比目标小时，我把左边界设为中点，这样每次区间都会缩小。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "dp-error-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct confusion between number of ways and minimum coins; state the minimum recurrence with unreachable states handled.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "硬币无限，求组成金额的最少硬币数。"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "我把每种硬币对应的 dp[金额减硬币] 加起来，就能求最少硬币。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "new-gap-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "helpRequired",
+          "gradingGoal": "Give a grounded explanation of why memoized DFS is needed and what to memoize for longest increasing path; do not invent constraints.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "求矩阵中最长严格递增路径。"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "我理解深搜，但不同起点反复计算同一段后缀路径，这里不知道怎么避免。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "uncertain-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "eitherAcceptable",
+          "gradingGoal": "Context is insufficient for a concrete technical recommendation; any help must acknowledge uncertainty rather than invent requirements.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "再介绍一下这个设计。"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "我在考虑几个方案，我们还没有确定一致性要求。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "logistics-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Ordinary interviewer logistics requires no coaching.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "我花一分钟看一下笔记。"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "好的，您慢慢看。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "self-corrected-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate already notices and fixes the bug; repeating the correction is unwanted.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "检查循环边界。"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "我看到了，左边界等于中点可能卡住。我改成中点加一，保证推进。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "invariant-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "silenceRequired",
+          "gradingGoal": "Candidate articulates the correct sorted-interval invariant and progresses independently.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "为什么合并算法成立？"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "按起点排序后，结果覆盖已处理前缀，后面的区间只可能和结果最后一个区间重叠。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "overflow-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the explicit overflow misconception without assuming unprovided numeric bounds.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "输入是两个有符号32位整数，求精确的和。"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "我用有符号32位变量相加，两个32位整数相加不会溢出这种类型。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "tradeoff-zh",
+      "decisions": [
+        {
+          "id": "decision",
+          "expectation": "eitherAcceptable",
+          "gradingGoal": "Both proposed tradeoffs are plausible; only useful grounded clarification is acceptable, not invented scale or a forced architecture.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "怎么在轮询和推送之间选择？"
+            },
+            {
+              "kind": "transcript",
+              "at": 5,
+              "spokenAt": 5,
+              "speaker": "me",
+              "text": "我会先确认新鲜度、更新频率和连接限制，再做选择。"
+            }
+          ],
+          "triggerAt": 8
+        }
+      ]
+    },
+    {
+      "id": "sequence-delayed-en",
+      "decisions": [
+        {
+          "id": "initial-gap",
+          "expectation": "helpRequired",
+          "gradingGoal": "Explain that dp[i] is the length of a divisible chain ending at sorted nums[i], and use earlier divisible nums[j] with dp[j]+1; provide actionable grounded help.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "Given distinct positive integers, find the largest subset such that every pair is divisible in one direction."
+            },
+            {
+              "kind": "transcript",
+              "at": 3,
+              "spokenAt": 3,
+              "speaker": "me",
+              "text": "After sorting I want dynamic programming, but I am stuck defining dp[i] and transitioning from earlier states."
+            }
+          ],
+          "triggerAt": 6
+        },
+        {
+          "id": "existing-hint-sufficient",
+          "expectation": "silenceRequired",
+          "gradingGoal": "No new gap: retain the actual prior hint. The delayed fragment was spoken before it; the productive line does not ask for another hint.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 10,
+              "spokenAt": 4,
+              "speaker": "me",
+              "text": "I am still thinking about what dp[i] should represent."
+            }
+          ],
+          "triggerAt": 11
+        },
+        {
+          "id": "new-misconception",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the new reconstruction error: all maximum-length endpoints do not form one chain; retain predecessor links and reconstruct one chain from a maximum endpoint. This is separate from the prior state/transition hint.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 16,
+              "spokenAt": 16,
+              "speaker": "me",
+              "text": "I now update the length using predecessors that divide the current number. To reconstruct the answer, I will collect every element whose dp equals the maximum length into one subset."
+            }
+          ],
+          "triggerAt": 18
+        }
+      ]
+    },
+    {
+      "id": "sequence-progress-en",
+      "decisions": [
+        {
+          "id": "initial-gap",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the newly stated binary-search boundary error: advancing low to mid can stall; low should move beyond mid in this inclusive design.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "Binary search with inclusive low and high bounds."
+            },
+            {
+              "kind": "transcript",
+              "at": 3,
+              "spokenAt": 3,
+              "speaker": "me",
+              "text": "When mid is smaller than target, low becomes mid; this always makes progress."
+            }
+          ],
+          "triggerAt": 6
+        },
+        {
+          "id": "existing-hint-sufficient",
+          "expectation": "silenceRequired",
+          "gradingGoal": "No new gap: retain the actual prior hint. The delayed fragment was spoken before it; the productive line does not ask for another hint.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 10,
+              "spokenAt": 9,
+              "speaker": "me",
+              "text": "I am checking the boundaries as I described."
+            }
+          ],
+          "triggerAt": 11
+        },
+        {
+          "id": "new-misconception",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the genuinely new assumption that binary search can discard half of an unsorted array by midpoint comparison. Explain the sorted-order requirement; avoid merely repeating the earlier low-bound hint.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 16,
+              "spokenAt": 16,
+              "speaker": "me",
+              "text": "I found the target in the sorted array. Next I can apply the same binary search directly to an unsorted array, because a midpoint comparison still eliminates half."
+            }
+          ],
+          "triggerAt": 18
+        }
+      ]
+    },
+    {
+      "id": "sequence-delayed-zh",
+      "decisions": [
+        {
+          "id": "initial-gap",
+          "expectation": "helpRequired",
+          "gradingGoal": "Explain that dp[i] is the length of a divisible chain ending at sorted nums[i], and use earlier divisible nums[j] with dp[j]+1; provide actionable grounded help.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "给定不同的正整数，求最大的子集，任意两个数中一个能整除另一个。"
+            },
+            {
+              "kind": "transcript",
+              "at": 3,
+              "spokenAt": 3,
+              "speaker": "me",
+              "text": "排序以后我想做动态规划，但不知道 dp[i] 表示什么，也不知道怎么从前面的状态转移。"
+            }
+          ],
+          "triggerAt": 6
+        },
+        {
+          "id": "existing-hint-sufficient",
+          "expectation": "silenceRequired",
+          "gradingGoal": "No new gap: retain the actual prior hint. The delayed fragment was spoken before it; the productive line does not ask for another hint.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 10,
+              "spokenAt": 4,
+              "speaker": "me",
+              "text": "我还在想 dp[i] 应该表示什么。"
+            }
+          ],
+          "triggerAt": 11
+        },
+        {
+          "id": "new-misconception",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the new reconstruction error: all maximum-length endpoints do not form one chain; retain predecessor links and reconstruct one chain from a maximum endpoint. This is separate from the prior state/transition hint.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 16,
+              "spokenAt": 16,
+              "speaker": "me",
+              "text": "我现在知道用能整除当前数的前驱更新长度。恢复答案时，我打算选择所有 dp 等于最大长度的元素，把它们作为同一个子集。"
+            }
+          ],
+          "triggerAt": 18
+        }
+      ]
+    },
+    {
+      "id": "sequence-progress-zh",
+      "decisions": [
+        {
+          "id": "initial-gap",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the newly stated binary-search boundary error: advancing low to mid can stall; low should move beyond mid in this inclusive design.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 0,
+              "spokenAt": 0,
+              "speaker": "them",
+              "text": "用左右闭区间二分查找。"
+            },
+            {
+              "kind": "transcript",
+              "at": 3,
+              "spokenAt": 3,
+              "speaker": "me",
+              "text": "中点小于目标时左边界设为中点，这样一定推进。"
+            },
+            {
+              "kind": "speechPending",
+              "at": 6.1,
+              "spokenAt": 6.1,
+              "speaker": "me",
+              "milestone": "attemptStarted"
+            },
+            {
+              "kind": "transcript",
+              "at": 6.4,
+              "spokenAt": 6.4,
+              "speaker": "me",
+              "text": "我先检查两个元素的情况。",
+              "milestone": "attemptStarted"
+            },
+            {
+              "kind": "speechSettled",
+              "at": 6.5,
+              "speaker": "me",
+              "milestone": "attemptStarted"
+            },
+            {
+              "kind": "screen",
+              "at": 6.6,
+              "text": "inclusive low/high; mid = (low + high) // 2",
+              "milestone": "attemptStarted"
+            }
+          ],
+          "triggerAt": 6,
+          "automaticFollowups": [
+            {
+              "id": "in-flight-progress",
+              "expectation": "silenceRequired",
+              "gradingGoal": "The actual preceding hint already addresses the boundary error. The candidate is independently checking a two-element case; do not repeat the hint."
+            }
+          ]
+        },
+        {
+          "id": "existing-hint-sufficient",
+          "expectation": "silenceRequired",
+          "gradingGoal": "No new gap: retain the actual prior hint. The delayed fragment was spoken before it; the productive line does not ask for another hint.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 10,
+              "spokenAt": 9,
+              "speaker": "me",
+              "text": "我正在按刚才说的检查边界。"
+            }
+          ],
+          "triggerAt": 11
+        },
+        {
+          "id": "new-misconception",
+          "expectation": "helpRequired",
+          "gradingGoal": "Correct the genuinely new assumption that binary search can discard half of an unsorted array by midpoint comparison. Explain the sorted-order requirement; avoid merely repeating the earlier low-bound hint.",
+          "events": [
+            {
+              "kind": "transcript",
+              "at": 16,
+              "spokenAt": 16,
+              "speaker": "me",
+              "text": "我先用排序数组二分找到了目标。接下来对未排序数组也能直接用相同的二分查找，因为中点比较仍然能排除一半。"
+            }
+          ],
+          "triggerAt": 18
+        }
+      ]
+    }
+  ]
+}

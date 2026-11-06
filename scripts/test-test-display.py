@@ -45,12 +45,31 @@ class SupervisorTests(unittest.TestCase):
 print(json.dumps({'display': 77, 'uuid': 'fixture-uuid', 'expected_profile': 'fixture.icc', 'retained': False}), flush=True)
 if sys.stdin.readline() == 'finish\\n': print('{"finished": true}', flush=True)
 ''')
+        catalog = self.repo / 'Tests/JarvisLiveTests/Scenarios'
+        catalog.mkdir(parents=True)
+        shutil.copyfile(ROOT / 'Tests/JarvisLiveTests/Scenarios/evaluation-suites.json', catalog / 'evaluation-suites.json')
         spec = importlib.util.spec_from_file_location('fixture_supervisor', self.source)
         self.module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.module)
         self.script('python3 "$JARVIS_TEST_SUPERVISOR" admit\n')
         self.processes = []
         self.addCleanup(self.reap)
+
+    def test_replay_is_headless_but_app_suite_retains_display(self):
+        requires = self.module.requires_test_display
+        self.assertFalse(requires('run-live-tests.sh', ['--suite', 'coaching/intervention']))
+        self.assertFalse(requires('run-live-tests.sh', ['--suite=coaching/intervention', '--repeat', '3']))
+        self.assertTrue(requires('run-live-tests.sh', ['--suite', 'app/coaching']))
+        self.assertTrue(requires('run-live-tests.sh', ['A']))
+        self.assertTrue(requires('run-live-tests.sh', ['--suite', 'coaching/intervention', '--suite', 'app/coaching']))
+        self.assertTrue(requires('run-tests.sh', ['--suite', 'coaching/intervention']))
+        manifest = self.repo / 'Tests/JarvisLiveTests/Scenarios/evaluation-suites.json'
+        catalog = json.loads(manifest.read_text())
+        catalog['suites'].append({'id': 'coaching/another', 'executor': 'coachingReplay'})
+        manifest.write_text(json.dumps(catalog))
+        self.assertFalse(requires('run-live-tests.sh', ['--suite', 'coaching/another']))
+        manifest.write_text('{}')
+        self.assertTrue(requires('run-live-tests.sh', ['--suite', 'coaching/intervention']))
 
     def reap(self):
         for process in self.processes:
