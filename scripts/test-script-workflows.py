@@ -2,6 +2,7 @@
 """Synthetic command contracts; no signing keys, app launches, capture, or providers."""
 
 import os
+import hashlib
 import json
 from pathlib import Path
 import plistlib
@@ -570,6 +571,27 @@ if [[ "$1" == detach && "${FAIL_DETACH:-0}" == 1 ]]; then exit 1; fi
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(checksum.exists())
         self.assertNotIn("passed final release verification", result.stdout)
+
+    def test_replacing_public_image_cannot_attest_unverified_bytes(self):
+        with (self.privacy / "PrivacyInfo.xcprivacy").open("wb") as stream:
+            plistlib.dump({"NSPrivacyTracking": False}, stream)
+        verified_bytes = b"verified disk image"
+        image = self.root / "Jarvis.dmg"
+        image.write_bytes(verified_bytes)
+        (self.root / "scripts/verify-installation.py").write_text("""from pathlib import Path
+replacement = Path('replacement.dmg')
+replacement.write_bytes(b'unverified replacement')
+replacement.replace('Jarvis.dmg')
+""")
+        result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(image.read_bytes(), b"unverified replacement")
+        checksum = self.root / "Jarvis.dmg.verified.sha256"
+        self.assertEqual(checksum.read_text(), hashlib.sha256(verified_bytes).hexdigest() + "  Jarvis.dmg\n")
+        publication = subprocess.run(["shasum", "-a", "256", "-c", str(checksum)],
+                                     cwd=self.root, text=True, capture_output=True)
+        self.assertNotEqual(publication.returncode, 0)
+        self.assertIn("Jarvis.dmg: FAILED", publication.stdout)
 
     def test_missing_privacy_manifest_is_rejected(self):
         result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")

@@ -175,7 +175,7 @@ for flow_step in "${package_flow[@]}"; do
   fi
   previous_flow_line="$flow_line"
 done
-if ! /usr/bin/grep -Fq 'hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT"' \
+if ! /usr/bin/grep -Fq 'hdiutil attach "$VERIFY_DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT"' \
       "$verify_script" \
     || ! /usr/bin/grep -Fq '"$(readlink "$APPLICATIONS_LINK")" != "/Applications"' \
       "$verify_script" \
