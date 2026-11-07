@@ -119,10 +119,12 @@ must retain their exact bytes. Verify a clean SwiftPM download and native AEC sm
 and Apple silicon before accepting a dependency update.
 
 CI runs the resolved AEC module's create/process/destroy smoke tests on each native test runner.
-The Intel Gate runs subscription-helper privacy checks natively; the unsigned universal release
+The Intel Gate runs subscription-helper privacy checks natively; the universal release
 build runs them against its bundled helper on Apple silicon, reusing that build's executable.
 The universal build also checks every shipped executable's architectures and linked SDK.
-These checks establish compilation and test coverage; capture, permissions, and live transcription
+An ad-hoc-signed archive of that one assembled app is transferred to native Apple silicon and Intel
+runners for the [installation diagnostic](#packaged-installation-verification); neither runner
+rebuilds the candidate. These checks establish compilation and offline runtime coverage; capture, permissions, and live transcription
 on physical Intel hardware use the same signed-app validation as Apple silicon.
 
 ## Packaging & signing — why permission grants persist
@@ -383,7 +385,9 @@ Applications target position. Release verification also checks the Applications 
 version, universal architectures in every shipped executable, the subscription helper and its license,
 native References helper with debug fault mode excluded, linked macOS 26-or-newer
 SDK in both app slices, notices, strict code signature, and
-Gatekeeper policy result before detaching the image. The same SDK guard runs immediately after the
+Gatekeeper policy result, then executes the installation diagnostic against an isolated copy of the
+mounted app before detaching the image. Only complete success writes the portable DMG checksum
+receipt. The same SDK guard runs immediately after the
 release build, before signing or notarization; the pre-container app is not accepted as a proxy for
 the downloaded artifact.
 
@@ -397,8 +401,11 @@ draft makes the next release-please run miss the previous release and garble the
 `macos-26` job then runs the test gate and installs the hash-pinned pure-Python wheels in
 `scripts/requirements-release.txt` into an ephemeral environment, and signs/notarizes with secrets
 scoped to the main-only `release` environment (the base64 `.p12` certificate and an App Store Connect
-API key — names in the workflow). It attaches `Jarvis.dmg` and the `appcast.xml` update feed described
-below, rejects any other asset, then publishes the Release. The
+API key — names in the workflow). The build signs the `appcast.xml` update feed described below and
+uploads the final DMG, its checksum receipt, and the feed as one workflow candidate. Native Apple
+silicon and Intel jobs download that candidate, require the recorded checksum, and repeat final-DMG
+verification. Publication depends on both jobs succeeding, downloads the same candidate, checks its
+checksum again, and attaches only `Jarvis.dmg` and `appcast.xml` before publishing. The
 stable installation block in
 `.github/release-header.md` links directly to that tag's DMG and explains the in-window drag to
 Applications; GitHub still supplies its automatic source archives. A failed sign, notarization, or
@@ -415,6 +422,39 @@ tags created with `GITHUB_TOKEN` never trigger other workflows.
 later and run natively on Apple silicon and Intel. Packaging resolves the pinned universal AEC
 dependency, compiles both app architectures, then validates the assembled bundle before signing. The README owns the user
 installation steps; provider credentials remain user-supplied in Settings.
+
+### Packaged installation verification
+
+[`verify-installation.py`](../scripts/verify-installation.py) copies an assembled app into a private
+temporary directory outside the checkout and launches its fixed `--verify-installation` diagnostic
+through Launch Services. The diagnostic runs before application composition, accepts no caller paths
+or settings, and accesses no credentials, providers, microphones, screens, or UI. It uses production
+resource loading, performs speech-model inference and synthetic audio processing, and checks the
+parsed skills against an independently declared expected catalog. Resource lookup for an installed
+app stays inside that app; source-checkout fallbacks cannot make a malformed installation pass.
+
+Success requires one complete receipt for the copied bundle, release version, and native architecture
+after the launch wait completes. An app without the diagnostic is rejected before launch. Missing,
+malformed, failed, incomplete, or duplicate receipts, launch failures, and timeouts fail validation.
+The diagnostic has its own fixed watchdog. Timeout or interruption leaves the private copy intact
+when process termination is unproven and reports its path; neither a receipt nor a signal alone is
+treated as exit evidence. This headless diagnostic does not own a test display or a live session.
+
+[`test-installation-verification.py`](../scripts/test-installation-verification.py) exercises the
+launcher/receipt failure contract in the Gate. [`test-packaged-app.py`](../scripts/test-packaged-app.py)
+checks disposable copies with a missing or corrupt model and an omitted skill. Altered copies are
+ad-hoc signed so the expected failure must come from the production component check, rather than
+Gatekeeper. The verified candidate is never modified. PR CI executes these checks on both native
+architectures; the signed release workflow executes the diagnostic from the exact final DMG on both.
+
+Maintainers must additionally validate the installed candidate: a fresh install and an upgrade
+preserving settings must Start, recognize speech, display a hint, Stop, and Start again. Cover both
+local and server speech detection and record the candidate checksum, native architecture, and OS.
+This is a manual release-acceptance requirement. The workflow does not automate or enforce it and
+can publish after the offline checks pass without fresh-install or upgrade evidence. An enforced
+same-candidate capture checkpoint remains outstanding. The offline diagnostic does not establish
+TCC, physical capture, provider availability, or coaching quality; the
+[debug live scenarios](./live-e2e-tests.md) remain separate evidence.
 
 ## In-app updates — Sparkle over the release feed
 

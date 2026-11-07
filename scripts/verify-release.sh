@@ -10,6 +10,7 @@ if [[ $# -gt 2 || -z "$DMG" || ! -f "$DMG" || -L "$DMG" ]]; then
   echo "usage: $0 Jarvis.dmg [v<version>]" >&2
   exit 2
 fi
+rm -f "$DMG.verified.sha256"
 
 if ! "$DMGBUILD_PYTHON" -c 'from ds_store import DSStore' 2>/dev/null; then
   echo "error: the pinned release-layout dependencies are required to verify the DMG." >&2
@@ -156,4 +157,8 @@ codesign --verify --strict --deep --verbose=2 "$EXTRACTED_APP"
 # syspolicy_check runs the modern distribution checks; spctl stays as the direct Gatekeeper assertion.
 syspolicy_check distribution "$EXTRACTED_APP" --verbose
 spctl --assess --type execute --verbose "$EXTRACTED_APP"
+python3 scripts/verify-installation.py "$EXTRACTED_APP"
+hdiutil detach "$MOUNT_POINT"
+MOUNTED=false
+(cd "$(dirname "$DMG")" && shasum -a 256 "$(basename "$DMG")") > "$DMG.verified.sha256"
 echo "✅ $(basename "$DMG") passed final release verification"

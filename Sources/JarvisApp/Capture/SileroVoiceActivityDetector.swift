@@ -20,28 +20,11 @@ final class SileroVoiceActivityDetector {
     private var context = [Float](repeating: 0, count: contextSamples)
 
     convenience init?() {
-        guard let url = Self.bundledModelURL() else {
+        guard let url = JarvisResourceBundle.app.url(forResource: "SileroVAD.mlmodelc") else {
             jlog("Jarvis VAD: SileroVAD.mlmodelc missing from the app resources")
             return nil
         }
         self.init(modelURL: url)
-    }
-
-    /// Not `Bundle.module`: its generated accessor looks in the wrong places for an installed
-    /// release and calls `fatalError` when the bundle is missing.
-    private static func bundledModelURL() -> URL? {
-        let resourceBundle = "Jarvis_JarvisApp.bundle"
-        let model = "SileroVAD.mlmodelc"
-        var candidates: [URL] = []
-        // Installed app: the packaging scripts copy the resource bundle into Contents/Resources.
-        if let resources = Bundle.main.resourceURL {
-            candidates.append(resources.appendingPathComponent(resourceBundle)
-                .appendingPathComponent(model))
-        }
-        // `swift build` and the benchmark harness: SwiftPM leaves it beside the executable.
-        candidates.append(Bundle.main.bundleURL.appendingPathComponent(resourceBundle)
-            .appendingPathComponent(model))
-        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }
     }
 
     init?(modelURL url: URL) {
@@ -95,6 +78,13 @@ final class SileroVoiceActivityDetector {
     func reset() {
         pending.removeAll(keepingCapacity: true)
         resetModelContinuity()
+    }
+
+    func verifyInference() -> Bool {
+        defer { reset() }
+        let silence = [Float](repeating: 0, count: Self.chunkSamples)
+        guard let probability = predict(chunk: silence[...]) else { return false }
+        return probability.isFinite && (0...1).contains(probability)
     }
 
     /// Context and LSTM state must describe the same point in the audio, so reset them together.

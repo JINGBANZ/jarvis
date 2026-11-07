@@ -4,8 +4,8 @@ import Foundation
 /// (`scripts/check-coaching-kernel.sh`).
 public enum SkillCatalog {
     /// Sorted by name. An unreadable or invalid skill file is skipped and logged, never fatal.
-    public static func bundled() -> [Skill] {
-        guard let directory = skillsDirectory() else {
+    public static func bundled(in hostBundle: Bundle? = nil) -> [Skill] {
+        guard let directory = JarvisResourceBundle.core.url(forResource: "Skills", in: hostBundle) else {
             jlog("Jarvis coach skills: none found — coaching without them")
             return []
         }
@@ -83,25 +83,6 @@ public enum SkillCatalog {
         return segments.allSatisfy { segment in
             !segment.isEmpty && segment.allSatisfy { $0.isASCII && ($0.isLowercase || $0.isNumber) }
         }
-    }
-
-    /// Avoids `Bundle.module`, whose accessor `fatalError`s in an installed app. Probes the
-    /// installed app, the executable's directory, then (for `swift test`) the source tree via
-    /// `#filePath`. A candidate counts only when it holds a skill, so an empty directory can't
-    /// shadow the source.
-    private static func skillsDirectory() -> URL? {
-        let resourceBundle = "Jarvis_JarvisCore.bundle"
-        var candidates: [URL] = []
-        if let resources = Bundle.main.resourceURL {
-            candidates.append(resources.appendingPathComponent(resourceBundle)
-                .appendingPathComponent("Skills"))
-        }
-        candidates.append(Bundle.main.bundleURL.appendingPathComponent(resourceBundle)
-            .appendingPathComponent("Skills"))
-        candidates.append(URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("Resources").appendingPathComponent("Skills"))
-        return candidates.first { !skillFiles(in: $0).isEmpty }
     }
 
     private static func skillFiles(in directory: URL) -> [URL] {

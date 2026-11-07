@@ -103,7 +103,7 @@ class TestSelectionTests(ScriptTests):
     )
     shared_python_checks = (
         'check-process-launching.py', 'test-live-cancellation.py', 'test-script-workflows.py',
-        'test-test-display.py', 'test-test-command-ownership.py',
+        'test-installation-verification.py', 'test-test-display.py', 'test-test-command-ownership.py',
     )
 
     def setUp(self):
@@ -538,12 +538,14 @@ if [[ "$1" == attach ]]; then
   while [[ "$1" != -mountpoint ]]; do shift; done
   /usr/bin/ditto "$SYNTHETIC_IMAGE" "$2"
 fi
+if [[ "$1" == detach && "${FAIL_DETACH:-0}" == 1 ]]; then exit 1; fi
 ''')
         for name in ("codesign", "xcrun", "spctl", "syspolicy_check", "layout-python"):
             self.executable(self.bin / name, "#!/bin/bash\nexit 0\n")
         self.environment["DMGBUILD_PYTHON"] = str(self.bin / "layout-python")
         for name in ("check-universal-app.sh", "check-release-sdk.sh"):
             self.executable(self.root / "scripts" / name, "#!/bin/bash\nexit 0\n")
+        (self.root / "scripts/verify-installation.py").write_text("print('installation fixture passed')\n")
 
     def test_privacy_manifest_in_both_swiftpm_bundle_layouts(self):
         for relative in ("PrivacyInfo.xcprivacy", "Contents/Resources/PrivacyInfo.xcprivacy"):
@@ -555,12 +557,33 @@ fi
                 result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn("passed final release verification", result.stdout)
+                self.assertTrue((self.root / "Jarvis.dmg.verified.sha256").is_file())
                 manifest.unlink()
+
+    def test_failed_installation_removes_stale_verification_checksum(self):
+        with (self.privacy / "PrivacyInfo.xcprivacy").open("wb") as stream:
+            plistlib.dump({"NSPrivacyTracking": False}, stream)
+        checksum = self.root / "Jarvis.dmg.verified.sha256"
+        checksum.write_text("stale success\n")
+        (self.root / "scripts/verify-installation.py").write_text("raise SystemExit(1)\n")
+        result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(checksum.exists())
+        self.assertNotIn("passed final release verification", result.stdout)
 
     def test_missing_privacy_manifest_is_rejected(self):
         result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("missing the ZIPFoundation privacy manifest", result.stderr)
+
+    def test_failed_detach_does_not_issue_verification_checksum(self):
+        with (self.privacy / "PrivacyInfo.xcprivacy").open("wb") as stream:
+            plistlib.dump({"NSPrivacyTracking": False}, stream)
+        self.environment["FAIL_DETACH"] = "1"
+        result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.root / "Jarvis.dmg.verified.sha256").exists())
+        self.assertNotIn("passed final release verification", result.stdout)
 
     def test_invalid_or_symlinked_privacy_manifest_is_rejected_in_both_layouts(self):
         target = self.root / "PrivacyInfo.xcprivacy"

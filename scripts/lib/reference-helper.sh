@@ -6,7 +6,7 @@ bundle_reference_helper() {
   local binary privacy
   binary="$artifacts/JarvisReferenceHelper"
   privacy="$artifacts/ZIPFoundation_ZIPFoundation.bundle"
-  # The Swift Build backend (Swift 6.4+) emits a macOS-layout bundle; the legacy backend a flat one.
+  # SwiftPM resource layout depends on the build backend and build mode.
   [[ -x "$binary" && ( -f "$privacy/PrivacyInfo.xcprivacy" \
       || -f "$privacy/Contents/Resources/PrivacyInfo.xcprivacy" ) ]] || return 1
   rm -rf "$destination"

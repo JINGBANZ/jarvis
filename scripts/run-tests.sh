@@ -18,6 +18,7 @@ else
   python3 scripts/check-process-launching.py
   python3 scripts/test-live-cancellation.py
   python3 scripts/test-script-workflows.py
+  python3 scripts/test-installation-verification.py
   python3 scripts/test-test-display.py
   python3 scripts/test-test-command-ownership.py
 fi
