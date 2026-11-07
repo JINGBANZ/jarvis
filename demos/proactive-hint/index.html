@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Jarvis — a proactive hint during a Zoom interview</title>
+    <script src="assets/gsap.min.js"></script>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 1920px; height: 1080px; overflow: hidden; background: #172e47; }
+      #root { position: relative; width: 100%; height: 100%; overflow: hidden; color: #f5f5f5; font-family: system-ui, sans-serif; }
+      .scene { position: absolute; inset: 0; }
+      .wallpaper { position: absolute; inset: 0; background: linear-gradient(138deg, #23334f 0%, #455c73 38%, #30566b 65%, #152d42 100%); }
+      .wallpaper::before { content: ''; position: absolute; left: -250px; top: 110px; width: 2220px; height: 650px; border-radius: 48%; background: linear-gradient(160deg, rgba(118,158,163,.5), rgba(61,105,126,.1)); transform: rotate(-21deg); }
+      .wallpaper::after { content: ''; position: absolute; left: 820px; top: 580px; width: 1250px; height: 630px; border-radius: 50%; background: linear-gradient(160deg, rgba(149,176,170,.22), rgba(30,72,94,.25)); transform: rotate(-25deg); }
+      .menu-bar { position: absolute; inset: 0 0 auto; height: 38px; display: flex; justify-content: space-between; align-items: center; padding: 0 26px; background: rgba(17,28,43,.72); font-size: 17px; }
+      .menu-left, .menu-right { display: flex; align-items: center; gap: 25px; }
+      .apple { font-size: 25px; line-height: 1; }
+      .menu-app { font-weight: 600; }
+      .menu-right { gap: 19px; }
+      .menu-right svg { width: 20px; height: 20px; }
+      .battery { width: 28px; height: 13px; border: 1.5px solid currentColor; border-radius: 3px; position: relative; }
+      .battery::before { content: ''; position: absolute; inset: 2px 3px 2px 2px; background: currentColor; border-radius: 1px; }
+      .battery::after { content: ''; position: absolute; right: -4px; top: 3px; height: 5px; width: 2px; background: currentColor; }
+      #world { position: absolute; inset: 0; }
+      .app-window { position: absolute; overflow: hidden; border: 1px solid rgba(245,245,245,.18); border-radius: 12px; box-shadow: 0 25px 65px rgba(0,0,0,.3), 0 3px 10px rgba(0,0,0,.24); }
+      .window-bar { height: 42px; position: relative; display: flex; align-items: center; justify-content: center; font-size: 17px; background: #292a2d; color: #d2d3d6; }
+      .traffic-lights { position: absolute; left: 16px; display: flex; gap: 8px; }
+      .traffic-lights span { width: 12px; height: 12px; border-radius: 50%; }
+      .traffic-lights span:nth-child(1) { background: #ff6058; }
+      .traffic-lights span:nth-child(2) { background: #febc2e; }
+      .traffic-lights span:nth-child(3) { background: #28c840; }
+      #zoom-window { left: 48px; top: 158px; width: 522px; height: 676px; background: #151619; }
+      .meeting-top { height: 49px; padding: 0 18px; display: flex; align-items: center; justify-content: space-between; font-size: 17px; color: #f5f5f5; }
+      .meeting-title { display: flex; align-items: center; gap: 8px; }
+      .security-icon { width: 19px; height: 19px; color: #69c877; }
+      .view-control { display: flex; align-items: center; gap: 6px; padding: 5px 9px; border-radius: 5px; background: #292a2d; font-size: 15px; }
+      .view-control svg { width: 15px; height: 15px; }
+      .gallery { height: 499px; padding: 0 14px 12px; display: flex; flex-direction: column; gap: 10px; }
+      .participant { position: relative; flex: 1; min-height: 0; background: #202124; border-radius: 5px; display: flex; align-items: center; justify-content: center; }
+      .avatar { width: 106px; height: 106px; display: flex; align-items: center; justify-content: center; border-radius: 50%; background: #245cc0; font-size: 38px; font-weight: 500; }
+      .you .avatar { background: #42615b; }
+      .participant-name { position: absolute; bottom: 8px; left: 9px; display: flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 3px; background: rgba(0,0,0,.65); font-size: 17px; }
+      .participant-name svg { width: 14px; height: 14px; }
+      .speaking-frame { position: absolute; inset: 0; border: 3px solid #69c877; border-radius: 5px; opacity: 0; }
+      .zoom-toolbar { height: 85px; border-top: 1px solid rgba(245,245,245,.07); display: flex; align-items: center; justify-content: space-evenly; background: #1c1d20; padding: 0 5px; }
+      .zoom-control { position: relative; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 7px; width: 60px; font-size: 12px; color: #e8e9ed; }
+      .zoom-control svg { width: 25px; height: 25px; }
+      .participant-count { position: absolute; top: -3px; right: 9px; font-size: 12px; }
+      .zoom-control.share svg { color: #69c877; }
+      .leave-control { border-radius: 5px; color: #fff; background: #bd3b43; font-size: 14px; padding: 8px 10px; }
+      #code-window { left: 604px; top: 106px; width: 958px; height: 728px; background: #1e1e1e; }
+      #code-window .window-bar { background: #323233; }
+      .editor-layout { display: flex; height: 658px; }
+      .activity-bar { width: 48px; background: #333333; display: flex; align-items: center; flex-direction: column; gap: 26px; padding-top: 20px; color: #c9cbd0; }
+      .activity-bar svg { width: 25px; height: 25px; }
+      .activity-bar .selected { position: relative; color: #fff; }
+      .activity-bar .selected::before { content: ''; position: absolute; left: -12px; top: -7px; height: 39px; width: 2px; background: #fff; }
+      .explorer { width: 151px; flex-shrink: 0; background: #252526; color: #c9cbd0; padding-top: 16px; font-size: 15px; }
+      .explorer-label { padding: 0 13px 24px; font-size: 12px; letter-spacing: .08em; }
+      .folder-row { display: flex; align-items: center; gap: 4px; padding: 0 10px; height: 30px; font-size: 13px; font-weight: 600; }
+      .folder-row svg { width: 13px; height: 13px; }
+      .file-row { height: 32px; display: flex; align-items: center; gap: 7px; padding-left: 20px; background: #37373d; }
+      .file-symbol { color: #c9b88d; font-family: ui-monospace, monospace; font-size: 14px; }
+      .editor { position: relative; flex: 1; min-width: 0; color: #d4d4d4; }
+      .editor-tab { height: 43px; display: flex; align-items: center; gap: 9px; background: #252526; font-size: 15px; }
+      .active-tab { height: 43px; display: flex; align-items: center; gap: 9px; padding: 0 18px; background: #1e1e1e; }
+      .tab-close { margin-left: 18px; font-size: 19px; color: #c9cbd0; }
+      .breadcrumbs { height: 37px; display: flex; align-items: center; gap: 10px; padding: 0 22px; color: #c9cbd0; font-size: 14px; }
+      .problem { padding: 13px 25px 13px; }
+      .problem-title { font-size: 23px; color: #e8e9ed; font-weight: 600; margin-bottom: 9px; }
+      .problem-example { font-family: ui-monospace, monospace; font-size: 17px; color: #b5becb; }
+      .code-area { position: relative; margin: 17px 16px; width: 722px; height: 355px; }
+      .code-slot { position: absolute; inset: 0; }
+      .code-line { position: relative; height: 37px; display: flex; align-items: center; font-family: ui-monospace, monospace; font-size: 21px; line-height: 37px; white-space: pre; }
+      .line-number { width: 37px; flex-shrink: 0; font-size: 16px; color: #a1a1a1; text-align: right; padding-right: 17px; }
+      .kw { color: #c586c0; }
+      .fn { color: #dcdcaa; }
+      .num { color: #b5cea8; }
+      .loop-highlight { position: absolute; z-index: 0; top: 0; left: 37px; width: 620px; height: 37px; border-radius: 3px; background: rgba(181,206,168,.09); opacity: 0; }
+      .code-text { position: relative; z-index: 1; }
+      .caret { display: inline-block; width: 2px; height: 22px; margin-left: 2px; vertical-align: -4px; background: #d4d4d4; }
+      .editor-status { height: 27px; display: flex; align-items: center; justify-content: space-between; padding: 0 15px; font-size: 13px; color: #fff; background: #005b94; }
+      .status-left, .status-right { display: flex; align-items: center; gap: 19px; }
+      .coach-slot { position: absolute; top: 265px; right: 42px; width: 365px; height: 255px; z-index: 3; }
+      #coach { width: 100%; height: 100%; overflow: hidden; border-radius: 12px; background: rgba(26,26,26,.93); color: #f5f5f5; border: 1px solid rgba(245,245,245,.15); box-shadow: 0 15px 40px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.24); }
+      .coach-header { position: relative; height: 33px; display: flex; align-items: center; justify-content: center; color: #b8b8b8; font-size: 15px; font-weight: 500; }
+      .coach-header svg { position: absolute; width: 15px; height: 15px; }
+      .collapse-icon { left: 13px; }
+      .clear-icon { right: 13px; }
+      .coach-body { padding: 14px 19px; }
+      .hint-time { font-size: 16px; color: #b8b8b8; margin-bottom: 9px; }
+      #hint-text { margin: 0; font-size: 25px; font-weight: 600; line-height: 1.38; letter-spacing: -.01em; }
+      .caption-slot { position: absolute; left: 280px; right: 280px; top: 887px; height: 80px; }
+      .caption { display: flex; align-items: center; gap: 21px; width: fit-content; margin: 0 auto; padding: 15px 24px; border-radius: 12px; background: rgba(18,23,29,.93); box-shadow: 0 5px 18px rgba(0,0,0,.13); }
+      .speaker { flex-shrink: 0; font-size: 17px; font-weight: 600; color: #b5cea8; letter-spacing: .05em; }
+      .dialogue { font-size: 27px; line-height: 1.3; letter-spacing: -.015em; }
+      .dock { position: absolute; left: 660px; bottom: 17px; height: 75px; width: 600px; padding: 10px 20px; display: flex; align-items: center; justify-content: center; gap: 18px; background: rgba(213,225,235,.25); border: 1px solid rgba(245,245,245,.23); border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,.2); }
+      .dock-icon { position: relative; width: 52px; height: 52px; flex-shrink: 0; border-radius: 12px; display: flex; align-items: center; justify-content: center; overflow: visible; box-shadow: 0 2px 5px rgba(0,0,0,.16); }
+      .dock-icon svg { width: 39px; height: 39px; }
+      .dock-icon.running::after { content: ''; position: absolute; bottom: -8px; left: 24px; width: 4px; height: 4px; border-radius: 50%; background: #e8e9ed; }
+      .finder { background: linear-gradient(90deg, #6bbcf5 50%, #dcebf7 50%); color: #21395b; }
+      .safari { background: #f5f5f5; }
+      .code-app { background: #f5f5f5; color: #007acc; }
+      .zoom-app { background: #245cc0; color: #fff; }
+      .jarvis-app { background: #e5ece5; color: #25352e; }
+      .terminal { background: #202124; color: #f5f5f5; font-family: ui-monospace, monospace; font-size: 24px; }
+      .dock-divider { width: 1px; height: 42px; background: rgba(245,245,245,.28); margin: 0 2px; }
+      .trash { background: rgba(245,245,245,.75); color: #59685e; }
+      .demo-label { position: absolute; bottom: 40px; right: 30px; color: #e8e9ed; font-size: 15px; }
+      .icon-library { position: absolute; width: 0; height: 0; overflow: hidden; }
+    </style>
+  </head>
+  <body>
+    <svg class="icon-library" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><defs>
+      <symbol id="icon-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2M12 19v3M8 22h8"/></symbol>
+      <symbol id="icon-video" viewBox="0 0 24 24"><rect x="2" y="5" width="13" height="14" rx="2"/><path d="m15 9 7-4v14l-7-4"/></symbol>
+      <symbol id="icon-people" viewBox="0 0 24 24"><circle cx="9" cy="7" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M17 4a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 7"/></symbol>
+      <symbol id="icon-chat" viewBox="0 0 24 24"><path d="M3 3h18v14H9l-6 4z"/></symbol>
+      <symbol id="icon-share" viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="16" rx="2"/><path d="M12 17V2M7 7l5-5 5 5"/></symbol>
+      <symbol id="icon-files" viewBox="0 0 24 24"><path d="M8 2h10l4 4v14H8zM8 6H3v16h14v-2"/></symbol>
+      <symbol id="icon-search" viewBox="0 0 24 24"><circle cx="10" cy="10" r="7"/><path d="m15 15 7 7"/></symbol>
+      <symbol id="icon-branch" viewBox="0 0 24 24"><circle cx="6" cy="4" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="20" r="2"/><path d="M6 6v12M6 12h7a5 5 0 0 0 5-4"/></symbol>
+      <symbol id="icon-run" viewBox="0 0 24 24"><path d="m8 3 13 9-13 9zM3 5v14"/></symbol>
+      <symbol id="icon-jarvis" viewBox="0 0 32 32"><rect x="5" y="8" width="22" height="19" rx="7"/><path d="M16 8V4M2 15v6M30 15v6M11 22h10"/><circle cx="11" cy="15" r="1" fill="currentColor"/><circle cx="21" cy="15" r="1" fill="currentColor"/></symbol>
+    </defs></svg>
+    <div id="root" data-composition-id="proactive-hint" data-start="0" data-duration="10" data-width="1920" data-height="1080" data-fps="30">
+      <div id="conversation-scene" class="scene clip" data-start="0" data-duration="10" data-track-index="0">
+        <div class="wallpaper" aria-hidden="true"></div>
+        <div class="menu-bar">
+          <div class="menu-left"><span class="apple"></span><span class="menu-app">Code</span><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Run</span><span>Terminal</span><span>Window</span><span>Help</span></div>
+          <div class="menu-right">
+            <svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.8" aria-label="Jarvis menu bar icon"><use href="#icon-jarvis"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M2 7a16 16 0 0 1 20 0M5 11a11 11 0 0 1 14 0M8 15a6 6 0 0 1 8 0"/><circle cx="12" cy="19" r="1" fill="currentColor"/></svg>
+            <span class="battery" aria-hidden="true"></span><span>Thu Oct 8</span><span>12:08 PM</span>
+          </div>
+        </div>
+        <div id="world">
+          <div id="zoom-window" class="app-window">
+            <div class="window-bar"><div class="traffic-lights" aria-hidden="true"><span></span><span></span><span></span></div><span>Zoom Workplace</span></div>
+            <div class="meeting-top">
+              <span class="meeting-title"><svg class="security-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 2 3 6v6c0 5 9 10 9 10s9-5 9-10V6zM8 12l3 3 5-6"/></svg>Coding interview</span>
+              <span class="view-control"><svg viewBox="0 0 18 18" fill="currentColor" aria-hidden="true"><path d="M2 2h5v5H2zM11 2h5v5h-5zM2 11h5v5H2zM11 11h5v5h-5z"/></svg>View</span>
+            </div>
+            <div class="gallery">
+              <div class="participant"><div class="avatar">AM</div><div class="participant-name"><svg fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><use href="#icon-mic"/></svg>Alex Morgan</div><div id="interviewer-speaking" class="speaking-frame"></div></div>
+              <div class="participant you"><div class="avatar">Y</div><div class="participant-name"><svg fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><use href="#icon-mic"/></svg>You</div><div id="candidate-speaking" class="speaking-frame"></div></div>
+            </div>
+            <div class="zoom-toolbar">
+              <div class="zoom-control"><svg fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><use href="#icon-mic"/></svg><span>Audio</span></div>
+              <div class="zoom-control"><svg fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><use href="#icon-video"/><path d="M2 2 22 22" stroke="#ff6058" stroke-width="2"/></svg><span>Video</span></div>
+              <div class="zoom-control"><svg fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><use href="#icon-people"/></svg><span class="participant-count">2</span><span>Participants</span></div>
+              <div class="zoom-control"><svg fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><use href="#icon-chat"/></svg><span>Chat</span></div>
+              <div class="zoom-control share"><svg fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><use href="#icon-share"/></svg><span>Share</span></div>
+              <div class="zoom-control"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="4" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="20" cy="12" r="2"/></svg><span>More</span></div>
+              <span class="leave-control">Leave</span>
+            </div>
+          </div>
+          <div id="code-window" class="app-window">
+            <div class="window-bar"><div class="traffic-lights" aria-hidden="true"><span></span><span></span><span></span></div><span>two_sum.py — interview — Visual Studio Code</span></div>
+            <div class="editor-layout">
+              <div class="activity-bar" aria-hidden="true"><span class="selected"><svg fill="none" stroke="currentColor" stroke-width="1.5"><use href="#icon-files"/></svg></span><svg fill="none" stroke="currentColor" stroke-width="1.5"><use href="#icon-search"/></svg><svg fill="none" stroke="currentColor" stroke-width="1.5"><use href="#icon-branch"/></svg><svg fill="none" stroke="currentColor" stroke-width="1.5"><use href="#icon-run"/></svg></div>
+              <div class="explorer"><div class="explorer-label">EXPLORER</div><div class="folder-row"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="m4 6 4 4 4-4"/></svg>INTERVIEW</div><div class="file-row"><span class="file-symbol">Py</span>two_sum.py</div></div>
+              <div class="editor">
+                <div class="editor-tab"><span class="active-tab"><span class="file-symbol">Py</span><span>two_sum.py</span><span class="tab-close">×</span></span></div>
+                <div class="breadcrumbs"><span>interview</span><span>›</span><span>two_sum.py</span></div>
+                <div class="problem"><div class="problem-title">Two Sum</div><div class="problem-example">nums = [2, 7, 11, 15] · target = 9</div></div>
+                <div data-hf-id="hf-foj7" class="code-area">
+                  <div data-hf-id="hf-61tm" id="initial-solution" class="code-slot clip" data-start="0" data-duration="7.2" data-track-index="1">
+                    <div data-hf-id="hf-lawi" id="before-code">
+                      <div data-hf-id="hf-pnna" class="code-line"><span data-hf-id="hf-9j4e" class="line-number">1</span><span data-hf-id="hf-s05d" class="code-text"><span data-hf-id="hf-czhm" class="kw">def</span> <span data-hf-id="hf-0lfh" class="fn">two_sum</span>(nums, target):</span></div>
+                      <div data-hf-id="hf-2esa" class="code-line"><div data-hf-id="hf-glg2" id="loop-one" class="loop-highlight"></div><span data-hf-id="hf-9xff" class="line-number">2</span><span data-hf-id="hf-tqes" class="code-text">    <span data-hf-id="hf-dtgu" class="kw">for</span> i <span data-hf-id="hf-ue7s" class="kw">in</span> <span data-hf-id="hf-joj6" class="fn">range</span>(<span data-hf-id="hf-vzu4" class="fn">len</span>(nums)):</span></div>
+                      <div data-hf-id="hf-2t3b" class="code-line"><div data-hf-id="hf-bwyc" id="loop-two" class="loop-highlight"></div><span data-hf-id="hf-abqg" class="line-number">3</span><span data-hf-id="hf-oujt" class="code-text">        <span data-hf-id="hf-toc2" class="kw">for</span> j <span data-hf-id="hf-pykw" class="kw">in</span> <span data-hf-id="hf-qqpi" class="fn">range</span>(i + <span data-hf-id="hf-kud6" class="num">1</span>, <span data-hf-id="hf-yitg" class="fn">len</span>(nums)):</span></div>
+                      <div data-hf-id="hf-37ec" class="code-line"><span data-hf-id="hf-7jl9" class="line-number">4</span><span data-hf-id="hf-9w2j" class="code-text">            <span data-hf-id="hf-xko0" class="kw">if</span> nums[i] + nums[j] == target:</span></div>
+                      <div data-hf-id="hf-3lpd" class="code-line"><span data-hf-id="hf-7xwa" class="line-number">5</span><span data-hf-id="hf-1c6r" class="code-text">                <span data-hf-id="hf-l6xl" class="kw">return</span> [i, j]<span data-hf-id="hf-vlyv" id="before-caret" class="caret"></span></span></div>
+                    </div>
+                  </div>
+                  <div data-hf-id="hf-8pj4" id="revised-solution" class="code-slot clip" data-start="7.2" data-duration="2.8" data-track-index="1">
+                    <div data-hf-id="hf-gsjd" id="after-code">
+                      <div data-hf-id="hf-jjta" class="code-line solution-line"><span data-hf-id="hf-07iq" class="line-number">1</span><span data-hf-id="hf-151x" class="code-text"><span data-hf-id="hf-2tf2" class="kw">def</span> <span data-hf-id="hf-wt5d" class="fn">two_sum</span>(nums, target):</span></div>
+                      <div data-hf-id="hf-w8b6" class="code-line solution-line"><span data-hf-id="hf-cyez" class="line-number">2</span><span data-hf-id="hf-hdpe" class="code-text">    seen = {}</span></div>
+                      <div data-hf-id="hf-wmm7" class="code-line solution-line"><span data-hf-id="hf-bu8w" class="line-number">3</span><span data-hf-id="hf-d6dg" class="code-text">    <span data-hf-id="hf-u2n3" class="kw">for</span> i, value <span data-hf-id="hf-ornt" class="kw">in</span> <span data-hf-id="hf-8t2d" class="fn">enumerate</span>(nums):</span></div>
+                      <div data-hf-id="hf-x0x8" class="code-line solution-line"><span data-hf-id="hf-mcgx" class="line-number">4</span><span data-hf-id="hf-m7bg" class="code-text">        complement = target - value</span></div>
+                      <div data-hf-id="hf-xf89" class="code-line solution-line"><span data-hf-id="hf-t472" class="line-number">5</span><span data-hf-id="hf-i6o1" class="code-text">        <span data-hf-id="hf-l5ug" class="kw">if</span> complement <span data-hf-id="hf-p5yu" class="kw">in</span> seen:</span></div>
+                      <div data-hf-id="hf-xtja" class="code-line solution-line"><span data-hf-id="hf-8c7b" class="line-number">6</span><span data-hf-id="hf-od5a" class="code-text">            <span data-hf-id="hf-g8bx" class="kw">return</span> [seen[complement], i]</span></div>
+                      <div data-hf-id="hf-y7ub" class="code-line solution-line"><span data-hf-id="hf-8qic" class="line-number">7</span><span data-hf-id="hf-7m7a" class="code-text">        seen[value] = i<span data-hf-id="hf-cmq8" id="after-caret" class="caret"></span></span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="editor-status"><div class="status-left"><span>⑂ main</span><span>✓</span></div><div class="status-right"><span>Ln 5, Col 30</span><span>Spaces: 4</span><span>UTF-8</span><span>Python</span></div></div>
+          </div>
+          <div data-hf-id="hf-cl16" id="proactive-hint-panel" class="coach-slot clip" data-start="4.5" data-duration="5.5" data-track-index="2">
+            <div data-hf-id="hf-ujr5" id="coach">
+              <div data-hf-id="hf-djb4" class="coach-header">
+                <svg data-hf-id="hf-uhqv" class="collapse-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path data-hf-id="hf-gtpo" d="m4 6 4 4 4-4" /></svg>
+                <span data-hf-id="hf-q1ow">Jarvis</span>
+                <svg data-hf-id="hf-h2pb" class="clear-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><path data-hf-id="hf-i6vn" d="m3 9 5-6 5 4-5 6H6zM6 6l5 4M9 13h5" /></svg>
+              </div>
+              <div data-hf-id="hf-6jfj" class="coach-body"><div data-hf-id="hf-c4l4" class="hint-time">12:08:04</div><p data-hf-id="hf-ewer" id="hint-text">Look up the complement in a hash map. One pass, O(n).</p></div>
+            </div>
+          </div>
+        <div data-hf-id="hf-sgnn" id="question-caption" class="caption-slot clip" data-start="0.55" data-duration="2.35" data-track-index="3"><div data-hf-id="hf-9q2h" class="caption" id="caption-one"><span data-hf-id="hf-k130" class="speaker">INTERVIEWER</span><span data-hf-id="hf-wurh" class="dialogue">Can you improve the time complexity?</span></div></div>
+        <div data-hf-id="hf-ya9t" id="thinking-caption" class="caption-slot clip" data-start="3" data-duration="3.2" data-track-index="3"><div data-hf-id="hf-9cm7" class="caption" id="caption-two"><span data-hf-id="hf-72cf" class="speaker">YOU</span><span data-hf-id="hf-gppx" class="dialogue">Right now, I’m checking every pair…</span></div></div>
+        <div data-hf-id="hf-h0qe" id="answer-caption" class="caption-slot clip" data-start="6.5" data-duration="3.5" data-track-index="3"><div data-hf-id="hf-bmgt" class="caption" id="caption-three"><span data-hf-id="hf-qdcv" class="speaker">YOU</span><span data-hf-id="hf-b6dy" class="dialogue">I could look up the complement.</span></div></div>
+        </div>
+        <div class="dock" aria-hidden="true">
+          <div class="dock-icon finder"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 13v4M28 13v4M9 25q11 9 22 0M22 4l-4 18h7v12"/></svg></div>
+          <div class="dock-icon safari"><svg viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" fill="#4fa6df"/><circle cx="20" cy="20" r="14" fill="none" stroke="#fff" stroke-width="1" stroke-dasharray="1 4"/><path d="m12 28 6-10 10-6-6 10z" fill="#fff"/><path d="m18 18 10-6-6 10z" fill="#ff6058"/></svg></div>
+          <div class="dock-icon code-app running"><svg viewBox="0 0 40 40" fill="currentColor"><path d="m28 3 9 4v26l-9 4L12 24l-6 5-4-3 8-6-8-6 4-3 6 5zm0 9-10 8 10 8z"/></svg></div>
+          <div class="dock-icon zoom-app running"><svg viewBox="0 0 40 40" fill="currentColor"><rect x="4" y="10" width="23" height="20" rx="5"/><path d="m28 15 8-5v20l-8-5z"/></svg></div>
+          <div class="dock-icon jarvis-app running"><svg viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="1.7"><use href="#icon-jarvis"/></svg></div>
+          <div class="dock-icon terminal">›_</div>
+          <div class="dock-divider"></div>
+          <div class="dock-icon trash"><svg viewBox="0 0 40 40" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 11h18l-2 23H13zM8 10h24M16 6h8M17 15v14M23 15v14"/></svg></div>
+        </div>
+        <span class="demo-label">Illustrative demo</span>
+      </div>
+    </div>
+    <script>
+      const tl = gsap.timeline({ paused: true });
+      tl.fromTo('#world', { opacity: 0 }, { opacity: 1, duration: 0.45, ease: 'power1.out' }, 0);
+      tl.to('#interviewer-speaking', { opacity: 1, duration: 0.18 }, 0.55);
+      tl.to('#interviewer-speaking', { opacity: 0, duration: 0.18 }, 2.75);
+      tl.to('#candidate-speaking', { opacity: 1, duration: 0.18 }, 3);
+      tl.to('.loop-highlight', { opacity: 1, duration: 0.4 }, 3.2);
+      tl.to('.loop-highlight', { opacity: 0, duration: 0.3 }, 6.6);
+      tl.fromTo('#coach', { opacity: 0, y: 7 }, { opacity: 1, y: 0, duration: 0.32, ease: 'power2.out' }, 4.5);
+
+      const hint = document.querySelector('#hint-text');
+      const fullHint = hint.textContent;
+      const typing = { characters: 0 };
+      hint.textContent = '';
+      tl.to(typing, { characters: fullHint.length, duration: 1, ease: 'none', onUpdate: () => {
+        hint.textContent = fullHint.slice(0, Math.floor(typing.characters));
+      } }, 4.6);
+
+      tl.fromTo('#before-code', { opacity: 1 }, { opacity: 0, duration: 0.2 }, 7);
+      tl.fromTo('.solution-line', { opacity: 0 }, { opacity: 1, duration: 0.12, stagger: 0.07, ease: 'none' }, 7.2);
+
+      const blink = { phase: 0 };
+      const carets = document.querySelectorAll('.caret');
+      tl.to(blink, { phase: 25 * Math.PI, duration: 10, ease: 'none', onUpdate: () => {
+        for (const caret of carets) caret.style.opacity = Math.sin(blink.phase) >= 0 ? '1' : '0';
+      } }, 0);
+
+      window.__timelines = window.__timelines || {};
+      window.__timelines['proactive-hint'] = tl;
+      tl.seek(0);
+    </script>
+  </body>
+</html>
