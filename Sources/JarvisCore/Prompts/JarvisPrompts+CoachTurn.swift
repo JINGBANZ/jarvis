@@ -33,7 +33,8 @@ extension JarvisPrompts.Coach {
         + "hint is shown to the user, and anything longer goes in detail."
 
     static func condensedHistory(_ summary: String) -> String {
-        "[session so far, condensed — earlier turns were summarized]\n\(summary)"
+        "[earlier conversation, condensed — later decisions and evidence take precedence; "
+            + "verification applies only to the work actually checked]\n\(summary)"
     }
 
     static func notPermittedOnShortcut(_ name: String) -> String {

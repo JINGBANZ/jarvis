@@ -1104,22 +1104,32 @@ rather than a per-turn screenshot.
   Haiku can wrap valid briefing JSON despite the prompt requesting bare JSON. An untagged fence or
   case-insensitive `json` tag is accepted, with LF or CRLF line endings. It strips only that envelope
   before validating the same briefing structure; surrounding prose, other language tags, incomplete
-  fences, and truncated JSON are rejected. The prompt aims below the accepted-size limit to leave
-  room for the full briefing; the normalized JSON must fit the token budget defined by
-  `JarvisPrompts.HistorySummary`, using the history estimator to bound non-ASCII scripts and JSON
-  overhead. Word count adds no separate rejection. The provider's generation allowance is separate
-  from the accepted-summary budget, leaving room for completion and reasoning. The runner replaces
-  history only with a complete, structurally valid, bounded briefing for the current revision.
-  Provider-marked incomplete output, malformed output, missing fields, or a stale result is rejected
-  before mutation; history, context revision, and rewrite reason stay unchanged through the existing
-  fail-soft path. This
-  check establishes structure and size, not factual truth or semantic usefulness: a refusal in the
+  fences, and truncated JSON are rejected. The prompt targets about 600 estimated tokens, but this
+  is a soft target: a complete briefing can exceed it without a corrective shortening request.
+  Replacement must reduce the whole history's estimate, including the summary envelope and
+  retained skill/tool pairs. The provider's generation allowance remains a separate bound for
+  completion and reasoning. The runner replaces history only with a complete, structurally valid
+  briefing for the current revision that passes this shrinkage check. Provider-marked incomplete
+  output, malformed output, missing fields, stale results, cancellation, and nonshrinking replacements
+  leave history, context revision, and rewrite reason unchanged. This
+  check establishes structure and useful size reduction, not factual truth or semantic usefulness: a refusal in the
   expected JSON shape can still pass. Preserving evidence and distinguishing proposals from observed
-  results remain summarizer responsibilities. Compaction uses one Core-owned workload
-  deadline across providers; a slow or failed summary also leaves full history for a later attempt.
+  results remain summarizer responsibilities. One briefing can cover multiple topics; each decision,
+  open question, and verification belongs to its topic and to the earlier span summarized. A passing
+  test applies only to the work actually checked. Later confirmed decisions and evidence take
+  precedence, and the next compaction reconciles older summaries with that newer history instead of
+  treating an earlier snapshot as current truth. No topic registry or separate live decision store is
+  maintained.
+  Compaction uses one Core-owned workload deadline across providers. After any attempted batch,
+  scheduling suppresses the same selected source content and boundary until the selected batch
+  changes. Appending a short tail or rewriting only retained tail observations does not retry it;
+  enough new history to select a different batch does. The content identity controls retry eligibility,
+  while the rewrite revision separately protects replacement from stale results. Only the last
+  attempted identity is retained; a changed batch is a new opportunity, not a permanent blacklist of
+  source text.
   Compaction runs outside coaching and transcription. Stop and Quit cancel it immediately; Stop's
   background drain waits only for cancellation cleanup. Debug diagnostics record the first request's
-  outcome and accepted before/after history estimates and summary size, without copying content
+  outcome, specific rejection reason, and accepted before/after history estimates and summary size, without copying content
   into Activity. [Scenario H](./live-e2e-tests.md#scenarios) checks the first real-provider replacement
   and subsequent recall with a debug-only lower threshold. Server-side memory (a Conversations
   API conversation, or `previous_response_id` threading) is deliberately not used: it can only grow,
@@ -1746,7 +1756,7 @@ The always-on legs are built to survive transient failure rather than die on it:
   bounded cycle failure. Fallback selection never probes providers concurrently; cancelled operation
   cleanup may overlap under the [shortcut contract](#on-demand-coaching-shortcuts). Cancellation remains quiet.
   Memory **compaction** fails soft outside
-  this route: a failed summary simply leaves the full history for the next attempt.
+  this route: a failed summary leaves the full history, and a changed selected batch can be attempted later.
 - **The audit edge** is isolated, bounded, and completeness-aware. Regular Stop drains and closes its
   old audit in a background task while a replacement Start proceeds independently. Quit seals the
   audit and returns without waiting. Capacity or persistence failure loses only affected evidence,

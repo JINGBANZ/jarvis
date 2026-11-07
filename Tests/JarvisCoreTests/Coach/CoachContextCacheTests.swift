@@ -205,10 +205,12 @@ import JarvisBrainProviders
         try await encodeSnapshot()
         let stale = try #require(history.compactionPrefix(fraction: 0.99))
         history.commit([.user("\(JarvisPrompts.Coach.screenTextHeader)\nnew_code")])
-        #expect(!history.compact(prefixCount: stale.count, summary: "stale", revision: stale.revision))
+        #expect(history.compact(prefixCount: stale.count, summary: "stale", revision: stale.revision) == .stale)
         try await encodeSnapshot()
         let fresh = try #require(history.compactionPrefix(fraction: 0.99))
-        #expect(history.compact(prefixCount: fresh.count, summary: "Ledger ownership summary.", revision: fresh.revision))
+        guard case .accepted = history.compact(prefixCount: fresh.count, summary: "Ledger ownership summary.", revision: fresh.revision) else {
+            Issue.record("expected the summary to reduce history"); return
+        }
         #expect(history.snapshot().contains { $0.toolCallId == "retained_skill" && $0.text?.contains(codingSkill.body) == true })
         try await encodeSnapshot()
         history.commit([.user("Next question after the intentional reset.")])

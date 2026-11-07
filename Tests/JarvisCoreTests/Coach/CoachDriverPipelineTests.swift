@@ -2118,7 +2118,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let summarizer = ScriptedBrain(script: [.init(toolCalls: [], outputText: #"{"context":"PROBLEM: tic-tac-toe columns.","decisions":[],"coaching":[],"openQuestions":[],"verification":[]}"#)])
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 30))
-        transcript.append(.init(speaker: .me, text: String(repeating: "the problem statement goes on ", count: 8), at: 0))
+        transcript.append(.init(speaker: .me, text: String(repeating: "the problem statement goes on ", count: 40), at: 0))
         await driver.handleTrigger(.turnEnd)
         transcript.append(.init(speaker: .me, text: "and some more detail about the grid", at: 1))
         await driver.handleTrigger(.turnEnd)
@@ -2175,7 +2175,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
             config: Config(historyCompactionTokenThreshold: 5),
             onRouteFailure: { recorder.record($0) })
-        transcript.append(.init(speaker: .me, text: "Keep the inclusive boundary decision", at: 0))
+        let statement = "Keep the inclusive boundary decision. " + String(repeating: "Resolved discussion. ", count: 100)
+        #expect(CoachHistory.estimatedTextTokens(statement) > CoachHistory.estimatedTextTokens(
+            JarvisPrompts.Coach.condensedHistory(response.outputText ?? "")))
+        transcript.append(.init(speaker: .me, text: statement, at: 0))
         await driver.handleTrigger(.turnEnd)
         transcript.append(.init(speaker: .me, text: "Tests have not run", at: 1))
         await driver.handleTrigger(.turnEnd)
@@ -2226,7 +2229,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let summarizer = GatedSummarizer(gate: gate, summary: briefing)
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 5))
-        transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))
+        let statement = "a reasonably long problem statement to remember. "
+            + String(repeating: "Resolved discussion. ", count: 100)
+        #expect(CoachHistory.estimatedTextTokens(statement) > CoachHistory.estimatedTextTokens(
+            JarvisPrompts.Coach.condensedHistory(briefing)))
+        transcript.append(.init(speaker: .me, text: statement, at: 0))
         await driver.handleTrigger(.turnEnd)
         transcript.append(.init(speaker: .me, text: "next thought", at: 5))
         await driver.handleTrigger(.turnEnd)
@@ -3267,7 +3274,7 @@ private func waitUntil(
     return condition()
 }
 
-private func waitUntilAsync(
+func waitUntilAsync(
     timeoutNanoseconds: UInt64 = 5_000_000_000,
     condition: @escaping @Sendable () async -> Bool
 ) async -> Bool {

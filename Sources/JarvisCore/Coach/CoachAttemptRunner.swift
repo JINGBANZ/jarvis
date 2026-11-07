@@ -43,6 +43,12 @@ final class CoachAttemptRunner: @unchecked Sendable {
     private var compactionRequested = false
     private var compactionTask: Task<Void, Never>?
     private var backgroundWorkStopped = false
+    private var attemptedCompaction: CompactionCandidate?
+
+    private struct CompactionCandidate: Equatable {
+        let input: String
+        let prefixCount: Int
+    }
 
     init(
         config: Config,
@@ -813,20 +819,22 @@ final class CoachAttemptRunner: @unchecked Sendable {
 
     /// Off the attempt path so speech isn't held behind a summary. One run at a time: overlapping
     /// runs both replace `0..<prefixCount`, destroying real turns.
-    func startCompactionIfIdle(using client: BrainClient) {
-        guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
+    @discardableResult
+    func startCompactionIfIdle(using client: BrainClient) -> Task<Void, Never>? {
+        guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return nil }
         runnerLock.lock()
         // A turn resuming from `conversation.finish()` after teardown must not start a request
         // that nothing will drain.
         guard !backgroundWorkStopped else {
             runnerLock.unlock()
-            return
+            return nil
         }
         guard !isCompacting else {
             // Coalesce, don't drop: this attempt's fresh OCR may invalidate the running summary.
             compactionRequested = true
+            let task = compactionTask
             runnerLock.unlock()
-            return
+            return task
         }
         isCompacting = true
         compactionRequested = false
@@ -835,6 +843,7 @@ final class CoachAttemptRunner: @unchecked Sendable {
         }
         compactionTask = task
         runnerLock.unlock()
+        return task
     }
 
     private func runCompactionPasses(using client: BrainClient) async {
@@ -872,32 +881,56 @@ final class CoachAttemptRunner: @unchecked Sendable {
         guard history.estimatedTokens > config.historyCompactionTokenThreshold else { return }
         guard let (oldest, count, revision) = history.compactionPrefix() else { return }
         do {
+            let input = try JarvisPrompts.HistorySummary.input(oldest)
+            let candidate = CompactionCandidate(input: input, prefixCount: count)
+            let shouldRequest = runnerLock.withLock {
+                guard !backgroundWorkStopped, !Task.isCancelled,
+                      attemptedCompaction != candidate else { return false }
+                attemptedCompaction = candidate
+                return true
+            }
+            guard shouldRequest else { return }
             jlog("History compaction: started history_tokens=\(history.estimatedTokens)")
             let response = try await client.respond(
                 messages: [
                     .system(JarvisPrompts.HistorySummary.system),
-                    .user(try JarvisPrompts.HistorySummary.input(oldest)),
+                    .user(input),
                 ],
                 tools: [],
                 toolChoice: .auto)
-            guard response.incompleteReason == nil,
-                  let output = response.outputText,
-                  let summary = JarvisPrompts.HistorySummary.validatedSummary(output) else {
-                jlog("History compaction: rejected — keeping full history")
+            guard response.incompleteReason == nil else {
+                jlog("History compaction: rejected reason=incomplete_output — keeping full history")
                 return
             }
-            // A summary that wins the race with teardown must not mutate history.
-            guard !Task.isCancelled else { return }
-            let beforeTokens = history.estimatedTokens
-            guard history.compact(prefixCount: count, summary: summary, revision: revision) else {
-                jlog("History compaction: stale — keeping full history")
+            guard let output = response.outputText else {
+                jlog("History compaction: rejected reason=missing_output — keeping full history")
                 return
             }
-            jlog("History compaction: accepted before_tokens=\(beforeTokens) "
-                 + "after_tokens=\(history.estimatedTokens) "
-                 + "summary_tokens=\(CoachHistory.estimatedTextTokens(summary))")
+            guard let summary = JarvisPrompts.HistorySummary.validatedSummary(output) else {
+                jlog("History compaction: rejected reason=invalid_briefing — keeping full history")
+                return
+            }
+            let result: CoachHistory.CompactionResult? = runnerLock.withLock {
+                guard !backgroundWorkStopped, !Task.isCancelled else { return nil }
+                return history.compact(prefixCount: count, summary: summary, revision: revision)
+            }
+            switch result {
+            case .accepted(let before, let after):
+                jlog("History compaction: accepted before_tokens=\(before) after_tokens=\(after) "
+                     + "summary_tokens=\(CoachHistory.estimatedTextTokens(summary))")
+            case .stale:
+                jlog("History compaction: rejected reason=stale_source — keeping full history")
+            case .notSmaller:
+                jlog("History compaction: rejected reason=not_smaller — keeping full history")
+            case nil:
+                jlog("History compaction: cancelled — keeping full history")
+            }
         } catch {
-            jlog("History compaction: failed (will retry later): \(error.localizedDescription)")
+            if Task.isCancelled || error is CancellationError {
+                jlog("History compaction: cancelled — keeping full history")
+            } else {
+                jlog("History compaction: failed error_type=\(type(of: error)) — keeping full history")
+            }
         }
     }
 }
