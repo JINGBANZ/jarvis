@@ -1,3 +1,4 @@
+import JarvisScenarioHarness
 import Foundation
 import JarvisBrainProviders
 import JarvisCore
@@ -252,6 +253,10 @@ struct LiveE2ETests {
 
     @Test func scenarioA() async throws {
         guard let launcher = await LiveE2ELauncher.begin(scenario: "A") else { return }
+        try await Self.checkScenarioA(launcher: launcher)
+    }
+
+    static func checkScenarioA(launcher: LiveE2ELauncher) async throws {
         let launch = try await launcher.launch()
         var results = LiveE2EResults(scenario: "A")
         guard let evidence = Self.requireEvidence(launch, &results) else {

@@ -317,6 +317,24 @@ def protect_apps():
         raise AppConflict('A separately launched Jarvis Dev app is running; it was not signalled')
 
 
+def requires_test_display(entry, arguments):
+    if entry in ('transcription-benchmark.sh', 'build-app.sh'):
+        return False
+    if entry == 'run-live-tests.sh':
+        suites = [value.split('=', 1)[1] for value in arguments if value.startswith('--suite=')]
+        suites += [arguments[index + 1] for index, value in enumerate(arguments[:-1]) if value == '--suite']
+        if len(suites) == 1:
+            try:
+                manifest = HERE.parent.parent / 'Tests/JarvisLiveTests/Scenarios/evaluation-suites.json'
+                entries = json.loads(manifest.read_text())['suites']
+                matches = [value for value in entries if value['id'] == suites[0]]
+                if len(matches) == 1 and matches[0]['executor'] == 'coachingReplay':
+                    return False
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+    return True
+
+
 def worker_command():
     build = HERE.parent.parent / '.build/test-display'
     build.mkdir(parents=True, exist_ok=True)
@@ -331,6 +349,7 @@ def worker_command():
                         '-o', str(temporary)], check=True, timeout=120)
         os.replace(temporary, binary)
     return [str(binary), str(HERE / 'descriptor.json')]
+
 
 
 class Supervisor:
@@ -688,7 +707,7 @@ class Supervisor:
                 self.lease.write('completed', lifecycle_status='not-started', refusal=str(error))
                 raise
             self.lease.write('preflight')
-            if not ci and entry not in ('transcription-benchmark.sh', 'build-app.sh'):
+            if not ci and requires_test_display(entry, arguments):
                 allow_create = display_boot != current_boot
                 # Consume the boot's creation opportunity before any OS-facing worker starts.
                 self.lease.write('preflight', display_boot=current_boot)

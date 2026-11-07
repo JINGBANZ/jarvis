@@ -24,6 +24,10 @@ class ScriptTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name).resolve()
         shutil.copytree(REPOSITORY / "scripts", self.root / "scripts")
+        scenarios = self.root / 'Tests/JarvisLiveTests/Scenarios'
+        scenarios.mkdir(parents=True)
+        for name in ('evaluation-suites.json', 'coaching-intervention.json'):
+            shutil.copy2(REPOSITORY / 'Tests/JarvisLiveTests/Scenarios' / name, scenarios / name)
         # Replace admission only inside this copied fixture checkout. Production has no bypass.
         (self.root / "scripts/lib/test-display.sh").write_text("""isolate_test_display() { :; }
 launch_test_app() { open -W -n "$@"; }
@@ -162,7 +166,7 @@ class GuardTests(ScriptTests):
         check = guard['check_boundary']
         check(self.root, package)
         source = self.root / 'Sources/JarvisProcess/Fixture.swift'
-        for forbidden in ('import JarvisTestSupport',
+        for forbidden in ('import JarvisTestProcesses', 'import JarvisScenarioHarness',
                           'let context = environment["JARVIS_TEST_RUN_SOCKET"]',
                           'TestCommandOwnership.makeLauncher()'):
             source.write_text(forbidden)
@@ -170,8 +174,35 @@ class GuardTests(ScriptTests):
                 check(self.root, package)
         source.unlink()
         package['targets'][0]['dependencies'] = [{'byName': ['Intermediate', None]}]
-        package['targets'][-1]['dependencies'] = [{'target': ['JarvisTestSupport', None]}]
-        with self.assertRaisesRegex(ValueError, 'depends on JarvisTestSupport'):
+        package['targets'][-1]['dependencies'] = [{'target': ['JarvisTestProcesses', None]}]
+        with self.assertRaisesRegex(ValueError, 'depends on JarvisTestProcesses'):
+            check(self.root, package)
+
+    def test_scenario_harness_boundaries(self):
+        guard = runpy.run_path(str(self.root / 'scripts/check-process-launching.py'))
+        package = {'targets': [{'name': name, 'dependencies': []}
+                              for name in (*guard['PRODUCTION_TARGETS'], 'JarvisTestProcesses', 'JarvisScenarioHarness')]}
+        for area in guard['SOURCE_AREAS']:
+            (self.root / 'Sources' / area).mkdir(parents=True)
+        check = guard['check_boundary']
+        check(self.root, package)
+        package['targets'][0]['dependencies'] = [{'byName': ['JarvisScenarioHarness', None]}]
+        with self.assertRaisesRegex(ValueError, 'depends on JarvisScenarioHarness'):
+            check(self.root, package)
+        package['targets'][0]['dependencies'] = []
+        package['targets'][-2]['dependencies'] = [{'byName': ['JarvisCore', None]}]
+        with self.assertRaisesRegex(ValueError, 'JarvisTestProcesses.*JarvisProcess'):
+            check(self.root, package)
+        package['targets'][-2]['dependencies'] = []
+        process_source = self.root / 'Tests/Support/ProcessOwnership/Fixture.swift'
+        process_source.parent.mkdir(parents=True)
+        process_source.write_text('import JarvisCore')
+        with self.assertRaisesRegex(ValueError, 'process ownership must remain independent'):
+            check(self.root, package)
+        process_source.unlink()
+        misplaced = self.root / 'Sources/JarvisEvaluation/CoachingReplayExecutor.swift'
+        misplaced.write_text('struct CoachingReplayExecutor {}')
+        with self.assertRaisesRegex(ValueError, 'scenario harness implementation'):
             check(self.root, package)
 
     def test_non_debug_tests_refused_before_admission_in_both_entrypoints(self):
@@ -199,7 +230,7 @@ class GuardTests(ScriptTests):
                     marker.unlink()
 
     def test_missing_source_cannot_pass_audio_guard(self):
-        for name in ("Sources", "Resources"):
+        for name in ("Sources", "Resources", "Tests/Support"):
             shutil.copytree(REPOSITORY / name, self.root / name)
         shutil.copy2(REPOSITORY / "Package.swift", self.root / "Package.swift")
         baseline = self.run_script("check-audio-capture-config.sh")
@@ -286,6 +317,47 @@ print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
                     self.assertEqual(result.returncode, status, result.stdout + result.stderr)
                     self.assertFalse((self.root / 'admission.jsonl').exists())
                     self.assertFalse((self.root / '.jarvis').exists())
+
+    def test_suite_listing_is_manifest_backed_and_has_no_admission(self):
+        result = self.run_script('run-live-tests.sh', '--list')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('coaching/intervention (intervention-v1)', result.stdout)
+        self.assertIn('app/coaching (signed-app-A-v1)', result.stdout)
+        self.assertIn('sequence-delayed-zh', result.stdout)
+        self.assertFalse((self.root / 'admission.jsonl').exists())
+        self.assertFalse((self.root / '.jarvis').exists())
+
+    def test_invalid_suite_repeat_and_mixed_selectors_never_enter_supervisor(self):
+        for arguments in (['--suite', 'unknown'], ['--suite', 'coaching/intervention', '--repeat', '0'],
+                          ['--suite', 'coaching/intervention', '--repeat', '101'],
+                          ['A', '--suite', 'coaching/intervention'], ['--repeat', '2']):
+            with self.subTest(arguments=arguments):
+                result = self.run_script('run-live-tests.sh', *arguments)
+                self.assertEqual(result.returncode, 2, result.stdout + result.stderr)
+                self.assertFalse((self.root / 'admission.jsonl').exists())
+
+    def test_replay_suite_keeps_admission_without_building_app(self):
+        self.executable(self.bin / 'swift', f'''#!{sys.executable}
+import json, os
+from pathlib import Path
+Path('suite-environment.json').write_text(json.dumps({{key: os.environ.get(key) for key in ('JARVIS_EVALUATION_SUITE', 'JARVIS_EVALUATION_REPEAT', 'JARVIS_LIVE_E2E_APP')}}))
+print('Test run with 1 test in 1 suite passed after 0.001 seconds.')
+''')
+        base = self.root / '.jarvis/live-e2e'
+        for index in range(11):
+            (base / f'2000-01-{index + 1:02d}').mkdir(parents=True)
+        arguments = ['--suite', 'coaching/intervention', '--provider', 'openai', '--repeat', '3']
+        result = self.run_script('run-live-tests.sh', *arguments)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        rows = [json.loads(row) for row in (self.root / 'admission.jsonl').read_text().splitlines()]
+        self.assertEqual(rows, [['run', 'run-live-tests.sh', *arguments], ['admit']])
+        environment = json.loads((self.root / 'suite-environment.json').read_text())
+        self.assertEqual(environment['JARVIS_EVALUATION_SUITE'], 'coaching/intervention')
+        self.assertEqual(environment['JARVIS_EVALUATION_REPEAT'], '3')
+        self.assertIsNone(environment['JARVIS_LIVE_E2E_APP'])
+        self.assertEqual(len(list(base.iterdir())), 10)
+        self.assertFalse((base / '2000-01-01').exists())
+        self.assertFalse((base / '2000-01-02').exists())
 
     def test_valid_arguments_survive_reentry_and_reference_transition(self):
         cases = (

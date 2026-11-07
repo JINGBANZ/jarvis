@@ -68,7 +68,7 @@ done <<< "$live_e2e_references"
 fixture_references="$(guard_scan -RIlE 'FixtureAudioSource|FixtureScreenCapture' Sources)"
 while IFS= read -r reference; do
     case "$reference" in
-        ""|Sources/JarvisApp/LiveE2E/*) ;;
+        ""|Sources/JarvisApp/Testing/*) ;;
         *)
             echo "Fixture audio and screen sources belong to the live e2e mode only: $reference" >&2
             exit 1
@@ -78,10 +78,10 @@ done <<< "$fixture_references"
 if ! /usr/bin/grep -Fq '.define("JARVIS_LIVE_E2E", .when(configuration: .debug))' Package.swift \
     || ! /usr/bin/grep -Fq 'swiftSettings: liveE2ESettings' Package.swift \
     || ! /usr/bin/grep -Fq 'liveE2ESettings + ' Package.swift; then
-    echo "Package.swift must define JARVIS_LIVE_E2E for debug builds of JarvisCore and JarvisApp only." >&2
+    echo "Package.swift must define JARVIS_LIVE_E2E for debug builds of the app and scenario harness." >&2
     exit 1
 fi
-for live_e2e_source in Sources/JarvisApp/LiveE2E/*.swift Sources/JarvisCore/LiveE2E/*.swift; do
+for live_e2e_source in Sources/JarvisApp/Testing/*.swift Tests/Support/ScenarioHarness/Scenarios/*.swift; do
     if ! /usr/bin/head -n 1 "$live_e2e_source" | /usr/bin/grep -Eq '^#if JARVIS_LIVE_E2E( |$)'; then
         echo "Live e2e sources must compile only into debug builds: $live_e2e_source must start with #if JARVIS_LIVE_E2E" >&2
         exit 1

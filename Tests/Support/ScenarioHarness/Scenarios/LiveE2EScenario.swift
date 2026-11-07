@@ -1,0 +1,398 @@
+#if JARVIS_LIVE_E2E
+import JarvisCore
+import Foundation
+
+/// Decoded through a private string-typed layer so the Core enums it names stay free of `Codable`.
+public struct LiveE2EScenario: Sendable, Equatable {
+    public enum Failure: Error, CustomStringConvertible {
+        case invalid(String)
+
+        public var description: String {
+            switch self {
+            case .invalid(let detail): "Invalid live e2e scenario: \(detail)"
+            }
+        }
+    }
+
+    public enum Audio: String, Sendable {
+        case fixture
+        case device
+        case fixtureNoSystem = "fixture-no-system"
+        case fixtureNoMicrophone = "fixture-no-microphone"
+    }
+
+    public struct Brain: Sendable, Equatable {
+        public let primary: BrainProvider
+        public let fallbacks: [BrainProvider]
+        public let model: String?
+
+        public init(primary: BrainProvider, fallbacks: [BrainProvider], model: String? = nil) {
+            self.primary = primary
+            self.fallbacks = fallbacks
+            self.model = model
+        }
+    }
+
+    public struct Capabilities: Sendable, Equatable {
+        public let disabledTools: [String]
+        public let disabledSkills: [String]
+    }
+
+    public enum TranscriptionKey: String, Sendable {
+        case standard
+        case invalid
+    }
+
+    public struct Transcription: Sendable, Equatable {
+        public let target: TranscriptionTarget
+        public let expectedLanguages: [TranscriptionLanguage]
+        public let key: TranscriptionKey
+    }
+
+    public struct Voices: Sendable, Equatable {
+        public let them: String
+        public let me: String
+    }
+
+    public struct Line: Sendable, Equatable {
+        public let speaker: Speaker
+        public let text: String
+    }
+
+    public struct Overlap: Sendable, Equatable {
+        public let speaker: Speaker
+        public let text: String
+        public let afterSeconds: Double
+    }
+
+    public enum Step: Sendable, Equatable {
+        case screen(fixture: String)
+        case press(CoachingShortcut)
+        case say(Line, overlap: Overlap?, whileAttemptRunning: Bool)
+        case switchBrain(BrainProvider)
+        case waitForCompaction
+        case stop
+    }
+
+    public let id: String
+    public let audio: Audio
+    public let brain: Brain
+    public let capabilities: Capabilities
+    /// A file name inside the fixtures directory.
+    public let prepNotes: String?
+    public let transcription: Transcription
+    public let voices: Voices
+    public let historyCompactionTokenThreshold: Int?
+    public let steps: [Step]
+
+    public static func load(from url: URL, fixturesDirectory: URL) throws -> LiveE2EScenario {
+        try decode(Data(contentsOf: url), fixturesDirectory: fixturesDirectory)
+    }
+
+    public static func decode(_ data: Data, fixturesDirectory: URL) throws -> LiveE2EScenario {
+        let raw = try JSONDecoder().decode(RawScenario.self, from: data)
+        return try LiveE2EScenario(raw: raw, fixturesDirectory: fixturesDirectory)
+    }
+}
+
+extension LiveE2EScenario {
+    private init(raw: RawScenario, fixturesDirectory: URL) throws {
+        // ASCII only: the id names the scenario's output directory and appears in test filters.
+        guard !raw.id.isEmpty,
+              raw.id.allSatisfy({ $0 == "-" || ($0.isASCII && ($0.isLetter || $0.isNumber)) }) else {
+            throw Failure.invalid("id must be non-empty letters, digits, and -: \"\(raw.id)\"")
+        }
+        let audio = try Self.parse(Audio.self, raw.audio, "audio")
+        let primary = try Self.parse(BrainProvider.self, raw.brain.primary, "brain.primary")
+        let fallbacks = try raw.brain.fallbacks.map {
+            try Self.parse(BrainProvider.self, $0, "brain.fallbacks")
+        }
+        if let prepNotes = raw.prepNotes {
+            try Self.requireFixture(prepNotes, in: fixturesDirectory, field: "prepNotes")
+        }
+        let provider = try Self.parse(TranscriptionProvider.self,
+            raw.transcription.provider ?? "openai", "transcription.provider")
+        let languages = TranscriptionLanguage.canonicalizing(try (raw.transcription.languages ?? []).map {
+            try Self.parse(TranscriptionLanguage.self, $0, "transcription.languages")
+        })
+        let target: TranscriptionTarget
+        switch provider {
+        case .openAI:
+            target = .openAI(try Self.parse(OpenAITranscriptionModel.self,
+                raw.transcription.model ?? "", "transcription.model"))
+        case .gemini:
+            target = .gemini(try Self.parse(GeminiTranscriptionModel.self,
+                raw.transcription.model ?? "", "transcription.model"))
+        case .deepgram:
+            target = .deepgram(try Self.parse(DeepgramTranscriptionModel.self,
+                raw.transcription.model ?? "", "transcription.model"))
+        case .appleSpeech:
+            guard let locale = raw.transcription.locale, !locale.isEmpty, languages.isEmpty else {
+                throw Failure.invalid("Apple Speech requires a locale and no language list")
+            }
+            target = .appleSpeech(localeIdentifier: locale)
+        }
+        let key = try Self.parse(TranscriptionKey.self, raw.transcription.key, "transcription.key")
+        if let threshold = raw.historyCompactionTokenThreshold, threshold <= 0 {
+            throw Failure.invalid("historyCompactionTokenThreshold must be positive")
+        }
+
+        id = raw.id
+        self.audio = audio
+        if let model = raw.brain.model, BrainModelCatalog.model(id: model, for: primary) == nil {
+            throw Failure.invalid("brain.model is unavailable for \(primary.rawValue): \(model)")
+        }
+        brain = Brain(primary: primary, fallbacks: fallbacks, model: raw.brain.model)
+        capabilities = Capabilities(
+            disabledTools: raw.capabilities.disabledTools,
+            disabledSkills: raw.capabilities.disabledSkills)
+        prepNotes = raw.prepNotes
+        transcription = Transcription(target: target, expectedLanguages: languages, key: key)
+        voices = Voices(them: raw.voices.them, me: raw.voices.me)
+        historyCompactionTokenThreshold = raw.historyCompactionTokenThreshold
+        steps = try Self.steps(from: raw.steps, primary: primary, fixturesDirectory: fixturesDirectory)
+        if id == LiveE2ECacheCheck.scenarioID {
+            guard [.codexSubscription, .openAI].contains(primary), fallbacks.isEmpty,
+                  Self.target(for: primary, modelID: raw.brain.model) == Self.target(for: primary),
+                  !steps.contains(where: { if case .switchBrain = $0 { true } else { false } }) else {
+                throw Failure.invalid(
+                    "CACHE requires Codex subscription or OpenAI on its default live-test model without fallbacks or provider switches")
+            }
+        }
+
+        // A line on a stream that isn't played would leave the runner waiting for an attempt
+        // forever.
+        func plays(_ speaker: Speaker) -> Bool {
+            switch audio {
+            case .fixture: true
+            case .fixtureNoSystem: speaker == .me
+            case .fixtureNoMicrophone: speaker == .them
+            case .device: false
+            }
+        }
+        for (index, step) in steps.enumerated() {
+            guard case .say(let line, let overlap, _) = step else { continue }
+            for speaker in [line.speaker] + [overlap?.speaker].compactMap({ $0 }) where !plays(speaker) {
+                throw Failure.invalid(
+                    "steps[\(index)]: \"\(audio.rawValue)\" audio cannot speak as \(speaker.rawValue)")
+            }
+        }
+    }
+
+    private static func steps(
+        from rawSteps: [RawStep],
+        primary: BrainProvider,
+        fixturesDirectory: URL
+    ) throws -> [Step] {
+        guard !rawSteps.isEmpty else {
+            throw Failure.invalid("steps must not be empty")
+        }
+        var currentBrain = primary
+        var steps: [Step] = []
+        for (index, raw) in rawSteps.enumerated() {
+            let label = "steps[\(index)]"
+            func invalid(_ detail: String) -> Failure { .invalid("\(label): \(detail)") }
+
+            if let unknown = raw.unknownKeys.first {
+                throw invalid("unknown key \"\(unknown)\"")
+            }
+            let primaryKeys = raw.primaryKeys
+            guard primaryKeys.count == 1, let key = primaryKeys.first else {
+                throw invalid(
+                    "needs exactly one of \(RawStep.primaryKeyNames.joined(separator: ", ")), "
+                        + "found \(primaryKeys.count)")
+            }
+            if key != "say", raw.overlap != nil || raw.whileAttemptRunning != nil {
+                throw invalid("overlap and whileAttemptRunning apply only to a say step")
+            }
+
+            let step: Step
+            switch key {
+            case "screen":
+                let fixture = raw.screen ?? ""
+                try requireFixture(fixture, in: fixturesDirectory, field: "\(label).screen")
+                // The coach receives it as a screen capture, which is always JPEG.
+                guard ["jpg", "jpeg"].contains(URL(fileURLWithPath: fixture).pathExtension.lowercased()) else {
+                    throw Failure.invalid("\(label).screen must be a JPEG image, got \"\(fixture)\"")
+                }
+                step = .screen(fixture: fixture)
+            case "press":
+                step = .press(try shortcut(raw.press ?? "", label: label))
+            case "say":
+                guard let line = raw.say else {
+                    throw invalid("say must be an object with speaker and text")
+                }
+                let whileAttemptRunning = raw.whileAttemptRunning ?? false
+                if index == 0, whileAttemptRunning {
+                    throw invalid("whileAttemptRunning cannot mark the first step")
+                }
+                var overlap: Overlap?
+                if let rawOverlap = raw.overlap {
+                    guard rawOverlap.afterSeconds > 0 else {
+                        throw invalid("overlap.afterSeconds must be positive")
+                    }
+                    overlap = Overlap(
+                        speaker: try parse(Speaker.self, rawOverlap.speaker, "\(label).overlap.speaker"),
+                        text: rawOverlap.text,
+                        afterSeconds: rawOverlap.afterSeconds)
+                }
+                step = .say(
+                    Line(speaker: try parse(Speaker.self, line.speaker, "\(label).say.speaker"),
+                         text: line.text),
+                    overlap: overlap,
+                    whileAttemptRunning: whileAttemptRunning)
+            case "switchBrain":
+                let provider = try parse(BrainProvider.self, raw.switchBrain ?? "", "\(label).switchBrain")
+                guard provider != currentBrain else {
+                    throw invalid("switchBrain names the current brain \"\(provider.rawValue)\"")
+                }
+                currentBrain = provider
+                step = .switchBrain(provider)
+            case "waitForCompaction":
+                guard raw.waitForCompaction == true else {
+                    throw invalid("waitForCompaction must be true")
+                }
+                step = .waitForCompaction
+            default:
+                guard raw.stop == true else {
+                    throw invalid("stop must be true")
+                }
+                guard index == rawSteps.count - 1 else {
+                    throw invalid("stop must be the last step")
+                }
+                step = .stop
+            }
+            steps.append(step)
+        }
+        guard steps.last == .stop else {
+            throw Failure.invalid("steps[\(steps.count - 1)]: the last step must be stop")
+        }
+        return steps
+    }
+
+    private static func shortcut(_ raw: String, label: String) throws -> CoachingShortcut {
+        switch raw {
+        case "hint": .hint
+        case "explainMore": .explainMore
+        case "showCode": .showCode
+        default: throw Failure.invalid("\(label).press: unknown shortcut \"\(raw)\"")
+        }
+    }
+
+    private static func parse<Value: RawRepresentable>(
+        _ type: Value.Type,
+        _ raw: String,
+        _ field: String
+    ) throws -> Value where Value.RawValue == String {
+        guard let value = Value(rawValue: raw) else {
+            throw Failure.invalid("\(field): unknown value \"\(raw)\"")
+        }
+        return value
+    }
+
+    /// Plain file names only, so a scenario can't reach outside the fixtures directory.
+    private static func requireFixture(_ name: String, in directory: URL, field: String) throws {
+        guard !name.isEmpty, !name.contains("/"), !name.contains("..") else {
+            throw Failure.invalid("\(field) must be a plain file name, got \"\(name)\"")
+        }
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: directory.appendingPathComponent(name).path,
+            isDirectory: &isDirectory
+        ), !isDirectory.boolValue else {
+            throw Failure.invalid("\(field) names no file in the fixtures directory: \"\(name)\"")
+        }
+    }
+}
+
+// MARK: - Raw JSON layer
+
+private struct RawScenario: Decodable {
+    struct Brain: Decodable {
+        let primary: String
+        let fallbacks: [String]
+        let model: String?
+    }
+
+    struct Capabilities: Decodable {
+        let disabledTools: [String]
+        let disabledSkills: [String]
+    }
+
+    struct Transcription: Decodable {
+        let provider: String?
+        let model: String?
+        let locale: String?
+        let languages: [String]?
+        let key: String
+    }
+
+    struct Voices: Decodable {
+        let them: String
+        let me: String
+    }
+
+    let id: String
+    let audio: String
+    let brain: Brain
+    let capabilities: Capabilities
+    let prepNotes: String?
+    let transcription: Transcription
+    let voices: Voices
+    let historyCompactionTokenThreshold: Int?
+    let steps: [RawStep]
+}
+
+private struct RawLine: Decodable {
+    let speaker: String
+    let text: String
+}
+
+private struct RawOverlap: Decodable {
+    let speaker: String
+    let text: String
+    let afterSeconds: Double
+}
+
+/// Keeps unknown keys by name so validation can reject them with the step's index.
+private struct RawStep: Decodable {
+    static let primaryKeyNames = ["screen", "press", "say", "switchBrain", "waitForCompaction", "stop"]
+    static let modifierKeyNames = ["overlap", "whileAttemptRunning"]
+
+    private struct Key: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ string: String) { stringValue = string }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { nil }
+    }
+
+    let primaryKeys: [String]
+    let unknownKeys: [String]
+    let screen: String?
+    let press: String?
+    let say: RawLine?
+    let switchBrain: String?
+    let waitForCompaction: Bool?
+    let stop: Bool?
+    let overlap: RawOverlap?
+    let whileAttemptRunning: Bool?
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: Key.self)
+        let names = container.allKeys.map(\.stringValue)
+        primaryKeys = names.filter { Self.primaryKeyNames.contains($0) }
+        unknownKeys = names.filter {
+            !Self.primaryKeyNames.contains($0) && !Self.modifierKeyNames.contains($0)
+        }
+        screen = try container.decodeIfPresent(String.self, forKey: Key("screen"))
+        press = try container.decodeIfPresent(String.self, forKey: Key("press"))
+        say = try container.decodeIfPresent(RawLine.self, forKey: Key("say"))
+        switchBrain = try container.decodeIfPresent(String.self, forKey: Key("switchBrain"))
+        waitForCompaction = try container.decodeIfPresent(Bool.self, forKey: Key("waitForCompaction"))
+        stop = try container.decodeIfPresent(Bool.self, forKey: Key("stop"))
+        overlap = try container.decodeIfPresent(RawOverlap.self, forKey: Key("overlap"))
+        whileAttemptRunning = try container.decodeIfPresent(Bool.self, forKey: Key("whileAttemptRunning"))
+    }
+}
+#endif

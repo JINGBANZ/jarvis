@@ -68,9 +68,9 @@ The checks establish different facts; a passing flag test is not a passing captu
 3. **Signed-app continuous stream check.**
    [`run-capture-privacy-tests.sh`](../scripts/run-capture-privacy-tests.sh) builds and launches the
    signed debug app using `open`. The debug-only
-   [`CapturePrivacyAppDelegate`](../Sources/JarvisApp/LiveE2E/CapturePrivacyAppDelegate.swift) drives
+   [`CapturePrivacyAppDelegate`](../Sources/JarvisApp/Testing/CapturePrivacyAppDelegate.swift) drives
    the real Overlay Box and Settings/Activity while
-   [`CapturePrivacyStream`](../Sources/JarvisApp/LiveE2E/CapturePrivacyStream.swift) records a display
+   [`CapturePrivacyStream`](../Sources/JarvisApp/Testing/CapturePrivacyStream.swift) records a display
    through `SCStream`, without excluding any app or window in the recorder's filter.
 
    ```sh
