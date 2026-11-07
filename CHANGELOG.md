@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.13](https://github.com/JINGBANZ/jarvis/compare/v0.5.12...v0.5.13) (2026-11-07)
+
+
+### Features
+
+* **testing:** add shared scenario evaluation harness ([#497](https://github.com/JINGBANZ/jarvis/issues/497)) ([758d80c](https://github.com/JINGBANZ/jarvis/commit/758d80ced40f07b5044b9aa3b4a8439fb27ab1da))
+
+
+### Bug Fixes
+
+* **coach:** accept useful summaries beyond the soft size target ([#501](https://github.com/JINGBANZ/jarvis/issues/501)) ([4ca8cc5](https://github.com/JINGBANZ/jarvis/commit/4ca8cc585b1ec2f965f621c199e1786c5b8b0d7a))
+* **proxy:** preserve availability after http2 protocol errors ([#500](https://github.com/JINGBANZ/jarvis/issues/500)) ([d2fc2a6](https://github.com/JINGBANZ/jarvis/commit/d2fc2a68167343170215c7b6a1b3058faf85c60d))
+* **release:** unblock release validation ([#496](https://github.com/JINGBANZ/jarvis/issues/496)) ([cf6f1be](https://github.com/JINGBANZ/jarvis/commit/cf6f1be4b30937da70a514014055919cd6173339))
+
 ## [0.5.12](https://github.com/JINGBANZ/jarvis/compare/v0.5.11...v0.5.12) (2026-11-05)
 
 
