@@ -1,4 +1,4 @@
-# The same source and privacy patch supply development and release bundles.
+# The same source and local patch supply development and release bundles.
 CLIPROXYAPI_VERSION="8.0.20"
 CLIPROXYAPI_SOURCE_SHA256="3c0dacdf6195a5f7f6cd9c2a7d388c168ed4d0fa14fafac62f6228710e339cf9"
 CLIPROXYAPI_GO_VERSION="1.26.9"
@@ -59,10 +59,14 @@ build_cliproxyapi() {
   mkdir -p "$source"
   tar -xzf "$archive" --strip-components=1 -C "$source"
   patch --batch --fuzz=0 -d "$source" -p1 < scripts/cliproxyapi/local-only.patch
-  echo "▶ building CLIProxyAPI $CLIPROXYAPI_VERSION ($architecture) with the local-only privacy patch"
+  echo "▶ building CLIProxyAPI $CLIPROXYAPI_VERSION ($architecture) with the local-only patch"
   (
-    cd "$source"
-    CGO_ENABLED=0 GOOS=darwin GOARCH="$go_arch" GOTOOLCHAIN=local GOENV=off GOFLAGS= GOWORK=off \
+    cd "$source" || exit
+    CGO_ENABLED=0 GOOS=darwin GOARCH="$go_host" GOTOOLCHAIN=local GOENV=off GOFLAGS='' GOWORK=off \
+      GOPATH="$cache/go-path" GOCACHE="$cache/go-cache" \
+      "$toolchain/go/bin/go" test -mod=readonly ./sdk/cliproxy/auth \
+      -run '^TestJarvisHTTP2ProtocolErrorCooldown$' -count=1 -v
+    CGO_ENABLED=0 GOOS=darwin GOARCH="$go_arch" GOTOOLCHAIN=local GOENV=off GOFLAGS='' GOWORK=off \
       GOPATH="$cache/go-path" GOCACHE="$cache/go-cache" \
       "$toolchain/go/bin/go" build -mod=readonly -trimpath -buildvcs=false \
       -ldflags "-s -w -X main.Version=$CLIPROXYAPI_VERSION-jarvis-local" \
