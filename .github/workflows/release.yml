@@ -34,7 +34,7 @@ jobs:
 
   # Same job as the Gate so the macOS build runs once, and same workflow because tags created with
   # GITHUB_TOKEN never trigger other workflows.
-  publish:
+  build:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     # Pinned, not macos-latest: AppKit picks the control design from the linked SDK.
@@ -45,7 +45,7 @@ jobs:
     # stalled notarization leaves a draft release without its asset.
     timeout-minutes: 75
     permissions:
-      contents: write # upload the release asset
+      contents: write # reading unpublished draft release notes requires push access
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -114,6 +114,64 @@ jobs:
           else
             ./scripts/generate-appcast.sh Jarvis.dmg "$TAG"
           fi
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: signed-release-candidate
+          path: |
+            Jarvis.dmg
+            Jarvis.dmg.verified.sha256
+            appcast.xml
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Delete temporary keychain
+        if: ${{ always() }}
+        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true
+
+  verify-installation:
+    needs: [release-please, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-26, macos-26-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-release-candidate
+      - name: Install DMG layout tool
+        run: |
+          RELEASE_TOOLS="$RUNNER_TEMP/release-tools"
+          python3 -m venv "$RELEASE_TOOLS"
+          "$RELEASE_TOOLS/bin/python" -m pip install \
+            --require-hashes \
+            --requirement scripts/requirements-release.txt
+          echo "DMGBUILD_PYTHON=$RELEASE_TOOLS/bin/python" >> "$GITHUB_ENV"
+      - name: Verify final DMG on the native architecture
+        env:
+          TAG: ${{ needs.release-please.outputs.tag_name }}
+        run: |
+          shasum -a 256 -c Jarvis.dmg.verified.sha256
+          ./scripts/verify-release.sh Jarvis.dmg "$TAG"
+
+  publish:
+    needs: [release-please, build, verify-installation]
+    runs-on: macos-26
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: signed-release-candidate
+      - name: Require the verified DMG bytes
+        run: shasum -a 256 -c Jarvis.dmg.verified.sha256
 
       # release-please creates a draft, so a failed run never leaves a public Release without its app.
       - name: Attach the app and publish the Release
@@ -189,7 +247,3 @@ jobs:
             fi
           done
           gh release edit "$TAG" --notes-file "$RELEASE_NOTES" --draft=false --latest
-
-      - name: Delete temporary keychain
-        if: ${{ always() }}
-        run: security delete-keychain "$RUNNER_TEMP/app-signing.keychain-db" || true

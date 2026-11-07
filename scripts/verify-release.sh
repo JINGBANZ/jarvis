@@ -10,6 +10,7 @@ if [[ $# -gt 2 || -z "$DMG" || ! -f "$DMG" || -L "$DMG" ]]; then
   echo "usage: $0 Jarvis.dmg [v<version>]" >&2
   exit 2
 fi
+rm -f "$DMG.verified.sha256"
 
 if ! "$DMGBUILD_PYTHON" -c 'from ds_store import DSStore' 2>/dev/null; then
   echo "error: the pinned release-layout dependencies are required to verify the DMG." >&2
@@ -60,12 +61,15 @@ cleanup_verify_dir() {
 }
 trap cleanup_verify_dir EXIT
 
+# Another packaging command can replace the public path while verification is running.
+VERIFY_DMG="$VERIFY_DIR/$(basename "$DMG")"
+cp "$DMG" "$VERIFY_DMG"
 echo "▶ verifying final disk image: $(basename "$DMG")"
-hdiutil verify "$DMG"
-codesign --verify --strict --verbose=2 "$DMG"
-xcrun stapler validate "$DMG"
-spctl --assess --type open --context context:primary-signature --verbose "$DMG"
-hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT"
+hdiutil verify "$VERIFY_DMG"
+codesign --verify --strict --verbose=2 "$VERIFY_DMG"
+xcrun stapler validate "$VERIFY_DMG"
+spctl --assess --type open --context context:primary-signature --verbose "$VERIFY_DMG"
+hdiutil attach "$VERIFY_DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT"
 MOUNTED=true
 
 EXTRACTED_APP="$MOUNT_POINT/$APP"
@@ -156,4 +160,8 @@ codesign --verify --strict --deep --verbose=2 "$EXTRACTED_APP"
 # syspolicy_check runs the modern distribution checks; spctl stays as the direct Gatekeeper assertion.
 syspolicy_check distribution "$EXTRACTED_APP" --verbose
 spctl --assess --type execute --verbose "$EXTRACTED_APP"
+python3 scripts/verify-installation.py "$EXTRACTED_APP"
+hdiutil detach "$MOUNT_POINT"
+MOUNTED=false
+(cd "$VERIFY_DIR" && shasum -a 256 "$(basename "$VERIFY_DMG")") > "$DMG.verified.sha256"
 echo "✅ $(basename "$DMG") passed final release verification"
