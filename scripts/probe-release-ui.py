@@ -17,9 +17,13 @@ ROOT = Path(__file__).resolve().parent.parent
 def run(arguments, *, timeout, log=None):
     if log is None:
         return subprocess.check_output(arguments, cwd=ROOT, text=True, timeout=timeout)
-    with log.open("w") as output:
-        subprocess.run(arguments, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT,
-                       check=True, timeout=timeout)
+    try:
+        with log.open("w") as output:
+            subprocess.run(arguments, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT,
+                           check=True, timeout=timeout)
+    except subprocess.SubprocessError:
+        print(log.read_text()[-24_000:], file=sys.stderr, flush=True)
+        raise
 
 
 def inject_environment(value, environment):

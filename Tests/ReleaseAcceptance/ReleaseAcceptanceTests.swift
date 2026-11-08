@@ -55,67 +55,18 @@ final class ReleaseAcceptanceTests: XCTestCase {
         let grant = welcome.buttons["Grant Access"]
         XCTAssertTrue(grant.waitForExistence(timeout: 20), "Stored-key precondition must expose ordinary permission onboarding")
         attachEvidence(app, name: "permissions-before-grants")
-        let permissions = ["microphone", "audio", "screen"]
-        var accepted: [String] = []
-        var openedScreenSettings = false
-        let monitor = addUIInterruptionMonitor(withDescription: "Jarvis permission consent") { element in
-            let description = element.debugDescription
-            let attachment = XCTAttachment(string: description)
-            attachment.name = "permission-interruption-\(accepted.count)"
-            attachment.lifetime = .keepAlways
-            self.add(attachment)
-            self.attachRunningApplicationInventory()
-            guard accepted.count < permissions.count else {
-                XCTFail("Unexpected additional permission interruption")
-                return false
-            }
-            let permission = permissions[accepted.count]
-            guard description.localizedCaseInsensitiveContains("Jarvis"),
-                  description.localizedCaseInsensitiveContains(permission) else {
-                XCTFail("Refuse a dialog that does not identify Jarvis and the expected \(permission) permission")
-                return false
-            }
-            if permission == "screen", element.buttons["Open System Settings"].exists {
-                element.buttons["Open System Settings"].click()
-                openedScreenSettings = true
-            } else {
-                let allow = element.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow' OR label == 'OK'")).firstMatch
-                guard allow.exists else {
-                    XCTFail("Permission dialog requires a supported Allow control: \(permission)")
-                    return false
-                }
-                allow.click()
-            }
-            accepted.append(permission)
-            return true
-        }
-        defer { removeUIInterruptionMonitor(monitor) }
         grant.click()
         var relaunched = false
-        for permission in permissions where !accepted.contains(permission) {
-            let blocked = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                accepted.contains(permission) || !welcome.isEnabled
-            }, object: nil)
-            guard XCTWaiter.wait(for: [blocked], timeout: 15) == .completed else {
-                attachRunningApplicationInventory()
-                throw AcceptanceFailure("Expected macOS \(permission) consent did not interrupt onboarding")
+        for permission in ["microphone", "audio", "screen"] {
+            let dialog = try permissionDialog(for: permission)
+            if permission == "screen", dialog.buttons.matching(identifier: "Open System Settings").count == 1 {
+                dialog.buttons["Open System Settings"].click()
+                relaunched = try grantScreenRecordingInSettings()
+            } else {
+                let allow = dialog.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow' OR label == 'OK'"))
+                XCTAssertEqual(allow.count, 1, "Consent requires one unambiguous Allow control")
+                allow.element.click()
             }
-            if !accepted.contains(permission) {
-                // XCTest invokes interruption handlers only while attempting an ordinary UI interaction.
-                welcome.staticTexts["Hi, I’m Jarvis."].click()
-            }
-            let consent = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-                accepted.contains(permission)
-            }, object: nil)
-            guard XCTWaiter.wait(for: [consent], timeout: 15) == .completed else {
-                attachRunningApplicationInventory()
-                throw AcceptanceFailure("No validated macOS \(permission) consent was accepted")
-            }
-        }
-        XCTAssertEqual(accepted, permissions, "Every required permission must have a validated consent action")
-        if openedScreenSettings {
-            XCUIApplication(bundleIdentifier: "com.apple.systempreferences").activate()
-            relaunched = try grantScreenRecordingInSettings()
         }
         app.activate()
         if welcome.buttons["Open System Settings"].waitForExistence(timeout: 5) {
@@ -147,6 +98,55 @@ final class ReleaseAcceptanceTests: XCTestCase {
                        "Normal onboarding must persist completion; read the actual preference file afresh")
         XCTAssertTrue(app.statusItems["Jarvis is stopped"].waitForExistence(timeout: 30),
                       "Normal onboarding must prove every grant before entering the stopped app")
+    }
+
+    private func permissionDialog(for permission: String) throws -> XCUIElement {
+        let owners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent"]
+        var captured: Set<String> = []
+        var found: (String, XCUIElement)?
+        let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            var matches: [(String, XCUIElement)] = []
+            for identifier in owners where !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty {
+                let candidate = XCUIApplication(bundleIdentifier: identifier)
+                if captured.insert(identifier).inserted {
+                    self.attachEvidence(candidate, name: "\(permission)-owner-first-\(identifier)")
+                }
+                let dialogs = candidate.dialogs.allElementsBoundByIndex
+                let containers = dialogs.isEmpty ? candidate.windows.allElementsBoundByIndex : dialogs
+                for container in containers {
+                    let text = container.staticTexts.allElementsBoundByIndex.map {
+                        $0.label + " " + ($0.value as? String ?? "")
+                    }.joined(separator: "\n")
+                    guard text.localizedCaseInsensitiveContains("Jarvis"),
+                          text.localizedCaseInsensitiveContains(permission) else { continue }
+                    let allow = container.buttons.matching(NSPredicate(format: "label BEGINSWITH[c] 'Allow' OR label == 'OK'"))
+                    let opensSettings = permission == "screen" && container.buttons.matching(identifier: "Open System Settings").count == 1
+                    if allow.count == 1 || opensSettings { matches.append((identifier, container)) }
+                }
+            }
+            guard matches.count == 1 else { return false }
+            found = matches[0]
+            return true
+        }, object: nil)
+        let result = XCTWaiter.wait(for: [visible], timeout: 20)
+        attachRunningApplicationInventory()
+        for identifier in owners where !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty {
+            let candidate = XCUIApplication(bundleIdentifier: identifier)
+            print("permission=\(permission) owner=\(identifier) dialogs=\(candidate.dialogs.count) windows=\(candidate.windows.count)")
+            attachEvidence(candidate, name: "\(permission)-owner-final-\(identifier)")
+        }
+        guard result == .completed, let (identifier, dialog) = found else {
+            throw AcceptanceFailure("No unique system dialog identified Jarvis and the expected \(permission) permission")
+        }
+        let attachment = XCTAttachment(string: dialog.debugDescription)
+        attachment.name = "\(permission)-consent-container-\(identifier)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let text = dialog.staticTexts.allElementsBoundByIndex.map {
+            $0.label + " " + ($0.value as? String ?? "")
+        }.joined(separator: "\n")
+        print("permission=\(permission) owner=\(identifier) type=\(dialog.elementType.rawValue) matchedText=\(String(text.prefix(1500)))")
+        return dialog
     }
 
     private func attachRunningApplicationInventory() {
