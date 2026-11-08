@@ -16,6 +16,35 @@ import JarvisCore
     func blocks(_ turn: [String: Any]) -> [[String: Any]] { turn["content"] as? [[String: Any]] ?? [] }
     func types(_ turn: [String: Any]) -> [String] { blocks(turn).map { $0["type"] as? String ?? "?" } }
 
+    @Test func toolDeclarationsCarryGuidanceAndRemainStableAcrossHistory() throws {
+        let wire = MessagesWireFormat(model: "claude-opus-5", reasoningEffort: "low", maxOutputTokens: 2_048, stream: false)
+        let capabilities = CoachCapabilities.compose(
+            disabledTools: [], referencesAdmitted: true, skills: SkillCatalog.bundled())
+        let system = JarvisPrompts.Coach.system(capabilities: capabilities)
+        let call = RawToolCall(id: "load", name: "load_tool", argumentsJSON: "{}")
+        let histories: [[ChatMessage]] = [
+            [.user("first request")],
+            [.user("first request"), .assistantToolCalls([call]),
+             ChatMessage(role: .tool, text: "loaded guidance", toolCallId: "load"), .user("next request")],
+        ]
+        var declarations: [Data] = []
+        for history in histories {
+            let data = try wire.encode(messages: [.system(system)] + history,
+                                       tools: capabilities.tools, toolChoice: .required)
+            let payload = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let tools = try #require(payload["tools"] as? [[String: Any]])
+            let speak = try #require(tools.first { $0["name"] as? String == "speak" })
+            #expect(speak["description"] as? String == speakTool.description + "\n\n" + speakTool.guidance)
+            let capture = try #require(tools.first { $0["name"] as? String == "capture_screen" })
+            #expect(capture["description"] as? String == captureScreenTool.description + "\n\n" + captureScreenTool.guidance)
+            #expect(!tools.contains { $0["name"] as? String == "search_references" })
+            #expect(!system.contains(speakTool.guidance))
+            #expect(!system.contains(searchReferencesTool.guidance))
+            declarations.append(try JSONSerialization.data(withJSONObject: tools, options: [.sortedKeys]))
+        }
+        #expect(declarations[0] == declarations[1])
+    }
+
     @Test func metadataPrefixSurvivesChangingHistoryAndToolContinuations() throws {
         let catalog = #"Untrusted filenames: [{"documentID":"stable-id","sourceDisplayName":"notes.md"}]"#
         let call = RawToolCall(id: "read", name: "read_reference", argumentsJSON: "{}")
@@ -262,6 +291,7 @@ import JarvisCore
         #expect(exchange.instructions == "You are Jarvis.")
         #expect(exchange.toolNames == ["speak"])
         #expect(exchange.speakParameters == ["detail", "hint"])
+        #expect(exchange.speakDescription == "d")
         #expect(exchange.toolChoiceType == "auto")
         #expect(exchange.input.count == 5)
         #expect(exchange.inputFingerprints.count == exchange.input.count)

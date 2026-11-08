@@ -1959,7 +1959,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         #expect(await outcome == .spoke)
         #expect(brain.calls.count == 2)
-        #expect(brain.calls.last?.first?.text?.contains("# Detail") == true)
+        #expect(brain.declaredTools.last?.first { $0.name == "speak" }?
+            .declarationDescription.contains("# Supporting detail") == true)
         driver.updateTranscriptionWork(.settled, for: .them)
     }
 
@@ -1998,7 +1999,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         driver.updateTranscriptionWork(.settled, for: .them)
         #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
-        #expect(brain.calls.last?.first?.text?.contains("# Detail") == true)
+        #expect(brain.declaredTools.last?.first { $0.name == "speak" }?
+            .declarationDescription.contains("# Supporting detail") == true)
     }
 
     @Test func automaticManualHintAttemptDoesNotRecapture() async {
@@ -3102,19 +3104,22 @@ final class GatedBrain: BrainClient, @unchecked Sendable {
     private let lock = NSLock()
     private var _callCount = 0
     private var _calls: [[ChatMessage]] = []
+    private var _declaredTools: [[ToolDef]] = []
+    var declaredTools: [[ToolDef]] { lock.withLock { _declaredTools } }
     var callCount: Int { lock.lock(); defer { lock.unlock() }; return _callCount }
     var calls: [[ChatMessage]] { lock.withLock { _calls } }
-    private func record(_ messages: [ChatMessage]) -> Int {
+    private func record(_ messages: [ChatMessage], tools: [ToolDef]) -> Int {
         lock.lock(); defer { lock.unlock() }
         let index = _callCount
         _callCount += 1
         _calls.append(messages)
+        _declaredTools.append(tools)
         return index
     }
     init(gate: AsyncGate, response: BrainResponse) { self.gate = gate; self.script = [response] }
     init(gate: AsyncGate, script: [BrainResponse]) { self.gate = gate; self.script = script }
     func respond(messages: [ChatMessage], tools: [ToolDef], toolChoice: ToolChoice) async throws -> BrainResponse {
-        let index = record(messages)
+        let index = record(messages, tools: tools)
         await gate.enter()
         return script[min(index, script.count - 1)]
     }
@@ -3125,6 +3130,8 @@ final class GatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
     private let gate: AsyncGate
     private let lock = NSLock()
     private var recordedCalls: [[ChatMessage]] = []
+    private var recordedTools: [[ToolDef]] = []
+    var declaredTools: [[ToolDef]] { lock.withLock { recordedTools } }
     var calls: [[ChatMessage]] { lock.withLock { recordedCalls } }
 
     init(gate: AsyncGate) { self.gate = gate }
@@ -3133,6 +3140,7 @@ final class GatedFailureThenSpeakingBrain: BrainClient, @unchecked Sendable {
                  toolChoice: ToolChoice) async throws -> BrainResponse {
         let index = lock.withLock {
             recordedCalls.append(messages)
+            recordedTools.append(tools)
             return recordedCalls.count - 1
         }
         if index == 0 {

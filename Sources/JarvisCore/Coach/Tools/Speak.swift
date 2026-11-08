@@ -4,58 +4,35 @@ public let speakToolName = "speak"
 
 public let speakTool = ToolDef(
     name: speakToolName,
-    description: "Show one direct coaching hint in at most 36 words total. "
-        + "Call only when a reply is useful. Use detail for Markdown content required by a "
-        + "loaded skill or a warranted explanation; otherwise null.",
-    // Line breaks and the indentation after them are stripped, so no JSON string here may
-    // contain a line break.
+    description: "Show one direct reply to the user in the private overlay. Keep hint within 36 words "
+        + "total; detail is optional Markdown shown underneath, not an audio response.",
     parametersJSON: #"""
         {"type":"object","properties":{
-            "hint":{"type":"string","description":"One direct, connected coaching hint; the box handles wrapping."},
-            "detail":{"type":["string","null"],"description":"Markdown shown under the hint in the box. Follow loaded skill guidance; otherwise null unless an explanation is warranted."}
+            "hint":{"type":"string","description":"One brief, direct, connected reply; the overlay handles wrapping."},
+            "detail":{"type":["string","null"],"description":"Markdown shown under the hint for requested content that cannot fit there, supporting content required by a loaded skill, or a warranted explanation; otherwise null."}
         },"required":["hint","detail"],"additionalProperties":false}
         """#.replacingOccurrences(of: #"\n\s*"#, with: "", options: .regularExpression),
-    guidance: tipStyle + "\n\n" + detailGuidance)
+    guidance: """
+        # Reply style
+        Lead with the most useful point. Use brief, concrete, connected sentences in familiar language.
+        Answer the user's current request directly; follow loaded skills for task-specific delivery.
+        For unsolicited help, offer one useful cue or next move that builds on what the user is doing.
+        Use words and names already established in the conversation or visible evidence. Explain an
+        unfamiliar term or symbol on first use when needed; accuracy takes priority over brevity.
 
-private let tipStyle = """
-    # Tip style
-    Lead with the most useful point. Be brief, concrete, encouraging, and easy to read and
-    understand under pressure. Connect related sentences naturally.
-
-    Follow a loaded skill's stage-specific delivery guidance when it applies. Otherwise:
-    If "me" has not yet engaged with an approach — no attempt visible in the code, speech, or
-    notes — lead with orientation, not a step. If the question itself is long or dense, spend
-    the first tip entirely on its meaning: what is given, what the output is, and what each rule
-    or case decides — as if paraphrasing it to someone who has not read the prompt. Say nothing
-    yet about how to detect, parse, or scan for those cases; that is strategy, not meaning, and
-    belongs in a later tip. A misread question makes any strategy worthless, and the overlay is
-    too short to do both at once. Once "me" has that restatement (from an earlier tip or their own
-    words), the next tip can name one viable overall strategy. A "next step" means nothing without
-    a plan to hang it on. Once an approach is underway, prefer one pointed question or next step
-    that builds on it.
-    Give a full solution only when "me" explicitly asks for it.
-
-    Name things with the words already in front of "me" — on the captured screen, or in what
-    either speaker said. Do not use an unfamiliar term as if it were shared. When a new term or
-    symbol genuinely is the right one, gloss it on first use ("1<<h, that is 2 to the power h");
-    accuracy outranks brevity.
-    """
-
-private let detailGuidance = """
-    # Detail
-    The hint is the coaching. Keep its brief rationale there. Include detail when a
-    loaded skill calls for supporting content or an explanation is warranted; otherwise leave it null.
-    detail is Markdown shown under the hint in the persistent box. Use it for supporting content
-    beyond the hint that a loaded skill asks for, on that skill's own terms for when it applies.
-    Beyond that, write prose there only when the user asks you to explain, or is clearly lost:
-    they ask why, they restate something wrongly, or
-    they say they can't follow earlier advice. Silence or unchanged work is not confusion, and you
-    hear transcripts, not tone.
-    When you do explain, keep it to what the gap needs: why it works, a tiny example when it helps,
-    and one next action. If an earlier explanation didn't land, simplify or use a smaller example
-    instead of repeating it.
-    Never invent personal experience or screen details you haven't seen.
-    """
+        # Supporting detail
+        The short hint must stand on its own, including its brief rationale. Use detail for requested
+        content that cannot fit in the short hint, supporting content required by a loaded skill, or a
+        warranted explanation; otherwise set it to null. Put a concise answer or summary in hint and
+        the requested content in detail. Follow the user's requested format.
+        An explanation is warranted when the user asks for one or shows a specific understanding gap:
+        they ask why, restate something incorrectly, or say they cannot follow. Silence or unchanged
+        work alone does not establish confusion.
+        When explaining, address that gap with the necessary reason, a tiny example when useful, and
+        one next action. If an earlier explanation did not help, simplify or change the example.
+        Do not invent personal experience or screen details.
+        """
+)
 
 extension JarvisPrompts.Coach {
     static func tipShown(dropped: [String] = []) -> String {

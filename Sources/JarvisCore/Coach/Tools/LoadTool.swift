@@ -6,9 +6,9 @@ extension CoachCapabilities {
     static func loadTool(catalogNames: [String]) -> ToolDef {
         ToolDef(
             name: loadToolName,
-            description: "Load a tool listed under 'Tools you can load'. Returns its "
-                + "arguments schema and usage guidance. Call it once per session for each tool, "
-                + "before its first use; after that, use call_tool.",
+            description: "Load the schema and usage guidance for one tool in Available additional tools. "
+                + "Load each tool once per session before its first use, then use call_tool. "
+                + "Earlier load results remain available in the conversation.",
             parametersJSON: loaderParametersJSON(catalogNames: catalogNames))
     }
 }

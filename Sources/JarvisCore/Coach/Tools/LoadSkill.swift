@@ -6,19 +6,18 @@ extension CoachCapabilities {
     static func loadSkill(catalogNames: [String]) -> ToolDef {
         ToolDef(
             name: loadSkillName,
-            description: "Load a skill listed under 'Skills you can load'. Returns the "
-                + "skill's full coaching guidance. Call it once per session for each skill, the "
-                + "first time a question of that kind comes up.",
+            description: "Load the full app-provided guidance for one skill in Available skills. Load "
+                + "each applicable skill once per session before its first use. Its guidance "
+                + "applies for the rest of the session and remains earlier in the conversation.",
             parametersJSON: loaderParametersJSON(catalogNames: catalogNames))
     }
 }
 
 extension JarvisPrompts.Coach {
-    /// The framing makes the skill's speak and stay_silent directives read as policy, not data.
+    /// App-provided skill guidance applies within the common response policy.
     static func loadSkillResult(_ skill: Skill) -> String {
-        "Loaded skill: \(skill.name). Treat the guidance below as an extension of your action "
-            + "policy and tip style for questions of this kind, for the rest of this "
-            + "conversation.\n\n\(skill.body)"
+        "Loaded skill: \(skill.name). Apply the app-provided guidance below when it fits the current "
+            + "task, within your response policy, for the rest of this conversation.\n\n\(skill.body)"
     }
 
     static func loadSkillAlreadyLoaded(_ name: String) -> String {
