@@ -241,13 +241,35 @@ final class ReleaseAcceptanceTests: XCTestCase {
         let settings = XCUIApplication(bundleIdentifier: "com.apple.systempreferences")
         XCTAssertTrue(settings.wait(for: .runningForeground, timeout: 15), "Permission action must open System Settings")
         attachEvidence(settings, name: "system-screen-recording-settings")
-        let toggle = settings.switches["Jarvis"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 10), "System Settings must expose the candidate's recording toggle")
+        let panes = settings.scrollViews.containing(.staticText, identifier: "Screen & System Audio Recording")
+        defer {
+            let description = panes.count == 1 ? panes.element.debugDescription : settings.debugDescription
+            print("System Settings recording controls:\n\(String(description.suffix(16000)))")
+            attachEvidence(settings, name: "system-screen-recording-settings-final")
+        }
+        XCTAssertTrue(panes.firstMatch.waitForExistence(timeout: 10), "The recording privacy pane must load")
+        XCTAssertEqual(panes.count, 1, "The recording privacy pane must be unambiguous")
+        let pane = panes.element
+        let screenHeading = pane.staticTexts["Screen & System Audio Recording"]
+        let audioOnlyHeading = pane.staticTexts["System Audio Recording Only"]
+        XCTAssertTrue(audioOnlyHeading.waitForExistence(timeout: 10))
+        XCTAssertGreaterThan(screenHeading.frame.height, 0)
+        XCTAssertGreaterThan(audioOnlyHeading.frame.minY, screenHeading.frame.maxY)
+        let sections = pane.outlines.containing(.switch, identifier: "Jarvis_Toggle").allElementsBoundByIndex.filter {
+            let frame = $0.frame
+            return frame.height > 0 && frame.minY >= screenHeading.frame.maxY && frame.maxY <= audioOnlyHeading.frame.minY
+        }
+        XCTAssertEqual(sections.count, 1, "Exactly one Jarvis outline must belong to the screen-recording section")
+        let section = try XCTUnwrap(sections.first)
+        XCTAssertEqual(section.staticTexts["Jarvis_Title"].value as? String, "Jarvis")
+        XCTAssertEqual(section.switches.matching(identifier: "Jarvis_Toggle").count, 1)
+        let toggle = section.switches["Jarvis_Toggle"]
         if toggle.value as? String != "1" { toggle.click() }
         let confirm = settings.buttons["Quit & Reopen"]
         let relaunches = confirm.waitForExistence(timeout: 5)
         if relaunches { confirm.click() }
-        XCTAssertEqual(toggle.value as? String, "1", "Screen-recording grant must be enabled")
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '1'"), object: toggle)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed, "Screen-recording grant must be enabled")
         return relaunches
     }
 
