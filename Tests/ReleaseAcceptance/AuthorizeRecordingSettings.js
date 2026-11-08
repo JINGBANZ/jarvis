@@ -14,7 +14,16 @@ function run() {
         recognizedText: false
     };
     const receipt = authorized => JSON.stringify({authorized, stage, diagnostics});
+    let lastProgress = null;
+    function publish(authorized = false) {
+        const value = receipt(authorized);
+        if (value !== lastProgress) {
+            $.NSFileHandle.fileHandleWithStandardOutput.writeData($(value + "\n").dataUsingEncoding($.NSUTF8StringEncoding));
+            lastProgress = value;
+        }
+    }
     try {
+        publish();
         const input = $.NSFileHandle.fileHandleWithStandardInput.readDataToEndOfFile;
         const credentials = JSON.parse(ObjC.unwrap($.NSString.alloc.initWithDataEncoding(input, $.NSUTF8StringEncoding)));
         if (Object.keys(credentials).sort().join(",") !== "password,username"
@@ -23,9 +32,18 @@ function run() {
             || !/^[A-Za-z0-9_-]{32,128}$/.test(credentials.password)) {
             return receipt(false);
         }
-        const events = Application("System Events");
+        const environment = $.NSProcessInfo.processInfo.environment;
+        if (ObjC.unwrap(environment.objectForKey("GITHUB_ACTIONS")) !== "true"
+            || ObjC.unwrap(environment.objectForKey("RUNNER_ENVIRONMENT")) !== "github-hosted"
+            || ObjC.unwrap($.NSUserName()) !== "runner"
+            || ObjC.unwrap($.NSHomeDirectory()) !== "/Users/runner") {
+            return receipt(false);
+        }
         stage = "accessibility";
+        publish();
+        const events = Application("System Events");
         diagnostics.uiElementsEnabled = events.uiElementsEnabled() === true;
+        publish();
         if (!diagnostics.uiElementsEnabled) { return receipt(false); }
 
         function attribute(element, name) {
@@ -68,15 +86,28 @@ function run() {
         const owner = "com.apple.LocalAuthenticationRemoteService";
         let form = null;
         let hydrationDeadline = null;
+        stage = "owner";
+        publish();
         while (Date.now() < deadline && form === null) {
-            stage = "owner";
             const processes = events.processes.whose({bundleIdentifier: owner})();
             diagnostics.processCount = Math.min(processes.length, 256);
+            if (processes.length === 0) {
+                stage = "owner";
+                Object.assign(diagnostics, {windowCount: 0, usernameCount: 0, secureCount: 0,
+                    modifySettingsCount: 0, recognizedHeading: false, recognizedText: false});
+            }
+            publish();
             if (processes.length > 1) { return receipt(false); }
             if (processes.length === 1) {
-                stage = "form";
+                if (stage === "owner") { stage = "form"; publish(); }
                 const windows = processes[0].windows();
                 diagnostics.windowCount = Math.min(windows.length, 256);
+                if (windows.length === 0) {
+                    stage = "form";
+                    Object.assign(diagnostics, {usernameCount: 0, secureCount: 0,
+                        modifySettingsCount: 0, recognizedHeading: false, recognizedText: false});
+                }
+                publish();
                 if (windows.length > 256) { return receipt(false); }
                 if (windows.length > 0 && hydrationDeadline === null) { hydrationDeadline = Date.now() + 10000; }
                 const inspected = windows.map(inspect);
@@ -90,6 +121,7 @@ function run() {
                     if (diagnostics.recognizedHeading && diagnostics.recognizedText) { stage = "fields"; }
                 }
                 if (matches.length === 1) { form = matches[0].form; }
+                publish();
             }
             if (form === null && hydrationDeadline !== null && Date.now() >= hydrationDeadline) { return receipt(false); }
             if (form === null) { $.NSThread.sleepForTimeInterval(0.25); }
@@ -98,12 +130,14 @@ function run() {
 
         function fill(field, value) {
             stage = "fill";
+            publish();
             const attribute = field.attributes.byName("AXValue");
             if (attribute.exists() && attribute.settable()) {
                 attribute.value = value;
                 return;
             }
             stage = "clipboard";
+            publish();
             const clipboard = $.NSPasteboard.generalPasteboard;
             const saved = [];
             const items = clipboard.pasteboardItems;
@@ -134,18 +168,22 @@ function run() {
         fill(form.username, credentials.username);
         fill(form.secure, credentials.password);
         stage = "submit";
+        publish();
         events.click(form.modify);
         stage = "dismiss";
+        publish();
         const dismissalDeadline = Date.now() + 15000;
         while (Date.now() < dismissalDeadline) {
             if (!form.window.exists()) {
                 stage = "complete";
+                publish(true);
                 return receipt(true);
             }
             $.NSThread.sleepForTimeInterval(0.25);
         }
         return receipt(false);
     } catch (_) {
+        publish();
         return receipt(false);
     }
 }

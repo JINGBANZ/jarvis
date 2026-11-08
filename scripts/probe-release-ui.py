@@ -49,6 +49,16 @@ def validate_authorization_receipt(output):
     return receipt
 
 
+def validate_authorization_progress(output):
+    if not isinstance(output, str) or len(output.encode("utf-8")) > 65_536:
+        raise ValueError("Invalid native-authorization progress size")
+    lines = output.splitlines()
+    if not 1 <= len(lines) <= 128:
+        raise ValueError("Invalid native-authorization progress count")
+    receipts = [validate_authorization_receipt(line) for line in lines]
+    return receipts[-1]
+
+
 def stop_authorization(process):
     if process.poll() is None:
         process.terminate()
@@ -83,18 +93,22 @@ def start_authorization():
 
 
 def collect_authorization(process, evidence, *, required):
+    was_running = process.poll() is None
+    timed_out = False
     try:
         if not required:
             stop_authorization(process)
-        output, _ = process.communicate(timeout=10)
+        output, errors = process.communicate(timeout=10)
     except subprocess.TimeoutExpired:
+        timed_out = True
         stop_authorization(process)
-        process.communicate(timeout=5)
-        if required:
-            raise ValueError("Native-authorization helper did not finish") from None
-        return
+        output, errors = process.communicate(timeout=5)
+    status = {"wasRunning": was_running, "returnCode": process.returncode, "timedOut": timed_out,
+              "stdoutBytes": len(output.encode("utf-8")), "stderrBytes": len(errors.encode("utf-8"))}
+    (evidence / "authorization-process.json").write_text(json.dumps(status, indent=2) + "\n")
+    print("Native authorization process: " + json.dumps(status, sort_keys=True), flush=True)
     try:
-        receipt = validate_authorization_receipt(output)
+        receipt = validate_authorization_progress(output)
     except ValueError:
         if required:
             raise
@@ -102,6 +116,8 @@ def collect_authorization(process, evidence, *, required):
         return
     (evidence / "authorization.json").write_text(json.dumps(receipt, indent=2) + "\n")
     print("Native authorization: " + json.dumps(receipt, sort_keys=True), flush=True)
+    if required and timed_out:
+        raise ValueError("Native-authorization helper did not finish")
     if required and (process.returncode != 0 or not receipt["authorized"]):
         raise ValueError("Native recording authorization failed at stage " + receipt["stage"])
 

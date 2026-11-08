@@ -72,12 +72,48 @@ class NativeAuthorizationTests(unittest.TestCase):
     def test_unsuccessful_native_authorization_cannot_pass_and_raw_errors_are_private(self):
         failed = self.receipt(authorized=False, stage="fields")
         process = mock.Mock(returncode=0)
+        process.poll.return_value = 0
         process.communicate.return_value = (json.dumps(failed), "private credential in raw stderr")
         with tempfile.TemporaryDirectory() as temporary, contextlib.redirect_stdout(io.StringIO()) as output:
             with self.assertRaisesRegex(ValueError, "failed at stage fields"):
                 PROBE["collect_authorization"](process, Path(temporary), required=True)
             self.assertNotIn("private credential", output.getvalue())
             self.assertEqual(json.loads((Path(temporary) / "authorization.json").read_text()), failed)
+
+    def test_progress_requires_every_line_to_be_safe_and_uses_latest_receipt(self):
+        early = self.receipt(authorized=False, stage="owner")
+        complete = self.receipt()
+        progress = json.dumps(early) + "\n" + json.dumps(complete) + "\n"
+        self.assertEqual(PROBE["validate_authorization_progress"](progress), complete)
+        for invalid in ("", "private\n" + progress, progress + "\n", progress * 65, " " * 65_537):
+            with self.subTest(length=len(invalid)), self.assertRaises(ValueError):
+                PROBE["validate_authorization_progress"](invalid)
+
+    def test_failed_ui_collects_progress_and_process_scalars_without_raw_output(self):
+        progress = self.receipt(authorized=False, stage="form")
+        process = mock.Mock(returncode=-15)
+        process.poll.return_value = None
+        process.communicate.return_value = (json.dumps(progress) + "\n", "private native error")
+        with tempfile.TemporaryDirectory() as temporary, contextlib.redirect_stdout(io.StringIO()) as output:
+            PROBE["collect_authorization"](process, Path(temporary), required=False)
+            process.terminate.assert_called_once()
+            status = json.loads((Path(temporary) / "authorization-process.json").read_text())
+            self.assertEqual(status, {"wasRunning": True, "returnCode": -15, "timedOut": False,
+                                      "stdoutBytes": len(json.dumps(progress)) + 1,
+                                      "stderrBytes": len("private native error")})
+            self.assertNotIn("private native error", output.getvalue())
+            self.assertEqual(json.loads((Path(temporary) / "authorization.json").read_text()), progress)
+
+    def test_runtime_failure_keeps_raw_output_out_of_logs_and_artifacts(self):
+        process = mock.Mock(returncode=1)
+        process.poll.return_value = 1
+        process.communicate.return_value = ("private output", "private error")
+        with tempfile.TemporaryDirectory() as temporary, contextlib.redirect_stdout(io.StringIO()) as output:
+            PROBE["collect_authorization"](process, Path(temporary), required=False)
+            self.assertFalse((Path(temporary) / "authorization.json").exists())
+            self.assertEqual(len(list(Path(temporary).iterdir())), 1)
+            self.assertNotIn("private output", output.getvalue())
+            self.assertNotIn("private error", output.getvalue())
 
     def test_password_reaches_only_helper_stdin(self):
         record = {"username": "jarvisacceptance", "password": "private-test-password-" * 2,
