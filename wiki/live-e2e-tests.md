@@ -96,7 +96,6 @@ Product modules expose the interfaces exercised by the harness and do not import
 | `Sources/JarvisApp/Testing/` | Debug-only signed-app adapters and explicit native harness modes requiring app composition or macOS frameworks. |
 | `Tests/JarvisScenarioHarnessTests/` | Offline verification of the shared harness; included in the Gate with synthetic dependencies. |
 | `Tests/JarvisLiveTests/` | Real-provider and signed-app test entry points, the suite catalog, scenarios, and fixtures; excluded from Gate execution. |
-| `Tests/ReleaseAcceptance/` | External XCTest UI runner for the installed production app and a standalone virtual-audio probe; neither is a product dependency or shipped app mode. |
 
 `EvaluationSuiteRunner` in
 [`Execution/`](../Tests/Support/ScenarioHarness/Execution/EvaluationSuiteRunner.swift) owns provider
@@ -124,24 +123,6 @@ remain beside the product target they verify.
 The transcription benchmark retains its own capture instrumentation and scoring contract described
 in [transcription-benchmark.md](./transcription-benchmark.md). It is not an alternate entry point for
 coaching regression suites.
-
-The external installed-app probe requires full Xcode and uses a standalone UI-test project because
-SwiftPM cannot host XCUIAutomation. It launches the installed production bundle with ordinary launch arguments
-and drives onboarding, Settings, Skills, and Quit. Profile mutation is restricted to the disposable
-GitHub-hosted runner account. Its provider-credential-free permission case supplies a clearly invalid stored
-key only to reach the permission step; it neither starts a provider session nor establishes
-credential validity. `scripts/probe-release-ui.py` requires every declared case to pass and rejects
-missing or skipped results. A separate direct-HAL loopback check establishes that the virtual audio
-device carries a known signal; it does not establish the app's capture, echo cancellation, or speech
-recognition. The branch-scoped feasibility workflow runs both checks automatically on native Apple
-silicon and Intel. Recording authorization uses a separate temporary administrator created inside
-that VM. Its random password stays in an owner-only file outside uploaded evidence. The shell-owned
-System Events helper receives it through private stdin, operates only the native authorization form,
-and emits a validated scalar receipt; XCTest separately verifies the enabled recording grant and
-completed onboarding. The driver owns and reaps the helper, and the workflow removes the
-identity-checked account and credential file; it leaves the existing runner account unchanged.
-A timeout fails the job; final cleanup of a wedged test runner belongs to the disposable VM teardown.
-This probe does not replace final signed-candidate release verification.
 
 ## Evaluation suites
 
@@ -612,7 +593,7 @@ to run it and what to confirm. A pull request that changes one of these areas ru
 it as unverified in its description.
 
 - **Onboarding walk (F03),** when onboarding, its key check, or its permission probes change, because
-  the signed scenario runner does not drive the operating system's consent UI. Reset as
+  macOS does not let automation click its own permission dialogs. Reset as
   [build-and-run.md → Packaging & signing](./build-and-run.md#packaging--signing--why-permission-grants-persist)
   describes, then walk both steps against [architecture.md → Onboarding](./architecture.md#onboarding)
   and [Permissions](./architecture.md#permissions).

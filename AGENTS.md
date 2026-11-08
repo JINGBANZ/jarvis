@@ -151,8 +151,7 @@ Foundation-only product logic in `JarvisCore`; keep AppKit, audio, capture, and 
 
 ## Gotchas
 
-- The Gate and the live e2e tests need only the Command Line Tools; the app has no Xcode project.
-  The separate release-acceptance UI-test project requires full Xcode on its hosted runner.
+- The Gate and the live e2e tests need only the Command Line Tools; no Xcode project exists.
   Developer desktops also have full Xcode and the Xcode MCP; see `wiki/build-and-run.md#toolchain`.
   SwiftPM downloads the checksum-pinned universal AEC library on both Intel and Apple silicon.
 - Launch the signed app through `./scripts/build-app.sh --run` / `open`, never the bare executable.

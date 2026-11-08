@@ -64,12 +64,10 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `scripts/test-proxy-privacy.sh`: the bundled-helper egress check ([build-and-run.md](./build-and-run.md)).
 - `scripts/build-app.sh` + `scripts/lib/cliproxyapi.sh`: the local `Jarvis Dev.app` build and the pinned subscription helper both app builds bundle ([build-and-run.md](./build-and-run.md)).
 - `.github/workflows/` + `scripts/package-app.sh`: CI, agent automation, and the signed, notarized release pipeline ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci), [sandbox.md → Repository automation](./sandbox.md#repository-automation)).
-- `scripts/verify-packaged-resources.py` + `scripts/test-packaged-resources.py`: static packaged-resource verification and its regression checks ([build-and-run.md → Packaged installation verification](./build-and-run.md#packaged-installation-verification)).
 - `AGENTS.md` + `.github/workflows/sync-shared-rules.yml`: agent guidance whose shared-rules block syncs weekly from `JINGBANZ/rules`.
 
 ## Not yet built
 
-- **Installed-candidate release acceptance gate** — automation and publication enforcement for the [fresh-install and upgrade capture check](./build-and-run.md#packaged-installation-verification).
 - **Neural double-talk canceller** (DTLN / Muesli-style on the same aligned streams) — the escalation if AEC3 over-attenuates the user under loud far audio in practice.
 - **Gemini Live session resumption** (`sessionResumptionUpdate`) — `GeminiLiveTranscriber` drains and
   rotates ahead of the ~10-minute `goAway` close ([architecture.md → Resilience](./architecture.md#resilience)),

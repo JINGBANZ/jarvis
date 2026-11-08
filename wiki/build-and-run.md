@@ -12,8 +12,7 @@ ScreenCaptureKit, AVFoundation, AppKit, SwiftUI, Vision, CoreAudio, and Security
 needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`.
 
 The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Line Tools;
-the app has no Xcode project. The external release-acceptance UI-test project requires full Xcode.
-CI uses the hosted runners' selected Xcode toolchains. Developer desktops
+no Xcode project exists. CI uses the hosted runners' selected Xcode toolchains. Developer desktops
 also have full Xcode and the Xcode MCP,
 whose macOS workflow builds, launches, stops, and reads logs, so an agent may drive the app that way;
 the scripts use `open`. The [live-test prerequisites](./live-e2e-tests.md#prerequisites-and-standing-conditions) depend on
@@ -120,14 +119,11 @@ must retain their exact bytes. Verify a clean SwiftPM download and native AEC sm
 and Apple silicon before accepting a dependency update.
 
 CI runs the resolved AEC module's create/process/destroy smoke tests on each native test runner.
-The Intel Gate runs subscription-helper privacy checks natively; the universal release
+The Intel Gate runs subscription-helper privacy checks natively; the unsigned universal release
 build runs them against its bundled helper on Apple silicon, reusing that build's executable.
 The universal build also checks every shipped executable's architectures and linked SDK.
-An ad-hoc-signed archive of that one assembled app is transferred to native Apple silicon and Intel
-runners for [static resource verification](#packaged-installation-verification); neither runner
-rebuilds or launches the candidate during this check. The source tests establish offline runtime
-coverage; the package checks establish artifact integrity. Installed-app capture, permissions, and
-live transcription require the same signed-app validation on Intel and Apple silicon.
+These checks establish compilation and test coverage; capture, permissions, and live transcription
+on physical Intel hardware use the same signed-app validation as Apple silicon.
 
 ## Packaging & signing — why permission grants persist
 
@@ -387,9 +383,7 @@ Applications target position. Release verification also checks the Applications 
 version, universal architectures in every shipped executable, the subscription helper and its license,
 native References helper with debug fault mode excluded, linked macOS 26-or-newer
 SDK in both app slices, notices, strict code signature, and
-Gatekeeper policy result, then checks the model and skill resources in the mounted app against the
-checkout inputs before detaching the image. Only complete success writes the portable DMG checksum
-receipt. The same SDK guard runs immediately after the
+Gatekeeper policy result before detaching the image. The same SDK guard runs immediately after the
 release build, before signing or notarization; the pre-container app is not accepted as a proxy for
 the downloaded artifact.
 
@@ -403,11 +397,8 @@ draft makes the next release-please run miss the previous release and garble the
 `macos-26` job then runs the test gate and installs the hash-pinned pure-Python wheels in
 `scripts/requirements-release.txt` into an ephemeral environment, and signs/notarizes with secrets
 scoped to the main-only `release` environment (the base64 `.p12` certificate and an App Store Connect
-API key — names in the workflow). The build signs the `appcast.xml` update feed described below and
-uploads the final DMG, its checksum receipt, and the feed as one workflow candidate. Native Apple
-silicon and Intel jobs download that candidate, require the recorded checksum, and repeat final-DMG
-verification. Publication depends on both jobs succeeding, downloads the same candidate, checks its
-checksum again, and attaches only `Jarvis.dmg` and `appcast.xml` before publishing. The
+API key — names in the workflow). It attaches `Jarvis.dmg` and the `appcast.xml` update feed described
+below, rejects any other asset, then publishes the Release. The
 stable installation block in
 `.github/release-header.md` links directly to that tag's DMG and explains the in-window drag to
 Applications; GitHub still supplies its automatic source archives. A failed sign, notarization, or
@@ -424,38 +415,6 @@ tags created with `GITHUB_TOKEN` never trigger other workflows.
 later and run natively on Apple silicon and Intel. Packaging resolves the pinned universal AEC
 dependency, compiles both app architectures, then validates the assembled bundle before signing. The README owns the user
 installation steps; provider credentials remain user-supplied in Settings.
-
-### Packaged installation verification
-
-[`verify-packaged-resources.py`](../scripts/verify-packaged-resources.py) reads an assembled app and
-compares its model and skill resource trees with the same checkout's SwiftPM `.copy` inputs. It checks
-relative paths and file digests, rejects symbolic links and ambiguous layouts, and accepts the flat
-and standard nested resource bundles SwiftPM produces. Missing, modified, or extra resources fail the
-check. The candidate is never modified or launched; this is packaging evidence, without a shipped
-verification mode or a model-inference claim.
-
-Production lookup uses
-[`JarvisResourceBundle`](../Sources/JarvisCore/Config/JarvisResourceBundle.swift), which confines an
-installed app's resource search to its own bundle. The Core tests in
-[`InstalledSkillCatalogTests`](../Tests/JarvisCoreTests/Config/InstalledSkillCatalogTests.swift) cover
-both bundle layouts and ensure neighboring bundles or the source checkout cannot rescue missing
-installed resources. [`test-packaged-resources.py`](../scripts/test-packaged-resources.py) runs static
-fixtures in the Gate, including missing and corrupt models, missing skills, altered bytes, and
-symlinks. PR CI checks one transferred universal candidate on both runners; release verification
-checks the exact final signed DMG on both. These static checks do not prove native app execution.
-
-Release acceptance requires automatic CI validation of the installed candidate through the normal
-app UI: a fresh install and a supported upgrade preserving settings must Start, recognize speech,
-display a hint, Stop, and Start again. The required coverage includes client-side and server-side
-speech detection on native Apple silicon and Intel, with evidence tied to the candidate checksum,
-architecture, and OS. The external UI runner under
-[`Tests/ReleaseAcceptance/`](../Tests/ReleaseAcceptance/) exercises ordinary installed-app launch and
-permission setup. The full journey remains unproven and is not yet integrated into the release
-workflow: it can currently publish after the offline checks pass without fresh-install or upgrade
-proof. Closing that publication gap is required before the release-acceptance change is ready.
-Static resource verification does not establish model inference, TCC, physical capture, provider
-availability, or coaching quality; the
-[debug live scenarios](./live-e2e-tests.md) remain separate evidence.
 
 ## In-app updates — Sparkle over the release feed
 

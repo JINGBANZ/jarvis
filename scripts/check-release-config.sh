@@ -17,22 +17,12 @@ package_guard_call="./scripts/check-release-sdk.sh \"\$BIN_PATH\""
 verify_guard_call="./scripts/check-release-sdk.sh \"\$EXTRACTED_BIN\""
 
 for path in "$workflow" "$ci_workflow" "$release_header" "$package_script" "$verify_script" \
-    "$bundle_script" "$sdk_guard" "$dmg_settings" "$dmg_layout_guard" "$release_requirements" "$appcast_script" \
-    scripts/verify-packaged-resources.py scripts/test-packaged-resources.py; do
+    "$bundle_script" "$sdk_guard" "$dmg_settings" "$dmg_layout_guard" "$release_requirements" "$appcast_script"; do
   if [[ ! -f "$path" || -L "$path" ]]; then
     echo "Release configuration guard: $path must be a regular file." >&2
     exit 1
   fi
 done
-
-if ! /usr/bin/grep -Fq 'python3 scripts/verify-packaged-resources.py "$EXTRACTED_APP"' "$verify_script" \
-    || ! /usr/bin/grep -Fq 'needs: [release-please, build, verify-installation]' "$workflow" \
-    || ! /usr/bin/grep -Fq 'run: shasum -a 256 -c Jarvis.dmg.verified.sha256' "$workflow" \
-    || ! /usr/bin/grep -Fq 'needs: [gate, universal-app, installation]' "$ci_workflow" \
-    || ! /usr/bin/grep -Fq 'python3 scripts/verify-packaged-resources.py' "$ci_workflow"; then
-  echo "Release and CI must check packaged resources and preserve verified DMG bytes." >&2
-  exit 1
-fi
 
 if ! /usr/bin/grep -Eq '^[[:space:]]*runs-on:[[:space:]]*macos-26[[:space:]]*$' "$workflow"; then
   echo "Release publish job must use the Apple-silicon macos-26 runner." >&2
@@ -175,7 +165,7 @@ for flow_step in "${package_flow[@]}"; do
   fi
   previous_flow_line="$flow_line"
 done
-if ! /usr/bin/grep -Fq 'hdiutil attach "$VERIFY_DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT"' \
+if ! /usr/bin/grep -Fq 'hdiutil attach "$DMG" -readonly -nobrowse -mountpoint "$MOUNT_POINT"' \
       "$verify_script" \
     || ! /usr/bin/grep -Fq '"$(readlink "$APPLICATIONS_LINK")" != "/Applications"' \
       "$verify_script" \
