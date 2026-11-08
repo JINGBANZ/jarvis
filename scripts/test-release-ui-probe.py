@@ -62,6 +62,7 @@ class NativeAuthorizationTests(unittest.TestCase):
             "recognizedHeading": True, "recognizedText": True,
             "focusAvailable": True, "focusIsSecureField": True,
             "focusOwnerIsAuthenticationAgent": True, "focusOwnerIsSystemSettings": False,
+            "focusOwnerIsSecurityPrivacyExtension": False,
             "focusOwnerPID": 12345, "focusError": 0,
         }}
 
@@ -78,6 +79,7 @@ class NativeAuthorizationTests(unittest.TestCase):
                             {"diagnostics": {**receipt["diagnostics"], "focusIsSecureField": False}},
                             {"diagnostics": {**receipt["diagnostics"], "focusOwnerIsAuthenticationAgent": False}},
                             {"diagnostics": {**receipt["diagnostics"], "focusOwnerIsSystemSettings": True}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusOwnerIsSecurityPrivacyExtension": True}},
                             {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": 2_147_483_648}},
                             {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": True}},
                             {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": 0}},
@@ -85,6 +87,13 @@ class NativeAuthorizationTests(unittest.TestCase):
                             {"diagnostics": {**receipt["diagnostics"], "uiElementsEnabled": False}}):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):
                 PROBE["validate_authorization_receipt"](json.dumps({**receipt, **replacement}))
+
+    def test_completion_requires_exactly_one_verified_native_owner(self):
+        for owner in PROBE["FOCUS_OWNER_FLAGS"]:
+            with self.subTest(owner=owner):
+                receipt = self.receipt()
+                receipt["diagnostics"].update({key: key == owner for key in PROBE["FOCUS_OWNER_FLAGS"]})
+                self.assertEqual(PROBE["validate_authorization_receipt"](json.dumps(receipt)), receipt)
 
     def test_unsuccessful_native_authorization_cannot_pass_and_raw_errors_are_private(self):
         failed = self.receipt(authorized=False, stage="fields")

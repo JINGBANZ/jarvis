@@ -7,7 +7,8 @@ function run() {
         processCount: 0, formCount: 0, usernameCount: 0, secureCount: 0, modifySettingsCount: 0,
         uiElementsEnabled: false, recognizedHeading: false, recognizedText: false,
         focusAvailable: false, focusIsSecureField: false, focusOwnerIsAuthenticationAgent: false,
-        focusOwnerIsSystemSettings: false, focusOwnerPID: 0, focusError: 0
+        focusOwnerIsSystemSettings: false, focusOwnerIsSecurityPrivacyExtension: false,
+        focusOwnerPID: 0, focusError: 0
     };
     const receipt = authorized => JSON.stringify({authorized, stage, diagnostics});
     let lastProgress = null;
@@ -48,6 +49,7 @@ function run() {
         publish();
         if (!diagnostics.uiElementsEnabled) { return receipt(false); }
         ObjC.import("ApplicationServices");
+        ObjC.import("Security");
         // Automatic metadata exposes copied CF attributes as opaque pointers; AX references are toll-free objects.
         ObjC.bindFunction("AXUIElementCreateSystemWide", ["id", []]);
         ObjC.bindFunction("AXUIElementCopyAttributeValue", ["int", ["id", "id", "id *"]]);
@@ -57,9 +59,20 @@ function run() {
         ObjC.bindFunction("AXUIElementSetAttributeValue", ["int", ["id", "id", "id"]]);
         ObjC.bindFunction("AXUIElementPerformAction", ["int", ["id", "id"]]);
         ObjC.bindFunction("CFEqual", ["bool", ["id", "id"]]);
+        ObjC.bindFunction("CFDictionarySetValue", ["void", ["id", "pointer", "id"]]);
+        ObjC.bindFunction("SecCodeCopyGuestWithAttributes", ["int", ["id", "id", "unsigned int", "id *"]]);
+        ObjC.bindFunction("SecRequirementCreateWithString", ["int", ["id", "unsigned int", "id *"]]);
+        ObjC.bindFunction("SecCodeCheckValidity", ["int", ["id", "unsigned int", "id"]]);
         const system = $.AXUIElementCreateSystemWide();
         function check(error) { if (Number(error) !== 0) { fail(Number(error)); } }
         check($.AXUIElementSetMessagingTimeout(system, 0.25));
+        const nativeRequirements = ["com.apple.settings.PrivacySecurity.extension",
+            "com.apple.LocalAuthentication.UIAgent", "com.apple.systempreferences"].map(name => {
+            const value = Ref();
+            check($.SecRequirementCreateWithString($('anchor apple and identifier "' + name + '"'), 0, value));
+            if (!value[0] || value[0].isNil()) { fail(); }
+            return {name, requirement: value[0]};
+        });
 
         function attribute(element, name, optional = false) {
             const value = Ref();
@@ -80,12 +93,18 @@ function run() {
             return identifier;
         }
         function owner(identifier) {
-            const application = $.NSRunningApplication.runningApplicationWithProcessIdentifier(identifier);
-            return application.isNil() ? null : ObjC.unwrap(application.bundleIdentifier);
+            const attributes = $.NSMutableDictionary.dictionary;
+            $.CFDictionarySetValue(attributes, $.kSecGuestAttributePid, $(identifier));
+            const code = Ref();
+            if (Number($.SecCodeCopyGuestWithAttributes($(), attributes, 0, code)) !== 0
+                || !code[0] || code[0].isNil()) { return null; }
+            for (const candidate of nativeRequirements) {
+                if (Number($.SecCodeCheckValidity(code[0], 0, candidate.requirement)) === 0) { return candidate.name; }
+            }
+            return null;
         }
         function isNativeOwner(identifier) {
-            const name = owner(identifier);
-            return name === "com.apple.LocalAuthentication.UIAgent" || name === "com.apple.systempreferences";
+            return owner(identifier) !== null;
         }
         function isSecure(element) {
             return scalar(element, "AXRole") === "AXSecureTextField"
@@ -149,10 +168,11 @@ function run() {
                 const identifier = focused ? pid(focused) : 0;
                 const name = identifier > 0 ? owner(identifier) : null;
                 const secure = focused !== null && isSecure(focused);
-                const native = name === "com.apple.LocalAuthentication.UIAgent" || name === "com.apple.systempreferences";
+                const native = name !== null;
                 Object.assign(diagnostics, {
                     focusAvailable: focused !== null, focusIsSecureField: secure, focusOwnerPID: identifier,
                     focusOwnerIsAuthenticationAgent: name === "com.apple.LocalAuthentication.UIAgent",
+                    focusOwnerIsSecurityPrivacyExtension: name === "com.apple.settings.PrivacySecurity.extension",
                     focusOwnerIsSystemSettings: name === "com.apple.systempreferences", processCount: native ? 1 : 0
                 });
                 publish();
@@ -182,7 +202,8 @@ function run() {
                 Object.assign(diagnostics, {
                     processCount: 0, formCount: 0, usernameCount: 0, secureCount: 0, modifySettingsCount: 0,
                     recognizedHeading: false, recognizedText: false, focusAvailable: false, focusIsSecureField: false,
-                    focusOwnerIsAuthenticationAgent: false, focusOwnerIsSystemSettings: false, focusOwnerPID: 0
+                    focusOwnerIsAuthenticationAgent: false, focusOwnerIsSystemSettings: false,
+                    focusOwnerIsSecurityPrivacyExtension: false, focusOwnerPID: 0
                 });
                 publish();
             }

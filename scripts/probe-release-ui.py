@@ -20,7 +20,8 @@ AUTHORIZATION_STAGES = {
 }
 AUTHORIZATION_COUNTS = {"processCount", "formCount", "usernameCount", "secureCount", "modifySettingsCount"}
 AUTHORIZATION_FLAGS = {"uiElementsEnabled", "recognizedHeading", "recognizedText"}
-FOCUS_FLAGS = {"focusAvailable", "focusIsSecureField", "focusOwnerIsAuthenticationAgent", "focusOwnerIsSystemSettings"}
+FOCUS_OWNER_FLAGS = {"focusOwnerIsAuthenticationAgent", "focusOwnerIsSystemSettings", "focusOwnerIsSecurityPrivacyExtension"}
+FOCUS_FLAGS = {"focusAvailable", "focusIsSecureField"} | FOCUS_OWNER_FLAGS
 FOCUS_PIDS = {"focusOwnerPID"}
 FOCUS_ERRORS = {0, *range(-25214, -25199)}
 
@@ -53,7 +54,7 @@ def validate_authorization_receipt(output):
             or any(diagnostics[key] != 1 for key in AUTHORIZATION_COUNTS)
             or not diagnostics["focusAvailable"] or not diagnostics["focusIsSecureField"]
             or diagnostics["focusOwnerPID"] == 0
-            or diagnostics["focusOwnerIsAuthenticationAgent"] == diagnostics["focusOwnerIsSystemSettings"]):
+            or sum(diagnostics[key] for key in FOCUS_OWNER_FLAGS) != 1):
         raise ValueError("Native-authorization completion lacks form proof")
     return receipt
 
@@ -146,7 +147,7 @@ def describe_focus_owner(pid, evidence):
             raise ValueError
         identity.update(executable=str(path), stage="metadata")
         for bundle in path.parents:
-            if bundle.suffix not in {".app", ".bundle", ".xpc"}:
+            if bundle.suffix not in {".app", ".bundle", ".xpc", ".appex"}:
                 continue
             with (bundle / "Contents/Info.plist").open("rb") as source:
                 identifier = plistlib.load(source).get("CFBundleIdentifier")
