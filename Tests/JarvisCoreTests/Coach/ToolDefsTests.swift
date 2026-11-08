@@ -57,7 +57,8 @@ import Testing
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
         #expect(captureScreenTool.description.contains("fresh JPEG screenshot"))
-        #expect(speakTool.description.contains("private overlay, not audio"))
+        #expect(speakTool.description == "Show one direct reply to the user in the private overlay. Keep hint within 36 words "
+            + "total; detail is optional Markdown shown underneath, not an audio response.")
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
     }
 

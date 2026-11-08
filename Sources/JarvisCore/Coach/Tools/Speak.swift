@@ -4,7 +4,8 @@ public let speakToolName = "speak"
 
 public let speakTool = ToolDef(
     name: speakToolName,
-    description: "Display a short hint and optional Markdown detail in the private overlay, not audio.",
+    description: "Show one direct reply to the user in the private overlay. Keep hint within 36 words "
+        + "total; detail is optional Markdown shown underneath, not an audio response.",
     parametersJSON: #"""
         {"type":"object","properties":{
             "hint":{"type":"string","description":"One brief, direct, connected reply; the overlay handles wrapping."},
