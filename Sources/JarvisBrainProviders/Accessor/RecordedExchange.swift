@@ -101,7 +101,7 @@ public struct RecordedExchange: Equatable, Sendable {
     public var toolCount = 0
     public var toolsFingerprint = "[]"
     public var speakParameters: [String]?
-    public var speakDescription: String?
+    public var speakDetailDescription: String?
     public var toolChoiceType: String?
     public var input: [InputItem] = []
     public var inputFingerprints: [String] = []
@@ -128,7 +128,7 @@ public struct RecordedExchange: Equatable, Sendable {
         toolCount = (tools as? [Any])?.count ?? 0
         let declared = tools as? [[String: Any]] ?? []
         toolNames = declared.compactMap { $0["name"] as? String }
-        speakDescription = declared.first { $0["name"] as? String == speakToolName }?["description"] as? String
+        speakDetailDescription = nil
         guard let speak = declared.first(where: { $0["name"] as? String == speakToolName }),
               let parameters = (speak["parameters"] ?? speak["input_schema"]) as? [String: Any],
               let properties = parameters["properties"] as? [String: Any]
@@ -137,5 +137,6 @@ public struct RecordedExchange: Equatable, Sendable {
             return
         }
         speakParameters = properties.keys.sorted()
+        speakDetailDescription = (properties["detail"] as? [String: Any])?["description"] as? String
     }
 }

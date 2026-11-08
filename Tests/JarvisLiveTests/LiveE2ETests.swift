@@ -536,8 +536,8 @@ struct LiveE2ETests {
         results.check("C23", [
             (schemas == [["detail", "hint"]],
              "speak is declared with exactly hint and detail (saw \(schemas.sorted { $0.count < $1.count }))"),
-            (coachRequests.allSatisfy { ($0.speakDescription ?? "").contains("# Supporting detail") },
-             "every coach request's speak declaration carries supporting detail guidance"),
+            (coachRequests.allSatisfy { ($0.speakDetailDescription ?? "").contains("Optional Markdown displayed below the hint") },
+             "every coach request's detail field carries its supporting content guidance"),
         ])
 
         results.note("C24", "A7's Show code press delivered \(Self.describeDetail(evidence, a7[1]))")

@@ -34,6 +34,14 @@ import JarvisCore
             let tools = try #require(payload["tools"] as? [[String: Any]])
             let speak = try #require(tools.first { $0["name"] as? String == "speak" })
             #expect(speak["description"] as? String == speakTool.description + "\n\n" + speakTool.guidance)
+            let schema = try #require(speak["parameters"] as? [String: Any])
+            let properties = try #require(schema["properties"] as? [String: [String: Any]])
+            let hint = try #require(properties["hint"]?["description"] as? String)
+            let detail = try #require(properties["detail"]?["description"] as? String)
+            #expect(hint.contains("One direct, connected reply of at most 36 words"))
+            #expect(detail.contains("Optional Markdown displayed below the hint"))
+            #expect(detail.contains("an explanation request is not required"))
+            #expect(!(speak["description"] as? String ?? "").contains("Otherwise use null"))
             let capture = try #require(tools.first { $0["name"] as? String == "capture_screen" })
             #expect(capture["description"] as? String == captureScreenTool.description + "\n\n" + captureScreenTool.guidance)
             #expect(!tools.contains { $0["name"] as? String == "search_references" })
@@ -212,7 +220,7 @@ import JarvisCore
         {"model":"gemini-3.8-flash","store":false,"system_instruction":"You are Jarvis.",
          "generation_config":{"thinking_level":"low","thinking_summaries":"none","max_output_tokens":2048,
            "tool_choice":{"allowed_tools":{"mode":"any","tools":["speak"]}}},
-         "tools":[{"type":"function","name":"speak","parameters":{"type":"object","properties":{"hint":{},"detail":{}}}}],
+         "tools":[{"type":"function","name":"speak","parameters":{"type":"object","properties":{"hint":{},"detail":{"description":"Optional Markdown displayed below the hint"}}}}],
          "input":[{"type":"user_input","content":[{"type":"text","text":"Session start."}]},
                   {"type":"thought","signature":"skip_thought_signature_validator"},
                   {"type":"function_call","id":"runner_1a2b3c4d","name":"load_skill","arguments":{"name":"coding"}},
@@ -230,7 +238,7 @@ import JarvisCore
         #expect(exchange.instructions == "You are Jarvis.")
         #expect(exchange.toolNames == ["speak"])
         #expect(exchange.speakParameters == ["detail", "hint"])
-        #expect(exchange.speakDescription == nil)
+        #expect(exchange.speakDetailDescription == "Optional Markdown displayed below the hint")
         #expect(exchange.toolChoiceType == "allowed_tools")
         #expect(exchange.input.count == 5)
         #expect(exchange.input[0] == .message(role: "user", parts: ["Session start."]))

@@ -95,7 +95,7 @@ import Testing
         #expect(await task.value == .spoke)
         try #require(brain.calls.count == 2)
         #expect(brain.declaredTools.last?.first { $0.name == "speak" }?
-            .descriptionWithGuidance.contains("# Supporting detail") == true)
+            .parametersJSON.contains("Optional Markdown displayed below the hint") == true)
         let userText = brain.calls[1].filter { $0.role == .user }.compactMap(\.text).joined(separator: " ")
         let expected = latest == .manualCode ? "Show code" : (latest == .manualHint ? "hint shortcut" : "Explain more")
         #expect(userText.contains(expected))

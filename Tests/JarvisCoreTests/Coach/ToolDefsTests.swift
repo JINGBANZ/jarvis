@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import JarvisCore
 
@@ -33,18 +34,31 @@ import Testing
 
     }
 
-    @Test func theDetailFieldIsGovernedByPromptTextAlone() {
-        #expect(speakTool.parametersJSON.contains("requested content that cannot fit there"))
-        #expect(speakTool.guidance.contains("# Supporting detail"))
-        #expect(speakTool.guidance.contains("supporting content required by a loaded skill"))
-        #expect(speakTool.guidance.contains("otherwise set it to null"))
-        #expect(!speakTool.guidance.contains("mermaid"))
+    @Test func speakFieldDescriptionsOwnTheirDeliveryRules() throws {
+        let schema = try #require(try JSONSerialization.jsonObject(
+            with: Data(speakTool.parametersJSON.utf8)) as? [String: Any])
+        let properties = try #require(schema["properties"] as? [String: [String: Any]])
+        let hint = try #require(properties["hint"]?["description"] as? String)
+        let detail = try #require(properties["detail"]?["description"] as? String)
+        #expect(hint.contains("at most 36 words"))
+        #expect(hint.contains("The hint must make sense without detail"))
+        #expect(hint.contains("“1<<h, that is 2 to the power h.”"))
+        #expect(hint.contains("\n\n"))
+        #expect(detail.contains("Optional Markdown displayed below the hint"))
+        #expect(detail.contains("supporting content required by an applicable loaded skill"))
+        #expect(detail.contains("an explanation request is not required"))
+        #expect(detail.contains("Silence or unchanged work"))
+        #expect(detail.contains("Otherwise use null"))
+        #expect(detail.contains("\n\n"))
+        #expect(!speakTool.guidance.contains("36 words"))
+        #expect(!speakTool.guidance.contains("explanation"))
+        #expect(!speakTool.description.contains("explanation"))
     }
 
     @Test func coachToolsDescribeCaptureAndOverlayContracts() {
         #expect(JarvisPrompts.Coach.system.contains("capture_screen"))
         #expect(captureScreenTool.description.contains("fresh JPEG screenshot"))
-        #expect(speakTool.description.contains("within 36 words total"))
+        #expect(speakTool.description.contains("private overlay, not audio"))
         #expect(staySilentTool.description.contains("default for unsolicited turns"))
     }
 
@@ -169,11 +183,10 @@ import Testing
         #expect(!JarvisPrompts.Coach.system.contains("full solution"))
     }
 
-    @Test func coachPromptGroundsTipVocabularyInWhatTheUserAlreadySees() {
-        let guidance = speakTool.guidance.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        #expect(guidance.contains("Use words and names already established in the conversation or visible evidence"))
-        #expect(guidance.contains("Explain an unfamiliar term or symbol on first use"))
-        #expect(guidance.contains("accuracy takes priority over brevity"))
+    @Test func speakCommonGuidanceGroundsRepliesInEvidence() {
+        #expect(speakTool.guidance.contains("Ground replies in the available evidence"))
+        #expect(speakTool.guidance.contains("Follow applicable loaded skills for delivery"))
+        #expect(speakTool.guidance.contains("Never invent personal experience or screen details"))
     }
 
     @Test func coachPromptDirectsSilenceToTheStaySilentTool() {

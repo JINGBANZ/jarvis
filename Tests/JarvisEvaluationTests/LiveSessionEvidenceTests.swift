@@ -473,7 +473,7 @@ import Testing
         #expect(second.replayedFunctionCalls.isEmpty)
         #expect(second.speakDetail == .noSpeakCall)
         #expect(second.speakParameters == nil)
-        #expect(second.speakDescription == nil)
+        #expect(second.speakDetailDescription == nil)
     }
 
     @Test func archivedCLIRequestsExposeProviderAndInstructions() throws {
@@ -558,16 +558,17 @@ import Testing
         let record = try Self.coachRecord(attempt: 1, request: [
             "model": "gpt-5.6-sol",
             "tools": [
-                ["type": "function", "name": "speak", "description": "Reply style and supporting detail",
+                ["type": "function", "name": "speak", "description": "Display a reply",
                  "parameters": ["type": "object",
                                 "properties": ["hint": ["type": "string"],
-                                               "detail": ["type": ["string", "null"]]]]],
+                                               "detail": ["type": ["string", "null"],
+                                                          "description": "Optional Markdown displayed below the hint"]]]],
                 ["type": "function", "name": "stay_silent", "parameters": ["type": "object"]],
             ],
         ], response: ["id": "resp_1", "status": "completed", "output": [[String: Any]]()])
         let evidence = try Self.evidence(traffic: [record])
         #expect(evidence.traffic[0].speakParameters == ["detail", "hint"])
-        #expect(evidence.traffic[0].speakDescription == "Reply style and supporting detail")
+        #expect(evidence.traffic[0].speakDetailDescription == "Optional Markdown displayed below the hint")
     }
 
     // MARK: - Debug log, health, and malformed records
