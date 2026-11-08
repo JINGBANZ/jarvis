@@ -22,7 +22,10 @@ def run(arguments, *, timeout, log=None):
             subprocess.run(arguments, cwd=ROOT, stdout=output, stderr=subprocess.STDOUT,
                            check=True, timeout=timeout)
     except subprocess.SubprocessError:
-        print(log.read_text()[-24_000:], file=sys.stderr, flush=True)
+        content = log.read_text()
+        diagnostics = [line for line in content.splitlines() if "error:" in line]
+        print("\n".join(diagnostics[:20])[:8_000], file=sys.stderr, flush=True)
+        print(content[-24_000:], file=sys.stderr, flush=True)
         raise
 
 
@@ -77,7 +80,8 @@ def main():
     derived = evidence / "derived"
     run(["/usr/bin/xcodebuild", "build-for-testing", "-project", str(project),
          "-scheme", "ReleaseAcceptance", "-destination", f"platform=macOS,arch={architecture}",
-         "-derivedDataPath", str(derived), "CODE_SIGN_IDENTITY=-", "CODE_SIGNING_REQUIRED=NO"],
+         "-derivedDataPath", str(derived), f"ARCHS={architecture}", "ONLY_ACTIVE_ARCH=YES",
+         "CODE_SIGN_IDENTITY=-", "CODE_SIGNING_REQUIRED=NO"],
         timeout=300, log=evidence / "build.log")
     manifests = list((derived / "Build/Products").glob("*.xctestrun"))
     if len(manifests) != 1:

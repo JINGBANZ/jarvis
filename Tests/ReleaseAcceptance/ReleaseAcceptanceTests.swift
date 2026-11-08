@@ -41,8 +41,11 @@ final class ReleaseAcceptanceTests: XCTestCase {
         XCTAssertFalse(window.staticTexts["No skills are installed."].exists)
         attachEvidence(app, name: "installed-skills")
         window.buttons[XCUIIdentifierCloseWindow].click()
-        status.click()
-        let quit = status.menuItems["Quit Jarvis"]
+        app.activate()
+        let applicationMenu = app.menuBars.menuBarItems["Jarvis"]
+        XCTAssertTrue(applicationMenu.waitForExistence(timeout: 10))
+        applicationMenu.click()
+        let quit = applicationMenu.menuItems["Quit Jarvis"]
         XCTAssertTrue(quit.waitForExistence(timeout: 10))
         quit.click()
         XCTAssertTrue(app.wait(for: .notRunning, timeout: 15), "Normal Quit must terminate the installed app")
@@ -58,14 +61,28 @@ final class ReleaseAcceptanceTests: XCTestCase {
         grant.click()
         var relaunched = false
         for permission in ["microphone", "audio", "screen"] {
-            let dialog = try permissionDialog(for: permission)
-            if permission == "screen", dialog.buttons.matching(identifier: "Open System Settings").count == 1 {
-                dialog.buttons["Open System Settings"].click()
-                relaunched = try grantScreenRecordingInSettings()
-            } else {
-                let allow = consentButtons(in: dialog)
-                XCTAssertEqual(allow.count, 1, "Consent requires one unambiguous Allow control")
-                allow.element.click()
+            switch try permissionPrompt(for: permission, onboarding: welcome) {
+            case .consent(let dialog):
+                if permission == "screen", dialog.buttons.matching(identifier: "Open System Settings").count == 1 {
+                    dialog.buttons["Open System Settings"].click()
+                    relaunched = try grantScreenRecordingInSettings()
+                } else {
+                    let allow = consentButtons(in: dialog)
+                    XCTAssertEqual(allow.count, 1, "Consent requires one unambiguous Allow control")
+                    allow.element.click()
+                }
+            case .relaunch:
+                let previous = try XCTUnwrap(NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first)
+                welcome.buttons["Quit & Reopen"].click()
+                let reopened = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                    let running = NSRunningApplication.runningApplications(withBundleIdentifier: self.bundleID)
+                    return running.count == 1 && running[0].processIdentifier != previous.processIdentifier
+                        && running[0].bundleURL?.resolvingSymlinksInPath() == self.installedURL
+                        && running[0].executableArchitecture == NSRunningApplication.current.executableArchitecture
+                }, object: nil)
+                XCTAssertEqual(XCTWaiter.wait(for: [reopened], timeout: 15), .completed,
+                               "Normal Quit & Reopen must replace the installed candidate process")
+                relaunched = true
             }
         }
         app.activate()
@@ -100,10 +117,16 @@ final class ReleaseAcceptanceTests: XCTestCase {
                       "Normal onboarding must prove every grant before entering the stopped app")
     }
 
-    private func permissionDialog(for permission: String) throws -> XCUIElement {
+    private enum PermissionPrompt {
+        case consent(XCUIElement)
+        case relaunch
+    }
+
+    private func permissionPrompt(for permission: String, onboarding: XCUIElement) throws -> PermissionPrompt {
         let owners = ["com.apple.UserNotificationCenter", "com.apple.coreservices.uiagent"]
         var captured: Set<String> = []
         var found: (String, XCUIElement)?
+        var needsRelaunch = false
         let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             var matches: [(String, XCUIElement)] = []
             for identifier in owners where !NSRunningApplication.runningApplications(withBundleIdentifier: identifier).isEmpty {
@@ -124,9 +147,19 @@ final class ReleaseAcceptanceTests: XCTestCase {
                     if allow.count == 1 || opensSettings { matches.append((identifier, container)) }
                 }
             }
-            guard matches.count == 1 else { return false }
-            found = matches[0]
-            return true
+            if matches.count == 1 {
+                found = matches[0]
+                return true
+            }
+            if matches.isEmpty, permission == "screen",
+               onboarding.staticTexts.matching(NSPredicate(format: "value == 'Granted' OR label == 'Granted'")).count == 2,
+               onboarding.staticTexts["Screen Recording"].exists,
+               onboarding.staticTexts["Reopen to finish"].exists,
+               onboarding.buttons["Quit & Reopen"].exists {
+                needsRelaunch = true
+                return true
+            }
+            return false
         }, object: nil)
         let result = XCTWaiter.wait(for: [visible], timeout: 20)
         attachRunningApplicationInventory()
@@ -135,9 +168,18 @@ final class ReleaseAcceptanceTests: XCTestCase {
             print("permission=\(permission) owner=\(identifier) dialogs=\(candidate.dialogs.count) windows=\(candidate.windows.count)")
             attachEvidence(candidate, name: "\(permission)-owner-final-\(identifier)")
         }
-        guard result == .completed, let (identifier, dialog) = found else {
+        guard result == .completed else {
             throw AcceptanceFailure("No unique system dialog identified Jarvis and the expected \(permission) permission")
         }
+        if needsRelaunch {
+            let attachment = XCTAttachment(string: onboarding.debugDescription)
+            attachment.name = "screen-recording-requires-normal-relaunch"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            print("permission=screen normalAction=Quit & Reopen; microphone/audio Granted, screen Reopen to finish")
+            return .relaunch
+        }
+        let (identifier, dialog) = try XCTUnwrap(found)
         let attachment = XCTAttachment(string: dialog.debugDescription)
         attachment.name = "\(permission)-consent-container-\(identifier)"
         attachment.lifetime = .keepAlways
@@ -146,7 +188,7 @@ final class ReleaseAcceptanceTests: XCTestCase {
             $0.label + " " + ($0.value as? String ?? "")
         }.joined(separator: "\n")
         print("permission=\(permission) owner=\(identifier) type=\(dialog.elementType.rawValue) matchedText=\(String(text.prefix(1500)))")
-        return dialog
+        return .consent(dialog)
     }
 
     private func consentButtons(in dialog: XCUIElement) -> XCUIElementQuery {
@@ -179,6 +221,7 @@ final class ReleaseAcceptanceTests: XCTestCase {
     private func prepareProfile(completed: Bool, placeholderCredential: Bool = false) throws {
         continueAfterFailure = false
         executionTimeAllowance = 180
+        addTeardownBlock { @MainActor [self] in try cleanUpCandidateAndProfile() }
         let username = NSUserName()
         let home = NSHomeDirectory()
         let githubActions = ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true"
@@ -235,7 +278,18 @@ final class ReleaseAcceptanceTests: XCTestCase {
         XCTAssertEqual(running.count, 1, "Exactly one installed candidate must run")
         let actual = try XCTUnwrap(running.first)
         XCTAssertEqual(actual.bundleURL?.resolvingSymlinksInPath(), url)
-        let identity = "path=\(url.path)\nversion=\(expectedVersion)\npid=\(actual.processIdentifier)\n"
+        #if arch(arm64)
+        let expectedArchitecture = NSBundleExecutableArchitectureARM64
+        let architectureName = "arm64"
+        #elseif arch(x86_64)
+        let expectedArchitecture = NSBundleExecutableArchitectureX86_64
+        let architectureName = "x86_64"
+        #else
+        #error("Release acceptance requires a supported native Mac architecture")
+        #endif
+        XCTAssertEqual(actual.executableArchitecture, expectedArchitecture,
+                       "The installed candidate must execute the runner's native architecture")
+        let identity = "path=\(url.path)\nversion=\(expectedVersion)\npid=\(actual.processIdentifier)\narchitecture=\(architectureName)\nexecutingArchitecture=\(actual.executableArchitecture)\n"
         let attachment = XCTAttachment(string: identity)
         attachment.name = "installed-process-identity"
         attachment.lifetime = .keepAlways
@@ -250,7 +304,7 @@ final class ReleaseAcceptanceTests: XCTestCase {
         add(attachment)
     }
 
-    override func tearDown() async throws {
+    private func cleanUpCandidateAndProfile() throws {
         if let app = application {
             if app.state != .notRunning {
                 attachEvidence(app, name: "final-ui-state")
@@ -270,7 +324,6 @@ final class ReleaseAcceptanceTests: XCTestCase {
             defaults.synchronize()
         }
         if let credentialFile { try FileManager.default.removeItem(at: credentialFile) }
-        try await super.tearDown()
     }
 
     private struct AcceptanceFailure: Error, CustomStringConvertible {

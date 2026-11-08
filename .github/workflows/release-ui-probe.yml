@@ -53,6 +53,7 @@ jobs:
           sleep 3
       - name: Verify virtual audio carries a real signal
         run: |
+          umask 077
           mkdir -p .jarvis/release-ui-probe
           swiftc -swift-version 6 -strict-concurrency=complete -warnings-as-errors \
             -parse-as-library -module-cache-path "$RUNNER_TEMP/audio-probe-module-cache" \
