@@ -144,18 +144,19 @@ def describe_focus_owner(pid, evidence):
         identity["stage"] = "path"
         if not path.is_relative_to("/System/Library") or not path.is_file() or path.stat().st_uid != 0:
             raise ValueError
-        identity["stage"] = "signature"
-        subprocess.run(["/usr/bin/codesign", "--verify", "--strict", "-R", "anchor apple", str(path)],
-                       capture_output=True, timeout=5, check=True)
-        identity.update(appleSigned=True, executable=str(path), stage="metadata")
+        identity.update(executable=str(path), stage="metadata")
         for bundle in path.parents:
             if bundle.suffix not in {".app", ".bundle", ".xpc"}:
                 continue
             with (bundle / "Contents/Info.plist").open("rb") as source:
                 identifier = plistlib.load(source).get("CFBundleIdentifier")
             if isinstance(identifier, str) and re.fullmatch(r"com\.apple\.[A-Za-z0-9_.-]{1,128}", identifier):
-                identity.update(bundleIdentifier=identifier, stage="complete")
+                identity["bundleIdentifier"] = identifier
             break
+        identity["stage"] = "signature"
+        subprocess.run(["/usr/bin/codesign", "--verify", "--strict", "-R=anchor apple", str(path)],
+                       capture_output=True, timeout=5, check=True)
+        identity.update(appleSigned=True, stage="complete")
     except (OSError, ValueError, subprocess.SubprocessError, plistlib.InvalidFileException):
         pass
     (evidence / "authorization-owner.json").write_text(json.dumps(identity, indent=2) + "\n")
