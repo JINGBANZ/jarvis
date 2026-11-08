@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import XCTest
 
 @MainActor
@@ -9,6 +10,7 @@ final class ReleaseAcceptanceTests: XCTestCase {
     private var savedPreferences: [String: Any]?
     private var profilePrepared = false
     private var credentialFile: URL?
+    private var savedClipboard: [[NSPasteboard.PasteboardType: Data]]?
 
     func testFreshOnboarding() throws {
         try prepareProfile(completed: false)
@@ -242,11 +244,6 @@ final class ReleaseAcceptanceTests: XCTestCase {
         XCTAssertTrue(settings.wait(for: .runningForeground, timeout: 15), "Permission action must open System Settings")
         attachEvidence(settings, name: "system-screen-recording-settings")
         let panes = settings.scrollViews.containing(.staticText, identifier: "Screen & System Audio Recording")
-        defer {
-            let description = panes.count == 1 ? panes.element.debugDescription : settings.debugDescription
-            print("System Settings recording controls:\n\(String(description.suffix(16000)))")
-            attachEvidence(settings, name: "system-screen-recording-settings-final")
-        }
         XCTAssertTrue(panes.firstMatch.waitForExistence(timeout: 10), "The recording privacy pane must load")
         XCTAssertEqual(panes.count, 1, "The recording privacy pane must be unambiguous")
         let pane = panes.element
@@ -265,12 +262,132 @@ final class ReleaseAcceptanceTests: XCTestCase {
         XCTAssertEqual(section.switches.matching(identifier: "Jarvis_Toggle").count, 1)
         let toggle = section.switches["Jarvis_Toggle"]
         if toggle.value as? String != "1" { toggle.click() }
+        try authorizeRecordingSettings(settings, toggle: toggle)
         let confirm = settings.buttons["Quit & Reopen"]
         let relaunches = confirm.waitForExistence(timeout: 5)
         if relaunches { confirm.click() }
         let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "value == '1'"), object: toggle)
-        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 5), .completed, "Screen-recording grant must be enabled")
+        let enabledResult = XCTWaiter.wait(for: [enabled], timeout: 5)
+        let description = panes.count == 1 ? panes.element.debugDescription : settings.debugDescription
+        print("System Settings recording controls:\n\(String(description.suffix(16000)))")
+        attachEvidence(settings, name: "system-screen-recording-settings-final")
+        XCTAssertEqual(enabledResult, .completed, "Screen-recording grant must be enabled")
         return relaunches
+    }
+
+    private func authorizeRecordingSettings(_ settings: XCUIApplication, toggle: XCUIElement) throws {
+        let agent = XCUIApplication(bundleIdentifier: "com.apple.SecurityAgent")
+        var dialog: XCUIElement?
+        let authorization = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").isEmpty {
+                let dialogs = agent.dialogs.allElementsBoundByIndex
+                let containers = dialogs.isEmpty ? agent.windows.allElementsBoundByIndex : dialogs
+                let matches = containers.filter { container in
+                    let text = container.staticTexts.allElementsBoundByIndex.map {
+                        $0.label + " " + ($0.value as? String ?? "")
+                    }.joined(separator: "\n")
+                    return text.contains("Privacy & Security")
+                        && text.localizedCaseInsensitiveContains("modify your system settings")
+                        && container.textFields.count == 1 && container.secureTextFields.count == 1
+                        && container.buttons.matching(identifier: "Modify Settings").count == 1
+                }
+                if matches.count == 1 { dialog = matches[0]; return true }
+            }
+            return toggle.value as? String == "1" || settings.buttons["Quit & Reopen"].exists
+        }, object: nil)
+        let result = XCTWaiter.wait(for: [authorization], timeout: 10)
+        attachRunningApplicationInventory()
+        if !NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.SecurityAgent").isEmpty {
+            attachEvidence(agent, name: "screen-recording-authorization-before-credentials")
+            print("Screen-recording authorization UI:\n\(String(agent.debugDescription.prefix(12000)))")
+        }
+        guard result == .completed else { throw AcceptanceFailure("No recognized recording authorization result") }
+        guard let dialog else { return }
+        let credentials = try readAuthorizationCredential()
+        let username = dialog.textFields.element
+        username.click()
+        username.typeKey("a", modifierFlags: .command)
+        username.typeText(credentials.username)
+        let password = dialog.secureTextFields.element
+        password.click()
+        password.typeKey("a", modifierFlags: .command)
+        let pasteboard = NSPasteboard.general
+        savedClipboard = (pasteboard.pasteboardItems ?? []).map { item in
+            Dictionary(uniqueKeysWithValues: item.types.compactMap { type in
+                item.data(forType: type).map { (type, $0) }
+            })
+        }
+        pasteboard.clearContents()
+        guard pasteboard.setString(credentials.password, forType: .string) else {
+            restoreClipboard()
+            throw AcceptanceFailure("Could not prepare ephemeral authorization paste")
+        }
+        password.typeKey("v", modifierFlags: .command)
+        restoreClipboard()
+        dialog.buttons["Modify Settings"].click()
+        let dismissed = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: dialog)
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 10), .completed,
+                       "Native authorization must accept the temporary administrator")
+    }
+
+    private struct AuthorizationCredential: Decodable {
+        let marker: String
+        let username: String
+        let password: String
+        let uid: uid_t
+        let owner_uid: uid_t
+        let verified: Bool
+    }
+
+    private func readAuthorizationCredential() throws -> AuthorizationCredential {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["RUNNER_ENVIRONMENT"] == "github-hosted",
+              let temporary = environment["RUNNER_TEMP"], temporary.hasPrefix("/"),
+              URL(fileURLWithPath: temporary).resolvingSymlinksInPath().path == temporary,
+              environment["JARVIS_ACCEPTANCE_AUTH_FILE"] == temporary + "/jarvis-ui-authorization.json" else {
+            throw AcceptanceFailure("Invalid hosted authorization location")
+        }
+        let directory = open(temporary, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard directory >= 0 else { throw AcceptanceFailure("Could not open hosted temporary directory") }
+        defer { close(directory) }
+        var directoryInfo = stat()
+        guard fstat(directory, &directoryInfo) == 0, directoryInfo.st_uid == getuid(),
+              directoryInfo.st_mode & 0o022 == 0 else { throw AcceptanceFailure("Unsafe hosted temporary directory") }
+        let descriptor = openat(directory, "jarvis-ui-authorization.json", O_RDONLY | O_NOFOLLOW)
+        guard descriptor >= 0 else { throw AcceptanceFailure("Missing ephemeral authorization file") }
+        defer { close(descriptor) }
+        var info = stat()
+        guard fstat(descriptor, &info) == 0, info.st_uid == getuid(), info.st_nlink == 1,
+              info.st_mode & mode_t(S_IFMT) == mode_t(S_IFREG), info.st_mode & 0o777 == 0o600,
+              info.st_size > 0, info.st_size <= 4096 else { throw AcceptanceFailure("Unsafe ephemeral authorization file") }
+        let credential: AuthorizationCredential
+        do {
+            let data = try FileHandle(fileDescriptor: descriptor, closeOnDealloc: false).read(upToCount: 4097) ?? Data()
+            guard data.count <= 4096 else { throw AcceptanceFailure("Oversized authorization file") }
+            credential = try JSONDecoder().decode(AuthorizationCredential.self, from: data)
+        } catch {
+            throw AcceptanceFailure("Invalid ephemeral authorization file")
+        }
+        guard credential.marker == "jarvis-release-ui-authorization-v1", credential.username == "jarvisacceptance",
+              credential.owner_uid == getuid(), credential.verified, credential.uid >= 501,
+              credential.password.count >= 32, credential.password.count <= 128,
+              let account = getpwnam(credential.username), account.pointee.pw_uid == credential.uid else {
+            throw AcceptanceFailure("Unverified temporary authorization account")
+        }
+        return credential
+    }
+
+    private func restoreClipboard() {
+        guard let savedClipboard else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let items = savedClipboard.map { values in
+            let item = NSPasteboardItem()
+            for (type, data) in values { item.setData(data, forType: type) }
+            return item
+        }
+        pasteboard.writeObjects(items)
+        self.savedClipboard = nil
     }
 
     private func prepareProfile(completed: Bool, placeholderCredential: Bool = false) throws {
@@ -280,7 +397,8 @@ final class ReleaseAcceptanceTests: XCTestCase {
         let username = NSUserName()
         let home = NSHomeDirectory()
         let githubActions = ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true"
-        guard username == "runner", home == "/Users/runner", githubActions else {
+        guard username == "runner", home == "/Users/runner", githubActions,
+              ProcessInfo.processInfo.environment["RUNNER_ENVIRONMENT"] == "github-hosted" else {
             let resolvedHome = URL(fileURLWithPath: home).resolvingSymlinksInPath().path
             throw AcceptanceFailure("Profile-mutating release acceptance requires the disposable GitHub-hosted runner account; username=\(username), resolvedHome=\(resolvedHome), GITHUB_ACTIONS=\(githubActions)")
         }
@@ -360,6 +478,7 @@ final class ReleaseAcceptanceTests: XCTestCase {
     }
 
     private func cleanUpCandidateAndProfile() throws {
+        restoreClipboard()
         if let app = application {
             if app.state != .notRunning {
                 attachEvidence(app, name: "final-ui-state")

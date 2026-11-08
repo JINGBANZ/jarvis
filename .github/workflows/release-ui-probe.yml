@@ -69,7 +69,12 @@ jobs:
           PY
       - name: Exercise normal launch and permissions without provider credentials
         if: ${{ !cancelled() }}
-        run: python3 scripts/probe-release-ui.py "$HOME/Applications/Jarvis.app"
+        run: |
+          python3 scripts/prepare-release-ui-account.py prepare
+          python3 scripts/probe-release-ui.py "$HOME/Applications/Jarvis.app"
+      - name: Remove the temporary authorization account
+        if: always()
+        run: python3 scripts/prepare-release-ui-account.py cleanup
       - name: Retain synthetic UI evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

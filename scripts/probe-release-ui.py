@@ -55,6 +55,7 @@ def validate_summary(summary):
 def main():
     account = pwd.getpwuid(os.getuid())
     if (sys.platform != "darwin" or os.environ.get("GITHUB_ACTIONS") != "true"
+            or os.environ.get("RUNNER_ENVIRONMENT") != "github-hosted"
             or account.pw_name != "runner" or account.pw_dir != "/Users/runner"):
         raise ValueError("This probe may change app preferences only on a disposable hosted runner")
     if len(sys.argv) != 2:
@@ -90,6 +91,9 @@ def main():
         manifest = plistlib.load(source)
     injected = inject_environment(manifest, {
         "GITHUB_ACTIONS": "true",
+        "RUNNER_ENVIRONMENT": "github-hosted",
+        "RUNNER_TEMP": os.environ["RUNNER_TEMP"],
+        "JARVIS_ACCEPTANCE_AUTH_FILE": str(Path(os.environ["RUNNER_TEMP"]) / "jarvis-ui-authorization.json"),
         "JARVIS_ACCEPTANCE_APP_PATH": str(app),
         "JARVIS_ACCEPTANCE_EXPECTED_VERSION": info["CFBundleShortVersionString"],
         "JARVIS_ACCEPTANCE_EVIDENCE": str(evidence),

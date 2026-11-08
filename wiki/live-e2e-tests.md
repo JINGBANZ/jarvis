@@ -128,13 +128,16 @@ coaching regression suites.
 The external installed-app probe requires full Xcode and uses a standalone UI-test project because
 SwiftPM cannot host XCUIAutomation. It launches the installed production bundle with ordinary launch arguments
 and drives onboarding, Settings, Skills, and Quit. Profile mutation is restricted to the disposable
-GitHub-hosted runner account. Its credential-free permission case supplies a clearly invalid stored
+GitHub-hosted runner account. Its provider-credential-free permission case supplies a clearly invalid stored
 key only to reach the permission step; it neither starts a provider session nor establishes
 credential validity. `scripts/probe-release-ui.py` requires every declared case to pass and rejects
 missing or skipped results. A separate direct-HAL loopback check establishes that the virtual audio
 device carries a known signal; it does not establish the app's capture, echo cancellation, or speech
 recognition. The branch-scoped feasibility workflow runs both checks automatically on native Apple
-silicon and Intel. A timeout fails the job; final cleanup of a wedged test runner belongs to the
+silicon and Intel. Recording authorization uses a separate temporary administrator created inside
+that VM. Its random password stays in an owner-only file outside uploaded evidence and enters only
+the native authorization form. The workflow removes the identity-checked account and credential file;
+it leaves the existing runner account unchanged. A timeout fails the job; final cleanup of a wedged test runner belongs to the
 disposable VM teardown. This probe does not replace final signed-candidate release verification.
 
 ## Evaluation suites

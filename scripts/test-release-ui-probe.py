@@ -2,11 +2,18 @@
 """Check fail-closed result accounting without launching apps or touching TCC."""
 
 from pathlib import Path
+import json
+import os
 import runpy
+import subprocess
+import tempfile
 import unittest
+from unittest import mock
 
 
 PROBE = runpy.run_path(str(Path(__file__).with_name("probe-release-ui.py")))
+ACCOUNT = runpy.run_path(str(Path(__file__).with_name("prepare-release-ui-account.py")))
+ACCOUNT_GLOBALS = ACCOUNT["prepare"].__globals__
 
 
 class ProbeResultsTests(unittest.TestCase):
@@ -37,6 +44,120 @@ class ProbeResultsTests(unittest.TestCase):
         self.assertIs(target["TestTimeoutsEnabled"], True)
         self.assertEqual(target["MaximumTestExecutionTimeAllowance"], 120)
         self.assertEqual(manifest["Metadata"]["EnvironmentVariables"], {"UNRELATED": "value"})
+
+
+class TemporaryAccountSafetyTests(unittest.TestCase):
+    def test_unsafe_host_cannot_prepare(self):
+        with mock.patch("sys.platform", "linux"), mock.patch("subprocess.run") as run:
+            with self.assertRaisesRegex(ValueError, "host-guard"):
+                ACCOUNT["hosted_directory"]()
+            run.assert_not_called()
+
+    def test_preexisting_account_cannot_be_replaced(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(ACCOUNT_GLOBALS, {
+            "account_identity": mock.Mock(return_value={"uid": 502, "generated_uid": "existing"}),
+            "command": mock.Mock(),
+        }):
+            with self.assertRaisesRegex(ValueError, "account-already-exists"):
+                ACCOUNT["prepare"](Path(temporary))
+            ACCOUNT_GLOBALS["command"].assert_not_called()
+            self.assertEqual(list(Path(temporary).iterdir()), [])
+
+    def test_preexisting_home_or_secret_cannot_be_reused(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(ACCOUNT_GLOBALS, {
+            "account_identity": mock.Mock(return_value=None), "command": mock.Mock(),
+        }):
+            directory = Path(temporary)
+            with mock.patch("os.path.lexists", return_value=True):
+                with self.assertRaisesRegex(ValueError, "account-home-already-exists"):
+                    ACCOUNT["prepare"](directory)
+            path = directory / ACCOUNT["FILENAME"]
+            path.write_text("unrelated")
+            with mock.patch("os.path.lexists", return_value=False):
+                with self.assertRaises(FileExistsError):
+                    ACCOUNT["prepare"](directory)
+            self.assertEqual(path.read_text(), "unrelated")
+            ACCOUNT_GLOBALS["command"].assert_not_called()
+
+    def test_cleanup_rejects_changed_account_identity(self):
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(ACCOUNT_GLOBALS, {
+            "account_identity": mock.Mock(return_value={"uid": 503, "generated_uid": "other"}),
+            "command": mock.Mock(),
+        }):
+            directory = Path(temporary)
+            path = directory / ACCOUNT["FILENAME"]
+            path.write_text(json.dumps({"marker": ACCOUNT["MARKER"], "username": ACCOUNT["ACCOUNT"],
+                                       "owner_uid": os.getuid(), "uid": 502, "generated_uid": "created"}))
+            path.chmod(0o600)
+            with self.assertRaisesRegex(ValueError, "cleanup-identity-mismatch"):
+                ACCOUNT["cleanup"](directory)
+            ACCOUNT_GLOBALS["command"].assert_not_called()
+            self.assertTrue(path.exists())
+
+    def test_preparation_records_verified_identity_without_password_in_argv(self):
+        password = "generated-private-password-1234567890"
+        command = mock.Mock(return_value=subprocess.CompletedProcess([], 0, "user is a member of the group\n", ""))
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(ACCOUNT_GLOBALS, {
+            "account_identity": mock.Mock(side_effect=[None, {"uid": 502, "generated_uid": "created"}]),
+            "command": command, "verify_authentication": mock.Mock(),
+        }), mock.patch("secrets.token_urlsafe", return_value=password), mock.patch("os.path.lexists", return_value=False):
+            directory = Path(temporary)
+            ACCOUNT["prepare"](directory)
+            record, info = ACCOUNT["read_record"](directory)
+            self.assertIs(record["verified"], True)
+            self.assertEqual(record["uid"], 502)
+            self.assertEqual(info.st_mode & 0o777, 0o600)
+            creation = command.call_args_list[0]
+            self.assertNotIn(password, repr(creation.args))
+            self.assertEqual(creation.kwargs["input_text"], password + "\n")
+            ACCOUNT_GLOBALS["verify_authentication"].assert_called_once_with(password)
+
+    def test_cleanup_deletes_only_matching_created_identity_and_file(self):
+        identity = {"uid": 502, "generated_uid": "created"}
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(ACCOUNT_GLOBALS, {
+            "account_identity": mock.Mock(side_effect=[identity, None]), "command": mock.Mock(),
+        }):
+            directory = Path(temporary)
+            path = directory / ACCOUNT["FILENAME"]
+            path.write_text(json.dumps({"marker": ACCOUNT["MARKER"], "username": ACCOUNT["ACCOUNT"],
+                                       "owner_uid": os.getuid(), **identity}))
+            path.chmod(0o600)
+            ACCOUNT["cleanup"](directory)
+            ACCOUNT_GLOBALS["command"].assert_called_once_with(
+                ["/usr/bin/sudo", "-n", "/usr/sbin/sysadminctl", "-deleteUser", "jarvisacceptance"],
+                stage="account-deletion")
+            self.assertFalse(path.exists())
+
+    def test_secret_symlink_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            target = directory / "unrelated"
+            target.write_text("private")
+            (directory / ACCOUNT["FILENAME"]).symlink_to(target)
+            with self.assertRaises(OSError):
+                ACCOUNT["read_record"](directory)
+            self.assertEqual(target.read_text(), "private")
+
+    def test_authentication_secret_uses_stdin_and_checks_negative_control(self):
+        password = "secret-never-in-argv-or-errors"
+        results = [subprocess.CompletedProcess([], 1, "failed", ""),
+                   subprocess.CompletedProcess([], 0, "", "")]
+        with mock.patch("subprocess.run", side_effect=results) as run:
+            ACCOUNT["verify_authentication"](password)
+            self.assertEqual(run.call_count, 2)
+            for call in run.call_args_list:
+                self.assertNotIn(password, repr(call.args))
+            self.assertIn(password, run.call_args.kwargs["input"])
+        with mock.patch("subprocess.run", return_value=subprocess.CompletedProcess([], 0, "", "")):
+            with self.assertRaisesRegex(ValueError, "^account-authentication$"):
+                ACCOUNT["verify_authentication"](password)
+
+    def test_subprocess_failures_do_not_expose_output_or_input(self):
+        secret = "private-test-credential"
+        with mock.patch("subprocess.run", side_effect=subprocess.TimeoutExpired(["tool"], 1, output=secret)):
+            with self.assertRaises(ValueError) as error:
+                ACCOUNT["command"](["tool"], stage="account-creation", input_text=secret)
+            self.assertEqual(str(error.exception), "account-creation")
 
 
 if __name__ == "__main__":
