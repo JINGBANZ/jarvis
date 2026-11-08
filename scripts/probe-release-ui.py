@@ -97,7 +97,7 @@ def main():
          "-parallel-testing-enabled", "NO", "-maximum-test-execution-time-allowance", "120"],
         timeout=420, log=evidence / "test.log")
     summary = json.loads(run(["/usr/bin/xcrun", "xcresulttool", "get", "test-results", "summary",
-                             "--path", str(result), "--format", "json"], timeout=30))
+                             "--path", str(result)], timeout=30))
     (evidence / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     validate_summary(summary)
     (evidence / "probe.json").write_text(json.dumps({

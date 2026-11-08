@@ -139,9 +139,12 @@ final class ReleaseAcceptanceTests: XCTestCase {
     private func prepareProfile(completed: Bool, placeholderCredential: Bool = false) throws {
         continueAfterFailure = false
         executionTimeAllowance = 180
-        guard NSUserName() == "runner", NSHomeDirectory() == "/Users/runner",
-              ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true" else {
-            throw AcceptanceFailure("Profile-mutating release acceptance requires the disposable GitHub-hosted runner account")
+        let username = NSUserName()
+        let home = NSHomeDirectory()
+        let githubActions = ProcessInfo.processInfo.environment["GITHUB_ACTIONS"] == "true"
+        guard username == "runner", home == "/Users/runner", githubActions else {
+            let resolvedHome = URL(fileURLWithPath: home).resolvingSymlinksInPath().path
+            throw AcceptanceFailure("Profile-mutating release acceptance requires the disposable GitHub-hosted runner account; username=\(username), resolvedHome=\(resolvedHome), GITHUB_ACTIONS=\(githubActions)")
         }
         XCTAssertTrue(NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty,
                       "Refuse to replace a pre-existing Jarvis process")
