@@ -176,3 +176,44 @@ private extension DeepgramUtteranceAssembler {
         receive(event, socket: 1)
     }
 }
+
+
+extension DeepgramUtteranceAssemblerTests {
+    @Test func finalizedRangeUsesWordsRatherThanTheRecognitionWindow() {
+        var assembler = Self.liveAssembler()
+        _ = assembler.receive(.results(.init(transcript: "first", isFinal: true, speechFinal: false,
+            start: 0, end: 4, lastWordEnd: 2, firstWordStart: 1)))
+        _ = assembler.receive(.results(.init(transcript: "second", isFinal: true, speechFinal: true,
+            start: 4, end: 8, lastWordEnd: 6, firstWordStart: 5)))
+        #expect(assembler.publishedSpeechInterval == SpeechInterval(startedAt: 1, endedAt: 6))
+        assembler.finishPublishing()
+        assembler.reset(socket: 2)
+        #expect(assembler.publishedSpeechInterval == nil)
+    }
+
+    @Test func missingWordTimingCannotBecomeAMeasuredSpeechRange() {
+        var assembler = Self.liveAssembler()
+        _ = assembler.receive(final("untimed", start: 0, end: 4, speechFinal: true))
+        #expect(assembler.publishedSpeechInterval == nil)
+    }
+
+    @Test func sentAudioGapRejectsCrossingFinalsButLaterMeasuredSpeechRecovers() {
+        var clock = DeepgramLiveSession.AudioClock()
+        let words = SpeechInterval(startedAt: 0.1, endedAt: 0.2)
+        clock.recordSentAudio(sequenceNumber: 10, capturedAt: 10, duration: 0.1)
+        clock.recordSentAudio(sequenceNumber: 11, capturedAt: 10.15, duration: 0.1)
+        #expect(clock.sessionInterval(words) == SpeechInterval(startedAt: 10.1, endedAt: 10.2))
+        clock.recordSentAudio(sequenceNumber: 13, capturedAt: 11, duration: 0.1)
+        #expect(clock.sessionInterval(words) == nil)
+        clock.recordSentAudio(sequenceNumber: 14, capturedAt: 11.1, duration: 0.1)
+        #expect(clock.sessionInterval(words) == nil)
+        #expect(clock.sessionInterval(SpeechInterval(startedAt: 0.1, endedAt: 0.3)) == nil)
+        let recovered = clock.sessionInterval(SpeechInterval(startedAt: 0.25, endedAt: 0.35))
+        #expect(abs((recovered?.startedAt ?? 0) - 11.05) < 0.000_001)
+        #expect(abs((recovered?.endedAt ?? 0) - 11.15) < 0.000_001)
+        #expect(clock.sessionInterval(SpeechInterval(startedAt: 0.3, endedAt: 0.5)) == nil)
+        clock = .init()
+        clock.recordSentAudio(sequenceNumber: 15, capturedAt: 12, duration: 0.2)
+        #expect(clock.sessionInterval(words) == SpeechInterval(startedAt: 12.1, endedAt: 12.2))
+    }
+}

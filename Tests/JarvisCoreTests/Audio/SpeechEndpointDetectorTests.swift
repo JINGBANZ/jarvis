@@ -36,11 +36,12 @@ import Testing
         #expect(detector.observe(speechProbability: 0.0, frameStartedAt: 1.04) == nil)
         #expect(detector.observe(speechProbability: 0.0, frameStartedAt: 1.05) == nil)
         let ended = detector.observe(speechProbability: 0.0, frameStartedAt: 1.06)
-        guard case .ended(let startedAt, let detectedAt) = ended else {
+        guard case .ended(let startedAt, let endedAt, let detectedAt) = ended else {
             Issue.record("expected a speech endpoint")
             return
         }
         #expect(startedAt == 1.00)
+        #expect(abs(endedAt - 1.03) < 0.000_001)
         #expect(abs(detectedAt - 1.07) < 0.000_001)
     }
 
@@ -69,7 +70,7 @@ import Testing
         #expect(detector.observe(speechProbability: 0.0, frameStartedAt: 0.04) == nil)
         #expect(detector.observe(speechProbability: 0.0, frameStartedAt: 0.05) == nil)
         let ended = detector.observe(speechProbability: 0.0, frameStartedAt: 0.06)
-        guard case .ended(let startedAt, let detectedAt) = ended else {
+        guard case .ended(let startedAt, _, let detectedAt) = ended else {
             Issue.record("expected a speech endpoint")
             return
         }
@@ -130,7 +131,7 @@ import Testing
 
         // Speech, plus the trailing silence window, plus 0.5 s of slack.
         for event in ended {
-            guard case .ended(let startedAt, let detectedAt) = event else { continue }
+            guard case .ended(let startedAt, _, let detectedAt) = event else { continue }
             let length = detectedAt - startedAt
             #expect(length > 3.0)
             #expect(length < 3.0 + 0.8 + 0.5)
@@ -148,7 +149,7 @@ import Testing
         at = feed(&detector, probability: 0.0, seconds: 1, from: at, into: &events)
         _ = at
         #expect(events.count == 2)
-        guard case .ended(let startedAt, let detectedAt) = events[1] else {
+        guard case .ended(let startedAt, _, let detectedAt) = events[1] else {
             Issue.record("expected the long turn to close on silence")
             return
         }

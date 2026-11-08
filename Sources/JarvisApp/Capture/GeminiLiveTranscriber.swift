@@ -49,6 +49,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
     /// content-free local activity.
     private var activityTracker = PCM16SpeechActivityTracker()
     private var pendingSpeech = PendingSpeechWindow()
+    private var finalAwaitingSpeechEnd: (text: String, generation: Int)?
     private var isSending = false         // one in-flight audio send at a time, preserves order
     private var draining = false
     private var stopped = true
@@ -144,6 +145,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         stopped = false; draining = false; isSending = false; recognitionInFlight = false
         _ = activityTracker.reset()
         pendingSpeech.reset()
+        finalAwaitingSpeechEnd = nil
         lock.unlock()
         coachingCoordinator.start()
         connection.connect()
@@ -167,6 +169,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         // No further audio arrives to release the detector, so close the window here too.
         _ = activityTracker.reset()
         pendingSpeech.reset()
+        finalAwaitingSpeechEnd = nil
         bufferedAudio.removeAll(keepingCapacity: false)
         bufferedByteCount = 0
         lock.unlock()
@@ -245,6 +248,10 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         guard !stopped else { lock.unlock(); return }
         isSending = false
         recognitionInFlight = false
+        if finalAwaitingSpeechEnd != nil {
+            jlog("⚠️ Gemini final omitted at socket boundary: speech end unavailable")
+            finalAwaitingSpeechEnd = nil
+        }
         lock.unlock()
         updateWorkFlag()
     }
@@ -255,6 +262,10 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         guard !stopped else { lock.unlock(); return }
         isSending = false
         recognitionInFlight = false
+        if finalAwaitingSpeechEnd != nil {
+            jlog("⚠️ Gemini final omitted at socket boundary: speech end unavailable")
+            finalAwaitingSpeechEnd = nil
+        }
         lock.unlock()
         updateWorkFlag()
         onTerminalFailure?(failure)
@@ -284,8 +295,17 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
             sequence: sequenceNumber, pcm16: pcm, at: clock.now() - sessionStart)
         lock.lock()
         guard !stopped else { lock.unlock(); return }
-        if let active = activityTracker.observe(pcm16: pcm, at: capturedAt) {
-            pendingSpeech.recordLocalSpeech(active: active, at: capturedAt - sessionStart)
+        var timedFinal: (String, SpeechInterval, Int)?
+        if let active = activityTracker.observe(pcm16: pcm, at: capturedAt, sampleRate: audioFormat.sampleRate) {
+            let boundary = active ? capturedAt : activityTracker.lastSpeechEndedAt
+            if let boundary {
+                pendingSpeech.recordLocalSpeech(active: active, at: boundary - sessionStart)
+            }
+            if !active, let pending = finalAwaitingSpeechEnd {
+                finalAwaitingSpeechEnd = nil
+                if let interval = pendingSpeech.takeFinalizedInterval() { timedFinal = (pending.text, interval, pending.generation) }
+                else { jlog("⚠️ Gemini final omitted: ambiguous local speech timing") }
+            }
         }
         let token = nextChunkToken
         nextChunkToken += 1
@@ -298,6 +318,9 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
             evicted += 1
         }
         lock.unlock()
+        if let (text, interval, generation) = timedFinal {
+            publishFinal(text, interval: interval, generation: generation)
+        }
         if evicted > 0 {
             jlog("⚠️ Jarvis Gemini [\(speaker.rawValue)] audio buffer overflow: "
                  + "evicted \(evicted) oldest chunk(s)")
@@ -366,6 +389,25 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         }
     }
 
+    private func publishFinal(_ text: String, interval: SpeechInterval, generation: Int) {
+        lock.lock()
+        guard !stopped, connection.isLive(generation: generation) else { lock.unlock(); return }
+        continuityReporter.recordServerSpeech(
+            .transcriptionCompleted, audioTimeMilliseconds: nil, socketGeneration: generation)
+        let accepted = coachingCoordinator.recordFinalizedTranscript(
+            text, spokenAt: interval.startedAt, spokenEndAt: interval.endedAt, source: "gemini-live")
+        benchmark?.observer.record(.init(kind: .finalized,
+            provider: TranscriptionProvider.gemini.rawValue, model: model.rawValue,
+            speaker: speaker.rawValue, generation: generation, text: text,
+            spokenAt: sessionStart + interval.startedAt,
+            spokenEndAt: sessionStart + interval.endedAt, observedAt: clock.now(), transcriptUnavailable: !accepted))
+        let lease = draining ? connection.readyLease : nil
+        lock.unlock()
+        if let lease, lease.generation == generation {
+            rotateNow(lease, reason: "timed utterance finalized during drain")
+        }
+    }
+
     private func noteRecognitionInFlight() {
         let observedAt = clock.now() - sessionStart
         lock.lock()
@@ -378,7 +420,7 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
         lock.lock()
         let state = pendingSpeech.state(
             queuedSince: bufferedAudio.first?.capturedAt,
-            isRecognizing: recognitionInFlight)
+            isRecognizing: recognitionInFlight || finalAwaitingSpeechEnd != nil)
         lock.unlock()
         coachingCoordinator.updateTranscriptionWork(state)
     }
@@ -442,28 +484,24 @@ final class GeminiLiveTranscriber: TranscriptionSession, InterimTranscriptPublis
             // Settle on any final, even one `TranscriptFiltering` rejects: the server is done.
             lock.lock()
             recognitionInFlight = false
-            let spokenAt = pendingSpeech.recordFinalized()
+            let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker)
+            let awaitingEnd = (text != nil || finalAwaitingSpeechEnd != nil) && pendingSpeech.awaitsSpeechEnd
+            if text == nil, finalAwaitingSpeechEnd == nil { pendingSpeech.recordRecognitionFinalized() }
+            let interval = awaitingEnd ? nil : pendingSpeech.takeFinalizedInterval()
+            if awaitingEnd, let text {
+                finalAwaitingSpeechEnd = (
+                    [finalAwaitingSpeechEnd?.text, text].compactMap { $0 }.joined(separator: " "),
+                    lease.generation)
+            }
             let isDraining = draining
             lock.unlock()
             onInterimTranscript?(nil)
-            if let text = GeminiLiveSession.finalTranscript(from: message, speaker: speaker) {
-                continuityReporter.recordServerSpeech(
-                    .transcriptionCompleted, audioTimeMilliseconds: nil,
-                    socketGeneration: lease.generation)
-                let accepted = coachingCoordinator.recordFinalizedTranscript(
-                    text, spokenAt: spokenAt, source: "gemini-live")
-                benchmark?.observer.record(.init(
-                    kind: .finalized,
-                    provider: TranscriptionProvider.gemini.rawValue,
-                    model: model.rawValue,
-                    speaker: speaker.rawValue,
-                    generation: lease.generation,
-                    text: text,
-                    observedAt: clock.now(),
-                    transcriptUnavailable: !accepted))
+            if let text, let interval { publishFinal(text, interval: interval, generation: lease.generation) }
+            else if text != nil, !awaitingEnd {
+                jlog("⚠️ Gemini final omitted: measured speech timing unavailable")
             }
             updateWorkFlag()
-            if isDraining {
+            if isDraining, !awaitingEnd {
                 rotateNow(lease, reason: "utterance finalized during drain")
             }
             return

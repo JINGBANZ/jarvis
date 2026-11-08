@@ -39,6 +39,7 @@ import Testing
         window.recordLocalSpeech(active: true, at: 9)
         _ = window.state(queuedSince: nil, isRecognizing: true)
         window.recordLocalSpeech(active: false, at: 10)
+        window.recordRecognitionFinalized()
         #expect(window.state(queuedSince: nil, isRecognizing: false) == .settled)
 
         window.recordLocalSpeech(active: true, at: 14)
@@ -85,27 +86,31 @@ import Testing
 
         #expect(window.state(queuedSince: nil, isRecognizing: true) == .pending(since: nil))
         #expect(window.state(queuedSince: nil, isRecognizing: false) == .settled)
-        #expect(window.recordFinalized() == nil)
+        #expect(window.takeFinalizedInterval() == nil)
     }
 
-    @Test func aFinalCarriesTheLocalOnsetAsItsSpokenTime() {
+    @Test func aFinalCarriesTheMeasuredSpeechRange() {
         var window = PendingSpeechWindow()
         window.recordLocalSpeech(active: true, at: 9)
         window.recordRecognitionObserved(at: 9.4)
         window.recordLocalSpeech(active: false, at: 12.5)
 
-        #expect(window.recordFinalized() == 9)
+        #expect(window.takeFinalizedInterval() == SpeechInterval(startedAt: 9, endedAt: 12.5))
     }
 
-    @Test func laterFinalsInOneLongRunKeepTheirArrivalTime() {
+    @Test func finalBeforeEndWaitsForMeasuredEndAndIsClaimedOnce() {
         var window = PendingSpeechWindow()
         window.recordLocalSpeech(active: true, at: 9)
         window.recordRecognitionObserved(at: 9.4)
-        #expect(window.recordFinalized() == 9)
+        #expect(window.awaitsSpeechEnd)
+        #expect(window.takeFinalizedInterval() == nil)
+        window.recordLocalSpeech(active: false, at: 12)
+        #expect(window.takeFinalizedInterval() == SpeechInterval(startedAt: 9, endedAt: 12))
+        #expect(window.takeFinalizedInterval() == nil)
 
         #expect(window.state(queuedSince: nil, isRecognizing: false) == .settled)
         window.recordRecognitionObserved(at: 15)
-        #expect(window.recordFinalized() == nil)
+        #expect(window.takeFinalizedInterval() == nil)
     }
 
     @Test func aSecondEpisodeLeavesTheFinalUntimed() {
@@ -116,18 +121,20 @@ import Testing
         window.recordLocalSpeech(active: true, at: 20)
 
         #expect(window.state(queuedSince: nil, isRecognizing: true) == .pending(since: 9))
-        #expect(window.recordFinalized() == nil)
+        #expect(window.takeFinalizedInterval() == nil)
     }
 
     @Test func aClosedWindowTimesTheNextFinal() {
         var window = PendingSpeechWindow()
         window.recordLocalSpeech(active: true, at: 9)
-        #expect(window.recordFinalized() == 9)
         window.recordLocalSpeech(active: false, at: 10)
+        #expect(window.takeFinalizedInterval() == SpeechInterval(startedAt: 9, endedAt: 10))
+        window.recordRecognitionFinalized()
         #expect(window.state(queuedSince: nil, isRecognizing: false) == .settled)
 
         window.recordLocalSpeech(active: true, at: 14)
-        #expect(window.recordFinalized() == 14)
+        window.recordLocalSpeech(active: false, at: 16)
+        #expect(window.takeFinalizedInterval() == SpeechInterval(startedAt: 14, endedAt: 16))
     }
 
     @Test func staleRecognitionDoesNotBackdateAFinal() {
@@ -136,13 +143,52 @@ import Testing
         window.recordLocalSpeech(active: true, at: 20)
 
         #expect(window.state(queuedSince: nil, isRecognizing: true) == .pending(since: 5))
-        #expect(window.recordFinalized() == 20)
+        window.recordLocalSpeech(active: false, at: 21)
+        #expect(window.takeFinalizedInterval() == SpeechInterval(startedAt: 20, endedAt: 21))
     }
 
-    @Test func aFinalTheDetectorMissedKeepsItsArrivalTime() {
+    @Test func aFinalTheDetectorMissedHasNoMeasuredRange() {
         var window = PendingSpeechWindow()
         window.recordRecognitionObserved(at: 12)
 
-        #expect(window.recordFinalized() == nil)
+        #expect(window.takeFinalizedInterval() == nil)
+    }
+}
+
+
+extension PendingSpeechWindowTests {
+    @Test func providerTimedFinalSettlesItsWindowBeforeTheNextUtterance() {
+        var window = PendingSpeechWindow()
+        window.recordLocalSpeech(active: true, at: 2)
+        window.recordLocalSpeech(active: false, at: 4)
+        window.recordRecognitionFinalized()
+        #expect(window.state(queuedSince: nil, isRecognizing: false) == .settled)
+        window.recordLocalSpeech(active: true, at: 8)
+        #expect(window.state(queuedSince: nil, isRecognizing: true) == .pending(since: 8))
+        window.recordLocalSpeech(active: false, at: 10)
+        #expect(window.takeFinalizedInterval() == SpeechInterval(startedAt: 8, endedAt: 10))
+    }
+
+    @Test func olderFinalCannotUseTheEndOfANewerUnresolvedEpisode() {
+        var window = PendingSpeechWindow()
+        window.recordLocalSpeech(active: true, at: 2)
+        window.recordLocalSpeech(active: false, at: 4)
+        _ = window.state(queuedSince: nil, isRecognizing: false)
+        window.recordLocalSpeech(active: true, at: 8)
+        window.recordLocalSpeech(active: false, at: 10)
+        #expect(window.takeFinalizedInterval() == nil)
+    }
+}
+
+
+extension PendingSpeechWindowTests {
+    @Test func filteredFinalBeforeEndpointStillAllowsTheNextUtteranceToBeTimed() {
+        var window = PendingSpeechWindow()
+        window.recordLocalSpeech(active: true, at: 2)
+        window.recordRecognitionFinalized()
+        window.recordLocalSpeech(active: false, at: 4)
+        window.recordLocalSpeech(active: true, at: 8)
+        window.recordLocalSpeech(active: false, at: 10)
+        #expect(window.takeFinalizedInterval() == SpeechInterval(startedAt: 8, endedAt: 10))
     }
 }

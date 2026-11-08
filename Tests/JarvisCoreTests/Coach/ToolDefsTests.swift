@@ -130,7 +130,7 @@ import Testing
     }
 
     @Test func coachPromptOrdersDirectRepliesThenFragmentsThenScreenGate() {
-        let directReply = JarvisPrompts.Coach.system.range(of: "1. Direct address from \"me\"")
+        let directReply = JarvisPrompts.Coach.system.range(of: "1. An explicit request addressed to Jarvis")
         let fragmentGate = JarvisPrompts.Coach.system.range(of: "2. Fragment gate")
         let screenGate = JarvisPrompts.Coach.system.range(of: "3. Screen gate")
         #expect(directReply != nil)

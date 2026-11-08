@@ -387,8 +387,8 @@ final class AggregateEchoCapture: AudioSource, @unchecked Sendable {
             switch event {
             case .started(let startedAt):
                 return .started(at: startedAt)
-            case .ended(let startedAt, _):
-                return .ended(startedAt: startedAt, commitAt: commitAt)
+            case .ended(let startedAt, let endedAt, _):
+                return .ended(startedAt: startedAt, endedAt: endedAt, commitAt: commitAt)
             }
         }
     }

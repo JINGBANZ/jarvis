@@ -66,7 +66,7 @@ final class ShortcutReplacementHarness: OverlayRendering {
                                   replacement: CoachingShortcut, mouseFirst: Bool, streaming: Bool) async throws {
         let brain = ShortcutReplacementBrain(streamFirstReply: streaming)
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "Explain the binary search invariant.", at: 0))
+        transcript.append(.init(speaker: .them, text: "Explain the binary search invariant.", at: 0, endedAt: 0))
         let driver = CoachDriver(config: .default, transcript: transcript,
             route: .init(targets: [.init(target: .init(provider: .openAI, modelID: "synthetic"), brain: brain)]),
             screen: ShortcutReplacementScreen(), overlay: self, clock: SystemClock())

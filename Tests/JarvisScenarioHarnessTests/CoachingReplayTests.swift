@@ -16,12 +16,12 @@ import Testing
         let catalog = try JSONDecoder().decode(CoachingReplayCatalog.self, from: Data("""
         {"version":"intervention-v1","rubricVersion":"intervention-v1","episodes":[{"id":"episode","decisions":[
           {"id":"first","expectation":"helpRequired","gradingGoal":"SECRET_RUBRIC_reconstruction","triggerAt":2,
-           "events":[{"kind":"transcript","at":0,"speaker":"them","text":"Find largest divisible subset."},
-                     {"kind":"transcript","at":1,"speaker":"me","text":"I know lengths but cannot reconstruct the chain."},
-                     {"kind":"transcript","at":3,"spokenAt":0.5,"speaker":"me","text":"I am still thinking about reconstruction.","milestone":"attemptStarted"}],
+           "events":[{"kind":"transcript","at":0,"spokenAt":0,"spokenEndAt":0,"speaker":"them","text":"Find largest divisible subset."},
+                     {"kind":"transcript","at":1,"spokenAt":1,"spokenEndAt":1,"speaker":"me","text":"I know lengths but cannot reconstruct the chain."},
+                     {"kind":"transcript","at":3,"spokenAt":0.5,"spokenEndAt":0.75,"speaker":"me","text":"I am still thinking about reconstruction.","milestone":"attemptStarted"}],
            "automaticFollowups":[{"id":"queued","expectation":"silenceRequired","gradingGoal":"SECRET_RUBRIC_late_fragment"}]},
           {"id":"progress","expectation":"silenceRequired","gradingGoal":"SECRET_RUBRIC_progress","triggerAt":9,
-           "events":[{"kind":"transcript","at":8,"speaker":"me","text":"I will use predecessor links to reconstruct one chain."}]}
+           "events":[{"kind":"transcript","at":8,"spokenAt":8,"spokenEndAt":8,"speaker":"me","text":"I will use predecessor links to reconstruct one chain."}]}
         ]}]}
         """.utf8))
         let executor = CoachingReplayExecutor(suite: "fixture/replay", target: .init(provider: .openAI, modelID: "fixture"),
@@ -58,7 +58,7 @@ import Testing
     @Test func providerFailureCannotPassAsSilence() async throws {
         let directory = try outputDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let catalog = try JSONDecoder().decode(CoachingReplayCatalog.self, from: Data(#"{"version":"intervention-v1","rubricVersion":"intervention-v1","episodes":[{"id":"quiet","decisions":[{"id":"decision","expectation":"silenceRequired","gradingGoal":"No help needed","triggerAt":1,"events":[{"kind":"transcript","at":0,"speaker":"me","text":"The expected complexity is linear."}]}]}]}"#.utf8))
+        let catalog = try JSONDecoder().decode(CoachingReplayCatalog.self, from: Data(#"{"version":"intervention-v1","rubricVersion":"intervention-v1","episodes":[{"id":"quiet","decisions":[{"id":"decision","expectation":"silenceRequired","gradingGoal":"No help needed","triggerAt":1,"events":[{"kind":"transcript","at":0,"spokenAt":0,"spokenEndAt":0,"speaker":"me","text":"The expected complexity is linear."}]}]}]}"#.utf8))
         let brain = ReplayFailingBrain()
         let executor = CoachingReplayExecutor(suite: "fixture/replay", target: .init(provider: .openAI, modelID: "fixture"),
             coach: brain, judge: brain, screen: NoReplayScreen())

@@ -75,9 +75,10 @@ public struct EvaluationSuiteRunner {
         let catalogURL = scenariosDirectory.appendingPathComponent(try require(selected.catalog))
         let catalogData = try Data(contentsOf: catalogURL)
         let catalog = try CoachingReplayCatalog.load(from: catalogURL)
-        let target = BrainTarget(provider: provider, modelID: environment["JARVIS_EVALUATION_MODEL"] ?? BrainModelCatalog.defaultModel(for: provider).id)
-        let judgeProvider = try require(BrainProvider(rawValue: environment["JARVIS_EVALUATION_JUDGE_PROVIDER"] ?? provider.rawValue), "Invalid judge provider")
-        let judgeTarget = BrainTarget(provider: judgeProvider, modelID: environment["JARVIS_EVALUATION_JUDGE_MODEL"] ?? BrainModelCatalog.defaultModel(for: judgeProvider).id)
+        let target = LiveE2EScenario.target(for: provider, modelID: environment["JARVIS_EVALUATION_MODEL"])
+        let judgeProvider = try require(BrainProvider(rawValue: environment["JARVIS_EVALUATION_JUDGE_PROVIDER"] ?? BrainProvider.codexSubscription.rawValue), "Invalid judge provider")
+        let judgeTarget = BrainTarget(provider: judgeProvider, modelID: environment["JARVIS_EVALUATION_JUDGE_MODEL"] ?? "gpt-5.6-terra")
+        guard judgeTarget.modelID != target.modelID else { throw Failure.invalidConfiguration }
         let effort = try require(ReasoningEffort(rawValue: environment["JARVIS_EVALUATION_EFFORT"] ?? Defaults.Brain.effort.rawValue), "Invalid coach reasoning effort")
         let judgeEffort = try require(ReasoningEffort(rawValue: environment["JARVIS_EVALUATION_JUDGE_EFFORT"] ?? ReasoningEffort.low.rawValue), "Invalid judge reasoning effort")
         let needsProxy = provider.servedByLocalProxy || judgeProvider.servedByLocalProxy
@@ -101,6 +102,7 @@ public struct EvaluationSuiteRunner {
                 "coachEffort": effort.rawValue, "judgeProvider": judgeProvider.rawValue,
                 "judgeModel": judgeTarget.modelID, "judgeEffort": judgeEffort.rawValue,
                 "rubricVersion": catalog.rubricVersion, "catalogVersion": catalog.version,
+                "judgeInstructionVersion": InterventionVerdict.judgeInstructionVersion,
                 "catalogSHA256": SHA256.hash(data: catalogData).map { String(format: "%02x", $0) }.joined(),
                 "sourceRevision": environment["JARVIS_EVALUATION_SOURCE_REVISION"] ?? "unknown",
                 "config": "Config.default", "saveConversations": "false", "acceptance": selected.acceptance,
@@ -138,7 +140,12 @@ public struct EvaluationSuiteRunner {
                         let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
                         try encoder.encode(calibration).write(to: directory.appendingPathComponent("judge-calibration.json"))
                     }
-                    var report = try await executor.run(catalog, metadata: metadata, output: directory)
+                    var report: EvaluationSuiteReport
+                    if runErrors.isEmpty {
+                        report = try await executor.run(catalog, metadata: metadata, output: directory)
+                    } else {
+                        report = EvaluationSuiteReport(suite: suite, results: [], metadata: metadata)
+                    }
                     let coachHealth = await coachAudit.close()
                     let judgeHealth = await judgeAudit.close()
                     if coachHealth != .complete { runErrors.append("Coach wire audit incomplete") }

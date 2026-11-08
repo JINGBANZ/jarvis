@@ -22,6 +22,8 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         var timelineOrigin: TimeInterval?
         var deltas = ""
         var speechStopped = false
+        var completedTranscript: String?
+        var completedSpeaker: Speaker?
 
         var spokenAt: TimeInterval? {
             guard let audioStartMilliseconds, let timelineOrigin else { return nil }
@@ -55,7 +57,8 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
     @discardableResult
     public func recordSpeechStarted(itemID: String, audioStartMilliseconds: Int,
                                     timelineOrigin: TimeInterval) -> Bool {
-        guard !itemID.isEmpty, audioStartMilliseconds >= 0 else { return false }
+        guard !itemID.isEmpty, audioStartMilliseconds >= 0,
+              timelineOrigin.isFinite, timelineOrigin >= 0 else { return false }
         lock.lock(); defer { lock.unlock() }
         guard !finalizedItemIDs.contains(itemID) else { return false }
         var item = items[itemID] ?? Item()
@@ -112,7 +115,25 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         guard !itemID.isEmpty else { return nil }
         lock.lock(); defer { lock.unlock() }
         guard !finalizedItemIDs.contains(itemID) else { return nil }
-        let item = items.removeValue(forKey: itemID) ?? Item()
+        var item = items[itemID] ?? Item()
+        item.completedTranscript = transcript
+        item.completedSpeaker = speaker
+        items[itemID] = item
+        return takeCompletedItemLocked(itemID: itemID)
+    }
+
+    /// Text can precede either VAD edge. The item stays pending until its measured range is complete.
+    public func takeCompletedItem(itemID: String) -> FinalizedItem? {
+        lock.lock(); defer { lock.unlock() }
+        return takeCompletedItemLocked(itemID: itemID)
+    }
+
+    private func takeCompletedItemLocked(itemID: String) -> FinalizedItem? {
+        guard let item = items[itemID], let transcript = item.completedTranscript,
+              let speaker = item.completedSpeaker,
+              let start = item.spokenAt, let end = item.spokenEndAt,
+              SpeechInterval(startedAt: start, endedAt: end) != nil else { return nil }
+        items.removeValue(forKey: itemID)
         finalizedItemIDs.insert(itemID)
         recordFinalizedAudioBoundaryLocked(item)
 
@@ -242,14 +263,18 @@ public final class RealtimeTranscriptionLedger: @unchecked Sendable {
         finalizedItemIDs.insert(itemID)
         recordFinalizedAudioBoundaryLocked(item)
 
-        if let partial = TranscriptFiltering.meaningfulTranscript(item.deltas, speaker: speaker) {
+        let partial = item.completedTranscript.flatMap {
+            TranscriptFiltering.meaningfulTranscript($0, speaker: speaker)
+        } ?? TranscriptFiltering.meaningfulTranscript(item.deltas, speaker: speaker)
+        if let start = item.spokenAt, let end = item.spokenEndAt,
+           SpeechInterval(startedAt: start, endedAt: end) != nil, let partial {
             return FinalizedItem(itemID: itemID, text: partial, spokenAt: item.spokenAt,
                                  spokenEndAt: item.spokenEndAt,
                                  recoveredFromDeltas: true, isTranscriptUnavailable: false)
         }
         // As in `recordCompleted`, a short blip returns nil. It is still finalized above, so a late
         // terminal event can't append a duplicate.
-        if suppressShortEmptyItem {
+        if suppressShortEmptyItem, partial == nil {
             guard let duration = item.detectedSpeechDurationMilliseconds,
                   duration >= Self.minimumContextGapDurationMilliseconds else { return nil }
         }

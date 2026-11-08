@@ -191,7 +191,7 @@ final class SystemAudioBenchmarkCapture: @unchecked Sendable {
                 .map { event -> LocalSpeechEvent in
                     switch event {
                     case .started(let startedAt): .started(at: startedAt)
-                    case .ended(let startedAt, _): .ended(startedAt: startedAt, commitAt: commitAt)
+                    case .ended(let startedAt, let endedAt, _): .ended(startedAt: startedAt, endedAt: endedAt, commitAt: commitAt)
                     }
                 }
             onChunk(data, sequence, sampleCount, capturedAt, speechEvents)

@@ -2,7 +2,7 @@ import Foundation
 
 extension JarvisPrompts.Coach {
     static func newSpeech(_ text: String) -> String {
-        "New since last turn:\n\(text)"
+        text
     }
 
     static func silenceTrigger(timestamp: String, duration: String) -> String {

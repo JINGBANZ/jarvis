@@ -40,7 +40,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Clarify the scale.")])])
         let (driver, transcript) = makeDriver(
             brain: brain, screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock())
-        transcript.append(.init(speaker: .them, text: "Design a cache.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Design a cache.", at: 1, endedAt: 1))
         #expect(driver.handledTranscriptCount == 0)
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -58,7 +58,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         let screen = FakeScreen()
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: clock)
-        transcript.append(.init(speaker: .me, text: "I'm stuck on this two-sum problem", at: 100))
+        transcript.append(.init(speaker: .me, text: "I'm stuck on this two-sum problem", at: 100, endedAt: 100))
 
         let outcome = await driver.handleTrigger(.manualHint)
 
@@ -86,7 +86,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
             DispatchQueue.global().async { screen.entered.wait(); continuation.resume() }
         }
         let boundary = transcript.append(.init(
-            speaker: .me, text: "What is the time complexity for this new approach?", at: 1))
+            speaker: .me, text: "What is the time complexity for this new approach?", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary) == .busy)
         screen.release.signal()
 
@@ -145,7 +145,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
         let screen = GatedScreen()
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: clock)
-        transcript.append(.init(speaker: .me, text: "here is my code", at: 0))
+        transcript.append(.init(speaker: .me, text: "here is my code", at: 0, endedAt: 0))
 
         let task = Task { await driver.handleTrigger(.manualHint) }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -266,7 +266,7 @@ private final class FailingScreen: ScreenCapturing, @unchecked Sendable {
             capabilities: .compose(disabledTools: [], referencesAdmitted: false, skills: skills))
 
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
-        transcript.append(.init(speaker: .them, text: "Tell me about a conflict you had.", at: 101))
+        transcript.append(.init(speaker: .them, text: "Tell me about a conflict you had.", at: 101, endedAt: 101))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
         #expect(brain.toolChoices[2] == .required)

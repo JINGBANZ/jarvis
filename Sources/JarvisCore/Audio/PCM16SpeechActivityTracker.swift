@@ -6,6 +6,8 @@ public struct PCM16SpeechActivityTracker {
     private var detector = AdaptiveAudioActivityDetector(configuration: .init())
     private var lastActiveAt: TimeInterval?
     private var reportedActive = false
+    /// End of the most recent speech-positive PCM chunk, before the release delay.
+    public private(set) var lastSpeechEndedAt: TimeInterval?
 
     public init(releaseDelay: TimeInterval = 0.5) {
         precondition(releaseDelay >= 0)
@@ -13,13 +15,14 @@ public struct PCM16SpeechActivityTracker {
     }
 
     /// True on a new onset, false once the release delay passes, nil when unchanged.
-    public mutating func observe(pcm16: Data, at timestamp: TimeInterval) -> Bool? {
-        guard timestamp.isFinite else { return nil }
+    public mutating func observe(pcm16: Data, at timestamp: TimeInterval, sampleRate: Int = 24_000) -> Bool? {
+        guard timestamp.isFinite, sampleRate > 0 else { return nil }
         let observation = detector.observe(pcm16: pcm16)
         guard observation.sampleCount > 0 else { return nil }
 
         if observation.isActive {
             lastActiveAt = timestamp
+            lastSpeechEndedAt = timestamp + Double(observation.sampleCount) / Double(sampleRate)
             guard !reportedActive else { return nil }
             reportedActive = true
             return true
@@ -40,6 +43,7 @@ public struct PCM16SpeechActivityTracker {
         let change: Bool? = reportedActive ? false : nil
         detector = AdaptiveAudioActivityDetector(configuration: .init())
         lastActiveAt = nil
+        lastSpeechEndedAt = nil
         reportedActive = false
         return change
     }

@@ -4,7 +4,7 @@ import Testing
 @Suite struct CoachAdmissionSnapshotTests {
     @Test @MainActor func targetSelectionCannotExpandTheAdmittedTranscript() async throws {
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .me, text: "First complete question.", at: 1))
+        transcript.append(.init(speaker: .me, text: "First complete question.", at: 1, endedAt: 1))
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
         let target = BrainTarget(provider: .openAI, modelID: BrainModelCatalog.defaultModel(for: .openAI).id)
         var selectedDriver: CoachDriver?
@@ -14,7 +14,7 @@ import Testing
                 targets: [.init(target: target, brain: brain)],
                 onSelected: { _ in
                     selectedDriver?.updateTranscriptionWork(.pending(since: 2), for: .them)
-                    transcript.append(.init(speaker: .me, text: "Later unadmitted reply.", at: 3))
+                    transcript.append(.init(speaker: .me, text: "Later unadmitted reply.", at: 3, endedAt: 3))
                 }),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock())
 

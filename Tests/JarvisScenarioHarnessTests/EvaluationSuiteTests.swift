@@ -75,8 +75,8 @@ extension EvaluationSuiteTests {
     @Test func checkedInCatalogValidatesAndRubricIsSeparateFromModelEvents() throws {
         let base = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         let catalog = try CoachingReplayCatalog.load(from: base.appendingPathComponent("JarvisLiveTests/Scenarios/coaching-intervention.json"))
-        #expect(catalog.episodes.count == 28)
-        #expect(catalog.episodes.flatMap(\.decisions).count == 36)
+        #expect(catalog.episodes.count == 32)
+        #expect(catalog.episodes.flatMap(\.decisions).count == 46)
         #expect(catalog.episodes.flatMap(\.decisions).flatMap(\.events).allSatisfy { !($0.text ?? "").contains("gradingGoal") })
     }
 }

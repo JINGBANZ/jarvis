@@ -98,17 +98,22 @@ public final class TranscriptionCoachingCoordinator: @unchecked Sendable {
     public func recordFinalizedTranscript(
         _ rawText: String,
         spokenAt: TimeInterval?,
+        spokenEndAt: TimeInterval?,
         source: String
     ) -> Bool {
         let text = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard text.contains(where: { $0.isLetter || $0.isNumber }) else { return false }
-        let fallbackTime = max(0, clock.now() - sessionStart)
-        let at = spokenAt.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil } ?? fallbackTime
+        guard let spokenAt, let spokenEndAt,
+              let speech = SpeechInterval(startedAt: spokenAt, endedAt: spokenEndAt) else {
+            jlog("⚠️ transcription omitted: measured speech timing unavailable (\(speaker.rawValue), \(source))")
+            return false
+        }
+        let at = speech.startedAt
 
         lock.lock()
         guard !stopped else { lock.unlock(); return false }
         let transcriptBoundary = transcript.append(
-            .init(speaker: speaker, text: text, at: at))
+            .init(speaker: speaker, text: text, at: at, endedAt: speech.endedAt))
         pending.append(text)
         pendingLatestSpeechTime = max(pendingLatestSpeechTime ?? at, at)
         pendingTranscriptBoundary = max(pendingTranscriptBoundary ?? 0, transcriptBoundary)

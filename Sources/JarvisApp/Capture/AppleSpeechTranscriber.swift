@@ -485,13 +485,15 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         }
         let timelineOffset = analyzerTimelineOffset ?? 0
         let resultStart = CMTimeGetSeconds(result.range.start)
-        let spokenAt = resultStart.isFinite && resultStart >= 0
-            ? timelineOffset + resultStart
-            : clock.now() - sessionStart
         let resultEnd = CMTimeGetSeconds(CMTimeRangeGetEnd(result.range))
-        let spokenEnd = resultEnd.isFinite && resultEnd >= resultStart
-            ? timelineOffset + resultEnd
-            : spokenAt
+        guard let speech = SpeechInterval(startedAt: timelineOffset + resultStart,
+                                          endedAt: timelineOffset + resultEnd) else {
+            lock.unlock()
+            jlog("⚠️ Apple Speech final omitted: invalid analyzer speech range")
+            return
+        }
+        let spokenAt = speech.startedAt
+        let spokenEnd = speech.endedAt
         let benchmarkItemID: String?
         if benchmark == nil {
             benchmarkItemID = nil
@@ -503,6 +505,7 @@ final class AppleSpeechTranscriber: TranscriptionSession, @unchecked Sendable {
         let accepted = coachingCoordinator.recordFinalizedTranscript(
             raw,
             spokenAt: spokenAt,
+            spokenEndAt: spokenEnd,
             source: "Apple Speech"
         )
         guard accepted else {

@@ -317,7 +317,7 @@ extension ReferenceHarnessAppDelegate {
     }
 
     private func referenceTurn(_ driver: CoachDriver, _ transcript: RollingTranscript, _ text: String) async throws {
-        transcript.append(.init(speaker: .them, text: text, at: Date().timeIntervalSince1970))
+        transcript.append(.init(speaker: .them, text: text, at: Date().timeIntervalSince1970, endedAt: Date().timeIntervalSince1970))
         try require(await driver.handleTrigger(.turnEnd) == .spoke, "synthetic model turn committed")
     }
 
@@ -476,7 +476,7 @@ extension ReferenceHarnessAppDelegate {
         let brain = ReferenceHarnessBrain([try referenceCall("read_reference", ["document_id": document.uuidString,
             "offset": 0, "revision_id": NSNull()], id: "late"), referenceFinish])
         let (driver, transcript, sink) = referenceDriver(brain: brain, result: .admitted(active))
-        transcript.append(.init(speaker: .them, text: "Read the admitted reference.", at: Date().timeIntervalSince1970))
+        transcript.append(.init(speaker: .them, text: "Read the admitted reference.", at: Date().timeIntervalSince1970, endedAt: Date().timeIntervalSince1970))
         let turn = Task { await driver.handleTrigger(.turnEnd) }
         while await brain.requests.isEmpty { await Task.yield() }
         try await Task.sleep(for: .milliseconds(100))

@@ -10,13 +10,15 @@ import Testing
         ledger.recordDelta(itemID: "second", delta: "second")
         ledger.recordDelta(itemID: "first", delta: "answer")
 
+        ledger.recordSpeechStopped(itemID: "first", audioEndMilliseconds: 2_500)
+        ledger.recordSpeechStopped(itemID: "second", audioEndMilliseconds: 4_000)
         let second = try #require(ledger.recordCompleted(itemID: "second", transcript: "second final",
                                                         speaker: .them))
         let first = try #require(ledger.recordCompleted(itemID: "first", transcript: "first final",
                                                        speaker: .them))
         #expect(second.text == "second final")
         #expect(second.spokenAt == 13)
-        #expect(second.spokenEndAt == nil)
+        #expect(second.spokenEndAt == 14)
         #expect(first.text == "first final")
         #expect(first.spokenAt == 11.25)
     }
@@ -27,6 +29,7 @@ import Testing
         ledger.recordDelta(itemID: "item", delta: "What is ")
         ledger.recordDelta(itemID: "item", delta: "a semaphore?")
 
+        ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: 2_000)
         let result = try #require(ledger.recordFailed(itemID: "item", speaker: .them))
         #expect(result.text == "What is a semaphore?")
         #expect(result.spokenAt == 4.5)
@@ -65,7 +68,7 @@ import Testing
         let ledger = RealtimeTranscriptionLedger()
         ledger.recordSpeechStarted(itemID: "item", audioStartMilliseconds: 8_000, timelineOrigin: 1)
         ledger.recordDelta(itemID: "item", delta: "partial question")
-        #expect(ledger.recordSpeechStopped(itemID: "item"))
+        #expect(ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: 9_000))
 
         let result = try #require(ledger.resolveStoppedItemTimeout(itemID: "item", speaker: .them))
         #expect(result.text == "partial question")
@@ -95,7 +98,8 @@ import Testing
 
         let result = try #require(
             ledger.resolveActiveItemTimeout(itemID: "item", speaker: .them))
-        #expect(result.text == "partial question")
+        #expect(result.text == nil)
+        #expect(result.isTranscriptUnavailable)
         #expect(!ledger.hasPendingItems)
     }
 
@@ -130,7 +134,7 @@ import Testing
         #expect(ledger.hasPendingItems)
         #expect(ledger.resolveStoppedItemTimeout(itemID: "item", speaker: .me) == nil)
 
-        ledger.recordSpeechStopped(itemID: "item")
+        ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: 1_000)
         #expect(ledger.hasPendingItems)
         let result = try #require(ledger.resolveStoppedItemTimeout(itemID: "item", speaker: .me))
         #expect(result.text == "still speaking")
@@ -142,6 +146,8 @@ import Testing
 
     @Test func emptyCompletedTextUsesDeltasButNoiseCompletionStaysSilent() throws {
         let ledger = RealtimeTranscriptionLedger()
+        ledger.recordSpeechStarted(itemID: "partial", audioStartMilliseconds: 0, timelineOrigin: 0)
+        ledger.recordSpeechStopped(itemID: "partial", audioEndMilliseconds: 1_000)
         ledger.recordDelta(itemID: "partial", delta: "usable partial")
         let partial = try #require(ledger.recordCompleted(itemID: "partial", transcript: "",
                                                          speaker: .me))
@@ -178,13 +184,15 @@ import Testing
         activeTimeout.recordDelta(itemID: "active", delta: "partial answer")
         let timedOut = try #require(activeTimeout.resolveActiveItemTimeout(itemID: "active",
                                                                           speaker: .me))
-        #expect(timedOut.text == "partial answer")
+        #expect(timedOut.text == nil)
+        #expect(timedOut.isTranscriptUnavailable)
         #expect(!activeTimeout.hasPendingItems)
 
         let disconnected = RealtimeTranscriptionLedger()
         disconnected.recordSpeechStarted(itemID: "first", audioStartMilliseconds: 2_000,
                                           timelineOrigin: 0)
         disconnected.recordDelta(itemID: "first", delta: "first partial")
+        disconnected.recordSpeechStopped(itemID: "first", audioEndMilliseconds: 2_500)
         disconnected.recordSpeechStarted(itemID: "second", audioStartMilliseconds: 3_000,
                                           timelineOrigin: 0)
         let recovered = disconnected.resolveAllInterruptedItems(speaker: .them)
@@ -211,13 +219,17 @@ import Testing
         #expect(ledger.hasPendingItems)
     }
 
-    @Test func terminalEventsClearActiveSpeechEvenWithoutVadStop() {
+    @Test func completedTextWaitsForVadEndWhileFailureSettlesActivity() {
         let completed = RealtimeTranscriptionLedger()
         completed.recordSpeechStarted(
             itemID: "completed", audioStartMilliseconds: 0, timelineOrigin: 0)
         #expect(completed.hasActiveSpeech)
         _ = completed.recordCompleted(
             itemID: "completed", transcript: "done", speaker: .them)
+        #expect(completed.hasActiveSpeech)
+        #expect(completed.hasPendingItems)
+        completed.recordSpeechStopped(itemID: "completed", audioEndMilliseconds: 1_000)
+        #expect(completed.takeCompletedItem(itemID: "completed")?.text == "done")
         #expect(!completed.hasActiveSpeech)
 
         let failed = RealtimeTranscriptionLedger()
@@ -280,22 +292,18 @@ import Testing
         #expect(ledger.pendingItemCount == 0)
     }
 
-    @Test func missingStopTimingWaitsForLaterVadBoundaryBeforeRetiringAudio() throws {
+    @Test func missingStopTimingStaysPendingUntilTheExistingDeadline() throws {
         let ledger = RealtimeTranscriptionLedger()
         ledger.recordSpeechStarted(itemID: "missing-stop", audioStartMilliseconds: 1_000,
                                    timelineOrigin: 10)
-        _ = try #require(ledger.recordCompleted(itemID: "missing-stop", transcript: "done",
-                                                speaker: .them))
-
+        #expect(ledger.recordCompleted(itemID: "missing-stop", transcript: "done", speaker: .them) == nil)
+        ledger.recordSpeechStarted(itemID: "later", audioStartMilliseconds: 4_000, timelineOrigin: 10)
         #expect(ledger.safeReplayDiscardTime == 11)
-
-        ledger.recordSpeechStarted(itemID: "later", audioStartMilliseconds: 4_000,
-                                   timelineOrigin: 10)
-        #expect(ledger.safeReplayDiscardTime == 14)
-        ledger.recordSpeechStopped(itemID: "later", audioEndMilliseconds: 5_000)
-        _ = try #require(ledger.recordCompleted(itemID: "later", transcript: "later",
-                                                speaker: .them))
-        #expect(ledger.safeReplayDiscardTime == 15)
+        #expect(ledger.takeCompletedItem(itemID: "missing-stop") == nil)
+        let expired = try #require(ledger.resolveActiveItemTimeout(itemID: "missing-stop", speaker: .them))
+        #expect(expired.text == nil)
+        #expect(expired.isTranscriptUnavailable)
+        #expect(ledger.pendingItemCount == 1)
     }
 
     @Test func negativeStopTimingIsIgnoredWithoutLosingTerminalText() throws {
@@ -304,10 +312,46 @@ import Testing
                                    timelineOrigin: 10)
         ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: -1)
 
-        let item = try #require(ledger.recordCompleted(
-            itemID: "item", transcript: "preserved", speaker: .them))
-        #expect(item.text == "preserved")
-        #expect(item.spokenEndAt == nil)
+        #expect(ledger.recordCompleted(itemID: "item", transcript: "preserved", speaker: .them) == nil)
         #expect(ledger.safeReplayDiscardTime == 11)
+        ledger.recordSpeechStopped(itemID: "item", audioEndMilliseconds: 2_000)
+        let item = try #require(ledger.takeCompletedItem(itemID: "item"))
+        #expect(item.text == "preserved")
+        #expect(item.spokenEndAt == 12)
+        #expect(ledger.safeReplayDiscardTime == 12)
+    }
+}
+
+
+extension RealtimeTranscriptionLedgerTests {
+    @Test(arguments: [true, false])
+    func completionBeforeEitherVadEdgeIsAdmittedOnceAfterBothArrive(stopFirst: Bool) throws {
+        let ledger = RealtimeTranscriptionLedger()
+        #expect(ledger.recordCompleted(itemID: "early", transcript: "held words", speaker: .me) == nil)
+        #expect(ledger.coachingWorkState == .pending(since: nil))
+        if stopFirst { ledger.recordSpeechStopped(itemID: "early", audioEndMilliseconds: 3_000) }
+        else { ledger.recordSpeechStarted(itemID: "early", audioStartMilliseconds: 1_000, timelineOrigin: 10) }
+        #expect(ledger.takeCompletedItem(itemID: "early") == nil)
+        if stopFirst { ledger.recordSpeechStarted(itemID: "early", audioStartMilliseconds: 1_000, timelineOrigin: 10) }
+        else { ledger.recordSpeechStopped(itemID: "early", audioEndMilliseconds: 3_000) }
+        let item = try #require(ledger.takeCompletedItem(itemID: "early"))
+        #expect(item.text == "held words")
+        #expect(item.spokenAt == 11)
+        #expect(item.spokenEndAt == 13)
+        #expect(ledger.takeCompletedItem(itemID: "early") == nil)
+        #expect(ledger.recordCompleted(itemID: "early", transcript: "duplicate", speaker: .me) == nil)
+        #expect(!ledger.hasPendingItems)
+    }
+
+    @Test func finalOnlyTextSettlesAtTheActiveDeadlineWithoutFabricatingTiming() throws {
+        let ledger = RealtimeTranscriptionLedger()
+        #expect(ledger.recordCompleted(itemID: "untimed", transcript: "held words", speaker: .me) == nil)
+        let expired = try #require(ledger.resolveActiveItemTimeout(itemID: "untimed", speaker: .me))
+        #expect(expired.text == nil)
+        #expect(expired.spokenAt == nil)
+        #expect(expired.spokenEndAt == nil)
+        #expect(expired.isTranscriptUnavailable)
+        #expect(!ledger.hasPendingItems)
+        #expect(!ledger.recordSpeechStopped(itemID: "untimed", audioEndMilliseconds: 3_000))
     }
 }

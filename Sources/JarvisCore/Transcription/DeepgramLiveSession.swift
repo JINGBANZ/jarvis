@@ -13,10 +13,12 @@ public enum DeepgramLiveSession {
         public let start: TimeInterval
         public let end: TimeInterval
         public let lastWordEnd: TimeInterval?
+        public let firstWordStart: TimeInterval?
 
         public init(
             transcript: String, isFinal: Bool, speechFinal: Bool,
-            start: TimeInterval, end: TimeInterval, lastWordEnd: TimeInterval? = nil
+            start: TimeInterval, end: TimeInterval, lastWordEnd: TimeInterval? = nil,
+            firstWordStart: TimeInterval? = nil
         ) {
             self.transcript = transcript
             self.isFinal = isFinal
@@ -24,6 +26,42 @@ public enum DeepgramLiveSession {
             self.start = start
             self.end = end
             self.lastWordEnd = lastWordEnd
+            self.firstWordStart = firstWordStart
+        }
+    }
+
+    /// Maps the current contiguous span of sent audio. A final crossing a dropped capture chunk
+    /// has no measured range; later speech can use the next span without restarting the socket.
+    public struct AudioClock: Sendable {
+        private var captureOrigin: TimeInterval?
+        private var spanOffset: TimeInterval = 0
+        private var sentDuration: TimeInterval = 0
+        private var expectedNextSequence: UInt64?
+        private var durationKnown = true
+
+        public init() {}
+
+        public mutating func recordSentAudio(sequenceNumber: UInt64, capturedAt: TimeInterval, duration: TimeInterval) {
+            guard durationKnown, duration.isFinite, duration > 0 else {
+                durationKnown = false
+                return
+            }
+            defer { sentDuration += duration; expectedNextSequence = sequenceNumber &+ 1 }
+            guard capturedAt.isFinite, capturedAt >= 0 else {
+                captureOrigin = nil
+                return
+            }
+            if captureOrigin == nil || expectedNextSequence != sequenceNumber {
+                captureOrigin = capturedAt
+                spanOffset = sentDuration
+            }
+        }
+
+        public func sessionInterval(_ speech: SpeechInterval?) -> SpeechInterval? {
+            guard durationKnown, let captureOrigin, let speech,
+                  speech.startedAt >= spanOffset, speech.endedAt <= sentDuration + 0.000_001 else { return nil }
+            return SpeechInterval(startedAt: captureOrigin + speech.startedAt - spanOffset,
+                                  endedAt: captureOrigin + speech.endedAt - spanOffset)
         }
     }
 
@@ -91,7 +129,8 @@ public enum DeepgramLiveSession {
                 speechFinal: object["speech_final"] as? Bool ?? false,
                 start: start,
                 end: start + (number(object["duration"]) ?? 0),
-                lastWordEnd: words.last.flatMap { number($0["end"]) }))
+                lastWordEnd: words.last.flatMap { number($0["end"]) },
+                firstWordStart: words.first.flatMap { number($0["start"]) }))
         case "UtteranceEnd":
             // Deepgram sends -1 when the words were finalized before the gap elapsed.
             guard let end = number(object["last_word_end"]), end >= 0 else { return .other }

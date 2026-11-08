@@ -318,7 +318,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let screen = FakeScreen()
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: clock)
-        transcript.append(.init(speaker: .me, text: "I'll brute-force two-sum with a double loop", at: 100))
+        transcript.append(.init(speaker: .me, text: "I'll brute-force two-sum with a double loop", at: 100, endedAt: 100))
 
         await driver.handleTrigger(.turnEnd)
 
@@ -346,7 +346,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let screen = FakeScreen(recognizedText: "class Solution {\n    while(true){ cnt--; }")
         let (driver, transcript) = makeDriver(brain: brain, screen: screen,
                                               overlay: FakeOverlay(), clock: ManualClock(now: 100))
-        transcript.append(.init(speaker: .me, text: "why is this throwing NPE", at: 100))
+        transcript.append(.init(speaker: .me, text: "why is this throwing NPE", at: 100, endedAt: 100))
 
         await driver.handleTrigger(.turnEnd)
 
@@ -375,7 +375,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let screen = FakeScreen(payload: TestFixtures.tinyJpegBase64)
         let (driver, transcript) = makeDriver(
             activity: evidence, brain: brain, screen: screen, clock: clock)
-        transcript.append(.init(speaker: .me, text: "here's my solution", at: 100))
+        transcript.append(.init(speaker: .me, text: "here's my solution", at: 100, endedAt: 100))
 
         await driver.handleTrigger(.turnEnd)
 
@@ -405,7 +405,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "use a hash map")])])
         let (driver, transcript) = makeDriver(
             activity: evidence, brain: brain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "stuck on two-sum", at: 100))
+        transcript.append(.init(speaker: .me, text: "stuck on two-sum", at: 100, endedAt: 100))
 
         await driver.handleTrigger(.manualHint)
 
@@ -464,7 +464,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             ]))
         let (driver, transcript) = makeDriver(
             activity: evidence, brain: brain, clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .me, text: "keep listening after failures", at: 0))
+        transcript.append(.init(speaker: .me, text: "keep listening after failures", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
@@ -485,7 +485,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let screen = HeldCleanupScreen()
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, screen: screen, overlay: overlay, clock: clock)
-        transcript.append(.init(speaker: .me, text: "here is my code", at: 0))
+        transcript.append(.init(speaker: .me, text: "here is my code", at: 0, endedAt: 0))
 
         let task = Task { await driver.handleTrigger(.turnEnd) }
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
@@ -528,27 +528,27 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
-        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
+        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(overlay.rendered == [""])
     }
 
-    @Test func staySilentToolRendersNothingAndLeavesNoTrace() async {
+    @Test func staySilentToolRendersNothingAndKeepsItsNativeReceipt() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet1")],
                                                  rawToolCalls: [RawToolCall(id: "quiet1", name: "stay_silent", argumentsJSON: "{}")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
-        transcript.append(.init(speaker: .me, text: "thinking about the columns", at: 0))
+        transcript.append(.init(speaker: .me, text: "thinking about the columns", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(overlay.rendered.isEmpty)
 
-        transcript.append(.init(speaker: .me, text: "maybe a map of columns", at: 5))
+        transcript.append(.init(speaker: .me, text: "maybe a map of columns", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
         let second = brain.calls[1]
         #expect(second.contains { ($0.text ?? "").contains("thinking about the columns") })
-        #expect(!second.contains { $0.role == .assistant && $0.toolCalls != nil })
-        #expect(!second.contains { $0.role == .tool })
+        #expect(second.contains { $0.role == .assistant && $0.toolCalls?.first?.name == "stay_silent" })
+        #expect(second.contains { $0.role == .tool && $0.toolCallId == "quiet1" && $0.text == "Silent at 00:00." })
     }
 
     @Test func staySilentActionLandsInActivityLog() async throws {
@@ -564,7 +564,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         ])
         let (driver, transcript) = makeDriver(
             activity: evidence, brain: brain, clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .me, text: "thinking about the columns", at: 0))
+        transcript.append(.init(speaker: .me, text: "thinking about the columns", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
@@ -590,7 +590,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeDriver(
             activity: evidence, brain: brain, screen: UnavailableScreen(),
             clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .me, text: "look at this", at: 0))
+        transcript.append(.init(speaker: .me, text: "look at this", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
@@ -603,17 +603,18 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(snapshot.rows[1].contains("stayed silent"))
     }
 
-    @Test func silentSilenceCheckLeavesNoTriggerNoteInHistory() async {
+    @Test func silentSilenceCheckRetainsItsTriggerAndLinkedDecision() async {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "q1")],
                                                  rawToolCalls: [RawToolCall(id: "q1", name: "stay_silent", argumentsJSON: "{}")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
         #expect(await driver.handleTrigger(.silence(secondsQuiet: 120)) == .silentByModel)
 
-        transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
+        transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
         // Only user messages: the system prompt legitimately contains a "no speech for" example.
-        #expect(!brain.calls[1].contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
+        #expect(brain.calls[1].contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
+        #expect(brain.calls[1].contains { $0.role == .tool && $0.toolCallId == "q1" && $0.text == "Silent at 00:00." })
     }
 
     @Test func silenceCheckWithCaptureIsKeptInHistory() async {
@@ -628,7 +629,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
         #expect(await driver.handleTrigger(.silence(secondsQuiet: 120)) == .silentByModel)
 
-        transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5))
+        transcript.append(.init(speaker: .me, text: "ok here is an idea", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
         let last = brain.calls.last!
         #expect(last.contains { $0.role == .user && ($0.text ?? "").contains("no speech for") })
@@ -641,7 +642,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             + [.init(toolCalls: [.staySilent(callId: "complete")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
-        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
+        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(brain.calls.count == 3)
         #expect(overlay.rendered.isEmpty)
@@ -655,8 +656,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .them, text: "Hmm.", at: 1))
-        transcript.append(.init(speaker: .me, text: "嗯嗯", at: 2))
+        transcript.append(.init(speaker: .them, text: "Hmm.", at: 1, endedAt: 1))
+        transcript.append(.init(speaker: .me, text: "嗯嗯", at: 2, endedAt: 2))
         #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
         #expect(brain.calls.isEmpty)
     }
@@ -671,7 +672,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(now: 0),
             coachingAttempts: attempts)
-        transcript.append(.init(speaker: .them, text: "Uh. Hmm.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Uh. Hmm.", at: 1, endedAt: 1))
 
         #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
         #expect(brain.calls.isEmpty)
@@ -690,7 +691,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .me, text: "Uh. Hmm. Oh, oh.", at: 1))
+        transcript.append(.init(speaker: .me, text: "Uh. Hmm. Oh, oh.", at: 1, endedAt: 1))
 
         #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
         #expect(brain.calls.isEmpty)
@@ -701,7 +702,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s", hint: "Walk through your loop out loud.")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
-        transcript.append(.init(speaker: .them, text: "那你是怎么做的?", at: 1))
+        transcript.append(.init(speaker: .them, text: "那你是怎么做的?", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 1)
     }
@@ -711,8 +712,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .them, text: "No. Okay.", at: 1))
-        transcript.append(.init(speaker: .me, text: "Yes. Hmm.", at: 2))
+        transcript.append(.init(speaker: .them, text: "No. Okay.", at: 1, endedAt: 1))
+        transcript.append(.init(speaker: .me, text: "Yes. Hmm.", at: 2, endedAt: 2))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(brain.calls.count == 1)
@@ -727,15 +728,15 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .them, text: "ER", at: 1))
-        transcript.append(.init(speaker: .me, text: "M", at: 2))
+        transcript.append(.init(speaker: .them, text: "ER", at: 1, endedAt: 1))
+        transcript.append(.init(speaker: .me, text: "M", at: 2, endedAt: 2))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(brain.calls.count == 1)
         let userText = brain.calls[0].filter { $0.role == .user }.compactMap(\.text)
             .joined(separator: " ")
-        #expect(userText.contains("[00:01] them: ER"))
-        #expect(userText.contains("[00:02] me: M"))
+        #expect(userText.contains("[00:01-00:01] them: ER"))
+        #expect(userText.contains("[00:02-00:02] me: M"))
     }
 
     @Test func emptyDeltaTurnEndSkipsTheBrain() async {
@@ -754,9 +755,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .them, text: "嗯", at: 1))
+        transcript.append(.init(speaker: .them, text: "嗯", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .skippedFillerOnly)
-        transcript.append(.init(speaker: .me, text: "I'd check both neighbors at that height", at: 5))
+        transcript.append(.init(speaker: .me, text: "I'd check both neighbors at that height", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
         let userText = brain.calls[0].filter { $0.role == .user }.compactMap(\.text)
             .joined(separator: " ")
@@ -769,8 +770,8 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .me, text: "Hmm.", at: 1))
-        transcript.append(.init(speaker: .them, text: "How would you test that?", at: 2))
+        transcript.append(.init(speaker: .me, text: "Hmm.", at: 1, endedAt: 1))
+        transcript.append(.init(speaker: .them, text: "How would you test that?", at: 2, endedAt: 2))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         let userText = brain.calls[0].filter { $0.role == .user }.compactMap(\.text)
@@ -800,7 +801,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
 
         async let outcome = driver.handleTrigger(.silence(secondsQuiet: 120))
         await gate.waitUntilEntered()
-        transcript.append(.init(speaker: .them, text: "嗯", at: 1))
+        transcript.append(.init(speaker: .them, text: "嗯", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
         await gate.release()
 
@@ -818,9 +819,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                   rawToolCalls: [RawToolCall(id: "spk1", name: "speak", argumentsJSON: #"{"hint":"hi"}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "the whole problem statement", at: 0))
+        transcript.append(.init(speaker: .me, text: "the whole problem statement", at: 0, endedAt: 0))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "new thought", at: 5))
+        transcript.append(.init(speaker: .me, text: "new thought", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
         let second = brain.calls[1]
         #expect(second.contains { ($0.text ?? "").contains("the whole problem statement") })
@@ -841,11 +842,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                                              argumentsJSON: #"{"hint":"second tip"}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: firstBrain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "the original problem", at: 0))
+        transcript.append(.init(speaker: .me, text: "the original problem", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
         installSingleTarget(nextBrain, on: driver)
-        transcript.append(.init(speaker: .me, text: "my next idea", at: 1))
+        transcript.append(.init(speaker: .me, text: "my next idea", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
         #expect(firstBrain.calls.count == 1)
@@ -874,7 +875,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                                              argumentsJSON: #"{"hint":"new provider turn"}"#)]),
         ])
         let (driver, transcript) = makeDriver(brain: oldBrain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "inspect this code", at: 0))
+        transcript.append(.init(speaker: .me, text: "inspect this code", at: 0, endedAt: 0))
         async let oldTurn = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
 
@@ -884,7 +885,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(oldBrain.callCount == 2)
         #expect(nextBrain.calls.isEmpty)
 
-        transcript.append(.init(speaker: .me, text: "now continue", at: 1))
+        transcript.append(.init(speaker: .me, text: "now continue", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(nextBrain.calls.count == 1)
     }
@@ -904,7 +905,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         ])
         let (driver, transcript) = makeDriver(
             brain: oldBrain, screen: screen, clock: clock)
-        transcript.append(.init(speaker: .me, text: "help with what is on screen", at: 0))
+        transcript.append(.init(speaker: .me, text: "help with what is on screen", at: 0, endedAt: 0))
         async let hintTurn = driver.handleTrigger(.manualHint)
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             DispatchQueue.global().async { screen.entered.wait(); cont.resume() }
@@ -916,7 +917,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(oldBrain.calls.count == 1)
         #expect(nextBrain.calls.isEmpty)
 
-        transcript.append(.init(speaker: .me, text: "continue with the new provider", at: 1))
+        transcript.append(.init(speaker: .me, text: "continue with the new provider", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(nextBrain.calls.count == 1)
     }
@@ -932,7 +933,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeRouteDriver(
             [(primaryTarget, primary), (fallbackTarget, fallback)],
             onAdvanced: { previous, current, _ in transitions.record(from: previous, to: current) })
-        transcript.append(.init(speaker: .me, text: "preserve this pending work", at: 0))
+        transcript.append(.init(speaker: .me, text: "preserve this pending work", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(primary.callCount == 3)
@@ -954,7 +955,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (primaryTarget, primary),
             (fallbackTarget, fallback),
         ])
-        transcript.append(.init(speaker: .me, text: "try the next provider", at: 0))
+        transcript.append(.init(speaker: .me, text: "try the next provider", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(primary.callCount == 1)
@@ -970,10 +971,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (BrainTarget(provider: .openAI, modelID: "gpt-5.5"), primary),
             (BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5"), fallback),
         ])
-        transcript.append(.init(speaker: .me, text: "first question", at: 0))
+        transcript.append(.init(speaker: .me, text: "first question", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
-        transcript.append(.init(speaker: .me, text: "second question", at: 1))
+        transcript.append(.init(speaker: .me, text: "second question", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
 
         #expect(primary.callCount == 3)
@@ -991,7 +992,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (primaryTarget, primary),
             (fallbackTarget, originalFallback),
         ])
-        transcript.append(.init(speaker: .me, text: "move to fallback", at: 0))
+        transcript.append(.init(speaker: .me, text: "move to fallback", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
         let refreshedPrimary = ThrowingBrain()
@@ -1003,7 +1004,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             ConfiguredBrainTarget(target: fallbackTarget, brain: refreshedFallback),
         ])))
 
-        transcript.append(.init(speaker: .me, text: "continue on fallback", at: 1))
+        transcript.append(.init(speaker: .me, text: "continue on fallback", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(refreshedPrimary.callCount == 0)
         #expect(refreshedFallback.calls.count == 1)
@@ -1020,7 +1021,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (primaryTarget, primary),
             (fallbackTarget, originalFallback),
         ])
-        transcript.append(.init(speaker: .me, text: "move to fallback", at: 0))
+        transcript.append(.init(speaker: .me, text: "move to fallback", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
         let reconfiguredPrimary = ThrowingBrain()
@@ -1032,7 +1033,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             ConfiguredBrainTarget(target: fallbackTarget, brain: reconfiguredFallback),
         ])))
 
-        transcript.append(.init(speaker: .me, text: "continue on fallback", at: 1))
+        transcript.append(.init(speaker: .me, text: "continue on fallback", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(reconfiguredPrimary.callCount == 0)
         #expect(reconfiguredPrimary.preparationCount == 0)
@@ -1053,7 +1054,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (primaryTarget, originalPrimary),
             (fallbackTarget, originalFallback),
         ])
-        transcript.append(.init(speaker: .me, text: "establish primary", at: 0))
+        transcript.append(.init(speaker: .me, text: "establish primary", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
 
         let refreshedPrimary = ThrowingBrain(error: brainFailure(.permanent, "new credential rejected"))
@@ -1067,7 +1068,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             ]),
             for: [.openAI]))
 
-        transcript.append(.init(speaker: .me, text: "advance after refresh", at: 1))
+        transcript.append(.init(speaker: .me, text: "advance after refresh", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(refreshedPrimary.callCount == 1)
         #expect(originalFallback.calls.count == 1)
@@ -1086,7 +1087,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (primaryTarget, originalPrimary),
             (fallbackTarget, originalFallback),
         ])
-        transcript.append(.init(speaker: .me, text: "keep CLI failure valid", at: 0))
+        transcript.append(.init(speaker: .me, text: "keep CLI failure valid", at: 0, endedAt: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
         await failureGate.waitUntilEntered()
@@ -1247,7 +1248,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
         holder.install(driver)
-        transcript.append(.init(speaker: .me, text: "skip without losing the notice", at: 0))
+        transcript.append(.init(speaker: .me, text: "skip without losing the notice", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(originalSkip.targets == [unavailableTarget])
@@ -1297,7 +1298,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
         holder.install(driver)
-        transcript.append(.init(speaker: .me, text: "advance without losing the notice", at: 0))
+        transcript.append(.init(speaker: .me, text: "advance without losing the notice", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(originalAdvance.events == [
@@ -1321,7 +1322,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (primaryTarget, originalPrimary),
             (fallbackTarget, fallback),
         ])
-        transcript.append(.init(speaker: .me, text: "complete across the key refresh", at: 0))
+        transcript.append(.init(speaker: .me, text: "complete across the key refresh", at: 0, endedAt: 0))
 
         async let firstOutcome = driver.handleTrigger(.turnEnd)
         await successGate.waitUntilEntered()
@@ -1337,7 +1338,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await successGate.release()
 
         #expect(await firstOutcome == .silentByModel)
-        transcript.append(.init(speaker: .me, text: "one later temporary failure", at: 1))
+        transcript.append(.init(speaker: .me, text: "one later temporary failure", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(refreshedPrimary.calls.count == 2)
         #expect(fallback.calls.isEmpty)
@@ -1355,7 +1356,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (primaryTarget, originalPrimary),
             (fallbackTarget, fallback),
         ])
-        transcript.append(.init(speaker: .me, text: "complete across effort edit", at: 0))
+        transcript.append(.init(speaker: .me, text: "complete across effort edit", at: 0, endedAt: 0))
 
         async let firstOutcome = driver.handleTrigger(.turnEnd)
         await successGate.waitUntilEntered()
@@ -1371,7 +1372,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await successGate.release()
 
         #expect(await firstOutcome == .silentByModel)
-        transcript.append(.init(speaker: .me, text: "one later temporary failure", at: 1))
+        transcript.append(.init(speaker: .me, text: "one later temporary failure", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(reconfiguredPrimary.calls.count == 2)
         #expect(fallback.calls.isEmpty)
@@ -1389,7 +1390,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (primaryTarget, originalPrimary),
             (fallbackTarget, fallback),
         ])
-        transcript.append(.init(speaker: .me, text: "count the in-flight failure", at: 0))
+        transcript.append(.init(speaker: .me, text: "count the in-flight failure", at: 0, endedAt: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
         await failureGate.waitUntilEntered()
@@ -1427,7 +1428,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             overlay: FakeOverlay(),
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
-        transcript.append(.init(speaker: .me, text: "deliver terminal state", at: 0))
+        transcript.append(.init(speaker: .me, text: "deliver terminal state", at: 0, endedAt: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
         await responseGate.waitUntilEntered()
@@ -1477,7 +1478,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             overlay: FakeOverlay(),
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
-        transcript.append(.init(speaker: .me, text: "preserve pending conversation", at: 0))
+        transcript.append(.init(speaker: .me, text: "preserve pending conversation", at: 0, endedAt: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
         await responseGate.waitUntilEntered()
@@ -1514,7 +1515,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 (BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5"), second),
             ],
             onExhausted: { exhausted.record(target: $0, failure: $1) })
-        transcript.append(.init(speaker: .me, text: "bounded failure", at: 0))
+        transcript.append(.init(speaker: .me, text: "bounded failure", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(first.callCount == 3)
@@ -1548,7 +1549,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             overlay: FakeOverlay(),
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
-        transcript.append(.init(speaker: .me, text: "advance cleanly", at: 0))
+        transcript.append(.init(speaker: .me, text: "advance cleanly", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(fallback.calls.count == 1)
@@ -1578,7 +1579,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
         holder.install(driver)
-        transcript.append(.init(speaker: .me, text: "do not orphan this transcript", at: 0))
+        transcript.append(.init(speaker: .me, text: "do not orphan this transcript", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(failed.callCount == 3)
@@ -1615,7 +1616,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
         holder.install(driver)
-        transcript.append(.init(speaker: .me, text: "use the replacement route", at: 0))
+        transcript.append(.init(speaker: .me, text: "use the replacement route", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(replacement.calls.count == 1)
@@ -1651,7 +1652,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             overlay: FakeOverlay(),
             clock: ManualClock(),
             automaticAttemptDelay: { _ in })
-        transcript.append(.init(speaker: .me, text: "skip the unavailable row", at: 0))
+        transcript.append(.init(speaker: .me, text: "skip the unavailable row", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(primary.callCount == 1)
@@ -1684,7 +1685,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 (BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5"), fallback),
             ],
             screen: screen)
-        transcript.append(.init(speaker: .me, text: "review visible code", at: 0))
+        transcript.append(.init(speaker: .me, text: "review visible code", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(screen.captureCount == 1)
@@ -1714,7 +1715,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
         defer { outcome.cancel() }
         #expect(await waitUntilAsync { await gate.hasEntered })
-        transcript.append(.init(speaker: .them, text: "Hmm.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Hmm.", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
         await gate.release()
 
@@ -1736,7 +1737,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
         driver.updateTranscriptionWork(.pending(since: 3), for: .me)
         driver.updateTranscriptionWork(.pending(since: 4), for: .them)
-        let boundary = transcript.append(.init(speaker: .me, text: "What is the complexity?", at: 2))
+        let boundary = transcript.append(.init(speaker: .me, text: "What is the complexity?", at: 2, endedAt: 2))
         let outcome = await turnOutcomeBeforeTimeout {
             await driver.handleTrigger(.turnEnd, transcriptBoundary: boundary)
         }
@@ -1749,11 +1750,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
         driver.updateTranscriptionWork(.pending(since: 1), for: .them)
-        transcript.append(.init(speaker: .me, text: "Yes, that approach.", at: 2))
+        transcript.append(.init(speaker: .me, text: "Yes, that approach.", at: 2, endedAt: 2))
         let task = Task { await turnOutcomeBeforeTimeout { await driver.handleTrigger(.turnEnd) } }
         defer { task.cancel(); driver.updateTranscriptionWork(.settled, for: .them) }
         #expect(!(await waitUntil { !brain.calls.isEmpty }))
-        transcript.append(.init(speaker: .them, text: "Which approach?", at: 1))
+        transcript.append(.init(speaker: .them, text: "Which approach?", at: 1, endedAt: 1))
         driver.updateTranscriptionWork(.pending(since: 3), for: .them)
         #expect(await task.value == .silentByModel)
         let request = try #require(brain.calls.first)
@@ -1767,7 +1768,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
         driver.updateTranscriptionWork(.pending(since: 3), for: .them)
-        transcript.append(.init(speaker: .me, text: "What is the complexity?", at: 2))
+        transcript.append(.init(speaker: .me, text: "What is the complexity?", at: 2, endedAt: 2))
         let task = Task {
             await turnOutcomeBeforeTimeout { await driver.handleTrigger(.silence(secondsQuiet: 10)) }
         }
@@ -1782,14 +1783,14 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "quiet")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
         driver.updateTranscriptionWork(.pending(since: 1), for: .them)
-        transcript.append(.init(speaker: .me, text: "First question.", at: 2))
+        transcript.append(.init(speaker: .me, text: "First question.", at: 2, endedAt: 2))
         let task = Task { await turnOutcomeBeforeTimeout { await driver.handleTrigger(.turnEnd) } }
         defer { task.cancel(); driver.updateTranscriptionWork(.settled, for: .them) }
         #expect(!(await waitUntil { !brain.calls.isEmpty }))
-        transcript.append(.init(speaker: .me, text: "Later reply.", at: 4))
+        transcript.append(.init(speaker: .me, text: "Later reply.", at: 4, endedAt: 4))
         driver.updateTranscriptionWork(.pending(since: 3), for: .them)
         #expect(!(await waitUntil { !brain.calls.isEmpty }))
-        transcript.append(.init(speaker: .them, text: "Middle question.", at: 3))
+        transcript.append(.init(speaker: .them, text: "Middle question.", at: 3, endedAt: 3))
         driver.updateTranscriptionWork(.pending(since: 5), for: .them)
         #expect(await task.value == .silentByModel)
         let request = try #require(brain.calls.first)
@@ -1805,7 +1806,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
         driver.updateTranscriptionWork(.pending(since: nil), for: .them)
-        transcript.append(.init(speaker: .me, text: "Yep.", at: 20))
+        transcript.append(.init(speaker: .me, text: "Yep.", at: 20, endedAt: 20))
 
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
@@ -1818,7 +1819,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         }
 
         #expect(!(await waitUntil { !brain.calls.isEmpty }))
-        transcript.append(.init(speaker: .them, text: "Did you see the pop-up?", at: 10))
+        transcript.append(.init(speaker: .them, text: "Did you see the pop-up?", at: 10, endedAt: 10))
         driver.updateTranscriptionWork(.settled, for: .them)
 
         #expect(await outcome.value == .silentByModel)
@@ -1836,7 +1837,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "second")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
-        transcript.append(.init(speaker: .me, text: "First complete turn.", at: 1))
+        transcript.append(.init(speaker: .me, text: "First complete turn.", at: 1, endedAt: 1))
 
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
@@ -1850,12 +1851,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await gate.waitUntilEntered()
 
         driver.updateTranscriptionWork(.pending(since: nil), for: .them)
-        transcript.append(.init(speaker: .me, text: "Yep.", at: 20))
+        transcript.append(.init(speaker: .me, text: "Yep.", at: 20, endedAt: 20))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
         await gate.release()
 
         #expect(!(await waitUntil { brain.callCount == 2 }))
-        transcript.append(.init(speaker: .them, text: "Did you see the pop-up?", at: 10))
+        transcript.append(.init(speaker: .them, text: "Did you see the pop-up?", at: 10, endedAt: 10))
         driver.updateTranscriptionWork(.settled, for: .them)
 
         #expect(await outcome.value == .silentByModel)
@@ -1874,7 +1875,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(),
             automaticAttemptDelay: { _ in await delayGate.enter() })
-        transcript.append(.init(speaker: .me, text: "wait for quiet", at: 0))
+        transcript.append(.init(speaker: .me, text: "wait for quiet", at: 0, endedAt: 0))
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
                 await driver.handleTrigger(.turnEnd)
@@ -1913,7 +1914,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             automaticAttemptDelay: { _ in
                 try await delayProbe.waitForCancellation()
             })
-        transcript.append(.init(speaker: .me, text: "failed pending thought", at: 0))
+        transcript.append(.init(speaker: .me, text: "failed pending thought", at: 0, endedAt: 0))
 
         let outcome = Task {
             await turnOutcomeBeforeTimeout {
@@ -1930,7 +1931,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await waitUntilAsync { await delayProbe.hasEntered })
         #expect(brain.calls.count == 1)
 
-        transcript.append(.init(speaker: .me, text: "latest words for the hint", at: 1))
+        transcript.append(.init(speaker: .me, text: "latest words for the hint", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.manualHint) == .busy)
         #expect(await outcome.value == .spoke)
         try #require(brain.calls.count == 2)
@@ -1949,7 +1950,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             clock: ManualClock(),
             capabilities: CoachCapabilities.compose(
                 disabledTools: [], referencesAdmitted: false))
-        transcript.append(.init(speaker: .me, text: "first attempt", at: 0))
+        transcript.append(.init(speaker: .me, text: "first attempt", at: 0, endedAt: 0))
 
         async let outcome = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
@@ -2021,9 +2022,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "two sum brute force", at: 1))
+        transcript.append(.init(speaker: .me, text: "two sum brute force", at: 1, endedAt: 1))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "maybe a hash map", at: 5))
+        transcript.append(.init(speaker: .me, text: "maybe a hash map", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
         let allText = brain.calls[1].compactMap(\.text).joined(separator: "\n")
         #expect(allText.contains("maybe a hash map"))
@@ -2038,7 +2039,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "important words", at: 1))
+        transcript.append(.init(speaker: .me, text: "important words", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(brain.calls.count == 2)
         #expect(brain.calls.last!.contains { ($0.text ?? "").contains("important words") })
@@ -2062,9 +2063,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(now: 0))
-        transcript.append(.init(speaker: .me, text: "look at this", at: 0))
+        transcript.append(.init(speaker: .me, text: "look at this", at: 0, endedAt: 0))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "another thought", at: 5))
+        transcript.append(.init(speaker: .me, text: "another thought", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
 
         let second = brain.calls[1]
@@ -2096,11 +2097,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             .init(toolCalls: [.staySilent(callId: "quiet")]),
         ])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "first look please", at: 0))
+        transcript.append(.init(speaker: .me, text: "first look please", at: 0, endedAt: 0))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "second look please", at: 5))
+        transcript.append(.init(speaker: .me, text: "second look please", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "and one more thought", at: 9))
+        transcript.append(.init(speaker: .me, text: "and one more thought", at: 9, endedAt: 9))
         await driver.handleTrigger(.turnEnd)
 
         let last = brain.calls.last!
@@ -2118,15 +2119,15 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let summarizer = ScriptedBrain(script: [.init(toolCalls: [], outputText: #"{"context":"PROBLEM: tic-tac-toe columns.","decisions":[],"coaching":[],"openQuestions":[],"verification":[]}"#)])
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 30))
-        transcript.append(.init(speaker: .me, text: String(repeating: "the problem statement goes on ", count: 40), at: 0))
+        transcript.append(.init(speaker: .me, text: String(repeating: "the problem statement goes on ", count: 40), at: 0, endedAt: 0))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "and some more detail about the grid", at: 1))
+        transcript.append(.init(speaker: .me, text: "and some more detail about the grid", at: 1, endedAt: 1))
         await driver.handleTrigger(.turnEnd)
 
         // The summary lands asynchronously after the summarizer returns, so poll with turns.
         var condensed = ""
         for turn in 0..<20 where condensed.isEmpty {
-            transcript.append(.init(speaker: .me, text: "next idea \(turn)", at: 5 + Double(turn)))
+            transcript.append(.init(speaker: .me, text: "next idea \(turn)", at: 5 + Double(turn), endedAt: 5 + Double(turn)))
             await driver.handleTrigger(.turnEnd)
             let latest = (brain.calls.last ?? []).compactMap(\.text).joined(separator: "\n")
             if latest.contains("PROBLEM: tic-tac-toe columns.") { condensed = latest }
@@ -2150,9 +2151,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 5),
                                               onRouteFailure: { recorder.record($0) })
-        transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))
+        transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0, endedAt: 0))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "next thought", at: 5))
+        transcript.append(.init(speaker: .me, text: "next thought", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
         let second = brain.calls[1].compactMap(\.text).joined(separator: "\n")
         #expect(second.contains("a reasonably long problem statement to remember"))
@@ -2178,13 +2179,13 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let statement = "Keep the inclusive boundary decision. " + String(repeating: "Resolved discussion. ", count: 100)
         #expect(CoachHistory.estimatedTextTokens(statement) > CoachHistory.estimatedTextTokens(
             JarvisPrompts.Coach.condensedHistory(response.outputText ?? "")))
-        transcript.append(.init(speaker: .me, text: statement, at: 0))
+        transcript.append(.init(speaker: .me, text: statement, at: 0, endedAt: 0))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "Tests have not run", at: 1))
+        transcript.append(.init(speaker: .me, text: "Tests have not run", at: 1, endedAt: 1))
         await driver.handleTrigger(.turnEnd)
         #expect(await waitUntilAsync { summarizer.calls.count >= 1 })
         for turn in 0..<20 {
-            transcript.append(.init(speaker: .me, text: "review next case", at: 2 + Double(turn)))
+            transcript.append(.init(speaker: .me, text: "review next case", at: 2 + Double(turn), endedAt: 2 + Double(turn)))
             await driver.handleTrigger(.turnEnd)
             let context = (brain.calls.last ?? []).compactMap(\.text).joined(separator: "\n")
             #expect(context.contains("Keep the inclusive boundary decision"))
@@ -2204,9 +2205,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let summarizer = GatedSummarizer(gate: gate, summary: "PROBLEM: parked mid-summary.")
         let (driver, transcript) = makeDriver(brain: brain, summarizer: summarizer, clock: clock,
                                               config: Config(historyCompactionTokenThreshold: 5))
-        transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0))
+        transcript.append(.init(speaker: .me, text: "a reasonably long problem statement to remember", at: 0, endedAt: 0))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "next thought", at: 5))
+        transcript.append(.init(speaker: .me, text: "next thought", at: 5, endedAt: 5))
 
         let outcome = await turnOutcomeBeforeTimeout {
             await driver.handleTrigger(.turnEnd)
@@ -2233,9 +2234,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             + String(repeating: "Resolved discussion. ", count: 100)
         #expect(CoachHistory.estimatedTextTokens(statement) > CoachHistory.estimatedTextTokens(
             JarvisPrompts.Coach.condensedHistory(briefing)))
-        transcript.append(.init(speaker: .me, text: statement, at: 0))
+        transcript.append(.init(speaker: .me, text: statement, at: 0, endedAt: 0))
         await driver.handleTrigger(.turnEnd)
-        transcript.append(.init(speaker: .me, text: "next thought", at: 5))
+        transcript.append(.init(speaker: .me, text: "next thought", at: 5, endedAt: 5))
         await driver.handleTrigger(.turnEnd)
         #expect(await waitUntilAsync { await gate.hasEntered })
 
@@ -2244,7 +2245,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await gate.release()
         await drained?.value
 
-        transcript.append(.init(speaker: .me, text: "third thought", at: 9))
+        transcript.append(.init(speaker: .me, text: "third thought", at: 9, endedAt: 9))
         await driver.handleTrigger(.turnEnd)
         let third = brain.calls[2].compactMap(\.text).joined(separator: "\n")
         #expect(!third.contains("never applied"))
@@ -2257,7 +2258,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", hint: "hi")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
+        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
     }
 
@@ -2265,7 +2266,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.staySilent(callId: "q")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
+        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
     }
 
@@ -2274,9 +2275,9 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", hint: "first")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: clock)
-        transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 100))
+        transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 100, endedAt: 100))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
-        transcript.append(.init(speaker: .me, text: "second idea about the rows", at: 101))
+        transcript.append(.init(speaker: .me, text: "second idea about the rows", at: 101, endedAt: 101))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 2)
         #expect(overlay.rendered.count == 2)
@@ -2288,7 +2289,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             + [.init(toolCalls: [.staySilent(callId: "complete")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: ManualClock())
-        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
+        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(brain.calls.count == 3)
         #expect(overlay.rendered.isEmpty)
@@ -2303,7 +2304,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             count: boundedResponses) + [.init(toolCalls: [.staySilent(callId: "complete")])])
         let overlay = FakeOverlay()
         let (driver, transcript) = makeDriver(brain: brain, overlay: overlay, clock: ManualClock())
-        transcript.append(.init(speaker: .me, text: "look at this code", at: 0))
+        transcript.append(.init(speaker: .me, text: "look at this code", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(brain.calls.count == boundedResponses)
         #expect(overlay.rendered.isEmpty)
@@ -2332,7 +2333,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             screen: screen,
             overlay: overlay,
             clock: ManualClock())
-        transcript.append(.init(speaker: .me, text: "inspect this code", at: 0))
+        transcript.append(.init(speaker: .me, text: "inspect this code", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == responsesPerAttempt + 1)
@@ -2356,7 +2357,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             route: ConfiguredBrainRoute(targets: [ConfiguredBrainTarget(target: target, brain: original)],
                 onRecoveryChanged: { recorder.providers.append($0) }),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(), automaticAttemptDelay: { _ in })
-        transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0))
+        transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0, endedAt: 0))
         let outcome = Task { await driver.handleTrigger(.turnEnd) }
         #expect(await waitUntilAsync { await gate.hasEntered })
         #expect(recorder.providers == [.openAI, .openAI])
@@ -2385,7 +2386,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 onRecoveryChanged: { recorder.providers.append($0) }),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: clock, automaticAttemptDelay: { _ in },
             recoveryDelay: { try await delays.wait($0) })
-        transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0))
+        transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0, endedAt: 0))
         let outcome = Task { await driver.handleTrigger(.turnEnd) }
         #expect(await waitUntilAsync { await gate.hasEntered })
         #expect(recorder.providers == [.openAI, .openAI])
@@ -2424,7 +2425,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(reconfigure
             ? driver.reconfigureBrainRouteClients(replacement)
             : driver.refreshBrainRouteClients(replacement))
-        transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0))
+        transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(recorder.providers == [.openAI, .openAI, nil])
     }
@@ -2442,7 +2443,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 ConfiguredBrainTarget(unavailable: unavailable, failure: unavailableFailure(unavailable, "signed out")),
             ]),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(), automaticAttemptDelay: { _ in })
-        transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0))
+        transcript.append(.init(speaker: .them, text: "how would you scale this?", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(brain.calls.count == 3)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
@@ -2463,11 +2464,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let (driver, transcript) = makeDriver(
             activity: activity, brain: brain, overlay: overlay, clock: ManualClock(),
             onRouteFailure: { recorder.record($0) })
-        transcript.append(.init(speaker: .them, text: "How would you design a queue?", at: 0))
+        transcript.append(.init(speaker: .them, text: "How would you design a queue?", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(brain.calls.count == 3)
-        transcript.append(.init(speaker: .them, text: "Please try the queue question again.", at: 1))
+        transcript.append(.init(speaker: .them, text: "Please try the queue question again.", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(brain.calls.count == 6)
         #expect(recorder.failures.count == 1)
@@ -2483,12 +2484,12 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let recorder = RouteFailureRecorder()
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock(),
             onRouteFailure: { recorder.record($0) })
-        transcript.append(.init(speaker: .them, text: "first question", at: 0))
+        transcript.append(.init(speaker: .them, text: "first question", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(brain.calls.count == 3)
         #expect(await driver.handleTrigger(.silence(secondsQuiet: 60)) == .brainError)
         #expect(brain.calls.count == 3)
-        transcript.append(.init(speaker: .them, text: "new question", at: 60))
+        transcript.append(.init(speaker: .them, text: "new question", at: 60, endedAt: 60))
         #expect(await driver.handleTrigger(.turnEnd) == .silentByModel)
         #expect(brain.calls.count == 6)
         #expect(recorder.failures.count == 1)
@@ -2507,10 +2508,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let driver = CoachDriver(config: .default, transcript: transcript,
             route: ConfiguredBrainRoute(targets: targets, onExhausted: { _, failure in recorder.record(failure) }),
             screen: FakeScreen(), overlay: FakeOverlay(), clock: ManualClock(), automaticAttemptDelay: { _ in })
-        transcript.append(.init(speaker: .them, text: "first question", at: 0))
+        transcript.append(.init(speaker: .them, text: "first question", at: 0, endedAt: 0))
         let request = Task { await driver.handleTrigger(.turnEnd) }
         #expect(await waitUntilAsync { await gate.hasEntered })
-        if !reason.isManual { transcript.append(.init(speaker: .them, text: "a genuinely new question", at: 1)) }
+        if !reason.isManual { transcript.append(.init(speaker: .them, text: "a genuinely new question", at: 1, endedAt: 1)) }
         #expect(await driver.handleTrigger(reason) == .busy)
         await gate.release()
         #expect(await request.value == .brainError)
@@ -2526,7 +2527,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let brain = ScriptedThrowBrain(script: [nil, nil, nil,
             .init(toolCalls: [.speak(callId: "later", hint: "Use the latest question.")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
-        transcript.append(.init(speaker: .them, text: "a question", at: 0))
+        transcript.append(.init(speaker: .them, text: "a question", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(await driver.handleTrigger(reason) == .spoke)
         #expect(brain.calls.count == 4)
@@ -2541,7 +2542,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             (BrainTarget(provider: .claudeSubscription, modelID: "claude-sonnet-5-5"), fallback),
         ])
         defer { driver.cancelBackgroundWork() }
-        transcript.append(.init(speaker: .them, text: "first question", at: 0))
+        transcript.append(.init(speaker: .them, text: "first question", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(await driver.handleTrigger(.manualHint) == .spoke)
         #expect(primary.callCount == 1)
@@ -2657,7 +2658,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let next = Task { await driver.handleTrigger(.manualHint) }
         await cooldown.waitUntilEntered()
         #expect(brain.calls.count == 6)
-        transcript.append(.init(speaker: .them, text: "newest question during cooldown", at: 5))
+        transcript.append(.init(speaker: .them, text: "newest question during cooldown", at: 5, endedAt: 5))
         #expect(await driver.handleTrigger(.turnEnd, transcriptBoundary: transcript.count) == .busy)
         clock.set(5)
         await cooldown.release()
@@ -2669,7 +2670,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
     @Test func permanentBrainErrorOutcome() async {
         let brain = ThrowingBrain(error: brainFailure(.permanent, "invalid credentials"))
         let (driver, transcript) = makeDriver(brain: brain, clock: ManualClock())
-        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
+        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0, endedAt: 0))
         #expect(await driver.handleTrigger(.turnEnd) == .brainError)
         #expect(brain.callCount == 1)
     }
@@ -2684,7 +2685,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                 if sequence >= 2 { try await delayProbe.waitForCancellation() }
             },
             onRouteFailure: { recorder.record($0) })
-        transcript.append(.init(speaker: .me, text: "please help with this problem", at: 0))
+        transcript.append(.init(speaker: .me, text: "please help with this problem", at: 0, endedAt: 0))
         let outcome = Task { await driver.handleTrigger(.turnEnd) }
         #expect(await waitUntilAsync { await delayProbe.hasEntered })
         outcome.cancel()
@@ -2705,11 +2706,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
                     onCancel: { Task { await gate.release() } }
                 }
             })
-        transcript.append(.init(speaker: .them, text: "first question", at: 0))
+        transcript.append(.init(speaker: .them, text: "first question", at: 0, endedAt: 0))
         let outcome = Task { await driver.handleTrigger(.turnEnd) }
         defer { outcome.cancel() }
         #expect(await waitUntilAsync { await gate.hasEntered })
-        transcript.append(.init(speaker: .them, text: "latest follow-up question", at: 1))
+        transcript.append(.init(speaker: .them, text: "latest follow-up question", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
         await gate.release()
         #expect(await outcome.value == .spoke)
@@ -2726,7 +2727,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             clock: ManualClock(now: 0),
             onRouteFailure: { recorder.record($0) }
         )
-        transcript.append(.init(speaker: .me, text: "first question", at: 0))
+        transcript.append(.init(speaker: .me, text: "first question", at: 0, endedAt: 0))
 
         #expect(await driver.handleTrigger(.turnEnd) == .spoke)
         #expect(recorder.failures.isEmpty)
@@ -2747,11 +2748,11 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             clock: ManualClock(now: 0),
             onRouteFailure: { recorder.record($0) }
         )
-        transcript.append(.init(speaker: .me, text: "first question", at: 0))
+        transcript.append(.init(speaker: .me, text: "first question", at: 0, endedAt: 0))
         async let first = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
 
-        transcript.append(.init(speaker: .me, text: "follow-up while unavailable", at: 1))
+        transcript.append(.init(speaker: .me, text: "follow-up while unavailable", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
         await gate.release()
 
@@ -2783,7 +2784,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             automaticAttemptDelay: { _ in
                 try await delayProbe.waitForCancellation()
             })
-        transcript.append(.init(speaker: .me, text: "first pending thought", at: 0))
+        transcript.append(.init(speaker: .me, text: "first pending thought", at: 0, endedAt: 0))
         let first = Task {
             await turnOutcomeBeforeTimeout {
                 await driver.handleTrigger(.turnEnd)
@@ -2794,7 +2795,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         await brainGate.release()
         #expect(await waitUntilAsync { await delayProbe.hasEntered })
 
-        transcript.append(.init(speaker: .me, text: "wake with this new thought", at: 1))
+        transcript.append(.init(speaker: .me, text: "wake with this new thought", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
 
         #expect(await first.value == .spoke)
@@ -2813,7 +2814,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         async let first = driver.handleTrigger(.silence(secondsQuiet: 30))
         await gate.waitUntilEntered()
 
-        transcript.append(.init(speaker: .me, text: "new speech ended", at: 1))
+        transcript.append(.init(speaker: .me, text: "new speech ended", at: 1, endedAt: 1))
         #expect(await driver.handleTrigger(.turnEnd) == .busy)
         await gate.release()
 
@@ -2830,7 +2831,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let clock = ManualClock(now: 0)
         let brain = ScriptedBrain(script: [.init(toolCalls: [.speak(callId: "s1", hint: "hi")])])
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0))
+        transcript.append(.init(speaker: .me, text: "let me think this through", at: 0, endedAt: 0))
         await driver.handleTrigger(.turnEnd)
         #expect(brain.toolChoices.last == .required)
     }
@@ -2840,10 +2841,10 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         let gate = AsyncGate()
         let brain = GatedBrain(gate: gate, response: .init(toolCalls: [.speak(callId: "s1", hint: "hi")]))
         let (driver, transcript) = makeDriver(brain: brain, clock: clock)
-        transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 0))
+        transcript.append(.init(speaker: .me, text: "first idea about the grid", at: 0, endedAt: 0))
         async let first = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()
-        transcript.append(.init(speaker: .me, text: "second idea about the rows", at: 1))
+        transcript.append(.init(speaker: .me, text: "second idea about the rows", at: 1, endedAt: 1))
         let second = await driver.handleTrigger(.turnEnd)
         #expect(second == .busy)
         await gate.release()
@@ -2861,7 +2862,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
             brain: brain,
             clock: ManualClock(now: 0))
         let boundary = transcript.append(
-            .init(speaker: .them, text: "settling speaker's final question", at: 1))
+            .init(speaker: .them, text: "settling speaker's final question", at: 1, endedAt: 1))
 
         async let first = driver.handleTrigger(.turnEnd)
         await gate.waitUntilEntered()

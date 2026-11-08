@@ -58,7 +58,15 @@ private let detailGuidance = """
     """
 
 extension JarvisPrompts.Coach {
-    static func tipShown(dropped: [String] = []) -> String {
-        dropped.isEmpty ? "shown to the user" : "shown to the user; " + dropped.joined(separator: "; ")
+    static func tipShown(at completedAt: TimeInterval, firstShownAt: TimeInterval? = nil,
+                         dropped: [String] = []) -> String {
+        let complete = RollingTranscript.stamp(completedAt)
+        let receipt: String
+        if let firstShownAt {
+            receipt = "Shown to user from \(RollingTranscript.stamp(firstShownAt)); complete at \(complete)."
+        } else {
+            receipt = "Shown to user at \(complete)."
+        }
+        return dropped.isEmpty ? receipt : receipt + " " + dropped.joined(separator: "; ")
     }
 }

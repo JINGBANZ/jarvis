@@ -10,13 +10,19 @@ public struct PendingSpeechWindow: Sendable {
     private var recognitionObservedAt: TimeInterval?
     private var localEpisodeCount = 0
     private var onsetClaimed = false
+    private var localEnd: TimeInterval?
 
     public init() {}
 
     /// An open window keeps its earliest onset: a later episode belongs to the same unresolved run.
     public mutating func recordLocalSpeech(active: Bool, at time: TimeInterval) {
+        if active, !localSpeechActive, onsetClaimed { close() }
         localSpeechActive = active
-        guard active else { return }
+        guard active else {
+            if time.isFinite { localEnd = time }
+            return
+        }
+        localEnd = nil
         localEpisodeCount += 1
         guard localOnset == nil, time.isFinite, time >= 0 else { return }
         localOnset = time
@@ -29,14 +35,21 @@ public struct PendingSpeechWindow: Sendable {
         recognitionObservedAt = min(recognitionObservedAt ?? time, time)
     }
 
-    /// The spoken start of the utterance the provider just finalized, or nil to keep its arrival
-    /// time. Only a window's first final with a single local episode gets the onset: a later final
-    /// in a long run began after it, and with a second episode the first may have been recognized
-    /// but never finalized. The recognition cap stays out for the same reason.
-    public mutating func recordFinalized() -> TimeInterval? {
+    /// A final can precede local endpoint detection. Wait for that measured end; recognition
+    /// arrival is never substituted. Multiple unresolved episodes cannot be assigned one range.
+    public var awaitsSpeechEnd: Bool {
+        !onsetClaimed && localEpisodeCount == 1 && localOnset != nil && localSpeechActive
+    }
+
+    public mutating func takeFinalizedInterval() -> SpeechInterval? {
+        guard !awaitsSpeechEnd else { return nil }
         defer { onsetClaimed = true }
-        guard !onsetClaimed, localEpisodeCount == 1 else { return nil }
-        return localOnset
+        guard !onsetClaimed, localEpisodeCount == 1, let localOnset, let localEnd else { return nil }
+        return SpeechInterval(startedAt: localOnset, endedAt: localEnd)
+    }
+
+    public mutating func recordRecognitionFinalized() {
+        onsetClaimed = true
     }
 
     public mutating func reset() {
@@ -50,7 +63,7 @@ public struct PendingSpeechWindow: Sendable {
         queuedSince: TimeInterval?,
         isRecognizing: Bool
     ) -> TranscriptionWorkState {
-        if !isRecognizing, queuedSince == nil, !localSpeechActive {
+        if !isRecognizing, queuedSince == nil, !localSpeechActive, onsetClaimed {
             close()
         }
         guard isRecognizing else {
@@ -62,6 +75,7 @@ public struct PendingSpeechWindow: Sendable {
 
     private mutating func close() {
         localOnset = nil
+        localEnd = nil
         recognitionObservedAt = nil
         localEpisodeCount = 0
         onsetClaimed = false

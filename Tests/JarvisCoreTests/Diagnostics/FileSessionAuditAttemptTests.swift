@@ -8,8 +8,8 @@ import Testing
         let log = await FileSessionAudit.readyForTesting(directory: dir)
         let target = BrainTarget(provider: .codexSubscription, modelID: "gpt-5.6-codex")
         let transcript = [
-            TranscriptLine(speaker: .them, text: "Uh. Hmm.", at: 1),
-            TranscriptLine(speaker: .them, text: "Explain the tradeoff", at: 2),
+            TranscriptLine(speaker: .them, text: "Uh. Hmm.", at: 1, endedAt: 1),
+            TranscriptLine(speaker: .them, text: "Explain the tradeoff", at: 2, endedAt: 2),
         ]
         let url = dir.appendingPathComponent(FileSessionAudit.coachingAttemptsFilename)
         log.recordStarted(
@@ -50,7 +50,7 @@ import Testing
     @Test func recordsActualRequestInclusionIndependentlyFromClassification() async throws {
         let dir = ActivityLogTests.tmp(); defer { try? FileManager.default.removeItem(at: dir) }
         let log = await FileSessionAudit.readyForTesting(directory: dir)
-        let line = TranscriptLine(speaker: .them, text: "Uh. Hmm.", at: 1)
+        let line = TranscriptLine(speaker: .them, text: "Uh. Hmm.", at: 1, endedAt: 1)
         log.recordStarted(
             attemptID: 1,
             wake: .trigger,

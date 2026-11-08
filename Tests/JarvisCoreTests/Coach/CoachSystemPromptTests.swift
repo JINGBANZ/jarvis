@@ -42,13 +42,13 @@ import Testing
         #expect(!bare.contains("load_tool"))
         #expect(!bare.contains("# Loading"))
         #expect(!bare.contains("# Tools you can load"))
-        #expect(bare.contains("1. Direct address"))
-        #expect(bare.contains("6. \"me\" is stuck"))
+        #expect(bare.contains("1. An explicit request addressed to Jarvis"))
+        #expect(bare.contains("6. When help is warranted"))
 
         let offered = JarvisPrompts.Coach.system(capabilities: withCatalog)
         #expect(offered.contains("# Loading"))
-        #expect(offered.contains("1. Direct address"))
-        #expect(offered.contains("6. \"me\" is stuck"))
+        #expect(offered.contains("1. An explicit request addressed to Jarvis"))
+        #expect(offered.contains("6. When help is warranted"))
     }
 
     @Test func aDeferredToolIsCatalogedButNotExplained() {

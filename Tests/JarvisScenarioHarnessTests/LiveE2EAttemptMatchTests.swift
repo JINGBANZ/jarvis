@@ -39,10 +39,10 @@ struct LiveE2EAttemptMatchTests {
     @Test("early playback uses its original boundary even after that speech finalizes")
     func speechDuringPreviousAttempt() {
         let transcript = RollingTranscript()
-        transcript.append(.init(speaker: .them, text: "previous step", at: 0))
+        transcript.append(.init(speaker: .them, text: "previous step", at: 0, endedAt: 0))
         let earlyBoundary = transcript.count
         let match = LiveE2EAttemptMatch.speech(speaker: .them, transcriptBoundary: earlyBoundary)
-        transcript.append(.init(speaker: .them, text: "early playback", at: 1))
+        transcript.append(.init(speaker: .them, text: "early playback", at: 1, endedAt: 1))
         let attempt = started(reason: .turnEnd, boundary: earlyBoundary, speakers: [.them])
 
         #expect(match.matches(attempt))
@@ -66,7 +66,7 @@ struct LiveE2EAttemptMatchTests {
         .init(attemptID: id, wake: .trigger, reason: reason,
               target: BrainTarget(provider: .codexSubscription, modelID: "test"),
               transcriptStartIndex: boundary,
-              transcriptLines: speakers.map { .init(speaker: $0, text: "fixture speech", at: 1) },
+              transcriptLines: speakers.map { .init(speaker: $0, text: "fixture speech", at: 1, endedAt: 1) },
               classifications: speakers.map { _ in .substantive },
               brainFacingTranscriptIndices: Set(boundary..<(boundary + speakers.count)),
               date: Date(timeIntervalSince1970: 1))

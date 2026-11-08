@@ -86,6 +86,10 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         let didStart = ledger.recordSpeechStarted(
             itemID: itemID, audioStartMilliseconds: audioStartMilliseconds,
             timelineOrigin: timelineOrigin)
+        if let item = ledger.takeCompletedItem(itemID: itemID) {
+            locallyCommittedItemIDs.remove(itemID)
+            _ = reconcileReplacementItemLocked(item, reason: nil)
+        }
         discardServerConfirmedAudioLocked()
         updateCoachingActivityLocked()
         lock.unlock()
@@ -114,7 +118,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
     func recordCommittedLocalTurn(
         itemID: String,
         startedAt: TimeInterval,
-        committedThroughAt: TimeInterval,
+        endedAt: TimeInterval,
         consumesUnboundTurn: Bool,
         socketGeneration: Int
     ) -> Bool {
@@ -123,7 +127,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
             lock.unlock(); return false
         }
         let startMilliseconds = max(0, Int((startedAt * 1_000).rounded()))
-        let endMilliseconds = max(startMilliseconds, Int((committedThroughAt * 1_000).rounded()))
+        let endMilliseconds = max(startMilliseconds, Int((endedAt * 1_000).rounded()))
         let didStart = ledger.recordSpeechStarted(
             itemID: itemID,
             audioStartMilliseconds: startMilliseconds,
@@ -132,6 +136,10 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
             itemID: itemID,
             audioEndMilliseconds: endMilliseconds)
         if didStart || didStop { locallyCommittedItemIDs.insert(itemID) }
+        if let item = ledger.takeCompletedItem(itemID: itemID) {
+            locallyCommittedItemIDs.remove(itemID)
+            _ = reconcileReplacementItemLocked(item, reason: nil)
+        }
         if consumesUnboundTurn, unboundLocalTurnCount > 0 { unboundLocalTurnCount -= 1 }
         discardServerConfirmedAudioLocked()
         updateCoachingActivityLocked()
@@ -170,12 +178,13 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         discardServerConfirmedAudioLocked()
         let handled = reconcileReplacementItemLocked(
             item, reason: item?.recoveredFromDeltas == true ? "completed without usable final" : nil)
-        if !handled {
+        if !handled, item != nil {
             jlog("Jarvis realtime [\(speaker.rawValue)] transcription completed "
                  + "with no usable text (item \(itemID))")
         }
         updateCoachingActivityLocked()
         lock.unlock()
+        if item == nil { scheduleActiveDeadline(itemID: itemID, socketGeneration: socketGeneration) }
     }
 
     func recordFailed(itemID: String, error: String, socketGeneration: Int) {
@@ -205,6 +214,10 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         guard !stopped, isCurrentGeneration(socketGeneration) else { lock.unlock(); return false }
         let didStop = ledger.recordSpeechStopped(
             itemID: itemID, audioEndMilliseconds: audioEndMilliseconds)
+        if let item = ledger.takeCompletedItem(itemID: itemID) {
+            locallyCommittedItemIDs.remove(itemID)
+            _ = reconcileReplacementItemLocked(item, reason: nil)
+        }
         discardServerConfirmedAudioLocked()
         updateCoachingActivityLocked()
         lock.unlock()
@@ -422,6 +435,7 @@ final class RealtimeTranscriptionLifecycle: @unchecked Sendable {
         coachingCoordinator.recordFinalizedTranscript(
             text,
             spokenAt: item.spokenAt,
+            spokenEndAt: item.spokenEndAt,
             source: "item \(item.itemID)\(detail)")
     }
 

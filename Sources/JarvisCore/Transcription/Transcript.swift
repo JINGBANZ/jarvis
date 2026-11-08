@@ -10,10 +10,13 @@ public struct TranscriptLine: Sendable {
     public let text: String
     /// Seconds since session start.
     public let at: TimeInterval
-    public init(speaker: Speaker, text: String, at: TimeInterval) {
+    public let endedAt: TimeInterval
+    public init(speaker: Speaker, text: String, at: TimeInterval, endedAt: TimeInterval) {
         self.speaker = speaker
         self.text = text
+        precondition(SpeechInterval(startedAt: at, endedAt: endedAt) != nil)
         self.at = at
+        self.endedAt = endedAt
     }
 }
 
@@ -22,6 +25,7 @@ public final class RollingTranscript: @unchecked Sendable {
     public typealias Snapshot = (text: String, upTo: Int, lines: [TranscriptLine])
 
     private var chronology = ConversationChronology<TranscriptLine>()
+    private var latestSpeechEnd: TimeInterval?
     private let lock = NSLock()
 
     public init() {}
@@ -31,6 +35,7 @@ public final class RollingTranscript: @unchecked Sendable {
     public func append(_ line: TranscriptLine) -> Int {
         lock.lock(); defer { lock.unlock() }
         chronology.append(line, occurredAt: line.at)
+        latestSpeechEnd = max(latestSpeechEnd ?? line.endedAt, line.endedAt)
         return chronology.count
     }
 
@@ -41,7 +46,7 @@ public final class RollingTranscript: @unchecked Sendable {
 
     public var lastSpeechTime: TimeInterval? {
         lock.lock(); defer { lock.unlock() }
-        return chronology.latestOccurredAt
+        return latestSpeechEnd
     }
 
     /// `now` is session-relative. With no speech yet this returns `now`, not 0, so the silence
@@ -72,7 +77,7 @@ public final class RollingTranscript: @unchecked Sendable {
     private static func renderChronological<S: Sequence>(_ lines: S) -> String
     where S.Element == TranscriptLine {
         lines
-            .map { "[\(stamp($0.at))] \($0.speaker.rawValue): \($0.text)" }
+            .map { "[\(stamp($0.at))-\(stamp($0.endedAt))] \($0.speaker.rawValue): \($0.text)" }
             .joined(separator: "\n")
     }
 
