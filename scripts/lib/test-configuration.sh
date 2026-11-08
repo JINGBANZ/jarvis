@@ -3,6 +3,10 @@ require_debug_test_configuration() {
   local configuration
   while (( $# )); do
     case "$1" in
+      --skip-build|--skip-build=*)
+        echo 'Jarvis supervised tests require a current build with test-host ownership tracking; --skip-build is unsupported.' >&2
+        return 2
+        ;;
       -c|--configuration)
         shift
         configuration="${1:-}"

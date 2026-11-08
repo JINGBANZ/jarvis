@@ -96,7 +96,8 @@ import Testing
 
     @MainActor private func makeBox() throws -> (OverlayBoxPanel, NSWindow) {
         let existing = Set(NSApplication.shared.windows.map(ObjectIdentifier.init))
-        let box = OverlayBoxPanel(contentSize: NSSize(width: 503, height: 503))
+        let (box, closeBox) = makeTestOverlayBox(contentSize: NSSize(width: 503, height: 503))
+        defer { closeBox() }
         let window = try #require(NSApp.windows.first { !existing.contains(ObjectIdentifier($0)) })
         return (box, window)
     }

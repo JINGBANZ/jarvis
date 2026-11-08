@@ -132,7 +132,8 @@ import Testing
     }
 
     @MainActor @Test func aClickOnTheSettingsSampleDoesNotReachTheNextSession() throws {
-        let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (box, closeBox) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closeBox() }
         box.showAppearancePreview(true)
         #expect(box.currentDetail != nil, "the preview shows a sample detail")
         box.clickDetailPin()
@@ -188,7 +189,8 @@ import Testing
     }
 
     @MainActor private func makeBox() throws -> OverlayBoxPanel {
-        let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (box, closeBox) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closeBox() }
         box.setSessionLive(true)
         return box
     }

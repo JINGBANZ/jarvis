@@ -25,6 +25,7 @@ let package = Package(
         // The ordinary spawn seam is shared by production OS adapters and executable composition.
         .target(name: "JarvisProcess"),
         .target(name: "JarvisTestProcesses", dependencies: ["JarvisProcess"], path: "Tests/Support/ProcessOwnership"),
+        .target(name: "JarvisTestHost", path: "Tests/Support/TestHost"),
         .target(name: "JarvisScenarioHarness", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"], path: "Tests/Support/ScenarioHarness", swiftSettings: liveE2ESettings),
         .target(name: "JarvisBrainProviders", dependencies: ["JarvisCore", "JarvisProcess"]),
         .target(name: "JarvisEvaluation", dependencies: ["JarvisCore", "JarvisBrainProviders", "JarvisProcess"]),
@@ -76,7 +77,7 @@ let package = Package(
         ),
         .testTarget(
             name: "JarvisOverlayTests",
-            dependencies: ["JarvisOverlay"]
+            dependencies: ["JarvisOverlay", "JarvisTestHost"]
         ),
         .testTarget(
             name: "JarvisScreenCaptureTests",

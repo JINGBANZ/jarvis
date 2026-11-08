@@ -136,6 +136,15 @@ wrapper transition is allowed. Sibling or arbitrary nested test entrypoints are 
 ones inheriting the same environment. The supervisor owns `caffeinate` directly, so keep-awake
 behavior creates no second command admission.
 
+SwiftPM's Darwin test host can detach from the command's process group. The test-bundle-only
+[`JarvisTestHost`](../Tests/Support/TestHost/TestHost.c) initializer registers its actual host through
+the authenticated ownership reporter before discovery or test bodies run. Registration requires
+an admitted command and current ancestry; missing context or refusal exits before test execution.
+The supervisor records the kernel PID and birth identity and retains ownership after reparenting.
+The C initializer supplies the load-time boundary because SwiftPM's custom executable entry-point
+option does not apply to Darwin test bundles. `JarvisTestHost` depends on no product code and cannot
+be linked directly or transitively by any non-test target; the dependency guard enforces that rule.
+
 LaunchServices apps can leave that shell's process group. `launch-app` durably prepares one app
 launch before `open -W -n -g`; the app registers before AppKit initialization using its launch nonce
 and actual executable. Result files and delivered signals are not exit evidence. The supervisor
@@ -144,7 +153,8 @@ inspection/permission errors. It never signals a process merely because its name
 
 | Process role | App-phase waits | Final command teardown |
 | --- | --- | --- |
-| Admitted shell and its test runner | Own the command chain | Root exit and empty original process group required. |
+| Admitted shell and SwiftPM driver | Own the command chain | Root exit and empty original process group required. |
+| Registered test-bundle host, including detached `swiftpm-testing-helper` | Excluded | Exact PID/birth absence required. |
 | Registered launch controller descended from the test runner | Excluded, so it can request/wait for an app phase | Exact exit required. |
 | Detached registered app and its helper descendants | Exact exit required before the next app phase | Exact exit required. |
 
@@ -196,6 +206,35 @@ is permanent for that run. Cancellation remains unfinished, including signals du
 Wait RPC client budgets cover the initial wait plus cancellation grace and forced exit; they do
 not block the supervisor from serving other receipts.
 
+Final waits continue serving ownership receipts and include newly registered clients. After a
+forced kill, the supervisor makes a bounded wait for exact process absence; an exit deadline
+still fails lifecycle completion, even if the process then exits. It cannot reap a reparented process
+with `waitpid`, so kernel birth
+identity checks establish that host's exit while `waitpid` reaps its directly owned command.
+
+## Test window containment
+
+[`OverlayBoxWindow`](../Sources/JarvisOverlay/OverlayBoxWindow.swift) constrains proposed frames to
+the explicitly requested isolated display before AppKit applies moves, resizes, or screen fitting.
+The ordinary app path uses AppKit's normal geometry. With a test display requested, unavailable,
+mirrored, overlapping, nonfinite, or oversized geometry fails instead of selecting a physical screen.
+[`OverlayTestDisplay`](../Sources/JarvisOverlay/OverlayTestDisplay.swift) validates placement before
+and after showing, observes moves and screen changes, and hides a visible window before refusing
+invalid placement. There is no desktop fallback after an isolated display was requested.
+
+Overlay fixtures own an exact window and close it with deferred cleanup, including assertion errors.
+Their window animations are disabled because synchronous content and visibility tests do not drive
+AppKit's animation event loop; this does not change production animations. Helpers that return a
+panel transfer its close action to the caller and retain cleanup on setup failure. They never close
+unrelated windows or destroy the retained display.
+
+The display-free geometry fixture verifies preserved valid frames, relocation away from a physical
+screen, and invalid-frame refusal. Native containment tests also compare actual WindowServer bounds
+with the isolated display after show, resize, and attempted off-display moves. Those tests require
+an isolated display and do not run in the ordinary hosted no-display lane. Compilation and geometry
+fixtures alone do not establish native placement, absence of a transient presentation, or the cause
+of a reported desktop escape.
+
 Ownership reporters use the supervisor-selected absolute Python interpreter with `-I`. Restricted
 helper environments receive only explicit ownership context; hostile PATH, PYTHONPATH, PYTHONHOME,
 credential, and proxy test inputs retain their original meaning. Reporter/client processes do not
@@ -246,7 +285,7 @@ imports, indirect dependencies, and scenario machinery placed in product modules
 the narrow process module; the latter depends only on `JarvisProcess`. Compiled release artifacts are inspected for reporter symbols
 and context/protocol strings when validating changes to this boundary.
 
-Both ordinary and hosted unit-test wrappers reject non-debug Swift test configurations before
+Both ordinary and hosted unit-test wrappers reject stale `--skip-build` runs and non-debug Swift test configurations before
 supervisor or display preflight, including short and equals-form configuration arguments. A release
 test host cannot silently use native launches inside a supervised command. Ordinary
 `swift build -c release` and standalone `build-app.sh release` / `--run` remain supported. Signed
@@ -263,6 +302,9 @@ that the child is absent; it never invokes real screen capture.
 The script/workflow and cancellation fixtures also use non-GUI stand-ins. Coverage includes
 outer-supervisor signals during an outstanding app wait, slow evidence drain, bounded
 TERM-ignoring fallback, late registration, teardown interruption and process-disappearance races.
+The real C bootstrap is exercised in a display-free executable: missing/refused ownership cannot
+enter its body, and an admitted host that detaches and ignores TERM must be observed absent after
+cancellation while an unrelated process survives.
 The display-free Swift layout fixture covers headless main-screen adoption, placeholder transitions,
 physical-screen preservation, mirroring, and refusal of display disappearance at completion.
 Supervisor fixtures cover automatic first use without approval, retained creator survival after

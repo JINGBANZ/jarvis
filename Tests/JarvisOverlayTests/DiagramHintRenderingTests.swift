@@ -103,7 +103,8 @@ import Testing
 
     @MainActor @Test func asyncDiagramDeliveryDrawsInsideThePrivatePanel() async throws {
         let windows = Set(NSApplication.shared.windows.map(\.windowNumber))
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         let window = try #require(NSApplication.shared.windows.first { !windows.contains($0.windowNumber) })
         panel.setSessionLive(true)
         let detail = try #require(ReplyDetail(markdown:
@@ -166,9 +167,9 @@ import Testing
     }
 
     @MainActor @Test func anUnsupportedGraphKeepsTheRestOfTheDocument() async throws {
-        let panel = OverlayBoxPanel()
+        let (panel, closePanel) = makeTestOverlayBox()
+        defer { closePanel() }
         panel.setSessionLive(true)
-        defer { panel.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown:
             "Keep the text hint.\n\n```mermaid\nsequenceDiagram\nA->>B: write\n```"))
         #expect(detail.diagram == nil)
@@ -185,10 +186,10 @@ import Testing
 
     @MainActor @Test func resizingPanelKeepsItsDiagramReadableBelowNativeSize() async throws {
         let previousWindows = Set(NSApplication.shared.windows.map(\.windowNumber))
-        let panel = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closePanel() }
         let window = try #require(NSApplication.shared.windows.first { !previousWindows.contains($0.windowNumber) })
         panel.setSessionLive(true)
-        defer { panel.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown:
             "```mermaid\nflowchart TD\nA[Client] --> B[API]\nB --> C[Database]\n```"))
         panel.render("Sketch this path.", detail: detail)
@@ -208,10 +209,10 @@ import Testing
     }
 
     @MainActor @Test func aVerticalDragGrowsATallGraph() throws {
-        let (panel, drawing) = try makeDiagramPanel(
+        let (panel, drawing, closePanel) = try makeDiagramPanel(
             "flowchart TD\nA[Client] --> B[API]\nB --> C[Database]",
             size: NSSize(width: 420, height: 380))
-        defer { panel.setSessionLive(false) }
+        defer { closePanel() }
         let start = try #require(drawing.image).size
 
         panel.setContentSize(NSSize(width: 420, height: 900))
@@ -221,10 +222,10 @@ import Testing
     }
 
     @MainActor @Test func aHorizontalDragGrowsAWideGraph() throws {
-        let (panel, drawing) = try makeDiagramPanel(
+        let (panel, drawing, closePanel) = try makeDiagramPanel(
             "flowchart LR\nA[Client] --> B[API]\nB --> C[Database]",
             size: NSSize(width: 420, height: 380))
-        defer { panel.setSessionLive(false) }
+        defer { closePanel() }
         let start = try #require(drawing.image).size
 
         panel.setContentSize(NSSize(width: 900, height: 380))
@@ -236,9 +237,11 @@ import Testing
 
     @MainActor private func makeDiagramPanel(
         _ source: String, size: NSSize
-    ) throws -> (OverlayBoxPanel, NSImageView) {
+    ) throws -> (OverlayBoxPanel, NSImageView, @MainActor () -> Void) {
         let previousWindows = Set(NSApplication.shared.windows.map(\.windowNumber))
-        let panel = OverlayBoxPanel(contentSize: size)
+        let (panel, closePanel) = makeTestOverlayBox(contentSize: size)
+        var transferred = false
+        defer { if !transferred { closePanel() } }
         let window = try #require(NSApplication.shared.windows.first {
             !previousWindows.contains($0.windowNumber)
         })
@@ -246,7 +249,9 @@ import Testing
         let detail = try #require(ReplyDetail(markdown: "```mermaid\n\(source)\n```"))
         _ = panel.deliver("Sketch this path.", detail: detail)
         let content = try #require(window.contentView)
-        return (panel, try #require(findImage(content)))
+        let drawing = try #require(findImage(content))
+        transferred = true
+        return (panel, drawing, closePanel)
     }
 
     @MainActor private func findImage(_ view: NSView) -> NSImageView? {

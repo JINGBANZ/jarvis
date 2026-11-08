@@ -165,7 +165,8 @@ import Testing
     }
 
     @Test func theBoxGrowsForWrappedContentWhenThePanelHasRoom() throws {
-        let box = OverlayBoxPanel(contentSize: NSSize(width: 320, height: 800))
+        let (box, closeBox) = makeTestOverlayBox(contentSize: NSSize(width: 320, height: 800))
+        defer { closeBox() }
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         let short = try #require(ReplyDetail(markdown: "```swift\nreturn result\n```"))
@@ -198,7 +199,8 @@ import Testing
     }
 
     @Test func theHintBoxKeepsSpaceAtTheMinimumPanelSize() throws {
-        let box = OverlayBoxPanel(contentSize: NSSize(width: 520, height: 440))
+        let (box, closeBox) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
+        defer { closeBox() }
         box.setSessionLive(true)
         defer { box.setSessionLive(false) }
         box.setContentSize(box.minimumContentSize)

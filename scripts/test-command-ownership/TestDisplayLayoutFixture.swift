@@ -38,5 +38,15 @@ struct TestDisplayLayoutFixture {
         precondition(!headless.accepts(TestDisplayLayout(screens: [mirrored], main: 3), display: 3),
                      "headless mode must not admit a mirrored test display")
         print("Display layout: 16 headless and physical preservation checks passed")
+        let contained = CGRect(x: 2700, y: 50, width: 520, height: 440)
+        precondition(TestWindowPlacement.frame(contained, within: test.frame) == contained)
+        let escaped = CGRect(x: 20, y: 20, width: 520, height: 440)
+        let placed = TestWindowPlacement.frame(escaped, within: test.frame)!
+        precondition(test.frame.contains(placed) && !physical.frame.intersects(placed))
+        precondition(placed.size == escaped.size)
+        precondition(TestWindowPlacement.frame(CGRect(x: 0, y: 0, width: 1921, height: 440), within: test.frame) == nil)
+        precondition(TestWindowPlacement.frame(CGRect(x: CGFloat.infinity, y: 0, width: 520, height: 440), within: test.frame) == nil)
+        precondition(TestWindowPlacement.frame(.zero, within: test.frame) == nil)
+        print("Window placement: 6 preservation, relocation and refusal checks passed")
     }
 }

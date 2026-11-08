@@ -4,6 +4,7 @@ import AppKit
 final class OverlayTestDisplay: NSObject {
     private let displayID: CGDirectDisplayID
     private weak var window: NSWindow?
+    private var isPositioning = false
 
     init?(window: NSWindow) {
         guard let raw = ProcessInfo.processInfo.environment["JARVIS_TEST_DISPLAY_ID"] else { return nil }
@@ -17,6 +18,10 @@ final class OverlayTestDisplay: NSObject {
         NotificationCenter.default.addObserver(
             self, selector: #selector(screenChanged),
             name: NSWindow.didResizeNotification, object: window)
+        for name in [NSWindow.didMoveNotification, NSWindow.didChangeScreenNotification] {
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(placementChanged), name: name, object: window)
+        }
         position()
     }
 
@@ -31,24 +36,46 @@ final class OverlayTestDisplay: NSObject {
     }
 
     func position() {
-        guard let window else { return }
+        guard !isPositioning, let window else { return }
+        isPositioning = true
+        defer { isPositioning = false }
         guard let screen = Self.resolve(displayID) else {
             window.orderOut(nil)
             Self.fail("The isolated test display disappeared; stopping before showing an overlay on the desktop.")
         }
-        let frame = screen.visibleFrame
-        guard window.frame.width <= frame.width, window.frame.height <= frame.height else {
+        guard let frame = TestWindowPlacement.frame(window.frame, within: screen.visibleFrame) else {
             window.orderOut(nil)
             Self.fail("The test window does not fit on the isolated display.")
         }
-        if !frame.contains(window.frame) {
-            window.setFrameOrigin(NSPoint(x: frame.midX - window.frame.width / 2,
-                                          y: frame.midY - window.frame.height / 2))
+        if frame != window.frame {
+            window.setFrameOrigin(frame.origin)
         }
-        guard frame.contains(window.frame) else {
+        guard screen.visibleFrame.contains(window.frame) else {
             window.orderOut(nil)
             Self.fail("AppKit did not place the test window on its isolated display.")
         }
+    }
+
+    static func constrainedFrame(_ proposed: NSRect) -> NSRect? {
+        guard let screen = requestedScreen else { return nil }
+        guard let frame = TestWindowPlacement.frame(proposed, within: screen.visibleFrame) else {
+            fail("The proposed test window frame does not fit on the isolated display.")
+        }
+        return frame
+    }
+
+    func verifyVisiblePlacement() {
+        guard let window, window.isVisible else { return }
+        guard let screen = Self.resolve(displayID),
+              screen.visibleFrame.contains(window.frame), window.screen == screen else {
+            window.orderOut(nil)
+            Self.fail("A visible test window left its isolated display.")
+        }
+    }
+
+    @objc private func placementChanged() {
+        guard !isPositioning else { return }
+        if window?.isVisible == true { verifyVisiblePlacement() } else { position() }
     }
 
     @objc private func screenChanged() { position() }

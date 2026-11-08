@@ -24,6 +24,7 @@ class DisplayLayoutTests(unittest.TestCase):
             binary = Path(directory) / 'layout-fixture'
             subprocess.run(['swiftc', '-parse-as-library', '-swift-version', '6',
                             str(ROOT / 'scripts/test-display/TestDisplayLayout.swift'),
+                            str(ROOT / 'Sources/JarvisOverlay/TestWindowPlacement.swift'),
                             str(ROOT / 'scripts/test-command-ownership/TestDisplayLayoutFixture.swift'),
                             '-o', str(binary)], cwd=ROOT, env=BASE_ENV, check=True, timeout=60)
             subprocess.run([str(binary)], env=BASE_ENV, check=True, timeout=5)

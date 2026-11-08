@@ -85,7 +85,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         width: Defaults.Overlay.Box.width,
         height: Defaults.Overlay.Box.height)
     ) {
-        panel = NSPanel(
+        panel = OverlayBoxWindow(
             contentRect: NSRect(origin: .zero, size: contentSize),
             styleMask: [.nonactivatingPanel, .borderless, .resizable],
             backing: .buffered, defer: false)
@@ -531,6 +531,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
         reassertCaptureExclusion()
         testDisplay?.position()
         panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
+        testDisplay?.verifyVisiblePlacement()
     }
 
     public func setSessionLive(_ live: Bool) {
@@ -644,6 +645,7 @@ public final class OverlayBoxPanel: NSObject, OverlayRendering, OverlayBoxApplyi
             renderDisplay()
             testDisplay?.position()
             panel.orderFrontRegardless() // ghost-mode-allowed: capture-excluded coaching overlay
+            testDisplay?.verifyVisiblePlacement()
         } else {
             renderDisplay()
             scrollToLatestHint()

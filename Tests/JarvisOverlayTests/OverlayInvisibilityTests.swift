@@ -41,6 +41,8 @@ private func checkScreenCaptureKitExclusion() async {
         withExtendedLifetime(placements) {
             protectedPanel.orderOut(nil)
             controlPanel.orderOut(nil)
+            protectedPanel.close()
+            controlPanel.close()
         }
     }
     protectedPanel.orderFrontRegardless()
@@ -82,6 +84,8 @@ private func makeSolidPanel(color: (r: UInt8, g: UInt8, b: UInt8), protected: Bo
     let panel = NSPanel(contentRect: rect, styleMask: [.nonactivatingPanel, .borderless],
                         backing: .buffered, defer: false)
     panel.level = .floating
+    panel.isReleasedWhenClosed = false
+    panel.animationBehavior = .none
     panel.isFloatingPanel = true
     panel.hidesOnDeactivate = false
     panel.isOpaque = true

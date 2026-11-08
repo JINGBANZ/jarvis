@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import shlex
 import signal
 import subprocess
 import sys
@@ -701,6 +702,87 @@ wait $!
 
     def test_outer_cancellation_forces_term_ignoring_app_after_grace(self):
         self.check_outer_cancellation(True)
+
+    def compile_test_host(self):
+        binary = self.repo / 'fixture-test-host-binary'
+        subprocess.run(['cc', '-Wall', '-Wextra', '-Werror',
+                        '-I', str(ROOT / 'Tests/Support/TestHost/include'),
+                        str(ROOT / 'Tests/Support/TestHost/TestHost.c'),
+                        str(ROOT / 'scripts/test-command-ownership/TestHostFixture.c'),
+                        '-o', str(binary)], check=True, env=BASE_ENV, timeout=30)
+        return binary
+
+    def test_native_test_host_refuses_missing_or_refused_ownership_before_main(self):
+        binary = self.compile_test_host()
+        marker = self.repo / 'fixture-main-entered'
+        for environment in (BASE_ENV, {**BASE_ENV, 'JARVIS_TEST_RUN_SOCKET': '/nonexistent.sock',
+                                       'JARVIS_TEST_RUN_TOKEN': 'fixture',
+                                       'JARVIS_TEST_PYTHON': sys.executable,
+                                       'JARVIS_TEST_SUPERVISOR': str(self.source)}):
+            result = subprocess.run([str(binary), str(marker)], env=environment,
+                                    capture_output=True, text=True, timeout=5)
+            self.assertEqual(result.returncode, 70, result.stderr)
+            self.assertFalse(marker.exists(), 'unowned host entered the test body')
+
+    def test_native_test_host_cannot_start_before_command_admission(self):
+        binary = self.compile_test_host()
+        marker = self.repo / 'fixture-main-entered'
+        self.prepare()
+        self.script(shlex.join([str(binary), str(marker)]) + '\n')
+        result = self.result(self.start())
+        self.assertEqual(result[0], 70, result)
+        self.assertIn('Test host cannot start outside an active admitted command', result[1])
+        self.assertFalse(marker.exists())
+        self.assertNotEqual(self.state()['phase'], 'completed')
+
+    def test_swift_test_cancellation_reaps_detached_test_host(self):
+        self.prepare()
+        self.compile_test_host()
+        self.source.write_text(self.source.read_text().replace('CANCEL_GRACE_SECONDS = 10', 'CANCEL_GRACE_SECONDS = 0.1'))
+        shutil.copy2(ROOT / 'scripts/lib/swift-test-flags.sh', self.repo / 'scripts/lib')
+        tools = self.repo / 'fixture-bin'
+        tools.mkdir()
+        (tools / 'xcode-select').write_text('#!/bin/sh\necho /fixture/Xcode\n')
+        (tools / 'xcode-select').chmod(0o700)
+        (tools / 'swift').write_text('#!' + sys.executable + '\n' + '''import pathlib, subprocess, sys
+host = subprocess.Popen([str(pathlib.Path('fixture-test-host-binary').resolve()), 'fixture-test-host'],
+                        start_new_session=True, stdin=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+host.wait()
+''')
+        (tools / 'swift').chmod(0o700)
+        self.script('''python3 "$JARVIS_TEST_SUPERVISOR" admit
+export PATH="$PWD/fixture-bin:$PATH"
+source scripts/lib/swift-test-flags.sh
+run_swift_tests "$PWD/test.log"
+''')
+        owner = self.start()
+        marker = self.repo / 'fixture-test-host'
+        deadline = time.monotonic() + 3
+        while not marker.exists():
+            if owner.poll() is not None:
+                self.fail(f'command exited before the test host started: {self.result(owner)}')
+            self.assertLess(time.monotonic(), deadline)
+            time.sleep(.01)
+        host = self.module.birth(int(marker.read_text()))
+        unrelated = subprocess.Popen(['/bin/sleep', '30'])
+        try:
+            owner.send_signal(signal.SIGTERM)
+            result = self.result(owner)
+            self.assertEqual(result[0], 128 + signal.SIGTERM, result)
+            deadline = time.monotonic() + 2
+            while self.module.same(host) and time.monotonic() < deadline:
+                time.sleep(.01)
+            self.assertFalse(self.module.same(host), 'detached SwiftPM test host survived command cancellation')
+            self.assertNotEqual(self.state()['phase'], 'completed')
+            registered = self.state()['owned_processes']
+            self.assertEqual([(x['pid'], x['start'], x.get('role')) for x in registered],
+                             [(host['pid'], host['start'], 'test-host')])
+            self.assertIsNone(unrelated.poll(), 'cancellation signalled an unrelated process')
+        finally:
+            self.module.signal_owned(host, signal.SIGKILL)
+            unrelated.terminate()
+            unrelated.wait(timeout=3)
 
     def test_signal_during_teardown_never_completes(self):
         self.prepare()

@@ -21,6 +21,17 @@ def check_boundary(root, package):
     dependencies = {target['name']: [value[0] for item in target['dependencies']
                     for kind, value in item.items() if kind in ('byName', 'target')]
                     for target in package['targets']}
+    for target in package['targets']:
+        if target.get('type') == 'test' or target['name'] == 'JarvisTestHost':
+            continue
+        pending, visited = [target['name']], set()
+        while pending:
+            name = pending.pop()
+            if name == 'JarvisTestHost':
+                raise ValueError(target['name'] + ' depends on test-bundle-only JarvisTestHost')
+            if name not in visited:
+                visited.add(name)
+                pending.extend(dependencies.get(name, []))
     for target in PRODUCTION_TARGETS:
         if target not in dependencies:
             raise ValueError('Missing production target: ' + target)
