@@ -166,7 +166,7 @@ struct LiveE2ETests {
                 (!initialTraffic.isEmpty, "initial provider's coach requests were recorded"),
                 (initialTraffic.allSatisfy { !($0.instructions ?? "").contains("search_references") },
                  "instructions never name search_references"),
-                (initialTraffic.allSatisfy { !($0.instructions ?? "").contains("Tools you can load") },
+                (initialTraffic.allSatisfy { !($0.instructions ?? "").contains("Available additional tools") },
                  "instructions carry no tools catalog or load-tool clause"),
             ])
             let catalogs = Set(initialTraffic.map { Self.skillCatalog(in: $0.instructions ?? "") })
@@ -536,8 +536,8 @@ struct LiveE2ETests {
         results.check("C23", [
             (schemas == [["detail", "hint"]],
              "speak is declared with exactly hint and detail (saw \(schemas.sorted { $0.count < $1.count }))"),
-            (coachRequests.allSatisfy { ($0.instructions ?? "").contains("# Detail") },
-             "every coach request's instructions carry the Detail section"),
+            (coachRequests.allSatisfy { ($0.speakDescription ?? "").contains("# Detail") },
+             "every coach request's speak declaration carries its detail guidance"),
         ])
 
         results.note("C24", "A7's Show code press delivered \(Self.describeDetail(evidence, a7[1]))")
@@ -686,7 +686,7 @@ struct LiveE2ETests {
     }
 
     static func skillCatalog(in instructions: String) -> [String] {
-        guard let heading = instructions.range(of: "# Skills you can load") else { return [] }
+        guard let heading = instructions.range(of: "# Available skills") else { return [] }
         var names: [String] = []
         for line in instructions[heading.upperBound...].split(separator: "\n") {
             if line.hasPrefix("- "), let colon = line.firstIndex(of: ":") {
