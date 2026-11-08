@@ -5,8 +5,8 @@ import Testing
 
 @Suite struct DetailNavigationTests {
     @MainActor @Test func theBoxFollowsTheNewestReplyWithDetail() throws {
-        let box = try makeBox()
-        defer { box.setSessionLive(false) }
+        let (box, closeBox) = try makeBox()
+        defer { closeBox() }
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         #expect(box.currentDetailPosition == "1 of 1")
         try deliver(box, "Add a cache.", "flowchart LR\nB[API] --> C[Cache]")
@@ -17,8 +17,8 @@ import Testing
     }
 
     @MainActor @Test func steppingBackHoldsTheBoxAndSteppingForwardResumesFollowing() throws {
-        let box = try makeBox()
-        defer { box.setSessionLive(false) }
+        let (box, closeBox) = try makeBox()
+        defer { closeBox() }
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         try deliver(box, "Add a cache.", "flowchart LR\nB[API] --> C[Cache]")
         box.clickDetailPrevious()
@@ -39,8 +39,8 @@ import Testing
     }
 
     @MainActor @Test func pinHoldsTheNewestAndUnpinJumpsBackToIt() throws {
-        let box = try makeBox()
-        defer { box.setSessionLive(false) }
+        let (box, closeBox) = try makeBox()
+        defer { closeBox() }
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         box.clickDetailPin()
         #expect(box.isDetailHeld)
@@ -59,8 +59,8 @@ import Testing
     }
 
     @MainActor @Test func dismissRollsTheBoxDownToItsStripAndShowRestoresIt() throws {
-        let box = try makeBox()
-        defer { box.setSessionLive(false) }
+        let (box, closeBox) = try makeBox()
+        defer { closeBox() }
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         let open = box.currentDetailHeight
         #expect(open > box.detailStripHeight)
@@ -78,8 +78,8 @@ import Testing
     }
 
     @MainActor @Test func aNewDetailOpensARolledBoxUnlessItIsHeld() throws {
-        let box = try makeBox()
-        defer { box.setSessionLive(false) }
+        let (box, closeBox) = try makeBox()
+        defer { closeBox() }
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         box.clickDetailDismiss()
         try deliver(box, "Add a cache.", "flowchart LR\nB[API] --> C[Cache]")
@@ -93,8 +93,8 @@ import Testing
     }
 
     @MainActor @Test func collapseHidesBothBoxesAndExpandRestoresThem() throws {
-        let box = try makeBox()
-        defer { box.setSessionLive(false) }
+        let (box, closeBox) = try makeBox()
+        defer { closeBox() }
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         box.clickCollapseButton()
         #expect(box.currentDetailHeight == 0)
@@ -106,8 +106,8 @@ import Testing
 
     /// AppKit draws tooltips in its own window, outside the panel's capture exclusion.
     @MainActor @Test func theDetailControlsAreLabeledAndTooltipFree() throws {
-        let box = try makeBox()
-        defer { box.setSessionLive(false) }
+        let (box, closeBox) = try makeBox()
+        defer { closeBox() }
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         #expect(box.detailButtonTooltips.allSatisfy { $0 == nil })
         #expect(box.detailButtonLabels.allSatisfy { $0?.isEmpty == false })
@@ -115,8 +115,8 @@ import Testing
     }
 
     @MainActor @Test func bothStripsShareOneChromeAndFollowTheBoxSize() throws {
-        let box = try makeBox()
-        defer { box.setSessionLive(false) }
+        let (box, closeBox) = try makeBox()
+        defer { closeBox() }
         box.endLiveResize()
         try deliver(box, "First sketch.", "flowchart LR\nA[Client] --> B[API]")
         #expect(box.detailIconPointSize == box.headerIconPointSize)
@@ -151,8 +151,8 @@ import Testing
     }
 
     @MainActor @Test func navigationCommandsFollowTheArrowsAndIgnoreUnavailablePanels() throws {
-        let box = try makeBox()
-        defer { box.setSessionLive(false) }
+        let (box, closeBox) = try makeBox()
+        defer { closeBox() }
         box.showPreviousDetail()
         box.showNextDetail()
         #expect(box.currentDetail == nil)
@@ -188,11 +188,10 @@ import Testing
         #expect(box.currentDetail == nil)
     }
 
-    @MainActor private func makeBox() throws -> OverlayBoxPanel {
+    @MainActor private func makeBox() throws -> TestOverlayBox {
         let (box, closeBox) = makeTestOverlayBox(contentSize: NSSize(width: 520, height: 440))
-        defer { closeBox() }
         box.setSessionLive(true)
-        return box
+        return (box, closeBox)
     }
 
     @MainActor private func deliver(_ box: OverlayBoxPanel, _ text: String, _ mermaid: String) throws {

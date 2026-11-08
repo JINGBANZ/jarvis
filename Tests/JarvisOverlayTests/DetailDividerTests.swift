@@ -5,9 +5,9 @@ import Testing
 
 @Suite struct DetailDividerTests {
     @MainActor @Test func draggingResizesWithoutMovingWindowAndSurvivesContentChanges() throws {
-        let (box, window) = try makeBox()
+        let (box, window, closeBox) = try makeBox()
+        defer { closeBox() }
         box.setSessionLive(true)
-        defer { box.setSessionLive(false) }
         let detail = try #require(ReplyDetail(markdown: "```swift\nreturn 1\n```"))
         _ = box.deliver("First hint", detail: detail)
         let divider = try divider(in: window)
@@ -39,9 +39,9 @@ import Testing
     }
 
     @MainActor @Test func dragLimitsKeepBothSectionsUsableAndAllowImmediateReversal() throws {
-        let (box, window) = try makeBox()
+        let (box, window, closeBox) = try makeBox()
+        defer { closeBox() }
         box.setSessionLive(true)
-        defer { box.setSessionLive(false) }
         _ = box.deliver("First hint", detail: ReplyDetail(markdown: "```swift\nreturn 1\n```"))
         let divider = try divider(in: window)
         try drag(divider, by: -2000)
@@ -60,9 +60,9 @@ import Testing
     }
 
     @MainActor @Test func accessibilityActionsAdjustBothWaysWithinBoundsWithoutTakingFocus() throws {
-        let (box, window) = try makeBox()
+        let (box, window, closeBox) = try makeBox()
+        defer { closeBox() }
         box.setSessionLive(true)
-        defer { box.setSessionLive(false) }
         _ = box.deliver("First hint", detail: ReplyDetail(markdown: "```swift\nreturn 1\n```"))
         let divider = try divider(in: window)
         let originalHeight = box.currentDetailHeight
@@ -94,12 +94,14 @@ import Testing
         #expect(!divider.accessibilityPerformIncrement())
     }
 
-    @MainActor private func makeBox() throws -> (OverlayBoxPanel, NSWindow) {
+    @MainActor private func makeBox() throws -> (OverlayBoxPanel, NSWindow, @MainActor () -> Void) {
         let existing = Set(NSApplication.shared.windows.map(ObjectIdentifier.init))
         let (box, closeBox) = makeTestOverlayBox(contentSize: NSSize(width: 503, height: 503))
-        defer { closeBox() }
+        var transferred = false
+        defer { if !transferred { closeBox() } }
         let window = try #require(NSApp.windows.first { !existing.contains(ObjectIdentifier($0)) })
-        return (box, window)
+        transferred = true
+        return (box, window, closeBox)
     }
 
     @MainActor private func divider(in window: NSWindow) throws -> NSView {
