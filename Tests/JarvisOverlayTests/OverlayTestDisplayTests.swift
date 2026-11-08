@@ -67,9 +67,14 @@ struct OverlayTestDisplayTests {
     private func expectWindowServerPlacement(_ window: NSWindow) async throws {
         let raw = try #require(ProcessInfo.processInfo.environment["JARVIS_TEST_DISPLAY_ID"])
         let id = try #require(CGDirectDisplayID(raw))
+        let primary = try #require(NSScreen.screens.first {
+            $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID == CGMainDisplayID()
+        })
+        let expected = CGRect(x: window.frame.minX, y: primary.frame.maxY - window.frame.maxY,
+                              width: window.frame.width, height: window.frame.height)
         let deadline = ContinuousClock.now.advanced(by: .seconds(1))
-        var published: [String: Any]?
-        // AppKit publishes ordering and bounds when the main run loop commits the show.
+        var committed: CGRect?
+        // AppKit publishes ordering and bounds when the main run loop commits each change.
         repeat {
             let rows = try #require(CGWindowListCopyWindowInfo(.optionIncludingWindow,
                                       CGWindowID(window.windowNumber)) as? [[String: Any]])
@@ -78,16 +83,19 @@ struct OverlayTestDisplayTests {
                     && ($0[kCGWindowOwnerPID as String] as? Int32) == ProcessInfo.processInfo.processIdentifier
                     && ($0[kCGWindowIsOnscreen as String] as? Bool) == true
             }) {
-                published = row
-                break
+                let bounds = try #require(row[kCGWindowBounds as String] as? [String: Any])
+                let frame = try #require(CGRect(dictionaryRepresentation: bounds as CFDictionary))
+                try #require(frame.width > 0 && frame.height > 0)
+                try #require(CGDisplayBounds(id).contains(frame),
+                             "WindowServer must keep every observed window frame on the test display")
+                if frame == expected {
+                    committed = frame
+                    break
+                }
             }
             try await Task.sleep(for: .milliseconds(20))
         } while ContinuousClock.now < deadline
-        let row = try #require(published, "WindowServer must publish the visible test window")
-        let bounds = try #require(row[kCGWindowBounds as String] as? [String: Any])
-        let frame = try #require(CGRect(dictionaryRepresentation: bounds as CFDictionary))
-        try #require(frame.width > 0 && frame.height > 0)
-        #expect(CGDisplayBounds(id).contains(frame), "WindowServer must place the actual window on the test display")
+        _ = try #require(committed, "WindowServer must publish the current visible test window frame")
     }
 
     @MainActor
