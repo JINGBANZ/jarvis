@@ -1960,7 +1960,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await outcome == .spoke)
         #expect(brain.calls.count == 2)
         #expect(brain.declaredTools.last?.first { $0.name == "speak" }?
-            .parametersJSON.contains("Optional Markdown displayed below the hint") == true)
+            .descriptionWithGuidance.contains("# Detail") == true)
         driver.updateTranscriptionWork(.settled, for: .them)
     }
 
@@ -2000,7 +2000,7 @@ final class FakeOverlay: OverlayRendering, @unchecked Sendable {
         #expect(await outcome.value == .spoke)
         #expect(brain.calls.count == 2)
         #expect(brain.declaredTools.last?.first { $0.name == "speak" }?
-            .parametersJSON.contains("Optional Markdown displayed below the hint") == true)
+            .descriptionWithGuidance.contains("# Detail") == true)
     }
 
     @Test func automaticManualHintAttemptDoesNotRecapture() async {

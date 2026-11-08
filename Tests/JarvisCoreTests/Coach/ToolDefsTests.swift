@@ -34,24 +34,23 @@ import Testing
 
     }
 
-    @Test func speakFieldDescriptionsOwnTheirDeliveryRules() throws {
+    @Test func speakGuidanceAddressesEachFieldWithShortSchemaLabels() throws {
         let schema = try #require(try JSONSerialization.jsonObject(
             with: Data(speakTool.parametersJSON.utf8)) as? [String: Any])
         let properties = try #require(schema["properties"] as? [String: [String: Any]])
-        let hint = try #require(properties["hint"]?["description"] as? String)
-        let detail = try #require(properties["detail"]?["description"] as? String)
-        #expect(hint.contains("at most 36 words"))
-        #expect(hint.contains("The hint must make sense without detail"))
-        #expect(hint.contains("“1<<h, that is 2 to the power h.”"))
-        #expect(hint.contains("\n\n"))
-        #expect(detail.contains("Optional Markdown displayed below the hint"))
-        #expect(detail.contains("supporting content required by an applicable loaded skill"))
-        #expect(detail.contains("an explanation request is not required"))
-        #expect(detail.contains("Silence or unchanged work"))
-        #expect(detail.contains("Otherwise use null"))
-        #expect(detail.contains("\n\n"))
-        #expect(!speakTool.guidance.contains("36 words"))
-        #expect(!speakTool.guidance.contains("explanation"))
+        #expect(properties["hint"]?["description"] as? String == "The short reply displayed to the user.")
+        #expect(properties["detail"]?["description"] as? String == "Optional Markdown displayed below the hint.")
+        let guidance = speakTool.guidance
+        let hint = try #require(guidance.range(of: "# Hint"))
+        let detail = try #require(guidance.range(of: "# Detail"))
+        #expect(hint.lowerBound < detail.lowerBound)
+        #expect(guidance.contains("at most 36 words"))
+        #expect(guidance.contains("The hint must make sense without detail"))
+        #expect(guidance.contains("“1<<h, that is 2 to the power h.”"))
+        #expect(guidance.contains("supporting content required by an applicable loaded skill"))
+        #expect(guidance.contains("an explanation request is not required"))
+        #expect(guidance.contains("Silence or unchanged work"))
+        #expect(guidance.contains("Otherwise use null"))
         #expect(!speakTool.description.contains("explanation"))
     }
 

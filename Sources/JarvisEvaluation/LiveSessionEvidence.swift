@@ -117,8 +117,8 @@ public struct LiveSessionEvidence: Sendable {
         public let replayedFunctionOutputCallIDs: [String]
         /// Sorted property names of the declared `speak` tool; nil when none was declared.
         public let speakParameters: [String]?
-        /// Usage guidance from the declared `speak.detail` field, when present.
-        public let speakDetailDescription: String?
+        /// Description and usage guidance from the declared `speak` tool, when present.
+        public let speakDescription: String?
         public let speakDetail: SpeakDetail
         public let usage: RecordedExchange.Usage?
     }

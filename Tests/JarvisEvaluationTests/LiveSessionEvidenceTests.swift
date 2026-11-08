@@ -473,7 +473,7 @@ import Testing
         #expect(second.replayedFunctionCalls.isEmpty)
         #expect(second.speakDetail == .noSpeakCall)
         #expect(second.speakParameters == nil)
-        #expect(second.speakDetailDescription == nil)
+        #expect(second.speakDescription == "")
     }
 
     @Test func archivedCLIRequestsExposeProviderAndInstructions() throws {
@@ -568,7 +568,7 @@ import Testing
         ], response: ["id": "resp_1", "status": "completed", "output": [[String: Any]]()])
         let evidence = try Self.evidence(traffic: [record])
         #expect(evidence.traffic[0].speakParameters == ["detail", "hint"])
-        #expect(evidence.traffic[0].speakDetailDescription == "Optional Markdown displayed below the hint")
+        #expect(evidence.traffic[0].speakDescription == "Display a reply")
     }
 
     // MARK: - Debug log, health, and malformed records

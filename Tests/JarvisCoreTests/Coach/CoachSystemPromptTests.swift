@@ -21,7 +21,7 @@ import Testing
         let capabilities = CoachCapabilities.compose(disabledTools: [], referencesAdmitted: false)
         let prompt = JarvisPrompts.Coach.system(capabilities: capabilities)
         #expect(!prompt.contains("Optional Markdown displayed below the hint"))
-        #expect(capabilities.tool(named: "speak")?.parametersJSON.contains("Optional Markdown displayed below the hint") == true)
+        #expect(capabilities.tool(named: "speak")?.descriptionWithGuidance.contains("# Detail") == true)
         #expect(capabilities.tool(named: "capture_screen")?.descriptionWithGuidance.contains("# When to capture") == true)
     }
 

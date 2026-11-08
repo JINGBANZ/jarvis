@@ -158,7 +158,7 @@ extension LiveSessionEvidence {
                 return callID ?? ""
             },
             speakParameters: exchange.speakParameters,
-            speakDetailDescription: exchange.speakDetailDescription,
+            speakDescription: exchange.speakDescription,
             speakDetail: speakDetail(in: exchange),
             usage: exchange.usage)
     }

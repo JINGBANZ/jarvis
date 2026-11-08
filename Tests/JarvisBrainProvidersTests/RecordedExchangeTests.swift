@@ -33,7 +33,7 @@ import JarvisCore
         #expect(exchange.toolNames == ["speak"])
         #expect(exchange.toolCount == 1)
         #expect(exchange.speakParameters == ["detail", "hint"])
-        #expect(exchange.speakDetailDescription == "Optional Markdown displayed below the hint")
+        #expect(exchange.speakDescription == "Display a reply")
         #expect(exchange.toolChoiceType == "allowed_tools")
         #expect(exchange.input == [
             .message(role: "user", parts: ["hi", "[base64 image omitted]"]),
