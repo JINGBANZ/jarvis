@@ -80,13 +80,6 @@ final class SileroVoiceActivityDetector {
         resetModelContinuity()
     }
 
-    func verifyInference() -> Bool {
-        defer { reset() }
-        let silence = [Float](repeating: 0, count: Self.chunkSamples)
-        guard let probability = predict(chunk: silence[...]) else { return false }
-        return probability.isFinite && (0...1).contains(probability)
-    }
-
     /// Context and LSTM state must describe the same point in the audio, so reset them together.
     private func resetModelContinuity() {
         context = [Float](repeating: 0, count: Self.contextSamples)

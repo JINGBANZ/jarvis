@@ -160,7 +160,7 @@ codesign --verify --strict --deep --verbose=2 "$EXTRACTED_APP"
 # syspolicy_check runs the modern distribution checks; spctl stays as the direct Gatekeeper assertion.
 syspolicy_check distribution "$EXTRACTED_APP" --verbose
 spctl --assess --type execute --verbose "$EXTRACTED_APP"
-python3 scripts/verify-installation.py "$EXTRACTED_APP"
+python3 scripts/verify-packaged-resources.py "$EXTRACTED_APP"
 hdiutil detach "$MOUNT_POINT"
 MOUNTED=false
 (cd "$VERIFY_DIR" && shasum -a 256 "$(basename "$VERIFY_DMG")") > "$DMG.verified.sha256"

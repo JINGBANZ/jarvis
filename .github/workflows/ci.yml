@@ -167,9 +167,8 @@ jobs:
         with:
           name: universal-installation-candidate
           path: .build/installation-candidate
-      - name: Verify the same universal app on the native architecture
+      - name: Check resources in the same universal app
         run: |
           (cd .build/installation-candidate && shasum -a 256 -c Jarvis-installation.sha256)
           ditto -x -k .build/installation-candidate/Jarvis-installation.zip .build/installation-candidate
-          python3 scripts/verify-installation.py .build/installation-candidate/Jarvis.app
-          python3 scripts/test-packaged-app.py .build/installation-candidate/Jarvis.app
+          python3 scripts/verify-packaged-resources.py .build/installation-candidate/Jarvis.app

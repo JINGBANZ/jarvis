@@ -64,7 +64,7 @@ target except `JarvisApp`, which the [live e2e run](./live-e2e-tests.md) verifie
 - `scripts/test-proxy-privacy.sh`: the bundled-helper egress check ([build-and-run.md](./build-and-run.md)).
 - `scripts/build-app.sh` + `scripts/lib/cliproxyapi.sh`: the local `Jarvis Dev.app` build and the pinned subscription helper both app builds bundle ([build-and-run.md](./build-and-run.md)).
 - `.github/workflows/` + `scripts/package-app.sh`: CI, agent automation, and the signed, notarized release pipeline ([build-and-run.md → Distribution](./build-and-run.md#distribution--signed-notarized-releases-from-ci), [sandbox.md → Repository automation](./sandbox.md#repository-automation)).
-- `scripts/verify-installation.py` + `scripts/test-installation-verification.py` + `scripts/test-packaged-app.py`: packaged-app diagnostic verification and its regression checks ([build-and-run.md → Packaged installation verification](./build-and-run.md#packaged-installation-verification)).
+- `scripts/verify-packaged-resources.py` + `scripts/test-packaged-resources.py`: static packaged-resource verification and its regression checks ([build-and-run.md → Packaged installation verification](./build-and-run.md#packaged-installation-verification)).
 - `AGENTS.md` + `.github/workflows/sync-shared-rules.yml`: agent guidance whose shared-rules block syncs weekly from `JINGBANZ/rules`.
 
 ## Not yet built

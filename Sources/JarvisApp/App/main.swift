@@ -4,8 +4,6 @@ import JarvisScenarioHarness
 import AppKit
 import JarvisCore
 
-InstallationVerification.runIfRequested()
-
 @MainActor
 private func liveE2EDelegate() -> (any NSApplicationDelegate)? {
     #if JARVIS_LIVE_E2E

@@ -104,7 +104,7 @@ class TestSelectionTests(ScriptTests):
     )
     shared_python_checks = (
         'check-process-launching.py', 'test-live-cancellation.py', 'test-script-workflows.py',
-        'test-installation-verification.py', 'test-release-ui-probe.py',
+        'test-packaged-resources.py', 'test-release-ui-probe.py',
         'test-test-display.py', 'test-test-command-ownership.py',
     )
 
@@ -547,7 +547,7 @@ if [[ "$1" == detach && "${FAIL_DETACH:-0}" == 1 ]]; then exit 1; fi
         self.environment["DMGBUILD_PYTHON"] = str(self.bin / "layout-python")
         for name in ("check-universal-app.sh", "check-release-sdk.sh"):
             self.executable(self.root / "scripts" / name, "#!/bin/bash\nexit 0\n")
-        (self.root / "scripts/verify-installation.py").write_text("print('installation fixture passed')\n")
+        (self.root / "scripts/verify-packaged-resources.py").write_text("print('resource fixture passed')\n")
 
     def test_privacy_manifest_in_both_swiftpm_bundle_layouts(self):
         for relative in ("PrivacyInfo.xcprivacy", "Contents/Resources/PrivacyInfo.xcprivacy"):
@@ -562,12 +562,12 @@ if [[ "$1" == detach && "${FAIL_DETACH:-0}" == 1 ]]; then exit 1; fi
                 self.assertTrue((self.root / "Jarvis.dmg.verified.sha256").is_file())
                 manifest.unlink()
 
-    def test_failed_installation_removes_stale_verification_checksum(self):
+    def test_failed_resource_check_removes_stale_verification_checksum(self):
         with (self.privacy / "PrivacyInfo.xcprivacy").open("wb") as stream:
             plistlib.dump({"NSPrivacyTracking": False}, stream)
         checksum = self.root / "Jarvis.dmg.verified.sha256"
         checksum.write_text("stale success\n")
-        (self.root / "scripts/verify-installation.py").write_text("raise SystemExit(1)\n")
+        (self.root / "scripts/verify-packaged-resources.py").write_text("raise SystemExit(1)\n")
         result = self.run_script("verify-release.sh", "Jarvis.dmg", "v0.5.12")
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse(checksum.exists())
@@ -579,7 +579,7 @@ if [[ "$1" == detach && "${FAIL_DETACH:-0}" == 1 ]]; then exit 1; fi
         verified_bytes = b"verified disk image"
         image = self.root / "Jarvis.dmg"
         image.write_bytes(verified_bytes)
-        (self.root / "scripts/verify-installation.py").write_text("""from pathlib import Path
+        (self.root / "scripts/verify-packaged-resources.py").write_text("""from pathlib import Path
 replacement = Path('replacement.dmg')
 replacement.write_bytes(b'unverified replacement')
 replacement.replace('Jarvis.dmg')

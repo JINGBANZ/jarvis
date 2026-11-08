@@ -12,7 +12,8 @@ ScreenCaptureKit, AVFoundation, AppKit, SwiftUI, Vision, CoreAudio, and Security
 needs — so a SwiftUI + ScreenCaptureKit binary builds with plain `swift build`.
 
 The Gate and the [live e2e tests](./live-e2e-tests.md) need only the Command Line Tools;
-no Xcode project exists. CI uses the hosted runners' selected Xcode toolchains. Developer desktops
+the app has no Xcode project. The external release-acceptance UI-test project requires full Xcode.
+CI uses the hosted runners' selected Xcode toolchains. Developer desktops
 also have full Xcode and the Xcode MCP,
 whose macOS workflow builds, launches, stops, and reads logs, so an agent may drive the app that way;
 the scripts use `open`. The [live-test prerequisites](./live-e2e-tests.md#prerequisites-and-standing-conditions) depend on
@@ -123,9 +124,10 @@ The Intel Gate runs subscription-helper privacy checks natively; the universal r
 build runs them against its bundled helper on Apple silicon, reusing that build's executable.
 The universal build also checks every shipped executable's architectures and linked SDK.
 An ad-hoc-signed archive of that one assembled app is transferred to native Apple silicon and Intel
-runners for the [installation diagnostic](#packaged-installation-verification); neither runner
-rebuilds the candidate. These checks establish compilation and offline runtime coverage; capture, permissions, and live transcription
-on physical Intel hardware use the same signed-app validation as Apple silicon.
+runners for [static resource verification](#packaged-installation-verification); neither runner
+rebuilds or launches the candidate during this check. The source tests establish offline runtime
+coverage; the package checks establish artifact integrity. Installed-app capture, permissions, and
+live transcription require the same signed-app validation on Intel and Apple silicon.
 
 ## Packaging & signing — why permission grants persist
 
@@ -385,8 +387,8 @@ Applications target position. Release verification also checks the Applications 
 version, universal architectures in every shipped executable, the subscription helper and its license,
 native References helper with debug fault mode excluded, linked macOS 26-or-newer
 SDK in both app slices, notices, strict code signature, and
-Gatekeeper policy result, then executes the installation diagnostic against an isolated copy of the
-mounted app before detaching the image. Only complete success writes the portable DMG checksum
+Gatekeeper policy result, then checks the model and skill resources in the mounted app against the
+checkout inputs before detaching the image. Only complete success writes the portable DMG checksum
 receipt. The same SDK guard runs immediately after the
 release build, before signing or notarization; the pre-container app is not accepted as a proxy for
 the downloaded artifact.
@@ -425,35 +427,34 @@ installation steps; provider credentials remain user-supplied in Settings.
 
 ### Packaged installation verification
 
-[`verify-installation.py`](../scripts/verify-installation.py) copies an assembled app into a private
-temporary directory outside the checkout and launches its fixed `--verify-installation` diagnostic
-through Launch Services. The diagnostic runs before application composition, accepts no caller paths
-or settings, and accesses no credentials, providers, microphones, screens, or UI. It uses production
-resource loading, performs speech-model inference and synthetic audio processing, and checks the
-parsed skills against an independently declared expected catalog. Resource lookup for an installed
-app stays inside that app; source-checkout fallbacks cannot make a malformed installation pass.
+[`verify-packaged-resources.py`](../scripts/verify-packaged-resources.py) reads an assembled app and
+compares its model and skill resource trees with the same checkout's SwiftPM `.copy` inputs. It checks
+relative paths and file digests, rejects symbolic links and ambiguous layouts, and accepts the flat
+and standard nested resource bundles SwiftPM produces. Missing, modified, or extra resources fail the
+check. The candidate is never modified or launched; this is packaging evidence, without a shipped
+verification mode or a model-inference claim.
 
-Success requires one complete receipt for the copied bundle, release version, and native architecture
-after the launch wait completes. An app without the diagnostic is rejected before launch. Missing,
-malformed, failed, incomplete, or duplicate receipts, launch failures, and timeouts fail validation.
-The diagnostic has its own fixed watchdog. Timeout or interruption leaves the private copy intact
-when process termination is unproven and reports its path; neither a receipt nor a signal alone is
-treated as exit evidence. This headless diagnostic does not own a test display or a live session.
+Production lookup uses
+[`JarvisResourceBundle`](../Sources/JarvisCore/Config/JarvisResourceBundle.swift), which confines an
+installed app's resource search to its own bundle. The Core tests in
+[`InstalledSkillCatalogTests`](../Tests/JarvisCoreTests/Config/InstalledSkillCatalogTests.swift) cover
+both bundle layouts and ensure neighboring bundles or the source checkout cannot rescue missing
+installed resources. [`test-packaged-resources.py`](../scripts/test-packaged-resources.py) runs static
+fixtures in the Gate, including missing and corrupt models, missing skills, altered bytes, and
+symlinks. PR CI checks one transferred universal candidate on both runners; release verification
+checks the exact final signed DMG on both. These static checks do not prove native app execution.
 
-[`test-installation-verification.py`](../scripts/test-installation-verification.py) exercises the
-launcher/receipt failure contract in the Gate. [`test-packaged-app.py`](../scripts/test-packaged-app.py)
-checks disposable copies with a missing or corrupt model and an omitted skill. Altered copies are
-ad-hoc signed so the expected failure must come from the production component check, rather than
-Gatekeeper. The verified candidate is never modified. PR CI executes these checks on both native
-architectures; the signed release workflow executes the diagnostic from the exact final DMG on both.
-
-Maintainers must additionally validate the installed candidate: a fresh install and an upgrade
-preserving settings must Start, recognize speech, display a hint, Stop, and Start again. Cover both
-local and server speech detection and record the candidate checksum, native architecture, and OS.
-This is a manual release-acceptance requirement. The workflow does not automate or enforce it and
-can publish after the offline checks pass without fresh-install or upgrade evidence. An enforced
-same-candidate capture checkpoint remains outstanding. The offline diagnostic does not establish
-TCC, physical capture, provider availability, or coaching quality; the
+Release acceptance requires automatic CI validation of the installed candidate through the normal
+app UI: a fresh install and a supported upgrade preserving settings must Start, recognize speech,
+display a hint, Stop, and Start again. The required coverage includes client-side and server-side
+speech detection on native Apple silicon and Intel, with evidence tied to the candidate checksum,
+architecture, and OS. The external UI runner under
+[`Tests/ReleaseAcceptance/`](../Tests/ReleaseAcceptance/) exercises ordinary installed-app launch and
+permission setup. The full journey remains unproven and is not yet integrated into the release
+workflow: it can currently publish after the offline checks pass without fresh-install or upgrade
+proof. Closing that publication gap is required before the release-acceptance change is ready.
+Static resource verification does not establish model inference, TCC, physical capture, provider
+availability, or coaching quality; the
 [debug live scenarios](./live-e2e-tests.md) remain separate evidence.
 
 ## In-app updates — Sparkle over the release feed
