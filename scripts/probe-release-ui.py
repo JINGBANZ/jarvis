@@ -23,6 +23,11 @@ DISCOVERY_COUNTS = {"ownerContainerCount", "frontmostProcessCount", "frontmostCo
                     "frontmostSecureCount", "frontmostModifySettingsCount"}
 DISCOVERY_FLAGS = {"frontmostIsSystemSettings", "frontmostIsLocalAuthentication",
                    "frontmostRecognizedHeading", "frontmostRecognizedText"}
+FOCUS_FLAGS = {"focusAvailable", "focusContainerAvailable", "focusIsSecureField",
+               "focusOwnerIsLocalAuthentication", "focusOwnerIsSystemSettings", "focusOwnerIsSecurityAgent",
+               "focusContainerIsSheet", "focusContainerIsWindow"}
+FOCUS_PIDS = {"focusOwnerPID", "focusContainerPID"}
+FOCUS_ERRORS = {0, *range(-25214, -25199)}
 
 
 def validate_authorization_receipt(output):
@@ -36,13 +41,17 @@ def validate_authorization_receipt(output):
             or not isinstance(receipt["diagnostics"], dict)):
         raise ValueError("Invalid native-authorization receipt")
     diagnostics = receipt["diagnostics"]
-    if set(diagnostics) != AUTHORIZATION_COUNTS | AUTHORIZATION_FLAGS | DISCOVERY_COUNTS | DISCOVERY_FLAGS:
+    if set(diagnostics) != (AUTHORIZATION_COUNTS | AUTHORIZATION_FLAGS | DISCOVERY_COUNTS
+                            | DISCOVERY_FLAGS | FOCUS_FLAGS | FOCUS_PIDS | {"focusError"}):
         raise ValueError("Invalid native-authorization diagnostics")
     if any(type(diagnostics[key]) is not int or not 0 <= diagnostics[key] <= 256
            for key in AUTHORIZATION_COUNTS | DISCOVERY_COUNTS):
         raise ValueError("Invalid native-authorization counts")
-    if any(type(diagnostics[key]) is not bool for key in AUTHORIZATION_FLAGS | DISCOVERY_FLAGS):
+    if any(type(diagnostics[key]) is not bool for key in AUTHORIZATION_FLAGS | DISCOVERY_FLAGS | FOCUS_FLAGS):
         raise ValueError("Invalid native-authorization flags")
+    if (any(type(diagnostics[key]) is not int or not 0 <= diagnostics[key] <= 2_147_483_647 for key in FOCUS_PIDS)
+            or type(diagnostics["focusError"]) is not int or diagnostics["focusError"] not in FOCUS_ERRORS):
+        raise ValueError("Invalid native-authorization focus metadata")
     if receipt["authorized"] != (receipt["stage"] == "complete"):
         raise ValueError("Inconsistent native-authorization receipt")
     if receipt["authorized"] and (

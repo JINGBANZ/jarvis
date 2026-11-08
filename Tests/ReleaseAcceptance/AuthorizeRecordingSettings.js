@@ -21,7 +21,18 @@ function run() {
         frontmostIsSystemSettings: false,
         frontmostIsLocalAuthentication: false,
         frontmostRecognizedHeading: false,
-        frontmostRecognizedText: false
+        frontmostRecognizedText: false,
+        focusAvailable: false,
+        focusContainerAvailable: false,
+        focusIsSecureField: false,
+        focusOwnerIsLocalAuthentication: false,
+        focusOwnerIsSystemSettings: false,
+        focusOwnerIsSecurityAgent: false,
+        focusOwnerPID: 0,
+        focusContainerPID: 0,
+        focusContainerIsSheet: false,
+        focusContainerIsWindow: false,
+        focusError: 0
     };
     const receipt = authorized => JSON.stringify({authorized, stage, diagnostics});
     let lastProgress = null;
@@ -55,6 +66,7 @@ function run() {
         diagnostics.uiElementsEnabled = events.uiElementsEnabled() === true;
         publish();
         if (!diagnostics.uiElementsEnabled) { return receipt(false); }
+        ObjC.import("ApplicationServices");
 
         function attribute(element, name) {
             const value = element.attributes.byName(name);
@@ -180,6 +192,80 @@ function run() {
             return summary;
         }
 
+        function inspectFocus(budget) {
+            const summary = {
+                focusAvailable: false, focusContainerAvailable: false, focusIsSecureField: false,
+                focusOwnerIsLocalAuthentication: false, focusOwnerIsSystemSettings: false,
+                focusOwnerIsSecurityAgent: false, focusOwnerPID: 0, focusContainerPID: 0,
+                focusContainerIsSheet: false, focusContainerIsWindow: false, focusError: 0
+            };
+            function recordError(code) {
+                if (summary.focusError === 0 && code !== 0) {
+                    summary.focusError = Number.isInteger(code) && code >= -25214 && code <= -25200 ? code : -25200;
+                }
+            }
+            function withinDeadline() {
+                if (Date.now() < budget.deadline) { return true; }
+                recordError(-25204);
+                return false;
+            }
+            function read(element, name) {
+                if (!withinDeadline()) { return null; }
+                const value = Ref();
+                const error = Number($.AXUIElementCopyAttributeValue(element, $(name), value));
+                recordError(error);
+                return error === 0 ? value[0] : null;
+            }
+            function pid(element) {
+                if (!withinDeadline()) { return 0; }
+                const value = Ref();
+                const error = Number($.AXUIElementGetPid(element, value));
+                recordError(error);
+                if (error !== 0) { return 0; }
+                const identifier = Number(value[0]);
+                if (Number.isInteger(identifier) && identifier > 0 && identifier <= 2147483647) { return identifier; }
+                recordError(-25200);
+                return 0;
+            }
+            function roleValue(element, name) {
+                const value = read(element, name);
+                return value ? ObjC.unwrap(value) : null;
+            }
+            try {
+                publish();
+                if (!withinDeadline()) { return summary; }
+                const system = $.AXUIElementCreateSystemWide();
+                const timeoutError = Number($.AXUIElementSetMessagingTimeout(system, 0.25));
+                recordError(timeoutError);
+                if (timeoutError !== 0) { return summary; }
+                const focused = read(system, "AXFocusedUIElement");
+                if (!focused) { return summary; }
+                summary.focusAvailable = true;
+                summary.focusOwnerPID = pid(focused);
+                if (summary.focusOwnerPID > 0) {
+                    const application = $.NSRunningApplication.runningApplicationWithProcessIdentifier(summary.focusOwnerPID);
+                    const identifier = ObjC.unwrap(application.bundleIdentifier);
+                    summary.focusOwnerIsLocalAuthentication = identifier === "com.apple.LocalAuthenticationRemoteService";
+                    summary.focusOwnerIsSystemSettings = identifier === "com.apple.systempreferences";
+                    summary.focusOwnerIsSecurityAgent = identifier === "com.apple.SecurityAgent";
+                }
+                const role = roleValue(focused, "AXRole");
+                const subrole = roleValue(focused, "AXSubrole");
+                summary.focusIsSecureField = role === "AXSecureTextField" || subrole === "AXSecureTextField";
+                const container = read(focused, "AXTopLevelUIElement") || read(focused, "AXWindow");
+                if (container) {
+                    summary.focusContainerAvailable = true;
+                    summary.focusContainerPID = pid(container);
+                    const containerRole = roleValue(container, "AXRole");
+                    summary.focusContainerIsSheet = containerRole === "AXSheet";
+                    summary.focusContainerIsWindow = containerRole === "AXWindow";
+                }
+            } catch (_) {
+                recordError(-25200);
+            }
+            return summary;
+        }
+
         const deadline = Date.now() + 180000;
         const owner = "com.apple.LocalAuthenticationRemoteService";
         let form = null;
@@ -203,6 +289,8 @@ function run() {
                 if (windows.length === 0) {
                     stage = "form";
                     const budget = {remaining: 128, deadline: Date.now() + 3000};
+                    Object.assign(diagnostics, inspectFocus(budget));
+                    publish();
                     Object.assign(diagnostics, inspectOwnerRoots(processes[0], budget));
                     Object.assign(diagnostics, inspectFrontmost(budget));
                 } else {

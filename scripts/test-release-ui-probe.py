@@ -59,6 +59,10 @@ class NativeAuthorizationTests(unittest.TestCase):
             "frontmostSecureCount": 0, "frontmostModifySettingsCount": 0,
             "frontmostIsSystemSettings": False, "frontmostIsLocalAuthentication": False,
             "frontmostRecognizedHeading": False, "frontmostRecognizedText": False,
+            "focusAvailable": False, "focusContainerAvailable": False, "focusIsSecureField": False,
+            "focusOwnerIsLocalAuthentication": False, "focusOwnerIsSystemSettings": False,
+            "focusOwnerIsSecurityAgent": False, "focusOwnerPID": 0, "focusContainerPID": 0, "focusError": 0,
+            "focusContainerIsSheet": False, "focusContainerIsWindow": False,
         }}
 
     def test_only_allowlisted_scalar_receipts_are_accepted(self):
@@ -71,6 +75,9 @@ class NativeAuthorizationTests(unittest.TestCase):
                             {"diagnostics": {**receipt["diagnostics"], "secureCount": 0}},
                             {"diagnostics": {**receipt["diagnostics"], "frontmostProcessCount": True}},
                             {"diagnostics": {**receipt["diagnostics"], "frontmostRecognizedText": "private"}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusOwnerPID": 2_147_483_648}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusContainerPID": True}},
+                            {"diagnostics": {**receipt["diagnostics"], "focusError": -1}},
                             {"diagnostics": {**receipt["diagnostics"], "uiElementsEnabled": False}}):
             with self.subTest(replacement=replacement), self.assertRaises(ValueError):
                 PROBE["validate_authorization_receipt"](json.dumps({**receipt, **replacement}))
