@@ -73,7 +73,7 @@ struct ResponsesWireFormat: BrainWireFormat {
         let toolsJSON: [[String: Any]] = try tools.map { t in
             // Responses uses a flat function tool shape. `strict` requires every object in the
             // schema to set additionalProperties:false and list all keys as required.
-            ["type": "function", "name": t.name, "description": t.declarationDescription,
+            ["type": "function", "name": t.name, "description": t.descriptionWithGuidance,
              "parameters": try verbatim.placeholder(for: t.parametersJSON), "strict": true]
         }
 

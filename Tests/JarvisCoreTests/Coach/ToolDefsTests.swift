@@ -2,13 +2,13 @@ import Testing
 @testable import JarvisCore
 
 @Suite struct ToolDefsTests {
-    @Test func declarationDescriptionsRespectDeferredLoading() {
+    @Test func descriptionsWithGuidanceRespectDeferredLoading() {
         let hot = ToolDef(name: "hot", description: "short", parametersJSON: "{}", guidance: "usage")
         let deferred = ToolDef(name: "deferred", description: "short", parametersJSON: "{}",
                                guidance: "usage", deferLoading: true)
-        #expect(hot.declarationDescription == "short\n\nusage")
-        #expect(deferred.declarationDescription == "short")
-        #expect(staySilentTool.declarationDescription == staySilentTool.description)
+        #expect(hot.descriptionWithGuidance == "short\n\nusage")
+        #expect(deferred.descriptionWithGuidance == "short")
+        #expect(staySilentTool.descriptionWithGuidance == staySilentTool.description)
         #expect(JarvisPrompts.Coach.loadToolResult(deferred).contains("usage"))
     }
 

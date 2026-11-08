@@ -52,7 +52,7 @@ public struct ToolDef: Sendable, Equatable {
     /// In the declaration description for a hot tool, the `load_tool` result for a deferred one.
     public let guidance: String
     /// One declaration format across providers; deferred guidance stays in the loader result.
-    public var declarationDescription: String {
+    public var descriptionWithGuidance: String {
         guidance.isEmpty || deferLoading ? description : description + "\n\n" + guidance
     }
     public let deferLoading: Bool

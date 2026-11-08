@@ -194,7 +194,7 @@ history.
 
 A tool carries its own usage guidance (`ToolDef.guidance`) and a deferred flag. A **hot** tool is
 in the `tools` array with its schema, and its guidance follows its short description in the
-declaration from the first request. `ToolDef.declarationDescription` supplies the same composition
+declaration from the first request. `ToolDef.descriptionWithGuidance` supplies the same composition
 to Responses, Messages, and Interactions. A **deferred** tool is never in the `tools` array. It
 appears under "Available additional tools" as one line, its name and its
 one-sentence description; the model calls `load_tool` to receive its schema and guidance as a plain tool result,

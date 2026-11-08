@@ -85,7 +85,7 @@ struct MessagesWireFormat: BrainWireFormat {
             // a streamed reply would arrive in one burst.
             body["tools"] = try tools.map { tool -> [String: Any] in
                 var declared: [String: Any] = [
-                    "name": tool.name, "description": tool.declarationDescription,
+                    "name": tool.name, "description": tool.descriptionWithGuidance,
                     "input_schema": try verbatim.placeholder(for: tool.parametersJSON),
                 ]
                 if stream { declared["eager_input_streaming"] = true }
