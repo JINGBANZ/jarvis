@@ -20,7 +20,7 @@ struct OverlayTestDisplayTests {
     }
 
     @MainActor @Test
-    func sessionPreviewAndResizeStayOnTheTestDisplay() throws {
+    func sessionPreviewAndResizeStayOnTheTestDisplay() async throws {
         let screen = try testScreen()
         let previous = Set(NSApplication.shared.windows.map(ObjectIdentifier.init))
         let (box, closeBox) = makeTestOverlayBox()
@@ -32,20 +32,20 @@ struct OverlayTestDisplayTests {
         box.showAppearancePreview(true)
         #expect(box.isPanelVisible)
         #expect(screen.frame.contains(window.frame))
-        try expectWindowServerPlacement(window)
+        try await expectWindowServerPlacement(window)
         box.showAppearancePreview(false)
         box.setSessionLive(true)
         box.setContentSize(NSSize(width: 900, height: 900))
         _ = box.deliver("The test overlay belongs on the virtual display.", detail: nil)
         #expect(box.isPanelVisible)
         #expect(screen.frame.contains(window.frame))
-        try expectWindowServerPlacement(window)
+        try await expectWindowServerPlacement(window)
         box.setSessionLive(false)
         #expect(!box.isPanelVisible)
     }
 
     @MainActor @Test
-    func proposedDesktopMovesStayOnTheIsolatedDisplay() throws {
+    func proposedDesktopMovesStayOnTheIsolatedDisplay() async throws {
         let screen = try testScreen()
         let previous = Set(NSApplication.shared.windows.map(ObjectIdentifier.init))
         let (box, closeBox) = makeTestOverlayBox()
@@ -60,18 +60,33 @@ struct OverlayTestDisplayTests {
         box.setSessionLive(true)
         window.setFrame(NSRect(origin: outside, size: window.frame.size), display: true)
         #expect(screen.visibleFrame.contains(window.frame))
-        try expectWindowServerPlacement(window)
+        try await expectWindowServerPlacement(window)
     }
 
     @MainActor
-    private func expectWindowServerPlacement(_ window: NSWindow) throws {
+    private func expectWindowServerPlacement(_ window: NSWindow) async throws {
         let raw = try #require(ProcessInfo.processInfo.environment["JARVIS_TEST_DISPLAY_ID"])
         let id = try #require(CGDirectDisplayID(raw))
-        let rows = try #require(CGWindowListCopyWindowInfo(.optionIncludingWindow,
-                                  CGWindowID(window.windowNumber)) as? [[String: Any]])
-        let row = try #require(rows.first { ($0[kCGWindowNumber as String] as? Int) == window.windowNumber })
+        let deadline = ContinuousClock.now.advanced(by: .seconds(1))
+        var published: [String: Any]?
+        // AppKit publishes ordering and bounds when the main run loop commits the show.
+        repeat {
+            let rows = try #require(CGWindowListCopyWindowInfo(.optionIncludingWindow,
+                                      CGWindowID(window.windowNumber)) as? [[String: Any]])
+            if let row = rows.first(where: {
+                ($0[kCGWindowNumber as String] as? Int) == window.windowNumber
+                    && ($0[kCGWindowOwnerPID as String] as? Int32) == ProcessInfo.processInfo.processIdentifier
+                    && ($0[kCGWindowIsOnscreen as String] as? Bool) == true
+            }) {
+                published = row
+                break
+            }
+            try await Task.sleep(for: .milliseconds(20))
+        } while ContinuousClock.now < deadline
+        let row = try #require(published, "WindowServer must publish the visible test window")
         let bounds = try #require(row[kCGWindowBounds as String] as? [String: Any])
         let frame = try #require(CGRect(dictionaryRepresentation: bounds as CFDictionary))
+        try #require(frame.width > 0 && frame.height > 0)
         #expect(CGDisplayBounds(id).contains(frame), "WindowServer must place the actual window on the test display")
     }
 
