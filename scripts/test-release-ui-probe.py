@@ -2,6 +2,8 @@
 """Check fail-closed result accounting without launching apps or touching TCC."""
 
 from pathlib import Path
+import contextlib
+import io
 import json
 import os
 import plistlib
@@ -45,6 +47,52 @@ class ProbeResultsTests(unittest.TestCase):
         self.assertIs(target["TestTimeoutsEnabled"], True)
         self.assertEqual(target["MaximumTestExecutionTimeAllowance"], 120)
         self.assertEqual(manifest["Metadata"]["EnvironmentVariables"], {"UNRELATED": "value"})
+
+
+class NativeAuthorizationTests(unittest.TestCase):
+    def receipt(self, *, authorized=True, stage="complete"):
+        return {"authorized": authorized, "stage": stage, "diagnostics": {
+            "uiElementsEnabled": True, "processCount": 1, "windowCount": 1,
+            "usernameCount": 1, "secureCount": 1, "modifySettingsCount": 1,
+            "recognizedHeading": True, "recognizedText": True,
+        }}
+
+    def test_only_allowlisted_scalar_receipts_are_accepted(self):
+        receipt = self.receipt()
+        self.assertEqual(PROBE["validate_authorization_receipt"](json.dumps(receipt)), receipt)
+        for replacement in ({"extra": "private"}, {"stage": []}, {"stage": "private-error"},
+                            {"authorized": 1}, {"authorized": False}, {"diagnostics": {}},
+                            {"diagnostics": {**receipt["diagnostics"], "processCount": True}},
+                            {"diagnostics": {**receipt["diagnostics"], "processCount": 257}},
+                            {"diagnostics": {**receipt["diagnostics"], "secureCount": 0}},
+                            {"diagnostics": {**receipt["diagnostics"], "uiElementsEnabled": False}}):
+            with self.subTest(replacement=replacement), self.assertRaises(ValueError):
+                PROBE["validate_authorization_receipt"](json.dumps({**receipt, **replacement}))
+
+    def test_unsuccessful_native_authorization_cannot_pass_and_raw_errors_are_private(self):
+        failed = self.receipt(authorized=False, stage="fields")
+        process = mock.Mock(returncode=0)
+        process.communicate.return_value = (json.dumps(failed), "private credential in raw stderr")
+        with tempfile.TemporaryDirectory() as temporary, contextlib.redirect_stdout(io.StringIO()) as output:
+            with self.assertRaisesRegex(ValueError, "failed at stage fields"):
+                PROBE["collect_authorization"](process, Path(temporary), required=True)
+            self.assertNotIn("private credential", output.getvalue())
+            self.assertEqual(json.loads((Path(temporary) / "authorization.json").read_text()), failed)
+
+    def test_password_reaches_only_helper_stdin(self):
+        record = {"username": "jarvisacceptance", "password": "private-test-password-" * 2,
+                  "verified": True, "uid": 502, "generated_uid": "owned"}
+        account = {"hosted_directory": mock.Mock(return_value=Path("/private/hosted")),
+                   "read_record": mock.Mock(return_value=(record, None)),
+                   "account_identity": mock.Mock(return_value={"uid": 502, "generated_uid": "owned"})}
+        process = mock.Mock()
+        stdin = process.stdin
+        with mock.patch("runpy.run_path", return_value=account), mock.patch("subprocess.Popen", return_value=process) as launch:
+            self.assertIs(PROBE["start_authorization"](), process)
+        self.assertNotIn(record["password"], repr(launch.call_args))
+        self.assertEqual(json.loads(stdin.write.call_args.args[0]),
+                         {"username": record["username"], "password": record["password"]})
+        stdin.close.assert_called_once()
 
 
 class TemporaryAccountSafetyTests(unittest.TestCase):

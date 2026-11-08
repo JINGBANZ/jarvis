@@ -6,12 +6,104 @@ import os
 from pathlib import Path
 import plistlib
 import pwd
+import runpy
 import subprocess
 import sys
 import uuid
 
 
 ROOT = Path(__file__).resolve().parent.parent
+
+AUTHORIZATION_STAGES = {
+    "input", "accessibility", "owner", "form", "fields", "fill", "clipboard", "submit", "dismiss", "complete",
+}
+AUTHORIZATION_COUNTS = {"processCount", "windowCount", "usernameCount", "secureCount", "modifySettingsCount"}
+AUTHORIZATION_FLAGS = {"uiElementsEnabled", "recognizedHeading", "recognizedText"}
+
+
+def validate_authorization_receipt(output):
+    try:
+        receipt = json.loads(output)
+    except (ValueError, TypeError):
+        raise ValueError("Invalid native-authorization receipt") from None
+    if (not isinstance(receipt, dict) or set(receipt) != {"authorized", "stage", "diagnostics"}
+            or type(receipt["authorized"]) is not bool or not isinstance(receipt["stage"], str)
+            or receipt["stage"] not in AUTHORIZATION_STAGES
+            or not isinstance(receipt["diagnostics"], dict)):
+        raise ValueError("Invalid native-authorization receipt")
+    diagnostics = receipt["diagnostics"]
+    if set(diagnostics) != AUTHORIZATION_COUNTS | AUTHORIZATION_FLAGS:
+        raise ValueError("Invalid native-authorization diagnostics")
+    if any(type(diagnostics[key]) is not int or not 0 <= diagnostics[key] <= 256
+           for key in AUTHORIZATION_COUNTS):
+        raise ValueError("Invalid native-authorization counts")
+    if any(type(diagnostics[key]) is not bool for key in AUTHORIZATION_FLAGS):
+        raise ValueError("Invalid native-authorization flags")
+    if receipt["authorized"] != (receipt["stage"] == "complete"):
+        raise ValueError("Inconsistent native-authorization receipt")
+    if receipt["authorized"] and (
+            not all(diagnostics[key] for key in AUTHORIZATION_FLAGS)
+            or any(diagnostics[key] != 1 for key in AUTHORIZATION_COUNTS - {"windowCount"})
+            or diagnostics["windowCount"] < 1):
+        raise ValueError("Native-authorization completion lacks form proof")
+    return receipt
+
+
+def stop_authorization(process):
+    if process.poll() is None:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=5)
+
+
+def start_authorization():
+    account = runpy.run_path(str(ROOT / "scripts/prepare-release-ui-account.py"))
+    directory = account["hosted_directory"]()
+    record, _ = account["read_record"](directory)
+    if (record.get("verified") is not True
+            or account["account_identity"]() != {"uid": record.get("uid"), "generated_uid": record.get("generated_uid")}
+            or not isinstance(record.get("password"), str) or not 32 <= len(record["password"]) <= 128):
+        raise ValueError("Unverified native-authorization account")
+    process = subprocess.Popen([
+        "/usr/bin/osascript", "-l", "JavaScript",
+        str(ROOT / "Tests/ReleaseAcceptance/AuthorizeRecordingSettings.js"),
+    ], cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        process.stdin.write(json.dumps({"username": record["username"], "password": record["password"]}))
+        process.stdin.close()
+        process.stdin = None
+    except (OSError, ValueError):
+        stop_authorization(process)
+        process.communicate(timeout=5)
+        raise ValueError("Could not supply native-authorization input") from None
+    return process
+
+
+def collect_authorization(process, evidence, *, required):
+    try:
+        if not required:
+            stop_authorization(process)
+        output, _ = process.communicate(timeout=10)
+    except subprocess.TimeoutExpired:
+        stop_authorization(process)
+        process.communicate(timeout=5)
+        if required:
+            raise ValueError("Native-authorization helper did not finish") from None
+        return
+    try:
+        receipt = validate_authorization_receipt(output)
+    except ValueError:
+        if required:
+            raise
+        print("Native-authorization helper produced no valid completion receipt.", flush=True)
+        return
+    (evidence / "authorization.json").write_text(json.dumps(receipt, indent=2) + "\n")
+    print("Native authorization: " + json.dumps(receipt, sort_keys=True), flush=True)
+    if required and (process.returncode != 0 or not receipt["authorized"]):
+        raise ValueError("Native recording authorization failed at stage " + receipt["stage"])
 
 
 def run(arguments, *, timeout, log=None):
@@ -92,8 +184,6 @@ def main():
     injected = inject_environment(manifest, {
         "GITHUB_ACTIONS": "true",
         "RUNNER_ENVIRONMENT": "github-hosted",
-        "RUNNER_TEMP": os.environ["RUNNER_TEMP"],
-        "JARVIS_ACCEPTANCE_AUTH_FILE": str(Path(os.environ["RUNNER_TEMP"]) / "jarvis-ui-authorization.json"),
         "JARVIS_ACCEPTANCE_APP_PATH": str(app),
         "JARVIS_ACCEPTANCE_EXPECTED_VERSION": info["CFBundleShortVersionString"],
         "JARVIS_ACCEPTANCE_EVIDENCE": str(evidence),
@@ -104,10 +194,22 @@ def main():
     with configured.open("wb") as output:
         plistlib.dump(manifest, output)
     result = evidence / "result.xcresult"
-    run(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", str(configured),
-         "-destination", f"platform=macOS,arch={architecture}", "-resultBundlePath", str(result),
-         "-parallel-testing-enabled", "NO", "-maximum-test-execution-time-allowance", "120"],
-        timeout=420, log=evidence / "test.log")
+    authorization = start_authorization()
+    try:
+        try:
+            run(["/usr/bin/xcodebuild", "test-without-building", "-xctestrun", str(configured),
+                 "-destination", f"platform=macOS,arch={architecture}", "-resultBundlePath", str(result),
+                 "-parallel-testing-enabled", "NO", "-maximum-test-execution-time-allowance", "120"],
+                timeout=420, log=evidence / "test.log")
+        except BaseException:
+            try:
+                collect_authorization(authorization, evidence, required=False)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                print("Native-authorization completion remains unproven.", flush=True)
+            raise
+        collect_authorization(authorization, evidence, required=True)
+    finally:
+        stop_authorization(authorization)
     summary = json.loads(run(["/usr/bin/xcrun", "xcresulttool", "get", "test-results", "summary",
                              "--path", str(result)], timeout=30))
     (evidence / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")

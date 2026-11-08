@@ -135,10 +135,13 @@ missing or skipped results. A separate direct-HAL loopback check establishes tha
 device carries a known signal; it does not establish the app's capture, echo cancellation, or speech
 recognition. The branch-scoped feasibility workflow runs both checks automatically on native Apple
 silicon and Intel. Recording authorization uses a separate temporary administrator created inside
-that VM. Its random password stays in an owner-only file outside uploaded evidence and enters only
-the native authorization form. The workflow removes the identity-checked account and credential file;
-it leaves the existing runner account unchanged. A timeout fails the job; final cleanup of a wedged test runner belongs to the
-disposable VM teardown. This probe does not replace final signed-candidate release verification.
+that VM. Its random password stays in an owner-only file outside uploaded evidence. The shell-owned
+System Events helper receives it through private stdin, operates only the native authorization form,
+and emits a validated scalar receipt; XCTest separately verifies the enabled recording grant and
+completed onboarding. The driver owns and reaps the helper, and the workflow removes the
+identity-checked account and credential file; it leaves the existing runner account unchanged.
+A timeout fails the job; final cleanup of a wedged test runner belongs to the disposable VM teardown.
+This probe does not replace final signed-candidate release verification.
 
 ## Evaluation suites
 
